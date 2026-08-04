@@ -38,13 +38,16 @@ export interface MpcConstraints {
 }
 
 export interface DashboardQorStep {
+  blockedCount: number
   id: string
   label: string
   metricsPath: string | null
   missing: string[]
+  passCount: number
   reportCount: number
   runtime: string
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
+  totalCount: number
 }
 
 export interface DashboardMetric {
@@ -140,6 +143,30 @@ export function qorSummaryStatus(value: unknown): DashboardQorStep['status'] {
   return 'unavailable'
 }
 
+/** Counts are only taken from the declared V4 quality gates, never inferred. */
+export function qorGateCounts(value: unknown): Pick<
+  DashboardQorStep,
+  'blockedCount' | 'passCount' | 'totalCount'
+> {
+  const summary = record(value)
+  const gates = summary?.gates
+  if (summary?.schema_version !== 4 || !Array.isArray(gates)) {
+    return { blockedCount: 0, passCount: 0, totalCount: 0 }
+  }
+
+  return gates.reduce(
+    (counts, gate) => {
+      const state = stringValue(record(gate)?.state).toLowerCase()
+      if (!state) return counts
+      counts.totalCount += 1
+      if (state === 'pass') counts.passCount += 1
+      if (state === 'failed' || state === 'blocked') counts.blockedCount += 1
+      return counts
+    },
+    { blockedCount: 0, passCount: 0, totalCount: 0 },
+  )
+}
+
 export function qorPieSlices(steps: readonly DashboardQorStep[]): DashboardPieSlice[] {
   const count = (status: DashboardQorStep['status']) =>
     steps.filter((step) => step.status === status).length
@@ -212,13 +239,16 @@ export function qorStepsFromIndex(index: WorkspaceResourceIndex): DashboardQorSt
       (file) => file.exists,
     )
     return {
+      blockedCount: 0,
       id: `${step.name}:${step.tool}`,
       label: step.name,
       metricsPath: metrics?.exists ? metrics.path : null,
       missing: metrics?.exists ? [] : ['analysis/qor_metrics.json'],
+      passCount: 0,
       reportCount: reports.length,
       runtime: step.runtime,
       status: 'unavailable',
+      totalCount: 0,
     }
   })
 }

@@ -8,6 +8,7 @@ import {
   formatDashboardMetric,
   instanceMetricsFromDbFeature,
   mpcConstraintsFromParameters,
+  qorGateCounts,
   qorStepsFromIndex,
   qorStatusSummary,
   qorSummaryStatus,
@@ -65,20 +66,26 @@ describe('dashboard data presentation', () => {
         {
           id: 'route',
           label: 'Route',
+          blockedCount: 0,
           metricsPath: null,
           missing: [],
+          passCount: 0,
           reportCount: 1,
           runtime: '0:00:01',
           status: 'pass',
+          totalCount: 0,
         },
         {
           id: 'rcx',
           label: 'RCX',
+          blockedCount: 0,
           metricsPath: null,
           missing: [],
+          passCount: 0,
           reportCount: 1,
           runtime: '0:00:01',
           status: 'incomplete',
+          totalCount: 0,
         },
       ]),
     ).toMatchObject({
@@ -189,6 +196,26 @@ describe('dashboard data presentation', () => {
     expect(qorSummaryStatus({ status: 'unknown' })).toBe('unavailable')
   })
 
+  it('counts only declared QoR quality gates for the dashboard', () => {
+    expect(
+      qorGateCounts({
+        schema_version: 4,
+        gates: [
+          { state: 'pass' },
+          { state: 'failed' },
+          { state: 'unavailable' },
+          { state: 'blocked' },
+          {},
+        ],
+      }),
+    ).toEqual({ blockedCount: 2, passCount: 1, totalCount: 4 })
+    expect(qorGateCounts({ schema_version: 3, gates: [{ state: 'pass' }] })).toEqual({
+      blockedCount: 0,
+      passCount: 0,
+      totalCount: 0,
+    })
+  })
+
   it('keeps QoR entries associated with their flow step', () => {
     const index = {
       root: '/workspace',
@@ -254,9 +281,12 @@ describe('dashboard data presentation', () => {
     expect(qorStepsFromIndex(index)).toMatchObject([
       {
         label: 'route',
+        blockedCount: 0,
         metricsPath: '/workspace/route/analysis/qor_metrics.json',
+        passCount: 0,
         reportCount: 1,
         runtime: '0:0:8',
+        totalCount: 0,
       },
     ])
   })

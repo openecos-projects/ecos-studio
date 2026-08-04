@@ -86,23 +86,6 @@
             </button>
           </section>
 
-          <section class="dashboard-section key-metrics-card">
-            <header class="dashboard-section-header">
-              <div>
-                <i class="ri-speed-up-line" aria-hidden="true" />
-                <h2>Key Metrics</h2>
-              </div>
-            </header>
-            <dl class="key-metrics-grid">
-              <div v-for="metric in keyMetrics" :key="metric.id">
-                <dt>{{ metric.label }}</dt>
-                <dd>{{ formatDashboardMetric(metric) }}</dd>
-              </div>
-            </dl>
-          </section>
-        </div>
-
-        <div class="home-dashboard-row home-dashboard-middle">
           <section class="dashboard-section status-card">
             <header class="dashboard-section-header">
               <div><h2>Checklist</h2></div>
@@ -146,7 +129,9 @@
               </div>
             </div>
           </section>
+        </div>
 
+        <div class="home-dashboard-row home-dashboard-middle">
           <section class="dashboard-section status-card qor-card">
             <header class="dashboard-section-header">
               <div><h2>Quality of Results</h2></div>
@@ -162,21 +147,20 @@
               </div>
               <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
                 <div>
-                  <strong class="status-summary-title">{{ qorTitle }}</strong>
-                  <p>{{ qorSummaryLabel }}</p>
+                  <strong class="status-summary-title">Gate summary</strong>
                 </div>
                 <dl class="status-count-list">
-                  <div v-if="qorSummary.total" class="is-blocked">
+                  <div class="is-pass">
+                    <dt>Pass</dt>
+                    <dd>{{ qorGateSummary.passCount }}</dd>
+                  </div>
+                  <div class="is-blocked">
                     <dt>Blocked</dt>
-                    <dd>{{ qorSummary.blocked }}/{{ qorSummary.total }}</dd>
+                    <dd>{{ qorGateSummary.blockedCount }}</dd>
                   </div>
-                  <div v-if="qorSummary.total" class="is-warning">
-                    <dt>Warning</dt>
-                    <dd>{{ qorSummary.warning }}/{{ qorSummary.total }}</dd>
-                  </div>
-                  <div v-if="qorSummary.unavailable" class="is-unavailable">
-                    <dt>Unavailable</dt>
-                    <dd>{{ qorSummary.unavailable }}/{{ qorSummary.total }}</dd>
+                  <div>
+                    <dt>Total</dt>
+                    <dd>{{ qorGateSummary.totalCount }}</dd>
                   </div>
                 </dl>
                 <button
@@ -189,58 +173,31 @@
                 </button>
               </div>
               <div class="qor-step-list">
-                <div v-for="step in qorSteps" :key="step.id" class="qor-step-row">
-                  <span
-                    class="qor-step-status"
-                    :class="`is-${step.status}`"
-                    aria-hidden="true"
-                  />
-                  <strong>{{ step.label }}</strong>
-                  <span :class="`is-${step.status}`">{{ step.status }}</span>
-                  <span>{{ step.reportCount }} reports</span>
-                </div>
+                <section v-for="step in qorSteps" :key="step.id" class="qor-step-row">
+                  <button
+                    type="button"
+                    class="qor-step-link"
+                    :title="`Open ${step.label} QoR analysis`"
+                    @click="openStepQorAnalysis(step.label)"
+                  >
+                    <span
+                      class="qor-step-status"
+                      :class="`is-${step.status}`"
+                      aria-hidden="true"
+                    />
+                    <strong>{{ step.label }}</strong>
+                    <i class="ri-arrow-right-up-line" aria-hidden="true" />
+                  </button>
+                  <dl class="qor-step-counts">
+                    <div class="is-pass"><dt>Pass</dt><dd>{{ step.passCount }}</dd></div>
+                    <div class="is-blocked"><dt>Blocked</dt><dd>{{ step.blockedCount }}</dd></div>
+                    <div><dt>Total</dt><dd>{{ step.totalCount }}</dd></div>
+                  </dl>
+                </section>
                 <div v-if="!qorSteps.length" class="dashboard-empty compact">
                   No QoR analysis yet
                 </div>
               </div>
-            </div>
-          </section>
-        </div>
-
-        <div class="home-dashboard-row home-dashboard-bottom">
-          <section class="dashboard-section snapshot-card">
-            <header class="dashboard-section-header">
-              <div>
-                <i class="ri-gallery-line" aria-hidden="true" />
-                <h2>Data Snapshot</h2>
-              </div>
-              <span class="dashboard-muted">{{ analysisCharts.length }} images</span>
-            </header>
-            <div v-if="analysisCharts.length" class="snapshot-grid" aria-label="Analysis snapshots">
-              <div
-                v-for="(chart, index) in dataSnapshotCells"
-                :key="chart?.label ?? `snapshot-empty-${index}`"
-                class="snapshot-grid-cell"
-                :class="{ 'is-empty': !chart }"
-              >
-                <button
-                  v-if="chart"
-                  type="button"
-                  :title="chart.label"
-                  @click="preview = { label: chart.label, url: chart.imageBlobUrl }"
-                >
-                  <img
-                    v-if="chart.imageBlobUrl"
-                    :src="chart.imageBlobUrl"
-                    :alt="chart.label"
-                  />
-                  <i v-else class="ri-image-2-line" aria-hidden="true" />
-                  <span>{{ chart.label }}</span>
-                </button>
-              </div>
-            </div>
-            <div v-else class="dashboard-empty">
-              <i class="ri-gallery-line" /><span>No analysis snapshots</span>
             </div>
           </section>
 
@@ -278,6 +235,60 @@
               <i class="ri-image-2-line" /><span>Waiting for layout data</span>
             </div>
           </section>
+        </div>
+
+        <div class="home-dashboard-row home-dashboard-bottom">
+          <section class="dashboard-section key-metrics-card">
+            <header class="dashboard-section-header">
+              <div>
+                <i class="ri-speed-up-line" aria-hidden="true" />
+                <h2>Key Metrics</h2>
+              </div>
+            </header>
+            <dl class="key-metrics-grid">
+              <div v-for="metric in keyMetrics" :key="metric.id">
+                <dt>{{ metric.label }}</dt>
+                <dd>{{ formatDashboardMetric(metric) }}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="dashboard-section snapshot-card">
+            <header class="dashboard-section-header">
+              <div>
+                <i class="ri-gallery-line" aria-hidden="true" />
+                <h2>Data Snapshot</h2>
+              </div>
+              <span class="dashboard-muted">{{ analysisCharts.length }} images</span>
+            </header>
+            <div v-if="analysisCharts.length" class="snapshot-grid" aria-label="Analysis snapshots">
+              <div
+                v-for="(chart, index) in dataSnapshotCells"
+                :key="chart?.label ?? `snapshot-empty-${index}`"
+                class="snapshot-grid-cell"
+                :class="{ 'is-empty': !chart }"
+              >
+                <button
+                  v-if="chart"
+                  type="button"
+                  :title="chart.label"
+                  @click="preview = { label: chart.label, url: chart.imageBlobUrl }"
+                >
+                  <img
+                    v-if="chart.imageBlobUrl"
+                    :src="chart.imageBlobUrl"
+                    :alt="chart.label"
+                  />
+                  <i v-else class="ri-image-2-line" aria-hidden="true" />
+                  <span>{{ chart.label }}</span>
+                </button>
+              </div>
+            </div>
+            <div v-else class="dashboard-empty">
+              <i class="ri-gallery-line" /><span>No analysis snapshots</span>
+            </div>
+          </section>
+
         </div>
       </main>
     </template>
@@ -394,6 +405,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
+import { useRouter } from 'vue-router'
 import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
@@ -420,6 +432,7 @@ import {
 } from '@/components/drawingAreaChipViewer'
 
 const { config } = useParameters()
+const router = useRouter()
 const { currentProject } = useWorkspace()
 const { flowStages, isLoading: flowLoading } = useFlowStages()
 const {
@@ -447,7 +460,7 @@ const preview = ref<{ label: string; url: string } | null>(null)
 const layoutChipViewerBusy = ref(false)
 const layoutPreviewBlobUrl = ref('')
 const DATA_SNAPSHOT_ROWS = 4
-const DATA_SNAPSHOT_COLUMNS = 6
+const DATA_SNAPSHOT_COLUMNS = 5
 let layoutPreviewLoadToken = 0
 let loadedLayoutPreviewSignature = ''
 const dataSnapshotCells = computed(() =>
@@ -590,6 +603,16 @@ const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
 const qorSlices = computed(() => qorPieSlices(qorSteps.value))
 const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
 const qorSummary = computed(() => qorStatusSummary(qorSteps.value))
+const qorGateSummary = computed(() =>
+  qorSteps.value.reduce(
+    (summary, step) => ({
+      blockedCount: summary.blockedCount + step.blockedCount,
+      passCount: summary.passCount + step.passCount,
+      totalCount: summary.totalCount + step.totalCount,
+    }),
+    { blockedCount: 0, passCount: 0, totalCount: 0 },
+  ),
+)
 const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
 const qorStatusTone = computed(() => statusTone(qorSummary.value))
 const checklistCenterPrimary = computed(() =>
@@ -601,9 +624,13 @@ const checklistCenterSecondary = computed(() =>
   checklistSummary.value.total ? 'passing' : 'no data',
 )
 const qorCenterPrimary = computed(() =>
-  qorSummary.value.total ? `${qorSummary.value.passed}/${qorSummary.value.total}` : '--',
+  qorGateSummary.value.totalCount
+    ? `${qorGateSummary.value.passCount}/${qorGateSummary.value.totalCount}`
+    : '--',
 )
-const qorCenterSecondary = computed(() => (qorSummary.value.total ? 'gates' : 'no data'))
+const qorCenterSecondary = computed(() =>
+  qorGateSummary.value.totalCount ? 'gates' : 'no data',
+)
 const checklistTitle = computed(() => {
   if (!checklistSummary.value.total) return 'Checklist pending'
   if (checklistSummary.value.blocked) return 'Sign-off blocked'
@@ -611,26 +638,12 @@ const checklistTitle = computed(() => {
   if (checklistSummary.value.unavailable) return 'Sign-off unavailable'
   return 'Sign-off ready'
 })
-const qorTitle = computed(() => {
-  if (!qorSummary.value.total) return 'QoR pending'
-  if (qorSummary.value.blocked) return 'Gate blocked'
-  if (qorSummary.value.warning) return 'Gate attention'
-  if (qorSummary.value.unavailable) return 'Gate unavailable'
-  return 'Gate pass'
-})
 const checklistSummaryLabel = computed(() => {
   if (!checklistSummary.value.total) return 'Run a flow step to populate checks'
   if (checklistSummary.value.blocked) return 'Blocking checklist items need review'
   if (checklistSummary.value.warning) return 'Checklist has warning items'
   if (checklistSummary.value.unavailable) return 'Some checklist items are unavailable'
   return 'All checklist items passed'
-})
-const qorSummaryLabel = computed(() => {
-  if (!qorSummary.value.total) return 'Run a flow step to populate gates'
-  if (qorSummary.value.blocked) return 'Blocking QoR gates need review'
-  if (qorSummary.value.warning) return 'QoR gates need attention'
-  if (qorSummary.value.unavailable) return 'Some QoR gates are unavailable'
-  return `All ${qorSummary.value.passed} gates passed`
 })
 const utilization = computed(() => `${(config.core.utilization * 100).toFixed(1)}%`)
 const currentCellCount = computed(
@@ -677,6 +690,14 @@ function statusTone(summary: {
   return 'pass'
 }
 
+function openStepQorAnalysis(step: string): void {
+  void router.push({
+    name: ':step',
+    params: { step },
+    query: { panel: 'analysis' },
+  })
+}
+
 async function openLayoutChipViewer(): Promise<void> {
   const stage = layoutRenderStage.value
   const projectPath = currentProject.value?.path
@@ -717,19 +738,19 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .home-dashboard-top {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 3fr);
 }
 
 .home-dashboard-top.without-mpc {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
 }
 
 .home-dashboard-middle {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 2fr);
 }
 
 .home-dashboard-bottom {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dashboard-section {
@@ -1080,6 +1101,10 @@ async function openLayoutChipViewer(): Promise<void> {
 .status-count-list > .is-blocked dd {
   color: var(--danger-color);
 }
+.status-count-list > .is-pass dt,
+.status-count-list > .is-pass dd {
+  color: var(--success-color);
+}
 .status-count-list > .is-warning dt,
 .status-count-list > .is-warning dd {
   color: var(--warn-color);
@@ -1136,38 +1161,86 @@ async function openLayoutChipViewer(): Promise<void> {
 .qor-step-list {
   display: grid;
   flex: 1;
-  gap: 1px;
+  gap: 4px 6px;
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   min-width: 0;
-  overflow: auto;
-  padding: 7px 10px;
+  overflow: hidden;
+  padding: 7px 8px;
 }
 .qor-step-row {
-  align-items: center;
-  display: grid;
-  gap: 5px;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
   min-width: 0;
-  padding: 1px 0;
+  padding: 4px 6px;
 }
-.qor-step-row strong {
+.qor-step-link {
+  align-items: center;
+  background: transparent;
+  border: 0;
   color: var(--text-primary);
-  font-size: 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+.qor-step-link strong {
+  color: var(--text-primary);
+  font-size: 9px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.qor-step-row span:not(.qor-step-status) {
+.qor-step-link i {
   color: var(--text-secondary);
   font-size: 10px;
-  white-space: nowrap;
 }
-.qor-step-row span.is-pass {
+.qor-step-link:hover strong,
+.qor-step-link:focus-visible strong,
+.qor-step-link:hover i,
+.qor-step-link:focus-visible i {
+  color: var(--accent-color);
+}
+.qor-step-link:focus-visible {
+  outline: 1px solid var(--accent-color);
+  outline-offset: 2px;
+}
+.qor-step-counts {
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 3px 0 0;
+  min-width: 0;
+}
+.qor-step-counts div {
+  min-width: 0;
+}
+.qor-step-counts dt,
+.qor-step-counts dd {
+  color: var(--text-secondary);
+  font-size: 8px;
+  line-height: 1.2;
+  margin: 0;
+  text-align: center;
+}
+.qor-step-counts dd {
+  color: var(--text-primary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.qor-step-counts .is-pass dd {
   color: var(--success-color);
 }
-.qor-step-row span.is-incomplete {
-  color: var(--warn-color);
-}
-.qor-step-row span.is-blocked {
+.qor-step-counts .is-blocked dd {
   color: var(--danger-color);
 }
 
@@ -1178,7 +1251,7 @@ async function openLayoutChipViewer(): Promise<void> {
 .snapshot-grid {
   display: grid;
   flex: 1;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   grid-template-rows: repeat(4, minmax(0, 1fr));
   min-height: 0;
   padding: 7px;
@@ -1191,11 +1264,11 @@ async function openLayoutChipViewer(): Promise<void> {
   min-width: 0;
 }
 
-.snapshot-grid-cell:nth-child(6n) {
+.snapshot-grid-cell:nth-child(5n) {
   border-right: 0;
 }
 
-.snapshot-grid-cell:nth-child(n + 19) {
+.snapshot-grid-cell:nth-child(n + 16) {
   border-bottom: 0;
 }
 
@@ -1389,7 +1462,11 @@ async function openLayoutChipViewer(): Promise<void> {
   .qor-step-row {
     gap: 3px;
   }
-  .qor-step-row span:not(.qor-step-status) {
+  .qor-step-list {
+    grid-template-columns: repeat(auto-fit, minmax(114px, 1fr));
+  }
+  .qor-step-counts dt,
+  .qor-step-counts dd {
     font-size: 7px;
   }
 }

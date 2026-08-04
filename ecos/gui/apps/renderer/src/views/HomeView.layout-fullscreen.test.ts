@@ -8,20 +8,26 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('grid-template-rows: repeat(3, minmax(0, 1fr))')
   })
 
-  it('places Key Metrics in the wide first-row slot and ChipView at the third-row right', () => {
+  it('uses the requested three-row card arrangement and horizontal proportions', () => {
     const topRowStart = homeViewSource.indexOf('home-dashboard-row home-dashboard-top')
     const middleRowStart = homeViewSource.indexOf('home-dashboard-row home-dashboard-middle')
     const bottomRowStart = homeViewSource.indexOf('home-dashboard-row home-dashboard-bottom')
     const topRow = homeViewSource.slice(topRowStart, middleRowStart)
+    const middleRow = homeViewSource.slice(middleRowStart, bottomRowStart)
     const bottomRow = homeViewSource.slice(bottomRowStart)
 
-    expect(topRow).toContain('class="dashboard-section key-metrics-card"')
-    expect(topRow).not.toContain('class="dashboard-section layout-card"')
-    expect(bottomRow.indexOf('snapshot-card')).toBeLessThan(bottomRow.indexOf('layout-card'))
-    expect(bottomRow).toContain('class="dashboard-section layout-card"')
+    expect(topRow).toContain('class="dashboard-section chip-card"')
+    expect(topRow).toContain('class="dashboard-section constraint-card"')
+    expect(topRow).toContain('class="dashboard-section status-card"')
+    expect(middleRow.indexOf('qor-card')).toBeLessThan(middleRow.indexOf('layout-card'))
+    expect(bottomRow.indexOf('key-metrics-card')).toBeLessThan(bottomRow.indexOf('snapshot-card'))
     expect(homeViewSource).toContain(
-      '.home-dashboard-bottom {\n  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);',
+      '.home-dashboard-top {\n  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 3fr);',
     )
+    expect(homeViewSource).toContain(
+      '.home-dashboard-middle {\n  grid-template-columns: minmax(0, 5fr) minmax(0, 2fr);',
+    )
+    expect(homeViewSource).toContain('.home-dashboard-bottom {\n  grid-template-columns: repeat(2, minmax(0, 1fr));')
   })
 
   it('keeps layout and data snapshot previews accessible through modal dialogs', () => {
@@ -56,10 +62,10 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain(':src="layoutPreviewUrl"')
   })
 
-  it('lays Data Snapshot out as a responsive 4-by-6 thumbnail grid', () => {
+  it('lays Data Snapshot out as a responsive 4-by-5 thumbnail grid', () => {
     expect(homeViewSource).toContain('const DATA_SNAPSHOT_ROWS = 4')
-    expect(homeViewSource).toContain('const DATA_SNAPSHOT_COLUMNS = 6')
-    expect(homeViewSource).toContain('grid-template-columns: repeat(6, minmax(0, 1fr))')
+    expect(homeViewSource).toContain('const DATA_SNAPSHOT_COLUMNS = 5')
+    expect(homeViewSource).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
     expect(homeViewSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
     expect(homeViewSource).toContain('border-right: 1px dashed')
     expect(homeViewSource).toContain('border-bottom: 1px dashed')
@@ -74,10 +80,19 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).not.toContain('radial-gradient(\n        circle at 0 0')
   })
 
-  it('keeps the QoR per-step statistics beside the new summary panels', () => {
+  it('keeps compact QoR gate counts and analysis entry points beside the summary panels', () => {
     expect(homeViewSource).toContain('Quality of Results')
     expect(homeViewSource).toContain('class="qor-summary-content"')
     expect(homeViewSource).toContain('class="qor-step-list"')
+    expect(homeViewSource).toContain('class="qor-step-link"')
+    expect(homeViewSource).toContain('openStepQorAnalysis(step.label)')
+    expect(homeViewSource).toContain('step.passCount')
+    expect(homeViewSource).toContain('step.blockedCount')
+    expect(homeViewSource).toContain('step.totalCount')
+    expect(homeViewSource).toContain('qorGateSummary.passCount')
+    expect(homeViewSource).not.toContain('qor-step-runtime')
+    expect(homeViewSource).not.toContain('step.metricCount')
+    expect(homeViewSource).toContain('overflow: hidden')
     expect(homeViewSource).toContain('border-right: 1px solid var(--border-color)')
   })
 
@@ -87,7 +102,7 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('font-size: 14px')
     expect(homeViewSource).toContain('font-size: 11px')
     expect(homeViewSource).toContain('.status-summary-content.is-blocked')
-    expect(homeViewSource).toContain('.qor-step-row span.is-pass')
+    expect(homeViewSource).toContain('.qor-step-counts .is-pass dd')
   })
 
   it('preserves both fixed-size checklist and QoR pie chart regions', () => {

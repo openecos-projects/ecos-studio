@@ -17,13 +17,12 @@ describe('ChatInspectorPanel fullscreen controls', () => {
     expect(chatInspectorSource).toContain('View step configuration full screen')
   })
 
-  it('offers QoR analysis only on supported workspace steps', () => {
+  it('offers QoR analysis on every recognized workspace flow step', () => {
     expect(chatInspectorSource).toContain('StepQorAnalysisPanel')
     expect(chatInspectorSource).toContain('showStepQorAnalysis')
-    expect(chatInspectorSource).toContain('StepEnum.PLACEMENT')
-    expect(chatInspectorSource).toContain('StepEnum.ROUTING')
-    expect(chatInspectorSource).toContain('StepEnum.STA')
+    expect(chatInspectorSource).toContain('Boolean(stepFromRoutePath())')
     expect(chatInspectorSource).toContain("selectTab('analysis')")
+    expect(chatInspectorSource).toContain("route.query.panel === 'analysis'")
   })
 
   it('can place chat controls in the workbench topbar while keeping the panel content below', () => {

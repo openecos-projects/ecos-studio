@@ -11,6 +11,7 @@ import {
   instanceMetricsFromDbFeature,
   metricsFromAnalysis,
   mpcConstraintsFromParameters,
+  qorGateCounts,
   qorStepsFromIndex,
   qorSummaryStatus,
   synthesisMetricsFromStat,
@@ -133,9 +134,13 @@ export function useDashboardOverview() {
             sourceIndexes.includes(index) && sourceStep
               ? dbFeatureDashboardMetrics(sourceStep)
               : Promise.resolve(new Map<string, number>())
-          if (!step.metricsPath) return { metrics: await dbMetrics, step }
+          if (!step.metricsPath) {
+            return { metrics: await dbMetrics, step }
+          }
           const metricsPath = await resolveProjectPathAccess(step.metricsPath)
-          if (!metricsPath) return { metrics: await dbMetrics, step }
+          if (!metricsPath) {
+            return { metrics: await dbMetrics, step }
+          }
 
           const [metricsRaw, summaryRaw, dbFeatureMetrics] = await Promise.all([
             readOptionalProjectTextFile(metricsPath),
@@ -147,11 +152,17 @@ export function useDashboardOverview() {
             })(),
             dbMetrics,
           ])
-          const metrics = mergeMetrics([metricsFromText(metricsRaw), dbFeatureMetrics])
+          const qorMetrics = metricsFromText(metricsRaw)
+          const metrics = mergeMetrics([qorMetrics, dbFeatureMetrics])
           let status: DashboardQorStep['status'] = 'unavailable'
           if (summaryRaw) {
             try {
-              status = qorSummaryStatus(JSON.parse(summaryRaw))
+              const summary = JSON.parse(summaryRaw)
+              status = qorSummaryStatus(summary)
+              return {
+                metrics,
+                step: { ...step, ...qorGateCounts(summary), status },
+              }
             } catch {
               status = 'incomplete'
             }

@@ -176,11 +176,7 @@ function stepFromRoutePath(): StepEnum | undefined {
 
 /** Synthesis 不提供步骤配置编辑，隐藏 Inspector 标签与面板 */
 const showStepConfigInspector = computed(() => stepFromRoutePath() !== StepEnum.SYNTHESIS)
-const showStepQorAnalysis = computed(() =>
-  [StepEnum.PLACEMENT, StepEnum.ROUTING, StepEnum.STA].includes(
-    stepFromRoutePath() ?? StepEnum.INIT,
-  ),
-)
+const showStepQorAnalysis = computed(() => Boolean(stepFromRoutePath()))
 
 const activeTab = ref<'chat' | 'inspector' | 'analysis'>('chat')
 const isChatFullscreen = ref(false)
@@ -205,7 +201,7 @@ const activePanelFullscreen = computed(() =>
 )
 
 watch(
-  () => route.path,
+  () => [route.path, route.query.panel],
   () => {
     if (!showStepConfigInspector.value && activeTab.value === 'inspector') {
       activeTab.value = 'chat'
@@ -219,7 +215,11 @@ watch(
     if (!showStepQorAnalysis.value && isStepQorAnalysisFullscreen.value) {
       closePanelFullscreen()
     }
+    if (route.query.panel === 'analysis' && showStepQorAnalysis.value) {
+      activeTab.value = 'analysis'
+    }
   },
+  { immediate: true },
 )
 
 function selectTab(tab: 'chat' | 'inspector' | 'analysis'): void {
