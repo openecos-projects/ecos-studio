@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { WorkspaceResourceIndex } from '@ecos-studio/shared'
 import {
+  dashboardMetricSourceStepIndexes,
   checklistPieSlices,
   checklistStatusSummary,
   dashboardMetrics,
@@ -9,6 +10,8 @@ import {
   qorStepsFromIndex,
   qorStatusSummary,
   qorSummaryStatus,
+  synthesisMetricsFromStat,
+  timingMetricsFromQorSummary,
 } from './dashboardData'
 
 describe('dashboard data presentation', () => {
@@ -86,23 +89,71 @@ describe('dashboard data presentation', () => {
     })
   })
 
-  it('maps current parameters and QoR metrics without using fallback numbers', () => {
+  it('maps Key Metrics only from completed-step results', () => {
     const metrics = dashboardMetrics(
-      {
-        Die: { Area: 100 },
-        Core: { Utilitization: 0.4 },
-        'Frequency max [MHz]': 500,
-      },
       new Map([
+        ['die_area', 100],
+        ['core_utilization', 0.4],
+        ['io_pin_count', 12],
         ['instance_count', 88],
         ['sta_setup_wns', 0.125],
       ]),
     )
+    expect(metrics.find((metric) => metric.id === 'die-area')?.value).toBe(100)
+    expect(metrics.find((metric) => metric.id === 'io-pins')?.label).toBe('IO Pin')
     expect(metrics.find((metric) => metric.id === 'instances')?.value).toBe(88)
     expect(metrics.find((metric) => metric.id === 'nets')?.value).toBeNull()
     expect(
       formatDashboardMetric(metrics.find((metric) => metric.id === 'core-utilization')!),
     ).toBe('40.0%')
+  })
+
+  it('uses the synthesis stat and post-synthesis QoR summary for synthesis metrics', () => {
+    const synthesisMetrics = synthesisMetricsFromStat({
+      design: { num_ports: 54, num_cells: 307, num_wires: 343 },
+    })
+    const timingMetrics = timingMetricsFromQorSummary({
+      summary: {
+        setup: { frequency_mhz: 789, wns: 18.732, tns: 0 },
+        hold: { wns: 0.245, tns: 0 },
+      },
+    })
+    const metrics = dashboardMetrics(new Map([...synthesisMetrics, ...timingMetrics]))
+
+    expect(metrics.find((metric) => metric.id === 'die-area')?.value).toBeNull()
+    expect(metrics.find((metric) => metric.id === 'core-utilization')?.value).toBeNull()
+    expect(metrics.find((metric) => metric.id === 'drc')?.value).toBeNull()
+    expect(metrics.find((metric) => metric.id === 'io-pins')?.value).toBe(54)
+    expect(metrics.find((metric) => metric.id === 'instances')?.value).toBe(307)
+    expect(metrics.find((metric) => metric.id === 'nets')?.value).toBe(343)
+    expect(metrics.find((metric) => metric.id === 'frequency')?.value).toBe(789)
+    expect(metrics.find((metric) => metric.id === 'setup-wns')?.value).toBe(18.732)
+    expect(metrics.find((metric) => metric.id === 'hold-wns')?.value).toBe(0.245)
+  })
+
+  it('selects only the latest successful step except for the Harden summary', () => {
+    expect(
+      dashboardMetricSourceStepIndexes([
+        { name: 'Synthesis', state: 'Success' },
+        { name: 'Floorplan', state: 'Success' },
+        { name: 'route', state: 'Running' },
+      ]),
+    ).toEqual([1])
+
+    expect(
+      dashboardMetricSourceStepIndexes([{ name: 'Synthesis', state: 'Completed' }]),
+    ).toEqual([0])
+
+    expect(
+      dashboardMetricSourceStepIndexes([
+        { name: 'route', state: 'Success' },
+        { name: 'drc', state: 'Failed' },
+        { name: 'filler', state: 'Success' },
+        { name: 'RCX', state: 'Success' },
+        { name: 'sta', state: 'Success' },
+        { name: 'Harden', state: 'Success' },
+      ]),
+    ).toEqual([0, 2, 3, 4])
   })
 
   it('understands both supported summary schemas', () => {

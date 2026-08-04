@@ -1,12 +1,19 @@
 import { computed, ref, watch } from 'vue'
-import type { WorkspaceResourceIndex } from '@ecos-studio/shared'
+import {
+  joinLocalPath,
+  type WorkspaceResourceIndex,
+  type WorkspaceStepResource,
+} from '@ecos-studio/shared'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import {
+  dashboardMetricSourceStepIndexes,
   dashboardMetrics,
   metricsFromAnalysis,
   mpcConstraintsFromParameters,
   qorStepsFromIndex,
   qorSummaryStatus,
+  synthesisMetricsFromStat,
+  timingMetricsFromQorSummary,
   type DashboardQorStep,
 } from '@/components/home/dashboardData'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -28,6 +35,47 @@ function metricsFromText(value: string | null): Map<string, number> {
   }
 }
 
+function mergeMetrics(groups: readonly ReadonlyMap<string, number>[]): Map<string, number> {
+  const merged = new Map<string, number>()
+  for (const group of groups) {
+    for (const [metricId, value] of group) merged.set(metricId, value)
+  }
+  return merged
+}
+
+async function readAuthorizedProjectTextFile(path: string): Promise<string | null> {
+  const authorizedPath = await resolveProjectPathAccess(path)
+  return authorizedPath ? await readOptionalProjectTextFile(authorizedPath) : null
+}
+
+async function synthesisDashboardMetrics(step: WorkspaceStepResource): Promise<Map<string, number>> {
+  const statPath = step.resources.feature.stat
+  if (!statPath?.exists) return new Map()
+
+  const [statRaw, timingRaw] = await Promise.all([
+    readAuthorizedProjectTextFile(statPath.path),
+    readAuthorizedProjectTextFile(
+      joinLocalPath(step.directory, 'feature/post_synthesis/qor_summary.json'),
+    ),
+  ])
+  return mergeMetrics([
+    metricsFromTextWith(statRaw, synthesisMetricsFromStat),
+    metricsFromTextWith(timingRaw, timingMetricsFromQorSummary),
+  ])
+}
+
+function metricsFromTextWith(
+  value: string | null,
+  parse: (value: unknown) => Map<string, number>,
+): Map<string, number> {
+  if (!value) return new Map()
+  try {
+    return parse(JSON.parse(value))
+  } catch {
+    return new Map()
+  }
+}
+
 export function useDashboardOverview() {
   const { currentProject, resourceVersions } = useWorkspace()
   const index = ref<WorkspaceResourceIndex | null>(null)
@@ -39,9 +87,7 @@ export function useDashboardOverview() {
 
   const parameters = computed(() => index.value?.parameters ?? null)
   const mpcConstraints = computed(() => mpcConstraintsFromParameters(parameters.value))
-  const keyMetrics = computed(() =>
-    dashboardMetrics(parameters.value, metricValues.value),
-  )
+  const keyMetrics = computed(() => dashboardMetrics(metricValues.value))
 
   async function load(): Promise<void> {
     const projectPath = currentProject.value?.path
@@ -91,10 +137,20 @@ export function useDashboardOverview() {
       )
       if (token !== loadToken || currentProject.value?.path !== projectPath) return
 
-      const nextMetricValues = new Map<string, number>()
-      for (const group of metricGroups) {
-        for (const [id, value] of group.metrics) nextMetricValues.set(id, value)
-      }
+      const sourceIndexes = dashboardMetricSourceStepIndexes(nextIndex.flow.steps)
+      const latestSourceStep =
+        sourceIndexes.length === 1 ? nextIndex.flow.steps[sourceIndexes[0]!] : null
+      const nextMetricValues =
+        latestSourceStep?.name.trim().toLowerCase() === 'synthesis'
+          ? await synthesisDashboardMetrics(latestSourceStep)
+          : mergeMetrics(
+              sourceIndexes.flatMap((index) => {
+                const group = metricGroups[index]
+                return group ? [group.metrics] : []
+              }),
+            )
+      if (token !== loadToken || currentProject.value?.path !== projectPath) return
+
       index.value = nextIndex
       qorSteps.value = metricGroups.map((group) => group.step)
       metricValues.value = nextMetricValues

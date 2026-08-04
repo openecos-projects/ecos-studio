@@ -1,4 +1,8 @@
-import type { WorkspaceResourceFile, WorkspaceResourceIndex } from '@ecos-studio/shared'
+import type {
+  WorkspaceResourceFile,
+  WorkspaceResourceIndex,
+  WorkspaceStepResource,
+} from '@ecos-studio/shared'
 
 export type DashboardTone = 'good' | 'warn' | 'bad' | 'neutral'
 
@@ -232,13 +236,87 @@ export function metricsFromAnalysis(value: unknown): Map<string, number> {
   return metrics
 }
 
+export function synthesisMetricsFromStat(value: unknown): Map<string, number> {
+  const payload = record(value)
+  const design = record(payload?.design)
+  const metrics = new Map<string, number>()
+  if (!design) return metrics
+
+  const metricKeys: readonly [string, string][] = [
+    ['io_pin_count', 'num_ports'],
+    ['instance_count', 'num_cells'],
+    ['net_count', 'num_wires'],
+  ]
+  for (const [metricId, sourceKey] of metricKeys) {
+    const metricValue = finiteNumber(design[sourceKey])
+    if (metricValue !== null) metrics.set(metricId, metricValue)
+  }
+  return metrics
+}
+
+export function timingMetricsFromQorSummary(value: unknown): Map<string, number> {
+  const summary = record(record(value)?.summary)
+  const setup = record(summary?.setup)
+  const hold = record(summary?.hold)
+  const metrics = new Map<string, number>()
+  const metricKeys: readonly [string, unknown][] = [
+    ['sta_frequency_mhz', setup?.frequency_mhz],
+    ['sta_setup_wns', setup?.wns],
+    ['sta_setup_tns', setup?.tns],
+    ['sta_hold_wns', hold?.wns],
+    ['sta_hold_tns', hold?.tns],
+  ]
+  for (const [metricId, value] of metricKeys) {
+    const metricValue = finiteNumber(value)
+    if (metricValue !== null) metrics.set(metricId, metricValue)
+  }
+  return metrics
+}
+
+export function dashboardMetricSourceStepIndexes(
+  steps: readonly Pick<WorkspaceStepResource, 'name' | 'state'>[],
+): number[] {
+  let latestSuccessfulIndex = -1
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index]
+    if (step && isSuccessfulDashboardStep(step)) {
+      latestSuccessfulIndex = index
+      break
+    }
+  }
+  if (latestSuccessfulIndex === -1) return []
+
+  const latestStep = steps[latestSuccessfulIndex]
+  if (latestStep?.name.trim().toLowerCase() !== 'harden') {
+    return [latestSuccessfulIndex]
+  }
+
+  const routeIndex = steps.findIndex((step) => step.name.trim().toLowerCase() === 'route')
+  if (routeIndex === -1 || routeIndex >= latestSuccessfulIndex) return []
+
+  const indexes: number[] = []
+  for (let index = routeIndex; index < latestSuccessfulIndex; index += 1) {
+    const step = steps[index]
+    if (step && isSuccessfulDashboardStep(step)) indexes.push(index)
+  }
+  return indexes
+}
+
+function isSuccessfulDashboardStep(step: Pick<WorkspaceStepResource, 'state'>): boolean {
+  switch (step.state.trim().toLowerCase()) {
+    case 'success':
+    case 'succeeded':
+    case 'complete':
+    case 'completed':
+      return true
+    default:
+      return false
+  }
+}
+
 export function dashboardMetrics(
-  parameters: unknown,
   analysisMetrics: ReadonlyMap<string, number>,
 ): DashboardMetric[] {
-  const source = record(parameters)
-  const die = record(source?.Die)
-  const core = record(source?.Core)
   const findMetric = (...ids: string[]): number | null => {
     for (const id of ids) {
       const value = analysisMetrics.get(id)
@@ -247,16 +325,16 @@ export function dashboardMetrics(
     return null
   }
   return [
-    { id: 'die-area', label: 'Die Area', value: finiteNumber(die?.Area), unit: 'um2' },
+    { id: 'die-area', label: 'Die Area', value: findMetric('die_area'), unit: 'um2' },
     {
       id: 'core-utilization',
       label: 'Core Utility',
-      value: finiteNumber(core?.Utilitization),
+      value: findMetric('core_utilization'),
       unit: '%',
     },
     {
-      id: 'ip-pins',
-      label: 'IP Pin',
+      id: 'io-pins',
+      label: 'IO Pin',
       value: findMetric('pin_count', 'io_pin_count', 'total_pins'),
       unit: '',
     },
@@ -275,7 +353,7 @@ export function dashboardMetrics(
     {
       id: 'frequency',
       label: 'Frequency',
-      value: finiteNumber(source?.['Frequency max [MHz]']),
+      value: findMetric('sta_frequency_mhz', 'frequency_mhz'),
       unit: 'MHz',
     },
     {
