@@ -254,6 +254,25 @@ export function synthesisMetricsFromStat(value: unknown): Map<string, number> {
   return metrics
 }
 
+export function instanceMetricsFromDbFeature(value: unknown): Map<string, number> {
+  const instances = record(record(value)?.Instances)
+  const metrics = new Map<string, number>()
+  const metricKeys: readonly [string, string, 'num' | 'area'][] = [
+    ['macro_count', 'macros', 'num'],
+    ['macro_area', 'macros', 'area'],
+    ['std_cell_count', 'logic', 'num'],
+    ['std_cell_area', 'logic', 'area'],
+    ['io_pad_count', 'iopads', 'num'],
+  ]
+
+  for (const [metricId, instanceKind, sourceKey] of metricKeys) {
+    const instanceMetrics = record(instances?.[instanceKind])
+    const metricValue = finiteNumber(instanceMetrics?.[sourceKey])
+    if (metricValue !== null) metrics.set(metricId, metricValue)
+  }
+  return metrics
+}
+
 export function timingMetricsFromQorSummary(value: unknown): Map<string, number> {
   const summary = record(record(value)?.summary)
   const setup = record(summary?.setup)
@@ -340,8 +359,38 @@ export function dashboardMetrics(
     },
     {
       id: 'instances',
-      label: 'Instance number',
+      label: 'Instance Number',
       value: findMetric('instance_count', 'total_instances'),
+      unit: '',
+    },
+    {
+      id: 'macro-number',
+      label: 'Macro Number',
+      value: findMetric('macro_count'),
+      unit: '',
+    },
+    {
+      id: 'macro-area',
+      label: 'Macro Area',
+      value: findMetric('macro_area'),
+      unit: 'um2',
+    },
+    {
+      id: 'std-cell-number',
+      label: 'Std Cell Number',
+      value: findMetric('std_cell_count'),
+      unit: '',
+    },
+    {
+      id: 'std-cell-area',
+      label: 'Std Cell Area',
+      value: findMetric('std_cell_area'),
+      unit: 'um2',
+    },
+    {
+      id: 'io-pad-number',
+      label: 'IO Pad Number',
+      value: findMetric('io_pad_count'),
       unit: '',
     },
     {

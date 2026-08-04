@@ -8,6 +8,7 @@ import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import {
   dashboardMetricSourceStepIndexes,
   dashboardMetrics,
+  instanceMetricsFromDbFeature,
   metricsFromAnalysis,
   mpcConstraintsFromParameters,
   qorStepsFromIndex,
@@ -64,6 +65,22 @@ async function synthesisDashboardMetrics(step: WorkspaceStepResource): Promise<M
   ])
 }
 
+async function dbFeatureDashboardMetrics(
+  step: WorkspaceStepResource,
+): Promise<Map<string, number>> {
+  const stepName = step.name.trim().toLowerCase()
+  if (!['floorplan', 'fixfanout', 'place', 'cts', 'legalization', 'route'].includes(stepName)) {
+    return new Map()
+  }
+
+  const dbPath = step.resources.feature.db
+  if (!dbPath?.exists) return new Map()
+  return metricsFromTextWith(
+    await readAuthorizedProjectTextFile(dbPath.path),
+    instanceMetricsFromDbFeature,
+  )
+}
+
 function metricsFromTextWith(
   value: string | null,
   parse: (value: unknown) => Map<string, number>,
@@ -108,13 +125,19 @@ export function useDashboardOverview() {
       if (token !== loadToken || currentProject.value?.path !== projectPath) return
 
       const nextSteps = qorStepsFromIndex(nextIndex)
+      const sourceIndexes = dashboardMetricSourceStepIndexes(nextIndex.flow.steps)
       const metricGroups = await Promise.all(
-        nextSteps.map(async (step) => {
-          if (!step.metricsPath) return { metrics: new Map<string, number>(), step }
+        nextSteps.map(async (step, index) => {
+          const sourceStep = nextIndex.flow.steps[index]
+          const dbMetrics =
+            sourceIndexes.includes(index) && sourceStep
+              ? dbFeatureDashboardMetrics(sourceStep)
+              : Promise.resolve(new Map<string, number>())
+          if (!step.metricsPath) return { metrics: await dbMetrics, step }
           const metricsPath = await resolveProjectPathAccess(step.metricsPath)
-          if (!metricsPath) return { metrics: new Map<string, number>(), step }
+          if (!metricsPath) return { metrics: await dbMetrics, step }
 
-          const [metricsRaw, summaryRaw] = await Promise.all([
+          const [metricsRaw, summaryRaw, dbFeatureMetrics] = await Promise.all([
             readOptionalProjectTextFile(metricsPath),
             (() => {
               const summaryPath = siblingSummaryPath(metricsPath)
@@ -122,8 +145,9 @@ export function useDashboardOverview() {
                 ? readOptionalProjectTextFile(summaryPath)
                 : Promise.resolve(null)
             })(),
+            dbMetrics,
           ])
-          const metrics = metricsFromText(metricsRaw)
+          const metrics = mergeMetrics([metricsFromText(metricsRaw), dbFeatureMetrics])
           let status: DashboardQorStep['status'] = 'unavailable'
           if (summaryRaw) {
             try {
@@ -137,7 +161,6 @@ export function useDashboardOverview() {
       )
       if (token !== loadToken || currentProject.value?.path !== projectPath) return
 
-      const sourceIndexes = dashboardMetricSourceStepIndexes(nextIndex.flow.steps)
       const latestSourceStep =
         sourceIndexes.length === 1 ? nextIndex.flow.steps[sourceIndexes[0]!] : null
       const nextMetricValues =

@@ -6,6 +6,7 @@ import {
   checklistStatusSummary,
   dashboardMetrics,
   formatDashboardMetric,
+  instanceMetricsFromDbFeature,
   mpcConstraintsFromParameters,
   qorStepsFromIndex,
   qorStatusSummary,
@@ -129,6 +130,32 @@ describe('dashboard data presentation', () => {
     expect(metrics.find((metric) => metric.id === 'frequency')?.value).toBe(789)
     expect(metrics.find((metric) => metric.id === 'setup-wns')?.value).toBe(18.732)
     expect(metrics.find((metric) => metric.id === 'hold-wns')?.value).toBe(0.245)
+  })
+
+  it('extracts physical instance metrics from the Floorplan-through-Route db feature', () => {
+    const dbMetrics = instanceMetricsFromDbFeature({
+      Instances: {
+        macros: { num: 3, area: 41.25 },
+        logic: { num: 316, area: 803.04 },
+        iopads: { num: 54 },
+      },
+    })
+    const metrics = dashboardMetrics(
+      new Map([
+        ['instance_count', 432],
+        ...dbMetrics,
+      ]),
+    )
+    const instanceIndex = metrics.findIndex((metric) => metric.id === 'instances')
+
+    expect(metrics.slice(instanceIndex, instanceIndex + 6)).toMatchObject([
+      { id: 'instances', label: 'Instance Number', value: 432 },
+      { id: 'macro-number', label: 'Macro Number', value: 3 },
+      { id: 'macro-area', label: 'Macro Area', value: 41.25, unit: 'um2' },
+      { id: 'std-cell-number', label: 'Std Cell Number', value: 316 },
+      { id: 'std-cell-area', label: 'Std Cell Area', value: 803.04, unit: 'um2' },
+      { id: 'io-pad-number', label: 'IO Pad Number', value: 54 },
+    ])
   })
 
   it('selects only the latest successful step except for the Harden summary', () => {
