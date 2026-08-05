@@ -4,6 +4,7 @@
       <AgentChoiceCard
         v-if="message.choice && !message.answeredOptionId"
         :choice="message.choice"
+        :disabled="!choiceInteractive || choiceDisabled"
         @select="emit('choice', message.choice.promptId, $event)"
       />
     </template>
@@ -443,9 +444,17 @@ import AgentChoiceCard from './AgentChoiceCard.vue'
 import AgentToolCard from './AgentToolCard.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 
-const props = defineProps<{
-  message: Message
-}>()
+const props = withDefaults(
+  defineProps<{
+    choiceDisabled?: boolean
+    choiceInteractive?: boolean
+    message: Message
+  }>(),
+  {
+    choiceDisabled: false,
+    choiceInteractive: true,
+  },
+)
 
 const emit = defineEmits<{
   (e: 'img-load'): void
