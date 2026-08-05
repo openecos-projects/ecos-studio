@@ -6,7 +6,9 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('step-dashboard-top')
     expect(componentSource).toContain('step-dashboard-middle')
     expect(componentSource).toContain('step-dashboard-bottom')
-    expect(componentSource).toContain('grid-template-rows: repeat(3, minmax(196px, 1fr))')
+    expect(componentSource).toContain(
+      'grid-template-rows: minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr)',
+    )
   })
 
   it('shows the requested step-specific cards and preserves the layout entry point', () => {
@@ -16,10 +18,40 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('Data Insights')
     expect(componentSource).toContain('Data Reports')
     expect(componentSource).toContain('chipViewer.open')
-    expect(componentSource).toContain('step-distribution-chart')
-    expect(componentSource).toContain('data.stepChartTitle')
     expect(componentSource).toContain('distribution-tabs')
     expect(componentSource).toContain('chartTabLabel')
+  })
+
+  it('uses flow data and the existing editor for the Overview configuration surface', () => {
+    expect(componentSource).toContain('useFlowStages')
+    expect(componentSource).toContain('useStepConfigInfo')
+    expect(componentSource).toContain('StepConfigPanel')
+    expect(componentSource).toContain('<h3>Basic Info</h3>')
+    expect(componentSource).toContain('<h3>Configuration</h3>')
+    expect(componentSource).toContain("label: 'Step'")
+    expect(componentSource).toContain("label: 'Tool'")
+    expect(componentSource).toContain("label: 'Runtime'")
+    expect(componentSource).toContain("label: 'Peak Memory'")
+    expect(componentSource).toContain("label: 'State'")
+    expect(componentSource).toContain(
+      'grid-template-columns: minmax(0, 1fr) minmax(0, 2fr)',
+    )
+    expect(componentSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
+    expect(componentSource).toContain('grid-template-rows: repeat(5, minmax(0, 1fr))')
+    expect(componentSource).toContain('showStepConfiguration')
+    expect(componentSource).toContain('Details <i class="ri-arrow-right-up-line"')
+    expect(componentSource).toContain('<StepConfigPanel />')
+  })
+
+  it('shows the requested checklist empty state and every report file with its directory', () => {
+    expect(componentSource).toContain('No Checklist Data')
+    expect(componentSource).toContain('Check Passed')
+    expect(componentSource).toContain('v-for="report in data.reports"')
+    expect(componentSource).toContain('report.relativePath')
+    expect(componentSource).toContain('report.directory')
+    expect(componentSource).toContain('ri-folder-2-line')
+    expect(componentSource).not.toContain('visibleReports')
+    expect(componentSource).not.toContain("|| 'Report'")
   })
 
   it('uses Home baseline comparisons in a prioritized two-column QoR metric grid', () => {
@@ -36,7 +68,9 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('qor-metric-current')
     expect(componentSource).toContain('qor-step-trend-bar')
     expect(componentSource).toContain('width: 100%')
-    expect(componentSource).toContain('grid-template-columns: minmax(0, 3fr) minmax(0, 1fr)')
+    expect(componentSource).toContain(
+      'grid-template-columns: minmax(0, 3fr) minmax(0, 1fr)',
+    )
     expect(componentSource).toContain('overflow-wrap: anywhere')
     expect(componentSource).toContain('grid-template-rows: repeat(6, minmax(0, 1fr))')
     expect(componentSource).toContain('.qor-step-list')

@@ -45,10 +45,7 @@ vi.mock('@/utils/projectFs', () => ({
   resolveProjectPathAccess: testState.resolveProjectPathAccess,
 }))
 
-import {
-  clearStepDashboardDataCache,
-  useStepDashboardData,
-} from './useStepDashboardData'
+import { clearStepDashboardDataCache, useStepDashboardData } from './useStepDashboardData'
 
 const workspaceResourceIndex = {
   flow: {
@@ -63,7 +60,22 @@ const workspaceResourceIndex = {
             map: { exists: false, path: '' },
           },
           output: { geometryManifest: { exists: false } },
-          report: {},
+          report: {
+            summary: {
+              path: '/projects/gcd/ws_0004/synthesis/report/Synthesis_check.rpt',
+              exists: true,
+            },
+            corner: {
+              timing: {
+                path: '/projects/gcd/ws_0004/synthesis/report/MAX_125/Cworst/timing_max.rpt',
+                exists: true,
+              },
+            },
+            outsideReportDirectory: {
+              path: '/projects/gcd/ws_0004/synthesis/output/summary.rpt',
+              exists: true,
+            },
+          },
         },
       },
     ],
@@ -111,6 +123,21 @@ describe('useStepDashboardData cache', () => {
       expect(first.data.value?.step).toBe('synthesis')
     })
     const initialData = first.data.value
+    expect(first.data.value?.reports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          directory: '',
+          label: 'Synthesis_check.rpt',
+          relativePath: 'Synthesis_check.rpt',
+        }),
+        expect.objectContaining({
+          directory: 'MAX_125 / Cworst',
+          label: 'timing_max.rpt',
+          relativePath: 'MAX_125/Cworst/timing_max.rpt',
+        }),
+      ]),
+    )
+    expect(first.data.value?.reports).toHaveLength(2)
 
     let releaseIndex: ((value: typeof workspaceResourceIndex) => void) | undefined
     testState.getWorkspaceResourceIndexApi.mockImplementationOnce(

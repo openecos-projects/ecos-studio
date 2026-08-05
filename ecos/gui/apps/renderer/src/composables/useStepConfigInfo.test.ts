@@ -169,6 +169,30 @@ describe('useStepConfigInfo', () => {
     )
   })
 
+  it('loads a synthesis config supplied through the legacy path field', async () => {
+    testState.route.path = '/workspace/synthesis'
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        path: '/workspace/demo/config/flow_config.json',
+      },
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'Synthesis',
+    })
+    testState.readProjectTextFile.mockResolvedValue('{"SYNTHESIS":{}}')
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => {
+      expect(result.stepConfigPathResolved.value).toBe(
+        '/workspace/demo/config/flow_config.json',
+      )
+    })
+    expect(result.stepConfigParsed.value).toEqual({ SYNTHESIS: {} })
+  })
+
   it('ignores stale step config reads after the workspace session changes', async () => {
     let resolveOldRead: ((content: string) => void) | undefined
     testState.resolveWorkspaceStepInfoApi

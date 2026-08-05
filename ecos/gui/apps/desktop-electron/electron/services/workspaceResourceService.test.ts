@@ -118,7 +118,7 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
-  it('discovers every .rpt file below a step report directory', async () => {
+  it('discovers every file below a step report directory', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'sta', tool: 'ecc' }])
     const reportDirectory = join(root, 'sta_ecc', 'report')
@@ -130,7 +130,7 @@ describe('WorkspaceResourceService', () => {
       'utf8',
     )
     await writeFile(
-      join(reportDirectory, 'MAX_125', 'Cworst', 'ignored.json'),
+      join(reportDirectory, 'MAX_125', 'Cworst', 'summary.json'),
       '{}',
       'utf8',
     )
@@ -150,9 +150,9 @@ describe('WorkspaceResourceService', () => {
       expect.arrayContaining([
         join(reportDirectory, 'sta.db.rpt'),
         join(reportDirectory, 'MAX_125', 'Cworst', 'timing_max.rpt'),
+        join(reportDirectory, 'MAX_125', 'Cworst', 'summary.json'),
       ]),
     )
-    expect(reports.some((resource) => resource.path.endsWith('ignored.json'))).toBe(false)
   })
 
   it('uses the sizer workspace directory convention for steps with spaces', async () => {

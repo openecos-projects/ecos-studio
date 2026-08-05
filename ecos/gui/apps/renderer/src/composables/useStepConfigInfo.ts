@@ -70,8 +70,10 @@ function pinRouteStepConfigRoutingLayers(
 }
 
 function pickStepConfigPathFromInfo(data: Record<string, unknown>): string | undefined {
-  const v = data.config
-  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+  for (const value of [data.config, data.path]) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
 }
 
 function firstResponseMessage(

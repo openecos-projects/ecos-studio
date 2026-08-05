@@ -22,62 +22,56 @@
           <header class="step-dashboard-header">
             <div>
               <i class="ri-radar-line" aria-hidden="true" />
-              <h2>{{ data.step }} overview</h2>
+              <h2>Overview</h2>
             </div>
-            <span class="step-status" :class="`is-${data.run.tone}`">{{
-              data.run.state
-            }}</span>
           </header>
           <div class="step-summary-body">
-            <dl class="step-run-grid">
-              <div>
-                <dt>Tool</dt>
-                <dd>{{ data.tool || '--' }}</dd>
-              </div>
-              <div>
-                <dt>Runtime</dt>
-                <dd>{{ formatRuntime(data.run.runtimeSeconds) }}</dd>
-              </div>
-              <div>
-                <dt>Peak memory</dt>
-                <dd>{{ memoryLabel }}</dd>
-              </div>
-            </dl>
-            <div
-              class="step-insight-area"
-              :class="{ 'has-step-chart': data.stepBars.length > 0 }"
-            >
-              <figure v-if="data.stepBars.length" class="step-distribution-chart">
-                <figcaption>{{ data.stepChartTitle }}</figcaption>
-                <div class="distribution-bars" :aria-label="data.stepChartTitle">
-                  <div
-                    v-for="bar in data.stepBars"
-                    :key="bar.id"
-                    class="distribution-row"
-                  >
-                    <span>{{ bar.label }}</span>
-                    <i><b :style="{ width: `${stepBarWidth(bar.value)}%` }" /></i>
-                    <strong>{{
-                      formatDashboardValue(bar.value, data.stepChartUnit)
-                    }}</strong>
-                  </div>
-                </div>
-              </figure>
-              <dl v-if="data.keyMetrics.length" class="step-key-metrics">
-                <div
-                  v-for="metric in data.keyMetrics"
-                  :key="metric.id"
-                  :class="metricTone(metric)"
-                >
-                  <dt>{{ metric.label }}</dt>
-                  <dd>{{ formatDashboardValue(metric.value, metric.unit) }}</dd>
+            <section class="overview-subcard basic-info-card">
+              <header class="overview-subcard-header">
+                <i class="ri-information-line" aria-hidden="true" />
+                <h3>Basic Info</h3>
+              </header>
+              <dl class="basic-info-list">
+                <div v-for="item in basicInfo" :key="item.label">
+                  <dt>{{ item.label }}</dt>
+                  <dd>{{ item.value }}</dd>
                 </div>
               </dl>
-              <div v-else-if="!data.stepBars.length" class="card-empty compact">
-                <i class="ri-file-search-line" aria-hidden="true" />
-                <span>No step-specific metrics</span>
+            </section>
+
+            <section class="overview-subcard config-summary-card">
+              <header class="overview-subcard-header">
+                <i class="ri-file-settings-line" aria-hidden="true" />
+                <h3>Configuration</h3>
+                <span v-if="configFileName" :title="configPathLabel">{{
+                  configFileName
+                }}</span>
+              </header>
+              <div class="config-summary-body">
+                <div v-if="configLoading" class="config-summary-state">
+                  <i class="ri-loader-4-line spin" aria-hidden="true" />
+                  <span>Loading configuration</span>
+                </div>
+                <dl v-else-if="configPreviewEntries.length" class="config-preview-grid">
+                  <div v-for="entry in configPreviewEntries" :key="entry.id">
+                    <dt :title="entry.label">{{ entry.label }}</dt>
+                    <dd :title="entry.value">{{ entry.value }}</dd>
+                  </div>
+                </dl>
+                <div v-else class="config-summary-state">
+                  <i class="ri-file-search-line" aria-hidden="true" />
+                  <span>No configuration data</span>
+                </div>
               </div>
-            </div>
+              <button
+                type="button"
+                class="status-detail-link config-details-link"
+                title="View and edit step configuration"
+                @click="showStepConfiguration = true"
+              >
+                Details <i class="ri-arrow-right-up-line" aria-hidden="true" />
+              </button>
+            </section>
           </div>
         </section>
 
@@ -89,7 +83,12 @@
             </div>
             <span class="dashboard-muted">checklist.json</span>
           </header>
-          <div class="step-status-card-content">
+          <div v-if="!data.checklist.total" class="checklist-empty-state">
+            <i class="ri-checkbox-circle-line" aria-hidden="true" />
+            <strong>No Checklist Data</strong>
+            <span>Check Passed</span>
+          </div>
+          <div v-else class="step-status-card-content">
             <StatusPieChart
               label="Step checklist status distribution"
               :slices="data.checklist.slices"
@@ -212,23 +211,30 @@
                       <span
                         v-if="metric.baselineValue !== null"
                         class="qor-metric-baseline"
-                        :style="{ width: `${qorMetricSegmentPercent(metric.baselineValue, metric)}%` }"
+                        :style="{
+                          width: `${qorMetricSegmentPercent(metric.baselineValue, metric)}%`,
+                        }"
                       />
                       <span
                         class="qor-metric-current"
                         :class="`is-${qorMetricComparisonState(metric)}`"
-                        :style="{ width: `${qorMetricSegmentPercent(metric.currentValue, metric)}%` }"
+                        :style="{
+                          width: `${qorMetricSegmentPercent(metric.currentValue, metric)}%`,
+                        }"
                       />
                     </div>
                     <div class="qor-metric-values">
                       <span>{{ qorMetricBaselineValue(metric) }}</span>
-                      <span>{{ formatDashboardValue(metric.currentValue, metric.unit) }}</span>
+                      <span>{{
+                        formatDashboardValue(metric.currentValue, metric.unit)
+                      }}</span>
                     </div>
                   </div>
                   <strong
                     class="qor-step-total"
                     :class="`is-${metric.comparisonState}`"
-                  >{{ qorMetricDeltaValue(metric) }}</strong>
+                    >{{ qorMetricDeltaValue(metric) }}</strong
+                  >
                 </div>
               </section>
             </div>
@@ -357,13 +363,20 @@
             <span class="dashboard-muted">{{ data.reports.length }} files</span>
           </header>
           <ul v-if="data.reports.length" class="report-list">
-            <li v-for="report in visibleReports" :key="report.id">
+            <li v-for="report in data.reports" :key="report.id">
               <span class="report-file-icon"
                 ><i class="ri-file-text-line" aria-hidden="true"
               /></span>
               <span class="report-copy">
                 <strong :title="report.label">{{ report.label }}</strong>
-                <small>{{ reportMeta(report) }}</small>
+                <small :title="report.relativePath">
+                  <template v-if="report.directory">
+                    <i class="ri-folder-2-line" aria-hidden="true" />
+                    {{ report.directory }}
+                    <span v-if="reportMeta(report)"> · </span>
+                  </template>
+                  {{ reportMeta(report) }}
+                </small>
               </span>
               <button
                 type="button"
@@ -462,12 +475,16 @@
                 <span
                   v-if="metric.baselineValue !== null"
                   class="qor-metric-baseline"
-                  :style="{ width: `${qorMetricSegmentPercent(metric.baselineValue, metric)}%` }"
+                  :style="{
+                    width: `${qorMetricSegmentPercent(metric.baselineValue, metric)}%`,
+                  }"
                 />
                 <span
                   class="qor-metric-current"
                   :class="`is-${qorMetricComparisonState(metric)}`"
-                  :style="{ width: `${qorMetricSegmentPercent(metric.currentValue, metric)}%` }"
+                  :style="{
+                    width: `${qorMetricSegmentPercent(metric.currentValue, metric)}%`,
+                  }"
                 />
               </div>
               <div class="qor-metric-values">
@@ -475,14 +492,25 @@
                 <span>{{ formatDashboardValue(metric.currentValue, metric.unit) }}</span>
               </div>
             </div>
-            <strong
-              class="qor-step-total"
-              :class="`is-${metric.comparisonState}`"
-            >{{ qorMetricDeltaValue(metric) }}</strong>
+            <strong class="qor-step-total" :class="`is-${metric.comparisonState}`">{{
+              qorMetricDeltaValue(metric)
+            }}</strong>
           </div>
         </section>
       </div>
       <p v-else class="dialog-empty">No QoR metrics are available for this step.</p>
+    </div>
+  </Dialog>
+
+  <Dialog
+    v-model:visible="showStepConfiguration"
+    modal
+    :header="configDialogTitle"
+    :style="{ width: 'min(1120px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <div class="step-config-dialog">
+      <StepConfigPanel />
     </div>
   </Dialog>
 
@@ -510,6 +538,8 @@ import {
   useStepDashboardData,
   type StepDashboardReport,
 } from '@/composables/useStepDashboardData'
+import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
+import { useFlowStages } from '@/composables/useFlowStages'
 import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
@@ -519,6 +549,7 @@ import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { buildChipViewerOpenRequest, canOpenChipViewer } from './drawingAreaChipViewer'
 import StatusPieChart from './home/StatusPieChart.vue'
 import { homeQorFlowStepForLabel } from './home/qorComparisonData'
+import StepConfigPanel from './StepConfigPanel.vue'
 import {
   formatDashboardValue,
   formatRuntime,
@@ -533,11 +564,18 @@ import {
 
 const { currentStep, data, error, loading, refresh } = useStepDashboardData()
 const { currentProject } = useWorkspace()
+const { flowStages } = useFlowStages()
 const { state: qorComparisonState } = useHomeQorComparison()
+const {
+  loading: configLoading,
+  stepConfigParsed,
+  stepConfigPathResolved,
+} = useStepConfigInfo()
 const chipViewerBusy = ref(false)
 const dataChartIndex = ref(0)
 const showChecklistDetails = ref(false)
 const showQorDetails = ref(false)
+const showStepConfiguration = ref(false)
 const imagePreview = ref({ label: '', url: '', visible: false })
 const reportDialog = ref({
   label: '',
@@ -561,11 +599,43 @@ const chipViewerAvailable = computed(() =>
     step: chipViewerStep.value,
   }),
 )
-const memoryLabel = computed(() => {
-  const value = data.value?.run.peakMemoryMb
-  return value === null || value === undefined ? '--' : `${value.toFixed(1)} MB`
+const currentFlowStage = computed(() => {
+  const step = (data.value?.step ?? currentStep.value).trim().toLowerCase()
+  return flowStages.value.find(
+    (stage) =>
+      stage.path.trim().toLowerCase() === step ||
+      stage.label.trim().toLowerCase() === step,
+  )
 })
-const visibleReports = computed(() => data.value?.reports.slice(0, 4) ?? [])
+const basicInfo = computed(() => {
+  const step = data.value
+  const flowStage = currentFlowStage.value
+  const peakMemory = flowStage?.['peak memory (mb)']
+  return [
+    { label: 'Step', value: step?.step ?? '--' },
+    { label: 'Tool', value: flowStage?.tool || step?.tool || '--' },
+    {
+      label: 'Runtime',
+      value: flowStage?.runtime || formatRuntime(step?.run.runtimeSeconds ?? null),
+    },
+    {
+      label: 'Peak Memory',
+      value:
+        typeof peakMemory === 'number' && Number.isFinite(peakMemory)
+          ? `${peakMemory.toFixed(1)} MB`
+          : step?.run.peakMemoryMb === null || step?.run.peakMemoryMb === undefined
+            ? '--'
+            : `${step.run.peakMemoryMb.toFixed(1)} MB`,
+    },
+    { label: 'State', value: flowStage?.state || step?.run.state || '--' },
+  ]
+})
+const configPreviewEntries = computed(() => stepConfigPreview(stepConfigParsed.value))
+const configPathLabel = computed(() => stepConfigPathResolved.value ?? '')
+const configFileName = computed(() => fileName(configPathLabel.value))
+const configDialogTitle = computed(
+  () => `${data.value?.step ?? currentStep.value} Configuration`,
+)
 const visibleQorMetrics = computed(() =>
   prioritizeQorMetricComparisons(
     data.value?.qor.metrics ?? [],
@@ -580,9 +650,6 @@ const selectedDataChart = computed(() => {
 const largestBar = computed(() =>
   Math.max(1, ...(selectedDataChart.value?.bars.map((bar) => bar.value) ?? [1])),
 )
-const largestStepBar = computed(() =>
-  Math.max(1, ...(data.value?.stepBars.map((bar) => bar.value) ?? [1])),
-)
 
 function barWidth(value: number, maximum: number): number {
   if (value <= 0) return 0
@@ -591,10 +658,6 @@ function barWidth(value: number, maximum: number): number {
 
 function dataBarWidth(value: number): number {
   return barWidth(value, largestBar.value)
-}
-
-function stepBarWidth(value: number): number {
-  return barWidth(value, largestStepBar.value)
 }
 
 function metricTone(metric: StepDashboardMetric): string {
@@ -766,7 +829,54 @@ function reportMeta(report: StepDashboardReport): string {
       : `${Math.max(1, Math.round(report.sizeBytes / 1024))} KB`
   const date =
     report.modifiedAt === null ? '' : new Date(report.modifiedAt).toLocaleString()
-  return [size, date].filter(Boolean).join(' · ') || 'Report'
+  return [size, date].filter(Boolean).join(' · ')
+}
+
+interface StepConfigPreviewEntry {
+  id: string
+  label: string
+  value: string
+}
+
+function isConfigRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function stepConfigPreview(value: unknown): StepConfigPreviewEntry[] {
+  const entries: StepConfigPreviewEntry[] = []
+
+  function visit(current: unknown, path: string[]): void {
+    if (entries.length >= 10) return
+    if (Array.isArray(current)) {
+      entries.push({
+        id: path.join('.') || 'value',
+        label: path[path.length - 1] || 'Value',
+        value: `[${current.length} items]`,
+      })
+      return
+    }
+    if (isConfigRecord(current)) {
+      for (const [key, child] of Object.entries(current)) {
+        visit(child, [...path, key])
+        if (entries.length >= 10) return
+      }
+      return
+    }
+    const label = path[path.length - 1] || 'Value'
+    entries.push({
+      id: path.join('.') || label,
+      label,
+      value: current === null ? 'null' : String(current),
+    })
+  }
+
+  visit(value, [])
+  return entries
+}
+
+function fileName(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? ''
 }
 </script>
 
@@ -775,11 +885,11 @@ function reportMeta(report: StepDashboardReport): string {
   box-sizing: border-box;
   display: grid;
   gap: 8px;
-  grid-template-rows: repeat(3, minmax(196px, 1fr));
+  grid-template-rows: minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr);
   height: 100%;
   min-height: 0;
   min-width: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 8px;
 }
 
@@ -965,76 +1075,173 @@ function reportMeta(report: StepDashboardReport): string {
   grid-template-columns: minmax(138px, 0.85fr) minmax(0, 1.15fr);
 }
 
-.step-run-grid,
-.step-key-metrics,
 .data-highlights {
   margin: 0;
 }
 
-.step-run-grid {
-  border-right: 1px solid var(--border-color);
-  display: grid;
-  gap: 7px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 9px;
+.step-summary-body {
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  padding: 8px;
 }
 
-.step-run-grid > div:first-child {
-  grid-column: 1 / -1;
-}
-.step-insight-area {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+.overview-subcard {
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
 }
-.step-insight-area:not(.has-step-chart) {
-  grid-template-columns: 1fr;
+
+.overview-subcard-header {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 7px;
 }
-.step-distribution-chart {
-  border-right: 1px solid var(--border-color);
+
+.overview-subcard-header > i {
+  color: var(--accent-color);
+  font-size: 13px;
+}
+
+.overview-subcard-header h3 {
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 700;
   margin: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 9px;
 }
-.step-distribution-chart figcaption {
+
+.overview-subcard-header span {
   color: var(--text-secondary);
-  font-size: 9px;
-  margin-bottom: 8px;
+  font-size: 8px;
+  margin-left: auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.step-key-metrics {
+
+.basic-info-list {
   display: grid;
-  gap: 7px 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  overflow: auto;
-  padding: 9px;
+  gap: 4px;
+  margin: 0;
+  overflow: hidden;
+  padding: 6px;
 }
 
-.step-run-grid div,
-.step-key-metrics div,
-.data-highlights div {
+.basic-info-list > div {
+  align-items: center;
+  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   min-width: 0;
+  padding: 4px 6px;
 }
 
-.step-run-grid dt,
-.step-key-metrics dt,
+.basic-info-list dt,
+.config-preview-grid dt,
 .data-highlights dt {
   color: var(--text-secondary);
-  font-size: 9px;
-  margin: 0 0 2px;
+  font-size: 8px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.step-run-grid dd,
-.step-key-metrics dd,
+.basic-info-list dd,
+.config-preview-grid dd,
 .data-highlights dd {
   color: var(--text-primary);
   font-size: 10px;
   font-weight: 600;
   margin: 0;
   overflow: hidden;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.config-summary-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.config-preview-grid {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px;
+}
+
+.config-preview-grid > div {
+  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 4px 6px;
+}
+
+.config-preview-grid dd {
+  margin-top: 2px;
+  text-align: left;
+}
+
+.config-summary-state,
+.checklist-empty-state {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  font-size: 10px;
+  gap: 5px;
+  justify-content: center;
+  min-height: 0;
+  padding: 8px;
+  text-align: center;
+}
+
+.config-summary-state > i,
+.checklist-empty-state > i {
+  color: var(--accent-color);
+  font-size: 18px;
+}
+
+.checklist-empty-state strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.checklist-empty-state span {
+  color: var(--success-color);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.config-details-link {
+  align-self: flex-end;
+  flex: 0 0 auto;
+  margin: 0 7px 6px;
+}
+
+.data-highlights div {
+  min-width: 0;
 }
 
 .step-status-card-content {
@@ -1434,9 +1641,18 @@ function reportMeta(report: StepDashboardReport): string {
   display: block;
   font-size: 8px;
   margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.report-copy small i {
+  color: var(--accent-color);
+  font-size: 10px;
+  margin-right: 3px;
+}
+
+.step-config-dialog {
+  height: min(72vh, 720px);
+  min-height: 420px;
 }
 
 .card-empty,
@@ -1609,6 +1825,7 @@ function reportMeta(report: StepDashboardReport): string {
 @media (max-width: 880px) {
   .step-dashboard {
     grid-template-rows: repeat(3, minmax(232px, auto));
+    overflow: auto;
   }
   .step-dashboard-top,
   .step-dashboard-middle,
@@ -1616,8 +1833,8 @@ function reportMeta(report: StepDashboardReport): string {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(210px, auto) minmax(210px, auto);
   }
-  .step-insight-area {
-    grid-template-columns: minmax(0, 1.15fr) minmax(118px, 0.85fr);
+  .step-summary-body {
+    grid-template-columns: 1fr;
   }
 }
 

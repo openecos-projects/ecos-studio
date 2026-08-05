@@ -6,7 +6,6 @@
         {
           'is-panel-fullscreen panel-fullscreen-card': isAnyPanelFullscreen,
           'is-chat-fullscreen': isChatFullscreen,
-          'is-step-config-fullscreen': isStepConfigFullscreen,
         },
       ]"
     >
@@ -25,15 +24,6 @@
               title="AI Chat"
             >
               <i class="ri-chat-3-line text-base"></i>
-            </button>
-            <button
-              v-if="showStepConfigInspector"
-              type="button"
-              @click="selectTab('inspector')"
-              :class="tabClass(activeTab === 'inspector')"
-              title="Configuration"
-            >
-              <i class="ri-layout-column-line text-base"></i>
             </button>
             <button
               v-if="showStepQorAnalysis"
@@ -66,14 +56,10 @@
                 activePanelFullscreen
                   ? activeTab === 'chat'
                     ? 'Exit AI Chat full screen'
-                    : activeTab === 'inspector'
-                      ? 'Exit step configuration full screen'
-                      : 'Exit step QoR analysis full screen'
+                    : 'Exit step QoR analysis full screen'
                   : activeTab === 'chat'
                     ? 'View AI Chat full screen'
-                    : activeTab === 'inspector'
-                      ? 'View step configuration full screen'
-                      : 'View step QoR analysis full screen'
+                    : 'View step QoR analysis full screen'
               "
               @click="toggleActivePanelFullscreen"
             >
@@ -97,11 +83,6 @@
             class="h-full min-h-0 w-full max-w-full min-w-0 flex-1 overflow-hidden"
           />
         </KeepAlive>
-
-        <StepConfigPanel
-          v-if="activeTab === 'inspector' && showStepConfigInspector"
-          class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-        />
 
         <StepQorAnalysisPanel
           v-if="activeTab === 'analysis' && showStepQorAnalysis"
@@ -159,7 +140,6 @@ import { useRoute } from 'vue-router'
 import { StepEnum } from '@/api/type'
 import { useMessageStore } from '@/stores/messageStore'
 import AIChatPanel from './AIChatPanel.vue'
-import StepConfigPanel from './StepConfigPanel.vue'
 import StepQorAnalysisPanel from './StepQorAnalysisPanel.vue'
 
 const props = defineProps<{
@@ -174,43 +154,27 @@ function stepFromRoutePath(): StepEnum | undefined {
   return stepEnumValues.find((s) => s.toLowerCase() === segment.toLowerCase())
 }
 
-/** Synthesis 不提供步骤配置编辑，隐藏 Inspector 标签与面板 */
-const showStepConfigInspector = computed(() => stepFromRoutePath() !== StepEnum.SYNTHESIS)
 const showStepQorAnalysis = computed(() => Boolean(stepFromRoutePath()))
 
-const activeTab = ref<'chat' | 'inspector' | 'analysis'>('chat')
+const activeTab = ref<'chat' | 'analysis'>('chat')
 const isChatFullscreen = ref(false)
-const isStepConfigFullscreen = ref(false)
 const isStepQorAnalysisFullscreen = ref(false)
 const clearInformationConfirmationVisible = ref(false)
 const messageStore = useMessageStore()
 const { messages } = storeToRefs(messageStore)
 
 const isAnyPanelFullscreen = computed(
-  () =>
-    isChatFullscreen.value ||
-    isStepConfigFullscreen.value ||
-    isStepQorAnalysisFullscreen.value,
+  () => isChatFullscreen.value || isStepQorAnalysisFullscreen.value,
 )
 const activePanelFullscreen = computed(() =>
-  activeTab.value === 'chat'
-    ? isChatFullscreen.value
-    : activeTab.value === 'inspector'
-      ? isStepConfigFullscreen.value
-      : isStepQorAnalysisFullscreen.value,
+  activeTab.value === 'chat' ? isChatFullscreen.value : isStepQorAnalysisFullscreen.value,
 )
 
 watch(
   () => [route.path, route.query.panel],
   () => {
-    if (!showStepConfigInspector.value && activeTab.value === 'inspector') {
-      activeTab.value = 'chat'
-    }
     if (!showStepQorAnalysis.value && activeTab.value === 'analysis') {
       activeTab.value = 'chat'
-    }
-    if (!showStepConfigInspector.value && isStepConfigFullscreen.value) {
-      closePanelFullscreen()
     }
     if (!showStepQorAnalysis.value && isStepQorAnalysisFullscreen.value) {
       closePanelFullscreen()
@@ -222,8 +186,7 @@ watch(
   { immediate: true },
 )
 
-function selectTab(tab: 'chat' | 'inspector' | 'analysis'): void {
-  if (tab === 'inspector' && !showStepConfigInspector.value) return
+function selectTab(tab: 'chat' | 'analysis'): void {
   if (tab === 'analysis' && !showStepQorAnalysis.value) return
   activeTab.value = tab
 
@@ -232,19 +195,16 @@ function selectTab(tab: 'chat' | 'inspector' | 'analysis'): void {
   }
 }
 
-function openPanelFullscreen(panel: 'chat' | 'inspector' | 'analysis'): void {
-  if (panel === 'inspector' && !showStepConfigInspector.value) return
+function openPanelFullscreen(panel: 'chat' | 'analysis'): void {
   if (panel === 'analysis' && !showStepQorAnalysis.value) return
 
   activeTab.value = panel
   isChatFullscreen.value = panel === 'chat'
-  isStepConfigFullscreen.value = panel === 'inspector'
   isStepQorAnalysisFullscreen.value = panel === 'analysis'
 }
 
 function closePanelFullscreen(): void {
   isChatFullscreen.value = false
-  isStepConfigFullscreen.value = false
   isStepQorAnalysisFullscreen.value = false
 }
 

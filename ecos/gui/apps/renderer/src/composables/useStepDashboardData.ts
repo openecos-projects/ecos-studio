@@ -28,9 +28,11 @@ import {
 } from '@/components/step-dashboard/stepDashboardData'
 
 export interface StepDashboardReport {
+  directory: string
   id: string
   label: string
   path: string
+  relativePath: string
   sizeBytes: number | null
   modifiedAt: number | null
 }
@@ -64,13 +66,43 @@ function resourceFile(value: unknown): value is WorkspaceResourceFile {
   )
 }
 
+function normalizedPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
 function reportFiles(
   report: WorkspaceStepResource['resources']['report'],
-): WorkspaceResourceFile[] {
-  return Object.values(report).flatMap((value) => {
-    if (resourceFile(value)) return value.exists ? [value] : []
-    return Object.values(value).filter((file) => resourceFile(file) && file.exists)
-  })
+  reportDirectory: string,
+): StepDashboardReport[] {
+  const root = normalizedPath(reportDirectory)
+  const seenPaths = new Set<string>()
+  const files = Object.values(report)
+    .flatMap((value) => {
+      if (resourceFile(value)) return [value]
+      return Object.values(value).filter(resourceFile)
+    })
+    .filter((file) => {
+      const path = normalizedPath(file.path)
+      return file.exists && path.startsWith(`${root}/`) && !seenPaths.has(path)
+        ? Boolean(seenPaths.add(path))
+        : false
+    })
+
+  return files
+    .sort((left, right) => left.path.localeCompare(right.path))
+    .map((file) => {
+      const relativePath = normalizedPath(file.path).slice(root.length + 1)
+      const parts = relativePath.split('/').filter(Boolean)
+      return {
+        directory: parts.slice(0, -1).join(' / '),
+        id: file.path,
+        label: parts[parts.length - 1] || fileLabel(file.path),
+        path: file.path,
+        relativePath,
+        sizeBytes: file.sizeBytes ?? null,
+        modifiedAt: file.mtimeMs ?? null,
+      }
+    })
 }
 
 function fileLabel(path: string): string {
@@ -256,15 +288,10 @@ export function useStepDashboardData() {
         layoutUrl,
         mapUrl,
         hasGeometry: Boolean(resourceStep.resources.output.geometryManifest?.exists),
-        reports: reportFiles(resourceStep.resources.report)
-          .sort((left, right) => (right.mtimeMs ?? 0) - (left.mtimeMs ?? 0))
-          .map((file) => ({
-            id: file.path,
-            label: fileLabel(file.path),
-            path: file.path,
-            sizeBytes: file.sizeBytes ?? null,
-            modifiedAt: file.mtimeMs ?? null,
-          })),
+        reports: reportFiles(
+          resourceStep.resources.report,
+          `${resourceStep.directory}/report`,
+        ),
       }
       if (!cacheKey) {
         revokeBlobUrl(layoutUrl)
