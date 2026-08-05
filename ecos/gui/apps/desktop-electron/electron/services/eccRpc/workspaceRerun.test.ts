@@ -155,6 +155,121 @@ describe('prepareWorkspaceRerun', () => {
     ])
   })
 
+  it('rewrites home.json paths and prunes post-target home aggregates', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await mkdir(join(source, 'drc_ecc', 'analysis'), { recursive: true })
+    await writeFile(join(source, 'drc_ecc', 'analysis', 'drc.png'), 'drc')
+    await writeFile(
+      join(source, 'home', 'home.json'),
+      `${JSON.stringify(
+        {
+          parameters: `${source}/home/parameters.json`,
+          flow: `${source}/home/flow.json`,
+          layout: `${source}/legalization_dreamplace/output/layout.png`,
+          'GDS merge': '',
+          checklist: `${source}/home/checklist.json`,
+          metrics: {
+            'drc dist.': `${source}/drc_ecc/analysis/drc.png`,
+            'fanout dist.': `${source}/fixFanout_ecc/output/fanout.png`,
+          },
+          monitor: {
+            step: [
+              'fixFanout - analysis',
+              'place - analysis',
+              'CTS - analysis',
+              'legalization - analysis',
+            ],
+            memory: ['1', '2', '3', '4'],
+            runtime: ['1', '2', '3', '4'],
+            instance: ['1', '2', '3', '4'],
+            frequency: ['1', '2', '3', '4'],
+          },
+        },
+        null,
+        4,
+      )}\n`,
+    )
+    await writeFile(
+      join(source, 'home', 'checklist.json'),
+      `${JSON.stringify(
+        {
+          schema_version: 3,
+          kind: 'signoff_checklist',
+          status: 'blocked',
+          summary: { passed: 1, blocked: 2, attention: 0, unavailable: 0 },
+          checklist: [
+            {
+              id: 'artifact.fixFanout',
+              step: 'fixFanout',
+              state: 'pass',
+              blocked: false,
+            },
+            {
+              id: 'quality.place',
+              step: 'place',
+              state: 'failed',
+              blocked: true,
+            },
+            {
+              id: 'quality.drc.clean',
+              step: 'drc',
+              state: 'failed',
+              blocked: true,
+            },
+          ],
+        },
+        null,
+        4,
+      )}\n`,
+    )
+    const contract = contractFor(source, flow, artifact)
+
+    await prepareWorkspaceRerun(contract)
+
+    const home = JSON.parse(
+      await readFile(`${contract.target_workspace}/home/home.json`, 'utf8'),
+    ) as {
+      parameters: string
+      flow: string
+      layout: string
+      checklist: string
+      metrics: Record<string, string>
+      monitor: { step: string[]; memory: string[] }
+    }
+    expect(home.parameters).toBe(`${contract.target_workspace}/home/parameters.json`)
+    expect(home.flow).toBe(`${contract.target_workspace}/home/flow.json`)
+    expect(home.checklist).toBe(`${contract.target_workspace}/home/checklist.json`)
+    expect(home.layout).toBe('')
+    expect(home.metrics).toEqual({
+      'fanout dist.': `${contract.target_workspace}/fixFanout_ecc/output/fanout.png`,
+    })
+    expect(home.monitor.step).toEqual(['fixFanout - analysis'])
+    expect(home.monitor.memory).toEqual(['1'])
+
+    const checklist = JSON.parse(
+      await readFile(`${contract.target_workspace}/home/checklist.json`, 'utf8'),
+    ) as {
+      status: string
+      summary: { passed: number; blocked: number }
+      checklist: Array<{ step: string }>
+    }
+    expect(checklist.checklist.map((item) => item.step)).toEqual(['fixFanout'])
+    expect(checklist.summary).toEqual({
+      passed: 1,
+      blocked: 0,
+      attention: 0,
+      unavailable: 0,
+    })
+    expect(checklist.status).toBe('ready')
+
+    const contractText = await readFile(
+      `${contract.target_workspace}/home/flow_agent_workspace_rerun_contract.v1.json`,
+      'utf8',
+    )
+    expect(contractText).toContain(source)
+    expect(contractText).not.toContain(`"source_workspace": "${contract.target_workspace}"`)
+  })
+
   it('executes the frozen contract through the target GUI workspace handle', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
@@ -197,7 +312,7 @@ describe('prepareWorkspaceRerun', () => {
     )
   })
 
-  it('rejects a full-flow end step that differs from the source workspace flow', async () => {
+  it('rejects a full-flow end step that is not the catalog terminus', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = {
       ...contractFor(source, flow, artifact),
@@ -206,8 +321,40 @@ describe('prepareWorkspaceRerun', () => {
     }
 
     await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
-      'full-flow end step does not match the source workspace flow',
+      'full-flow end step must be the catalog terminus',
     )
+  })
+
+  it('extends a short source flow to the catalog terminus for full_flow', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = {
+      ...contractFor(source, flow, artifact),
+      end_step: 'Harden',
+      execution_scope: 'full_flow' as const,
+    }
+
+    await prepareWorkspaceRerun(contract)
+
+    const targetFlow = JSON.parse(
+      await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
+    ) as { steps: Array<{ name: string; state: string }> }
+    expect(targetFlow.steps.map((step) => step.name)).toEqual([
+      'fixFanout',
+      'place',
+      'CTS',
+      'legalization',
+      'route',
+      'drc',
+      'filler',
+      'RCX',
+      'sta',
+      'Harden',
+    ])
+    expect(targetFlow.steps.find((step) => step.name === 'fixFanout')?.state).toBe(
+      'Success',
+    )
+    expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')
+    expect(targetFlow.steps.find((step) => step.name === 'Harden')?.state).toBe('Unstart')
   })
 
   it.each([
