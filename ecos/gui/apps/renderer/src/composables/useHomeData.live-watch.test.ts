@@ -667,6 +667,51 @@ describe('useHomeData live project file watchers', () => {
     expect(lifecycle.resourceVersions.value.home).toBe(0)
   })
 
+  it('refreshes Home resources when the active flow step succeeds', async () => {
+    const flowSteps = [
+      { name: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+      { name: 'Floorplan', tool: 'openroad', state: 'Unstart' },
+    ]
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path === '/workspace/a/home/home.json') {
+        return JSON.stringify(homeDataFor('/workspace/a'))
+      }
+      if (path === '/workspace/a/home/flow.json') {
+        return JSON.stringify({ steps: flowSteps })
+      }
+      return '{}'
+    })
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    const lifecycle = await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+    testState.flowExecutionActive!.value = true
+
+    await vi.waitFor(() => {
+      expect(home.flowLogSegments.value).toEqual([
+        expect.objectContaining({ stepName: 'Synthesis', live: true }),
+      ])
+    })
+    const flowWatch = testState.projectFileWatchers.find(
+      (entry) => entry.path === '/workspace/a/home/flow.json',
+    )
+    expect(flowWatch).toBeDefined()
+
+    const before = lifecycle.resourceVersions.value.all
+    flowSteps[0]!.state = 'Success'
+    flowWatch!.listener({
+      subscriptionId: 'flow-watch-success',
+      path: '/workspace/a/home/flow.json',
+      eventType: 'change',
+    })
+
+    await vi.waitFor(() => {
+      expect(lifecycle.resourceVersions.value.all).toBe(before + 1)
+    })
+  })
+
   it('ignores older home.json refreshes that finish after newer changes', async () => {
     let version = 1
     const delayedHomeReads: Array<{

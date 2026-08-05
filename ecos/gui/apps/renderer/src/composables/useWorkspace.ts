@@ -1385,9 +1385,9 @@ export function useWorkspace() {
       return null
     }
 
-    const scopes = new Set<WorkspaceInvalidationScope>(
-      cmd === 'rtl2gds' ? ['all'] : ['flow', 'step', 'maps', 'logs'],
-    )
+    // A successful step updates the same Home data sources as a full flow. Keeping
+    // this broad also lets Home refresh before the RPC caller regains control.
+    const scopes = new Set<WorkspaceInvalidationScope>(['all'])
 
     const info = event.info
     if (info && typeof info === 'object') {

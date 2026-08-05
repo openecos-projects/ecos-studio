@@ -317,37 +317,48 @@
                 <i class="ri-gallery-line" aria-hidden="true" />
                 <h2>Data Snapshot</h2>
               </div>
-              <span class="dashboard-muted">{{ analysisCharts.length }} images</span>
+              <span class="dashboard-muted">{{ homeSnapshots.length }} snapshots</span>
             </header>
             <div
-              v-if="analysisCharts.length"
+              v-if="homeSnapshots.length"
               class="snapshot-grid"
-              aria-label="Analysis snapshots"
+              aria-label="Flow snapshots"
             >
               <div
-                v-for="(chart, index) in dataSnapshotCells"
-                :key="chart?.label ?? `snapshot-empty-${index}`"
+                v-for="(snapshot, index) in homeSnapshotCells"
+                :key="snapshot?.id ?? `snapshot-empty-${index}`"
                 class="snapshot-grid-cell"
-                :class="{ 'is-empty': !chart }"
+                :class="{ 'is-empty': !snapshot }"
               >
                 <button
-                  v-if="chart"
+                  v-if="snapshot"
                   type="button"
-                  :title="chart.label"
-                  @click="preview = { label: chart.label, url: chart.imageBlobUrl }"
+                  :title="snapshot.label"
+                  @click="
+                    snapshot.kind === 'image'
+                      ? (preview = { label: snapshot.label, url: snapshot.url })
+                      : openHomeSnapshotDetail(snapshot)
+                  "
                 >
                   <img
-                    v-if="chart.imageBlobUrl"
-                    :src="chart.imageBlobUrl"
-                    :alt="chart.label"
+                    v-if="snapshot.kind === 'image'"
+                    :src="snapshot.url"
+                    :alt="snapshot.label"
                   />
-                  <i v-else class="ri-image-2-line" aria-hidden="true" />
-                  <span>{{ chart.label }}</span>
+                  <StatusPieChart
+                    v-else
+                    class="home-snapshot-pie"
+                    :label="`${snapshot.label} distribution`"
+                    :slices="snapshot.slices"
+                    :center-primary="formatHomeSnapshotTotal(snapshot.total)"
+                    :center-secondary="snapshot.unit || 'count'"
+                  />
+                  <span>{{ snapshot.label }}</span>
                 </button>
               </div>
             </div>
             <div v-else class="dashboard-empty">
-              <i class="ri-gallery-line" /><span>No analysis snapshots</span>
+              <i class="ri-gallery-line" /><span>No flow snapshots</span>
             </div>
           </section>
         </div>
@@ -546,6 +557,35 @@
       :alt="preview.label"
     />
   </Dialog>
+
+  <Dialog
+    v-model:visible="homeSnapshotDetailVisible"
+    modal
+    :header="selectedHomeSnapshot?.label ?? 'Snapshot Distribution'"
+    :style="{ width: 'min(880px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <div v-if="selectedHomeSnapshot" class="home-snapshot-detail">
+      <section class="home-snapshot-detail-chart">
+        <StatusPieChart
+          :label="`${selectedHomeSnapshot.label} distribution`"
+          :slices="selectedHomeSnapshot.slices"
+          :center-primary="formatHomeSnapshotTotal(selectedHomeSnapshot.total)"
+          :center-secondary="selectedHomeSnapshot.unit || 'count'"
+          show-labels
+        />
+      </section>
+      <dl class="home-snapshot-detail-list">
+        <div v-for="slice in selectedHomeSnapshot.slices" :key="slice.id">
+          <dt>
+            <span :style="{ backgroundColor: slice.color ?? undefined }" />
+            {{ slice.label }}
+          </dt>
+          <dd>{{ formatHomeSnapshotTotal(slice.value) }}</dd>
+        </div>
+      </dl>
+    </div>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
@@ -569,6 +609,10 @@ import {
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
 import { useFlowStages } from '@/composables/useFlowStages'
 import { useHomeData } from '@/composables/useHomeData'
+import {
+  useHomeSnapshots,
+  type HomeSnapshotDistribution,
+} from '@/composables/useHomeSnapshots'
 import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
 import { useParameters } from '@/composables/useParameters'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
@@ -588,7 +632,6 @@ const route = useRoute()
 const { currentProject } = useWorkspace()
 const { flowStages, isLoading: flowLoading } = useFlowStages()
 const {
-  analysisCharts,
   checklistItems,
   currentWorkspaceFlowExecutionActive,
   ensureFlowLogSegmentContentLoaded,
@@ -598,6 +641,7 @@ const {
   flowLogSegments,
   layoutBlobUrl,
 } = useHomeData()
+const { items: homeSnapshots } = useHomeSnapshots()
 const {
   index: dashboardResourceIndex,
   keyMetrics,
@@ -613,16 +657,17 @@ const showPorts = ref(false)
 const showChecklist = ref(false)
 const showQor = ref(false)
 const preview = ref<{ label: string; url: string } | null>(null)
+const selectedHomeSnapshot = ref<HomeSnapshotDistribution | null>(null)
 const layoutChipViewerBusy = ref(false)
 const layoutPreviewBlobUrl = ref('')
 const DATA_SNAPSHOT_ROWS = 4
 const DATA_SNAPSHOT_COLUMNS = 5
 let layoutPreviewLoadToken = 0
 let loadedLayoutPreviewSignature = ''
-const dataSnapshotCells = computed(() =>
+const homeSnapshotCells = computed(() =>
   Array.from(
     { length: DATA_SNAPSHOT_ROWS * DATA_SNAPSHOT_COLUMNS },
-    (_, index) => analysisCharts.value[index] ?? null,
+    (_, index) => homeSnapshots.value[index] ?? null,
   ),
 )
 const previewVisible = computed({
@@ -631,6 +676,23 @@ const previewVisible = computed({
     if (!visible) preview.value = null
   },
 })
+const homeSnapshotDetailVisible = computed({
+  get: () => selectedHomeSnapshot.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) selectedHomeSnapshot.value = null
+  },
+})
+
+function openHomeSnapshotDetail(snapshot: HomeSnapshotDistribution): void {
+  selectedHomeSnapshot.value = snapshot
+}
+
+function formatHomeSnapshotTotal(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 2,
+    notation: Math.abs(value) >= 1_000_000 ? 'compact' : 'standard',
+  }).format(value)
+}
 
 const flowNodes = computed<FlowStatusNode[]>(() =>
   flowStages.value
@@ -1741,6 +1803,27 @@ async function openLayoutChipViewer(): Promise<void> {
   width: 100%;
 }
 
+.home-snapshot-pie {
+  align-self: stretch;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.home-snapshot-pie :deep(.status-pie-chart-wrap) {
+  min-height: 0;
+}
+
+.home-snapshot-pie :deep(.status-pie-center strong) {
+  font-size: 12px;
+}
+
+.home-snapshot-pie :deep(.status-pie-center span) {
+  font-size: 8px;
+}
+
 .snapshot-grid-cell i {
   align-self: center;
   font-size: 18px;
@@ -2159,6 +2242,77 @@ async function openLayoutChipViewer(): Promise<void> {
   max-height: min(75vh, 820px);
   object-fit: contain;
   width: 100%;
+}
+
+.home-snapshot-detail {
+  align-items: stretch;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1fr);
+  min-width: 0;
+}
+
+.home-snapshot-detail-chart {
+  min-height: 280px;
+}
+
+.home-snapshot-detail-list {
+  align-content: start;
+  display: grid;
+  gap: 7px 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+}
+
+.home-snapshot-detail-list > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.home-snapshot-detail-list dt,
+.home-snapshot-detail-list dd {
+  margin: 0;
+}
+
+.home-snapshot-detail-list dt {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-snapshot-detail-list dt span {
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.home-snapshot-detail-list dd {
+  color: var(--text-primary);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+@media (max-width: 680px) {
+  .home-snapshot-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-snapshot-detail-chart {
+    min-height: 240px;
+  }
 }
 
 @media (max-width: 1180px) {

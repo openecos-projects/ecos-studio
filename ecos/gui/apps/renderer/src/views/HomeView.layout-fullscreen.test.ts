@@ -84,6 +84,15 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('object-fit: contain')
   })
 
+  it('uses successful flow artifacts for image and distribution snapshots', () => {
+    expect(homeViewSource).toContain('useHomeSnapshots')
+    expect(homeViewSource).toContain('homeSnapshots.length')
+    expect(homeViewSource).toContain("snapshot.kind === 'image'")
+    expect(homeViewSource).toContain('openHomeSnapshotDetail(snapshot)')
+    expect(homeViewSource).toContain('class="home-snapshot-pie"')
+    expect(homeViewSource).toContain('class="home-snapshot-detail"')
+  })
+
   it('uses the legacy green bracket corners around each dashboard card', () => {
     expect(homeViewSource).toContain('.dashboard-section::before')
     expect(homeViewSource).toContain('top left / 23px 2px no-repeat')
@@ -254,8 +263,8 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('.key-metrics-grid > div {\n  min-height: 0;')
   })
 
-  it('preserves both fixed-size checklist and QoR pie chart regions', () => {
-    expect(homeViewSource.match(/<StatusPieChart/g)?.length).toBe(2)
+  it('preserves fixed-size checklist, QoR, and snapshot pie chart regions', () => {
+    expect(homeViewSource.match(/<StatusPieChart/g)?.length).toBe(4)
     expect(homeViewSource).toContain('min-height: 108px')
     expect(homeViewSource).toContain('grid-template-columns: minmax(104px, 0.45fr)')
     expect(homeViewSource).toContain(

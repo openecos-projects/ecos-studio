@@ -11,8 +11,8 @@ export function flowStepKey(stepName: string): string {
   return stepName.trim().toLowerCase()
 }
 
-export function isSuccessfulFlowStep(step: WorkspaceStepResource): boolean {
-  switch (step.state.trim().toLowerCase()) {
+export function isSuccessfulFlowState(state: string): boolean {
+  switch (state.trim().toLowerCase()) {
     case 'success':
     case 'succeeded':
     case 'complete':
@@ -21,6 +21,10 @@ export function isSuccessfulFlowStep(step: WorkspaceStepResource): boolean {
     default:
       return false
   }
+}
+
+export function isSuccessfulFlowStep(step: WorkspaceStepResource): boolean {
+  return isSuccessfulFlowState(step.state)
 }
 
 export function flowStepRunArtifacts(step: WorkspaceStepResource): FlowStepRunArtifacts {

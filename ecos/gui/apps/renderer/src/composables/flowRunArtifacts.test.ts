@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   flowStepArtifactFingerprint,
   flowStepRunArtifacts,
+  isSuccessfulFlowState,
   isSuccessfulFlowStep,
 } from './flowRunArtifacts'
 
@@ -85,6 +86,8 @@ describe('flow run artifacts', () => {
     })
 
     expect(isSuccessfulFlowStep(initial)).toBe(true)
+    expect(isSuccessfulFlowState('succeeded')).toBe(true)
+    expect(isSuccessfulFlowState('failed')).toBe(false)
     expect(flowStepArtifactFingerprint(changed)).not.toBe(
       flowStepArtifactFingerprint(initial),
     )

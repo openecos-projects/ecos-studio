@@ -157,7 +157,7 @@ describe('useFlowRunner desktop-only guard', () => {
     expect(result).toBeNull()
   })
 
-  it('resolves the full flow API result without directly refreshing resources', async () => {
+  it('refreshes all Home resources after the full flow API completes', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     rtl2gdsApi.mockResolvedValue({
@@ -178,6 +178,9 @@ describe('useFlowRunner desktop-only guard', () => {
       },
     })
     expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['all'], {
+      sessionId: 'session-1',
+    })
   })
 
   it('passes rerun=true to the full flow API when requested', async () => {
@@ -265,7 +268,7 @@ describe('useFlowRunner desktop-only guard', () => {
     })
   })
 
-  it('invalidates Home and parameters after a single step completes without runtime events', async () => {
+  it('refreshes all Home resources after a single step completes without runtime events', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     runStepApi.mockResolvedValue({
@@ -278,12 +281,12 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runFlow()
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['all'], {
       sessionId: 'session-1',
     })
   })
 
-  it('still invalidates Home and parameters when runtime events only updated flow resources', async () => {
+  it('still refreshes all Home resources when runtime events only updated flow resources', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     runStepApi.mockImplementation(async () => {
@@ -302,19 +305,18 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runFlow()
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['all'], {
       sessionId: 'session-1',
     })
   })
 
-  it('does not duplicate fallback invalidations when runtime events already updated Home and parameters', async () => {
+  it('does not duplicate fallback invalidations when runtime events already refreshed all resources', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     runStepApi.mockImplementation(async () => {
       resourceVersions.value = {
         ...resourceVersions.value,
-        home: resourceVersions.value.home + 1,
-        parameters: resourceVersions.value.parameters + 1,
+        all: resourceVersions.value.all + 1,
       }
       return {
         data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
@@ -369,7 +371,7 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runPromise
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['all'], {
       sessionId: 'session-a',
     })
   })

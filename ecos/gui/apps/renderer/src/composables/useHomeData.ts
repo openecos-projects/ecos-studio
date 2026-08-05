@@ -6,6 +6,7 @@ import {
   isFlowExecutionActiveForWorkspace,
   markFlowExecutionActiveForWorkspace,
 } from './useFlowRunner'
+import { isSuccessfulFlowState } from './flowRunArtifacts'
 import {
   getWorkspaceResourceIndexApi,
   readWorkspaceHomeResourceApi,
@@ -1401,10 +1402,26 @@ export function useHomeData() {
       pruneFlowLogContentKeepOnly(logKeys)
       const segments = mergePlannedFlowLogSegments(plan.tasks, flowLogSegments.value)
       if (sid !== liveSession || currentProject.value?.path !== projectPath) return
+      const priorOngoingKey = lastOngoingKey
       flowLogSegments.value = segments
       const ongoing = segments.find((s) => s.live)
       flowLogStepName.value = ongoing?.stepName ?? ''
-      const key = ongoing ? `${ongoing.stepName}|${ongoing.tool}` : null
+      const key = ongoing ? flowLogSegmentKey(ongoing) : null
+
+      // Full-flow execution arrives as one RPC operation. Its flow.json does still
+      // record each step transition, so use the previous live step to detect a
+      // newly successful completion and refresh the Home panel immediately.
+      if (
+        priorOngoingKey &&
+        priorOngoingKey !== key &&
+        plan.tasks.some(
+          ({ seg }) =>
+            flowLogSegmentKey(seg) === priorOngoingKey &&
+            isSuccessfulFlowState(seg.state),
+        )
+      ) {
+        workspaceLifecycle.invalidate('all')
+      }
       if (key !== lastOngoingKey) {
         lastOngoingKey = key
         cleanupLogWatchOnly()
