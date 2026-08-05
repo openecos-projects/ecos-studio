@@ -7,6 +7,7 @@ import type {
 export type DashboardTone = 'good' | 'warn' | 'bad' | 'neutral'
 
 export interface DashboardPieSlice {
+  color?: string
   id: string
   label: string
   value: number
@@ -101,6 +102,15 @@ export function mpcConstraintsFromParameters(value: unknown): MpcConstraints | n
   }
 }
 
+export function mpcDisplayNameFromParameters(value: unknown): string | null {
+  const mpc = record(record(value)?.MPC)
+  return stringValue(mpc?.display_name) || null
+}
+
+export function maxFanoutFromParameters(value: unknown): number | null {
+  return finiteNumber(record(value)?.['Max fanout'])
+}
+
 export function checklistPieSlices(
   items: readonly { state: string }[],
 ): DashboardPieSlice[] {
@@ -144,12 +154,13 @@ export function qorSummaryStatus(value: unknown): DashboardQorStep['status'] {
 }
 
 /** A summary is one analyzed step result, independent of its optional gate list. */
-export function qorSummaryCounts(value: unknown): Pick<
-  DashboardQorStep,
-  'blockedCount' | 'passCount' | 'totalCount'
-> {
+export function qorSummaryCounts(
+  value: unknown,
+): Pick<DashboardQorStep, 'blockedCount' | 'passCount' | 'totalCount'> {
   const summary = record(value)
-  const declaredStatus = stringValue(summary?.quality_status || summary?.status).toLowerCase()
+  const declaredStatus = stringValue(
+    summary?.quality_status || summary?.status,
+  ).toLowerCase()
   if (!declaredStatus) {
     return { blockedCount: 0, passCount: 0, totalCount: 0 }
   }

@@ -9,7 +9,9 @@ import {
   dashboardMetricSourceStepIndexes,
   dashboardMetrics,
   instanceMetricsFromDbFeature,
+  maxFanoutFromParameters,
   metricsFromAnalysis,
+  mpcDisplayNameFromParameters,
   mpcConstraintsFromParameters,
   qorSummaryCounts,
   qorStepsFromIndex,
@@ -37,7 +39,9 @@ function metricsFromText(value: string | null): Map<string, number> {
   }
 }
 
-function mergeMetrics(groups: readonly ReadonlyMap<string, number>[]): Map<string, number> {
+function mergeMetrics(
+  groups: readonly ReadonlyMap<string, number>[],
+): Map<string, number> {
   const merged = new Map<string, number>()
   for (const group of groups) {
     for (const [metricId, value] of group) merged.set(metricId, value)
@@ -50,7 +54,9 @@ async function readAuthorizedProjectTextFile(path: string): Promise<string | nul
   return authorizedPath ? await readOptionalProjectTextFile(authorizedPath) : null
 }
 
-async function synthesisDashboardMetrics(step: WorkspaceStepResource): Promise<Map<string, number>> {
+async function synthesisDashboardMetrics(
+  step: WorkspaceStepResource,
+): Promise<Map<string, number>> {
   const statPath = step.resources.feature.stat
   if (!statPath?.exists) return new Map()
 
@@ -70,7 +76,11 @@ async function dbFeatureDashboardMetrics(
   step: WorkspaceStepResource,
 ): Promise<Map<string, number>> {
   const stepName = step.name.trim().toLowerCase()
-  if (!['floorplan', 'fixfanout', 'place', 'cts', 'legalization', 'route'].includes(stepName)) {
+  if (
+    !['floorplan', 'fixfanout', 'place', 'cts', 'legalization', 'route'].includes(
+      stepName,
+    )
+  ) {
     return new Map()
   }
 
@@ -104,6 +114,8 @@ export function useDashboardOverview() {
   let loadToken = 0
 
   const parameters = computed(() => index.value?.parameters ?? null)
+  const maxFanout = computed(() => maxFanoutFromParameters(parameters.value))
+  const mpcDisplayName = computed(() => mpcDisplayNameFromParameters(parameters.value))
   const mpcConstraints = computed(() => mpcConstraintsFromParameters(parameters.value))
   const keyMetrics = computed(() => dashboardMetrics(metricValues.value))
 
@@ -218,6 +230,8 @@ export function useDashboardOverview() {
     index,
     keyMetrics,
     loading,
+    maxFanout,
+    mpcDisplayName,
     mpcConstraints,
     qorSteps,
     reload: load,

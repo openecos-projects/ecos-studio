@@ -214,7 +214,7 @@ export class WorkspaceResourceService {
     const toolKey = tool.toLowerCase()
 
     if (toolKey === 'yosys') {
-      addYosysResources(resources, root, directory, design, step.name)
+      addYosysResources(resources, directory, design, step.name)
     } else if (toolKey === 'ecc') {
       addEccLikeResources(resources, root, directory, design, topModule, step.name)
     } else if (toolKey === 'dreamplace') {
@@ -709,7 +709,6 @@ function addEccLikeResources(
 
 function addYosysResources(
   resources: StepFileBuckets,
-  root: string,
   directory: string,
   design: string,
   stepName: string,
@@ -766,7 +765,6 @@ function addYosysResources(
   )
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
-  resources.config.path = createFile(join(root, 'config', 'flow_config.json'), 'config')
 }
 
 function addEccConfigResources(
@@ -809,6 +807,7 @@ function addEccConfigResources(
     'config',
   )
   resources.config.rcx = createFile(join(root, 'config', 'rcx.json'), 'config')
+  resources.config.sta = createFile(join(root, 'config', 'sta.json'), 'config')
   resources.config.timing_opt_drv = createFile(
     join(root, 'config', 'to_default_config_drv.json'),
     'config',
@@ -829,40 +828,47 @@ function addEccConfigResources(
     join(root, 'config', 'pl_default_config.json'),
     'config',
   )
-  resources.config.config = configResourceForEccStep(resources.config, stepName)
+  const stepConfig = configResourceForEccStep(resources.config, stepName)
+  if (stepConfig) resources.config.config = stepConfig
 }
 
 function configResourceForEccStep(
   config: StepFileBuckets['config'],
   stepName: string,
-): WorkspaceResourceFile {
+): WorkspaceResourceFile | undefined {
   switch (stepName.toLowerCase()) {
     case 'floorplan':
-      return config.floorplan ?? config.flow
+      return config.floorplan
     case 'place':
-      return config.placement ?? config.flow
+      return config.placement
     case 'cts':
-      return config.cts ?? config.flow
+      return config.cts
     case 'route':
-      return config.routing ?? config.flow
+      return config.routing
     case 'drc':
-      return config.drc ?? config.flow
+      return config.drc
     case 'fixfanout':
-      return config.netlist_opt ?? config.flow
+      return config.netlist_opt
     case 'optdrv':
-      return config.timing_opt_drv ?? config.flow
+      return config.timing_opt_drv
     case 'opthold':
-      return config.timing_opt_hold ?? config.flow
+      return config.timing_opt_hold
     case 'optsetup':
-      return config.timing_opt_setup ?? config.flow
+      return config.timing_opt_setup
+    case 'legalization':
+      return config.legalization
+    case 'filler':
+      return config.filler
     case 'pnp':
-      return config.pnp ?? config.flow
+      return config.pnp
     case 'rcx':
-      return config.rcx ?? config.flow
+      return config.rcx
+    case 'sta':
+      return config.sta
     case 'db':
-      return config.db ?? config.flow
+      return config.db
     default:
-      return config.flow
+      return undefined
   }
 }
 
@@ -976,7 +982,7 @@ function analysisFiles(step: WorkspaceStepResource): WorkspaceResourceFile[] {
 
 function buildConfigInfo(step: WorkspaceStepResource): Record<string, unknown> {
   const tool = step.tool.toLowerCase()
-  if (tool === 'yosys') return { path: step.resources.config.path?.path }
+  if (tool === 'yosys') return {}
   if (tool === 'dreamplace') return { config: step.resources.config.dreamplace?.path }
   return { config: step.resources.config.config?.path }
 }
@@ -991,7 +997,7 @@ function stripPngExtension(filename: string): string {
 
 function configFiles(step: WorkspaceStepResource): WorkspaceResourceFile[] {
   const tool = step.tool.toLowerCase()
-  if (tool === 'yosys') return existingResourceRefs([step.resources.config.path])
+  if (tool === 'yosys') return []
   if (tool === 'dreamplace')
     return existingResourceRefs([step.resources.config.dreamplace])
   return existingResourceRefs([step.resources.config.config])

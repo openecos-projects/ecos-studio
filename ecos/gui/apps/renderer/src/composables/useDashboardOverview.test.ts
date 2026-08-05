@@ -66,7 +66,9 @@ function workspaceStep(): WorkspaceStepResource {
   }
 }
 
-function workspaceIndex(): WorkspaceResourceIndex {
+function workspaceIndex(
+  parameters: WorkspaceResourceIndex['parameters'] = null,
+): WorkspaceResourceIndex {
   return {
     root: '/workspace',
     design: 'demo',
@@ -75,11 +77,19 @@ function workspaceIndex(): WorkspaceResourceIndex {
     home: {
       homeJson: { exists: true, kind: 'home', path: '/workspace/home/home.json' },
       flowJson: { exists: true, kind: 'flow', path: '/workspace/home/flow.json' },
-      parametersJson: { exists: true, kind: 'parameters', path: '/workspace/home/parameters.json' },
-      checklistJson: { exists: true, kind: 'checklist', path: '/workspace/home/checklist.json' },
+      parametersJson: {
+        exists: true,
+        kind: 'parameters',
+        path: '/workspace/home/parameters.json',
+      },
+      checklistJson: {
+        exists: true,
+        kind: 'checklist',
+        path: '/workspace/home/checklist.json',
+      },
     },
     homeData: null,
-    parameters: null,
+    parameters,
     flow: { steps: [workspaceStep()] },
     status: 'available',
     messages: [],
@@ -106,7 +116,9 @@ describe('useDashboardOverview db feature metrics', () => {
           ],
         })
       }
-      if (path === `${ANALYSIS_PATH.slice(0, -'qor_metrics.json'.length)}qor_summary.json`) {
+      if (
+        path === `${ANALYSIS_PATH.slice(0, -'qor_metrics.json'.length)}qor_summary.json`
+      ) {
         return JSON.stringify({
           schema_version: 4,
           quality_status: 'pass',
@@ -137,7 +149,8 @@ describe('useDashboardOverview db feature metrics', () => {
       expect(overview.qorSteps.value).toHaveLength(1)
     })
 
-    const metric = (id: string) => overview.keyMetrics.value.find((entry) => entry.id === id)
+    const metric = (id: string) =>
+      overview.keyMetrics.value.find((entry) => entry.id === id)
     expect(metric('instances')?.value).toBe(423)
     expect(metric('macro-number')?.value).toBe(3)
     expect(metric('macro-area')?.value).toBe(41.25)
@@ -150,5 +163,21 @@ describe('useDashboardOverview db feature metrics', () => {
       totalCount: 1,
     })
     expect(testState.readOptionalProjectTextFile).toHaveBeenCalledWith(DB_FEATURE_PATH)
+  })
+
+  it('exposes MPC display name and max fanout from Home parameters', async () => {
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue(
+      workspaceIndex({
+        'Max fanout': 32,
+        MPC: { display_name: 'MPC Frame' },
+      }),
+    )
+    const overview = scope.run(() => useDashboardOverview())!
+
+    await vi.waitFor(() => {
+      expect(overview.mpcDisplayName.value).toBe('MPC Frame')
+    })
+
+    expect(overview.maxFanout.value).toBe(32)
   })
 })

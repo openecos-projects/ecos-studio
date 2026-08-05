@@ -4,26 +4,16 @@ import chatInspectorSource from './ChatInspectorPanel.vue?raw'
 import messageItemSource from './MessageItem.vue?raw'
 
 describe('ChatInspectorPanel fullscreen controls', () => {
-  it('adds fullscreen support for chat and QoR analysis panels', () => {
+  it('keeps fullscreen support for the remaining chat panel', () => {
     expect(chatInspectorSource).toContain('chat-inspector-fullscreen-toggle')
     expect(chatInspectorSource).toContain('panel-fullscreen-overlay')
     expect(chatInspectorSource).toContain('panel-fullscreen-card')
     expect(chatInspectorSource).toContain('isChatFullscreen')
-    expect(chatInspectorSource).toContain('isStepQorAnalysisFullscreen')
-    expect(chatInspectorSource).toContain('openPanelFullscreen')
     expect(chatInspectorSource).toContain('closePanelFullscreen')
     expect(chatInspectorSource).toContain('View AI Chat full screen')
-    expect(chatInspectorSource).toContain('View step QoR analysis full screen')
     expect(chatInspectorSource).not.toContain('StepConfigPanel')
-    expect(chatInspectorSource).not.toContain("activeTab === 'inspector'")
-  })
-
-  it('offers QoR analysis on every recognized workspace flow step', () => {
-    expect(chatInspectorSource).toContain('StepQorAnalysisPanel')
-    expect(chatInspectorSource).toContain('showStepQorAnalysis')
-    expect(chatInspectorSource).toContain('Boolean(stepFromRoutePath())')
-    expect(chatInspectorSource).toContain("selectTab('analysis')")
-    expect(chatInspectorSource).toContain("route.query.panel === 'analysis'")
+    expect(chatInspectorSource).not.toContain('StepQorAnalysisPanel')
+    expect(chatInspectorSource).not.toContain('QoR Analysis')
   })
 
   it('can place chat controls in the workbench topbar while keeping the panel content below', () => {

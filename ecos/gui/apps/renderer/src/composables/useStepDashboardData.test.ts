@@ -59,7 +59,13 @@ const workspaceResourceIndex = {
             step: { path: '/projects/gcd/ws_0004/synthesis/feature/synthesis.step.json' },
             map: { exists: false, path: '' },
           },
-          output: { geometryManifest: { exists: false } },
+          output: {
+            geometryManifest: { exists: false },
+            image: {
+              exists: false,
+              path: '/projects/gcd/ws_0004/synthesis/output/layout.png',
+            },
+          },
           report: {
             summary: {
               path: '/projects/gcd/ws_0004/synthesis/report/Synthesis_check.rpt',
@@ -138,6 +144,11 @@ describe('useStepDashboardData cache', () => {
       ]),
     )
     expect(first.data.value?.reports).toHaveLength(2)
+    expect(first.data.value?.layoutUrl).toBeNull()
+    expect(testState.readProjectBlobUrl).not.toHaveBeenCalledWith(
+      '/projects/gcd/ws_0004/synthesis/output/layout.png',
+      expect.anything(),
+    )
 
     let releaseIndex: ((value: typeof workspaceResourceIndex) => void) | undefined
     testState.getWorkspaceResourceIndexApi.mockImplementationOnce(
@@ -167,8 +178,63 @@ describe('useStepDashboardData cache', () => {
 })
 
 describe('useStepDashboardData', () => {
+  it('skips an absent layout artifact without discarding Synthesis data', () => {
+    expect(source).toContain('resourceStep.resources.output.image?.exists')
+    expect(source).toContain("? stringInfo(layoutResponse.info, 'image')")
+  })
+
   it('reads each step checklist from the step folder', () => {
     expect(source).toContain('`${resourceStep.directory}/checklist.json`')
     expect(source).not.toContain('InfoEnum.checklist')
+  })
+
+  it('loads Synthesis timing data from the post-synthesis feature directory', () => {
+    expect(source).toContain('resourceStep.resources.feature.stat?.path || dbPath')
+    expect(source).toContain('feature/post_synthesis/qor_summary.json')
+    expect(source).toContain('feature/post_synthesis/timing_paths.json')
+    expect(source).toContain('synthesisInsights(')
+  })
+
+  it('uses the indexed Floorplan database feature for specialized insights', () => {
+    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'floorplan'")
+    expect(source).toContain('floorplanInsights(dbJson)')
+  })
+
+  it('uses each physical step feature for Floorplan-style snapshots and step.json metrics', () => {
+    expect(source).toContain('floorplanStyleInsightSteps')
+    expect(source).toContain("'fixfanout'")
+    expect(source).toContain("'place'")
+    expect(source).toContain("'cts'")
+    expect(source).toContain("'legalization'")
+    expect(source).toContain("'route'")
+    expect(source).toContain("'filler'")
+    expect(source).toContain(
+      'stepFeatureInsights(resourceStep.name, stepJson, dbJson, mapJson)',
+    )
+    expect(source).toContain('feature/${resourceStep.name}.map.json')
+  })
+
+  it('loads the optional Place all-cell density map and retains its cached Blob URL', () => {
+    expect(source).toContain('feature/density_map/place_allcell_density.png')
+    expect(source).toContain('readOptionalImage(placeDensityMapPath)')
+    expect(source).toContain('placeDensityMapUrl')
+    expect(source).toContain('revokeBlobUrl(placeDensityMapUrl)')
+  })
+
+  it('loads specialized RCX, DRC, and STA feature artifacts for their insight surfaces', () => {
+    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'rcx'")
+    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'drc'")
+    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'sta'")
+    expect(source).toContain('analysis/drc_statis.csv')
+    expect(source).toContain('readText(drcStatisticsPath)')
+    expect(source).toContain('rcxInsights(stepJson)')
+    expect(source).toContain('drcInsights(drcStatisticsText)')
+    expect(source).toContain('staCornerSummaryPaths(stepJson, resourceStep.directory)')
+    expect(source).toContain('staInsights(stepJson, staTimingSummaries)')
+  })
+
+  it('uses indexed Harden output artifacts for the dedicated output surface', () => {
+    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'harden'")
+    expect(source).toContain('hardenOutputInsights(resourceStep.resources.output)')
   })
 })

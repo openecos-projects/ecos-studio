@@ -92,8 +92,18 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).not.toContain('radial-gradient(\n        circle at 0 0')
   })
 
-  it('keeps compact baseline QoR comparison counts and analysis entry points', () => {
+  it('uses grid cells for dashboard parameters and compact QoR comparison entry points', () => {
+    expect(homeViewSource).toContain('class="dashboard-parameter-grid chip-info-grid"')
+    expect(homeViewSource).toContain('class="dashboard-parameter-grid constraint-list"')
+    expect(homeViewSource).toContain('class="dashboard-parameter-grid key-metrics-grid"')
+    expect(homeViewSource).toContain('.dashboard-parameter-grid > div')
+    expect(homeViewSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
     expect(homeViewSource).toContain('Quality of Results')
+    expect(homeViewSource).toContain('<dt>Passing</dt>')
+    expect(homeViewSource).toContain('checklistSummary.passed')
+    expect(homeViewSource.indexOf('<dt>Passing</dt>')).toBeLessThan(
+      homeViewSource.indexOf('<dt>Blocked</dt>'),
+    )
     expect(homeViewSource).toContain('QoR comparison')
     expect(homeViewSource).toContain('class="qor-summary-content"')
     expect(homeViewSource).toContain('class="qor-step-list"')
@@ -104,6 +114,16 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('Default baseline')
     expect(homeViewSource).toContain('QoR score')
     expect(homeViewSource).toContain('class="qor-score-hero"')
+    expect(homeViewSource).toContain('Baseline QoR score')
+    expect(homeViewSource).toContain('qorBaselineScoreValue')
+    expect(homeViewSource).toContain('qorBaselineScoreTone')
+    expect(homeViewSource).toContain('class="qor-score-versus"')
+    expect(homeViewSource).toContain('>VS</span>')
+    expect(homeViewSource).toContain('class="qor-comparison-pie"')
+    expect(homeViewSource).toContain('label="QoR comparison distribution"')
+    expect(homeViewSource).toContain('show-labels')
+    expect(homeViewSource).not.toContain(':center-primary="qorCenterPrimary"')
+    expect(homeViewSource).not.toContain(':center-secondary="qorCenterSecondary"')
     expect(homeViewSource).toContain('PASS >= ${QOR_SCORE_THRESHOLD}')
     expect(homeViewSource).toContain('FAIL < ${QOR_SCORE_THRESHOLD}')
     expect(homeViewSource).toContain('state.comparison?.baselineScore')
@@ -112,13 +132,83 @@ describe('HomeView workspace dashboard layout', () => {
     )
     expect(homeViewSource).toContain('step.improvedCount')
     expect(homeViewSource).toContain('step.regressedCount')
+    expect(homeViewSource).toContain('step.unchangedCount')
     expect(homeViewSource).toContain('step.comparableCount')
     expect(homeViewSource).toContain('qorComparisonSummary.improvedCount')
+    expect(homeViewSource).toContain('qorComparisonSummary.value.unchangedCount')
+    expect(homeViewSource).toContain("id: 'not-compared'")
+    expect(homeViewSource).toContain('qorUncomparedCount')
     expect(homeViewSource).not.toContain('qorStepSummary.passCount')
     expect(homeViewSource).not.toContain('qor-step-runtime')
     expect(homeViewSource).not.toContain('step.metricCount')
+    expect(homeViewSource).not.toContain('qor-step-counts')
+    expect(homeViewSource).toContain('class="qor-step-trend"')
+    expect(homeViewSource).toContain('class="qor-step-trend-bar"')
+    expect(homeViewSource).toContain('class="qor-step-total"')
+    expect(homeViewSource).toContain(':style="{ flexGrow: step.improvedCount }"')
+    expect(homeViewSource).toContain(':style="{ flexGrow: step.regressedCount }"')
+    expect(homeViewSource).toContain(':style="{ flexGrow: step.unchangedCount }"')
     expect(homeViewSource).toContain('overflow: hidden')
     expect(homeViewSource).toContain('border-right: 1px solid var(--border-color)')
+  })
+
+  it('shows the requested chip metadata and max fanout from Home parameters', () => {
+    const chipCardStart = homeViewSource.indexOf('class="dashboard-section chip-card"')
+    const constraintsCardStart = homeViewSource.indexOf(
+      'class="dashboard-section constraint-card"',
+    )
+    const chipCard = homeViewSource.slice(chipCardStart, constraintsCardStart)
+
+    const labels = [
+      'Project',
+      'SoC Template',
+      'Baseline workspace',
+      'Workspace',
+      'PDK',
+      'Design',
+      'Top Module',
+      'Target Die Area',
+      'Target Frequency',
+      'Clock',
+    ]
+    for (const label of labels) {
+      expect(chipCard).toContain(`<dt>${label}</dt>`)
+    }
+    for (const [index, previous] of labels.slice(0, -1).entries()) {
+      const next = labels[index + 1]!
+      expect(chipCard.indexOf(`<dt>${previous}</dt>`)).toBeLessThan(
+        chipCard.indexOf(`<dt>${next}</dt>`),
+      )
+    }
+
+    expect(chipCard).toContain('valueOrNA(mpcDisplayName)')
+    expect(chipCard).toContain('valueOrNA(qorComparisonState.projectName)')
+    expect(chipCard).toContain('valueOrNA(qorComparisonState.baselineWorkspaceName)')
+    expect(chipCard).toContain('valueOrNA(currentProject?.name)')
+    expect(chipCard).toContain('positiveNumberOrNA(config.die.area)')
+    expect(chipCard).toContain('frequencyOrNA(config.frequencyMax)')
+    expect(homeViewSource).toContain('<dt>Max Fanout</dt>')
+    expect(homeViewSource).toContain('valueOrNA(maxFanout)')
+    expect(homeViewSource).toContain('maxFanout,')
+    expect(homeViewSource).not.toContain('home-dashboard-top.without-mpc')
+  })
+
+  it('keeps the Constraints header and cell-count row free of redundant status UI', () => {
+    const constraintCardStart = homeViewSource.indexOf(
+      'class="dashboard-section constraint-card"',
+    )
+    const statusCardStart = homeViewSource.indexOf(
+      'class="dashboard-section status-card"',
+      constraintCardStart,
+    )
+    const constraintCard = homeViewSource.slice(constraintCardStart, statusCardStart)
+
+    expect(constraintCard).toContain('<dt>Maximum cell count</dt>')
+    expect(constraintCard).not.toContain('cellLimitLabel')
+    expect(constraintCard).not.toContain('Current count is within limit')
+    expect(constraintCard).not.toContain('View port definition')
+    expect(constraintCard).not.toContain('ri-external-link-line')
+    expect(homeViewSource).not.toContain('.constraint-list small')
   })
 
   it('renders each QoR step as a single aligned metric comparison card', () => {
@@ -154,14 +244,22 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('font-size: 14px')
     expect(homeViewSource).toContain('font-size: 11px')
     expect(homeViewSource).toContain('.status-summary-content.is-blocked')
-    expect(homeViewSource).toContain('.qor-step-counts .is-improved dd')
-    expect(homeViewSource).toContain('.qor-step-counts .is-regressed dd')
+    expect(homeViewSource).toContain('.qor-step-trend-bar > .is-improved')
+    expect(homeViewSource).toContain('.qor-step-trend-bar > .is-regressed')
+    expect(homeViewSource).toContain('.qor-step-trend-bar > .is-neutral')
+    expect(homeViewSource).toContain(
+      '.key-metrics-grid {\n  grid-auto-rows: minmax(0, 1fr);',
+    )
+    expect(homeViewSource).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))')
+    expect(homeViewSource).toContain('.key-metrics-grid > div {\n  min-height: 0;')
   })
 
   it('preserves both fixed-size checklist and QoR pie chart regions', () => {
     expect(homeViewSource.match(/<StatusPieChart/g)?.length).toBe(2)
     expect(homeViewSource).toContain('min-height: 108px')
     expect(homeViewSource).toContain('grid-template-columns: minmax(104px, 0.45fr)')
-    expect(homeViewSource).toContain('grid-template-columns: minmax(112px, 0.34fr)')
+    expect(homeViewSource).toContain(
+      'grid-template-rows: minmax(0, 1fr) 20px minmax(0, 1fr)',
+    )
   })
 })

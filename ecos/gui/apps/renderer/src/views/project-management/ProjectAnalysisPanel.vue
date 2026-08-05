@@ -116,9 +116,6 @@
             >
               Set baseline
             </button>
-            <button type="button" class="dash-btn" @click="exportReport">
-              Export report
-            </button>
           </template>
         </div>
       </section>
@@ -559,7 +556,6 @@ const emit = defineEmits<{
   'select-step': [step: FlowStep]
   'select-workspace': [workspaceId: string]
   'select-issue-metric': [metric: string | null]
-  'export-report': []
   'set-baseline': [{ workspaceId: string }]
   'import-project': []
   'new-project': []
@@ -856,10 +852,6 @@ function selectStep(step: FlowStep): void {
 
 function selectWorkspace(workspaceId: string): void {
   emit('select-workspace', workspaceId)
-}
-
-function exportReport(): void {
-  emit('export-report')
 }
 
 /** Baseline changes rewrite project.json, so they take a second click to commit. */

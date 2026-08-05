@@ -176,15 +176,6 @@ export function useStepConfigInfo() {
 
       if (response.response === 'missing') {
         info.value = payload
-        const configPath = payload ? pickStepConfigPathFromInfo(payload) : undefined
-        if (payload && configPath) {
-          responseKind.value = 'warning'
-          await loadStepConfigFileFromInfo(payload, sessionId, refetchToken)
-          if (canApply()) {
-            lastLoadedStep = stepEnum
-          }
-          return
-        }
         responseKind.value = 'idle'
         clearFileState()
         lastLoadedStep = stepEnum

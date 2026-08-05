@@ -7,7 +7,9 @@ import {
   dashboardMetrics,
   formatDashboardMetric,
   instanceMetricsFromDbFeature,
+  maxFanoutFromParameters,
   mpcConstraintsFromParameters,
+  mpcDisplayNameFromParameters,
   qorSummaryCounts,
   qorStepsFromIndex,
   qorStatusSummary,
@@ -35,6 +37,20 @@ describe('dashboard data presentation', () => {
       maximumCellCount: 250,
       ports: [{ name: 'clk', direction: 'input', width: 1 }],
     })
+  })
+
+  it('reads MPC display name and max fanout directly from Home parameters', () => {
+    const parameters = {
+      'Max fanout': 42,
+      MPC: {
+        display_name: 'MPC Frame',
+      },
+    }
+
+    expect(mpcDisplayNameFromParameters(parameters)).toBe('MPC Frame')
+    expect(maxFanoutFromParameters(parameters)).toBe(42)
+    expect(mpcDisplayNameFromParameters({ MPC: { display_name: ' ' } })).toBeNull()
+    expect(maxFanoutFromParameters({ 'Max fanout': '42' })).toBeNull()
   })
 
   it('keeps checklist states visible in the pie data', () => {
@@ -147,12 +163,7 @@ describe('dashboard data presentation', () => {
         iopads: { num: 54 },
       },
     })
-    const metrics = dashboardMetrics(
-      new Map([
-        ['instance_count', 432],
-        ...dbMetrics,
-      ]),
-    )
+    const metrics = dashboardMetrics(new Map([['instance_count', 432], ...dbMetrics]))
     const instanceIndex = metrics.findIndex((metric) => metric.id === 'instances')
 
     expect(metrics.slice(instanceIndex, instanceIndex + 6)).toMatchObject([
@@ -197,7 +208,9 @@ describe('dashboard data presentation', () => {
   })
 
   it('counts each declared QoR summary status as one analyzed step', () => {
-    expect(qorSummaryCounts({ schema_version: 4, quality_status: 'pass', gates: [] })).toEqual({
+    expect(
+      qorSummaryCounts({ schema_version: 4, quality_status: 'pass', gates: [] }),
+    ).toEqual({
       blockedCount: 0,
       passCount: 1,
       totalCount: 1,

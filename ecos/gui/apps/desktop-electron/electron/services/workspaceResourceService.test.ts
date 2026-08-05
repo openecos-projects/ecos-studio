@@ -467,37 +467,41 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
-  it('maps yosys config to flow_config.json', async () => {
+  it('does not expose configuration for Synthesis even when flow_config.json exists', async () => {
     const root = await tempWorkspace()
-    await mkdir(join(root, 'home'), { recursive: true })
-    await writeJson(join(root, 'home', 'parameters.json'), {
-      Design: 'gcd',
-      'Top module': 'gcd',
-      PDK: 'ics55',
-    })
-    await writeJson(join(root, 'home', 'flow.json'), {
-      steps: [
-        { name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} },
-      ],
-    })
-    await writeJson(join(root, 'home', 'home.json'), {})
+    await writeWorkspace(root, [{ name: 'Synthesis', tool: 'yosys' }])
+    await mkdir(join(root, 'config'), { recursive: true })
+    await writeFile(join(root, 'config', 'flow_config.json'), '{}', 'utf8')
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const result = await service.resolveStepInfo({ step: 'synthesis', id: 'config' })
 
     expect(result).toMatchObject({
       step: 'Synthesis',
-      response: 'missing',
-      info: { path: join(root, 'config', 'flow_config.json') },
-      missing: [join(root, 'config', 'flow_config.json')],
+      response: 'available',
+      info: {},
+      missing: [],
     })
+    expect(result.info.path).toBeUndefined()
+    expect(result.info.config).toBeUndefined()
   })
 
   it.each([
-    ['place', 'pl_default_config.json'],
     ['Floorplan', 'fp_default_config.json'],
-    ['optDrv', 'to_default_config_drv.json'],
+    ['fixFanout', 'no_default_config_fixfanout.json'],
+    ['place', 'pl_default_config.json'],
     ['CTS', 'cts_default_config.json'],
+    ['PNP', 'pnp_default_config.json'],
+    ['optDrv', 'to_default_config_drv.json'],
+    ['optHold', 'to_default_config_hold.json'],
+    ['optSetup', 'to_default_config_setup.json'],
+    ['legalization', 'pl_default_config.json'],
+    ['route', 'rt_default_config.json'],
+    ['drc', 'drc_default_config.json'],
+    ['filler', 'pl_default_config.json'],
+    ['RCX', 'rcx.json'],
+    ['sta', 'sta.json'],
+    ['db', 'db_default_config.json'],
   ])(
     'maps ECC %s config to the workspace config directory',
     async (stepName, configFile) => {
@@ -520,6 +524,45 @@ describe('WorkspaceResourceService', () => {
         info: { config: join(root, 'config', configFile) },
         missing: [],
       })
+    },
+  )
+
+  it.each([
+    ['Timing optimization', []],
+    ['Signoff', []],
+    ['Harden', ['sta.json']],
+  ])(
+    'does not expose configuration for ECC %s even when unrelated config files exist',
+    async (stepName, extraConfigFiles) => {
+      const root = await tempWorkspace()
+      await writeWorkspace(root, [{ name: stepName, tool: 'ecc' }])
+      await mkdir(join(root, 'config'), { recursive: true })
+      await writeFile(
+        join(root, 'config', 'flow_config.json'),
+        '{"ConfigPath":{}}',
+        'utf8',
+      )
+      await Promise.all(
+        extraConfigFiles.map((filename) =>
+          writeFile(join(root, 'config', filename), '{}', 'utf8'),
+        ),
+      )
+
+      const service = new WorkspaceResourceService({
+        projectScopeProvider: provider(root),
+      })
+      const result = await service.resolveStepInfo({
+        step: stepName,
+        id: 'config',
+      })
+
+      expect(result).toMatchObject({
+        step: stepName,
+        response: 'available',
+        missing: [],
+      })
+      expect(result.info.config).toBeUndefined()
+      expect(result.info.path).toBeUndefined()
     },
   )
 

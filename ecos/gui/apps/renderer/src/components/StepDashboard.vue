@@ -60,7 +60,7 @@
                 </dl>
                 <div v-else class="config-summary-state">
                   <i class="ri-file-search-line" aria-hidden="true" />
-                  <span>No configuration data</span>
+                  <span>N/A</span>
                 </div>
               </div>
               <button
@@ -279,7 +279,7 @@
           </button>
           <div v-else class="card-empty">
             <i class="ri-image-2-line" aria-hidden="true" />
-            <span>Layout preview unavailable</span>
+            <span>No layout information</span>
           </div>
         </section>
       </div>
@@ -302,7 +302,443 @@
               <i class="ri-map-2-line" aria-hidden="true" />
             </button>
           </header>
-          <div class="data-body">
+          <div v-if="data.synthesisInsights" class="data-body synthesis-data-body">
+            <section class="synthesis-insight-column">
+              <header class="synthesis-insight-header">
+                <div>
+                  <i class="ri-stack-line" aria-hidden="true" />
+                  <h3>Metrics</h3>
+                </div>
+                <span>{{ data.synthesisInsights.metrics.length }} values</span>
+              </header>
+              <dl
+                v-if="data.synthesisInsights.metrics.length"
+                class="synthesis-value-grid"
+              >
+                <div v-for="metric in data.synthesisInsights.metrics" :key="metric.id">
+                  <dt>{{ metric.label }}</dt>
+                  <dd :title="metric.value">{{ metric.value }}</dd>
+                </div>
+              </dl>
+              <div v-else class="synthesis-empty-state">
+                <i class="ri-bar-chart-grouped-line" aria-hidden="true" />
+                <span>No synthesis statistics</span>
+              </div>
+            </section>
+
+            <section class="synthesis-insight-column synthesis-timing-column">
+              <header class="synthesis-insight-header">
+                <div>
+                  <i class="ri-timer-line" aria-hidden="true" />
+                  <h3>Timing Analysis</h3>
+                </div>
+                <span>{{ data.synthesisInsights.timingModules.length }} modules</span>
+              </header>
+              <div
+                v-if="data.synthesisInsights.timingModules.length"
+                class="synthesis-timing-content"
+              >
+                <div
+                  class="synthesis-timing-tabs"
+                  role="tablist"
+                  aria-label="Synthesis timing analysis modules"
+                >
+                  <button
+                    v-for="(module, index) in data.synthesisInsights.timingModules"
+                    :id="`synthesis-timing-tab-${module.id}`"
+                    :key="module.id"
+                    type="button"
+                    role="tab"
+                    :aria-selected="index === synthesisTimingTabIndex"
+                    :class="{ 'is-active': index === synthesisTimingTabIndex }"
+                    @click="synthesisTimingTabIndex = index"
+                  >
+                    {{ module.label }}
+                  </button>
+                </div>
+                <dl
+                  v-if="selectedSynthesisTimingModule"
+                  class="synthesis-value-grid synthesis-timing-parameter-grid"
+                  role="tabpanel"
+                  :aria-labelledby="`synthesis-timing-tab-${selectedSynthesisTimingModule.id}`"
+                >
+                  <div
+                    v-for="value in selectedSynthesisTimingModule.values"
+                    :key="value.id"
+                  >
+                    <dt>{{ value.label }}</dt>
+                    <dd :title="value.value">{{ value.value }}</dd>
+                  </div>
+                </dl>
+              </div>
+              <div v-else class="synthesis-empty-state">
+                <i class="ri-timer-line" aria-hidden="true" />
+                <span>No post-synthesis timing summary</span>
+              </div>
+              <button
+                type="button"
+                class="status-detail-link synthesis-timing-path-link"
+                title="View all post-synthesis timing paths"
+                @click="showSynthesisTimingPaths = true"
+              >
+                Timing paths
+                <span>{{ data.synthesisInsights.timingPaths.length }}</span>
+                <i class="ri-arrow-right-up-line" aria-hidden="true" />
+              </button>
+            </section>
+          </div>
+          <div v-else-if="data.rcxInsights" class="data-body rcx-data-body">
+            <section class="rcx-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-flashlight-line" aria-hidden="true" />
+                  <h3>Electrical Summary</h3>
+                </div>
+                <span>{{ data.rcxInsights.electricalCorners.length }} corners</span>
+              </header>
+              <dl class="synthesis-value-grid rcx-summary-grid">
+                <div
+                  v-for="metric in data.rcxInsights.electricalMetrics"
+                  :key="metric.id"
+                >
+                  <dt>{{ metric.label }}</dt>
+                  <dd :title="metric.value">{{ metric.value }}</dd>
+                </div>
+              </dl>
+              <div class="insight-table-wrap rcx-corner-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Corner</th>
+                      <th>Nets</th>
+                      <th>Ground Cap</th>
+                      <th>Coupling Cap</th>
+                      <th>Total Cap</th>
+                      <th>Resistance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="corner in data.rcxInsights.electricalCorners"
+                      :key="corner.corner"
+                    >
+                      <th :title="corner.corner">{{ corner.corner }}</th>
+                      <td>{{ insightTableValue(corner.netCount) }}</td>
+                      <td>{{ insightTableValue(corner.groundCapacitanceFf) }}</td>
+                      <td>{{ insightTableValue(corner.couplingCapacitanceFf) }}</td>
+                      <td>{{ insightTableValue(corner.totalCapacitanceFf) }}</td>
+                      <td>{{ insightTableValue(corner.totalResistanceOhm) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="rcx-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-shield-check-line" aria-hidden="true" />
+                  <h3>Signoff Metrics</h3>
+                </div>
+                <span>{{ data.rcxInsights.signoffCorners.length }} RC corners</span>
+              </header>
+              <dl class="synthesis-value-grid rcx-summary-grid">
+                <div v-for="metric in data.rcxInsights.signoffMetrics" :key="metric.id">
+                  <dt>{{ metric.label }}</dt>
+                  <dd :title="metric.value">{{ metric.value }}</dd>
+                </div>
+              </dl>
+              <div class="insight-table-wrap rcx-corner-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>RC Corner</th>
+                      <th>Status</th>
+                      <th>Total Cap</th>
+                      <th>Coupling Cap</th>
+                      <th>Resistance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="corner in data.rcxInsights.signoffCorners"
+                      :key="corner.corner"
+                    >
+                      <th :title="corner.corner">{{ corner.corner }}</th>
+                      <td>{{ corner.availability }}</td>
+                      <td>{{ insightTableValue(corner.totalCapacitanceFf) }}</td>
+                      <td>{{ insightTableValue(corner.couplingCapacitanceFf) }}</td>
+                      <td>{{ insightTableValue(corner.totalResistanceOhm) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+          <div v-else-if="data.drcInsights" class="data-body drc-data-body">
+            <section class="floorplan-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-table-line" aria-hidden="true" />
+                  <h3>Metrics</h3>
+                </div>
+                <span>{{ data.drcInsights.table.rows.length }} rows</span>
+              </header>
+              <div class="insight-table-wrap drc-statistics-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th v-for="header in data.drcInsights.table.headers" :key="header">
+                        {{ header }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in data.drcInsights.table.rows" :key="row.id">
+                      <td v-for="(cell, index) in row.values" :key="`${row.id}-${index}`">
+                        {{ cell }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="floorplan-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-pie-chart-2-line" aria-hidden="true" />
+                  <h3>Snapshot</h3>
+                </div>
+                <span>{{ data.drcInsights.snapshots.length }} charts</span>
+              </header>
+              <div class="floorplan-snapshot-grid">
+                <button
+                  v-for="snapshot in data.drcInsights.snapshots"
+                  :key="snapshot.id"
+                  type="button"
+                  class="floorplan-snapshot-card"
+                  :title="`View ${snapshot.label} distribution`"
+                  @click="openFloorplanSnapshot(snapshot)"
+                >
+                  <StatusPieChart
+                    class="floorplan-snapshot-pie"
+                    :label="`${snapshot.label} distribution`"
+                    :slices="snapshot.slices"
+                    :center-primary="formatDashboardValue(snapshot.total, snapshot.unit)"
+                    center-secondary="total"
+                  />
+                  <span class="floorplan-snapshot-copy">
+                    <strong>{{ snapshot.label }}</strong>
+                    <span>{{ formatDashboardValue(snapshot.total, snapshot.unit) }}</span>
+                  </span>
+                </button>
+              </div>
+            </section>
+          </div>
+          <div v-else-if="data.staInsights" class="data-body sta-data-body">
+            <div class="sta-corner-tabs" role="tablist" aria-label="STA corners">
+              <button
+                v-for="(corner, index) in data.staInsights.corners"
+                :id="`sta-corner-tab-${index}`"
+                :key="corner.id"
+                type="button"
+                role="tab"
+                :aria-selected="index === staCornerTabIndex"
+                :class="{ 'is-active': index === staCornerTabIndex }"
+                :title="corner.staCorner"
+                @click="selectStaCorner(index)"
+              >
+                {{ corner.staCorner }}
+              </button>
+            </div>
+
+            <section class="sta-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-stack-line" aria-hidden="true" />
+                  <h3>Metrics</h3>
+                </div>
+                <span>{{ selectedStaCorner?.metrics.length ?? 0 }} values</span>
+              </header>
+              <dl v-if="selectedStaCorner" class="synthesis-value-grid sta-metrics-grid">
+                <div v-for="metric in selectedStaCorner.metrics" :key="metric.id">
+                  <dt>{{ metric.label }}</dt>
+                  <dd :title="metric.value">{{ metric.value }}</dd>
+                </div>
+              </dl>
+              <div v-else class="synthesis-empty-state">
+                <i class="ri-timer-line" aria-hidden="true" />
+                <span>No STA corner data</span>
+              </div>
+            </section>
+
+            <section class="sta-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-timer-line" aria-hidden="true" />
+                  <h3>Timing Analysis</h3>
+                </div>
+                <span>{{ selectedStaCorner?.timingModules.length ?? 0 }} modules</span>
+              </header>
+              <div
+                v-if="selectedStaCorner?.timingModules.length"
+                class="synthesis-timing-content"
+              >
+                <div
+                  class="synthesis-timing-tabs sta-timing-tabs"
+                  role="tablist"
+                  aria-label="STA timing analysis modules"
+                >
+                  <button
+                    v-for="(module, index) in selectedStaCorner.timingModules"
+                    :id="`sta-timing-tab-${module.id}`"
+                    :key="module.id"
+                    type="button"
+                    role="tab"
+                    :aria-selected="index === staTimingTabIndex"
+                    :class="{ 'is-active': index === staTimingTabIndex }"
+                    @click="staTimingTabIndex = index"
+                  >
+                    {{ module.label }}
+                  </button>
+                </div>
+                <dl
+                  v-if="selectedStaTimingModule"
+                  class="synthesis-value-grid synthesis-timing-parameter-grid"
+                  role="tabpanel"
+                  :aria-labelledby="`sta-timing-tab-${selectedStaTimingModule.id}`"
+                >
+                  <div v-for="value in selectedStaTimingModule.values" :key="value.id">
+                    <dt>{{ value.label }}</dt>
+                    <dd :title="value.value">{{ value.value }}</dd>
+                  </div>
+                </dl>
+              </div>
+              <div v-else class="synthesis-empty-state">
+                <i class="ri-timer-line" aria-hidden="true" />
+                <span>No corner timing summary</span>
+              </div>
+            </section>
+          </div>
+          <div v-else-if="data.hardenInsights" class="data-body harden-data-body">
+            <section class="harden-output-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-folder-open-line" aria-hidden="true" />
+                  <h3>Output</h3>
+                </div>
+                <span>{{ data.hardenInsights.artifacts.length }} artifacts</span>
+              </header>
+              <div class="insight-table-wrap harden-output-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Path</th>
+                      <th>State</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="artifact in data.hardenInsights.artifacts"
+                      :key="artifact.type"
+                      :class="{
+                        'is-available': artifact.exists,
+                        'is-missing': !artifact.exists,
+                      }"
+                    >
+                      <td>{{ artifact.type }}</td>
+                      <td :title="artifact.path">{{ artifact.path }}</td>
+                      <td>
+                        <span class="harden-output-state">
+                          <i
+                            :class="
+                              artifact.exists
+                                ? 'ri-checkbox-circle-fill'
+                                : 'ri-close-circle-fill'
+                            "
+                            aria-hidden="true"
+                          />
+                          <span>{{ artifact.exists ? 'Available' : 'Missing' }}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+          <div v-else-if="insightData" class="data-body floorplan-data-body">
+            <section class="floorplan-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-stack-line" aria-hidden="true" />
+                  <h3>Metrics</h3>
+                </div>
+                <span>{{ insightData.metrics.length }} values</span>
+              </header>
+              <dl
+                v-if="insightData.metrics.length"
+                class="synthesis-value-grid floorplan-metrics-grid"
+              >
+                <div v-for="metric in insightData.metrics" :key="metric.id">
+                  <dt class="floorplan-metric-label">{{ metric.label }}</dt>
+                  <dd :title="metric.value">{{ metric.value }}</dd>
+                </div>
+              </dl>
+              <div v-else class="synthesis-empty-state">
+                <i class="ri-bar-chart-grouped-line" aria-hidden="true" />
+                <span>No floorplan metrics</span>
+              </div>
+            </section>
+
+            <section class="floorplan-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-pie-chart-2-line" aria-hidden="true" />
+                  <h3>Snapshot</h3>
+                </div>
+                <span>{{ insightData.snapshots.length }} charts</span>
+              </header>
+              <div class="floorplan-snapshot-grid">
+                <button
+                  v-if="data.placeDensityMapUrl"
+                  type="button"
+                  class="floorplan-snapshot-card floorplan-snapshot-image-card"
+                  title="View all cell density map"
+                  @click="openImagePreview('All Cell Density', data.placeDensityMapUrl)"
+                >
+                  <img :src="data.placeDensityMapUrl" alt="Place all-cell density map" />
+                  <span class="floorplan-snapshot-copy">
+                    <strong>All Cell Density</strong>
+                    <span>Density map</span>
+                  </span>
+                </button>
+                <button
+                  v-for="snapshot in insightData.snapshots"
+                  :key="snapshot.id"
+                  type="button"
+                  class="floorplan-snapshot-card"
+                  :title="`View ${snapshot.label} distribution`"
+                  @click="openFloorplanSnapshot(snapshot)"
+                >
+                  <StatusPieChart
+                    class="floorplan-snapshot-pie"
+                    :label="`${snapshot.label} distribution`"
+                    :slices="snapshot.slices"
+                    :center-primary="formatDashboardValue(snapshot.total, snapshot.unit)"
+                    center-secondary="total"
+                  />
+                  <span class="floorplan-snapshot-copy">
+                    <strong>{{ snapshot.label }}</strong>
+                    <span>{{ formatDashboardValue(snapshot.total, snapshot.unit) }}</span>
+                  </span>
+                </button>
+              </div>
+            </section>
+          </div>
+          <div v-else class="data-body">
             <figure v-if="selectedDataChart" class="distribution-chart">
               <figcaption>{{ selectedDataChart.title }}</figcaption>
               <div
@@ -354,7 +790,10 @@
           </div>
         </section>
 
-        <section class="step-dashboard-card reports-card">
+        <section
+          class="step-dashboard-card reports-card"
+          :class="{ 'is-sta-report-card': data.step.trim().toLowerCase() === 'sta' }"
+        >
           <header class="step-dashboard-header">
             <div>
               <i class="ri-file-chart-line" aria-hidden="true" />
@@ -515,6 +954,132 @@
   </Dialog>
 
   <Dialog
+    v-model:visible="showSynthesisTimingPaths"
+    modal
+    header="Post-Synthesis Timing Paths"
+    :style="{ width: 'min(1180px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <div v-if="data?.synthesisInsights" class="timing-paths-dialog">
+      <section
+        v-if="data.synthesisInsights.timingPathSummary.length"
+        class="timing-path-summary"
+      >
+        <header>
+          <div>
+            <i class="ri-information-line" aria-hidden="true" />
+            <h3>Run Information</h3>
+          </div>
+        </header>
+        <dl class="timing-path-summary-grid">
+          <div v-for="value in data.synthesisInsights.timingPathSummary" :key="value.id">
+            <dt>{{ value.label }}</dt>
+            <dd :title="value.value">{{ value.value }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section v-if="data.synthesisInsights.timingPaths.length" class="timing-path-list">
+        <header class="timing-path-list-header">
+          <div>
+            <i class="ri-git-branch-line" aria-hidden="true" />
+            <h3>Timing Paths</h3>
+          </div>
+          <span>{{ data.synthesisInsights.timingPaths.length }} paths</span>
+        </header>
+        <div class="timing-path-waterfall">
+          <article v-for="path in data.synthesisInsights.timingPaths" :key="path.id">
+            <header>
+              <span>{{ path.label }}</span>
+              <small>{{ path.stages.length }} stages</small>
+            </header>
+            <dl class="timing-path-values">
+              <div v-for="value in path.values" :key="value.id">
+                <dt>{{ value.label }}</dt>
+                <dd :title="value.value">{{ value.value }}</dd>
+              </div>
+            </dl>
+            <section v-if="path.stages.length" class="timing-path-stages">
+              <h4>Stage List</h4>
+              <ol>
+                <li v-for="(stage, index) in path.stages" :key="`${path.id}-${index}`">
+                  <span>{{ index + 1 }}</span>
+                  <dl>
+                    <div v-for="value in stage" :key="value.id">
+                      <dt>{{ value.label }}</dt>
+                      <dd :title="value.value">{{ value.value }}</dd>
+                    </div>
+                  </dl>
+                </li>
+              </ol>
+            </section>
+          </article>
+        </div>
+      </section>
+      <p v-else class="dialog-empty">No post-synthesis timing paths are available.</p>
+    </div>
+    <p v-else class="dialog-empty">No post-synthesis timing paths are available.</p>
+  </Dialog>
+
+  <Dialog
+    v-model:visible="showFloorplanSnapshot"
+    modal
+    :header="
+      selectedFloorplanSnapshot
+        ? `${selectedFloorplanSnapshot.label} Distribution`
+        : 'Floorplan Snapshot'
+    "
+    :style="{ width: 'min(980px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <div v-if="selectedFloorplanSnapshot" class="floorplan-snapshot-dialog">
+      <section class="floorplan-snapshot-large-chart">
+        <StatusPieChart
+          class="floorplan-snapshot-large-pie"
+          :label="`${selectedFloorplanSnapshot.label} distribution`"
+          :slices="selectedFloorplanSnapshot.slices"
+          :center-primary="
+            formatDashboardValue(
+              selectedFloorplanSnapshot.total,
+              selectedFloorplanSnapshot.unit,
+            )
+          "
+          center-secondary="total"
+          :show-labels="selectedFloorplanSnapshot.slices.length <= 3"
+        />
+      </section>
+
+      <section class="floorplan-snapshot-detail-list">
+        <header>
+          <div>
+            <i class="ri-list-check-2" aria-hidden="true" />
+            <h3>Distribution</h3>
+          </div>
+          <span>{{ selectedFloorplanSnapshot.slices.length }} bins</span>
+        </header>
+        <ul>
+          <li v-for="slice in selectedFloorplanSnapshot.slices" :key="slice.label">
+            <span
+              class="floorplan-snapshot-swatch"
+              :class="`is-${slice.tone}`"
+              :style="slice.color ? { backgroundColor: slice.color } : undefined"
+              aria-hidden="true"
+            />
+            <strong :title="slice.label">{{ slice.label }}</strong>
+            <span>{{
+              formatDashboardValue(slice.value, selectedFloorplanSnapshot.unit)
+            }}</span>
+            <small>{{
+              floorplanSnapshotPercent(slice.value, selectedFloorplanSnapshot.total)
+            }}</small>
+          </li>
+        </ul>
+      </section>
+    </div>
+    <p v-else class="dialog-empty">No Floorplan snapshot is available.</p>
+  </Dialog>
+
+  <Dialog
     v-model:visible="reportDialog.visible"
     modal
     :header="reportDialog.label"
@@ -557,6 +1122,7 @@ import {
   statusLabel,
   statusTone,
   type StepDashboardChecklist,
+  type StepDashboardFloorplanSnapshot,
   type StepDashboardMetric,
   type StepDashboardQor,
   type StepDashboardQorMetricComparison,
@@ -573,9 +1139,15 @@ const {
 } = useStepConfigInfo()
 const chipViewerBusy = ref(false)
 const dataChartIndex = ref(0)
+const synthesisTimingTabIndex = ref(0)
+const staCornerTabIndex = ref(0)
+const staTimingTabIndex = ref(0)
 const showChecklistDetails = ref(false)
 const showQorDetails = ref(false)
+const showSynthesisTimingPaths = ref(false)
+const showFloorplanSnapshot = ref(false)
 const showStepConfiguration = ref(false)
+const selectedFloorplanSnapshot = ref<StepDashboardFloorplanSnapshot | null>(null)
 const imagePreview = ref({ label: '', url: '', visible: false })
 const reportDialog = ref({
   label: '',
@@ -647,6 +1219,21 @@ const selectedDataChart = computed(() => {
   const charts = data.value?.dataCharts ?? []
   return charts[dataChartIndex.value] ?? charts[0] ?? null
 })
+const selectedSynthesisTimingModule = computed(() => {
+  const modules = data.value?.synthesisInsights?.timingModules ?? []
+  return modules[synthesisTimingTabIndex.value] ?? modules[0] ?? null
+})
+const selectedStaCorner = computed(() => {
+  const corners = data.value?.staInsights?.corners ?? []
+  return corners[staCornerTabIndex.value] ?? corners[0] ?? null
+})
+const selectedStaTimingModule = computed(() => {
+  const modules = selectedStaCorner.value?.timingModules ?? []
+  return modules[staTimingTabIndex.value] ?? modules[0] ?? null
+})
+const insightData = computed(
+  () => data.value?.floorplanInsights ?? data.value?.stepInsights ?? null,
+)
 const largestBar = computed(() =>
   Math.max(1, ...(selectedDataChart.value?.bars.map((bar) => bar.value) ?? [1])),
 )
@@ -658,6 +1245,15 @@ function barWidth(value: number, maximum: number): number {
 
 function dataBarWidth(value: number): number {
   return barWidth(value, largestBar.value)
+}
+
+function insightTableValue(value: number | null): string {
+  return value === null ? '--' : formatDashboardValue(value, '')
+}
+
+function selectStaCorner(index: number): void {
+  staCornerTabIndex.value = index
+  staTimingTabIndex.value = 0
 }
 
 function metricTone(metric: StepDashboardMetric): string {
@@ -777,11 +1373,24 @@ watch(
   () => data.value?.step,
   () => {
     dataChartIndex.value = 0
+    synthesisTimingTabIndex.value = 0
+    staCornerTabIndex.value = 0
+    staTimingTabIndex.value = 0
   },
 )
 
 function openImagePreview(label: string, url: string): void {
   imagePreview.value = { label, url, visible: true }
+}
+
+function openFloorplanSnapshot(snapshot: StepDashboardFloorplanSnapshot): void {
+  selectedFloorplanSnapshot.value = snapshot
+  showFloorplanSnapshot.value = true
+}
+
+function floorplanSnapshotPercent(value: number, total: number): string {
+  if (total <= 0) return '0%'
+  return `${((value / total) * 100).toFixed(1)}%`
 }
 
 async function openChipViewer(): Promise<void> {
@@ -823,13 +1432,9 @@ async function openReport(report: StepDashboardReport): Promise<void> {
 }
 
 function reportMeta(report: StepDashboardReport): string {
-  const size =
-    report.sizeBytes === null
-      ? ''
-      : `${Math.max(1, Math.round(report.sizeBytes / 1024))} KB`
-  const date =
-    report.modifiedAt === null ? '' : new Date(report.modifiedAt).toLocaleString()
-  return [size, date].filter(Boolean).join(' · ')
+  return report.sizeBytes === null
+    ? ''
+    : `${Math.max(1, Math.round(report.sizeBytes / 1024))} KB`
 }
 
 interface StepConfigPreviewEntry {
@@ -846,7 +1451,7 @@ function stepConfigPreview(value: unknown): StepConfigPreviewEntry[] {
   const entries: StepConfigPreviewEntry[] = []
 
   function visit(current: unknown, path: string[]): void {
-    if (entries.length >= 10) return
+    if (entries.length >= 9) return
     if (Array.isArray(current)) {
       entries.push({
         id: path.join('.') || 'value',
@@ -858,7 +1463,7 @@ function stepConfigPreview(value: unknown): StepConfigPreviewEntry[] {
     if (isConfigRecord(current)) {
       for (const [key, child] of Object.entries(current)) {
         visit(child, [...path, key])
-        if (entries.length >= 10) return
+        if (entries.length >= 9) return
       }
       return
     }
@@ -901,9 +1506,11 @@ function fileName(path: string): string {
 }
 
 .step-dashboard-top,
-.step-dashboard-middle,
-.step-dashboard-bottom {
+.step-dashboard-middle {
   grid-template-columns: minmax(0, 5fr) minmax(250px, 3fr);
+}
+.step-dashboard-bottom {
+  grid-template-columns: minmax(0, 8fr) minmax(180px, 2fr);
 }
 
 .step-dashboard-card {
@@ -1081,7 +1688,7 @@ function fileName(path: string): string {
 
 .step-summary-body {
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   padding: 8px;
 }
 
@@ -1128,21 +1735,29 @@ function fileName(path: string): string {
 
 .basic-info-list {
   display: grid;
+  flex: 1;
   gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   margin: 0;
+  min-height: 0;
   overflow: hidden;
   padding: 6px;
 }
 
 .basic-info-list > div {
-  align-items: center;
   background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
   border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
-  display: grid;
-  gap: 4px;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  justify-content: center;
   min-width: 0;
-  padding: 4px 6px;
+  padding: 5px 7px;
+}
+
+.basic-info-list > div:last-child {
+  grid-column: 1 / -1;
 }
 
 .basic-info-list dt,
@@ -1160,13 +1775,20 @@ function fileName(path: string): string {
 .config-preview-grid dd,
 .data-highlights dd {
   color: var(--text-primary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   margin: 0;
   overflow: hidden;
-  text-align: right;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.basic-info-list dd {
+  line-height: 1.25;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .config-summary-body {
@@ -1179,8 +1801,8 @@ function fileName(path: string): string {
   display: grid;
   flex: 1;
   gap: 4px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   margin: 0;
   min-height: 0;
   overflow: hidden;
@@ -1194,11 +1816,11 @@ function fileName(path: string): string {
   flex-direction: column;
   justify-content: center;
   min-width: 0;
-  padding: 4px 6px;
+  padding: 5px 7px;
 }
 
 .config-preview-grid dd {
-  margin-top: 2px;
+  margin-top: 3px;
   text-align: left;
 }
 
@@ -1505,6 +2127,570 @@ function fileName(path: string): string {
   width: 100%;
 }
 
+.synthesis-data-body {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.floorplan-data-body {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.rcx-data-body,
+.drc-data-body {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.data-body.harden-data-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+.sta-data-body {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.synthesis-insight-column,
+.floorplan-insight-column,
+.rcx-insight-column,
+.harden-output-column,
+.sta-insight-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.synthesis-insight-column + .synthesis-insight-column,
+.floorplan-insight-column + .floorplan-insight-column,
+.rcx-insight-column + .rcx-insight-column,
+.sta-insight-column + .sta-insight-column {
+  border-left: 1px solid var(--border-color);
+}
+.synthesis-insight-header,
+.floorplan-insight-header {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 5px 8px;
+}
+.synthesis-insight-header > div,
+.floorplan-insight-header > div,
+.timing-path-summary header > div,
+.timing-path-list-header > div {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+.synthesis-insight-header i,
+.floorplan-insight-header i,
+.timing-path-summary header i,
+.timing-path-list-header i {
+  color: var(--accent-color);
+  font-size: 12px;
+}
+.synthesis-insight-header h3,
+.floorplan-insight-header h3,
+.timing-path-summary h3,
+.timing-path-list h3 {
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 700;
+  margin: 0;
+}
+.synthesis-insight-header > span,
+.floorplan-insight-header > span,
+.timing-path-list-header > span {
+  color: var(--text-secondary);
+  font-size: 8px;
+  white-space: nowrap;
+}
+.synthesis-value-grid,
+.timing-path-summary-grid,
+.timing-path-values,
+.timing-path-stages dl {
+  margin: 0;
+}
+.synthesis-value-grid {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 0;
+  padding: 6px;
+}
+.synthesis-value-grid > div,
+.timing-path-summary-grid > div,
+.timing-path-values > div,
+.timing-path-stages dl > div {
+  min-width: 0;
+}
+.synthesis-value-grid > div {
+  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  justify-content: center;
+  padding: 5px 7px;
+}
+.synthesis-value-grid dt,
+.timing-path-summary-grid dt,
+.timing-path-values dt,
+.timing-path-stages dt {
+  color: var(--text-secondary);
+  font-size: 8px;
+  margin: 0;
+}
+.synthesis-value-grid dt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.synthesis-value-grid dd,
+.timing-path-summary-grid dd,
+.timing-path-values dd,
+.timing-path-stages dd {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.synthesis-value-grid dd {
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  font-variant-numeric: normal;
+  font-weight: 600;
+  margin: 0;
+  overflow: visible;
+  text-align: left;
+  white-space: normal;
+}
+.synthesis-timing-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.synthesis-timing-tabs {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+  padding: 5px 6px;
+}
+.synthesis-timing-tabs button {
+  background: var(--bg-secondary);
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 8px;
+  min-height: 21px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 3px 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.synthesis-timing-tabs button:hover,
+.synthesis-timing-tabs button.is-active {
+  background: color-mix(in srgb, var(--accent-color) 16%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent-color) 44%, transparent);
+  color: var(--accent-color);
+  font-weight: 700;
+}
+.synthesis-timing-parameter-grid {
+  padding-top: 5px;
+}
+.floorplan-metrics-grid {
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.floorplan-metrics-grid > div {
+  gap: 4px;
+  justify-content: flex-start;
+  padding: 6px 7px;
+}
+.floorplan-metric-label {
+  display: block;
+  line-height: 1.15;
+  min-height: 18px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.floorplan-metrics-grid dd {
+  font-size: 11px;
+  line-height: 1.2;
+}
+.floorplan-snapshot-grid {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  min-height: 0;
+  padding: 6px;
+}
+.floorplan-snapshot-card {
+  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 3px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  margin: 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px;
+  text-align: left;
+}
+.floorplan-snapshot-card:hover {
+  border-color: color-mix(in srgb, var(--accent-color) 62%, var(--border-color));
+}
+.floorplan-snapshot-card:focus-visible {
+  outline: 1px solid var(--accent-color);
+  outline-offset: -2px;
+}
+.floorplan-snapshot-image-card img {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  width: 100%;
+}
+.floorplan-snapshot-copy {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.floorplan-snapshot-copy strong {
+  color: var(--text-secondary);
+  font-size: 8px;
+  font-weight: 400;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.floorplan-snapshot-copy span {
+  color: var(--text-primary);
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.floorplan-snapshot-pie {
+  min-height: 0;
+}
+.floorplan-snapshot-pie :deep(.status-pie-chart-wrap) {
+  min-height: 0;
+}
+.floorplan-snapshot-pie :deep(.status-pie-center strong) {
+  font-size: 10px;
+}
+.floorplan-snapshot-pie :deep(.status-pie-center span) {
+  font-size: 7px;
+  margin-top: 1px;
+}
+.rcx-summary-grid {
+  flex: 0 0 86px;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+.rcx-summary-grid > div {
+  padding: 4px 6px;
+}
+.insight-table-wrap {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 6px 6px;
+}
+.insight-table-wrap table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+.insight-table-wrap th,
+.insight-table-wrap td {
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 7px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  min-width: 0;
+  overflow: hidden;
+  padding: 3px 2px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insight-table-wrap thead th {
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 7px;
+  font-weight: 600;
+  text-align: center;
+}
+.insight-table-wrap tbody th,
+.insight-table-wrap tbody td:first-child {
+  color: var(--text-primary);
+  font-family: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.insight-table-wrap tbody td {
+  color: var(--text-primary);
+}
+.rcx-corner-table tbody tr {
+  height: 18px;
+}
+.drc-statistics-table {
+  padding: 6px;
+}
+.drc-statistics-table th,
+.drc-statistics-table td {
+  font-size: 6px;
+  padding: 3px 1px;
+  text-align: center;
+}
+.drc-statistics-table th:first-child,
+.drc-statistics-table td:first-child {
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+}
+.harden-output-table th:first-child,
+.harden-output-table td:first-child {
+  width: 52px;
+}
+.harden-output-table {
+  padding: 0;
+  width: 100%;
+}
+.harden-output-table table {
+  width: 100%;
+}
+.harden-output-table th:last-child,
+.harden-output-table td:last-child {
+  width: 92px;
+}
+.harden-output-table td:nth-child(2) {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-overflow: clip;
+  white-space: normal;
+}
+.harden-output-state {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+.harden-output-table tr.is-available .harden-output-state {
+  color: var(--success-color);
+}
+.harden-output-table tr.is-missing .harden-output-state {
+  color: var(--danger-color);
+}
+.sta-corner-tabs {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  display: grid;
+  gap: 3px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding: 5px 6px;
+}
+.sta-corner-tabs button {
+  background: var(--bg-secondary);
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 8px;
+  min-height: 21px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 3px 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sta-corner-tabs button:hover,
+.sta-corner-tabs button.is-active {
+  background: color-mix(in srgb, var(--accent-color) 16%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent-color) 44%, transparent);
+  color: var(--accent-color);
+  font-weight: 700;
+}
+.sta-metrics-grid {
+  padding-top: 5px;
+}
+.floorplan-snapshot-dialog {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(270px, 0.9fr) minmax(0, 1.1fr);
+  height: min(64vh, 580px);
+  min-height: 320px;
+}
+.floorplan-snapshot-large-chart,
+.floorplan-snapshot-detail-list {
+  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  min-height: 0;
+  min-width: 0;
+}
+.floorplan-snapshot-large-chart {
+  padding: 12px;
+}
+.floorplan-snapshot-large-pie,
+.floorplan-snapshot-large-pie :deep(.status-pie-chart-wrap) {
+  min-height: 0;
+}
+.floorplan-snapshot-large-pie :deep(.status-pie-center strong) {
+  font-size: 26px;
+}
+.floorplan-snapshot-large-pie :deep(.status-pie-center span) {
+  font-size: 11px;
+}
+.floorplan-snapshot-detail-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.floorplan-snapshot-detail-list > header {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 7px 9px;
+}
+.floorplan-snapshot-detail-list > header > div {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.floorplan-snapshot-detail-list > header i {
+  color: var(--accent-color);
+  font-size: 13px;
+}
+.floorplan-snapshot-detail-list h3 {
+  color: var(--text-primary);
+  font-size: 11px;
+  margin: 0;
+}
+.floorplan-snapshot-detail-list > header > span {
+  color: var(--text-secondary);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.floorplan-snapshot-detail-list ul {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+.floorplan-snapshot-detail-list li {
+  align-items: center;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+  display: grid;
+  gap: 5px;
+  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+  min-width: 0;
+  padding: 5px;
+}
+.floorplan-snapshot-swatch {
+  background: var(--text-secondary);
+  border-radius: 2px;
+  display: block;
+  height: 7px;
+  width: 7px;
+}
+.floorplan-snapshot-swatch.is-good {
+  background: var(--success-color);
+}
+.floorplan-snapshot-swatch.is-warn {
+  background: var(--warn-color);
+}
+.floorplan-snapshot-swatch.is-bad {
+  background: var(--danger-color);
+}
+.floorplan-snapshot-detail-list li strong,
+.floorplan-snapshot-detail-list li > span:not(.floorplan-snapshot-swatch),
+.floorplan-snapshot-detail-list li small {
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+.floorplan-snapshot-detail-list li strong {
+  color: var(--text-primary);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.floorplan-snapshot-detail-list li > span:not(.floorplan-snapshot-swatch) {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 9px;
+  text-align: right;
+}
+.floorplan-snapshot-detail-list li small {
+  color: var(--text-secondary);
+  font-size: 8px;
+  text-align: right;
+}
+.synthesis-timing-path-link {
+  align-items: center;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  display: flex;
+  flex: 0 0 27px;
+  gap: 5px;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0 8px;
+}
+.synthesis-timing-path-link span {
+  color: var(--text-secondary);
+  font-size: 8px;
+}
+.synthesis-empty-state {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  font-size: 9px;
+  gap: 4px;
+  justify-content: center;
+  padding: 8px;
+  text-align: center;
+}
+.synthesis-empty-state i {
+  color: var(--accent-color);
+  font-size: 16px;
+}
+
 .data-body {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(150px, 0.9fr);
@@ -1649,10 +2835,147 @@ function fileName(path: string): string {
   font-size: 10px;
   margin-right: 3px;
 }
+.reports-card.is-sta-report-card .report-list {
+  grid-auto-rows: minmax(54px, auto);
+}
+.reports-card.is-sta-report-card .report-list li {
+  align-items: start;
+  min-height: 54px;
+  padding: 7px 0;
+}
+.reports-card.is-sta-report-card .report-file-icon,
+.reports-card.is-sta-report-card .report-list li > .dashboard-icon-button {
+  padding-top: 3px;
+}
+.reports-card.is-sta-report-card .report-copy strong {
+  line-height: 1.35;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+.reports-card.is-sta-report-card .report-copy small {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 
 .step-config-dialog {
   height: min(72vh, 720px);
   min-height: 420px;
+}
+
+.timing-paths-dialog {
+  display: grid;
+  gap: 12px;
+  max-height: min(68vh, 760px);
+  overflow: auto;
+  padding-right: 4px;
+}
+.timing-path-summary,
+.timing-path-list {
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  min-width: 0;
+}
+.timing-path-summary > header,
+.timing-path-list-header {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  display: flex;
+  justify-content: space-between;
+  min-height: 31px;
+  padding: 5px 8px;
+}
+.timing-path-summary-grid {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 7px;
+}
+.timing-path-summary-grid > div {
+  background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
+  padding: 4px 6px;
+}
+.timing-path-waterfall {
+  column-count: 2;
+  column-gap: 10px;
+  padding: 8px;
+}
+.timing-path-waterfall > article {
+  background: color-mix(in srgb, var(--bg-secondary) 54%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
+  break-inside: avoid;
+  display: inline-block;
+  margin: 0 0 10px;
+  min-width: 0;
+  vertical-align: top;
+  width: 100%;
+}
+.timing-path-waterfall > article > header {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 5px 7px;
+}
+.timing-path-waterfall > article > header > span {
+  color: var(--accent-color);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.timing-path-waterfall > article > header small {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+  font-size: 8px;
+}
+.timing-path-values {
+  display: grid;
+  gap: 4px 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 7px;
+}
+.timing-path-values dd {
+  font-size: 8px;
+}
+.timing-path-stages {
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  padding: 7px;
+}
+.timing-path-stages h4 {
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.timing-path-stages ol {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.timing-path-stages li {
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+  display: grid;
+  gap: 5px;
+  grid-template-columns: 17px minmax(0, 1fr);
+  padding: 4px;
+}
+.timing-path-stages li > span {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 8px;
+  padding-top: 1px;
+  text-align: right;
+}
+.timing-path-stages dl {
+  display: grid;
+  gap: 3px 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.timing-path-stages dd {
+  font-size: 8px;
+  margin-top: 1px;
 }
 
 .card-empty,
@@ -1839,6 +3162,19 @@ function fileName(path: string): string {
 }
 
 @media (max-width: 640px) {
+  .sta-corner-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .floorplan-snapshot-dialog {
+    grid-template-columns: 1fr;
+    height: min(72vh, 620px);
+  }
+  .floorplan-snapshot-large-chart {
+    min-height: 220px;
+  }
+  .floorplan-snapshot-detail-list ul {
+    grid-template-columns: 1fr;
+  }
   .step-qor-overview {
     grid-template-columns: minmax(96px, 0.36fr) minmax(0, 0.64fr);
   }

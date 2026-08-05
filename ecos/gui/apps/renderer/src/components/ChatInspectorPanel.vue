@@ -17,24 +17,12 @@
           class="chat-inspector-topbar flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) px-3"
         >
           <div class="chat-inspector-tabs flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              @click="selectTab('chat')"
-              :class="tabClass(activeTab === 'chat')"
+            <span
+              class="flex h-8 w-9 items-center justify-center rounded border border-(--accent-color)/50 bg-(--accent-color)/20 text-(--accent-color)"
               title="AI Chat"
             >
               <i class="ri-chat-3-line text-base"></i>
-            </button>
-            <button
-              v-if="showStepQorAnalysis"
-              type="button"
-              @click="selectTab('analysis')"
-              :class="tabClass(activeTab === 'analysis')"
-              title="QoR Analysis"
-              aria-label="QoR Analysis"
-            >
-              <i class="ri-bar-chart-box-line text-base"></i>
-            </button>
+            </span>
           </div>
 
           <div class="chat-inspector-actions">
@@ -51,21 +39,15 @@
             <button
               type="button"
               class="chat-inspector-action-button chat-inspector-fullscreen-toggle"
-              :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
+              :title="isChatFullscreen ? 'Exit full screen' : 'Full screen'"
               :aria-label="
-                activePanelFullscreen
-                  ? activeTab === 'chat'
-                    ? 'Exit AI Chat full screen'
-                    : 'Exit step QoR analysis full screen'
-                  : activeTab === 'chat'
-                    ? 'View AI Chat full screen'
-                    : 'View step QoR analysis full screen'
+                isChatFullscreen ? 'Exit AI Chat full screen' : 'View AI Chat full screen'
               "
-              @click="toggleActivePanelFullscreen"
+              @click="toggleChatFullscreen"
             >
               <i
                 :class="
-                  activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
+                  isChatFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
                 "
               ></i>
             </button>
@@ -79,15 +61,9 @@
         <!-- KeepAlive：避免 v-if 销毁聊天导致 blob 图重新加载/裂图；状态与滚动由子组件 onActivated 恢复 -->
         <KeepAlive>
           <AIChatPanel
-            v-if="activeTab === 'chat'"
             class="h-full min-h-0 w-full max-w-full min-w-0 flex-1 overflow-hidden"
           />
         </KeepAlive>
-
-        <StepQorAnalysisPanel
-          v-if="activeTab === 'analysis' && showStepQorAnalysis"
-          class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-        />
       </div>
     </div>
   </Teleport>
@@ -133,87 +109,29 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import Dialog from 'primevue/dialog'
-import { useRoute } from 'vue-router'
-import { StepEnum } from '@/api/type'
 import { useMessageStore } from '@/stores/messageStore'
 import AIChatPanel from './AIChatPanel.vue'
-import StepQorAnalysisPanel from './StepQorAnalysisPanel.vue'
 
 const props = defineProps<{
   toolbarTarget?: HTMLElement | null
 }>()
 
-const route = useRoute()
-const stepEnumValues = Object.values(StepEnum)
-
-function stepFromRoutePath(): StepEnum | undefined {
-  const segment = route.path.split('/').pop() || ''
-  return stepEnumValues.find((s) => s.toLowerCase() === segment.toLowerCase())
-}
-
-const showStepQorAnalysis = computed(() => Boolean(stepFromRoutePath()))
-
-const activeTab = ref<'chat' | 'analysis'>('chat')
 const isChatFullscreen = ref(false)
-const isStepQorAnalysisFullscreen = ref(false)
 const clearInformationConfirmationVisible = ref(false)
 const messageStore = useMessageStore()
 const { messages } = storeToRefs(messageStore)
 
-const isAnyPanelFullscreen = computed(
-  () => isChatFullscreen.value || isStepQorAnalysisFullscreen.value,
-)
-const activePanelFullscreen = computed(() =>
-  activeTab.value === 'chat' ? isChatFullscreen.value : isStepQorAnalysisFullscreen.value,
-)
-
-watch(
-  () => [route.path, route.query.panel],
-  () => {
-    if (!showStepQorAnalysis.value && activeTab.value === 'analysis') {
-      activeTab.value = 'chat'
-    }
-    if (!showStepQorAnalysis.value && isStepQorAnalysisFullscreen.value) {
-      closePanelFullscreen()
-    }
-    if (route.query.panel === 'analysis' && showStepQorAnalysis.value) {
-      activeTab.value = 'analysis'
-    }
-  },
-  { immediate: true },
-)
-
-function selectTab(tab: 'chat' | 'analysis'): void {
-  if (tab === 'analysis' && !showStepQorAnalysis.value) return
-  activeTab.value = tab
-
-  if (isAnyPanelFullscreen.value) {
-    openPanelFullscreen(tab)
-  }
-}
-
-function openPanelFullscreen(panel: 'chat' | 'analysis'): void {
-  if (panel === 'analysis' && !showStepQorAnalysis.value) return
-
-  activeTab.value = panel
-  isChatFullscreen.value = panel === 'chat'
-  isStepQorAnalysisFullscreen.value = panel === 'analysis'
-}
+const isAnyPanelFullscreen = isChatFullscreen
 
 function closePanelFullscreen(): void {
   isChatFullscreen.value = false
-  isStepQorAnalysisFullscreen.value = false
 }
 
-function toggleActivePanelFullscreen(): void {
-  if (activePanelFullscreen.value) {
-    closePanelFullscreen()
-    return
-  }
-  openPanelFullscreen(activeTab.value)
+function toggleChatFullscreen(): void {
+  isChatFullscreen.value = !isChatFullscreen.value
 }
 
 function confirmClearInformation(): void {
@@ -235,15 +153,6 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onFullscreenKeydown)
 })
-
-function tabClass(active: boolean) {
-  return [
-    'h-8 w-9 rounded flex items-center justify-center transition-all cursor-pointer border',
-    active
-      ? 'text-(--accent-color) bg-(--accent-color)/20 border-(--accent-color)/50'
-      : 'text-(--text-secondary) border-transparent hover:bg-(--bg-hover)',
-  ]
-}
 </script>
 
 <style scoped>

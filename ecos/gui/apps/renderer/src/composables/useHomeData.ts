@@ -89,6 +89,10 @@ export interface FlowLogSegment {
   stepName: string
   tool: string
   state: string
+  /** `home/flow.json` 中当前 step 的运行时长，用于日志标题。 */
+  runtime?: string
+  /** `home/flow.json` 中当前 step 的峰值内存（MB），用于日志标题。 */
+  peakMemoryMb?: number | null
   /** flow.json 中为 Incomplete / Invalid */
   failed: boolean
   /** 磁盘上不存在或无法读取 */
@@ -1030,7 +1034,13 @@ export function useHomeData() {
 
     const fileContent = await readProjectTextFile(resolvedFlowPath)
     const flowData = JSON.parse(fileContent) as {
-      steps?: Array<{ name: string; tool: string; state: string }>
+      steps?: Array<{
+        name: string
+        tool: string
+        state: string
+        runtime?: unknown
+        'peak memory (mb)'?: unknown
+      }>
     }
     const steps = flowData.steps ?? []
     const root = resolvedWorkspaceRoot.replace(/\\/g, '/')
@@ -1059,6 +1069,12 @@ export function useHomeData() {
         stepName: step.name,
         tool: step.tool,
         state: step.state,
+        runtime: typeof step.runtime === 'string' ? step.runtime : '',
+        peakMemoryMb:
+          typeof step['peak memory (mb)'] === 'number' &&
+          Number.isFinite(step['peak memory (mb)'])
+            ? step['peak memory (mb)']
+            : null,
         failed,
         missing: false,
         ...(live ? { live: true } : {}),

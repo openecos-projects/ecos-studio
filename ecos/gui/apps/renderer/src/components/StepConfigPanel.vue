@@ -54,9 +54,7 @@
         <i
           class="ri-file-settings-line mb-3 text-4xl text-(--text-secondary) opacity-40"
         ></i>
-        <p class="text-[12px] leading-relaxed text-(--text-secondary)">
-          No configuration data.
-        </p>
+        <p class="text-[12px] leading-relaxed text-(--text-secondary)">N/A</p>
         <p
           v-if="runtimeMessages.length"
           class="mt-2 text-[10px] break-words text-(--text-secondary) opacity-80"

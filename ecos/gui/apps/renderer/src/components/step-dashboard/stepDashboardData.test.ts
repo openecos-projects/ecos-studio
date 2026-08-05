@@ -5,10 +5,18 @@ import {
   dataChartTitle,
   dbBars,
   dbHighlights,
+  drcInsights,
+  floorplanInsights,
+  hardenOutputInsights,
   mapHighlights,
   prioritizeQorMetricComparisons,
   qorSummary,
+  rcxInsights,
   runSummary,
+  staCornerSummaryPaths,
+  staInsights,
+  stepFeatureInsights,
+  synthesisInsights,
   stepDistribution,
   stepKeyMetrics,
 } from './stepDashboardData'
@@ -363,5 +371,510 @@ describe('step dashboard data', () => {
     expect(dbHighlights(synthesis).slice(0, 1)).toMatchObject([
       { label: 'Cell area', value: 777.84 },
     ])
+  })
+
+  it('keeps Synthesis statistics and post-synthesis timing paths structured by module', () => {
+    const insights = synthesisInsights(
+      {
+        design: {
+          num_wires: 343,
+          num_cells: 307,
+          area: 777.84,
+          num_cells_by_type: { DFFQX1: 35, NAND2X1: 22 },
+        },
+      },
+      {
+        path_groups: [
+          {
+            name: 'clk',
+            setup: { wns: 18.732, tns: 0, frequency_mhz: 789 },
+            hold: { wns: 0.245, tns: 0 },
+          },
+        ],
+        summary: { setup: { wns: 18.732 }, hold: { wns: 0.245 } },
+        design_statistics: { cella: 777, cap: 0 },
+      },
+      {
+        schema_version: 1,
+        corner: 'post_synthesis',
+        path_limit: 20,
+        paths: [
+          {
+            path_id: 'timing_path_1',
+            analysis_type: 'setup',
+            slack_ns: 18.7324353939,
+            stages: [
+              {
+                kind: 'point',
+                pin: 'source:CK',
+                cell: 'DFFQX1',
+                arrival_ns: 0,
+              },
+              {
+                kind: 'cell_arc',
+                pin: 'source:Q',
+                cell: 'DFFQX1',
+                arrival_ns: 0.18,
+              },
+            ],
+          },
+        ],
+      },
+    )
+
+    expect(insights?.metrics).toEqual([
+      { id: 'synthesis-metric-num_wires', label: 'Num Wires', value: '343' },
+      { id: 'synthesis-metric-num_cells', label: 'Num Cells', value: '307' },
+      { id: 'synthesis-metric-area', label: 'Area', value: '777.84' },
+    ])
+    expect(insights?.metrics.some((metric) => metric.label.includes('By Type'))).toBe(
+      false,
+    )
+    expect(insights?.timingModules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'Path Groups' }),
+        expect.objectContaining({ label: 'Summary' }),
+        expect.objectContaining({ label: 'Design Statistics' }),
+      ]),
+    )
+    expect(insights?.timingModules).toHaveLength(3)
+    expect(insights?.timingPathSummary).toEqual([
+      { id: 'timing-path-summary-schema_version', label: 'Schema Version', value: '1' },
+      { id: 'timing-path-summary-corner', label: 'Corner', value: 'post_synthesis' },
+      { id: 'timing-path-summary-path_limit', label: 'Path Limit', value: '20' },
+    ])
+    expect(insights?.timingPaths).toEqual([
+      expect.objectContaining({
+        id: 'timing_path_1',
+        values: expect.arrayContaining([
+          expect.objectContaining({ label: 'Slack Ns', value: '18.7324353939' }),
+        ]),
+        stages: [
+          expect.arrayContaining([
+            expect.objectContaining({ label: 'Pin', value: 'source:CK' }),
+          ]),
+          expect.arrayContaining([
+            expect.objectContaining({ label: 'Arrival Ns', value: '0.18' }),
+          ]),
+        ],
+      }),
+    ])
+  })
+
+  it('keeps the Harden output artifact paths and existence state explicit', () => {
+    expect(
+      hardenOutputInsights({
+        lef: { path: '/workspace/Harden_ecc/output/mpc2_Harden.lef', exists: true },
+        lib: { path: '/workspace/Harden_ecc/output/mpc2_Harden.lib', exists: false },
+        gds: { path: '/workspace/Harden_ecc/output/mpc2_Harden.gds', exists: true },
+      }),
+    ).toEqual({
+      artifacts: [
+        {
+          type: 'lef',
+          path: '/workspace/Harden_ecc/output/mpc2_Harden.lef',
+          exists: true,
+        },
+        {
+          type: 'lib',
+          path: '/workspace/Harden_ecc/output/mpc2_Harden.lib',
+          exists: false,
+        },
+        {
+          type: 'gds',
+          path: '/workspace/Harden_ecc/output/mpc2_Harden.gds',
+          exists: true,
+        },
+      ],
+    })
+  })
+
+  it('builds RCX electrical and signoff summaries without including run metadata', () => {
+    const insights = rcxInsights({
+      rcx: {
+        electrical_summary: {
+          parsed_corner_count: 2,
+          worst_total_capacitance_ff: 676.0284,
+          worst_coupling_capacitance_ff: 355.1234,
+          worst_total_resistance_ohm: 810.8891,
+          corners: [
+            {
+              corner: 'Cworst',
+              net_count: 343,
+              ground_capacitance_ff: 320.5,
+              coupling_capacitance_ff: 355.1234,
+              total_capacitance_ff: 675.6234,
+              total_resistance_ohm: 810.8891,
+            },
+          ],
+        },
+        signoff_metrics: {
+          parasitic_envelope: {
+            status: 'pass',
+            worst_total_capacitance_ff: 676.0284,
+            worst_coupling_capacitance_ff: 355.1234,
+            worst_total_resistance_ohm: 810.8891,
+          },
+          rc_corners: [
+            {
+              rc_corner: 'Cworst',
+              label: 'MAX_125/Cworst',
+              availability: 'available',
+              total_capacitance_ff: 675.6234,
+              coupling_capacitance_ff: 355.1234,
+              total_resistance_ohm: 810.8891,
+            },
+          ],
+        },
+      },
+      run: { runtime_seconds: 99 },
+      constraints: { max_transition: 1 },
+    })
+
+    expect(insights?.electricalMetrics).toEqual([
+      {
+        id: 'rcx-electrical-parsed_corner_count',
+        label: 'Parsed Corner Count',
+        value: '2',
+      },
+      {
+        id: 'rcx-electrical-worst_total_capacitance_ff',
+        label: 'Worst Total Capacitance Ff',
+        value: '676.028',
+      },
+      {
+        id: 'rcx-electrical-worst_coupling_capacitance_ff',
+        label: 'Worst Coupling Capacitance Ff',
+        value: '355.123',
+      },
+      {
+        id: 'rcx-electrical-worst_total_resistance_ohm',
+        label: 'Worst Total Resistance Ohm',
+        value: '810.889',
+      },
+    ])
+    expect(insights?.electricalCorners).toEqual([
+      expect.objectContaining({
+        corner: 'Cworst',
+        netCount: 343,
+        totalCapacitanceFf: 675.6234,
+      }),
+    ])
+    expect(insights?.signoffMetrics).toEqual(
+      expect.arrayContaining([
+        { id: 'rcx-envelope-status', label: 'Status', value: 'pass' },
+        {
+          id: 'rcx-envelope-worst_total_capacitance_ff',
+          label: 'Worst Total Capacitance Ff',
+          value: '676.028',
+        },
+      ]),
+    )
+    expect(insights?.signoffCorners).toEqual([
+      expect.objectContaining({ corner: 'MAX_125/Cworst', availability: 'available' }),
+    ])
+  })
+
+  it('parses DRC CSV data into a grid and layer/type pie distributions', () => {
+    const insights = drcInsights(
+      [
+        'Type,MET1,VIA1,MET2,total',
+        'parallel_run_length_spacing,0,0,14,14',
+        'total,0,0,14,14',
+      ].join('\n'),
+    )
+
+    expect(insights?.table).toEqual({
+      headers: ['Type', 'MET1', 'VIA1', 'MET2', 'total'],
+      rows: [
+        {
+          id: 'drc-0',
+          values: ['parallel_run_length_spacing', '0', '0', '14', '14'],
+        },
+        { id: 'drc-1', values: ['total', '0', '0', '14', '14'] },
+      ],
+    })
+    expect(insights?.snapshots).toEqual([
+      expect.objectContaining({
+        id: 'drc-layer-total',
+        label: 'Layer Totals',
+        total: 14,
+        slices: expect.arrayContaining([
+          expect.objectContaining({ label: 'MET2', value: 14 }),
+        ]),
+      }),
+      expect.objectContaining({
+        id: 'drc-type-total',
+        label: 'Type Totals',
+        total: 14,
+        slices: [
+          expect.objectContaining({ label: 'parallel_run_length_spacing', value: 14 }),
+        ],
+      }),
+    ])
+  })
+
+  it('associates each STA corner with its own metrics and timing summary', () => {
+    const step = {
+      sta: {
+        signoff_metrics: {
+          corners: [
+            {
+              sta_corner: 'MAX_125/Cworst',
+              configured_role: 'max',
+              process_corner: 'ss',
+              voltage_v: 0.72,
+              temperature_c: 125,
+              rc_corner: 'Cworst',
+              availability: 'available',
+              reason: '',
+              summary_file: 'feature/MAX_125/Cworst/qor_summary.json',
+            },
+          ],
+        },
+      },
+    }
+    expect(staCornerSummaryPaths(step, '/workspace/sta/')).toEqual([
+      {
+        id: 'MAX_125/Cworst',
+        path: '/workspace/sta/feature/MAX_125/Cworst/qor_summary.json',
+      },
+    ])
+
+    const insights = staInsights(step, [
+      {
+        path_groups: [{ name: 'clk', setup: { wns: -0.12, tns: -0.5 } }],
+        summary: { setup: { wns: -0.12 } },
+      },
+    ])
+    expect(insights?.corners).toEqual([
+      expect.objectContaining({
+        id: 'MAX_125/Cworst',
+        metrics: expect.arrayContaining([
+          expect.objectContaining({ label: 'Sta Corner', value: 'MAX_125/Cworst' }),
+          expect.objectContaining({ label: 'Voltage V', value: '0.72' }),
+        ]),
+        timingModules: expect.arrayContaining([
+          expect.objectContaining({ label: 'Path Groups' }),
+          expect.objectContaining({ label: 'Summary' }),
+        ]),
+      }),
+    ])
+  })
+
+  it('builds Floorplan metrics and seven snapshot distributions from its database feature', () => {
+    const insights = floorplanInsights({
+      'Design Layout': {
+        die_area: 2313.417604,
+        die_usage: 0.3358667195,
+        die_bounding_width: 48.098,
+        die_bounding_height: 48.098,
+        core_area: 1848,
+        core_usage: 0.4204545319,
+        core_bounding_width: 44,
+        core_bounding_height: 42,
+        design_dbu: 1000,
+      },
+      'Design Statis': {
+        num_iopins: 54,
+        num_instances: 423,
+        num_nets: 343,
+        num_pdn: 2,
+      },
+      Instances: {
+        macros: { num: 20, area: 100, pin_num: 80 },
+        logic: { num: 300, area: 700, pin_num: 1000 },
+        iopads: { num: 54 },
+        total: { num: 423, area: 948, pin_num: 1132 },
+      },
+      Nets: { num_clock: 10, num_signal: 343, wire_len: 5168 },
+      Pins: {
+        pin_distribution: [
+          { pin_num: 0, inst_num: 4, net_num: 1 },
+          { pin_num: 2, inst_num: 20, net_num: 10 },
+          { pin_num: 32, inst_num: 1, net_num: 0 },
+          { pin_num: '> 32', inst_num: 2, net_num: 4 },
+        ],
+      },
+      Layers: {
+        cut_layers: [
+          { layer_name: 'VIA1', via_num: 93 },
+          { layer_name: 'VIA2', via_num: 18 },
+        ],
+        routing_layers: [
+          { layer_name: 'MET1', wire_len: 120.25 },
+          { layer_name: 'MET2', wire_len: 14.5 },
+        ],
+      },
+    })
+
+    expect(insights?.metrics).toHaveLength(19)
+    expect(insights?.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'Die Area', value: '2313.418' }),
+        expect.objectContaining({ label: 'Die Usage', value: '0.336' }),
+        expect.objectContaining({ label: 'Num Iopins', value: '54' }),
+        expect.objectContaining({ label: 'Wire Len', value: '5168' }),
+      ]),
+    )
+    expect(insights?.snapshots).toHaveLength(7)
+    expect(insights?.snapshots.slice(0, 3)).toEqual([
+      expect.objectContaining({
+        id: 'instance-area',
+        total: 948,
+        slices: [
+          expect.objectContaining({ label: 'Macros', value: 100 }),
+          expect.objectContaining({ label: 'Logic', value: 700 }),
+          expect.objectContaining({ label: 'Others', value: 148 }),
+        ],
+      }),
+      expect.objectContaining({ id: 'instance-num', total: 423 }),
+      expect.objectContaining({ id: 'instance-pin_num', total: 1132 }),
+    ])
+    expect(insights?.snapshots[3]).toMatchObject({
+      id: 'pin-distribution-inst_num',
+      total: 27,
+      slices: expect.arrayContaining([
+        expect.objectContaining({ label: '0', value: 4 }),
+        expect.objectContaining({ label: '2', value: 20 }),
+        expect.objectContaining({ label: '32', value: 1 }),
+        expect.objectContaining({ label: '>32', value: 2, color: expect.any(String) }),
+      ]),
+    })
+    expect(insights?.snapshots[3]?.slices).toHaveLength(34)
+    expect(insights?.snapshots[4]).toMatchObject({
+      id: 'pin-distribution-net_num',
+      total: 15,
+    })
+    expect(insights?.snapshots[5]).toMatchObject({
+      id: 'layer-via_num',
+      label: 'Cut Layer Vias',
+      total: 111,
+      unit: 'count',
+      slices: [
+        expect.objectContaining({ label: 'VIA1', value: 93 }),
+        expect.objectContaining({ label: 'VIA2', value: 18 }),
+      ],
+    })
+    expect(insights?.snapshots[6]).toMatchObject({
+      id: 'layer-wire_len',
+      label: 'Routing Wire Length',
+      total: 134.75,
+      unit: '',
+      slices: [
+        expect.objectContaining({ label: 'MET1', value: 120.25 }),
+        expect.objectContaining({ label: 'MET2', value: 14.5 }),
+      ],
+    })
+  })
+
+  it('builds physical-step metrics from step.json without run, constraints, arrays, or maps', () => {
+    const insights = stepFeatureInsights(
+      'CTS',
+      {
+        run: { state: 'Success', runtime_seconds: 18 },
+        constraints: { max_fanout: 32 },
+        CTS: {
+          buffer_area: 8.3999999,
+          buffer_num: 3,
+          timing_quality: {
+            clock_count: 1,
+            target_unmet_count: 0,
+            clocks: [{ clock: 'clk', sink_count: 35 }],
+            routing_violation_num_map: { '0': 1, '1': 0 },
+          },
+        },
+      },
+      {
+        Instances: {
+          macros: { num: 2, area: 20, pin_num: 6 },
+          logic: { num: 10, area: 50, pin_num: 30 },
+          total: { num: 13, area: 80, pin_num: 40 },
+        },
+        Pins: {
+          pin_distribution: [
+            { pin_num: 2, inst_num: 10, net_num: 8 },
+            { pin_num: '> 32', inst_num: 1, net_num: 2 },
+          ],
+        },
+        Layers: {
+          cut_layers: [{ layer_name: 'VIA1', via_num: 12 }],
+          routing_layers: [{ layer_name: 'MET2', wire_len: 123.4567 }],
+        },
+      },
+      null,
+    )
+
+    expect(insights?.metrics).toEqual(
+      expect.arrayContaining([
+        { id: 'step-feature-CTS-buffer_area', label: 'Buffer Area', value: '8.4' },
+        { id: 'step-feature-CTS-buffer_num', label: 'Buffer Num', value: '3' },
+        {
+          id: 'step-feature-CTS-timing_quality-clock_count',
+          label: 'Timing Quality Clock Count',
+          value: '1',
+        },
+      ]),
+    )
+    for (const label of insights?.metrics.map((metric) => metric.label) ?? []) {
+      expect(label).not.toMatch(/run|constraints|clocks|map/i)
+    }
+    expect(insights?.snapshots).toHaveLength(7)
+    expect(insights?.snapshots[5]).toMatchObject({
+      id: 'layer-via_num',
+      slices: [expect.objectContaining({ label: 'VIA1', value: 12 })],
+    })
+    expect(insights?.snapshots[6]).toMatchObject({
+      id: 'layer-wire_len',
+      total: 123.4567,
+      slices: [expect.objectContaining({ label: 'MET2', value: 123.4567 })],
+    })
+  })
+
+  it('uses Place map Wirelength and overflow totals as Place metrics', () => {
+    const insights = stepFeatureInsights(
+      'place',
+      { run: { state: 'Success' }, constraints: { target_density: 0.7 } },
+      {},
+      {
+        Wirelength: {
+          FLUTE: 4668417,
+          GRWL: 4646000,
+          HPWL: 4066430,
+          HTree: 6262962,
+          VTree: 5772490,
+        },
+        Congestion: {
+          overflow: { total: { horizontal: 0, union: 10, vertical: 10 } },
+        },
+      },
+    )
+
+    expect(insights?.metrics).toEqual([
+      { id: 'place-wirelength-FLUTE', label: 'FLUTE', value: '4668417' },
+      { id: 'place-wirelength-GRWL', label: 'GRWL', value: '4646000' },
+      { id: 'place-wirelength-HPWL', label: 'HPWL', value: '4066430' },
+      { id: 'place-wirelength-HTree', label: 'HTree', value: '6262962' },
+      { id: 'place-wirelength-VTree', label: 'VTree', value: '5772490' },
+      { id: 'place-overflow-horizontal', label: 'overflow-horizontal', value: '0' },
+      { id: 'place-overflow-union', label: 'overflow-union', value: '10' },
+      { id: 'place-overflow-vertical', label: 'overflow-vertical', value: '10' },
+    ])
+  })
+
+  it('reuses Floorplan metrics for fixFanout, legalization, and filler', () => {
+    const database = {
+      'Design Layout': { die_area: 1200, die_usage: 0.4 },
+      'Design Statis': { num_iopins: 12, num_instances: 100 },
+      Instances: { macros: { num: 2, area: 100 }, iopads: { num: 12 } },
+      Nets: { num_clock: 1, num_signal: 90, wire_len: 1234 },
+    }
+    const expectedMetrics = floorplanInsights(database)?.metrics
+
+    for (const step of ['fixFanout', 'legalization', 'filler']) {
+      expect(
+        stepFeatureInsights(step, { run: {}, constraints: {} }, database, null)?.metrics,
+      ).toEqual(expectedMetrics)
+    }
   })
 })

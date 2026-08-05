@@ -81,7 +81,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import FlowLogCodeViewer from '@/components/FlowLogCodeViewer.vue'
 import { copyFlowLogText } from '@/components/flowLogCopy'
-import { formatPeakMemory, type FlowStatusNode } from './flowStatus'
+import { formatFlowLogTitle } from './flowLogTitle'
+import type { FlowStatusNode } from './flowStatus'
 import type { FlowLogSegment } from '@/composables/useHomeData'
 
 const props = defineProps<{
@@ -105,15 +106,9 @@ const selectedSegment = computed(
 const selectedContent = computed(() =>
   selectedSegment.value ? (props.contentByKey[keyFor(selectedSegment.value)] ?? '') : '',
 )
-const logTitle = computed(() => {
-  const node = props.selectedNode
-  if (!node) return 'Flow log'
-  const tool = selectedSegment.value?.tool.trim()
-  const stepAndTool = tool ? `${node.label} · ${tool}` : node.label
-  return `${stepAndTool} · Runtime ${node.runtime || '--'} · Peak memory ${formatPeakMemory(
-    node.peakMemoryMb,
-  )}`
-})
+const logTitle = computed(() =>
+  formatFlowLogTitle(selectedSegment.value, props.selectedNode),
+)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 function keyFor(segment: FlowLogSegment): string {

@@ -14,17 +14,31 @@ import {
   checklistSummary,
   dbDistributions,
   dbHighlights,
+  drcInsights,
+  floorplanInsights,
+  hardenOutputInsights,
   mapHighlights,
   qorSummary,
   record,
+  rcxInsights,
   runSummary,
+  staCornerSummaryPaths,
+  staInsights,
+  stepFeatureInsights,
+  synthesisInsights,
   stepDistribution,
   stepKeyMetrics,
   type StepDashboardBar,
   type StepDashboardChecklist,
+  type StepDashboardDrcInsights,
   type StepDashboardDistribution,
+  type StepDashboardFloorplanInsights,
+  type StepDashboardHardenInsights,
   type StepDashboardMetric,
   type StepDashboardQor,
+  type StepDashboardRcxInsights,
+  type StepDashboardStaInsights,
+  type StepDashboardSynthesisInsights,
 } from '@/components/step-dashboard/stepDashboardData'
 
 export interface StepDashboardReport {
@@ -49,8 +63,16 @@ export interface StepDashboardData {
   qor: StepDashboardQor
   dataHighlights: StepDashboardMetric[]
   dataCharts: StepDashboardDistribution[]
+  drcInsights: StepDashboardDrcInsights | null
+  floorplanInsights: StepDashboardFloorplanInsights | null
+  hardenInsights: StepDashboardHardenInsights | null
+  rcxInsights: StepDashboardRcxInsights | null
+  staInsights: StepDashboardStaInsights | null
+  stepInsights: StepDashboardFloorplanInsights | null
+  synthesisInsights: StepDashboardSynthesisInsights | null
   layoutUrl: string | null
   mapUrl: string | null
+  placeDensityMapUrl: string | null
   hasGeometry: boolean
   reports: StepDashboardReport[]
 }
@@ -130,6 +152,18 @@ function siblingAnalysisPath(metricsPath: string, filename: string): string {
 }
 
 const stepDashboardCache = new Map<string, StepDashboardData>()
+const floorplanStyleInsightSteps = new Set([
+  'fixfanout',
+  'place',
+  'cts',
+  'legalization',
+  'route',
+  'filler',
+])
+
+function usesFloorplanStyleInsights(step: string): boolean {
+  return floorplanStyleInsightSteps.has(step.trim().toLowerCase())
+}
 
 function stepDashboardCacheKey(projectPath: string, step: string): string {
   return `${projectPath.trim()}\u0000${step.trim().toLowerCase()}`
@@ -143,8 +177,12 @@ function releaseDashboardImages(
   data: StepDashboardData,
   replacement?: StepDashboardData,
 ): void {
-  const retainedUrls = new Set([replacement?.layoutUrl, replacement?.mapUrl])
-  for (const url of [data.layoutUrl, data.mapUrl]) {
+  const retainedUrls = new Set([
+    replacement?.layoutUrl,
+    replacement?.mapUrl,
+    replacement?.placeDensityMapUrl,
+  ])
+  for (const url of [data.layoutUrl, data.mapUrl, data.placeDensityMapUrl]) {
     if (!retainedUrls.has(url)) revokeBlobUrl(url)
   }
 }
@@ -180,10 +218,7 @@ export function useStepDashboardData() {
   })
 
   async function readJson(path: string): Promise<unknown | null> {
-    if (!path) return null
-    const authorizedPath = await resolveProjectPathAccess(path)
-    if (!authorizedPath) return null
-    const text = await readOptionalProjectTextFile(authorizedPath)
+    const text = await readText(path)
     if (!text) return null
     try {
       return JSON.parse(text) as unknown
@@ -192,11 +227,26 @@ export function useStepDashboardData() {
     }
   }
 
+  async function readText(path: string): Promise<string | null> {
+    if (!path) return null
+    const authorizedPath = await resolveProjectPathAccess(path)
+    if (!authorizedPath) return null
+    return readOptionalProjectTextFile(authorizedPath)
+  }
+
   async function readImage(path: string): Promise<string | null> {
     if (!path) return null
     const authorizedPath = await resolveProjectPathAccess(path)
     if (!authorizedPath) return null
     return readProjectBlobUrl(authorizedPath, { mimeType: 'image/png' })
+  }
+
+  async function readOptionalImage(path: string): Promise<string | null> {
+    try {
+      return await readImage(path)
+    } catch {
+      return null
+    }
   }
 
   async function refresh(): Promise<void> {
@@ -229,16 +279,43 @@ export function useStepDashboardData() {
       }
 
       const metricsPath = stringInfo(analysisResponse.info, 'metrics')
+      const isSynthesis = resourceStep.name.trim().toLowerCase() === 'synthesis'
+      const isFloorplan = resourceStep.name.trim().toLowerCase() === 'floorplan'
+      const isHarden = resourceStep.name.trim().toLowerCase() === 'harden'
+      const isPlace = resourceStep.name.trim().toLowerCase() === 'place'
+      const isRcx = resourceStep.name.trim().toLowerCase() === 'rcx'
+      const isDrc = resourceStep.name.trim().toLowerCase() === 'drc'
+      const isSta = resourceStep.name.trim().toLowerCase() === 'sta'
+      const isFloorplanStyleStep = usesFloorplanStyleInsights(resourceStep.name)
       const stepPath =
         stringInfo(analysisResponse.info, 'step feature') ||
         resourceStep.resources.feature.step?.path ||
         `${resourceStep.directory}/feature/${resourceStep.name}.step.json`
       const dbPath = stringInfo(analysisResponse.info, 'data summary')
+      const synthesisStatPath = isSynthesis
+        ? resourceStep.resources.feature.stat?.path || dbPath
+        : ''
+      const synthesisTimingSummaryPath = isSynthesis
+        ? `${resourceStep.directory}/feature/post_synthesis/qor_summary.json`
+        : ''
+      const synthesisTimingPathsPath = isSynthesis
+        ? `${resourceStep.directory}/feature/post_synthesis/timing_paths.json`
+        : ''
       const checklistPath = `${resourceStep.directory}/checklist.json`
+      const drcStatisticsPath = isDrc
+        ? `${resourceStep.directory}/analysis/drc_statis.csv`
+        : ''
       const featureMapPath = resourceStep.resources.feature.map?.exists
         ? resourceStep.resources.feature.map.path
+        : isPlace
+          ? `${resourceStep.directory}/feature/${resourceStep.name}.map.json`
+          : ''
+      const placeDensityMapPath = isPlace
+        ? `${resourceStep.directory}/feature/density_map/place_allcell_density.png`
         : ''
-      const layoutPath = stringInfo(layoutResponse.info, 'image')
+      const layoutPath = resourceStep.resources.output.image?.exists
+        ? stringInfo(layoutResponse.info, 'image')
+        : ''
       const availableMapPath = mapImagePath(mapResponse.info)
 
       const [
@@ -249,6 +326,10 @@ export function useStepDashboardData() {
         metricsJson,
         qorSummaryJson,
         hotspotsJson,
+        synthesisStatJson,
+        synthesisTimingSummaryJson,
+        synthesisTimingPathsJson,
+        drcStatisticsText,
       ] = await Promise.all([
         readJson(stepPath),
         readJson(dbPath),
@@ -257,16 +338,33 @@ export function useStepDashboardData() {
         readJson(metricsPath),
         readJson(siblingAnalysisPath(metricsPath, 'qor_summary.json')),
         readJson(siblingAnalysisPath(metricsPath, 'qor_hotspots.json')),
+        synthesisStatPath && synthesisStatPath !== dbPath
+          ? readJson(synthesisStatPath)
+          : Promise.resolve(null),
+        readJson(synthesisTimingSummaryPath),
+        readJson(synthesisTimingPathsPath),
+        readText(drcStatisticsPath),
       ])
       if (version !== requestVersion) return
 
-      const [layoutUrl, mapUrl] = await Promise.all([
+      const staTimingSummaries = await Promise.all(
+        isSta
+          ? staCornerSummaryPaths(stepJson, resourceStep.directory).map(({ path }) =>
+              readJson(path),
+            )
+          : [],
+      )
+      if (version !== requestVersion) return
+
+      const [layoutUrl, mapUrl, placeDensityMapUrl] = await Promise.all([
         readImage(layoutPath),
         readImage(availableMapPath),
+        readOptionalImage(placeDensityMapPath),
       ])
       if (version !== requestVersion) {
         revokeBlobUrl(layoutUrl)
         revokeBlobUrl(mapUrl)
+        revokeBlobUrl(placeDensityMapUrl)
         return
       }
 
@@ -285,8 +383,26 @@ export function useStepDashboardData() {
         qor: qorSummary(qorSummaryJson, metricsJson, hotspotsJson),
         dataHighlights: mapMetricValues.length ? mapMetricValues : dbHighlights(dbJson),
         dataCharts: dbDistributions(dbJson),
+        drcInsights: isDrc ? drcInsights(drcStatisticsText) : null,
+        floorplanInsights: isFloorplan ? floorplanInsights(dbJson) : null,
+        hardenInsights: isHarden
+          ? hardenOutputInsights(resourceStep.resources.output)
+          : null,
+        rcxInsights: isRcx ? rcxInsights(stepJson) : null,
+        staInsights: isSta ? staInsights(stepJson, staTimingSummaries) : null,
+        stepInsights: isFloorplanStyleStep
+          ? stepFeatureInsights(resourceStep.name, stepJson, dbJson, mapJson)
+          : null,
+        synthesisInsights: isSynthesis
+          ? synthesisInsights(
+              synthesisStatJson ?? dbJson,
+              synthesisTimingSummaryJson,
+              synthesisTimingPathsJson,
+            )
+          : null,
         layoutUrl,
         mapUrl,
+        placeDensityMapUrl,
         hasGeometry: Boolean(resourceStep.resources.output.geometryManifest?.exists),
         reports: reportFiles(
           resourceStep.resources.report,
@@ -296,6 +412,7 @@ export function useStepDashboardData() {
       if (!cacheKey) {
         revokeBlobUrl(layoutUrl)
         revokeBlobUrl(mapUrl)
+        revokeBlobUrl(placeDensityMapUrl)
         return
       }
       replaceCachedStepDashboardData(cacheKey, nextData)

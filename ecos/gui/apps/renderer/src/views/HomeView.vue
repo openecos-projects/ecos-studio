@@ -2,86 +2,89 @@
   <WorkspaceWorkbench flow-title="Flow status" :loading="flowLoading" :nodes="flowNodes">
     <template #left>
       <main class="home-dashboard" aria-label="Workspace dashboard">
-        <div
-          class="home-dashboard-row home-dashboard-top"
-          :class="{ 'without-mpc': !mpcConstraints }"
-        >
+        <div class="home-dashboard-row home-dashboard-top">
           <section class="dashboard-section chip-card">
             <header class="dashboard-section-header">
               <div>
                 <i class="ri-cpu-line" aria-hidden="true" />
                 <h2>Chip Basic Info</h2>
               </div>
-              <span v-if="config.pdk" class="dashboard-badge">{{ config.pdk }}</span>
             </header>
-            <dl class="chip-info-grid">
+            <dl class="dashboard-parameter-grid chip-info-grid">
+              <div>
+                <dt>Project</dt>
+                <dd>{{ valueOrNA(qorComparisonState.projectName) }}</dd>
+              </div>
+              <div>
+                <dt>SoC Template</dt>
+                <dd>{{ valueOrNA(mpcDisplayName) }}</dd>
+              </div>
+              <div>
+                <dt>Baseline workspace</dt>
+                <dd>{{ valueOrNA(qorComparisonState.baselineWorkspaceName) }}</dd>
+              </div>
+              <div>
+                <dt>Workspace</dt>
+                <dd>{{ valueOrNA(currentProject?.name) }}</dd>
+              </div>
+              <div>
+                <dt>PDK</dt>
+                <dd>{{ valueOrNA(config.pdk) }}</dd>
+              </div>
               <div>
                 <dt>Design</dt>
-                <dd>{{ config.design || '--' }}</dd>
+                <dd>{{ valueOrNA(config.design) }}</dd>
               </div>
               <div>
-                <dt>Top module</dt>
-                <dd>{{ config.topModule || '--' }}</dd>
+                <dt>Top Module</dt>
+                <dd>{{ valueOrNA(config.topModule) }}</dd>
               </div>
               <div>
-                <dt>Die</dt>
-                <dd>{{ dimension(config.die.Size) }}</dd>
+                <dt>Target Die Area</dt>
+                <dd>{{ positiveNumberOrNA(config.die.area) }}</dd>
               </div>
               <div>
-                <dt>Core</dt>
-                <dd>{{ dimension(config.core.Size) }}</dd>
-              </div>
-              <div>
-                <dt>Frequency</dt>
-                <dd>{{ config.frequencyMax || '--' }} MHz</dd>
+                <dt>Target Frequency</dt>
+                <dd>{{ frequencyOrNA(config.frequencyMax) }}</dd>
               </div>
               <div>
                 <dt>Clock</dt>
-                <dd>{{ config.clock || '--' }}</dd>
-              </div>
-              <div>
-                <dt>Utilization</dt>
-                <dd>{{ utilization }}</dd>
-              </div>
-              <div>
-                <dt>Layers</dt>
-                <dd>{{ config.bottomLayer }} - {{ config.topLayer }}</dd>
+                <dd>{{ valueOrNA(config.clock) }}</dd>
               </div>
             </dl>
           </section>
 
-          <section v-if="mpcConstraints" class="dashboard-section constraint-card">
+          <section class="dashboard-section constraint-card">
             <header class="dashboard-section-header">
               <div>
                 <i class="ri-ruler-2-line" aria-hidden="true" />
                 <h2>Constraints</h2>
               </div>
-              <button
-                type="button"
-                class="dashboard-icon-button"
-                title="View port definition"
-                aria-label="View port definition"
-                @click="showPorts = true"
-              >
-                <i class="ri-external-link-line" aria-hidden="true" />
-              </button>
             </header>
-            <dl class="constraint-list">
-              <div>
+            <dl class="dashboard-parameter-grid constraint-list">
+              <div v-if="mpcConstraints">
                 <dt>Minimum area</dt>
                 <dd>{{ valueOrDash(mpcConstraints.minimumArea) }}</dd>
               </div>
-              <div>
+              <div v-if="mpcConstraints">
                 <dt>Maximum area</dt>
                 <dd>{{ valueOrDash(mpcConstraints.maximumArea) }}</dd>
               </div>
-              <div :class="{ 'is-warning': cellLimitExceeded }">
+              <div v-if="mpcConstraints" :class="{ 'is-warning': cellLimitExceeded }">
                 <dt>Maximum cell count</dt>
                 <dd>{{ valueOrDash(mpcConstraints.maximumCellCount) }}</dd>
-                <small>{{ cellLimitLabel }}</small>
+              </div>
+              <div>
+                <dt>Max Fanout</dt>
+                <dd>{{ valueOrNA(maxFanout) }}</dd>
               </div>
             </dl>
-            <button type="button" class="port-definition-link" @click="showPorts = true">
+            <button
+              v-if="mpcConstraints"
+              type="button"
+              class="port-definition-link"
+              @click="showPorts = true"
+            >
               Port Definition <i class="ri-arrow-right-up-line" aria-hidden="true" />
             </button>
           </section>
@@ -103,6 +106,10 @@
                   <p>{{ checklistSummaryLabel }}</p>
                 </div>
                 <dl class="status-count-list">
+                  <div v-if="checklistSummary.total" class="is-pass">
+                    <dt>Passing</dt>
+                    <dd>{{ checklistSummary.passed }}/{{ checklistSummary.total }}</dd>
+                  </div>
                   <div v-if="checklistSummary.total" class="is-blocked">
                     <dt>Blocked</dt>
                     <dd>{{ checklistSummary.blocked }}/{{ checklistSummary.total }}</dd>
@@ -138,6 +145,20 @@
             </header>
             <div class="qor-overview">
               <div class="qor-visual-column">
+                <div
+                  class="qor-score-hero is-baseline"
+                  :class="`is-${qorBaselineScoreTone}`"
+                >
+                  <span>Baseline QoR score</span>
+                  <small :title="qorComparisonState.baselineWorkspaceName ?? undefined">
+                    {{ qorComparisonState.baselineWorkspaceName ?? 'Baseline workspace' }}
+                  </small>
+                  <div>
+                    <strong>{{ qorBaselineScoreValue }}</strong>
+                    <small v-if="qorBaselineScoreValue !== 'N/A'">/ 100</small>
+                  </div>
+                </div>
+                <span class="qor-score-versus" aria-hidden="true">VS</span>
                 <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
                   <span>QoR score</span>
                   <div>
@@ -145,14 +166,6 @@
                     <small v-if="qorScoreValue !== 'N/A'">/ 100</small>
                   </div>
                   <em>{{ qorScoreStatusLabel }}</em>
-                </div>
-                <div class="qor-pie-wrap">
-                  <StatusPieChart
-                    label="QoR status distribution"
-                    :slices="qorSlices"
-                    :center-primary="qorCenterPrimary"
-                    :center-secondary="qorCenterSecondary"
-                  />
                 </div>
               </div>
               <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
@@ -174,6 +187,13 @@
                     <dd>{{ qorComparisonSummary.comparableCount }}</dd>
                   </div>
                 </dl>
+                <div class="qor-comparison-pie">
+                  <StatusPieChart
+                    label="QoR comparison distribution"
+                    :slices="qorSlices"
+                    show-labels
+                  />
+                </div>
                 <button
                   type="button"
                   class="status-detail-link"
@@ -203,20 +223,34 @@
                     <strong>{{ step.label }}</strong>
                     <i class="ri-arrow-right-up-line" aria-hidden="true" />
                   </button>
-                  <dl class="qor-step-counts">
-                    <div class="is-improved">
-                      <dt>Improved</dt>
-                      <dd>{{ step.improvedCount }}</dd>
+                  <div
+                    class="qor-step-trend"
+                    :aria-label="`${step.label}: ${step.improvedCount} improved, ${step.regressedCount} regressed, ${step.unchangedCount} unchanged, ${step.comparableCount} compared`"
+                  >
+                    <div class="qor-step-trend-bar" aria-hidden="true">
+                      <span
+                        v-if="step.improvedCount"
+                        class="is-improved"
+                        :style="{ flexGrow: step.improvedCount }"
+                      />
+                      <span
+                        v-if="step.regressedCount"
+                        class="is-regressed"
+                        :style="{ flexGrow: step.regressedCount }"
+                      />
+                      <span
+                        v-if="step.unchangedCount"
+                        class="is-neutral"
+                        :style="{ flexGrow: step.unchangedCount }"
+                      />
+                      <span
+                        v-if="!step.comparableCount"
+                        class="is-unavailable"
+                        :style="{ flexGrow: 1 }"
+                      />
                     </div>
-                    <div class="is-regressed">
-                      <dt>Regressed</dt>
-                      <dd>{{ step.regressedCount }}</dd>
-                    </div>
-                    <div>
-                      <dt>Compared</dt>
-                      <dd>{{ step.comparableCount }}</dd>
-                    </div>
-                  </dl>
+                    <strong class="qor-step-total">{{ step.comparableCount }}</strong>
+                  </div>
                 </section>
                 <div v-if="!qorDashboardSteps.length" class="dashboard-empty compact">
                   No QoR analysis yet
@@ -269,7 +303,7 @@
                 <h2>Key Metrics</h2>
               </div>
             </header>
-            <dl class="key-metrics-grid">
+            <dl class="dashboard-parameter-grid key-metrics-grid">
               <div v-for="metric in keyMetrics" :key="metric.id">
                 <dt>{{ metric.label }}</dt>
                 <dd>{{ formatDashboardMetric(metric) }}</dd>
@@ -567,6 +601,8 @@ const {
 const {
   index: dashboardResourceIndex,
   keyMetrics,
+  maxFanout,
+  mpcDisplayName,
   mpcConstraints,
   qorSteps,
 } = useDashboardOverview()
@@ -749,6 +785,11 @@ const checklistCenterPrimary = computed(() =>
 const checklistCenterSecondary = computed(() =>
   checklistSummary.value.total ? 'passing' : 'no data',
 )
+const qorUncomparedCount = computed(
+  () =>
+    qorComparisonState.value.comparison?.metrics.filter((metric) => !metric.isDirectional)
+      .length ?? 0,
+)
 const qorSlices = computed(() => {
   if (qorComparisonState.value.status !== 'available') return []
   return [
@@ -764,23 +805,33 @@ const qorSlices = computed(() => {
       value: qorComparisonSummary.value.regressedCount,
       tone: 'bad' as const,
     },
+    {
+      id: 'unchanged',
+      label: 'Unchanged',
+      value: qorComparisonSummary.value.unchangedCount,
+      tone: 'neutral' as const,
+    },
+    {
+      id: 'not-compared',
+      label: 'Not compared',
+      value: qorUncomparedCount.value,
+      tone: 'warn' as const,
+    },
   ].filter((slice) => slice.value > 0)
 })
-const qorCenterPrimary = computed(() =>
-  qorComparisonState.value.status === 'available'
-    ? `${qorComparisonSummary.value.improvedCount}:${qorComparisonSummary.value.regressedCount}`
-    : '--',
-)
-const qorCenterSecondary = computed(() =>
-  qorComparisonState.value.status === 'available'
-    ? 'improved / regressed'
-    : 'no baseline',
-)
 const qorScoreValue = computed(() => {
   return formatQorScore(qorComparisonState.value.comparison?.score)
 })
+const qorBaselineScoreValue = computed(() =>
+  formatQorScore(qorComparisonState.value.comparison?.baselineScore),
+)
 const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
   const score = qorComparisonState.value.comparison?.score
+  if (score === null || score === undefined) return 'unrated'
+  return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
+})
+const qorBaselineScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
+  const score = qorComparisonState.value.comparison?.baselineScore
   if (score === null || score === undefined) return 'unrated'
   return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
 })
@@ -819,11 +870,13 @@ const qorDashboardSteps = computed(() => {
       : null
     const improvedCount = comparisonReady ? (comparisonStep?.improvedCount ?? 0) : 0
     const regressedCount = comparisonReady ? (comparisonStep?.regressedCount ?? 0) : 0
+    const unchangedCount = comparisonReady ? (comparisonStep?.unchangedCount ?? 0) : 0
     const comparableCount = comparisonReady ? (comparisonStep?.comparableCount ?? 0) : 0
     return {
       ...step,
       improvedCount,
       regressedCount,
+      unchangedCount,
       comparableCount,
       comparisonState: !comparisonReady
         ? 'unavailable'
@@ -861,7 +914,6 @@ const checklistSummaryLabel = computed(() => {
   if (checklistSummary.value.unavailable) return 'Some checklist items are unavailable'
   return 'All checklist items passed'
 })
-const utilization = computed(() => `${(config.core.utilization * 100).toFixed(1)}%`)
 const currentCellCount = computed(
   () => keyMetrics.value.find((metric) => metric.id === 'instances')?.value ?? null,
 )
@@ -874,19 +926,21 @@ const cellLimitExceeded = computed(() => {
     currentCellCount.value > constraints.maximumCellCount
   )
 })
-const cellLimitLabel = computed(() => {
-  if (currentCellCount.value === null) return 'Current count unavailable'
-  return cellLimitExceeded.value
-    ? 'Warning: current count exceeds this limit'
-    : 'Current count is within limit'
-})
-
-function dimension(values: number[]): string {
-  return values.length ? values.join(' x ') : '--'
-}
-
 function valueOrDash(value: number | null): string {
   return value === null ? '--' : String(value)
+}
+
+function valueOrNA(value: string | number | null | undefined): string {
+  if (typeof value === 'string') return value.trim() || 'N/A'
+  return value === null || value === undefined ? 'N/A' : String(value)
+}
+
+function positiveNumberOrNA(value: number): string {
+  return Number.isFinite(value) && value > 0 ? String(value) : 'N/A'
+}
+
+function frequencyOrNA(value: number): string {
+  return Number.isFinite(value) && value > 0 ? `${value} MHz` : 'N/A'
 }
 
 function sourcePath(value: Record<string, unknown>): string {
@@ -1007,10 +1061,6 @@ async function openLayoutChipViewer(): Promise<void> {
 
 .home-dashboard-top {
   grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 3fr);
-}
-
-.home-dashboard-top.without-mpc {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
 }
 
 .home-dashboard-middle {
@@ -1161,66 +1211,82 @@ async function openLayoutChipViewer(): Promise<void> {
   color: inherit;
 }
 
-.chip-info-grid,
-.key-metrics-grid {
+.dashboard-parameter-grid {
   display: grid;
-  gap: 7px 10px;
+  align-content: start;
+  gap: 6px;
   margin: 0;
   min-height: 0;
-  padding: 9px;
+  padding: 8px;
+}
+
+.dashboard-parameter-grid > div {
+  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 43px;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.chip-info-grid,
+.key-metrics-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .chip-info-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.key-metrics-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  overflow: auto;
+  flex: 1 1 auto;
+  overflow-y: auto;
 }
 
-.chip-info-grid div,
-.key-metrics-grid div {
-  min-width: 0;
+.key-metrics-grid {
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.constraint-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .chip-info-grid dt,
 .key-metrics-grid dt,
 .constraint-list dt {
   color: var(--text-secondary);
-  font-size: 9px;
-  margin: 0 0 2px;
+  font-size: 10px;
+  line-height: 1.2;
+  margin: 0 0 3px;
 }
 
 .chip-info-grid dd,
 .key-metrics-grid dd,
 .constraint-list dd {
   color: var(--text-primary);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.25;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.constraint-list {
-  display: grid;
-  gap: 9px;
-  margin: 0;
-  padding: 10px;
+.key-metrics-grid dd {
+  font-size: 11px;
+  line-height: 1.15;
 }
-.constraint-list > div {
-  min-width: 0;
+
+.key-metrics-grid > div {
+  min-height: 0;
+  padding: 5px 7px;
 }
-.constraint-list small {
-  color: var(--success-color);
-  display: block;
+
+.key-metrics-grid dt {
   font-size: 9px;
-  line-height: 1.25;
-  margin-top: 3px;
-}
-.constraint-list .is-warning small {
-  color: var(--warn-color);
+  margin-bottom: 2px;
 }
 
 .port-definition-link {
@@ -1301,7 +1367,7 @@ async function openLayoutChipViewer(): Promise<void> {
 
 .qor-visual-column {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 20px minmax(0, 1fr);
   padding: 0;
 }
 
@@ -1312,7 +1378,7 @@ async function openLayoutChipViewer(): Promise<void> {
   flex-direction: column;
   gap: 1px;
   justify-content: center;
-  min-height: 54px;
+  min-height: 0;
   padding: 5px 8px;
   text-align: center;
 }
@@ -1324,6 +1390,15 @@ async function openLayoutChipViewer(): Promise<void> {
   font-style: normal;
   font-weight: 700;
   line-height: 1.2;
+}
+
+.qor-score-hero.is-baseline > small {
+  color: var(--text-secondary);
+  font-size: 9px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .qor-score-hero > div {
@@ -1355,11 +1430,28 @@ async function openLayoutChipViewer(): Promise<void> {
   color: var(--danger-color);
 }
 
-.qor-pie-wrap {
-  min-height: 0;
+.qor-score-versus {
+  align-items: center;
+  color: var(--accent-color);
+  display: flex;
+  font-size: 10px;
+  font-weight: 800;
+  justify-content: center;
+  letter-spacing: 0;
+}
+
+.qor-comparison-pie {
+  align-content: center;
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 140px;
   min-width: 0;
   overflow: hidden;
-  padding: 5px 8px 8px;
+  padding: 2px 0;
+}
+
+.qor-comparison-pie :deep(.status-pie-chart-wrap) {
+  min-height: 140px;
 }
 
 .status-summary-content,
@@ -1541,35 +1633,50 @@ async function openLayoutChipViewer(): Promise<void> {
   outline: 1px solid var(--accent-color);
   outline-offset: 2px;
 }
-.qor-step-counts {
+.qor-step-trend {
+  align-items: center;
   display: grid;
-  gap: 3px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 3px 0 0;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 6px 0 0;
   min-width: 0;
 }
-.qor-step-counts div {
+
+.qor-step-trend-bar {
+  background: color-mix(in srgb, var(--border-color) 80%, transparent);
+  border-radius: 2px;
+  display: flex;
+  height: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.qor-step-trend-bar > span {
   min-width: 0;
 }
-.qor-step-counts dt,
-.qor-step-counts dd {
-  color: var(--text-secondary);
-  font-size: 8px;
-  line-height: 1.2;
-  margin: 0;
-  text-align: center;
+
+.qor-step-trend-bar > .is-improved {
+  background: var(--success-color);
 }
-.qor-step-counts dd {
+
+.qor-step-trend-bar > .is-regressed {
+  background: var(--danger-color);
+}
+
+.qor-step-trend-bar > .is-neutral {
+  background: var(--text-secondary);
+}
+
+.qor-step-trend-bar > .is-unavailable {
+  background: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+}
+
+.qor-step-total {
   color: var(--text-primary);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-}
-.qor-step-counts .is-improved dd {
-  color: var(--success-color);
-}
-.qor-step-counts .is-regressed dd {
-  color: var(--danger-color);
+  line-height: 1;
 }
 
 .status-card .dashboard-section-header h2 {
@@ -2059,7 +2166,6 @@ async function openLayoutChipViewer(): Promise<void> {
     grid-template-rows: auto auto auto;
   }
   .home-dashboard-top,
-  .home-dashboard-top.without-mpc,
   .home-dashboard-middle,
   .home-dashboard-bottom {
     grid-template-columns: 1fr;
@@ -2085,8 +2191,7 @@ async function openLayoutChipViewer(): Promise<void> {
   .qor-step-list {
     grid-template-columns: repeat(auto-fit, minmax(114px, 1fr));
   }
-  .qor-step-counts dt,
-  .qor-step-counts dd {
+  .qor-step-total {
     font-size: 7px;
   }
 }

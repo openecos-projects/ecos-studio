@@ -26,17 +26,22 @@ const props = defineProps<{
   slices: DashboardPieSlice[]
   centerPrimary?: string
   centerSecondary?: string
+  showLabels?: boolean
 }>()
 
 const chartElement = ref<HTMLElement | null>(null)
 let chart: echarts.ECharts | null = null
 let resizeObserver: ResizeObserver | null = null
 
-function colorFor(tone: DashboardPieSlice['tone']): string {
+function colorForTone(tone: DashboardPieSlice['tone']): string {
   if (tone === 'good') return '#16a34a'
   if (tone === 'warn') return '#d97706'
   if (tone === 'bad') return '#dc2626'
   return '#64748b'
+}
+
+function colorForSlice(slice: DashboardPieSlice): string {
+  return slice.color ?? colorForTone(slice.tone)
 }
 
 async function renderChart(): Promise<void> {
@@ -54,15 +59,34 @@ async function renderChart(): Promise<void> {
   resizeObserver.observe(target)
   chart.setOption({
     animationDuration: 180,
-    color: props.slices.map((slice) => colorFor(slice.tone)),
+    color: props.slices.map(colorForSlice),
     series: [
       {
         type: 'pie',
-        radius: ['54%', '78%'],
+        radius: props.showLabels ? ['42%', '66%'] : ['54%', '78%'],
         avoidLabelOverlap: true,
-        label: { show: false },
-        labelLine: { show: false },
-        data: props.slices.map((slice) => ({ name: slice.label, value: slice.value })),
+        label: {
+          color: 'inherit',
+          fontSize: 10,
+          fontWeight: 600,
+          formatter: '{b} {c}',
+          show: props.showLabels ?? false,
+        },
+        labelLine: {
+          length: 7,
+          length2: 8,
+          lineStyle: { width: 1 },
+          show: props.showLabels ?? false,
+        },
+        data: props.slices.map((slice) => {
+          const color = colorForSlice(slice)
+          return {
+            name: slice.label,
+            value: slice.value,
+            label: { color },
+            labelLine: { lineStyle: { color } },
+          }
+        }),
       },
     ],
     tooltip: { trigger: 'item', valueFormatter: (value: number) => String(value) },
@@ -70,7 +94,7 @@ async function renderChart(): Promise<void> {
 }
 
 watch(
-  () => props.slices,
+  () => [props.slices, props.showLabels] as const,
   () => void renderChart(),
   { deep: true, immediate: true },
 )

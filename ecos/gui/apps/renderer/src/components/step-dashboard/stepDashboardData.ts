@@ -27,6 +27,105 @@ export interface StepDashboardDistribution {
   bars: StepDashboardBar[]
 }
 
+export interface StepDashboardSynthesisValue {
+  id: string
+  label: string
+  value: string
+}
+
+export interface StepDashboardSynthesisTimingModule {
+  id: string
+  label: string
+  values: StepDashboardSynthesisValue[]
+}
+
+export interface StepDashboardSynthesisTimingPath {
+  id: string
+  label: string
+  values: StepDashboardSynthesisValue[]
+  stages: StepDashboardSynthesisValue[][]
+}
+
+export interface StepDashboardSynthesisInsights {
+  metrics: StepDashboardSynthesisValue[]
+  timingModules: StepDashboardSynthesisTimingModule[]
+  timingPathSummary: StepDashboardSynthesisValue[]
+  timingPaths: StepDashboardSynthesisTimingPath[]
+}
+
+export interface StepDashboardFloorplanSnapshot {
+  id: string
+  label: string
+  total: number
+  unit: 'count' | 'um2' | ''
+  slices: DashboardPieSlice[]
+}
+
+export interface StepDashboardFloorplanInsights {
+  metrics: StepDashboardSynthesisValue[]
+  snapshots: StepDashboardFloorplanSnapshot[]
+}
+
+export interface StepDashboardHardenOutputArtifact {
+  type: 'lef' | 'lib' | 'gds'
+  path: string
+  exists: boolean
+}
+
+export interface StepDashboardHardenInsights {
+  artifacts: StepDashboardHardenOutputArtifact[]
+}
+
+export interface StepDashboardRcxElectricalCorner {
+  corner: string
+  netCount: number | null
+  groundCapacitanceFf: number | null
+  couplingCapacitanceFf: number | null
+  totalCapacitanceFf: number | null
+  totalResistanceOhm: number | null
+}
+
+export interface StepDashboardRcxSignoffCorner {
+  corner: string
+  availability: string
+  totalCapacitanceFf: number | null
+  couplingCapacitanceFf: number | null
+  totalResistanceOhm: number | null
+}
+
+export interface StepDashboardRcxInsights {
+  electricalMetrics: StepDashboardSynthesisValue[]
+  electricalCorners: StepDashboardRcxElectricalCorner[]
+  signoffMetrics: StepDashboardSynthesisValue[]
+  signoffCorners: StepDashboardRcxSignoffCorner[]
+}
+
+export interface StepDashboardDrcTable {
+  headers: string[]
+  rows: Array<{ id: string; values: string[] }>
+}
+
+export interface StepDashboardDrcInsights {
+  table: StepDashboardDrcTable
+  snapshots: StepDashboardFloorplanSnapshot[]
+}
+
+export interface StepDashboardStaCorner {
+  id: string
+  staCorner: string
+  metrics: StepDashboardSynthesisValue[]
+  timingModules: StepDashboardSynthesisTimingModule[]
+}
+
+export interface StepDashboardStaInsights {
+  corners: StepDashboardStaCorner[]
+}
+
+export interface StepDashboardStaSummaryPath {
+  id: string
+  path: string
+}
+
 export interface StepDashboardQor {
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
   metricCount: number
@@ -486,6 +585,667 @@ export function dbBars(value: unknown): StepDashboardBar[] {
   return dbDistributions(value)[0]?.bars ?? []
 }
 
+function displaySynthesisValue(value: unknown): string {
+  if (value === null || value === undefined) return '--'
+  if (typeof value === 'string') return value || '--'
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return JSON.stringify(value)
+}
+
+function synthesisValues(
+  value: unknown,
+  idPrefix: string,
+  path: string[] = [],
+): StepDashboardSynthesisValue[] {
+  if (value === null || value === undefined) {
+    const label = path[path.length - 1] ?? 'Value'
+    return [
+      {
+        id: `${idPrefix}-${path.join('.') || 'value'}`,
+        label: humanize(label),
+        value: '--',
+      },
+    ]
+  }
+  if (typeof value !== 'object') {
+    const label = path[path.length - 1] ?? 'Value'
+    return [
+      {
+        id: `${idPrefix}-${path.join('.') || 'value'}`,
+        label: humanize(label),
+        value: displaySynthesisValue(value),
+      },
+    ]
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      synthesisValues(item, idPrefix, [...path, `${index + 1}`]),
+    )
+  }
+  return Object.entries(value).flatMap(([key, item]) =>
+    synthesisValues(item, idPrefix, [...path, key]),
+  )
+}
+
+function timingModules(value: unknown): StepDashboardSynthesisTimingModule[] {
+  const source = record(value)
+  if (!source) return []
+
+  const scalarValues: StepDashboardSynthesisValue[] = []
+  const modules: StepDashboardSynthesisTimingModule[] = []
+  for (const [key, item] of Object.entries(source)) {
+    if (item === null || typeof item !== 'object') {
+      scalarValues.push(...synthesisValues(item, 'timing-summary', [key]))
+      continue
+    }
+    if (Array.isArray(item)) {
+      modules.push({
+        id: `timing-${key}`,
+        label: humanize(key),
+        values: synthesisValues(item, `timing-${key}`),
+      })
+      continue
+    }
+    modules.push({
+      id: `timing-${key}`,
+      label: humanize(key),
+      values: synthesisValues(item, `timing-${key}`),
+    })
+  }
+  return scalarValues.length
+    ? [{ id: 'timing-overview', label: 'Overview', values: scalarValues }, ...modules]
+    : modules
+}
+
+function timingPathData(
+  value: unknown,
+): Pick<StepDashboardSynthesisInsights, 'timingPathSummary' | 'timingPaths'> {
+  const source = record(value)
+  if (!source) return { timingPathSummary: [], timingPaths: [] }
+
+  const timingPathSummary = Object.entries(source)
+    .filter(([key]) => key !== 'paths')
+    .flatMap(([key, item]) => synthesisValues(item, 'timing-path-summary', [key]))
+  const rawPaths = Array.isArray(source.paths) ? source.paths : []
+  const timingPaths = rawPaths.flatMap((candidate, index) => {
+    const path = record(candidate)
+    if (!path) return []
+    const pathId = typeof path.path_id === 'string' ? path.path_id : ''
+    const rawStages = Array.isArray(path.stages) ? path.stages : []
+    return [
+      {
+        id: pathId || `timing-path-${index + 1}`,
+        label: pathId || `Timing path ${index + 1}`,
+        values: Object.entries(path)
+          .filter(([key]) => key !== 'stages')
+          .flatMap(([key, item]) =>
+            synthesisValues(item, `timing-path-${index + 1}`, [key]),
+          ),
+        stages: rawStages.map((stage, stageIndex) =>
+          synthesisValues(stage, `timing-path-${index + 1}-stage-${stageIndex + 1}`),
+        ),
+      },
+    ]
+  })
+  return { timingPathSummary, timingPaths }
+}
+
+export function synthesisInsights(
+  statValue: unknown,
+  timingSummaryValue: unknown,
+  timingPathsValue: unknown,
+): StepDashboardSynthesisInsights | null {
+  const stat = record(statValue)
+  const design = record(stat?.design)
+  const timingSummary = record(timingSummaryValue)
+  const timingPaths = record(timingPathsValue)
+  if (!design && !timingSummary && !timingPaths) return null
+
+  const metrics = design
+    ? Object.entries(design)
+        .filter(([key]) => key !== 'num_cells_by_type')
+        .flatMap(([key, value]) => synthesisValues(value, 'synthesis-metric', [key]))
+    : []
+  return {
+    metrics,
+    timingModules: timingModules(timingSummary),
+    ...timingPathData(timingPaths),
+  }
+}
+
+function textValue(value: unknown, fallback = '--'): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
+export function hardenOutputInsights(value: unknown): StepDashboardHardenInsights {
+  const output = record(value)
+  const artifactTypes = ['lef', 'lib', 'gds'] as const
+  const artifacts: StepDashboardHardenOutputArtifact[] = artifactTypes.map((type) => {
+    const file = record(output?.[type])
+    return {
+      type,
+      path: textValue(file?.path),
+      exists: file?.exists === true,
+    }
+  })
+  return { artifacts }
+}
+
+function selectedInsightValues(
+  source: Record<string, unknown> | null,
+  idPrefix: string,
+  fields: readonly string[],
+): StepDashboardSynthesisValue[] {
+  return fields.map((field) => ({
+    id: `${idPrefix}-${field}`,
+    label: humanize(field),
+    value: insightMetricValue(source?.[field]),
+  }))
+}
+
+export function rcxInsights(value: unknown): StepDashboardRcxInsights | null {
+  const root = record(value)
+  const rcx = record(root?.rcx)
+  if (!rcx) return null
+  const electrical = record(rcx.electrical_summary)
+  const signoff = record(rcx.signoff_metrics)
+  const envelope = record(signoff?.parasitic_envelope)
+  const electricalCorners = (
+    Array.isArray(electrical?.corners) ? electrical.corners : []
+  ).flatMap((candidate) => {
+    const corner = record(candidate)
+    if (!corner) return []
+    return [
+      {
+        corner: textValue(corner.corner),
+        netCount: finiteNumber(corner.net_count),
+        groundCapacitanceFf: finiteNumber(corner.ground_capacitance_ff),
+        couplingCapacitanceFf: finiteNumber(corner.coupling_capacitance_ff),
+        totalCapacitanceFf: finiteNumber(corner.total_capacitance_ff),
+        totalResistanceOhm: finiteNumber(corner.total_resistance_ohm),
+      },
+    ]
+  })
+  const signoffCorners = (
+    Array.isArray(signoff?.rc_corners) ? signoff.rc_corners : []
+  ).flatMap((candidate) => {
+    const corner = record(candidate)
+    if (!corner) return []
+    return [
+      {
+        corner: textValue(corner.label, textValue(corner.rc_corner)),
+        availability: textValue(corner.availability),
+        totalCapacitanceFf: finiteNumber(corner.total_capacitance_ff),
+        couplingCapacitanceFf: finiteNumber(corner.coupling_capacitance_ff),
+        totalResistanceOhm: finiteNumber(corner.total_resistance_ohm),
+      },
+    ]
+  })
+
+  return {
+    electricalMetrics: selectedInsightValues(electrical, 'rcx-electrical', [
+      'parsed_corner_count',
+      'worst_total_capacitance_ff',
+      'worst_coupling_capacitance_ff',
+      'worst_total_resistance_ohm',
+    ]),
+    electricalCorners,
+    signoffMetrics: Object.entries(envelope ?? {}).flatMap(([key, item]) =>
+      item === null || typeof item === 'object'
+        ? []
+        : [
+            {
+              id: `rcx-envelope-${key}`,
+              label: humanize(key),
+              value: insightMetricValue(item),
+            },
+          ],
+    ),
+    signoffCorners,
+  }
+}
+
+function parseCsv(value: unknown): string[][] {
+  if (typeof value !== 'string' || !value.trim()) return []
+  const rows: string[][] = []
+  let cell = ''
+  let row: string[] = []
+  let quoted = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    const next = value[index + 1]
+    if (character === '"' && quoted && next === '"') {
+      cell += '"'
+      index += 1
+      continue
+    }
+    if (character === '"') {
+      quoted = !quoted
+      continue
+    }
+    if (character === ',' && !quoted) {
+      row.push(cell.trim())
+      cell = ''
+      continue
+    }
+    if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && next === '\n') index += 1
+      row.push(cell.trim())
+      if (row.some(Boolean)) rows.push(row)
+      row = []
+      cell = ''
+      continue
+    }
+    cell += character
+  }
+  row.push(cell.trim())
+  if (row.some(Boolean)) rows.push(row)
+  return rows
+}
+
+function csvTotal(value: string | undefined): number {
+  const numeric = value === undefined || value === '' ? null : Number(value)
+  return numeric === null || !Number.isFinite(numeric) ? 0 : Math.max(0, numeric)
+}
+
+export function drcInsights(value: unknown): StepDashboardDrcInsights | null {
+  const parsed = parseCsv(value)
+  const [headers = [], ...rawRows] = parsed
+  if (headers.length < 2) return null
+  const rows = rawRows.map((values, index) => ({
+    id: `drc-${index}`,
+    values: headers.map((_, columnIndex) => values[columnIndex] ?? ''),
+  }))
+  const totalColumn = Math.max(
+    1,
+    headers.findIndex((header) => header.toLowerCase() === 'total'),
+  )
+  const totalRow = rows.find((row) => row.values[0].trim().toLowerCase() === 'total')
+  const typeRows = rows.filter((row) => row !== totalRow)
+  const layerSlices = headers.slice(1, totalColumn).map((layer, index) => {
+    const columnIndex = index + 1
+    const total = totalRow
+      ? csvTotal(totalRow.values[columnIndex])
+      : typeRows.reduce((sum, row) => sum + csvTotal(row.values[columnIndex]), 0)
+    return {
+      id: `drc-layer-${layer}`,
+      label: layer,
+      value: total,
+      tone: 'neutral' as const,
+      color: floorplanSliceColor(index, Math.max(1, totalColumn - 1)),
+    }
+  })
+  const typeSlices = typeRows.map((row, index) => ({
+    id: `drc-type-${row.values[0] || index + 1}`,
+    label: row.values[0] || `Type ${index + 1}`,
+    value: csvTotal(row.values[totalColumn]),
+    tone: 'neutral' as const,
+    color: floorplanSliceColor(index, Math.max(1, typeRows.length)),
+  }))
+
+  return {
+    table: { headers, rows },
+    snapshots: [
+      {
+        id: 'drc-layer-total',
+        label: 'Layer Totals',
+        total: layerSlices.reduce((sum, slice) => sum + slice.value, 0),
+        unit: 'count',
+        slices: layerSlices,
+      },
+      {
+        id: 'drc-type-total',
+        label: 'Type Totals',
+        total: typeSlices.reduce((sum, slice) => sum + slice.value, 0),
+        unit: 'count',
+        slices: typeSlices,
+      },
+    ],
+  }
+}
+
+function staCornerRecords(value: unknown): Record<string, unknown>[] {
+  const root = record(value)
+  const sta = record(root?.sta)
+  const signoff = record(sta?.signoff_metrics)
+  return (Array.isArray(signoff?.corners) ? signoff.corners : []).flatMap((candidate) => {
+    const corner = record(candidate)
+    return corner ? [corner] : []
+  })
+}
+
+function staCornerId(corner: Record<string, unknown>, index: number): string {
+  return textValue(corner.sta_corner, `Corner ${index + 1}`)
+}
+
+export function staCornerSummaryPaths(
+  value: unknown,
+  stepDirectory: string,
+): StepDashboardStaSummaryPath[] {
+  const baseDirectory = stepDirectory.replace(/\/+$/, '')
+  return staCornerRecords(value).map((corner, index) => {
+    const id = staCornerId(corner, index)
+    const sourcePath = textValue(corner.summary_file, `feature/${id}/qor_summary.json`)
+    return {
+      id,
+      path: sourcePath.startsWith('/') ? sourcePath : `${baseDirectory}/${sourcePath}`,
+    }
+  })
+}
+
+function staCornerMetrics(
+  corner: Record<string, unknown>,
+  index: number,
+): StepDashboardSynthesisValue[] {
+  const excluded = new Set(['summary_file', 'reason'])
+  return Object.entries(corner).flatMap(([key, value]) =>
+    excluded.has(key) || value === null || typeof value === 'object'
+      ? []
+      : [
+          {
+            id: `sta-corner-${index}-${key}`,
+            label: humanize(key),
+            value: insightMetricValue(value),
+          },
+        ],
+  )
+}
+
+export function staInsights(
+  value: unknown,
+  timingSummaries: readonly unknown[],
+): StepDashboardStaInsights | null {
+  const rawCorners = staCornerRecords(value)
+  if (!rawCorners.length) return null
+  return {
+    corners: rawCorners.map((corner, index) => {
+      const staCorner = staCornerId(corner, index)
+      return {
+        id: staCorner,
+        staCorner,
+        metrics: staCornerMetrics(corner, index),
+        timingModules: timingModules(timingSummaries[index]),
+      }
+    }),
+  }
+}
+
+function selectedFloorplanValues(
+  source: Record<string, unknown> | null,
+  fields: readonly string[],
+  idPrefix: string,
+): StepDashboardSynthesisValue[] {
+  return fields.map((field) => ({
+    id: `${idPrefix}-${field}`,
+    label: humanize(field),
+    value: insightMetricValue(source?.[field]),
+  }))
+}
+
+function insightMetricValue(value: unknown): string {
+  const numeric = finiteNumber(value)
+  if (numeric === null) return displaySynthesisValue(value)
+  if (Number.isInteger(numeric)) return String(numeric)
+  return numeric.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function floorplanSliceColor(index: number, count: number): string {
+  const hue = Math.round((index / Math.max(1, count)) * 300 + 25) % 360
+  return `hsl(${hue} 62% 54%)`
+}
+
+function instanceCompositionSnapshot(
+  instances: Record<string, unknown> | null,
+  field: 'area' | 'num' | 'pin_num',
+  label: string,
+  unit: StepDashboardFloorplanSnapshot['unit'],
+): StepDashboardFloorplanSnapshot {
+  const total = Math.max(0, finiteNumber(record(instances?.total)?.[field]) ?? 0)
+  const macros = Math.max(0, finiteNumber(record(instances?.macros)?.[field]) ?? 0)
+  const logic = Math.max(0, finiteNumber(record(instances?.logic)?.[field]) ?? 0)
+  const others = Math.max(0, total - macros - logic)
+  return {
+    id: `instance-${field}`,
+    label,
+    total,
+    unit,
+    slices: [
+      { id: `${field}-macros`, label: 'Macros', value: macros, tone: 'warn' },
+      { id: `${field}-logic`, label: 'Logic', value: logic, tone: 'good' },
+      { id: `${field}-others`, label: 'Others', value: others, tone: 'neutral' },
+    ],
+  }
+}
+
+function pinDistributionSnapshot(
+  value: unknown,
+  field: 'inst_num' | 'net_num',
+  label: string,
+): StepDashboardFloorplanSnapshot {
+  const bins = new Map<number, number>()
+  let over32 = 0
+  for (const candidate of Array.isArray(value) ? value : []) {
+    const source = record(candidate)
+    const amount = Math.max(0, finiteNumber(source?.[field]) ?? 0)
+    const pinCount = source?.pin_num
+    if (typeof pinCount === 'number' && Number.isInteger(pinCount) && pinCount >= 0) {
+      if (pinCount <= 32) bins.set(pinCount, (bins.get(pinCount) ?? 0) + amount)
+      else over32 += amount
+    } else {
+      over32 += amount
+    }
+  }
+  const slices = Array.from({ length: 33 }, (_, pinCount) => ({
+    id: `${field}-${pinCount}`,
+    label: String(pinCount),
+    value: bins.get(pinCount) ?? 0,
+    tone: 'neutral' as const,
+    color: floorplanSliceColor(pinCount, 34),
+  }))
+  slices.push({
+    id: `${field}-over-32`,
+    label: '>32',
+    value: over32,
+    tone: 'neutral',
+    color: floorplanSliceColor(33, 34),
+  })
+  return {
+    id: `pin-distribution-${field}`,
+    label,
+    total: slices.reduce((sum, slice) => sum + slice.value, 0),
+    unit: 'count',
+    slices,
+  }
+}
+
+function layerDistributionSnapshot(
+  value: unknown,
+  field: 'via_num' | 'wire_len',
+  label: string,
+  unit: StepDashboardFloorplanSnapshot['unit'],
+): StepDashboardFloorplanSnapshot {
+  const rawLayers = Array.isArray(value) ? value : []
+  const layers = rawLayers.flatMap((candidate, index) => {
+    const source = record(candidate)
+    if (!source) return []
+    const layerName =
+      typeof source.layer_name === 'string' && source.layer_name.trim()
+        ? source.layer_name.trim()
+        : `Layer ${index + 1}`
+    return [
+      {
+        id: `layer-${field}-${index}`,
+        label: layerName,
+        value: Math.max(0, finiteNumber(source[field]) ?? 0),
+        tone: 'neutral' as const,
+        color: floorplanSliceColor(index, Math.max(1, rawLayers.length)),
+      },
+    ]
+  })
+  return {
+    id: `layer-${field}`,
+    label,
+    total: layers.reduce((sum, layer) => sum + layer.value, 0),
+    unit,
+    slices: layers,
+  }
+}
+
+function floorplanSnapshots(value: unknown): StepDashboardFloorplanSnapshot[] {
+  const source = record(value)
+  if (!source) return []
+  const instances = record(source.Instances)
+  const pins = record(source.Pins)
+  const layers = record(source.Layers)
+  return [
+    instanceCompositionSnapshot(instances, 'area', 'Instance Area', 'um2'),
+    instanceCompositionSnapshot(instances, 'num', 'Instance Count', 'count'),
+    instanceCompositionSnapshot(instances, 'pin_num', 'Instance Pins', 'count'),
+    pinDistributionSnapshot(pins?.pin_distribution, 'inst_num', 'Inst Pin Bins'),
+    pinDistributionSnapshot(pins?.pin_distribution, 'net_num', 'Net Pin Bins'),
+    layerDistributionSnapshot(layers?.cut_layers, 'via_num', 'Cut Layer Vias', 'count'),
+    layerDistributionSnapshot(
+      layers?.routing_layers,
+      'wire_len',
+      'Routing Wire Length',
+      '',
+    ),
+  ]
+}
+
+function stepFeatureMetrics(value: unknown): StepDashboardSynthesisValue[] {
+  const source = record(value)
+  if (!source) return []
+
+  const topLevelMetricKeys = Object.keys(source).filter(
+    (key) => key !== 'run' && key !== 'constraints',
+  )
+  const omitSingleTopLevelKey = topLevelMetricKeys.length === 1
+  const metrics: StepDashboardSynthesisValue[] = []
+
+  function visit(current: unknown, path: string[]): void {
+    if (current === null || current === undefined || Array.isArray(current)) return
+    if (
+      typeof current === 'string' ||
+      typeof current === 'number' ||
+      typeof current === 'boolean'
+    ) {
+      const labelPath = omitSingleTopLevelKey ? path.slice(1) : path
+      metrics.push({
+        id: `step-feature-${path.join('-')}`,
+        label: humanize((labelPath.length ? labelPath : path).join(' ')),
+        value: insightMetricValue(current),
+      })
+      return
+    }
+
+    const nested = record(current)
+    if (!nested) return
+    for (const [key, child] of Object.entries(nested)) {
+      if (key === 'run' || key === 'constraints' || key.endsWith('_map')) continue
+      visit(child, [...path, key])
+    }
+  }
+
+  for (const key of topLevelMetricKeys) visit(source[key], [key])
+  return metrics
+}
+
+function floorplanMetrics(value: unknown): StepDashboardSynthesisValue[] {
+  const source = record(value)
+  if (!source) return []
+  const layout = record(source['Design Layout'])
+  const statis = record(source['Design Statis'])
+  const instances = record(source.Instances)
+  const nets = record(source.Nets)
+  const metrics = [
+    ...selectedFloorplanValues(
+      layout,
+      [
+        'die_area',
+        'die_usage',
+        'die_bounding_width',
+        'die_bounding_height',
+        'core_area',
+        'core_usage',
+        'core_bounding_width',
+        'core_bounding_height',
+        'design_dbu',
+      ],
+      'floorplan-layout',
+    ),
+    ...selectedFloorplanValues(
+      statis,
+      ['num_iopins', 'num_instances', 'num_nets', 'num_pdn'],
+      'floorplan-statis',
+    ),
+    ...selectedFloorplanValues(
+      record(instances?.macros),
+      ['num', 'area'],
+      'floorplan-macros',
+    ),
+    ...selectedFloorplanValues(record(instances?.iopads), ['num'], 'floorplan-iopads'),
+    ...selectedFloorplanValues(
+      nets,
+      ['num_clock', 'num_signal', 'wire_len'],
+      'floorplan-nets',
+    ),
+  ]
+  return metrics
+}
+
+function placeMetrics(value: unknown): StepDashboardSynthesisValue[] {
+  const source = record(value)
+  const wirelength = record(source?.Wirelength)
+  const congestion = record(source?.Congestion)
+  const overflow = record(congestion?.overflow)
+  const overflowTotal = record(overflow?.total)
+  const metrics: StepDashboardSynthesisValue[] = []
+
+  for (const [key, item] of Object.entries(wirelength ?? {})) {
+    if (item === null || typeof item === 'object') continue
+    metrics.push({
+      id: `place-wirelength-${key}`,
+      label: humanize(key),
+      value: insightMetricValue(item),
+    })
+  }
+  for (const [key, item] of Object.entries(overflowTotal ?? {})) {
+    if (item === null || typeof item === 'object') continue
+    metrics.push({
+      id: `place-overflow-${key}`,
+      label: `overflow-${key}`,
+      value: insightMetricValue(item),
+    })
+  }
+  return metrics
+}
+
+export function floorplanInsights(value: unknown): StepDashboardFloorplanInsights | null {
+  const source = record(value)
+  if (!source) return null
+  return { metrics: floorplanMetrics(source), snapshots: floorplanSnapshots(source) }
+}
+
+export function stepFeatureInsights(
+  step: string,
+  stepValue: unknown,
+  databaseValue: unknown,
+  mapValue: unknown,
+): StepDashboardFloorplanInsights | null {
+  const normalizedStep = step.trim().toLowerCase()
+  const metrics =
+    normalizedStep === 'place'
+      ? placeMetrics(mapValue)
+      : normalizedStep === 'fixfanout' ||
+          normalizedStep === 'legalization' ||
+          normalizedStep === 'filler'
+        ? floorplanMetrics(databaseValue)
+        : stepFeatureMetrics(stepValue)
+  const snapshots = floorplanSnapshots(databaseValue)
+  return metrics.length || snapshots.length ? { metrics, snapshots } : null
+}
+
 export function dbDistributions(value: unknown): StepDashboardDistribution[] {
   const source = record(value)
   const design = record(source?.design)
@@ -744,7 +1504,8 @@ export function prioritizeQorMetricComparisons(
     })
     .sort((left, right) => {
       const changePriority = (metric: StepDashboardQorMetricComparison): number =>
-        metric.comparisonState === 'improvement' || metric.comparisonState === 'regression'
+        metric.comparisonState === 'improvement' ||
+        metric.comparisonState === 'regression'
           ? 0
           : 1
       const changeDelta = changePriority(left) - changePriority(right)
