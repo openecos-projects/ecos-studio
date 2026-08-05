@@ -4,10 +4,12 @@ import source from './AIChatPanel.vue?raw'
 describe('AIChatPanel flow contracts', () => {
   it('routes structured choices through their prompt id and compatible option value', () => {
     expect(source).toContain("event.type === 'choice'")
-    expect(source).toContain('messageStore.addChoice(event.choice, event.messageId)')
+    expect(source).toContain(
+      'messageStore.addChoice(event.choice, event.messageId, event.sessionId)',
+    )
     expect(source).toContain('candidate.choice?.promptId === promptId')
     expect(source).toContain('await sendAgentMessage(option.value, false)')
-    expect(source).toContain('messageStore.addMessage(option.label)')
+    expect(source).toContain('messageStore.addMessage(choiceSelectionText(option))')
   })
 
   it('renders Cursor-style full-width turns with sticky user nodes', () => {
@@ -22,7 +24,15 @@ describe('AIChatPanel flow contracts', () => {
   it('keeps tool activity and streaming updates on the structured message path', () => {
     expect(source).toContain("event.type === 'message' || event.type === 'tool'")
     expect(source).toContain('messageStore.upsertAgentEvent(event)')
-    expect(source).toContain('messageStore.finishStreamingMessages()')
+    expect(source).toContain('messageStore.finishStreamingMessages(event.sessionId)')
+  })
+
+  it('keeps the transcript pinned while tool progress content grows in place', () => {
+    expect(source).toContain('const stickToBottom = ref(true)')
+    expect(source).toContain('@scroll.passive="onScrollContainerScroll"')
+    expect(source).toContain('last?.content.length ?? 0')
+    expect(source).toContain('bindScrollContentObserver()')
+    expect(source).toContain('scrollToBottomIfNeeded(force, false)')
   })
 
   it('locks choice-only input while retaining stop and one-message queue controls', () => {
@@ -56,14 +66,14 @@ describe('AIChatPanel flow contracts', () => {
 
   it('maps validated provider contracts to structured messages', () => {
     expect(source).toContain("event.type === 'contract'")
-    expect(source).toContain('addExecutionContract(event.contract)')
+    expect(source).toContain('addExecutionContract(event.contract, event.sessionId)')
   })
 
   it('renders frozen rerun specifications in the same key-value table as workspace setup', () => {
     expect(source).toContain("event.contract.presentation === 'workspace_rerun'")
-    expect(source).toContain('workspaceRerunContract.value = event.contract')
+    expect(source).toContain('ui.workspaceRerunContract = event.contract')
     expect(source).toMatch(
-      /if \(event\.contract\.presentation === 'workspace_rerun'\) \{[\s\S]*workspaceRerunContract\.value = event\.contract[\s\S]*workspaceRerunMessage\.value = event\.text \?\? ''[\s\S]*lastContractSurface\.value = 'rerun'[\s\S]*scrollWorkspaceSetupIntoView\(\)[\s\S]*return\s*\}/,
+      /if \(event\.contract\.presentation === 'workspace_rerun'\) \{[\s\S]*ui\.workspaceRerunContract = event\.contract[\s\S]*ui\.workspaceRerunMessage = event\.text \?\? ''[\s\S]*ui\.lastContractSurface = 'rerun'/,
     )
     expect(source).toContain('AgentExecutionContractPanel')
     expect(source).toContain(':rows="workspaceRerunRows"')
@@ -73,7 +83,7 @@ describe('AIChatPanel flow contracts', () => {
   it('keeps workspace setup inside chat instead of reopening the native wizard', () => {
     expect(source).toContain("event.type === 'workspace_setup'")
     expect(source).toContain('AgentWorkspaceSetupPanel')
-    expect(source).toContain('workspaceSetupContract.value = event.workspaceSetup')
+    expect(source).toContain('ui.workspaceSetupContract = event.workspaceSetup')
     expect(source).not.toContain('openWorkspaceSetup?.(event.workspaceSetup)')
   })
 
@@ -83,7 +93,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('isWorkspaceCreationPending')
     expect(source).toContain('workspace_create_result:')
     expect(source).not.toContain('Workspace creation was not completed.')
-    expect(source).toContain('workspaceSetupMessage.value = event.text')
+    expect(source).toContain('ui.workspaceSetupMessage = event.text')
     expect(source).toContain('scrollWorkspaceSetupIntoView()')
     expect(source).not.toContain(
       "if (event.text) messageStore.addAssistantMessage(event.text, 'done')",
@@ -101,9 +111,7 @@ describe('AIChatPanel flow contracts', () => {
 
   it('prepares a validated workspace rerun without replacing the visible source workspace', () => {
     expect(source).toContain("event.type === 'workspace_rerun'")
-    expect(source).toMatch(
-      /event\.type === 'workspace_rerun'[\s\S]*workspaceRerunToken[\s\S]*scrollWorkspaceSetupIntoView\(\)[\s\S]*void executeWorkspaceRerun/,
-    )
+    expect(source).toContain('void executeWorkspaceRerun(')
     expect(source).toContain(
       'event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`',
     )
@@ -118,18 +126,35 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('workspace_rerun_result:')
     expect(source).toContain('await desktopApi.workspace.bindWindow(prepared.directory)')
     expect(source).toMatch(
-      /await agentFlowProgress\.start\(prepared\.directory\)[\s\S]*await executeRerun/,
+      /await router\.push\(\{ name: ':step', params: \{ step: contract\.target_step \} \}\)[\s\S]*await nextTick\(\)[\s\S]*invalidateWorkspaceResources\(\['home', 'flow', 'step', 'maps', 'logs', 'parameters'\]\)[\s\S]*await agentFlowProgress\.start\(prepared\.directory\)[\s\S]*await executeRerun/,
     )
     expect(source).toContain('executeRerun({ token: prepared.executionToken })')
-    expect(source).toContain("appendToolProgress('Preparing isolated rerun workspace.')")
-    expect(source).toContain("appendToolProgress('Opening isolated rerun workspace.')")
-    expect(source).toContain("appendToolProgress('Starting rerun execution.')")
-    expect(source).toContain('finishToolProgress()')
+    expect(source).toContain('markAgentWorkspaceRerunHomePrepared(prepared.directory)')
+    expect(source).toContain('requestHomeRunArtifactReset(prepared.directory)')
+    expect(source).toContain('registerAgentRerunWorkspaceInProject(')
+    expect(source).toContain('registerProjectManagedWorkspace({')
+    expect(source).toContain('resolveManagedProjectContext({')
+    expect(source).toContain(
+      "invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])",
+    )
+    expect(source).toContain(
+      "invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])",
+    )
+    expect(source).toContain(
+      "appendToolProgress('Preparing isolated rerun workspace.', ownerSessionId)",
+    )
+    expect(source).toContain(
+      "appendToolProgress('Opening isolated rerun workspace.', ownerSessionId)",
+    )
+    expect(source).toContain(
+      "appendToolProgress('Starting rerun execution.', ownerSessionId)",
+    )
+    expect(source).toContain('finishToolProgress(ownerSessionId)')
     expect(source).toContain('`Rerun failed: ${reason}`')
   })
 
   it('routes live flow progress into the tool timeline instead of plain assistant text', () => {
-    expect(source).toContain('messageStore.appendToolProgress(message)')
+    expect(source).toContain('messageStore.appendToolProgress(message')
     expect(source).toContain('messageStore.finishToolProgress()')
     expect(source).toContain("message.startsWith('Live flow progress is unavailable')")
   })
@@ -140,6 +165,32 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('projectRoot')
     expect(source).toContain('route.query.projectRoot')
     expect(source).toContain('Create another workspace in this project')
+    expect(source).toContain('AgentChatTabStrip')
+    expect(source).toContain('createChatTab')
+    expect(source).toContain('directory: tab.workspacePath')
+  })
+
+  it('prevents replaying stale choice cards after the conversation moves on', () => {
+    expect(source).toContain('messageStore.dismissOpenChoices()')
+    expect(source).toContain('activeChoicePromptId')
+    expect(source).toContain(':choice-interactive="msg.choice?.promptId === activeChoicePromptId"')
+    expect(source).toContain(
+      'if (activeChoicePromptId.value && activeChoicePromptId.value !== promptId) return',
+    )
+  })
+
+  it('shows a quiet pending cue while waiting for the next reply', () => {
+    expect(source).toContain('showPendingPlaceholder')
+    expect(source).toContain('class="agent-pending"')
+    expect(source).toContain('agent-pending__dot')
+    expect(source).not.toContain('Agent is working…')
+    expect(source).not.toContain("'Thinking'")
+  })
+
+  it('defers GUI-driving actions when the owning tab is not active', () => {
+    expect(source).toContain('isActiveGuiOwner')
+    expect(source).toContain('deferGuiAction')
+    expect(source).toContain('GUI_SWITCH_PROMPT')
+    expect(source).toContain('flushPendingGuiActionForActiveTab')
   })
 })
-

@@ -1491,8 +1491,13 @@ export function registerIpc(
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
     const agentRequest = readAgentStartSessionRequest(request)
     const window = BrowserWindow.fromWebContents(event.sender)
-    const directory = window ? workspaceWindowRegistry.getPathForWindow(window) : null
-    if (directory) agentRequest.directory = directory
+    const windowDirectory = window
+      ? workspaceWindowRegistry.getPathForWindow(window)
+      : null
+    // Prefer the tab's frozen workspace directory when provided.
+    if (!agentRequest.directory && windowDirectory) {
+      agentRequest.directory = windowDirectory
+    }
     trackAgentSession(event.sender, agentRequest)
     return await requireAgentRuntime(services).startSession(agentRequest)
   })
@@ -1593,11 +1598,16 @@ function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionR
     typeof record.projectRoot === 'string' && record.projectRoot.trim()
       ? record.projectRoot.trim()
       : undefined
+  const directory =
+    typeof record.directory === 'string' && record.directory.trim()
+      ? record.directory.trim()
+      : undefined
   const knownProjects = readAgentKnownProjects(record.knownProjects)
   return {
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
     mode: mode === 'home' || mode === 'workspace' ? mode : undefined,
+    ...(directory ? { directory } : {}),
     ...(projectRoot ? { projectRoot } : {}),
     ...(knownProjects ? { knownProjects } : {}),
   }

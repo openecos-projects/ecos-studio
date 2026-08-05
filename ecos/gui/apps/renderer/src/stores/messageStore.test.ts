@@ -6,6 +6,18 @@ import { useMessageStore } from './messageStore'
 describe('messageStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    useMessageStore().setActiveSessionId('session-test')
+  })
+
+  it('isolates messages per Agent chat session', () => {
+    const store = useMessageStore()
+    store.addMessage('alpha')
+    store.setActiveSessionId('session-b')
+    store.addMessage('beta')
+
+    expect(store.messages.map((message) => message.content)).toEqual(['beta'])
+    store.setActiveSessionId('session-test')
+    expect(store.messages.map((message) => message.content)).toEqual(['alpha'])
   })
 
   it('clears all in-memory chat messages', () => {
@@ -84,6 +96,37 @@ describe('messageStore', () => {
       answeredOptionId: 'prompt-1-1',
       id: 'choice-message',
       type: 'choice',
+    })
+  })
+
+  it('dismisses prior open choices when a new choice arrives or free-text advances', () => {
+    const store = useMessageStore()
+    const first = {
+      promptId: 'prompt-1',
+      title: 'Choose an operation',
+      options: [{ id: 'prompt-1-1', label: 'Create', value: '1' }],
+      variant: 'list' as const,
+    }
+    const second = {
+      promptId: 'prompt-2',
+      title: 'Choose an operation',
+      options: [{ id: 'prompt-2-1', label: 'Create', value: '1' }],
+      variant: 'list' as const,
+    }
+
+    store.addChoice(first, 'choice-1')
+    store.addChoice(second, 'choice-2')
+
+    expect(store.messages[0]).toMatchObject({
+      answeredOptionId: '__dismissed__',
+      id: 'choice-1',
+    })
+    expect(store.messages[1].answeredOptionId).toBeUndefined()
+
+    store.dismissOpenChoices()
+    expect(store.messages[1]).toMatchObject({
+      answeredOptionId: '__dismissed__',
+      id: 'choice-2',
     })
   })
 

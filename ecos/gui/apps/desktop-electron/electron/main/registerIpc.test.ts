@@ -325,6 +325,21 @@ describe('registerIpc', () => {
       ...session,
       directory: '/runs/other',
     })
+
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: owner },
+      {
+        ...session,
+        sessionId: 'gui-session-frozen',
+        directory: '/runs/frozen-tab',
+      },
+    )
+    expect(agentRuntimeService?.startSession).toHaveBeenCalledWith({
+      ...session,
+      sessionId: 'gui-session-frozen',
+      directory: '/runs/frozen-tab',
+    })
+
     emitAgentEvent?.({
       ...session,
       type: 'workspace_rerun',

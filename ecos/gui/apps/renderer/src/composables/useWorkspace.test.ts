@@ -80,10 +80,19 @@ vi.mock('@/stores/messageStore', () => ({
   }),
 }))
 
+vi.mock('@/stores/agentShellStore', () => ({
+  useAgentShellStore: () => ({
+    shouldPreserveMessages: () => false,
+    consumePreserveMessages: vi.fn(() => false),
+    resetShell: vi.fn(),
+  }),
+}))
+
 vi.mock('./homeRunArtifacts', () => ({
   requestHomeRunArtifactReset: requestHomeRunArtifactResetMock,
   clearHomeRunArtifactResetAwaitingBackendStart:
     clearHomeRunArtifactResetAwaitingBackendStartMock,
+  isAgentWorkspaceRerunHomePrepared: vi.fn(() => false),
 }))
 
 import { useWorkspace } from './useWorkspace'
@@ -499,7 +508,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value).toBeNull()
   })
 
-  it('clears chat messages only after a workspace opens successfully', async () => {
+  it('keeps Agent chat messages when a workspace opens successfully', async () => {
     const workspace = useWorkspace()
     const existingProject: Project = {
       id: '/work/old',
@@ -517,7 +526,7 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(await workspace.openProject(existingProject)).toBe(true)
-    expect(clearMessagesMock).toHaveBeenCalledTimes(1)
+    expect(clearMessagesMock).not.toHaveBeenCalled()
 
     vi.mocked(desktopApi.dialog.pickDirectory).mockResolvedValueOnce('/work/bad')
     loadWorkspaceApiMock.mockResolvedValueOnce({
@@ -527,7 +536,7 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(await workspace.openProject()).toBe(false)
-    expect(clearMessagesMock).toHaveBeenCalledTimes(1)
+    expect(clearMessagesMock).not.toHaveBeenCalled()
 
     vi.mocked(desktopApi.dialog.pickDirectory).mockResolvedValueOnce('/work/new')
     loadWorkspaceApiMock.mockResolvedValueOnce({
@@ -539,10 +548,10 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(await workspace.openProject()).toBe(true)
-    expect(clearMessagesMock).toHaveBeenCalledTimes(2)
+    expect(clearMessagesMock).not.toHaveBeenCalled()
   })
 
-  it('clears chat messages when the workspace closes', async () => {
+  it('keeps Agent chat messages when the workspace closes', async () => {
     const workspace = useWorkspace()
     const project: Project = {
       id: '/work/old',
@@ -563,7 +572,7 @@ describe('useWorkspace openProject', () => {
 
     await workspace.closeProject()
 
-    expect(clearMessagesMock).toHaveBeenCalledTimes(2)
+    expect(clearMessagesMock).not.toHaveBeenCalled()
   })
 
   it('does not let an in-flight project open commit after the workspace closes', async () => {

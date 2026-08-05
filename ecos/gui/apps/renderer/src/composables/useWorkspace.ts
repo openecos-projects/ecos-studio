@@ -30,6 +30,7 @@ import {
 } from '@/api/workspaceResources'
 import {
   clearHomeRunArtifactResetAwaitingBackendStart,
+  isAgentWorkspaceRerunHomePrepared,
   requestHomeRunArtifactReset,
 } from './homeRunArtifacts'
 import {
@@ -502,7 +503,6 @@ export function useWorkspace() {
             ...restored,
             path: canonicalProjectRoot,
           }
-          messageStore.clearMessages()
           await bindWorkspaceWindow(canonicalProjectRoot)
           await updateWindowTitle(restored.name)
           const workspaceId = workspaceHandleFromResponseData(
@@ -724,9 +724,8 @@ export function useWorkspace() {
         workspaceLifecycle.setSessionLoading(activeSession.sessionId)
 
         currentProject.value = loadedProject
-        if (!useAgentShellStore().shouldPreserveMessages()) {
-          messageStore.clearMessages()
-        } else {
+        // Agent chat tabs persist across workspace opens; do not wipe transcripts.
+        if (useAgentShellStore().shouldPreserveMessages()) {
           useAgentShellStore().consumePreserveMessages()
         }
         if (claimedAffinityPath && claimedAffinityPath !== canonicalProjectRoot) {
@@ -1050,9 +1049,7 @@ export function useWorkspace() {
         }
 
         currentProject.value = createdProject
-        if (!useAgentShellStore().shouldPreserveMessages()) {
-          messageStore.clearMessages()
-        } else {
+        if (useAgentShellStore().shouldPreserveMessages()) {
           useAgentShellStore().consumePreserveMessages()
         }
         if (claimedCreatePath && claimedCreatePath !== canonicalProjectRoot) {
@@ -1306,7 +1303,7 @@ export function useWorkspace() {
 
     const closingProjectPath = currentProject.value?.path
     currentProject.value = null
-    messageStore.clearMessages()
+    // Keep Agent tabs/messages when leaving a workspace.
     useAgentShellStore().resetShell()
     disconnectRuntimeEvents()
     workspaceLifecycle.closeSession()
@@ -1352,7 +1349,10 @@ export function useWorkspace() {
             asString(response.data.directory) ??
             currentProject.value?.path ??
             asString(response.data.workspaceId)
-          if (resetProjectPath) {
+          if (
+            resetProjectPath &&
+            !isAgentWorkspaceRerunHomePrepared(resetProjectPath)
+          ) {
             clearHomeRunArtifactResetAwaitingBackendStart(resetProjectPath)
             requestHomeRunArtifactReset(resetProjectPath)
           }

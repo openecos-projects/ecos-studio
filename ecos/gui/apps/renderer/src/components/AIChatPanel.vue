@@ -1,8 +1,20 @@
 <template>
   <div class="agent-chat flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+    <AgentChatTabStrip
+      :tabs="chatTabs"
+      :active-tab-id="agentSessionId"
+      @select="selectChatTab"
+      @close="closeChatTab"
+      @create="createChatTab"
+    >
+      <template v-if="$slots['tab-actions']" #actions>
+        <slot name="tab-actions" />
+      </template>
+    </AgentChatTabStrip>
     <div
       ref="scrollContainerRef"
       class="custom-scrollbar agent-chat__scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3"
+      @scroll.passive="onScrollContainerScroll"
     >
       <div
         v-if="messages.length === 0"
@@ -47,10 +59,25 @@
               v-for="msg in turn.responses"
               :key="msg.id"
               :message="msg"
+              :choice-interactive="msg.choice?.promptId === activeChoicePromptId"
+              :choice-disabled="isRunning"
               @img-load="onImageLoad"
               @choice="handleMessageChoice"
               class="message-item w-full max-w-full min-w-0"
             />
+            <div
+              v-if="
+                turnIndex === conversationTurns.length - 1 && showPendingPlaceholder
+              "
+              class="agent-pending"
+              role="status"
+              aria-live="polite"
+              :aria-label="isInterruptPending ? 'Stopping' : 'Waiting for reply'"
+            >
+              <span class="agent-pending__dot" aria-hidden="true"></span>
+              <span class="agent-pending__dot" aria-hidden="true"></span>
+              <span class="agent-pending__dot" aria-hidden="true"></span>
+            </div>
             <template v-if="turnIndex === conversationTurns.length - 1">
               <AgentWorkspaceSetupPanel
                 :answered-option-id="workspaceSetupAnsweredOptionId"
@@ -171,20 +198,38 @@ import type {
   DesktopAgentChoice,
   DesktopAgentChoiceOption,
   DesktopAgentEvent,
-  DesktopAgentRunStatus,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
+import {
+  createAgentSessionUiState,
+  getAgentSessionUi,
+  GUI_SWITCH_PROMPT,
+  removeAgentSessionUi,
+  type PendingGuiAction,
+} from './agentSessionUi'
+import { choiceSelectionText } from './agentChoiceDisplay'
 import { groupMessagesIntoTurns } from './chatTurns'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { resolveAgentTabContext } from '@/stores/agentTabContext'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
 import { useFlowRunner } from '@/composables/useFlowRunner'
+import {
+  clearAgentWorkspaceRerunHomePrepared,
+  markAgentWorkspaceRerunHomePrepared,
+  requestHomeRunArtifactReset,
+} from '@/composables/homeRunArtifacts'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { loadProjectHistory } from '@/utils/projectHistory'
+import {
+  registerProjectManagedWorkspace,
+  resolveManagedProjectContext,
+} from '@/utils/projectManifestRegistration'
 
 const props = withDefaults(
   defineProps<{
@@ -197,57 +242,133 @@ const AGENT_PROVIDER_ID = 'ecos_agent'
 const messageStore = useMessageStore()
 const agentShell = useAgentShellStore()
 const { messages } = storeToRefs(messageStore)
-const { sessionId: sharedSessionId } = storeToRefs(agentShell)
+const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(agentShell)
 const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 const router = useRouter()
 const route = useRoute()
-const { openProject } = useWorkspace()
+const { openProject, invalidateWorkspaceResources, currentProject } = useWorkspace()
 const { runAllFlow } = useFlowRunner()
-const agentFlowProgress = useAgentFlowProgress((message) => {
-  if (message.startsWith('Live flow progress is unavailable')) {
-    messageStore.addAssistantMessage(message, 'done')
-    return
-  }
-  messageStore.appendToolProgress(message)
-})
+const agentFlowProgress = useAgentFlowProgress(
+  (message) => {
+    const sessionId = agentSessionId.value
+    if (message.startsWith('Live flow progress is unavailable')) {
+      messageStore.addAssistantMessage(message, 'done', sessionId ?? undefined)
+      return
+    }
+    messageStore.appendToolProgress(message, sessionId ?? undefined)
+  },
+  () => {
+    // Keep Step/Analysis/maps in sync with flow.json while Agent rerun runs.
+    invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])
+  },
+)
 
-const inputValue = ref('')
-const queuedMessage = ref('')
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
 const agentSessionId = computed({
   get: () => sharedSessionId.value,
   set: (value: string | null) => agentShell.setSessionId(value),
 })
-const agentRunStatus = ref<DesktopAgentRunStatus>('idle')
-const isAgentConnecting = ref(false)
-const isAgentRequestPending = ref(false)
-const isInterruptPending = ref(false)
-const isWorkspaceCreationPending = ref(false)
-const isWorkspaceRerunPending = ref(false)
-const workspaceSetupContract = ref<DesktopAgentEvent['workspaceSetup']>()
-const workspaceSetupMessage = ref('')
-const workspaceSetupChoice = ref<DesktopAgentChoice>()
-const workspaceSetupAnsweredOptionId = ref('')
-const workspaceCreateSetupId = ref<string>()
-const workspaceRerunContract = ref<NonNullable<DesktopAgentEvent['contract']>>()
-const workspaceRerunMessage = ref('')
-const workspaceRerunChoice = ref<DesktopAgentChoice>()
-const workspaceRerunAnsweredOptionId = ref('')
-const workspaceContinueContract = ref<NonNullable<DesktopAgentEvent['contract']>>()
-const workspaceContinueMessage = ref('')
-const workspaceContinueChoice = ref<DesktopAgentChoice>()
-const workspaceContinueAnsweredOptionId = ref('')
-const isWorkspaceContinuePending = ref(false)
-const workspaceParameterContract = ref<NonNullable<DesktopAgentEvent['contract']>>()
-const workspaceParameterMessage = ref('')
-const workspaceParameterChoice = ref<DesktopAgentChoice>()
-const workspaceParameterAnsweredOptionId = ref('')
-const isWorkspaceParameterPending = ref(false)
-const pendingParameterUpdate = ref<
-  NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>
->()
-const lastContractSurface = ref<'setup' | 'rerun' | 'continue' | 'parameter'>()
+
+function sessionUi(sessionId: string | null | undefined) {
+  if (!sessionId) return createAgentSessionUiState()
+  return getAgentSessionUi(sessionId)
+}
+
+const activeUi = computed(() => sessionUi(agentSessionId.value))
+const inputValue = computed({
+  get: () => activeUi.value.inputValue,
+  set: (value: string) => {
+    activeUi.value.inputValue = value
+  },
+})
+const queuedMessage = computed({
+  get: () => activeUi.value.queuedMessage,
+  set: (value: string) => {
+    activeUi.value.queuedMessage = value
+  },
+})
+const agentRunStatus = computed({
+  get: () => activeUi.value.runStatus,
+  set: (value) => {
+    activeUi.value.runStatus = value
+  },
+})
+const isAgentConnecting = computed({
+  get: () => activeUi.value.isConnecting,
+  set: (value: boolean) => {
+    activeUi.value.isConnecting = value
+  },
+})
+const isAgentRequestPending = computed({
+  get: () => activeUi.value.isRequestPending,
+  set: (value: boolean) => {
+    activeUi.value.isRequestPending = value
+  },
+})
+const isInterruptPending = computed({
+  get: () => activeUi.value.isInterruptPending,
+  set: (value: boolean) => {
+    activeUi.value.isInterruptPending = value
+  },
+})
+const isWorkspaceCreationPending = computed({
+  get: () => activeUi.value.isWorkspaceCreationPending,
+  set: (value: boolean) => {
+    activeUi.value.isWorkspaceCreationPending = value
+  },
+})
+const isWorkspaceRerunPending = computed({
+  get: () => activeUi.value.isWorkspaceRerunPending,
+  set: (value: boolean) => {
+    activeUi.value.isWorkspaceRerunPending = value
+  },
+})
+const isWorkspaceContinuePending = computed({
+  get: () => activeUi.value.isWorkspaceContinuePending,
+  set: (value: boolean) => {
+    activeUi.value.isWorkspaceContinuePending = value
+  },
+})
+const isWorkspaceParameterPending = computed({
+  get: () => activeUi.value.isWorkspaceParameterPending,
+  set: (value: boolean) => {
+    activeUi.value.isWorkspaceParameterPending = value
+  },
+})
+const workspaceSetupContract = computed(() => activeUi.value.workspaceSetupContract)
+const workspaceSetupMessage = computed(() => activeUi.value.workspaceSetupMessage)
+const workspaceSetupChoice = computed(() => activeUi.value.workspaceSetupChoice)
+const workspaceSetupAnsweredOptionId = computed(
+  () => activeUi.value.workspaceSetupAnsweredOptionId,
+)
+const workspaceCreateSetupId = computed({
+  get: () => activeUi.value.workspaceCreateSetupId,
+  set: (value: string | undefined) => {
+    activeUi.value.workspaceCreateSetupId = value
+  },
+})
+const workspaceRerunContract = computed(() => activeUi.value.workspaceRerunContract)
+const workspaceRerunMessage = computed(() => activeUi.value.workspaceRerunMessage)
+const workspaceRerunChoice = computed(() => activeUi.value.workspaceRerunChoice)
+const workspaceRerunAnsweredOptionId = computed(
+  () => activeUi.value.workspaceRerunAnsweredOptionId,
+)
+const workspaceContinueContract = computed(() => activeUi.value.workspaceContinueContract)
+const workspaceContinueMessage = computed(() => activeUi.value.workspaceContinueMessage)
+const workspaceContinueChoice = computed(() => activeUi.value.workspaceContinueChoice)
+const workspaceContinueAnsweredOptionId = computed(
+  () => activeUi.value.workspaceContinueAnsweredOptionId,
+)
+const workspaceParameterContract = computed(
+  () => activeUi.value.workspaceParameterContract,
+)
+const workspaceParameterMessage = computed(() => activeUi.value.workspaceParameterMessage)
+const workspaceParameterChoice = computed(() => activeUi.value.workspaceParameterChoice)
+const workspaceParameterAnsweredOptionId = computed(
+  () => activeUi.value.workspaceParameterAnsweredOptionId,
+)
+const lastContractSurface = computed(() => activeUi.value.lastContractSurface)
 const workspaceRerunRows = computed<[string, string][]>(
   () =>
     workspaceRerunContract.value?.fields.map(({ label, value }) => [label, value]) ?? [],
@@ -298,6 +419,7 @@ const pendingMessageChoice = computed(
       .reverse()
       .find((message) => message.choice && !message.answeredOptionId)?.choice,
 )
+const activeChoicePromptId = computed(() => pendingMessageChoice.value?.promptId)
 const activeChoice = computed(
   () =>
     (lastContractSurface.value === 'setup' && !workspaceSetupAnsweredOptionId.value
@@ -346,8 +468,16 @@ const statusLabel = computed(() => {
   if (!agentSessionId.value) return 'Agent unavailable'
   return 'Ready'
 })
+/** Quiet waiting cue (no "thinking" copy) until the first reply lands. */
+const showPendingPlaceholder = computed(() => {
+  if (!isRunning.value) return false
+  const last = conversationTurns.value.at(-1)
+  if (!last?.user) return false
+  return last.responses.length === 0
+})
 const emptyStateSuggestions = computed(() => {
-  if (props.shell === 'home') {
+  const tabMode = activeTab.value?.mode ?? (props.shell === 'home' ? 'home' : 'workspace')
+  if (tabMode === 'home') {
     return [
       {
         label: 'Create a Workspace under a Project and run full RTL-to-GDS flow',
@@ -360,7 +490,9 @@ const emptyStateSuggestions = computed(() => {
     { label: 'Rerun a completed stage', value: '2' },
     { label: 'Continue unfinished flow', value: '3' },
   ]
-  if (queryString(route.query.projectRoot)) {
+  const projectRoot =
+    activeTab.value?.projectRoot || queryString(route.query.projectRoot)
+  if (projectRoot) {
     suggestions.push({
       label: 'Create another workspace in this project',
       value: '4',
@@ -374,6 +506,7 @@ let postCreateFlowRunning = false
 onMounted(() => {
   void connectAgent().then(() => {
     void maybeRunPostCreateFlow()
+    void flushPendingGuiActionForActiveTab()
   })
 })
 
@@ -381,7 +514,37 @@ onUnmounted(() => {
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = undefined
   agentFlowProgress.stop()
+  scrollContentObserver?.disconnect()
+  scrollContentObserver = undefined
 })
+
+watch(
+  () => agentSessionId.value,
+  (sessionId) => {
+    messageStore.setActiveSessionId(sessionId)
+    if (sessionId) void flushPendingGuiActionForActiveTab()
+  },
+  { immediate: true },
+)
+
+function currentTabContext() {
+  const workspacePath = currentProject.value?.path
+  return resolveAgentTabContext({
+    shell: props.shell === 'home' ? 'home' : 'workspace',
+    currentWorkspacePath: workspacePath,
+    currentWorkspaceName: currentProject.value?.name ?? baseName(workspacePath),
+    currentProjectRoot: queryString(route.query.projectRoot) || undefined,
+    routeProjectRoot: queryString(route.query.projectRoot) || undefined,
+    step: typeof route.params.step === 'string' ? route.params.step : undefined,
+  })
+}
+
+function baseName(path: string | undefined): string | undefined {
+  if (!path) return undefined
+  const trimmed = path.replace(/[\\/]+$/, '')
+  const parts = trimmed.split(/[\\/]/)
+  return parts[parts.length - 1] || trimmed
+}
 
 async function connectAgent(): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
@@ -390,39 +553,112 @@ async function connectAgent(): Promise<void> {
 
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = agent.onEvent(handleAgentEvent)
+  agentShell.setMode(props.shell === 'home' ? 'home' : 'workspace')
 
-  const existingSessionId = agentSessionId.value
-  if (existingSessionId) {
-    agentShell.setMode(props.shell === 'home' ? 'home' : 'workspace')
+  if (agentShell.tabs.length === 0) {
+    await createChatTab()
     return
   }
 
-  const sessionId = crypto.randomUUID()
-  agentSessionId.value = sessionId
-  agentShell.setMode(props.shell === 'home' ? 'home' : 'workspace')
-  isAgentConnecting.value = true
+  const active = agentShell.activeTab
+  if (active && !active.started) {
+    await startProviderSession(active.id)
+  }
+}
 
+async function createChatTab(): Promise<void> {
+  const tab = agentShell.createTab(currentTabContext())
+  messageStore.setActiveSessionId(tab.id)
+  sessionUi(tab.id)
+  await startProviderSession(tab.id)
+}
+
+function selectChatTab(id: string): void {
+  if (!agentShell.activateTab(id)) return
+  messageStore.setActiveSessionId(id)
+}
+
+async function closeChatTab(id: string): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  if (agent) {
+    try {
+      await agent.interrupt({ providerId: AGENT_PROVIDER_ID, sessionId: id })
+    } catch {
+      // Closing should still proceed if the provider session is already gone.
+    }
+  }
+  agentShell.removeTab(id)
+  messageStore.clearSessionMessages(id)
+  removeAgentSessionUi(id)
+  if (agentShell.tabs.length === 0) {
+    await createChatTab()
+    return
+  }
+  const nextId = agentShell.activeTabId
+  messageStore.setActiveSessionId(nextId)
+  if (nextId) {
+    const next = agentShell.tabs.find((tab) => tab.id === nextId)
+    if (next && !next.started) await startProviderSession(nextId)
+  }
+}
+
+async function startProviderSession(sessionId: string): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
+  const tab = agentShell.tabs.find((candidate) => candidate.id === sessionId)
+  if (!agent || !tab) return
+
+  const ui = sessionUi(sessionId)
+  ui.isConnecting = true
   try {
     await agent.start({ providerId: AGENT_PROVIDER_ID })
     const knownProjects = (await loadProjectHistory()).map((project) => ({
       name: project.name,
       path: project.path,
     }))
-    const projectRoot = queryString(route.query.projectRoot)
     await agent.startSession({
       providerId: AGENT_PROVIDER_ID,
       sessionId,
-      mode: props.shell === 'home' ? 'home' : 'workspace',
-      ...(projectRoot ? { projectRoot } : {}),
+      mode: tab.mode,
+      ...(tab.projectRoot ? { projectRoot: tab.projectRoot } : {}),
+      ...(tab.workspacePath ? { directory: tab.workspacePath } : {}),
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
     })
+    agentShell.markTabStarted(sessionId)
   } catch (error) {
-    agentRunStatus.value = 'error'
-    agentSessionId.value = null
-    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+    ui.runStatus = 'error'
+    messageStore.setActiveSessionId(sessionId)
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
   } finally {
-    isAgentConnecting.value = false
+    ui.isConnecting = false
   }
+}
+
+function isActiveGuiOwner(sessionId: string): boolean {
+  return agentShell.activeTabId === sessionId
+}
+
+function deferGuiAction(sessionId: string, action: PendingGuiAction): void {
+  sessionUi(sessionId).pendingGuiAction = action
+  messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done', sessionId)
+}
+
+async function flushPendingGuiActionForActiveTab(): Promise<void> {
+  const sessionId = agentSessionId.value
+  if (!sessionId) return
+  const ui = sessionUi(sessionId)
+  const pending = ui.pendingGuiAction
+  if (!pending) return
+  ui.pendingGuiAction = undefined
+  if (pending.type === 'rerun') {
+    await executeWorkspaceRerun(pending.contract, pending.token, sessionId)
+    return
+  }
+  if (pending.type === 'continue') {
+    await executeWorkspaceContinue(pending.payload, sessionId)
+    return
+  }
+  await executeWorkspaceParameterUpdate(pending.payload, sessionId)
 }
 
 async function maybeRunPostCreateFlow(): Promise<void> {
@@ -457,85 +693,97 @@ async function maybeRunPostCreateFlow(): Promise<void> {
 }
 
 function handleAgentEvent(event: DesktopAgentEvent): void {
-  if (
-    event.providerId !== AGENT_PROVIDER_ID ||
-    event.sessionId !== agentSessionId.value
-  ) {
-    return
-  }
+  if (event.providerId !== AGENT_PROVIDER_ID || !event.sessionId) return
+  if (!agentShell.tabs.some((tab) => tab.id === event.sessionId)) return
+
+  const ui = sessionUi(event.sessionId)
+  const isActive = isActiveGuiOwner(event.sessionId)
 
   if (event.type === 'status') {
-    if (event.status) agentRunStatus.value = event.status
-    if (event.status !== 'running') messageStore.finishStreamingMessages()
+    if (event.status) ui.runStatus = event.status
+    if (event.status !== 'running') {
+      messageStore.finishStreamingMessages(event.sessionId)
+    }
     return
   }
 
   if (event.type === 'contract' && event.contract) {
     if (event.contract.presentation === 'workspace_rerun') {
-      workspaceRerunContract.value = event.contract
-      workspaceRerunMessage.value = event.text ?? ''
-      workspaceRerunChoice.value = undefined
-      workspaceRerunAnsweredOptionId.value = ''
-      lastContractSurface.value = 'rerun'
-      scrollWorkspaceSetupIntoView()
+      ui.workspaceRerunContract = event.contract
+      ui.workspaceRerunMessage = event.text ?? ''
+      ui.workspaceRerunChoice = undefined
+      ui.workspaceRerunAnsweredOptionId = ''
+      ui.lastContractSurface = 'rerun'
+      if (isActive) scrollWorkspaceSetupIntoView()
       return
     }
     if (event.contract.presentation === 'workspace_continue') {
-      workspaceContinueContract.value = event.contract
-      workspaceContinueMessage.value = event.text ?? ''
-      workspaceContinueChoice.value = undefined
-      workspaceContinueAnsweredOptionId.value = ''
-      lastContractSurface.value = 'continue'
-      scrollWorkspaceSetupIntoView()
+      ui.workspaceContinueContract = event.contract
+      ui.workspaceContinueMessage = event.text ?? ''
+      ui.workspaceContinueChoice = undefined
+      ui.workspaceContinueAnsweredOptionId = ''
+      ui.lastContractSurface = 'continue'
+      if (isActive) scrollWorkspaceSetupIntoView()
       return
     }
     if (event.contract.presentation === 'workspace_parameter_update') {
-      workspaceParameterContract.value = event.contract
-      workspaceParameterMessage.value = event.text ?? ''
-      workspaceParameterChoice.value = undefined
-      workspaceParameterAnsweredOptionId.value = ''
-      lastContractSurface.value = 'parameter'
-      scrollWorkspaceSetupIntoView()
+      ui.workspaceParameterContract = event.contract
+      ui.workspaceParameterMessage = event.text ?? ''
+      ui.workspaceParameterChoice = undefined
+      ui.workspaceParameterAnsweredOptionId = ''
+      ui.lastContractSurface = 'parameter'
+      if (isActive) scrollWorkspaceSetupIntoView()
       return
     }
-    messageStore.addExecutionContract(event.contract)
+    messageStore.addExecutionContract(event.contract, event.sessionId)
     return
   }
   if (event.type === 'workspace_setup' && event.workspaceSetup) {
-    workspaceSetupContract.value = event.workspaceSetup
-    workspaceSetupMessage.value = event.text ?? ''
-    workspaceSetupChoice.value = undefined
-    workspaceSetupAnsweredOptionId.value = ''
-    lastContractSurface.value = 'setup'
-    scrollWorkspaceSetupIntoView()
+    ui.workspaceSetupContract = event.workspaceSetup
+    ui.workspaceSetupMessage = event.text ?? ''
+    ui.workspaceSetupChoice = undefined
+    ui.workspaceSetupAnsweredOptionId = ''
+    ui.lastContractSurface = 'setup'
+    if (isActive) scrollWorkspaceSetupIntoView()
     return
   }
   if (event.type === 'choice' && event.choice) {
-    if (event.choice.variant === 'buttons' && lastContractSurface.value === 'setup') {
-      workspaceSetupChoice.value = event.choice
+    if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'setup') {
+      ui.workspaceSetupChoice = event.choice
+      ui.workspaceSetupAnsweredOptionId = ''
     } else if (
       event.choice.variant === 'buttons' &&
-      lastContractSurface.value === 'rerun'
+      ui.lastContractSurface === 'rerun'
     ) {
-      workspaceRerunChoice.value = event.choice
+      ui.workspaceRerunChoice = event.choice
+      ui.workspaceRerunAnsweredOptionId = ''
     } else if (
       event.choice.variant === 'buttons' &&
-      lastContractSurface.value === 'continue'
+      ui.lastContractSurface === 'continue'
     ) {
-      workspaceContinueChoice.value = event.choice
+      ui.workspaceContinueChoice = event.choice
+      ui.workspaceContinueAnsweredOptionId = ''
     } else if (
       event.choice.variant === 'buttons' &&
-      lastContractSurface.value === 'parameter'
+      ui.lastContractSurface === 'parameter'
     ) {
-      workspaceParameterChoice.value = event.choice
+      ui.workspaceParameterChoice = event.choice
+      ui.workspaceParameterAnsweredOptionId = ''
     } else {
-      messageStore.addChoice(event.choice, event.messageId)
+      if (event.choice.variant === 'list') {
+        ui.lastContractSurface = undefined
+        ui.workspaceSetupChoice = undefined
+        ui.workspaceRerunChoice = undefined
+        ui.workspaceContinueChoice = undefined
+        ui.workspaceParameterChoice = undefined
+      }
+      messageStore.addChoice(event.choice, event.messageId, event.sessionId)
     }
-    scrollWorkspaceSetupIntoView()
+    if (isActive) scrollWorkspaceSetupIntoView()
     return
   }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
-    workspaceCreateSetupId.value = event.workspaceCreateSetupId
+    ui.workspaceCreateSetupId = event.workspaceCreateSetupId
     return
   }
   if (
@@ -543,31 +791,63 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     event.workspaceRerun &&
     event.workspaceRerunToken
   ) {
-    scrollWorkspaceSetupIntoView()
+    if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`,
       'done',
+      event.sessionId,
     )
-    void executeWorkspaceRerun(event.workspaceRerun, event.workspaceRerunToken)
+    if (!isActive) {
+      deferGuiAction(event.sessionId, {
+        type: 'rerun',
+        contract: event.workspaceRerun,
+        token: event.workspaceRerunToken,
+      })
+      return
+    }
+    void executeWorkspaceRerun(
+      event.workspaceRerun,
+      event.workspaceRerunToken,
+      event.sessionId,
+    )
     return
   }
   if (event.type === 'workspace_continue' && event.workspaceContinue) {
-    scrollWorkspaceSetupIntoView()
+    if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? 'Continuing unfinished flow.',
       'done',
+      event.sessionId,
     )
-    void executeWorkspaceContinue(event.workspaceContinue)
+    if (!isActive) {
+      deferGuiAction(event.sessionId, {
+        type: 'continue',
+        payload: event.workspaceContinue,
+      })
+      return
+    }
+    void executeWorkspaceContinue(event.workspaceContinue, event.sessionId)
     return
   }
   if (event.type === 'workspace_parameter_update' && event.workspaceParameterUpdate) {
-    pendingParameterUpdate.value = event.workspaceParameterUpdate
-    scrollWorkspaceSetupIntoView()
+    ui.pendingParameterUpdate = event.workspaceParameterUpdate
+    if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? 'Saving workspace parameter changes.',
       'done',
+      event.sessionId,
     )
-    void executeWorkspaceParameterUpdate(event.workspaceParameterUpdate)
+    if (!isActive) {
+      deferGuiAction(event.sessionId, {
+        type: 'parameter',
+        payload: event.workspaceParameterUpdate,
+      })
+      return
+    }
+    void executeWorkspaceParameterUpdate(
+      event.workspaceParameterUpdate,
+      event.sessionId,
+    )
     return
   }
   if (event.type === 'error') {
@@ -589,13 +869,15 @@ function agentErrorMessage(error: unknown): string {
 }
 
 function scrollWorkspaceSetupIntoView(): void {
-  nextTick(() => {
-    requestAnimationFrame(() => scrollToBottom(false))
-  })
+  stickToBottom.value = true
+  scrollToBottomIfNeeded(true, false)
 }
 
-// Near-bottom 阈值（像素）
-const NEAR_BOTTOM_THRESHOLD = 32
+// Near-bottom 阈值（像素）；略放宽以兼容 sticky 用户气泡
+const NEAR_BOTTOM_THRESHOLD = 80
+/** Whether the viewport was pinned to the latest output before content grew. */
+const stickToBottom = ref(true)
+let scrollContentObserver: ResizeObserver | undefined
 
 /**
  * 判断当前滚动位置是否接近底部
@@ -604,6 +886,10 @@ const isNearBottom = (): boolean => {
   const el = scrollContainerRef.value
   if (!el) return true
   return el.scrollHeight - (el.scrollTop + el.clientHeight) <= NEAR_BOTTOM_THRESHOLD
+}
+
+function onScrollContainerScroll(): void {
+  stickToBottom.value = isNearBottom()
 }
 
 /**
@@ -621,27 +907,40 @@ const scrollToBottom = (smooth = true) => {
   } else {
     el.scrollTop = el.scrollHeight
   }
+  stickToBottom.value = true
 }
 
 /** 从 Inspector 切回 Chat 时：KeepAlive 激活，强制滚到底（避免停在中间位置） */
 onActivated(() => {
-  nextTick(() => {
-    requestAnimationFrame(() => {
-      scrollToBottom(false)
-    })
-  })
+  stickToBottom.value = true
+  scrollToBottomIfNeeded(true, false)
 })
 
 /**
- * 智能滚动到底部
- * @param force 是否强制滚动（忽略 near-bottom 判定）
+ * 智能滚动到底部。
+ * 内容增高后 isNearBottom() 会失真，因此依赖 scroll 时维护的 stickToBottom。
  */
-const scrollToBottomIfNeeded = (force = false) => {
+const scrollToBottomIfNeeded = (force = false, smooth = false) => {
   nextTick(() => {
-    if (force || isNearBottom()) {
-      scrollToBottom()
+    requestAnimationFrame(() => {
+      if (force || stickToBottom.value) {
+        scrollToBottom(smooth)
+      }
+    })
+  })
+}
+
+function bindScrollContentObserver(): void {
+  scrollContentObserver?.disconnect()
+  const root = scrollContainerRef.value
+  const content = root?.querySelector('.messages-container')
+  if (!root || !content || typeof ResizeObserver === 'undefined') return
+  scrollContentObserver = new ResizeObserver(() => {
+    if (stickToBottom.value) {
+      scrollToBottom(false)
     }
   })
+  scrollContentObserver.observe(content)
 }
 
 /**
@@ -649,22 +948,34 @@ const scrollToBottomIfNeeded = (force = false) => {
  * 图片加载后高度变化，需要重新滚动到底部
  */
 const onImageLoad = () => {
-  // 使用 requestAnimationFrame 确保在渲染完成后滚动
-  requestAnimationFrame(() => {
-    if (isNearBottom()) {
-      scrollToBottom()
-    }
-  })
+  scrollToBottomIfNeeded(false, false)
 }
 
-// 监听消息变化，自动滚动到底部
+// 新消息、流式/tool 进度追加（length 不变）时贴底滚动
 watch(
-  () => messages.value.length,
-  (newLength, oldLength) => {
-    // 新消息到来时强制滚动到底部；删除消息时保持用户当前浏览位置
-    if (newLength > oldLength) {
-      scrollToBottomIfNeeded(true)
+  () => {
+    const list = messages.value
+    const last = list.at(-1)
+    return [
+      list.length,
+      last?.id ?? '',
+      last?.content.length ?? 0,
+      last?.status ?? '',
+      last?.type ?? '',
+    ].join(':')
+  },
+  (signature, previous) => {
+    if (!previous) {
+      bindScrollContentObserver()
+      scrollToBottomIfNeeded(true, false)
+      return
     }
+    const [nextLength = '0'] = signature.split(':')
+    const [prevLength = '0'] = previous.split(':')
+    const force = Number(nextLength) > Number(prevLength)
+    if (Number(nextLength) < Number(prevLength)) return
+    bindScrollContentObserver()
+    scrollToBottomIfNeeded(force, false)
   },
 )
 
@@ -685,6 +996,8 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isAgentRequestPending.value) return
 
+  // Any outbound user turn closes leftover choice cards so history cannot be replayed.
+  messageStore.dismissOpenChoices()
   if (addToHistory && message) messageStore.addMessage(message)
   inputValue.value = ''
   isAgentRequestPending.value = true
@@ -703,6 +1016,8 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
 }
 
 function handleMessageChoice(promptId: string, option: DesktopAgentChoiceOption): void {
+  if (isRunning.value) return
+  if (activeChoicePromptId.value && activeChoicePromptId.value !== promptId) return
   const message = messages.value.find(
     (candidate) => candidate.choice?.promptId === promptId,
   )
@@ -712,31 +1027,47 @@ function handleMessageChoice(promptId: string, option: DesktopAgentChoiceOption)
 }
 
 function handleWorkspaceSetupChoice(option: DesktopAgentChoiceOption): void {
-  if (workspaceSetupAnsweredOptionId.value) return
-  workspaceSetupAnsweredOptionId.value = option.id
+  if (activeUi.value.workspaceSetupAnsweredOptionId) return
+  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
+    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
+    return
+  }
+  activeUi.value.workspaceSetupAnsweredOptionId = option.id
   void submitChoice(option)
 }
 
 function handleWorkspaceRerunChoice(option: DesktopAgentChoiceOption): void {
-  if (workspaceRerunAnsweredOptionId.value) return
-  workspaceRerunAnsweredOptionId.value = option.id
+  if (activeUi.value.workspaceRerunAnsweredOptionId) return
+  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
+    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
+    return
+  }
+  activeUi.value.workspaceRerunAnsweredOptionId = option.id
   void submitChoice(option)
 }
 
 function handleWorkspaceContinueChoice(option: DesktopAgentChoiceOption): void {
-  if (workspaceContinueAnsweredOptionId.value) return
-  workspaceContinueAnsweredOptionId.value = option.id
+  if (activeUi.value.workspaceContinueAnsweredOptionId) return
+  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
+    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
+    return
+  }
+  activeUi.value.workspaceContinueAnsweredOptionId = option.id
   void submitChoice(option)
 }
 
 function handleWorkspaceParameterChoice(option: DesktopAgentChoiceOption): void {
-  if (workspaceParameterAnsweredOptionId.value) return
-  workspaceParameterAnsweredOptionId.value = option.id
+  if (activeUi.value.workspaceParameterAnsweredOptionId) return
+  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
+    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
+    return
+  }
+  activeUi.value.workspaceParameterAnsweredOptionId = option.id
   void submitChoice(option)
 }
 
 async function submitChoice(option: DesktopAgentChoiceOption): Promise<void> {
-  messageStore.addMessage(option.label)
+  messageStore.addMessage(choiceSelectionText(option))
   await sendAgentMessage(option.value, false)
 }
 
@@ -778,6 +1109,11 @@ async function createWorkspaceFromAgent(
   config: import('@/types').WorkspaceConfig,
   contract: import('@ecos-studio/shared').DesktopAgentWorkspaceSetupContract,
 ): Promise<void> {
+  const ownerSessionId = agentSessionId.value
+  if (!ownerSessionId || !isActiveGuiOwner(ownerSessionId)) {
+    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done', ownerSessionId ?? undefined)
+    return
+  }
   if (!createAgentWorkspace || isWorkspaceCreationPending.value) return
   isWorkspaceCreationPending.value = true
   try {
@@ -819,13 +1155,15 @@ async function reportWorkspaceCreationResult(
     providerId: AGENT_PROVIDER_ID,
     sessionId,
   })
-  messageStore.finishStreamingMessages()
+  messageStore.finishStreamingMessages(sessionId)
 }
 
 async function executeWorkspaceRerun(
   contract: NonNullable<DesktopAgentEvent['workspaceRerun']>,
   token: string,
+  ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
+  const ui = sessionUi(ownerSessionId)
   const desktopApi = getOptionalDesktopApi()
   const prepareRerun = desktopApi?.workspace.prepareFlowAgentRerun
   const executeRerun = desktopApi?.workspace.executeFlowAgentRerun
@@ -833,20 +1171,38 @@ async function executeWorkspaceRerun(
     messageStore.addAssistantMessage(
       'Rerun is unavailable in this desktop session.',
       'error',
+      ownerSessionId,
     )
     return
   }
-  if (isWorkspaceRerunPending.value) {
-    messageStore.addAssistantMessage('A rerun is already in progress.', 'error')
+  if (!isActiveGuiOwner(ownerSessionId)) {
+    deferGuiAction(ownerSessionId, { type: 'rerun', contract, token })
     return
   }
-  isWorkspaceRerunPending.value = true
+  if (ui.isWorkspaceRerunPending) {
+    messageStore.addAssistantMessage(
+      'A rerun is already in progress.',
+      'error',
+      ownerSessionId,
+    )
+    return
+  }
+  ui.isWorkspaceRerunPending = true
+  messageStore.setActiveSessionId(ownerSessionId)
+  let preparedDirectory = ''
   try {
     await desktopApi.workspace.bindWindow(contract.source_workspace)
-    messageStore.appendToolProgress('Preparing isolated rerun workspace.')
+    messageStore.appendToolProgress('Preparing isolated rerun workspace.', ownerSessionId)
     const prepared = await prepareRerun({ token })
-    messageStore.appendToolProgress('Opening isolated rerun workspace.')
+    preparedDirectory = prepared.directory
+    if (!isActiveGuiOwner(ownerSessionId)) {
+      deferGuiAction(ownerSessionId, { type: 'rerun', contract, token })
+      return
+    }
+    messageStore.appendToolProgress('Opening isolated rerun workspace.', ownerSessionId)
     agentShell.beginPreserveForAgentWorkspaceSwitch()
+    markAgentWorkspaceRerunHomePrepared(prepared.directory)
+    requestHomeRunArtifactReset(prepared.directory)
     const opened = await openProject({
       id: prepared.directory,
       lastOpened: new Date(),
@@ -855,68 +1211,143 @@ async function executeWorkspaceRerun(
     })
     if (!opened) throw new Error('The rerun workspace could not be opened.')
     await desktopApi.workspace.bindWindow(prepared.directory)
+    await registerAgentRerunWorkspaceInProject(
+      contract,
+      prepared.directory,
+      ownerSessionId,
+    )
     agentShell.expandWorkspaceChat()
     await router.push({ name: ':step', params: { step: contract.target_step } })
+    // Invalidate after navigation so Step views mounted on the target route reload
+    // (same-step push is a no-op for route watchers).
+    await nextTick()
+    invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
     await agentFlowProgress.start(prepared.directory)
-    messageStore.appendToolProgress('Starting rerun execution.')
+    messageStore.appendToolProgress('Starting rerun execution.', ownerSessionId)
     await executeRerun({ token: prepared.executionToken })
-    messageStore.appendToolProgress(`Rerun ${contract.rerun_id} completed.`)
-    await reportWorkspaceRerunResult(contract.rerun_id, 'succeeded', '')
+    invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
+    messageStore.appendToolProgress(
+      `Rerun ${contract.rerun_id} completed.`,
+      ownerSessionId,
+    )
+    await reportWorkspaceRerunResult(contract.rerun_id, 'succeeded', '', ownerSessionId)
   } catch (error) {
     const reason = agentErrorMessage(error)
-    messageStore.addAssistantMessage(`Rerun failed: ${reason}`, 'error')
+    messageStore.addAssistantMessage(`Rerun failed: ${reason}`, 'error', ownerSessionId)
     try {
-      await reportWorkspaceRerunResult(contract.rerun_id, 'failed', reason)
+      await reportWorkspaceRerunResult(contract.rerun_id, 'failed', reason, ownerSessionId)
     } catch {
-      messageStore.addAssistantMessage(reason, 'error')
+      messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
     }
   } finally {
+    if (preparedDirectory) {
+      clearAgentWorkspaceRerunHomePrepared(preparedDirectory)
+    }
     agentFlowProgress.stop()
-    messageStore.finishToolProgress()
-    isWorkspaceRerunPending.value = false
+    messageStore.finishToolProgress(ownerSessionId)
+    ui.isWorkspaceRerunPending = false
   }
+}
+
+async function registerAgentRerunWorkspaceInProject(
+  contract: NonNullable<DesktopAgentEvent['workspaceRerun']>,
+  workspacePath: string,
+  ownerSessionId: string,
+): Promise<void> {
+  const ownerTab = agentShell.tabs.find((tab) => tab.id === ownerSessionId)
+  const projectContext = await resolveManagedProjectContext({
+    preferred: {
+      projectRoot:
+        ownerTab?.projectRoot ||
+        activeTab.value?.projectRoot ||
+        queryString(route.query.projectRoot) ||
+        '',
+      projectName:
+        ownerTab?.projectName ||
+        activeTab.value?.projectName ||
+        undefined,
+    },
+    workspacePath: contract.source_workspace,
+  })
+  if (!projectContext) return
+
+  await registerProjectManagedWorkspace({
+    workspacePath,
+    projectContext,
+    routeQuery: {
+      sourceWorkspace: baseName(contract.source_workspace),
+      sourceStep: contract.target_step,
+      sourceOutputPath: contract.source_stage_artifact,
+      startStep: contract.target_step,
+      endStep: contract.end_step,
+    },
+    onWarning: (summary, detail) => {
+      messageStore.addAssistantMessage(`${summary}: ${detail}`, 'done', ownerSessionId)
+    },
+  })
 }
 
 async function reportWorkspaceRerunResult(
   rerunId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
-  const sessionId = agentSessionId.value
-  if (!agent || !sessionId) throw new Error('ECOS Agent session is unavailable.')
+  if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_rerun_result:${JSON.stringify({ rerun_id: rerunId, status, error })}`,
     providerId: AGENT_PROVIDER_ID,
-    sessionId,
+    sessionId: ownerSessionId,
   })
-  messageStore.finishStreamingMessages()
+  messageStore.finishStreamingMessages(ownerSessionId)
 }
 
 async function executeWorkspaceContinue(
   contract: NonNullable<DesktopAgentEvent['workspaceContinue']>,
+  ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  if (isWorkspaceContinuePending.value) return
-  isWorkspaceContinuePending.value = true
+  const ui = sessionUi(ownerSessionId)
+  if (!isActiveGuiOwner(ownerSessionId)) {
+    deferGuiAction(ownerSessionId, { type: 'continue', payload: contract })
+    return
+  }
+  if (ui.isWorkspaceContinuePending) return
+  ui.isWorkspaceContinuePending = true
+  messageStore.setActiveSessionId(ownerSessionId)
   try {
     await agentFlowProgress.start(contract.workspace)
     const flowResult = await runAllFlow({ rerun: false })
     if (flowResult === null) {
       throw new Error('Flow execution did not complete successfully.')
     }
-    await reportWorkspaceContinueResult(contract.continue_id, 'succeeded', '')
+    await reportWorkspaceContinueResult(
+      contract.continue_id,
+      'succeeded',
+      '',
+      ownerSessionId,
+    )
   } catch (error) {
     const reason = agentErrorMessage(error)
-    messageStore.addAssistantMessage(`Continue failed: ${reason}`, 'error')
+    messageStore.addAssistantMessage(
+      `Continue failed: ${reason}`,
+      'error',
+      ownerSessionId,
+    )
     try {
-      await reportWorkspaceContinueResult(contract.continue_id, 'failed', reason)
+      await reportWorkspaceContinueResult(
+        contract.continue_id,
+        'failed',
+        reason,
+        ownerSessionId,
+      )
     } catch {
-      messageStore.addAssistantMessage(reason, 'error')
+      messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
     }
   } finally {
     agentFlowProgress.stop()
-    messageStore.finishToolProgress()
-    isWorkspaceContinuePending.value = false
+    messageStore.finishToolProgress(ownerSessionId)
+    ui.isWorkspaceContinuePending = false
   }
 }
 
@@ -924,23 +1355,30 @@ async function reportWorkspaceContinueResult(
   continueId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
-  const sessionId = agentSessionId.value
-  if (!agent || !sessionId) throw new Error('ECOS Agent session is unavailable.')
+  if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_continue_result:${JSON.stringify({ continue_id: continueId, status, error })}`,
     providerId: AGENT_PROVIDER_ID,
-    sessionId,
+    sessionId: ownerSessionId,
   })
-  messageStore.finishStreamingMessages()
+  messageStore.finishStreamingMessages(ownerSessionId)
 }
 
 async function executeWorkspaceParameterUpdate(
   contract: NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>,
+  ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  if (isWorkspaceParameterPending.value) return
-  isWorkspaceParameterPending.value = true
+  const ui = sessionUi(ownerSessionId)
+  if (!isActiveGuiOwner(ownerSessionId)) {
+    deferGuiAction(ownerSessionId, { type: 'parameter', payload: contract })
+    return
+  }
+  if (ui.isWorkspaceParameterPending) return
+  ui.isWorkspaceParameterPending = true
+  messageStore.setActiveSessionId(ownerSessionId)
   try {
     const desktopApi = getOptionalDesktopApi()
     if (!desktopApi) throw new Error('Desktop API is unavailable.')
@@ -952,18 +1390,32 @@ async function executeWorkspaceParameterUpdate(
       parametersPath,
       `${JSON.stringify(parameters, null, 2)}\n`,
     )
-    await reportWorkspaceParameterUpdateResult(contract.update_id, 'succeeded', '')
+    await reportWorkspaceParameterUpdateResult(
+      contract.update_id,
+      'succeeded',
+      '',
+      ownerSessionId,
+    )
   } catch (error) {
     const reason = agentErrorMessage(error)
-    messageStore.addAssistantMessage(`Parameter update failed: ${reason}`, 'error')
+    messageStore.addAssistantMessage(
+      `Parameter update failed: ${reason}`,
+      'error',
+      ownerSessionId,
+    )
     try {
-      await reportWorkspaceParameterUpdateResult(contract.update_id, 'failed', reason)
+      await reportWorkspaceParameterUpdateResult(
+        contract.update_id,
+        'failed',
+        reason,
+        ownerSessionId,
+      )
     } catch {
-      messageStore.addAssistantMessage(reason, 'error')
+      messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
     }
   } finally {
-    isWorkspaceParameterPending.value = false
-    pendingParameterUpdate.value = undefined
+    ui.isWorkspaceParameterPending = false
+    ui.pendingParameterUpdate = undefined
   }
 }
 
@@ -971,16 +1423,16 @@ async function reportWorkspaceParameterUpdateResult(
   updateId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
-  const sessionId = agentSessionId.value
-  if (!agent || !sessionId) throw new Error('ECOS Agent session is unavailable.')
+  if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_parameter_update_result:${JSON.stringify({ update_id: updateId, status, error })}`,
     providerId: AGENT_PROVIDER_ID,
-    sessionId,
+    sessionId: ownerSessionId,
   })
-  messageStore.finishStreamingMessages()
+  messageStore.finishStreamingMessages(ownerSessionId)
 }
 
 function applyParameterPatchToParametersJson(
@@ -1086,6 +1538,51 @@ const handleKeyDown = (e: KeyboardEvent) => {
   gap: 0.625rem;
   min-width: 0;
   padding: 0.375rem 0 1rem;
+}
+
+.agent-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  margin: 0.25rem 0 0.35rem;
+  min-height: 1.25rem;
+  padding-left: 0.125rem;
+}
+
+.agent-pending__dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  animation: agent-pending-dot 1.05s ease-in-out infinite;
+}
+
+.agent-pending__dot:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.agent-pending__dot:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+@keyframes agent-pending-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 0.95;
+    transform: translateY(-0.12rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-pending__dot {
+    animation: none;
+    opacity: 0.55;
+  }
 }
 
 .message-item {

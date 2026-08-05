@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type {
   DesktopAgentChoice,
   DesktopAgentChoiceOption,
@@ -13,15 +13,60 @@ const generateId = (): string => {
   return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 }
 
+/** Marks a choice as closed without selecting a concrete option (free-text / superseded). */
+export const DISMISSED_CHOICE_OPTION_ID = '__dismissed__'
+
 export const useMessageStore = defineStore('messages', () => {
-  const messages = ref<Message[]>([])
+  const messagesBySessionId = ref<Record<string, Message[]>>({})
+  const activeSessionId = ref<string | null>(null)
+
+  const messages = computed(() => {
+    const sessionId = activeSessionId.value
+    if (!sessionId) return []
+    return messagesBySessionId.value[sessionId] ?? []
+  })
+
+  function setActiveSessionId(sessionId: string | null): void {
+    activeSessionId.value = sessionId
+    if (sessionId) ensureSession(sessionId)
+  }
+
+  function ensureSession(sessionId: string): Message[] {
+    const existing = messagesBySessionId.value[sessionId]
+    if (existing) return existing
+    const created: Message[] = []
+    messagesBySessionId.value = {
+      ...messagesBySessionId.value,
+      [sessionId]: created,
+    }
+    return created
+  }
+
+  function sessionMessages(sessionId: string | null | undefined): Message[] {
+    if (!sessionId) return []
+    return ensureSession(sessionId)
+  }
+
+  function requireActiveMessages(): Message[] {
+    const sessionId = activeSessionId.value
+    if (!sessionId) {
+      throw new Error('No active Agent chat session for messages.')
+    }
+    return ensureSession(sessionId)
+  }
+
+  function tryActiveMessages(): Message[] | null {
+    const sessionId = activeSessionId.value
+    if (!sessionId) return null
+    return ensureSession(sessionId)
+  }
 
   /**
    * 添加用户消息
    */
   const addMessage = (content: string): string => {
     const id = generateId()
-    messages.value.push({
+    requireActiveMessages().push({
       id,
       role: 'user',
       content,
@@ -37,9 +82,13 @@ export const useMessageStore = defineStore('messages', () => {
   const addAssistantMessage = (
     content: string = '',
     status: 'loading' | 'done' | 'error' = 'loading',
+    sessionId?: string,
   ): string => {
     const id = generateId()
-    messages.value.push({
+    const bucket = sessionId
+      ? sessionMessages(sessionId)
+      : requireActiveMessages()
+    bucket.push({
       id,
       role: 'assistant',
       content,
@@ -56,14 +105,16 @@ export const useMessageStore = defineStore('messages', () => {
     id: string,
     partial: Partial<Pick<Message, 'content' | 'status'>>,
   ): void => {
-    const message = messages.value.find((m) => m.id === id)
-    if (message) {
+    for (const bucket of Object.values(messagesBySessionId.value)) {
+      const message = bucket.find((m) => m.id === id)
+      if (!message) continue
       if (partial.content !== undefined) {
         message.content = partial.content
       }
       if (partial.status !== undefined) {
         message.status = partial.status
       }
+      return
     }
   }
 
@@ -71,9 +122,11 @@ export const useMessageStore = defineStore('messages', () => {
    * 追加内容到消息（用于流式更新）
    */
   const appendToMessage = (id: string, content: string): void => {
-    const message = messages.value.find((m) => m.id === id)
-    if (message) {
+    for (const bucket of Object.values(messagesBySessionId.value)) {
+      const message = bucket.find((m) => m.id === id)
+      if (!message) continue
       message.content += content
+      return
     }
   }
 
@@ -82,7 +135,7 @@ export const useMessageStore = defineStore('messages', () => {
    */
   const addImageMessage = (thumbnail: Thumbnail): string => {
     const id = generateId()
-    messages.value.push({
+    requireActiveMessages().push({
       id,
       role: 'user',
       content: `View image: ${thumbnail.label}`,
@@ -104,7 +157,7 @@ export const useMessageStore = defineStore('messages', () => {
    */
   const addInfoMessage = (infoData: InfoData): string => {
     const id = generateId()
-    messages.value.push({
+    requireActiveMessages().push({
       id,
       role: 'assistant',
       content: `${infoData.title} - ${infoData.step}`,
@@ -115,19 +168,63 @@ export const useMessageStore = defineStore('messages', () => {
     return id
   }
 
-  const addExecutionContract = (contract: DesktopAgentExecutionContract): string =>
-    addInfoMessage({
-      title: contract.title,
-      step: 'Execution contract',
-      items: contract.fields.map((field) => ({
-        label: field.label,
-        content: field.value,
-        format: 'text',
-      })),
+  const addExecutionContract = (
+    contract: DesktopAgentExecutionContract,
+    sessionId?: string,
+  ): string => {
+    const id = generateId()
+    const bucket = sessionId
+      ? sessionMessages(sessionId)
+      : requireActiveMessages()
+    bucket.push({
+      id,
+      role: 'assistant',
+      content: `${contract.title} - Execution contract`,
+      type: 'info',
+      status: 'done',
+      infoData: {
+        title: contract.title,
+        step: 'Execution contract',
+        items: contract.fields.map((field) => ({
+          label: field.label,
+          content: field.value,
+          format: 'text',
+        })),
+      },
     })
+    return id
+  }
 
-  const addChoice = (choice: DesktopAgentChoice, id = generateId()): string => {
-    messages.value.push({
+  const dismissOpenChoices = (
+    exceptPromptId?: string,
+    sessionId?: string,
+  ): void => {
+    const bucket = sessionId
+      ? sessionMessages(sessionId)
+      : tryActiveMessages()
+    if (!bucket) return
+    for (const message of bucket) {
+      if (
+        message.choice &&
+        !message.answeredOptionId &&
+        message.choice.promptId !== exceptPromptId
+      ) {
+        message.answeredOptionId = DISMISSED_CHOICE_OPTION_ID
+      }
+    }
+  }
+
+  const addChoice = (
+    choice: DesktopAgentChoice,
+    id = generateId(),
+    sessionId?: string,
+  ): string => {
+    const targetSessionId = sessionId ?? activeSessionId.value ?? undefined
+    dismissOpenChoices(choice.promptId, targetSessionId)
+    const bucket = targetSessionId
+      ? sessionMessages(targetSessionId)
+      : requireActiveMessages()
+    bucket.push({
       id,
       role: 'assistant',
       content: choice.title,
@@ -139,9 +236,9 @@ export const useMessageStore = defineStore('messages', () => {
   }
 
   const answerChoice = (promptId: string, option: DesktopAgentChoiceOption): boolean => {
-    const message = messages.value.find(
-      (candidate) => candidate.choice?.promptId === promptId,
-    )
+    const bucket = tryActiveMessages()
+    if (!bucket) return false
+    const message = bucket.find((candidate) => candidate.choice?.promptId === promptId)
     if (
       !message?.choice ||
       message.answeredOptionId ||
@@ -150,12 +247,18 @@ export const useMessageStore = defineStore('messages', () => {
       return false
     }
     message.answeredOptionId = option.id
+    dismissOpenChoices(promptId)
     return true
   }
 
   const upsertAgentEvent = (event: DesktopAgentEvent): string => {
+    const sessionId = event.sessionId ?? activeSessionId.value
+    if (!sessionId) {
+      throw new Error('No Agent chat session available for event upsert.')
+    }
+    const bucket = sessionMessages(sessionId)
     const id = event.messageId ?? generateId()
-    const existing = messages.value.find((message) => message.id === id)
+    const existing = bucket.find((message) => message.id === id)
     if (existing) {
       if (event.delta) existing.content += event.delta
       else if (event.text) existing.content = event.text
@@ -163,7 +266,7 @@ export const useMessageStore = defineStore('messages', () => {
         event.type === 'error' ? 'error' : event.delta ? 'loading' : 'done'
       return id
     }
-    messages.value.push({
+    bucket.push({
       id,
       role: 'assistant',
       content: event.delta ?? event.text ?? '',
@@ -173,8 +276,12 @@ export const useMessageStore = defineStore('messages', () => {
     return id
   }
 
-  const finishStreamingMessages = (): void => {
-    for (const message of messages.value) {
+  const finishStreamingMessages = (sessionId?: string): void => {
+    const bucket = sessionId
+      ? sessionMessages(sessionId)
+      : tryActiveMessages()
+    if (!bucket) return
+    for (const message of bucket) {
       if (message.role === 'assistant' && message.status === 'loading') {
         message.status = 'done'
       }
@@ -184,9 +291,12 @@ export const useMessageStore = defineStore('messages', () => {
   /**
    * Append a local progress line into the active tool timeline (flow / rerun prep).
    */
-  const appendToolProgress = (text: string): string => {
+  const appendToolProgress = (text: string, sessionId?: string): string => {
     const line = text.endsWith('\n') ? text : `${text}\n`
-    const existing = [...messages.value]
+    const bucket = sessionId
+      ? sessionMessages(sessionId)
+      : requireActiveMessages()
+    const existing = [...bucket]
       .reverse()
       .find((message) => message.type === 'tool' && message.status === 'loading')
     if (existing) {
@@ -194,7 +304,7 @@ export const useMessageStore = defineStore('messages', () => {
       return existing.id
     }
     const id = generateId()
-    messages.value.push({
+    bucket.push({
       id,
       role: 'assistant',
       content: line,
@@ -204,8 +314,12 @@ export const useMessageStore = defineStore('messages', () => {
     return id
   }
 
-  const finishToolProgress = (): void => {
-    for (const message of messages.value) {
+  const finishToolProgress = (sessionId?: string): void => {
+    const bucket = sessionId
+      ? sessionMessages(sessionId)
+      : tryActiveMessages()
+    if (!bucket) return
+    for (const message of bucket) {
       if (message.type === 'tool' && message.status === 'loading') {
         message.status = 'done'
       }
@@ -217,7 +331,7 @@ export const useMessageStore = defineStore('messages', () => {
    */
   const addMapMessage = (mapData: MapData): string => {
     const id = generateId()
-    messages.value.push({
+    requireActiveMessages().push({
       id,
       role: 'assistant',
       content: `${mapData.title} - ${mapData.step}`,
@@ -229,24 +343,41 @@ export const useMessageStore = defineStore('messages', () => {
   }
 
   /**
-   * 清空所有消息
+   * 清空所有会话消息
    */
   const clearMessages = () => {
-    messages.value.splice(0, messages.value.length)
+    messagesBySessionId.value = {}
+  }
+
+  const clearSessionMessages = (sessionId: string): void => {
+    if (!(sessionId in messagesBySessionId.value)) return
+    const next = { ...messagesBySessionId.value }
+    delete next[sessionId]
+    messagesBySessionId.value = next
   }
 
   /**
    * 删除单条消息
    */
   const removeMessage = (id: string): void => {
-    const index = messages.value.findIndex((message) => message.id === id)
-    if (index !== -1) {
-      messages.value.splice(index, 1)
+    for (const [sessionId, bucket] of Object.entries(messagesBySessionId.value)) {
+      const index = bucket.findIndex((message) => message.id === id)
+      if (index === -1) continue
+      bucket.splice(index, 1)
+      messagesBySessionId.value = {
+        ...messagesBySessionId.value,
+        [sessionId]: bucket,
+      }
+      return
     }
   }
 
   return {
     messages,
+    messagesBySessionId,
+    activeSessionId,
+    setActiveSessionId,
+    ensureSession,
     addMessage,
     addAssistantMessage,
     updateMessage,
@@ -256,6 +387,7 @@ export const useMessageStore = defineStore('messages', () => {
     addExecutionContract,
     addChoice,
     answerChoice,
+    dismissOpenChoices,
     upsertAgentEvent,
     finishStreamingMessages,
     appendToolProgress,
@@ -263,5 +395,6 @@ export const useMessageStore = defineStore('messages', () => {
     addMapMessage,
     removeMessage,
     clearMessages,
+    clearSessionMessages,
   }
 })

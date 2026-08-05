@@ -236,6 +236,14 @@ body.splitter-resizing-vertical * {
   cursor: row-resize !important;
 }
 
+/* Agent 右侧面板水平拉伸 */
+body.agent-panel-resizing,
+body.agent-panel-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
 /* 调整窗口大小时禁用全局文本选择 */
 body.window-resizing,
 body.window-resizing * {

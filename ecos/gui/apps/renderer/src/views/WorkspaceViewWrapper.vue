@@ -2,11 +2,23 @@
   <div class="workspace-view">
     <main :key="workspaceViewKey" class="workspace-main">
       <LeftSidebar />
-      <div class="workspace-body">
+      <div ref="workspaceBodyRef" class="workspace-body">
         <div class="workspace-editor">
           <router-view class="editor-view" />
         </div>
-        <aside v-if="workspaceChatExpanded" class="workspace-chat-rail">
+        <aside
+          v-if="workspaceChatExpanded"
+          class="workspace-chat-rail"
+          :style="{ width: panelWidthStyle }"
+        >
+          <div
+            class="agent-panel-resize-handle"
+            title="Resize Agent panel"
+            aria-label="Resize Agent panel"
+            role="separator"
+            aria-orientation="vertical"
+            @pointerdown="onResizePointerDown"
+          ></div>
           <ChatInspectorPanel class="workspace-chat-rail__panel" />
         </aside>
       </div>
@@ -15,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import LeftSidebar from '../components/LeftSidebar.vue'
@@ -24,22 +36,24 @@ import { clearHomeQorComparisonCache } from '../composables/useHomeQorComparison
 import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'
 import { clearStepDashboardDataCache } from '../composables/useStepDashboardData'
 import { useWorkspace } from '../composables/useWorkspace'
+import { useAgentPanelResize } from '@/composables/useAgentPanelResize'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 
 const { closeProject, currentProject } = useWorkspace()
 const agentShell = useAgentShellStore()
 const { workspaceChatExpanded } = storeToRefs(agentShell)
 const workspaceViewKey = computed(() => currentProject.value?.path ?? '')
+const workspaceBodyRef = ref<HTMLElement | null>(null)
+const { panelWidthStyle, onResizePointerDown } = useAgentPanelResize(workspaceBodyRef)
 
 watch(
   () => currentProject.value?.path,
   (path, previousPath) => {
     if (!path || !previousPath || path === previousPath) return
+    // Agent chat tabs keep their frozen context across workspace switches.
     if (agentShell.shouldPreserveSession()) {
       agentShell.consumePreserveSession()
-      return
     }
-    agentShell.resetShell()
   },
 )
 
@@ -53,6 +67,7 @@ onBeforeRouteLeave(async () => {
   clearStepDashboardDataCache()
   clearHomeQorComparisonCache()
   clearHomeSnapshotCache()
+  // Keep Agent tabs; only collapse the workspace chat rail chrome.
   agentShell.resetShell({ keepHomeOpen: false })
 })
 </script>
@@ -103,16 +118,45 @@ onBeforeRouteLeave(async () => {
 }
 
 .workspace-chat-rail {
+  position: relative;
   display: flex;
-  width: min(420px, 36vw);
   min-width: 280px;
-  max-width: 520px;
+  max-width: 720px;
   height: 100%;
   flex-shrink: 0;
   flex-direction: column;
   min-height: 0;
   border-left: 1px solid var(--border-color);
   background: var(--bg-primary);
+}
+
+.agent-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  z-index: 2;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.agent-panel-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background-color 120ms ease, width 120ms ease, left 120ms ease;
+}
+
+.agent-panel-resize-handle:hover::before,
+:global(body.agent-panel-resizing) .agent-panel-resize-handle::before {
+  left: 2px;
+  width: 2px;
+  background: var(--accent-color);
 }
 
 .workspace-chat-rail__panel {

@@ -7,22 +7,16 @@
         role="dialog"
         aria-modal="false"
         aria-label="ECOS Agent"
+        :style="{ width: panelWidthStyle }"
       >
-        <header class="home-agent-drawer__header">
-          <div class="home-agent-drawer__title">
-            <i class="ri-chat-3-line" aria-hidden="true"></i>
-            <span>ECOS Agent</span>
-          </div>
-          <button
-            type="button"
-            class="home-agent-drawer__close"
-            title="Close Agent"
-            aria-label="Close Agent"
-            @click="closeHomeAgent"
-          >
-            <i class="ri-close-line" aria-hidden="true"></i>
-          </button>
-        </header>
+        <div
+          class="agent-panel-resize-handle"
+          title="Resize Agent panel"
+          aria-label="Resize Agent panel"
+          role="separator"
+          aria-orientation="vertical"
+          @pointerdown="onResizePointerDown"
+        ></div>
         <div class="home-agent-drawer__body">
           <AIChatPanel shell="home" class="home-agent-drawer__chat" />
         </div>
@@ -32,13 +26,19 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import AIChatPanel from './AIChatPanel.vue'
+import { useAgentPanelResize } from '@/composables/useAgentPanelResize'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 
 const agentShell = useAgentShellStore()
 const { homeAgentOpen } = storeToRefs(agentShell)
-const { closeHomeAgent } = agentShell
+/** Use viewport as the width budget for the fixed right drawer. */
+const viewportRef = ref<HTMLElement | null>(
+  typeof document !== 'undefined' ? document.documentElement : null,
+)
+const { panelWidthStyle, onResizePointerDown } = useAgentPanelResize(viewportRef)
 </script>
 
 <style scoped>
@@ -49,60 +49,44 @@ const { closeHomeAgent } = agentShell
   bottom: var(--status-bar-height, 24px);
   z-index: 40;
   display: flex;
-  width: min(400px, 100vw);
+  min-width: 280px;
+  max-width: min(720px, 100vw);
   flex-direction: column;
   border-left: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
   background: var(--bg-primary);
   box-shadow: -6px 0 24px rgb(0 0 0 / 6%);
 }
 
-.home-agent-drawer__header {
-  display: flex;
-  height: 2.5rem;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-  padding: 0 0.75rem;
+.agent-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  z-index: 2;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
 }
 
-.home-agent-drawer__title {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-}
-
-.home-agent-drawer__title > i {
-  color: var(--accent-color);
-}
-
-.home-agent-drawer__close {
-  display: inline-flex;
-  height: 1.75rem;
-  width: 1.75rem;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 0.375rem;
+.agent-panel-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
   background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    width 120ms ease,
+    left 120ms ease;
 }
 
-.home-agent-drawer__close:hover {
-  background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
-  color: var(--text-primary);
-}
-
-.home-agent-drawer__close:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent-color) 65%, transparent);
-  outline-offset: 2px;
+.agent-panel-resize-handle:hover::before,
+:global(body.agent-panel-resizing) .agent-panel-resize-handle::before {
+  left: 2px;
+  width: 2px;
+  background: var(--accent-color);
 }
 
 .home-agent-drawer__body {
