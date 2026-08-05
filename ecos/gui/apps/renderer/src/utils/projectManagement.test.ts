@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
+import type { ResourceInfo } from '@ecos-studio/shared'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
   createProjectManifestDraft,
   createSelectionState,
+  parseProjectManifest,
   parseWorkspaceFlowStateMap,
+  projectMpcOptionFromResource,
   registerWorkspaceInManifest,
   setQorBaselineInManifest,
   workspaceStatusFromFlow,
@@ -26,6 +29,32 @@ const project: Project = {
 const successStates = Object.fromEntries(
   FLOW_STEPS.map((step) => [step, 'success']),
 ) as Partial<Record<FlowStep, 'success'>>
+
+function managedMpc(overrides: Partial<ResourceInfo> = {}): ResourceInfo {
+  return {
+    id: 'mpc:mpc-frame',
+    type: 'mpc',
+    name: 'mpc-frame',
+    display_name: 'MPC Frame',
+    description: 'Multi-project chip frame template.',
+    category: 'mpc',
+    status: 'installed',
+    installed_version: '0.1.0',
+    available_versions: ['0.1.0'],
+    active_version: null,
+    active: false,
+    path: '/resources/mpcs/mpc-frame/0.1.0',
+    managed_root: '/resources/mpcs',
+    platform: null,
+    size: null,
+    source: 'registry',
+    homepage: 'https://github.com/openecos-projects/mpc-frame',
+    actions: ['uninstall'],
+    health: { managed: true, status: 'ok' },
+    error: null,
+    ...overrides,
+  }
+}
 
 function metric(id: string, value: number, overrides: Record<string, unknown> = {}) {
   const timing = id.startsWith('sta_')
@@ -273,6 +302,55 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
 }
 
 describe('project management V3 model', () => {
+  it('selects only healthy managed MPC resources and derives their spec path', () => {
+    expect(projectMpcOptionFromResource(managedMpc())).toEqual({
+      resource_id: 'mpc:mpc-frame',
+      display_name: 'MPC Frame',
+      installed_version: '0.1.0',
+      path: '/resources/mpcs/mpc-frame/0.1.0',
+      spec_path: '/resources/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+    })
+    expect(
+      projectMpcOptionFromResource(
+        managedMpc({ health: { managed: false, status: 'ok' } }),
+      ),
+    ).toBeNull()
+    expect(
+      projectMpcOptionFromResource(
+        managedMpc({ status: 'available', installed_version: null, path: null }),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects an imported manifest whose MPC spec path is outside the MPC root', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      mpc: {
+        resource_id: 'mpc:mpc-frame',
+        display_name: 'MPC Frame',
+        installed_version: '0.1.0',
+        path: '/resources/mpcs/mpc-frame/0.1.0',
+        spec_path: '/resources/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+        design: { index: 0, design_name: 'frame' },
+        core_template: { minimum_area: 100, maximum_area: 500 },
+      },
+    })
+
+    expect(parseProjectManifest(JSON.stringify(manifest)).mpc).toEqual(manifest.mpc)
+    expect(() =>
+      parseProjectManifest(
+        JSON.stringify({
+          ...manifest,
+          mpc: {
+            ...manifest.mpc,
+            spec_path: '/tmp/spec.json.in',
+          },
+        }),
+      ),
+    ).toThrow('Invalid project manifest MPC spec_path.')
+  })
+
   it('uses the fixed project flow step order', () => {
     expect(FLOW_STEPS).toEqual([
       'Synth',
@@ -402,6 +480,68 @@ describe('project management V3 model', () => {
         (item) => item.metricName === 'sta_setup_wns',
       )?.cornerContext?.label,
     ).toBe('MAX - SS - 1.08 V - 125 C - Cworst')
+  })
+
+  it('keeps absent runtime and memory metrics unavailable instead of manufacturing zeros', () => {
+    const model = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      { ws_0004: successStates },
+      { ws_0004: { stepMetricTexts: {} } },
+    )
+
+    expect(model.workspaceSummaries[0]?.flowMetrics).toMatchObject({
+      totalRuntimeSec: null,
+      peakMemoryMb: null,
+    })
+    expect(model.dashboardSummary.flowMetricSummary.runtimePoints).toEqual([
+      expect.objectContaining({ value: null, label: 'N/A', state: 'pending' }),
+    ])
+    expect(model.dashboardSummary.flowMetricSummary.memoryPoints).toEqual([
+      expect.objectContaining({ value: null, label: 'N/A', state: 'pending' }),
+    ])
+  })
+
+  it('preserves a measured zero runtime or memory value', () => {
+    const inputs = v3Inputs()
+    inputs.stepMetricTexts.Route = metricsArtifact('route', [
+      metric('runtime_seconds', 0, {
+        unit: 's',
+        category: 'runtime',
+        direction: 'lower_is_better',
+        project_role: 'trend',
+        step_role: 'secondary',
+        rating: { gate: false, score: false, trend: true },
+      }),
+    ])
+    inputs.stepMetricTexts.RCX = metricsArtifact('RCX', [
+      metric('peak_memory_mb', 0, {
+        unit: 'MB',
+        category: 'runtime',
+        direction: 'lower_is_better',
+        project_role: 'trend',
+        step_role: 'secondary',
+        rating: { gate: false, score: false, trend: true },
+      }),
+    ])
+
+    const model = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      { ws_0004: successStates },
+      { ws_0004: inputs },
+    )
+
+    expect(model.workspaceSummaries[0]?.flowMetrics).toMatchObject({
+      totalRuntimeSec: 0,
+      peakMemoryMb: 0,
+    })
+    expect(model.dashboardSummary.flowMetricSummary.runtimePoints).toEqual([
+      expect.objectContaining({ value: 0, label: '0 s', state: 'good' }),
+    ])
+    expect(model.dashboardSummary.flowMetricSummary.memoryPoints).toEqual([
+      expect.objectContaining({ value: 0, label: '0 MB', state: 'good' }),
+    ])
   })
 
   it('marks a workspace not rated when RCX or STA signoff readiness is incomplete', () => {

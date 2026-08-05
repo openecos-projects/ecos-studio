@@ -28,4 +28,8 @@ describe('desktop IPC channel constants', () => {
       expect(value).toMatch(/^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/)
     }
   })
+
+  it('defines a chip viewer launch channel', () => {
+    expect(desktopApiIpcChannels.chipViewerOpen).toBe('chip-viewer:open')
+  })
 })

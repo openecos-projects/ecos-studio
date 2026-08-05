@@ -4,20 +4,24 @@ import type { ImagePreviewController } from '@/applications/image-preview'
 
 interface Props {
   preview?: ImagePreviewController | null
-  /** 是否显示「打开 Native Layout Viewer」工具 */
-  showNativeLayoutViewer?: boolean
-  /** Native viewer 拉起中 */
-  nativeLayoutViewerBusy?: boolean
+  /** 是否显示「打开 Chip Viewer」工具 */
+  showChipViewer?: boolean
+  /** Chip Viewer 拉起中 */
+  chipViewerBusy?: boolean
+  /** Chip Viewer edit 拉起中 */
+  chipViewerEditBusy?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   preview: null,
-  showNativeLayoutViewer: false,
-  nativeLayoutViewerBusy: false,
+  showChipViewer: false,
+  chipViewerBusy: false,
+  chipViewerEditBusy: false,
 })
 
 const emit = defineEmits<{
-  openNativeLayoutViewer: []
+  openChipViewer: []
+  openChipViewerEdit: []
 }>()
 
 const isRulerEnabled = ref(true)
@@ -81,22 +85,38 @@ onUnmounted(() => {
   >
     <div class="flex items-center gap-1">
       <button
-        v-if="showNativeLayoutViewer"
+        v-if="showChipViewer"
         type="button"
-        :disabled="nativeLayoutViewerBusy"
+        :disabled="chipViewerBusy || chipViewerEditBusy"
         class="flex h-9 w-9 shrink-0 items-center justify-center rounded text-base transition-all disabled:cursor-wait disabled:text-(--text-secondary) disabled:opacity-50"
         :class="
-          nativeLayoutViewerBusy
+          chipViewerBusy || chipViewerEditBusy
             ? 'text-(--text-secondary)'
             : 'text-(--text-secondary) hover:bg-(--bg-hover) hover:text-(--text-primary)'
         "
-        title="打开 Native Layout Viewer"
-        aria-label="打开 Native Layout Viewer"
-        @click="emit('openNativeLayoutViewer')"
+        title="打开 Chip Viewer"
+        aria-label="打开 Chip Viewer"
+        @click="emit('openChipViewer')"
+      >
+        <i class="ri-cpu-line text-base" :class="{ 'animate-pulse': chipViewerBusy }"></i>
+      </button>
+      <button
+        v-if="showChipViewer"
+        type="button"
+        :disabled="chipViewerBusy || chipViewerEditBusy"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded text-base transition-all disabled:cursor-wait disabled:text-(--text-secondary) disabled:opacity-50"
+        :class="
+          chipViewerBusy || chipViewerEditBusy
+            ? 'text-(--text-secondary)'
+            : 'text-(--text-secondary) hover:bg-(--bg-hover) hover:text-(--text-primary)'
+        "
+        title="打开 Chip Viewer 编辑模式"
+        aria-label="打开 Chip Viewer 编辑模式"
+        @click="emit('openChipViewerEdit')"
       >
         <i
-          class="ri-window-line text-base"
-          :class="{ 'animate-pulse': nativeLayoutViewerBusy }"
+          class="ri-edit-box-line text-base"
+          :class="{ 'animate-pulse': chipViewerEditBusy }"
         ></i>
       </button>
     </div>

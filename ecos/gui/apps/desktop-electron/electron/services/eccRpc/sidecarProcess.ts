@@ -104,7 +104,12 @@ export class EccRpcSidecarProcess {
     const launch = this.options.resolveLaunch
       ? await this.options.resolveLaunch(baseEnv)
       : {
-          args: this.options.commandArgs ?? ['rpc', 'serve', '--stdio'],
+          args: this.options.commandArgs ?? [
+            'rpc',
+            'serve',
+            '--stdio',
+            '--persistent-db',
+          ],
           command: this.command,
         }
     const env = launch.env ?? baseEnv

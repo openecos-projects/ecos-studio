@@ -3,12 +3,82 @@ import {
   buildProjectQorScoreDetail,
   buildProjectQorTrendSummary,
   hasCurrentQorSummaryText,
+  normalizeQorHotspots,
   normalizeQorMetrics,
   normalizeQorSummaryBlockingIssues,
   qorSummaryStatus,
   serializeProjectQorTrendReport,
   type ProjectQorWorkspaceInput,
 } from './projectQorTrend'
+
+describe('normalizeQorHotspots', () => {
+  const source = {
+    kind: 'feature',
+    path: 'feature/place.map.json',
+    selector: '/Congestion/overflow/max/union',
+  }
+
+  it('reads kind, severity and description straight from the artifact', () => {
+    const hotspots = normalizeQorHotspots(
+      'Place',
+      JSON.stringify({
+        schema_version: 3,
+        hotspots: [
+          {
+            kind: 'congestion',
+            severity: 'warning',
+            metric_id: 'place_congestion_egr_overflow_max',
+            display_name: 'Place EGR Overflow Max',
+            value: 3,
+            source,
+            description: 'Placement EGR overflow peak is present.',
+          },
+        ],
+      }),
+    )
+
+    expect(hotspots).toEqual([
+      {
+        step: 'Place',
+        kind: 'congestion',
+        severity: 'warning',
+        metric: 'place_congestion_egr_overflow_max',
+        displayName: 'Place EGR Overflow Max',
+        value: 3,
+        sourceFile: 'feature/place.map.json',
+        description: 'Placement EGR overflow peak is present.',
+      },
+    ])
+  })
+
+  it('leaves kind, severity and description null when the artifact omits them', () => {
+    const [hotspot] = normalizeQorHotspots(
+      'Place',
+      JSON.stringify({
+        schema_version: 3,
+        hotspots: [{ metric_id: 'place_congestion_egr_overflow_max', source }],
+      }),
+    )
+
+    expect(hotspot.kind).toBeNull()
+    expect(hotspot.severity).toBeNull()
+    expect(hotspot.description).toBeNull()
+  })
+
+  it('refuses to read an unrecognized severity as info', () => {
+    const [hotspot] = normalizeQorHotspots(
+      'Place',
+      JSON.stringify({
+        schema_version: 3,
+        hotspots: [
+          { metric_id: 'place_rudy_utilization_max', severity: 'minor', source },
+        ],
+      }),
+    )
+
+    expect(hotspot.severity).toBeNull()
+  })
+})
 
 describe('project QoR trend V3 model', () => {
   it('accepts only complete schema V3 records with feature provenance', () => {

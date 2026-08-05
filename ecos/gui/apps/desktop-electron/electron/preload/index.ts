@@ -10,11 +10,10 @@ import type {
   EccRuntimeEvent,
   DesktopFileDialogOptions,
   DesktopRtlSourceDialogOptions,
-  LayoutViewerOpenRequest,
+  ChipViewerOpenRequest,
   DesktopMenuEventId,
   DesktopProjectFileChangedEvent,
   DesktopProjectLogTailEvent,
-  RemoteContentReadJsonFileRequest,
   ProjectManifestMutationRequest,
   ResourceJob,
   ResourceImportLocalRequest,
@@ -120,14 +119,6 @@ const desktopApi: DesktopApi = {
       invokeDesktop<T | null>(desktopApiIpcChannels.settingsGet, key),
     set: (key, value) => invokeDesktop(desktopApiIpcChannels.settingsSet, key, value),
     delete: (key) => invokeDesktop(desktopApiIpcChannels.settingsDelete, key),
-  },
-  remoteContent: {
-    listFiles: (request) =>
-      invokeDesktop(desktopApiIpcChannels.remoteContentListFiles, request),
-    readTextFile: (request) =>
-      invokeDesktop(desktopApiIpcChannels.remoteContentReadTextFile, request),
-    readJsonFile: <T = unknown>(request: RemoteContentReadJsonFileRequest) =>
-      invokeDesktop<T>(desktopApiIpcChannels.remoteContentReadJsonFile, request),
   },
   projectManifest: {
     mutate: (request: ProjectManifestMutationRequest) =>
@@ -269,9 +260,9 @@ const desktopApi: DesktopApi = {
       }
     },
   },
-  layoutViewer: {
-    open: (request: LayoutViewerOpenRequest) =>
-      invokeDesktop(desktopApiIpcChannels.layoutViewerOpen, request),
+  chipViewer: {
+    open: (request: ChipViewerOpenRequest) =>
+      invokeDesktop(desktopApiIpcChannels.chipViewerOpen, request),
   },
   workspaceResources: {
     getIndex: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesGetIndex),
@@ -285,6 +276,8 @@ const desktopApi: DesktopApi = {
   resources: {
     list: () => invokeDesktop(desktopApiIpcChannels.resourcesList),
     get: (resourceId) => invokeDesktop(desktopApiIpcChannels.resourcesGet, resourceId),
+    readMpcSpec: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesReadMpcSpec, resourceId),
     install: (request: ResourceInstallRequest) =>
       invokeDesktop(desktopApiIpcChannels.resourcesInstall, request),
     update: (resourceId) =>

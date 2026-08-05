@@ -1,0 +1,1715 @@
+.step-analysis {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  /* An implicit auto column would size to the widest comparison row and clip the rest. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+/* Region 1 — flow step rail, badged with the selected workspace issue counts. */
+.step-rail {
+  display: flex;
+  min-width: 0;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.step-rail-item {
+  display: flex;
+  align-items: center;
+  flex: 1 0 auto;
+  gap: 5px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 7px 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.step-rail-item:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+
+.step-rail-item.selected {
+  border-bottom-color: var(--accent-color);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+.step-rail-item.muted .step-rail-name {
+  opacity: 0.55;
+}
+
+.step-rail-mark {
+  display: inline-grid;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  padding: 0 4px;
+  color: var(--bg-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.step-rail-mark.bad {
+  background: var(--danger-color);
+}
+
+.step-rail-mark.warn {
+  background: var(--warn-color);
+}
+
+/* Findings exist but no artifact called them blocking, so the count stays uncoloured. */
+.step-rail-mark.neutral {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-secondary) 26%, transparent);
+}
+
+.step-rail-mark.good {
+  min-width: 6px;
+  width: 6px;
+  height: 6px;
+  background: var(--success-color);
+}
+
+.step-rail-mark.none {
+  min-width: 6px;
+  width: 6px;
+  height: 6px;
+  background: color-mix(in srgb, var(--text-secondary) 40%, transparent);
+}
+
+/* Region 2 — workspace picker plus the one-line verdict for the current step. */
+.verdict-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  border-bottom: 1px solid var(--border-color);
+  padding: 8px 12px;
+}
+
+.workspace-picker {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.workspace-cycle {
+  display: grid;
+  width: 24px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-cycle:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+  color: var(--text-primary);
+}
+
+.workspace-cycle:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.workspace-selector {
+  display: grid;
+  min-width: min(100%, 178px);
+  max-width: 300px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 3px 7px 4px;
+  color: var(--text-primary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-selector:hover,
+.workspace-selector[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+}
+
+.workspace-selector > small {
+  grid-column: 1 / -1;
+  color: var(--text-secondary);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.workspace-selector-value {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.workspace-selector-value strong {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-selector-chevron {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.workspace-picker-total {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.workspace-picker-popover {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  width: min(380px, calc(100vw - 36px));
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 36%, var(--border-color));
+  border-radius: 5px;
+  padding: 7px;
+  background: var(--bg-primary);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 38%, transparent);
+}
+
+.workspace-picker-search {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0 7px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.workspace-picker-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 5px 0;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  font-size: 10.5px;
+}
+
+.workspace-picker-search input::placeholder {
+  color: var(--text-secondary);
+}
+
+.workspace-picker-popover ul {
+  display: grid;
+  max-height: 252px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  list-style: none;
+}
+
+.workspace-picker-option {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 55%, transparent);
+  padding: 6px 5px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.workspace-picker-option:hover,
+.workspace-picker-option.selected {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
+}
+
+.workspace-picker-option-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-picker-option-status {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-picker-empty {
+  margin: 2px 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.workspace-picker-preview-toggle {
+  justify-self: start;
+  min-height: 23px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0 7px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 9.5px;
+  font-weight: 720;
+}
+
+.workspace-picker-preview-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent-color) 52%, var(--border-color));
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+}
+
+.status-dot.good {
+  background: var(--success-color);
+}
+
+.status-dot.warn {
+  background: var(--warn-color);
+}
+
+.status-dot.bad {
+  background: var(--danger-color);
+}
+
+.chip-count {
+  border-radius: 6px;
+  padding: 0 4px;
+  color: var(--bg-primary);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.chip-count.bad {
+  background: var(--danger-color);
+}
+
+.chip-count.warn {
+  background: var(--warn-color);
+}
+
+.chip-count.neutral {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-secondary) 26%, transparent);
+}
+
+.chip-role {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.chip-role.accent {
+  color: var(--accent-color);
+}
+
+.verdict {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.verdict-badge {
+  border-radius: 3px;
+  padding: 2px 7px;
+  color: var(--bg-primary);
+  background: color-mix(in srgb, var(--text-secondary) 60%, transparent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.verdict-badge.pass {
+  background: var(--success-color);
+}
+
+.verdict-badge.blocked {
+  background: var(--danger-color);
+}
+
+.verdict-badge.incomplete,
+.verdict-badge.unavailable {
+  background: var(--warn-color);
+}
+
+.verdict-summary {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.verdict-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.verdict-fact small {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.verdict-fact strong {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.verdict-fact strong.good {
+  color: var(--success-color);
+}
+
+.verdict-fact strong.warn {
+  color: var(--warn-color);
+}
+
+.verdict-fact strong.bad {
+  color: var(--danger-color);
+}
+
+/*
+ * Region 3 — the two readings of one step. Comparison is the second of them rather than
+ * a drawer under the first, because "which workspace is better here" is asked as often
+ * as "what went wrong here".
+ */
+.mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color);
+  padding: 5px 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 34%, var(--bg-primary));
+}
+
+.mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 10px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mode-tab:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+
+.mode-tab.selected {
+  border-color: color-mix(in srgb, var(--accent-color) 46%, var(--border-color));
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 11%, transparent);
+}
+
+.mode-tab em {
+  border-radius: 6px;
+  padding: 0 5px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-secondary) 24%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.mode-tab em.bad {
+  color: var(--bg-primary);
+  background: var(--danger-color);
+}
+
+.mode-hint {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Region 4a — issue list on the left drives the evidence reader on the right. */
+.step-body {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(260px, 0.4fr) minmax(0, 1fr);
+}
+
+.issue-pane {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-right: 1px solid var(--border-color);
+}
+
+.evidence-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.issue-pane > .pane-header {
+  border-bottom: 1px solid var(--border-color);
+  padding: 8px 10px;
+}
+
+.pane-title {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pane-header small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-header small.good {
+  color: var(--success-color);
+}
+
+.pane-header small.warn {
+  color: var(--warn-color);
+}
+
+.pane-header small.bad {
+  color: var(--danger-color);
+}
+
+.severity-filters {
+  display: flex;
+  gap: 3px;
+}
+
+.severity-filters button {
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 2px 5px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.severity-filters button:hover,
+.severity-filters button.selected {
+  border-color: color-mix(in srgb, var(--accent-color) 46%, var(--border-color));
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
+}
+
+.issue-list {
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  list-style: none;
+}
+
+.issue-item {
+  display: grid;
+  width: 100%;
+  box-sizing: border-box;
+  gap: 2px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-left: 2px solid transparent;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+/*
+ * Only two things earn a colour here: a severity the artifact reported, and the fact
+ * that an artifact listed the finding as blocking. Everything else stays neutral rather
+ * than implying a ranking this panel invented.
+ */
+.issue-item.critical {
+  border-left-color: var(--danger-color);
+}
+
+.issue-item.warning {
+  border-left-color: var(--warn-color);
+}
+
+.issue-item.info {
+  border-left-color: var(--info-color);
+}
+
+.issue-item.blocking {
+  border-left-color: var(--danger-color);
+}
+
+.issue-item:hover {
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+}
+
+.issue-item.selected {
+  background: color-mix(in srgb, var(--accent-color) 9%, transparent);
+}
+
+.issue-kind {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.issue-title {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.issue-actual {
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.issue-item.critical .issue-actual,
+.issue-item.blocking .issue-actual {
+  color: var(--danger-color);
+}
+
+.issue-item.warning .issue-actual {
+  color: var(--warn-color);
+}
+
+/* Evidence card — every field is laid out flat, nothing hidden behind a toggle. */
+.evidence-card {
+  border: 1px solid var(--border-color);
+  border-left: 3px solid color-mix(in srgb, var(--text-secondary) 50%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-secondary) 46%, var(--bg-primary));
+}
+
+.evidence-card.critical {
+  border-left-color: var(--danger-color);
+}
+
+.evidence-card.warning {
+  border-left-color: var(--warn-color);
+}
+
+.evidence-card.info {
+  border-left-color: var(--info-color);
+}
+
+.evidence-card.blocking {
+  border-left-color: var(--danger-color);
+}
+
+.evidence-card > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  padding: 9px 12px;
+}
+
+/*
+ * The finding title is already the bold line in the selected queue row directly to the
+ * left, so the card heads with the channel instead of repeating it.
+ */
+.evidence-kind {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Two independent markers, both facts: whether an artifact listed the finding as
+ * blocking, and the severity an artifact reported for it. Either can be absent. They sit
+ * at the trailing edge as text so colour-blind readers still get them.
+ */
+.evidence-flag,
+.evidence-severity {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.evidence-flag {
+  color: var(--danger-color);
+}
+
+.evidence-severity {
+  color: var(--text-secondary);
+}
+
+.evidence-card.critical .evidence-severity {
+  color: var(--danger-color);
+}
+
+.evidence-card.warning .evidence-severity {
+  color: var(--warn-color);
+}
+
+.evidence-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+  padding: 11px 12px 13px;
+}
+
+.evidence-facts > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.evidence-diagnosis {
+  grid-column: 1 / -1;
+}
+
+/* Trails the artifact path it belongs to rather than claiming a slot of its own. */
+.evidence-metric-id {
+  color: var(--text-secondary);
+}
+
+.evidence-metric-id::before {
+  content: '→ ';
+}
+
+.evidence-facts dt {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 780;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.evidence-facts dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.evidence-facts dd.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.evidence-facts dd.strong {
+  font-weight: 700;
+}
+
+.evidence-card.critical .evidence-facts dd.strong {
+  color: var(--danger-color);
+}
+
+.evidence-card.warning .evidence-facts dd.strong {
+  color: var(--warn-color);
+}
+
+.evidence-block {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+/* Metrics of the selected workspace, grouped by QoR dimension. */
+.metric-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.metric-group {
+  display: grid;
+  gap: 1px;
+}
+
+.metric-group-label {
+  padding: 3px 0;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 780;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.metric-row {
+  display: grid;
+  align-items: baseline;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+  padding: 5px 6px;
+}
+
+.metric-row.highlighted {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent-color) 11%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+.metric-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-value {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Kept at the metric value size: the delta is the signal being scanned, so it
+   stays subordinate through colour and weight rather than through a smaller size. */
+.metric-delta {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.metric-delta.good {
+  color: var(--success-color);
+}
+
+.metric-delta.bad {
+  color: var(--danger-color);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.detail-table-wrap {
+  max-height: 320px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.detail-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.detail-table-wrap th,
+.detail-table-wrap td {
+  box-sizing: border-box;
+  min-width: 104px;
+  height: 30px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent);
+  padding: 5px 8px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-table-wrap th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-primary));
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.detail-table-wrap td {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.pane-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-align: center;
+}
+
+.pane-empty-detail {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+}
+
+.pane-empty-detail small {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+/* Region 4b — cross-workspace comparison for the selected step. */
+.compare-view {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  /*
+   * Without a bounded column the track grows to the widest row, so a project with
+   * enough workspaces pushes columns past the panel edge where nothing can scroll to
+   * them.
+   */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.compare-summary {
+  display: grid;
+  gap: 7px;
+  border-bottom: 1px solid var(--border-color);
+  padding: 9px 12px;
+}
+
+/*
+ * Everything a reader needs before the first control: which step, what the deltas are
+ * measured against, and how the current workspace came out of the step as a whole.
+ */
+.compare-summary-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.compare-caption {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The current workspace's standing over the whole step, inline rather than in a card of
+ * its own. Every metric behind the summary is already a row of the matrix below, so this
+ * is one glance before reading it, not a second place to read it.
+ */
+.verdict-card {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 2px 10px 2px 9px;
+  background: color-mix(in srgb, var(--bg-secondary) 46%, transparent);
+}
+
+.verdict-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.verdict-card-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Widths are the share of comparable metrics, so the whole track is always full. */
+.win-bar {
+  display: flex;
+  overflow: hidden;
+  width: 56px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text-secondary) 16%, transparent);
+}
+
+.win-bar i {
+  height: 100%;
+}
+
+.win-bar i.good {
+  background: var(--success-color);
+}
+
+.win-bar i.bad {
+  background: var(--danger-color);
+}
+
+.win-bar i.neutral {
+  background: color-mix(in srgb, var(--text-secondary) 42%, transparent);
+}
+
+.verdict-card-summary {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verdict-card.baseline .verdict-card-summary {
+  font-style: italic;
+}
+
+.compare-no-baseline {
+  min-width: 0;
+  margin: 0 0 0 auto;
+  color: var(--warn-color);
+  font-size: 9.5px;
+  text-align: right;
+}
+
+/*
+ * Column controls. These are predicates over the project, not a list of chosen
+ * workspaces: naming each workspace stops working at about a dozen of them, while
+ * "reported", "differing", and "has findings" hold at any project size and each one
+ * carries the number of columns it would leave on screen.
+ */
+.compare-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 7px;
+  min-width: 0;
+}
+
+.compare-column-filters {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  align-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+}
+
+.compare-column-filters button {
+  display: inline-flex;
+  min-height: 23px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  padding: 0 8px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.compare-column-filters button:first-child {
+  border-left: 0;
+}
+
+.compare-column-filters button em {
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.compare-column-filters button:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.compare-column-filters button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.compare-column-filters button.selected,
+.compare-column-filters button.selected em {
+  color: var(--accent-color);
+}
+
+.compare-column-filters button.selected {
+  background: color-mix(in srgb, var(--accent-color) 11%, transparent);
+}
+
+/* Search narrows the columns themselves, so it replaces the picker it used to open. */
+.compare-column-search {
+  display: flex;
+  width: 152px;
+  min-height: 23px;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 0 7px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+}
+
+.compare-column-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent-color) 52%, var(--border-color));
+}
+
+.compare-column-search i {
+  font-size: 12px;
+}
+
+.compare-column-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  font-size: 10.5px;
+}
+
+.compare-column-search input::placeholder {
+  color: var(--text-secondary);
+}
+
+.differ-toggle,
+.scope-reset {
+  min-height: 23px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.differ-toggle:hover,
+.differ-toggle.selected,
+.scope-reset:hover {
+  border-color: color-mix(in srgb, var(--accent-color) 46%, var(--border-color));
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
+}
+
+.compare-column-count {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  font-weight: 720;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.compare-scroll {
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+/*
+ * Grows with its rows instead of clipping them, so enough workspaces turn into a
+ * horizontal scroll of the pane rather than columns nothing can reach.
+ */
+.compare-table {
+  /*
+   * The metric column's width is a fixed value rather than a fraction because the
+   * baseline column is frozen against its right edge, and an offset cannot be written
+   * against a width only the layout knows.
+   */
+  --compare-metric-width: 178px;
+  --compare-column-width: 146px;
+
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-primary);
+}
+
+.compare-row {
+  display: grid;
+  min-width: max-content;
+}
+
+.compare-corner,
+.compare-head,
+.compare-metric,
+.compare-cell {
+  box-sizing: border-box;
+  min-width: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border-color) 56%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+}
+
+.compare-corner,
+.compare-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--bg-secondary) 86%, var(--bg-primary));
+}
+
+/*
+ * Enough workspaces push the table wider than the panel. Pinning the metric column
+ * keeps every value labelled once a reader scrolls out to the far columns.
+ */
+.compare-corner,
+.compare-metric {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-primary);
+}
+
+.compare-corner {
+  z-index: 5;
+  padding: 7px 10px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--bg-secondary) 86%, var(--bg-primary));
+}
+
+/*
+ * The baseline is frozen as a second column, not left as the first scrolling one. Reading
+ * the far workspaces otherwise puts every delta beside a reference that has gone off
+ * screen, and the reference is the one number a delta cannot be read without.
+ */
+.compare-head.pinned,
+.compare-cell.pinned {
+  position: sticky;
+  left: var(--compare-metric-width);
+  border-right-color: var(--border-color);
+}
+
+.compare-head.pinned {
+  z-index: 4;
+}
+
+.compare-cell.pinned {
+  z-index: 1;
+  background: var(--bg-primary);
+}
+
+.compare-cell.pinned.selected {
+  background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-primary));
+}
+
+.compare-group div {
+  position: sticky;
+  left: 0;
+  width: max-content;
+}
+
+.compare-head button,
+.compare-cell button {
+  display: grid;
+  width: 100%;
+  box-sizing: border-box;
+  gap: 2px;
+  border: 0;
+  padding: 7px 10px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.compare-head button {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/*
+ * Capped like the workspace chips are. A long name would otherwise widen every column
+ * it heads and push the columns beside it off screen. The full name stays on the
+ * tooltip and on this workspace's verdict card above.
+ */
+.compare-head-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-head button small {
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.compare-head button small.accent {
+  color: var(--accent-color);
+}
+
+.compare-head.selected,
+.compare-cell.selected {
+  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+.compare-metric {
+  display: grid;
+}
+
+/*
+ * Pressing a metric ranks the columns by it. That is what makes an uncapped comparison
+ * readable: the workspaces worth looking at come to the near columns instead of the
+ * reader scrolling out to find them.
+ */
+.compare-metric button {
+  display: grid;
+  width: 100%;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: center;
+  gap: 2px 5px;
+  border: 0;
+  padding: 7px 10px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.compare-metric:hover {
+  background: color-mix(in srgb, var(--accent-color) 5%, var(--bg-primary));
+}
+
+.compare-metric.ranked {
+  background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-primary));
+}
+
+.compare-metric strong,
+.compare-metric small {
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-metric strong {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.compare-metric small {
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.compare-rank-mark {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  color: var(--accent-color);
+  font-size: 14px;
+}
+
+.compare-cell:hover {
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+}
+
+/*
+ * Only the delta is coloured. Grading the value itself would need a threshold, and the
+ * QoR metric artifacts do not report one, so the sign against the baseline is all this
+ * table can honestly claim.
+ */
+.compare-value {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.compare-cell strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-cell.unreported strong {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.compare-cell.not-applicable strong {
+  color: color-mix(in srgb, var(--text-secondary) 82%, transparent);
+  font-style: normal;
+  font-weight: 700;
+}
+
+/*
+ * Marks the value a reader would call best using the direction the metric itself
+ * reports. Set only where that direction exists and the reported values are not all
+ * equal, so the mark never invents a winner.
+ */
+.compare-cell.leads {
+  box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+.compare-cell.leads strong {
+  font-weight: 750;
+}
+
+.lead-flag {
+  flex: 0 0 auto;
+  color: var(--accent-color);
+  font-family: inherit;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.compare-delta {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.compare-delta.good {
+  color: var(--success-color);
+}
+
+.compare-delta.bad {
+  color: var(--danger-color);
+}
+
+.compare-delta em,
+.metric-delta em {
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  font-style: normal;
+}
+
+.compare-note {
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/*
+ * A diverging bar on one scale shared by every cell of the table. Reading a column of
+ * these answers "did this workspace move the step forward" without doing the arithmetic
+ * that the numbers beside them require.
+ */
+.delta-bar {
+  position: relative;
+  /* Capped so a wide window stretches the column but not the chart inside it. */
+  max-width: 168px;
+  height: 4px;
+  margin-top: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-secondary) 13%, transparent);
+}
+
+/* The centre line the bars grow out of, and the baseline column's only mark. */
+.delta-bar::before {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  background: color-mix(in srgb, var(--text-secondary) 52%, transparent);
+  content: '';
+}
+
+.delta-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-secondary) 48%, transparent);
+}
+
+.delta-bar-fill.good {
+  background: var(--success-color);
+}
+
+.delta-bar-fill.bad {
+  background: var(--danger-color);
+}
+
+.compare-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  border-top: 1px solid var(--border-color);
+  padding: 7px 12px;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+}
+
+.compare-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 4px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-secondary) 48%, transparent);
+}
+
+.legend-swatch.good {
+  background: var(--success-color);
+}
+
+.legend-swatch.bad {
+  background: var(--danger-color);
+}
+
+.compare-legend-hint {
+  margin-left: auto;
+  color: color-mix(in srgb, var(--text-secondary) 80%, transparent);
+}
+
+.compare-group {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+}
+
+.compare-group div {
+  padding: 5px 10px;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.step-analysis button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 76%, transparent);
+  outline-offset: -2px;
+}
+
+@media (max-width: 1080px) {
+  .step-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(140px, 0.4fr) minmax(0, 1fr);
+  }
+
+  .issue-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+}
+
+@media (max-width: 700px) {
+  .step-rail-item {
+    flex: 0 0 auto;
+  }
+
+  .verdict-bar {
+    align-items: stretch;
+  }
+
+  .workspace-picker {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .workspace-selector {
+    min-width: 0;
+    max-width: none;
+    flex: 1 1 180px;
+  }
+
+  .workspace-picker-popover {
+    width: min(100%, 380px);
+  }
+
+  .verdict {
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 68%, transparent);
+    padding-top: 7px;
+  }
+
+  .issue-pane > .pane-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .severity-filters {
+    width: 100%;
+    padding-bottom: 2px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .severity-filters button {
+    flex: 0 0 auto;
+    font-size: 11px;
+  }
+
+  .compare-column-filters {
+    width: 100%;
+  }
+
+  .compare-column-filters button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .compare-column-search {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .verdict-card,
+  .compare-no-baseline {
+    margin-left: 0;
+  }
+
+  .compare-legend-hint {
+    margin-left: 0;
+  }
+}

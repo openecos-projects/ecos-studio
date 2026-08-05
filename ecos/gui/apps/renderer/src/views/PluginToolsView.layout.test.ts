@@ -129,13 +129,11 @@ describe('PluginToolsView resource table layout', () => {
     )
   })
 
-  it('uses only a lightweight background blur and avoids backdrop blur', () => {
-    expect(pluginToolsViewSource).toMatch(
-      /\.blurred-home\s*\{[\s\S]*filter:\s*blur\(1\.5px\)\s+brightness\(0\.82\);/,
-    )
-    expect(pluginToolsViewSource).toMatch(
-      /\.blurred-home\s*\{[\s\S]*transform:\s*translateZ\(0\)\s+scale\(1\.006\);/,
-    )
+  it('uses a neutral scrim without rendering a fabricated page behind the dialog', () => {
+    expect(pluginToolsViewSource).toContain('class="manager-scrim"')
+    expect(pluginToolsViewSource).not.toContain('blurred-home')
+    expect(pluginToolsViewSource).not.toContain('blurred-card')
+    expect(pluginToolsViewSource).not.toContain('blurred-lines')
     expect(pluginToolsViewSource).not.toContain('backdrop-filter: blur(')
   })
 

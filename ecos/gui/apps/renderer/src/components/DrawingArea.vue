@@ -12,35 +12,47 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { useEDA } from '@/composables/useEDA'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { getDesktopApi } from '@/platform/desktop'
+import {
+  buildChipViewerOpenRequest,
+  canOpenChipViewer,
+  chipViewerLoadingMessage,
+  shouldShowChipViewer,
+  type ChipViewerMode,
+} from './drawingAreaChipViewer'
 
 const route = useRoute()
 const { currentProject, resourceVersions, workspaceSession } = useWorkspace()
 const { getResourceUrl } = useEDA()
 
 const preview = shallowRef<ImagePreviewController | null>(null)
-const currentViewJsonPackageRoot = ref<string | null>(null)
 const previewImageUrl = ref<string | null>(null)
 const loadingState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const loadingMessage = ref('')
 const cursorEda = ref<{ x: number; y: number } | null>(null)
-const nativeLayoutViewerBusy = ref(false)
-
-const NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE = 'Preparing Native Layout Viewer...'
+const chipViewerBusy = ref(false)
+const chipViewerEditBusy = ref(false)
 
 const currentStepKey = computed(() => {
   const pathParts = route.path.split('/')
   return pathParts[pathParts.length - 1] || 'home'
 })
 
-const isPreparingNativeLayoutViewer = computed(
-  () => nativeLayoutViewerBusy.value && loadingState.value === 'loading',
+const isPreparingChipViewer = computed(
+  () => chipViewerBusy.value && loadingState.value === 'loading',
 )
 
-const showNativeLayoutViewer = computed(
-  () =>
-    isDesktopRuntime() &&
-    currentProject.value?.path != null &&
-    currentViewJsonPackageRoot.value != null,
+const isPreparingChipViewerEdit = computed(
+  () => chipViewerEditBusy.value && loadingState.value === 'loading',
+)
+
+const currentStepEnum = computed(() => getStepEnumFromPath(currentStepKey.value))
+
+const showChipViewer = computed(() =>
+  shouldShowChipViewer({
+    isDesktopRuntime: isDesktopRuntime(),
+    projectPath: currentProject.value?.path,
+    step: currentStepEnum.value,
+  }),
 )
 
 const stepEnumValues = Object.values(StepEnum)
@@ -68,18 +80,12 @@ function getStepEnumFromPath(path: string): StepEnum | undefined {
   return stepEnumValues.find((step) => step.toLowerCase() === path.toLowerCase())
 }
 
-function pickViewJsonPackageRoot(info: Record<string, unknown>): string | null {
-  const value = info.viewJson
-  return typeof value === 'string' && value.length > 0 ? value : null
-}
-
 function resetLoadingState(): void {
   loadingState.value = 'idle'
   loadingMessage.value = ''
 }
 
 function clearCurrentPreview(): void {
-  currentViewJsonPackageRoot.value = null
   previewImageUrl.value = null
 }
 
@@ -135,34 +141,56 @@ async function loadStepImagePreview(
   })
 }
 
-async function onOpenNativeLayoutViewer(): Promise<void> {
-  if (nativeLayoutViewerBusy.value) return
+async function openChipViewer(mode: ChipViewerMode): Promise<void> {
   const projectPath = currentProject.value?.path
-  const viewJsonPackageRoot = currentViewJsonPackageRoot.value
-  if (!projectPath || !viewJsonPackageRoot || !isDesktopRuntime()) return
+  const stepEnum = currentStepEnum.value
+  if (
+    !canOpenChipViewer({
+      chipViewerBusy: chipViewerBusy.value,
+      chipViewerEditBusy: chipViewerEditBusy.value,
+      isDesktopRuntime: isDesktopRuntime(),
+      projectPath,
+      step: stepEnum,
+    }) ||
+    !projectPath ||
+    !stepEnum
+  ) {
+    return
+  }
 
-  nativeLayoutViewerBusy.value = true
+  const busyState = mode === 'edit' ? chipViewerEditBusy : chipViewerBusy
+  const preparingMessage = chipViewerLoadingMessage(mode)
+  busyState.value = true
   loadingState.value = 'loading'
-  loadingMessage.value = NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE
+  loadingMessage.value = preparingMessage
   try {
     const desktopApi = getDesktopApi()
-    await desktopApi.layoutViewer.open({
-      projectPath,
-      viewJsonPackageRoot,
-    })
+    await desktopApi.chipViewer.open(
+      buildChipViewerOpenRequest(projectPath, stepEnum, mode),
+    )
   } catch (err) {
-    console.error('Failed to open native layout viewer:', err)
+    console.error(
+      mode === 'edit'
+        ? 'Failed to open chip viewer edit mode:'
+        : 'Failed to open chip viewer:',
+      err,
+    )
     loadingState.value = 'error'
     loadingMessage.value = err instanceof Error ? err.message : String(err)
   } finally {
-    nativeLayoutViewerBusy.value = false
-    if (
-      loadingState.value === 'loading' &&
-      loadingMessage.value === NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE
-    ) {
+    busyState.value = false
+    if (loadingState.value === 'loading' && loadingMessage.value === preparingMessage) {
       resetLoadingState()
     }
   }
+}
+
+async function onOpenChipViewer(): Promise<void> {
+  await openChipViewer('view')
+}
+
+async function onOpenChipViewerEdit(): Promise<void> {
+  await openChipViewer('edit')
 }
 
 const handleStageChange = async (stage: string) => {
@@ -191,9 +219,7 @@ const handleStageChange = async (stage: string) => {
       const info = layoutResponse.info
       const imagePath =
         typeof info.image === 'string' && info.image.length > 0 ? info.image : null
-      const viewJsonPackageRoot = pickViewJsonPackageRoot(info)
 
-      currentViewJsonPackageRoot.value = viewJsonPackageRoot
       previewImageUrl.value = null
 
       if (!imagePath) {
@@ -274,9 +300,11 @@ onUnmounted(() => {
   <div class="flex h-full flex-col overflow-hidden">
     <DrawingToolbar
       :preview="preview"
-      :show-native-layout-viewer="showNativeLayoutViewer"
-      :native-layout-viewer-busy="nativeLayoutViewerBusy"
-      @openNativeLayoutViewer="onOpenNativeLayoutViewer"
+      :show-chip-viewer="showChipViewer"
+      :chip-viewer-busy="chipViewerBusy"
+      :chip-viewer-edit-busy="chipViewerEditBusy"
+      @openChipViewer="onOpenChipViewer"
+      @openChipViewerEdit="onOpenChipViewerEdit"
     />
 
     <div class="relative flex-1 overflow-hidden">
@@ -285,25 +313,35 @@ onUnmounted(() => {
       <div
         v-if="loadingState === 'loading'"
         :data-testid="
-          isPreparingNativeLayoutViewer ? 'native-layout-viewer-loading' : undefined
+          isPreparingChipViewer || isPreparingChipViewerEdit
+            ? 'chip-viewer-loading'
+            : undefined
         "
         class="absolute inset-0 z-10 flex items-center justify-center bg-black/40 transition-opacity duration-200"
       >
         <div
           class="flex min-w-64 flex-col items-center gap-2 rounded-lg border border-white/10 bg-black/35 px-5 py-4 text-center text-sm text-white/80 shadow-2xl backdrop-blur-sm"
-          :class="{ 'gap-3': isPreparingNativeLayoutViewer }"
+          :class="{
+            'gap-3': isPreparingChipViewer || isPreparingChipViewerEdit,
+          }"
         >
           <div
             class="h-6 w-6 animate-spin rounded-full border-2 border-white/30 border-t-white/80"
-            :class="{ 'h-8 w-8': isPreparingNativeLayoutViewer }"
           ></div>
           <span class="font-medium">{{ loadingMessage || 'Loading...' }}</span>
           <span
-            v-if="isPreparingNativeLayoutViewer"
-            data-testid="native-layout-viewer-loading"
+            v-if="isPreparingChipViewerEdit"
+            data-testid="chip-viewer-loading"
             class="max-w-72 text-xs leading-5 text-white/55"
           >
-            Preparing Native Layout Viewer package before opening the window.
+            Preparing editable geometry snapshot before opening Chip Viewer.
+          </span>
+          <span
+            v-else-if="isPreparingChipViewer"
+            data-testid="chip-viewer-loading"
+            class="max-w-72 text-xs leading-5 text-white/55"
+          >
+            Preparing geometry snapshot before opening Chip Viewer.
           </span>
         </div>
       </div>

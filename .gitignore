@@ -1,5 +1,6 @@
 ws
 build
+ecos/chip-viewer/target/
 .pnpm-store
 .vscode
 .setup-done
@@ -12,9 +13,10 @@ result
 .vscode/
 # Claude Code
 .claude/
+.trellis/
 .humanize*
 .humanize/
-docs/superpowers/
+docs/
 .superpowers/
 .worktrees/
 

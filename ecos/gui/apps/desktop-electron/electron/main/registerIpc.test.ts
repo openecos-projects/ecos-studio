@@ -85,11 +85,6 @@ function registerHandlers() {
       get: vi.fn(),
       set: vi.fn(),
     },
-    remoteContentService: {
-      listFiles: vi.fn(),
-      readJsonFile: vi.fn(),
-      readTextFile: vi.fn(),
-    },
     projectManifestService: {
       mutate: vi.fn(),
     },
@@ -134,6 +129,7 @@ function registerHandlers() {
       activatePdk: vi.fn(),
       cancelResource: vi.fn(),
       getResource: vi.fn(),
+      readMpcSpec: vi.fn(),
       importLocalPath: vi.fn(),
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
@@ -193,7 +189,7 @@ function registerHandlers() {
       resize: vi.fn(),
       write: vi.fn(),
     },
-    layoutViewerService: {
+    chipViewerService: {
       open: vi.fn(),
     },
   }
@@ -319,6 +315,12 @@ describe('registerIpc', () => {
       status: 'cancelled',
       resource_id: 'tool:yosys',
     })
+    services.resourceManagerService.readMpcSpec.mockResolvedValue({
+      resource_id: 'mpc:mpc-frame',
+      installed_version: '0.1.0',
+      spec_path: '/tmp/mpc/spec/spec.json.in',
+      spec: { designs: [] },
+    })
     services.resourceManagerService.importPdkPath.mockResolvedValue(
       resources.resources[0],
     )
@@ -338,6 +340,14 @@ describe('registerIpc', () => {
       status: 'started',
       resource_id: 'tool:yosys',
       version: '0.61',
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesReadMpcSpec)?.(event, 'mpc:mpc-frame'),
+    ).resolves.toEqual({
+      resource_id: 'mpc:mpc-frame',
+      installed_version: '0.1.0',
+      spec_path: '/tmp/mpc/spec/spec.json.in',
+      spec: { designs: [] },
     })
     await expect(
       handlers.get(desktopApiIpcChannels.resourcesImportPdkPath)?.(event, {
@@ -362,6 +372,9 @@ describe('registerIpc', () => {
       'tool:yosys',
       '0.61',
       expect.any(Function),
+    )
+    expect(services.resourceManagerService.readMpcSpec).toHaveBeenCalledWith(
+      'mpc:mpc-frame',
     )
     expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
     expect(services.resourceManagerService.importLocalPath).toHaveBeenCalledWith(
@@ -449,59 +462,6 @@ describe('registerIpc', () => {
     })
     expect(services.eccRuntimeService.closeWorkspace).not.toHaveBeenCalled()
   })
-
-  it('delegates remote content requests to the remote content service', async () => {
-    const { handlers, services } = registerHandlers()
-    const event = { sender: { id: 'web-contents' } }
-    services.remoteContentService.listFiles.mockResolvedValue([
-      {
-        source: 'socTemplateCatalog',
-        path: 'manifest.json',
-        name: 'manifest.json',
-      },
-    ])
-    services.remoteContentService.readTextFile.mockResolvedValue('{"schema_version":1}')
-    services.remoteContentService.readJsonFile.mockResolvedValue({ schema_version: 1 })
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.remoteContentListFiles)?.(event, {
-        source: 'socTemplateCatalog',
-        pattern: '**/*.json',
-      }),
-    ).resolves.toEqual([
-      {
-        source: 'socTemplateCatalog',
-        path: 'manifest.json',
-        name: 'manifest.json',
-      },
-    ])
-    await expect(
-      handlers.get(desktopApiIpcChannels.remoteContentReadTextFile)?.(event, {
-        source: 'socTemplateCatalog',
-        path: 'manifest.json',
-      }),
-    ).resolves.toBe('{"schema_version":1}')
-    await expect(
-      handlers.get(desktopApiIpcChannels.remoteContentReadJsonFile)?.(event, {
-        source: 'socTemplateCatalog',
-        path: 'manifest.json',
-      }),
-    ).resolves.toEqual({ schema_version: 1 })
-
-    expect(services.remoteContentService.listFiles).toHaveBeenCalledWith({
-      source: 'socTemplateCatalog',
-      pattern: '**/*.json',
-    })
-    expect(services.remoteContentService.readTextFile).toHaveBeenCalledWith({
-      source: 'socTemplateCatalog',
-      path: 'manifest.json',
-    })
-    expect(services.remoteContentService.readJsonFile).toHaveBeenCalledWith({
-      source: 'socTemplateCatalog',
-      path: 'manifest.json',
-    })
-  })
-
   it('forwards resource progress to the requesting renderer during installs', async () => {
     const { handlers, services } = registerHandlers()
     const sender = {
@@ -1061,28 +1021,31 @@ describe('registerIpc', () => {
     })
   })
 
-  it('delegates native layout viewer launches to the layout viewer service', async () => {
+  it('delegates chip viewer launches to the chip viewer service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     const request = {
-      projectPath: '/tmp/project/home.json',
-      viewJsonPackageRoot: 'output/gcd_route_view',
+      mode: 'edit',
+      projectPath: '/tmp/project',
+      step: 'Floorplan',
     }
-    services.layoutViewerService.open.mockResolvedValue({
-      layoutPackagePath: '/tmp/project/output/gcd_route_view/.layoutpkg',
-      packageRoot: '/tmp/project/output/gcd_route_view',
+    services.chipViewerService.open.mockResolvedValue({
+      geometryManifestPath:
+        '/tmp/project/Floorplan_ecc/output/geometry/geometry.manifest',
       spawned: true,
+      workspaceStepDirectory: '/tmp/project/Floorplan_ecc',
     })
 
     await expect(
-      handlers.get(desktopApiIpcChannels.layoutViewerOpen)?.(event, request),
+      handlers.get(desktopApiIpcChannels.chipViewerOpen)?.(event, request),
     ).resolves.toEqual({
-      layoutPackagePath: '/tmp/project/output/gcd_route_view/.layoutpkg',
-      packageRoot: '/tmp/project/output/gcd_route_view',
+      geometryManifestPath:
+        '/tmp/project/Floorplan_ecc/output/geometry/geometry.manifest',
       spawned: true,
+      workspaceStepDirectory: '/tmp/project/Floorplan_ecc',
     })
 
-    expect(services.layoutViewerService.open).toHaveBeenCalledWith(request)
+    expect(services.chipViewerService.open).toHaveBeenCalledWith(request)
   })
 
   it('delegates workspace resource calls to the resource service', async () => {

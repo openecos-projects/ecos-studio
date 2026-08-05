@@ -8,23 +8,17 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/WelcomeView.vue'),
     children: [
       { path: '', name: 'ECOS', component: () => import('../views/ECOSView.vue') },
-      {
-        path: 'soc',
-        name: 'SoCGallery',
-        component: () => import('../views/SoCTemplateGalleryView.vue'),
-      },
-      {
-        path: 'soc/:templateId',
-        name: 'SoCTemplateDetail',
-        component: () => import('../views/SoCTemplateDetailView.vue'),
-        props: true,
-      },
       { path: 'ecc', name: 'ECC', component: () => import('../views/ECCView.vue') },
       { path: 'fe', name: 'FE', component: () => import('../views/FEView.vue') },
       {
         path: 'tools',
         name: 'PluginTools',
         component: () => import('../views/PluginToolsView.vue'),
+      },
+      {
+        path: 'mpc',
+        name: 'MpcResources',
+        component: () => import('../views/MpcResourcesView.vue'),
       },
       {
         path: 'projects',

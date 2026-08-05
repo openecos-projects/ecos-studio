@@ -25,7 +25,7 @@
         >
           Design Tools
         </h3>
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-2 gap-4">
           <!-- Frontend Design -->
           <button
             @click="navigateToFE"
@@ -45,22 +45,6 @@
               >RTL / Verilog / SystemVerilog</span
             >
           </button>
-          <!-- SOC -->
-          <button
-            @click="navigateToSoc"
-            class="group flex cursor-pointer flex-col items-center justify-center rounded-xl border border-(--border-color) bg-(--bg-secondary) py-8 transition-all duration-200 hover:scale-[1.02] hover:border-(--accent-color) hover:shadow-(--accent-color)/5 hover:shadow-lg"
-          >
-            <div
-              class="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-(--bg-primary) transition-colors group-hover:bg-(--accent-color)/10"
-            >
-              <i
-                class="ri-cpu-line text-2xl text-(--text-secondary) transition-colors group-hover:text-(--accent-color)"
-              ></i>
-            </div>
-            <span class="mb-1 text-sm font-medium text-(--text-primary)">SoC</span>
-            <span class="text-xs text-(--text-secondary)">Remote template catalog</span>
-          </button>
-
           <!-- Backend Design -->
           <button
             @click="navigateToECC"
@@ -117,6 +101,24 @@
           <div>
             <div class="space-y-2">
               <button
+                @click="navigateToMpcResources"
+                class="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-(--border-color) bg-(--bg-secondary) px-4 py-3 text-left transition-all duration-200 hover:border-(--accent-color)"
+              >
+                <i class="ri-layout-grid-line text-lg text-(--accent-color)"></i>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-medium text-(--text-primary)"
+                    >MPC Resources</span
+                  >
+                  <span class="block truncate text-xs text-(--text-secondary)"
+                    >Templates and core constraints</span
+                  >
+                </span>
+                <i
+                  class="ri-arrow-right-s-line text-lg text-(--text-secondary) transition-colors group-hover:text-(--accent-color)"
+                ></i>
+              </button>
+
+              <button
                 @click="handleNotReady"
                 class="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-(--border-color) bg-(--bg-secondary) px-4 py-3 text-left opacity-50 transition-all duration-200 hover:border-(--accent-color)"
               >
@@ -151,9 +153,9 @@ const router = useRouter()
 
 const navigateToECC = () => router.push('/ecc')
 const navigateToFE = () => router.push('/fe')
-const navigateToSoc = () => router.push('/soc')
 const navigateToProjects = () => router.push('/projects')
 const navigateToTools = () => router.push('/tools')
+const navigateToMpcResources = () => router.push('/mpc')
 const handleNotReady = () => {
   /* placeholder */
 }

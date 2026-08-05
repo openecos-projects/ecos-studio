@@ -16,11 +16,7 @@ describe('DrawingArea runtime wiring', () => {
     expect(source).not.toContain('useLayoutState')
   })
 
-  it('uses view-json resources only to open Native Layout Viewer', () => {
-    expect(source).toContain('currentViewJsonPackageRoot')
-    expect(source).toContain('desktopApi.layoutViewer.open')
-    expect(source).toContain('viewJsonPackageRoot')
-
+  it('does not use view-json overview rendering in the canvas', () => {
     expect(source).not.toContain('loadViewJsonOverview')
     expect(source).not.toContain('ViewJsonOverviewRenderer')
     expect(source).not.toContain('createViewJsonRasterTileWorker')

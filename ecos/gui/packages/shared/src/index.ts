@@ -32,8 +32,8 @@ export type {
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,
-  LayoutViewerOpenRequest,
-  LayoutViewerOpenResult,
+  ChipViewerOpenRequest,
+  ChipViewerOpenResult,
   PdkDetectedFiles,
   ScannedPdkDirectory,
   ScannedRtlDirectory,
@@ -46,6 +46,14 @@ export type {
   EccFlowRunResult,
   EccFlowRunStepRequest,
   EccFlowRunStepResult,
+  EccLayoutEditApplyRequest,
+  EccLayoutEditApplyResult,
+  EccLayoutEditBeginRequest,
+  EccLayoutEditBeginResult,
+  EccLayoutEditDiscardRequest,
+  EccLayoutEditDiscardResult,
+  EccLayoutEditSaveRequest,
+  EccLayoutEditSaveResult,
   EccRpcHelloResult,
   EccRpcPingResult,
   EccRpcShutdownResult,
@@ -82,20 +90,13 @@ export type {
   ResourceInstallRequest,
   ResourceJob,
   ResourceList,
+  MpcSpecReadResult,
   ResourceOperationResult,
   ResourceStatus,
   ResourceType,
   ResourceUpdateCheckItem,
   ResourceUpdateCheckResult,
 } from './contracts/resources.ts'
-export type {
-  RemoteContentApi,
-  RemoteContentFile,
-  RemoteContentListFilesRequest,
-  RemoteContentReadJsonFileRequest,
-  RemoteContentReadTextFileRequest,
-  RemoteContentSourceId,
-} from './contracts/remoteContent.ts'
 export type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
@@ -169,6 +170,8 @@ export {
   resolveProjectFileAbsolutePath,
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
+export { validateMpcSpec } from './utils/mpcSpec.ts'
+export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'
 export {
   applyProjectManifestMutation,
   archiveWorkspaceInManifest,
@@ -186,6 +189,8 @@ export type {
   ProjectManifestDraftInput,
   ProjectManifestFlowStep,
   ProjectManifestMetricSummary,
+  ProjectManifestMpc,
+  ProjectManifestMpcDesign,
   ProjectManifestMutation,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,

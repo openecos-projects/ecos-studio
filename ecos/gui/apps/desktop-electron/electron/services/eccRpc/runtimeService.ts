@@ -3,6 +3,14 @@ import type {
   EccFlowRunResult,
   EccFlowRunStepRequest,
   EccFlowRunStepResult,
+  EccLayoutEditApplyRequest,
+  EccLayoutEditApplyResult,
+  EccLayoutEditBeginRequest,
+  EccLayoutEditBeginResult,
+  EccLayoutEditDiscardRequest,
+  EccLayoutEditDiscardResult,
+  EccLayoutEditSaveRequest,
+  EccLayoutEditSaveResult,
   EccRpcHelloResult,
   EccRpcPingResult,
   EccRpcShutdownResult,
@@ -193,6 +201,24 @@ export class EccRpcRuntimeService {
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceInspectSignoffResult> {
     return this.runtimeForHandle(request.workspaceHandle).inspectSignoff(request)
+  }
+
+  layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
+    return this.runtimeForHandle(request.workspaceHandle).layoutEditBegin(request)
+  }
+
+  layoutEditApply(request: EccLayoutEditApplyRequest): Promise<EccLayoutEditApplyResult> {
+    return this.runtimeForHandle(request.workspaceHandle).layoutEditApply(request)
+  }
+
+  layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult> {
+    return this.runtimeForHandle(request.workspaceHandle).layoutEditSave(request)
+  }
+
+  layoutEditDiscard(
+    request: EccLayoutEditDiscardRequest,
+  ): Promise<EccLayoutEditDiscardResult> {
+    return this.runtimeForHandle(request.workspaceHandle).layoutEditDiscard(request)
   }
 
   async runFlow(request: EccFlowRunRequest): Promise<EccFlowRunResult> {

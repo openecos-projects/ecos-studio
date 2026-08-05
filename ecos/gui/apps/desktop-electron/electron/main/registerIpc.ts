@@ -44,12 +44,8 @@ import {
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
-  type LayoutViewerOpenRequest,
-  type LayoutViewerOpenResult,
-  type RemoteContentFile,
-  type RemoteContentListFilesRequest,
-  type RemoteContentReadJsonFileRequest,
-  type RemoteContentReadTextFileRequest,
+  type ChipViewerOpenRequest,
+  type ChipViewerOpenResult,
   type ResourceImportPdkRequest,
   type ResourceImportLocalRequest,
   type ResourceInstallRequest,
@@ -113,11 +109,6 @@ export interface DesktopBridgeServices {
     ): Promise<T | null>
     set(key: string, value: DesktopSettingsValue): Promise<void>
   }
-  remoteContentService: {
-    listFiles(request: RemoteContentListFilesRequest): Promise<RemoteContentFile[]>
-    readTextFile(request: RemoteContentReadTextFileRequest): Promise<string>
-    readJsonFile<T = unknown>(request: RemoteContentReadJsonFileRequest): Promise<T>
-  }
   projectManifestService: {
     mutate(
       request: ProjectManifestMutationRequest,
@@ -177,8 +168,8 @@ export interface DesktopBridgeServices {
   surferProtocolService: {
     authorizeWaveform(path: string): Promise<string>
   }
-  layoutViewerService: {
-    open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
+  chipViewerService: {
+    open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
   }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
@@ -190,6 +181,7 @@ export interface DesktopBridgeServices {
   resourceManagerService: {
     listResources(): Promise<unknown>
     getResource(resourceId: string): Promise<unknown>
+    readMpcSpec(resourceId: string): Promise<unknown>
     installResource(
       resourceId: string,
       version?: string,
@@ -920,24 +912,6 @@ export function registerIpc(
     await services.settingsStore.delete(key as string)
   })
 
-  handle(desktopApiIpcChannels.remoteContentListFiles, async (_event, request) => {
-    return await services.remoteContentService.listFiles(
-      request as RemoteContentListFilesRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.remoteContentReadTextFile, async (_event, request) => {
-    return await services.remoteContentService.readTextFile(
-      request as RemoteContentReadTextFileRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.remoteContentReadJsonFile, async (_event, request) => {
-    return await services.remoteContentService.readJsonFile(
-      request as RemoteContentReadJsonFileRequest,
-    )
-  })
-
   handle(desktopApiIpcChannels.projectManifestMutate, async (_event, request) => {
     if (!isRecord(request))
       throw new Error('Project manifest mutation request must be an object')
@@ -1215,8 +1189,8 @@ export function registerIpc(
     },
   )
 
-  handle(desktopApiIpcChannels.layoutViewerOpen, async (_event, request) => {
-    return await services.layoutViewerService.open(request as LayoutViewerOpenRequest)
+  handle(desktopApiIpcChannels.chipViewerOpen, async (_event, request) => {
+    return await services.chipViewerService.open(request as ChipViewerOpenRequest)
   })
 
   handle(desktopApiIpcChannels.workspaceResourcesGetIndex, async () => {
@@ -1250,6 +1224,10 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.resourcesGet, async (_event, resourceId) => {
     return await services.resourceManagerService.getResource(resourceId as string)
+  })
+
+  handle(desktopApiIpcChannels.resourcesReadMpcSpec, async (_event, resourceId) => {
+    return await services.resourceManagerService.readMpcSpec(resourceId as string)
   })
 
   handle(desktopApiIpcChannels.resourcesInstall, async (event, request) => {

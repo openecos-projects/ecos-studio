@@ -4,7 +4,6 @@
   fetchPnpmDeps,
   chipcompiler-cli,
   electron,
-  layout-viewer,
   makeWrapper,
   nodejs,
   pnpmConfigHook,
@@ -83,7 +82,6 @@ stdenv.mkDerivation (finalAttrs: {
       --prefix PATH : ${
         lib.makeBinPath [
           chipcompiler-cli
-          layout-viewer
           yosysWithSlang
         ]
       }

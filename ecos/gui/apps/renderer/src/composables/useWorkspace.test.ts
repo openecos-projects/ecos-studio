@@ -2344,6 +2344,15 @@ describe('useWorkspace openProject', () => {
         top_module: 'top',
         clock: 'clk',
       },
+      mpc: {
+        resource_id: 'mpc:mpc-frame',
+        display_name: 'MPC Frame',
+        installed_version: '0.1.0',
+        path: '/resources/mpcs/mpc-frame/0.1.0',
+        spec_path: '/resources/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+        design: { index: 0, design_name: 'frame' },
+        core_template: { minimum_area: 100, maximum_area: 500 },
+      },
       origin_def: '',
       origin_verilog: '',
       rtl_list: [],
@@ -2352,6 +2361,18 @@ describe('useWorkspace openProject', () => {
     await vi.waitFor(() => {
       expect(createWorkspaceApiMock).toHaveBeenCalled()
     })
+
+    expect(createWorkspaceApiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parameters: expect.objectContaining({
+          MPC: expect.objectContaining({
+            resource_id: 'mpc:mpc-frame',
+            design: { index: 0, design_name: 'frame' },
+            core_template: { minimum_area: 100, maximum_area: 500 },
+          }),
+        }),
+      }),
+    )
 
     expect(workspace.runtimeBackendConnecting.value).toBe(true)
 

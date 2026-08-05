@@ -10,6 +10,7 @@ import { AppInfoService } from '../services/appInfoService'
 import {
   getElectronLatestMainLogFile,
   getElectronMainLogFile,
+  getLogSessionDirectory,
 } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
@@ -20,7 +21,7 @@ import {
   frontendRuntimeEventFromNotification,
 } from '../services/frontendRpcRuntime'
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
-import { LayoutViewerService } from '../services/layoutViewerService'
+import { ChipViewerService } from '../services/chipViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -29,7 +30,6 @@ import {
 } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectManifestService } from '../services/projectManifestService'
-import { RemoteContentService } from '../services/remoteContentService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
@@ -58,11 +58,10 @@ let services: {
   appInfoService: AppInfoService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
   eccRuntimeService: EccRpcRuntimeService
-  remoteContentService: RemoteContentService
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
-  layoutViewerService: LayoutViewerService
+  chipViewerService: ChipViewerService
   shellService: ShellPtyService
   surferProtocolService: SurferProtocolService
   workspaceResourceService: WorkspaceResourceService
@@ -131,7 +130,6 @@ function getDesktopServices() {
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
   })
-  const remoteContentService = new RemoteContentService()
   const workspaceResourceService = new WorkspaceResourceService({
     projectScopeProvider: projectScopeService,
   })
@@ -200,23 +198,25 @@ function getDesktopServices() {
     },
   })
   surferProtocolService.register(protocol)
-  const layoutViewerService = new LayoutViewerService({
+  const chipViewerService = new ChipViewerService({
     appPath: app.getAppPath(),
     cwd: process.cwd(),
     env: runtimeEnv,
     isPackaged: app.isPackaged,
     platform: process.platform,
     resourcesPath: process.resourcesPath,
+    viewerLogDirectory: join(getLogSessionDirectory(), 'chip-viewer'),
+    layoutEditRuntime: eccRuntimeService,
+    workspaceResourceService,
   })
 
   services = {
     appInfoService,
     frontendRpcRuntimeService,
+    chipViewerService,
     eccRuntimeService,
-    remoteContentService,
     projectManifestService,
     resourceManagerService,
-    layoutViewerService,
     settingsStore,
     shellService,
     surferProtocolService,
@@ -250,10 +250,9 @@ async function ensureDesktopBridgeReady(): Promise<void> {
         })
       },
       eccRuntimeService: desktopServices.eccRuntimeService,
-      remoteContentService: desktopServices.remoteContentService,
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
-      layoutViewerService: desktopServices.layoutViewerService,
+      chipViewerService: desktopServices.chipViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
       surferProtocolService: desktopServices.surferProtocolService,

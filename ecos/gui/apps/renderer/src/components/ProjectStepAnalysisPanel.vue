@@ -1,260 +1,609 @@
 <template>
-  <section class="stage-workbench" aria-label="Project Step Analysis">
-    <aside class="stage-rail" aria-label="Flow stages">
-      <span class="stage-rail-label">Flow Stages</span>
-      <div class="stage-rail-list">
+  <section class="step-analysis" aria-label="Step analysis">
+    <nav class="step-rail" aria-label="Flow steps">
+      <button
+        v-for="tab in stepTabs"
+        :key="tab.step"
+        type="button"
+        class="step-rail-item"
+        :class="{
+          selected: tab.step === selectedStep,
+          muted: tab.analysisAvailability === 'unavailable',
+        }"
+        :aria-pressed="tab.step === selectedStep"
+        :title="stepTabTitle(tab)"
+        @click="emit('select-step', tab.step)"
+      >
+        <span class="step-rail-name">{{ tab.step }}</span>
+        <span class="step-rail-mark" :class="stepTabTone(tab)" aria-hidden="true">
+          {{ stepTabBadge(tab) }}
+        </span>
+      </button>
+    </nav>
+
+    <div class="verdict-bar">
+      <div class="workspace-picker" role="group" aria-label="Workspace">
         <button
-          v-for="stage in steps"
-          :key="stage.step"
           type="button"
-          class="stage-rail-item"
-          :class="{ selected: stage.step === selectedStep }"
-          :aria-pressed="stage.step === selectedStep"
-          @click="emit('select-step', stage.step)"
+          class="workspace-cycle"
+          :disabled="!canSelectPreviousWorkspace"
+          title="Previous workspace"
+          aria-label="Previous workspace"
+          @click="moveActiveWorkspace(-1)"
         >
-          <strong>{{ stage.step }}</strong>
-          <span>{{ stage.successCount }}/{{ stage.configuredCount }}</span>
-          <i v-if="stage.missingCount > 0">{{ stage.missingCount }}</i>
+          <i class="ri-arrow-left-s-line" aria-hidden="true"></i>
         </button>
-      </div>
-    </aside>
-
-    <div class="stage-main">
-      <header class="stage-header">
-        <div>
-          <span class="stage-kicker">{{ selectedStep }} Analysis</span>
-          <div class="stage-status-row">
-            <strong>{{ selectedStage?.successCount ?? 0 }} successful</strong>
-            <span>{{ selectedStage?.configuredCount ?? 0 }} configured</span>
-            <span :class="{ warning: (selectedStage?.missingCount ?? 0) > 0 }">
-              {{ selectedStage?.missingCount ?? 0 }} unavailable
-            </span>
-            <span v-if="stageCoverage">{{ stageCoverage }}</span>
-            <span
-              v-if="selectedSignoffStatus"
-              class="stage-signoff-status"
-              :class="selectedSignoffStatus"
-            >
-              signoff {{ selectedSignoffStatus }}
-            </span>
-          </div>
-        </div>
-        <span class="stage-baseline">Baseline: {{ qorTrendSummary.baselineLabel }}</span>
-      </header>
-
-      <section class="stage-metric-surface" aria-label="Selected step V3 metrics">
-        <header class="stage-surface-header">
-          <span>Workspace Metrics</span>
-          <small>{{ selectedMetrics.length }} step key metrics</small>
-        </header>
-        <div
-          v-if="selectedMetrics.length > 0"
-          class="stage-metric-table"
-          :style="{ '--workspace-count': String(workspaceMetricColumns.length) }"
+        <button
+          type="button"
+          class="workspace-selector"
+          :aria-expanded="workspacePickerOpen"
+          aria-controls="workspace-picker-list"
+          aria-haspopup="listbox"
+          :title="
+            activeWorkspaceChip
+              ? workspaceChipTitle(activeWorkspaceChip)
+              : 'Select workspace'
+          "
+          @click="workspacePickerOpen = !workspacePickerOpen"
         >
-          <div class="stage-metric-heading metric">Metric</div>
-          <button
-            v-for="workspace in workspaceMetricColumns"
-            :key="workspace.workspaceId"
-            type="button"
-            class="stage-workspace-cell stage-workspace-heading"
-            :class="{ selected: workspace.workspaceId === selectedWorkspaceId }"
-            :title="workspace.workspaceName"
-            @click="emit('select-workspace', workspace.workspaceId)"
-          >
-            {{ workspace.workspaceName }}
-          </button>
-          <template v-for="row in metricWorkspaceRows" :key="row.metric.id">
-            <div class="stage-metric-heading metric" :title="row.metric.hint">
-              {{ row.metric.label }}
-            </div>
-            <button
-              v-for="cell in row.cells"
-              :key="`${cell.workspaceId}-${row.metric.id}`"
-              type="button"
-              class="stage-metric-cell"
-              :class="cell.point.state"
-              :title="metricCellTitle(cell.workspaceName, row.metric, cell.point)"
-              @click="emit('select-workspace', cell.workspaceId)"
+          <small>Workspace</small>
+          <span class="workspace-selector-value">
+            <i
+              class="status-dot"
+              :class="activeWorkspaceChip?.tone"
+              aria-hidden="true"
+            ></i>
+            <strong>{{ activeWorkspaceChip?.workspaceName ?? 'No workspace' }}</strong>
+            <em
+              v-if="activeWorkspaceChip && activeWorkspaceChip.findingCount > 0"
+              class="chip-count"
+              :class="activeWorkspaceChip.blockingCount > 0 ? 'bad' : 'neutral'"
             >
-              <strong>{{ cell.point.label }}</strong>
-            </button>
-          </template>
+              {{ activeWorkspaceChip.findingCount }}
+            </em>
+            <small v-if="activeWorkspaceChip?.isBaseline" class="chip-role">base</small>
+            <small v-if="activeWorkspaceChip?.isBest" class="chip-role accent"
+              >best</small
+            >
+          </span>
+          <i
+            class="workspace-selector-chevron"
+            :class="workspacePickerOpen ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'"
+            aria-hidden="true"
+          ></i>
+        </button>
+        <button
+          type="button"
+          class="workspace-cycle"
+          :disabled="!canSelectNextWorkspace"
+          title="Next workspace"
+          aria-label="Next workspace"
+          @click="moveActiveWorkspace(1)"
+        >
+          <i class="ri-arrow-right-s-line" aria-hidden="true"></i>
+        </button>
+        <small class="workspace-picker-total"
+          >{{ workspaceChips.length }} workspaces</small
+        >
+
+        <div
+          v-if="workspacePickerOpen"
+          id="workspace-picker-list"
+          class="workspace-picker-popover"
+          @keydown.esc="workspacePickerOpen = false"
+        >
+          <label class="workspace-picker-search">
+            <i class="ri-search-line" aria-hidden="true"></i>
+            <input
+              v-model="workspacePickerQuery"
+              type="search"
+              placeholder="Search workspace"
+              aria-label="Search workspaces"
+            />
+          </label>
+          <ul v-if="visibleWorkspacePickerOptions.length > 0" role="listbox">
+            <li v-for="chip in visibleWorkspacePickerOptions" :key="chip.workspaceId">
+              <button
+                type="button"
+                role="option"
+                class="workspace-picker-option"
+                :class="{ selected: chip.workspaceId === activeWorkspaceId }"
+                :aria-selected="chip.workspaceId === activeWorkspaceId"
+                :title="workspaceChipTitle(chip)"
+                @click="selectWorkspaceFromPicker(chip.workspaceId)"
+              >
+                <i class="status-dot" :class="chip.tone" aria-hidden="true"></i>
+                <span class="workspace-picker-option-name">{{ chip.workspaceName }}</span>
+                <span class="workspace-picker-option-status">{{ chip.statusLabel }}</span>
+                <em
+                  v-if="chip.findingCount > 0"
+                  class="chip-count"
+                  :class="chip.blockingCount > 0 ? 'bad' : 'neutral'"
+                >
+                  {{ chip.findingCount }}
+                </em>
+                <small v-if="chip.isBaseline" class="chip-role">base</small>
+                <small v-if="chip.isBest" class="chip-role accent">best</small>
+              </button>
+            </li>
+          </ul>
+          <p v-else class="workspace-picker-empty">No matching workspace.</p>
+          <button
+            v-if="canToggleWorkspacePickerPreview"
+            type="button"
+            class="workspace-picker-preview-toggle"
+            :aria-expanded="workspacePickerShowsAll"
+            @click="workspacePickerShowsAll = !workspacePickerShowsAll"
+          >
+            {{
+              workspacePickerShowsAll
+                ? 'Show fewer'
+                : `Show all ${workspacePickerOptions.length}`
+            }}
+          </button>
         </div>
-        <p v-else class="stage-empty">
-          No step-specific V3 metrics are available for this stage.
-        </p>
+      </div>
+
+      <div class="verdict" aria-label="Step verdict">
+        <span v-if="verdict.status" class="verdict-badge" :class="verdict.status">
+          {{ verdict.label }}
+        </span>
+        <span class="verdict-summary">{{ verdict.summary }}</span>
+        <span v-for="fact in verdict.facts" :key="fact.label" class="verdict-fact">
+          <small>{{ fact.label }}</small>
+          <strong :class="fact.tone">{{ fact.value }}</strong>
+        </span>
+      </div>
+    </div>
+
+    <div class="mode-bar" role="tablist" aria-label="Step analysis view">
+      <button
+        v-for="option in modeOptions"
+        :key="option.id"
+        type="button"
+        role="tab"
+        class="mode-tab"
+        :class="{ selected: mode === option.id }"
+        :aria-selected="mode === option.id"
+        @click="mode = option.id"
+      >
+        {{ option.label }}
+        <em v-if="option.count !== null" :class="option.tone">{{ option.count }}</em>
+      </button>
+      <small class="mode-hint">{{ modeHint }}</small>
+    </div>
+
+    <div v-if="mode === 'findings'" class="step-body">
+      <section class="issue-pane" aria-label="Issues">
+        <header class="pane-header">
+          <span class="pane-title">Issues</span>
+          <div class="severity-filters" aria-label="Filter issues by finding channel">
+            <button
+              v-for="filter in issueFilters"
+              :key="filter.id"
+              type="button"
+              :class="{ selected: issueFilter === filter.id }"
+              :aria-pressed="issueFilter === filter.id"
+              @click="issueFilter = filter.id"
+            >
+              {{ filter.label }} {{ filter.count }}
+            </button>
+          </div>
+        </header>
+
+        <ul v-if="filteredIssues.length > 0" class="issue-list">
+          <li v-for="issue in filteredIssues" :key="issue.id">
+            <button
+              type="button"
+              class="issue-item"
+              :class="[
+                issue.severity,
+                { blocking: issue.blocking, selected: issue.id === selectedIssue?.id },
+              ]"
+              :aria-current="issue.id === selectedIssue?.id ? 'true' : undefined"
+              :title="issueRowTitle(issue)"
+              @click="selectedIssueId = issue.id"
+            >
+              <span class="issue-kind">{{ issue.kind }}</span>
+              <strong class="issue-title">{{ issue.title }}</strong>
+              <code class="issue-actual">{{ issue.actual }}</code>
+            </button>
+          </li>
+        </ul>
+        <p v-else class="pane-empty">{{ issueEmptyMessage }}</p>
       </section>
 
-      <section
-        class="stage-detail-surface"
-        aria-label="Selected workspace detail summaries"
-      >
-        <header class="stage-surface-header">
-          <span>Selected Workspace Details</span>
-          <small>{{ selectedWorkspace?.workspaceName ?? 'No workspace selected' }}</small>
-        </header>
-        <div v-if="selectedDetails.length > 0" class="stage-detail-list">
-          <article
-            v-for="detail in selectedDetails"
-            :key="detail.id"
-            class="stage-detail-view"
-          >
-            <header>
-              <span>{{ detailLabel(detail.presentation) }}</span>
-              <small>{{ detail.id }}</small>
-            </header>
-            <div class="stage-detail-content">
-              <div v-if="detailCoverage(detail)" class="detail-coverage">
-                <span
-                  >{{ detailCoverage(detail)?.available }}/{{
-                    detailCoverage(detail)?.expected
-                  }}
-                  corners</span
-                >
-                <strong :class="detailCoverage(detail)?.status">{{
-                  detailCoverage(detail)?.status
-                }}</strong>
-              </div>
-              <div v-if="detailRows(detail).length > 0" class="detail-table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th
-                        v-for="field in detailFields(detail)"
-                        :key="field"
-                        :title="fieldLabel(field)"
-                      >
-                        {{ fieldLabel(field) }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="(row, index) in detailRows(detail)"
-                      :key="detailRowKey(detail, row, index)"
-                    >
-                      <td
-                        v-for="field in detailFields(detail)"
-                        :key="field"
-                        :title="detailValue(row, field)"
-                      >
-                        {{ detailValue(row, field) }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <p v-else class="stage-empty">{{ detailEmptyMessage(detail) }}</p>
+      <section class="evidence-pane" aria-label="Evidence">
+        <article
+          v-if="evidenceIssue"
+          class="evidence-card"
+          :class="[evidenceIssue.severity, { blocking: evidenceIssue.blocking }]"
+        >
+          <header>
+            <strong class="evidence-kind">{{ evidenceIssue.kind }}</strong>
+            <span v-if="evidenceIssue.blocking" class="evidence-flag">blocking</span>
+            <span v-if="evidenceIssue.severity" class="evidence-severity">
+              {{ evidenceIssue.severity }}
+            </span>
+          </header>
+          <dl class="evidence-facts">
+            <div>
+              <dt>Actual</dt>
+              <dd class="mono strong">{{ evidenceIssue.actual }}</dd>
             </div>
-          </article>
-        </div>
-        <p v-else class="stage-empty">
-          No bounded detail data is available for this stage.
-        </p>
+            <div v-if="evidenceIssue.expected">
+              <dt>Expected</dt>
+              <dd class="mono">{{ evidenceIssue.expected }}</dd>
+            </div>
+            <div v-if="evidenceIssue.condition">
+              <dt>Pass condition</dt>
+              <dd class="mono">{{ evidenceIssue.condition }}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd class="mono">
+                {{ evidenceIssue.location ?? evidenceIssue.source }}
+                <span v-if="evidenceMetricId(evidenceIssue)" class="evidence-metric-id">
+                  {{ evidenceMetricId(evidenceIssue) }}
+                </span>
+              </dd>
+            </div>
+            <div v-if="evidenceIssue.diagnosis" class="evidence-diagnosis">
+              <dt>Diagnosis</dt>
+              <dd>{{ evidenceIssue.diagnosis }}</dd>
+            </div>
+          </dl>
+        </article>
+        <p v-else-if="!selectedIssue" class="pane-empty">{{ evidenceEmptyMessage }}</p>
+
+        <section class="evidence-block" aria-label="Step metrics">
+          <header class="pane-header">
+            <span class="pane-title">Metrics</span>
+            <small>{{ metricsCaption }}</small>
+          </header>
+          <div v-if="metricGroups.length > 0" class="metric-groups">
+            <div v-for="group in metricGroups" :key="group.id" class="metric-group">
+              <span class="metric-group-label">{{ group.label }}</span>
+              <div
+                v-for="row in group.rows"
+                :key="row.id"
+                class="metric-row"
+                :class="{ highlighted: row.id === selectedIssue?.metric }"
+                :title="metricRowTitle(row)"
+              >
+                <span class="metric-name">{{ row.label }}</span>
+                <span class="metric-value mono">{{ row.value }}</span>
+                <span v-if="row.delta" class="metric-delta" :class="row.deltaTone">
+                  {{ row.delta }}
+                  <em v-if="row.deltaPercent">{{ row.deltaPercent }}</em>
+                </span>
+                <span v-else-if="row.deltaNote" class="metric-delta compare-note">
+                  {{ row.deltaNote }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <p v-else class="pane-empty">
+            No V3 metrics were reported for {{ selectedStep }} in this workspace.
+          </p>
+        </section>
+
+        <section
+          v-for="table in detailTables"
+          :key="table.id"
+          class="evidence-block"
+          :aria-label="table.title"
+        >
+          <header class="pane-header">
+            <span class="pane-title">{{ table.title }}</span>
+            <small v-if="table.coverage" :class="table.coverage.tone">
+              {{ table.coverage.label }} · {{ table.coverage.status }}
+            </small>
+            <small
+              v-else
+              :class="detailSourceTone(table.sourceStatus)"
+              :title="`${table.sourceFile}: ${table.sourceStatus}`"
+            >
+              {{ detailSourceLabel(table.sourceFile, table.sourceStatus) }}
+            </small>
+          </header>
+          <div v-if="table.rows.length > 0" class="detail-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th v-for="column in table.columns" :key="column">{{ column }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, index) in table.rows" :key="`${table.id}-${index}`">
+                  <td v-for="(cell, cellIndex) in row" :key="cellIndex" :title="cell">
+                    {{ cell }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="pane-empty pane-empty-detail">
+            <span>{{ table.emptyMessage }}</span>
+            <small v-if="table.emptyDetail">{{ table.emptyDetail }}</small>
+          </p>
+        </section>
       </section>
     </div>
 
-    <aside class="findings-rail" aria-label="Selected step findings">
-      <header>
-        <span>Findings</span>
-        <small>{{ findings.length }}</small>
-      </header>
-      <ul v-if="findings.length > 0">
-        <li v-for="finding in findings" :key="finding.id" :class="finding.severity">
-          <button
-            type="button"
-            class="finding-select"
-            @click="emit('select-workspace', finding.workspaceId)"
+    <section v-else class="compare-view" aria-label="Cross-workspace comparison">
+      <header class="compare-summary">
+        <div class="compare-summary-head">
+          <span class="pane-title">{{ selectedStep }} across workspaces</span>
+          <small class="compare-caption">{{ compareCaption }}</small>
+          <span
+            v-if="activeCompareVerdict"
+            class="verdict-card"
+            :class="{ baseline: activeCompareVerdict.isBaseline }"
+            :title="`${activeCompareVerdict.workspaceName} · ${activeCompareVerdict.summary}`"
           >
-            <span>{{ finding.workspaceName }}</span>
-            <strong>{{ finding.label }}</strong>
-            <em>Actual: {{ findingValueLabel(finding) }}</em>
-            <small>{{ finding.detail }}</small>
+            <span class="verdict-card-head">
+              <strong>{{
+                abbreviateWorkspaceName(activeCompareVerdict.workspaceName)
+              }}</strong>
+              <small v-if="activeCompareVerdict.isBaseline" class="chip-role">base</small>
+              <small v-if="activeCompareVerdict.isBest" class="chip-role accent"
+                >best</small
+              >
+            </span>
+            <span
+              v-if="activeCompareVerdict.segments.length > 0"
+              class="win-bar"
+              aria-hidden="true"
+            >
+              <i
+                v-for="segment in activeCompareVerdict.segments"
+                :key="segment.outcome"
+                :class="segment.tone"
+                :style="{ width: `${segment.percent}%` }"
+              ></i>
+            </span>
+            <small class="verdict-card-summary">{{ activeCompareVerdict.summary }}</small>
+          </span>
+          <small v-else class="compare-no-baseline">
+            No baseline workspace is set, so no value here can be read as better or worse.
+          </small>
+        </div>
+
+        <div class="compare-controls">
+          <div
+            class="compare-column-filters"
+            role="group"
+            aria-label="Which workspaces to compare"
+          >
+            <button
+              v-for="option in columnFilterOptions"
+              :key="option.id"
+              type="button"
+              :class="{ selected: option.id === columnFilter }"
+              :aria-pressed="option.id === columnFilter"
+              :disabled="option.disabled"
+              :title="option.title"
+              @click="columnFilter = option.id"
+            >
+              {{ option.label }}
+              <em>{{ option.count }}</em>
+            </button>
+          </div>
+
+          <label class="compare-column-search">
+            <i class="ri-search-line" aria-hidden="true"></i>
+            <input
+              v-model="columnQuery"
+              type="search"
+              placeholder="Filter workspaces"
+              aria-label="Filter comparison columns by workspace name"
+            />
+          </label>
+
+          <button
+            v-if="canFilterDiffering"
+            type="button"
+            class="differ-toggle"
+            :class="{ selected: onlyDiffering }"
+            :aria-pressed="onlyDiffering"
+            @click="onlyDiffering = !onlyDiffering"
+          >
+            Only differing {{ compareMatrix.differingCount }}
           </button>
-          <details class="finding-detail-info">
-            <summary>Detail info</summary>
-            <dl>
-              <div>
-                <dt>Type</dt>
-                <dd>{{ finding.kind }}</dd>
+          <button
+            v-if="compareScopeIsNarrowed"
+            type="button"
+            class="scope-reset"
+            title="Show every workspace again, in the project's own order"
+            @click="resetCompareScope"
+          >
+            Reset
+          </button>
+          <small class="compare-column-count">{{ compareColumnCount }}</small>
+        </div>
+      </header>
+
+      <div class="compare-scroll">
+        <div
+          v-if="compareGroups.length > 0"
+          class="compare-table"
+          role="grid"
+          :aria-colcount="compareMatrix.columns.length + 1"
+          :aria-rowcount="compareVisibleRowCount + compareGroups.length + 1"
+        >
+          <div class="compare-row" role="row" :style="compareGridStyle">
+            <div role="columnheader" class="compare-corner">Metric</div>
+            <div
+              v-for="column in compareMatrix.columns"
+              :key="column.workspaceId"
+              role="columnheader"
+              class="compare-head"
+              :class="{
+                selected: column.workspaceId === activeWorkspaceId,
+                pinned: column.isBaseline,
+              }"
+            >
+              <button
+                type="button"
+                :title="compareColumnTitle(column)"
+                @click="emit('select-workspace', column.workspaceId)"
+              >
+                <span class="compare-head-name">
+                  {{ abbreviateWorkspaceName(column.workspaceName) }}
+                </span>
+                <small v-if="column.isBaseline">base</small>
+                <small v-else-if="column.isBest" class="accent">best</small>
+              </button>
+            </div>
+          </div>
+          <template v-for="group in compareGroups" :key="group.id">
+            <div class="compare-group" role="row">
+              <div role="rowheader">{{ group.label }}</div>
+            </div>
+            <div
+              v-for="row in group.rows"
+              :key="row.id"
+              class="compare-row"
+              role="row"
+              :style="compareGridStyle"
+            >
+              <div
+                role="rowheader"
+                class="compare-metric"
+                :class="{ ranked: compareSort?.metricName === row.id }"
+              >
+                <button
+                  type="button"
+                  :title="compareRankTitle(row)"
+                  @click="cycleCompareRank(row)"
+                >
+                  <strong>{{ row.label }}</strong>
+                  <small>{{ row.descriptor }}</small>
+                  <i
+                    v-if="compareSort?.metricName === row.id"
+                    class="compare-rank-mark"
+                    :class="
+                      compareSort?.direction === 'leading'
+                        ? 'ri-sort-desc'
+                        : 'ri-sort-asc'
+                    "
+                    aria-hidden="true"
+                  ></i>
+                </button>
               </div>
-              <div>
-                <dt>Metric</dt>
-                <dd>{{ finding.metric }}</dd>
+              <div
+                v-for="cell in row.cells"
+                :key="`${row.id}-${cell.workspaceId}`"
+                role="gridcell"
+                class="compare-cell"
+                :class="{
+                  selected: cell.workspaceId === activeWorkspaceId,
+                  pinned: cell.workspaceId === compareBaselineColumnId,
+                  unreported: cell.availability === 'not-reported',
+                  'not-applicable': cell.availability === 'not-applicable',
+                  leads: cell.leads,
+                }"
+              >
+                <button
+                  type="button"
+                  :title="compareCellTitle(row, cell)"
+                  @click="emit('select-workspace', cell.workspaceId)"
+                >
+                  <span class="compare-value">
+                    <strong>{{ cell.value }}</strong>
+                    <small v-if="cell.leads" class="lead-flag">best</small>
+                  </span>
+                  <small v-if="cell.delta" class="compare-delta" :class="cell.deltaTone">
+                    {{ cell.delta }}
+                    <em v-if="cell.deltaPercent">{{ cell.deltaPercent }}</em>
+                  </small>
+                  <small v-else-if="cell.deltaNote" class="compare-delta compare-note">
+                    {{ cell.deltaNote }}
+                  </small>
+                  <span
+                    v-if="cell.barRatio !== null"
+                    class="delta-bar"
+                    aria-hidden="true"
+                  >
+                    <i
+                      class="delta-bar-fill"
+                      :class="cell.deltaTone"
+                      :style="deltaBarStyle(cell)"
+                    ></i>
+                  </span>
+                </button>
               </div>
-              <div>
-                <dt>Actual</dt>
-                <dd>{{ findingValueLabel(finding) }}</dd>
-              </div>
-              <div v-if="finding.expected !== undefined && finding.expected !== null">
-                <dt>Expected</dt>
-                <dd>{{ findingExpectedLabel(finding) }}</dd>
-              </div>
-              <div v-if="finding.condition">
-                <dt>Pass condition</dt>
-                <dd>{{ finding.condition }}</dd>
-              </div>
-              <div>
-                <dt>Analysis record</dt>
-                <dd>{{ finding.source }}</dd>
-              </div>
-              <div v-if="finding.evidence">
-                <dt>Evidence</dt>
-                <dd>{{ finding.evidence }}</dd>
-              </div>
-              <div>
-                <dt>Diagnosis</dt>
-                <dd>{{ finding.detail }}</dd>
-              </div>
-            </dl>
-          </details>
-        </li>
-      </ul>
-      <p v-else class="stage-empty">No blocking issues or hotspots.</p>
-    </aside>
+            </div>
+          </template>
+        </div>
+        <p v-else class="pane-empty">{{ compareEmptyMessage }}</p>
+      </div>
+
+      <footer class="compare-legend">
+        <span><i class="legend-swatch good"></i>Better than the baseline</span>
+        <span><i class="legend-swatch bad"></i>Worse</span>
+        <span>
+          <i class="legend-swatch neutral"></i>
+          No reported direction, so the bar shows only which way the value moved
+        </span>
+        <span>Full bar = {{ barFullScalePercent }}% change or more</span>
+        <span class="compare-legend-hint">Click a metric to rank the columns by it</span>
+      </footer>
+    </section>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import {
+  abbreviateWorkspaceName,
+  buildStepCompareCandidates,
+  buildStepCompareMatrix,
+  buildStepDetailTables,
+  buildStepIssueFilters,
+  buildStepIssues,
+  buildStepMetricGroups,
+  buildStepTabs,
+  buildStepVerdict,
+  buildStepWorkspaceChips,
+  COMPARE_BAR_FULL_SCALE_PERCENT,
+  countStepIssues,
+  filterStepCompareGroups,
+  hasStepIssueEvidence,
+  matchesStepIssueFilter,
+  type StepCompareCell,
+  type StepCompareColumn,
+  type StepCompareRow,
+  type StepIssue,
+  type StepMetricRow,
+  type StepTab,
+  type StepWorkspaceChip,
+} from './projectStepAnalysis'
+import {
+  STEP_COMPARE_COLUMN_FILTERS,
+  buildStepComparisonScope,
+  type StepCompareColumnFilterId,
+  type StepCompareSort,
+} from './projectStepComparisonScope'
 import type {
   FlowStep,
-  ProjectMetricPoint,
-  ProjectStepCompareMetric,
   ProjectStepCompareSummary,
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
-import type {
-  ProjectQorDetailDescriptor,
-  ProjectQorFindingEvidence,
-  ProjectQorTimingIssue,
-  ProjectQorTrendSummary,
-} from '@/utils/projectQorTrend'
-
-interface StageFinding {
-  id: string
-  workspaceId: string
-  workspaceName: string
-  severity: 'info' | 'warning' | 'critical'
-  kind: string
-  label: string
-  metric: string
-  value: number | string | null
-  unit?: string
-  expected?: number | string | null
-  condition?: string
-  evidence?: string
-  detail: string
-  source: string
-}
+import type { ProjectQorTrendSummary } from '@/utils/projectQorTrend'
 
 const props = defineProps<{
   steps: ProjectStepCompareSummary[]
   workspaceSummaries: ProjectWorkspaceSummary[]
   qorTrendSummary: ProjectQorTrendSummary
+  projectName: string
+  projectObjective: string
+  bestWorkspaceId: string
+  bestWorkspaceReason?: string
   selectedStep: FlowStep
   selectedWorkspaceId: string
+  selectedIssueMetric?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -262,33 +611,22 @@ const emit = defineEmits<{
   'select-workspace': [workspaceId: string]
 }>()
 
-const selectedStage = computed(
-  () => props.steps.find((stage) => stage.step === props.selectedStep) ?? null,
-)
-const selectedMetrics = computed<ProjectStepCompareMetric[]>(
-  () => selectedStage.value?.metrics ?? [],
-)
-const workspaceMetricColumns = computed(() =>
-  props.workspaceSummaries.map((summary) => ({
-    workspaceId: summary.workspaceId,
-    workspaceName: summary.workspaceName,
-    summary,
-  })),
-)
-const metricWorkspaceRows = computed(() =>
-  selectedMetrics.value.map((metric) => ({
-    metric,
-    cells: workspaceMetricColumns.value.map((workspace) => ({
-      workspaceId: workspace.workspaceId,
-      workspaceName: workspace.workspaceName,
-      metric,
-      point:
-        metric.points.find((point) => point.workspaceId === workspace.workspaceId) ??
-        emptyPoint(workspace.summary),
-    })),
-  })),
-)
-const selectedWorkspace = computed(
+type StepAnalysisMode = 'findings' | 'compare'
+
+const issueFilter = ref('all')
+const selectedIssueId = ref<string | null>(null)
+const mode = ref<StepAnalysisMode>('findings')
+const onlyDiffering = ref(false)
+const workspacePickerOpen = ref(false)
+const workspacePickerQuery = ref('')
+const workspacePickerShowsAll = ref(false)
+const columnFilter = ref<StepCompareColumnFilterId>('all')
+const columnQuery = ref('')
+const compareSort = ref<StepCompareSort | null>(null)
+const barFullScalePercent = COMPARE_BAR_FULL_SCALE_PERCENT
+const WORKSPACE_PICKER_PREVIEW_COUNT = 16
+
+const activeWorkspace = computed(
   () =>
     props.workspaceSummaries.find(
       (summary) => summary.workspaceId === props.selectedWorkspaceId,
@@ -296,1136 +634,414 @@ const selectedWorkspace = computed(
     props.workspaceSummaries[0] ??
     null,
 )
-const selectedDetails = computed(
-  () => selectedWorkspace.value?.analysis.steps[props.selectedStep]?.details ?? [],
-)
-const stageCoverage = computed(() => {
-  const metrics =
-    selectedWorkspace.value?.analysis.steps[props.selectedStep]?.metrics ?? []
-  const prefix =
-    props.selectedStep === 'RCX' ? 'rcx_' : props.selectedStep === 'STA' ? 'sta_' : null
-  if (!prefix) return null
-  const available =
-    metrics.find((metric) => metric.metricName === `${prefix}corner_count`) ??
-    metrics.find((metric) => metric.metricName === `${prefix}spef_file_count`)
-  const expected = metrics.find(
-    (metric) => metric.metricName === `${prefix}expected_corner_count`,
-  )
-  if (
-    available?.value === null ||
-    available?.value === undefined ||
-    expected?.value === null ||
-    expected?.value === undefined
-  ) {
-    return null
-  }
-  return `${available.value}/${expected.value} corners`
-})
-const selectedSignoffStatus = computed(() => {
-  if (props.selectedStep !== 'RCX' && props.selectedStep !== 'STA') return null
-  const groups = selectedWorkspace.value?.analysis.signoffReadiness.groups ?? []
-  const statuses = groups
-    .filter((group) => group.step === props.selectedStep)
-    .map((group) => group.status)
-  if (statuses.length === 0) return null
-  if (statuses.includes('blocked')) return 'blocked'
-  if (statuses.includes('incomplete')) return 'incomplete'
-  if (statuses.every((status) => status === 'pass')) return 'pass'
-  return 'unavailable'
-})
-const findings = computed<StageFinding[]>(() =>
-  props.workspaceSummaries
-    .flatMap((summary) => stageFindingsForWorkspace(summary))
-    .sort((left, right) => findingSeverityRank(left) - findingSeverityRank(right))
-    .slice(0, 24),
+const activeWorkspaceId = computed(() => activeWorkspace.value?.workspaceId ?? '')
+const baselineWorkspace = computed(
+  () =>
+    props.workspaceSummaries.find(
+      (summary) => summary.workspaceId === props.qorTrendSummary.baselineWorkspaceId,
+    ) ?? null,
 )
 
-function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFinding[] {
-  const analysis = summary.analysis.steps[props.selectedStep]
-  if (!analysis) return []
+const issues = computed(() => buildStepIssues(activeWorkspace.value, props.selectedStep))
+const issueCounts = computed(() => countStepIssues(issues.value))
+const issueFilters = computed(() => buildStepIssueFilters(issues.value))
+const filteredIssues = computed(() =>
+  issues.value.filter((issue) => matchesStepIssueFilter(issue, issueFilter.value)),
+)
+// Falls back to the first queued issue so the evidence pane is never empty after
+// switching step, workspace, or filter.
+const selectedIssue = computed(
+  () =>
+    filteredIssues.value.find((issue) => issue.id === selectedIssueId.value) ??
+    filteredIssues.value[0] ??
+    null,
+)
+// Channels whose artifacts add nothing past the queue row get no card at all, so the
+// pane goes straight to the step metrics with the matching row highlighted.
+const evidenceIssue = computed(() =>
+  selectedIssue.value && hasStepIssueEvidence(selectedIssue.value)
+    ? selectedIssue.value
+    : null,
+)
+const issueEmptyMessage = computed(() =>
+  issueCounts.value.total === 0
+    ? `No findings reported for ${props.selectedStep} in this workspace.`
+    : 'No findings match this filter.',
+)
+const evidenceEmptyMessage = computed(() =>
+  issueCounts.value.total === 0
+    ? `No findings reported for ${props.selectedStep} in this workspace.`
+    : 'No findings match this filter.',
+)
 
-  const unitFor = (metric: string) =>
-    analysis.metrics.find((item) => item.metricName === metric)?.unit
-  const findings: StageFinding[] = []
-  const findingsByMetric = new Map<string, StageFinding>()
+// Context changes start from the complete queue. A metric supplied by Dashboard then
+// becomes the selected evidence, instead of relying on whichever issue happens to sort first.
+watch(
+  [() => props.selectedStep, activeWorkspaceId, () => props.selectedIssueMetric],
+  () => {
+    issueFilter.value = 'all'
+    const requested = props.selectedIssueMetric
+      ? issues.value.find((issue) => issue.metric === props.selectedIssueMetric)
+      : null
+    selectedIssueId.value = requested?.id ?? null
+  },
+  { immediate: true },
+)
 
-  if (analysis.flowStatus === 'success') {
-    for (const artifact of [
-      {
-        status: analysis.artifactStatus,
-        label: 'QoR metrics artifact',
-        source: 'analysis/qor_metrics.json',
-      },
-      {
-        status: analysis.summaryArtifactStatus,
-        label: 'QoR summary artifact',
-        source: 'analysis/qor_summary.json',
-      },
-      {
-        status: analysis.hotspotArtifactStatus,
-        label: 'QoR hotspots artifact',
-        source: 'analysis/qor_hotspots.json',
-      },
-    ]) {
-      if (artifact.status === 'available') continue
-      findings.push({
-        id: `artifact-${summary.workspaceId}-${artifact.source}`,
-        workspaceId: summary.workspaceId,
-        workspaceName: summary.workspaceName,
-        severity: artifact.status === 'invalid' ? 'critical' : 'warning',
-        kind: 'Analysis artifact',
-        label: artifact.label,
-        metric: artifact.source,
-        value: artifact.status,
-        expected: 'available',
-        detail:
-          artifact.status === 'invalid'
-            ? `${artifact.source} exists but does not satisfy the current V3 analysis schema.`
-            : `The successful ${props.selectedStep} step did not create required file ${artifact.source}.`,
-        source: artifact.source,
-      })
-    }
-  }
-
-  for (const issue of analysis.blockingIssues) {
-    const finding: StageFinding = {
-      id: `blocking-${summary.workspaceId}-${issue.metric}`,
-      workspaceId: summary.workspaceId,
-      workspaceName: summary.workspaceName,
-      severity: 'critical',
-      kind: 'Blocking issue',
-      label: issue.displayName,
-      metric: issue.metric,
-      value: issue.value,
-      unit: unitFor(issue.metric),
-      expected: issue.evidence.expectedValue,
-      condition: findingCondition(issue.metric, issue.evidence, unitFor(issue.metric)),
-      evidence: findingEvidenceLocation(issue.evidence),
-      detail: issue.evidence.diagnosis ?? issue.reason,
-      source: 'analysis/qor_summary.json',
-    }
-    findings.push(finding)
-    findingsByMetric.set(issue.metric, finding)
-  }
-
-  for (const gate of analysis.hardGateFailures) {
-    const existing = findingsByMetric.get(gate.metric)
-    if (existing) {
-      existing.kind = `${existing.kind} / failed hard gate`
-      existing.expected = gate.evidence.expectedValue ?? gate.threshold
-      existing.condition = findingCondition(
-        gate.metric,
-        gate.evidence,
-        unitFor(gate.metric),
-      )
-      existing.evidence = findingEvidenceLocation(gate.evidence) ?? existing.evidence
-      existing.detail =
-        gate.evidence.diagnosis ?? `${existing.detail} Hard gate ${gate.id} failed.`
-      continue
-    }
-    const finding: StageFinding = {
-      id: `hard-gate-${summary.workspaceId}-${gate.id}`,
-      workspaceId: summary.workspaceId,
-      workspaceName: summary.workspaceName,
-      severity: 'critical',
-      kind: gate.kind ? `Failed hard gate: ${gate.kind}` : 'Failed hard gate',
-      label: titleFromIdentifier(gate.id),
-      metric: gate.metric,
-      value: gate.actual,
-      unit: unitFor(gate.metric),
-      expected: gate.evidence.expectedValue ?? gate.threshold,
-      condition: findingCondition(gate.metric, gate.evidence, unitFor(gate.metric)),
-      evidence: findingEvidenceLocation(gate.evidence),
-      detail:
-        gate.evidence.diagnosis ??
-        `Hard gate ${gate.id} did not meet its required threshold.`,
-      source: 'analysis/qor_summary.json',
-    }
-    findings.push(finding)
-    findingsByMetric.set(gate.metric, finding)
-  }
-
-  for (const hotspot of analysis.hotspots) {
-    if (findingsByMetric.has(hotspot.metric)) continue
-    const finding: StageFinding = {
-      id: `hotspot-${summary.workspaceId}-${hotspot.metric}-${hotspot.kind}`,
-      workspaceId: summary.workspaceId,
-      workspaceName: summary.workspaceName,
-      severity: hotspot.severity,
-      kind: `Hotspot: ${hotspot.kind}`,
-      label: hotspot.displayName,
-      metric: hotspot.metric,
-      value: hotspot.value,
-      unit: unitFor(hotspot.metric),
-      detail: hotspot.description,
-      source: hotspot.sourceFile,
-    }
-    findings.push(finding)
-    findingsByMetric.set(hotspot.metric, finding)
-  }
-
-  for (const missingMetric of analysis.missingMetrics) {
-    findings.push({
-      id: `missing-metric-${summary.workspaceId}-${missingMetric.metricName}`,
-      workspaceId: summary.workspaceId,
-      workspaceName: summary.workspaceName,
-      severity: 'warning',
-      kind: 'Required metric unavailable',
-      label: missingMetric.metricName,
-      metric: missingMetric.metricName,
-      value: null,
-      evidence: findingEvidenceLocation(missingMetric.evidence),
-      detail: missingMetric.evidence.diagnosis ?? missingMetric.reason,
-      source: 'analysis/qor_summary.json',
-    })
-  }
-
-  for (const issue of analysis.integrityIssues) {
-    for (const id of issue.invalidMetricSourceIds) {
-      findings.push({
-        id: `integrity-metric-${summary.workspaceId}-${id}`,
-        workspaceId: summary.workspaceId,
-        workspaceName: summary.workspaceName,
-        severity: 'warning',
-        kind: 'Metric provenance',
-        label: 'Metric provenance',
-        metric: id,
-        value: null,
-        detail: `Metric ${id} has no valid feature/ source reference in qor_metrics.json.`,
-        source: 'analysis/qor_metrics.json',
-      })
-    }
-    for (const id of issue.invalidDetailIds) {
-      findings.push({
-        id: `integrity-detail-${summary.workspaceId}-${id}`,
-        workspaceId: summary.workspaceId,
-        workspaceName: summary.workspaceName,
-        severity: 'warning',
-        kind: 'Detail provenance',
-        label: 'Detail provenance',
-        metric: id,
-        value: null,
-        detail: `Detail ${id} has no valid feature/ source reference in qor_metrics.json.`,
-        source: 'analysis/qor_metrics.json',
-      })
-    }
-  }
-
-  for (const group of summary.analysis.signoffReadiness.groups.filter(
-    (item) => item.step === props.selectedStep && item.status !== 'pass',
-  )) {
-    const reasonCodes = summary.analysis.signoffReadiness.reasonCodes
-    findings.push({
-      id: `signoff-${summary.workspaceId}-${group.id}`,
-      workspaceId: summary.workspaceId,
-      workspaceName: summary.workspaceName,
-      severity: group.status === 'blocked' ? 'critical' : 'warning',
-      kind: group.gate ? 'Required signoff gate' : 'Signoff readiness',
-      label: titleFromIdentifier(group.id),
-      metric: group.id,
-      value: group.status,
-      expected: 'pass',
-      detail:
-        reasonCodes.length > 0
-          ? `${titleFromIdentifier(group.id)} is ${group.status}; reported reasons: ${reasonCodes.join(', ')}.`
-          : `${titleFromIdentifier(group.id)} is ${group.status}; no specific reason code was emitted.`,
-      source: 'analysis/qor_summary.json',
-    })
-  }
-
-  for (const timingIssue of analysis.timingIssues) {
-    findings.push({
-      id: `timing-${summary.workspaceId}-${timingIssue.issueId}`,
-      workspaceId: summary.workspaceId,
-      workspaceName: summary.workspaceName,
-      severity: timingIssue.severity,
-      kind: `Timing path: ${timingIssue.analysisType}`,
-      label: `${timingIssue.analysisType.toUpperCase()} ${timingIssue.checkType}`,
-      metric: timingIssue.issueId,
-      value: timingIssue.slackNs,
-      unit: 'ns',
-      expected: '>= 0 ns',
-      evidence: `analysis/sta_timing_issues.json (issue_id=${timingIssue.issueId})`,
-      detail: timingIssueDiagnosis(timingIssue),
-      source: 'analysis/sta_timing_issues.json',
-    })
-  }
-
-  if (analysis.timingCoverage) {
-    findings.push({
-      id: `timing-coverage-${summary.workspaceId}`,
-      workspaceId: summary.workspaceId,
-      workspaceName: summary.workspaceName,
-      severity: 'warning',
-      kind: 'STA timing coverage',
-      label: 'STA timing corners missing',
-      metric: 'sta_missing_corner_count',
-      value: analysis.timingCoverage.missingCornerCount,
-      unit: 'count',
-      expected: 0,
-      detail: `Missing timing corner artifacts: ${analysis.timingCoverage.missingCorners.join(', ')}. ${analysis.timingCoverage.availableArtifactCount} corner artifacts are available.`,
-      source: 'analysis/sta_timing_issues.json',
-    })
-  }
-
-  const hasSummaryEvidence = findings.some(
-    (finding) => finding.source === 'analysis/qor_summary.json',
+const verdict = computed(() =>
+  buildStepVerdict(activeWorkspace.value, props.selectedStep, issues.value),
+)
+const stepTabs = computed(() => buildStepTabs(props.steps, activeWorkspace.value))
+const workspaceChips = computed(() =>
+  buildStepWorkspaceChips(
+    props.workspaceSummaries,
+    props.qorTrendSummary,
+    props.bestWorkspaceId,
+    props.selectedStep,
+  ),
+)
+const workspaceChipById = computed(
+  () => new Map(workspaceChips.value.map((chip) => [chip.workspaceId, chip])),
+)
+const activeWorkspaceChip = computed(
+  () =>
+    workspaceChipById.value.get(activeWorkspaceId.value) ??
+    workspaceChips.value[0] ??
+    null,
+)
+const activeWorkspaceIndex = computed(() =>
+  workspaceChips.value.findIndex((chip) => chip.workspaceId === activeWorkspaceId.value),
+)
+const canSelectPreviousWorkspace = computed(() => activeWorkspaceIndex.value > 0)
+const canSelectNextWorkspace = computed(
+  () =>
+    activeWorkspaceIndex.value >= 0 &&
+    activeWorkspaceIndex.value < workspaceChips.value.length - 1,
+)
+const workspacePickerOptions = computed(() => {
+  const query = workspacePickerQuery.value.trim().toLocaleLowerCase()
+  if (!query) return workspaceChips.value
+  return workspaceChips.value.filter((chip) =>
+    [chip.workspaceId, chip.workspaceName, chip.statusLabel]
+      .join(' ')
+      .toLocaleLowerCase()
+      .includes(query),
   )
-  if (
-    analysis.summaryStatus &&
-    analysis.summaryStatus !== 'pass' &&
-    !hasSummaryEvidence
-  ) {
-    findings.push({
-      id: `summary-status-${summary.workspaceId}-${props.selectedStep}`,
-      workspaceId: summary.workspaceId,
-      workspaceName: summary.workspaceName,
-      severity: analysis.summaryStatus === 'blocked' ? 'critical' : 'warning',
-      kind: 'Step analysis status',
-      label: `${props.selectedStep} analysis ${analysis.summaryStatus}`,
-      metric: 'qor_summary.status',
-      value: analysis.summaryStatus,
-      expected: 'pass',
-      detail: `${props.selectedStep} qor_summary.json reports status ${analysis.summaryStatus}; no more specific finding was emitted.`,
-      source: 'analysis/qor_summary.json',
-    })
+})
+const visibleWorkspacePickerOptions = computed(() =>
+  workspacePickerShowsAll.value
+    ? workspacePickerOptions.value
+    : workspacePickerOptions.value.slice(0, WORKSPACE_PICKER_PREVIEW_COUNT),
+)
+const canToggleWorkspacePickerPreview = computed(
+  () => workspacePickerOptions.value.length > WORKSPACE_PICKER_PREVIEW_COUNT,
+)
+const compareCandidates = computed(() =>
+  buildStepCompareCandidates(
+    props.workspaceSummaries,
+    props.qorTrendSummary,
+    props.selectedStep,
+  ),
+)
+const compareScope = computed(() =>
+  buildStepComparisonScope({
+    candidates: compareCandidates.value,
+    baselineWorkspaceId: props.qorTrendSummary.baselineWorkspaceId,
+    selectedWorkspaceId: activeWorkspaceId.value,
+    filter: columnFilter.value,
+    query: columnQuery.value,
+    sort: compareSort.value,
+  }),
+)
+const columnFilterOptions = computed(() =>
+  STEP_COMPARE_COLUMN_FILTERS.map((option) => {
+    const count = compareScope.value.filterCounts[option.id]
+    // A narrowing that would leave only the reference columns is not worth offering, and
+    // pressing it would look like the table had broken.
+    const disabled = option.id !== 'all' && count === 0
+    return {
+      ...option,
+      count,
+      disabled,
+      title: disabled
+        ? `${option.title}. No workspace qualifies right now.`
+        : option.title,
+    }
+  }),
+)
+const compareScopeIsNarrowed = computed(
+  () =>
+    columnFilter.value !== 'all' ||
+    columnQuery.value.trim().length > 0 ||
+    compareSort.value !== null,
+)
+const comparisonWorkspaceSummaries = computed(() => {
+  const summaryById = new Map(
+    props.workspaceSummaries.map((summary) => [summary.workspaceId, summary]),
+  )
+  return compareScope.value.workspaceIds.flatMap((workspaceId) => {
+    const summary = summaryById.get(workspaceId)
+    return summary ? [summary] : []
+  })
+})
+const metricGroups = computed(() =>
+  buildStepMetricGroups(
+    activeWorkspace.value,
+    baselineWorkspace.value,
+    props.selectedStep,
+  ),
+)
+const detailTables = computed(() =>
+  buildStepDetailTables(activeWorkspace.value, props.selectedStep),
+)
+const compareMatrix = computed(() =>
+  buildStepCompareMatrix(
+    comparisonWorkspaceSummaries.value,
+    props.qorTrendSummary,
+    props.bestWorkspaceId,
+    props.selectedStep,
+  ),
+)
+const activeCompareVerdict = computed(
+  () =>
+    compareMatrix.value.verdicts.find(
+      (verdict) => verdict.workspaceId === activeWorkspaceId.value,
+    ) ??
+    compareMatrix.value.verdicts[0] ??
+    null,
+)
+/**
+ * The baseline column is frozen beside the metric column, so its width has to be a value
+ * the stylesheet can offset by rather than whatever a fraction of the panel works out to.
+ */
+const compareGridStyle = computed(() => ({
+  gridTemplateColumns: `var(--compare-metric-width) repeat(${compareMatrix.value.columns.length}, minmax(var(--compare-column-width), 1fr))`,
+}))
+const compareBaselineColumnId = computed(
+  () =>
+    compareMatrix.value.columns.find((column) => column.isBaseline)?.workspaceId ?? null,
+)
+const compareColumnCount = computed(() => {
+  const shown = compareMatrix.value.columns.length
+  const total = compareCandidates.value.length
+  if (shown === total) return `${total} workspaces`
+  // The baseline and the current workspace stay whatever the search says, so a search
+  // with no match has to explain the columns that are still there.
+  if (compareScope.value.filterCounts.all === 0)
+    return 'no match · reference columns only'
+  return `${shown} of ${total} workspaces`
+})
+const compareCaption = computed(() => {
+  const { rowCount, differingCount } = compareMatrix.value
+  const baseline = `baseline ${props.qorTrendSummary.baselineLabel}`
+  if (rowCount === 0) return baseline
+  if (differingCount === 0) return `${baseline} · no metric differs`
+  return `${baseline} · ${differingCount} of ${rowCount} differ`
+})
+// Hiding matched rows is only ever an improvement when some of them would remain.
+const canFilterDiffering = computed(
+  () =>
+    compareMatrix.value.differingCount > 0 &&
+    compareMatrix.value.differingCount < compareMatrix.value.rowCount,
+)
+const compareGroups = computed(() =>
+  filterStepCompareGroups(
+    compareMatrix.value.groups,
+    onlyDiffering.value && canFilterDiffering.value,
+  ),
+)
+const compareVisibleRowCount = computed(() =>
+  compareGroups.value.reduce((total, group) => total + group.rows.length, 0),
+)
+const compareEmptyMessage = computed(() =>
+  compareMatrix.value.rowCount === 0
+    ? `No V3 metrics were reported for ${props.selectedStep} in the workspaces shown.`
+    : `Every ${props.selectedStep} metric matches the baseline.`,
+)
+const modeOptions = computed(() => [
+  {
+    id: 'findings' as const,
+    label: 'Findings',
+    count: issues.value.length,
+    tone: issueCounts.value.blocking > 0 ? 'bad' : 'neutral',
+  },
+  {
+    id: 'compare' as const,
+    label: 'Compare',
+    count: compareMatrix.value.rowCount === 0 ? null : compareMatrix.value.differingCount,
+    tone: 'neutral',
+  },
+])
+const modeHint = computed(() =>
+  mode.value === 'findings'
+    ? `${activeWorkspace.value?.workspaceName ?? 'No workspace'} · ${props.selectedStep}`
+    : `${compareMatrix.value.columns.length} workspaces · ${props.selectedStep}`,
+)
+const metricsCaption = computed(() => {
+  const name = activeWorkspace.value?.workspaceName ?? 'No workspace'
+  const baseline = baselineWorkspace.value
+  if (!baseline || baseline.workspaceId === activeWorkspaceId.value) {
+    return `${name} · reference workspace`
   }
+  return `${name} · vs ${baseline.workspaceName}`
+})
 
-  return findings
+// A rank belongs to one metric of one step, and the next step reports its own metrics.
+watch(
+  () => props.selectedStep,
+  () => {
+    compareSort.value = null
+  },
+)
+
+watch(workspacePickerQuery, () => {
+  workspacePickerShowsAll.value = false
+})
+
+function moveActiveWorkspace(direction: -1 | 1): void {
+  const next = workspaceChips.value[activeWorkspaceIndex.value + direction]
+  if (next) emit('select-workspace', next.workspaceId)
 }
 
-function findingSeverityRank(finding: StageFinding): number {
-  return { critical: 0, warning: 1, info: 2 }[finding.severity]
+function selectWorkspaceFromPicker(workspaceId: string): void {
+  workspacePickerOpen.value = false
+  workspacePickerQuery.value = ''
+  workspacePickerShowsAll.value = false
+  emit('select-workspace', workspaceId)
 }
 
-function findingValueLabel(finding: StageFinding): string {
-  return formatFindingScalar(finding.value, finding.unit)
-}
-
-function findingExpectedLabel(finding: StageFinding): string {
-  return formatFindingScalar(finding.expected ?? null, finding.unit)
-}
-
-function findingEvidenceLocation(
-  evidence: ProjectQorFindingEvidence,
-): string | undefined {
-  if (!evidence.sourceFile) return undefined
-  return evidence.sourceSelector
-    ? `${evidence.sourceFile}#${evidence.sourceSelector}`
-    : evidence.sourceFile
-}
-
-function findingCondition(
-  metric: string,
-  evidence: ProjectQorFindingEvidence,
-  unit?: string,
-): string | undefined {
-  if (!evidence.expectedOperator || evidence.expectedValue === null) return undefined
-  return `${metric} ${evidence.expectedOperator} ${formatFindingScalar(
-    evidence.expectedValue,
-    unit,
-  )}`
-}
-
-function timingIssueDiagnosis(timingIssue: ProjectQorTimingIssue): string {
-  const clockDelay = [
-    timingIssue.launchClockNetworkDelayNs === null
-      ? null
-      : `launch delay ${timingIssue.launchClockNetworkDelayNs} ns`,
-    timingIssue.captureClockNetworkDelayNs === null
-      ? null
-      : `capture delay ${timingIssue.captureClockNetworkDelayNs} ns`,
-    timingIssue.clockNetworkDelayDeltaNs === null
-      ? null
-      : `clock-delay delta ${timingIssue.clockNetworkDelayDeltaNs} ns`,
+function compareColumnTitle(column: StepCompareColumn): string {
+  const roles = [
+    column.isBaseline ? 'baseline' : null,
+    column.workspaceId === activeWorkspaceId.value ? 'current workspace' : null,
+    column.isBest ? 'best' : null,
   ]
-    .filter((item): item is string => item !== null)
+    .filter(Boolean)
     .join(', ')
-  return `${timingIssue.corner} / ${timingIssue.pathGroup} / ${timingIssue.checkType}: slack ${timingIssue.slackNs} ns violates the required >= 0 ns.${clockDelay ? ` ${clockDelay}.` : ''}`
+  return [
+    column.workspaceName,
+    roles,
+    workspaceChipById.value.get(column.workspaceId)?.statusLabel,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
-function formatFindingScalar(value: number | string | null, unit?: string): string {
-  if (value === null) return 'Not reported'
-  if (typeof value === 'string') return value
-  const absolute = Math.abs(value)
-  const digits = absolute > 0 && absolute < 0.01 ? 6 : absolute < 1 ? 4 : 3
-  const label = String(Number(value.toFixed(digits)))
-  return unit ? `${label} ${unit}` : label
-}
-
-function titleFromIdentifier(value: string): string {
-  return value.replace(/[_-]+/g, ' ')
-}
-
-function emptyPoint(summary: ProjectWorkspaceSummary): ProjectMetricPoint {
-  return {
-    workspaceId: summary.workspaceId,
-    workspaceName: summary.workspaceName,
-    label: 'N/A',
-    value: null,
-    state: 'pending',
+function compareRankTitle(row: StepCompareRow): string {
+  if (compareSort.value?.metricName !== row.id) {
+    return row.higherIsBetter === null
+      ? `Rank the columns by ${row.label}, largest value first. This metric reports no better direction.`
+      : `Rank the columns by ${row.label}, best first (${row.descriptor}).`
   }
+  return compareSort.value.direction === 'leading'
+    ? `Reverse the ranking on ${row.label}`
+    : `Clear the ranking on ${row.label}`
 }
 
-function metricCellTitle(
-  workspaceName: string,
-  metric: ProjectStepCompareMetric,
-  point: ProjectMetricPoint,
+/** Leading, then trailing, then back to the project's own order. */
+function cycleCompareRank(row: StepCompareRow): void {
+  const sort = compareSort.value
+  if (sort?.metricName !== row.id) {
+    compareSort.value = {
+      metricName: row.id,
+      higherIsBetter: row.higherIsBetter,
+      direction: 'leading',
+    }
+    return
+  }
+  compareSort.value =
+    sort.direction === 'leading' ? { ...sort, direction: 'trailing' } : null
+}
+
+function resetCompareScope(): void {
+  columnFilter.value = 'all'
+  columnQuery.value = ''
+  compareSort.value = null
+}
+
+// Red is reserved for what the artifacts call blocking. Other findings are counted but
+// not ranked, since their importance is not something these artifacts report.
+function stepTabTone(tab: StepTab): string {
+  if (tab.blockingCount > 0) return 'bad'
+  if (tab.findingCount > 0 || tab.analysisAvailability === 'incomplete') return 'warn'
+  if (tab.analysisAvailability === 'available') return 'good'
+  return 'none'
+}
+
+function stepTabBadge(tab: StepTab): string {
+  return tab.findingCount > 0 ? String(tab.findingCount) : ''
+}
+
+function stepTabTitle(tab: StepTab): string {
+  if (tab.analysisAvailability === 'unavailable')
+    return `${tab.step}: analysis unavailable`
+  if (tab.analysisAvailability === 'incomplete') return `${tab.step}: analysis incomplete`
+  return `${tab.step}: ${tab.findingCount} findings, ${tab.blockingCount} listed as blocking`
+}
+
+function workspaceChipTitle(chip: StepWorkspaceChip): string {
+  const roles = [chip.isBaseline ? 'baseline' : null, chip.isBest ? 'best' : null]
+    .filter(Boolean)
+    .join(', ')
+  const suffix = roles ? ` (${roles})` : ''
+  const findings = `${chip.findingCount} findings, ${chip.blockingCount} listed as blocking`
+  return `${chip.workspaceName} · ${chip.statusLabel}${suffix} · ${findings}`
+}
+
+function detailSourceLabel(
+  sourceFile: string,
+  status: 'available' | 'missing' | 'invalid',
 ): string {
-  return `${workspaceName} ${metric.label}: ${point.label}`
+  return status === 'available' ? sourceFile : `QoR metrics: ${status}`
 }
 
-function detailLabel(presentation: string): string {
-  return (
-    {
-      place_map_summary: 'Placement Maps',
-      cts_clock_skew_table: 'Clock Timing Quality',
-      layer_table: 'Route Layers',
-      rule_layer_table: 'DRC Rule / Layer',
-      rcx_spef_corner_table: 'RCX Corners',
-      path_group_table: 'STA Path Groups',
-    }[presentation] ?? presentation
-  )
+function detailSourceTone(status: 'available' | 'missing' | 'invalid'): string {
+  if (status === 'invalid') return 'bad'
+  if (status === 'missing') return 'warn'
+  return 'neutral'
 }
 
-function detailRows(detail: ProjectQorDetailDescriptor): Record<string, unknown>[] {
-  const summary = detail.summary
-  if (detail.presentation === 'cts_clock_skew_table') {
-    return [
-      {
-        clock_count: summary.clock_count,
-        worst_optimized_skew_ns: summary.worst_optimized_skew_ns,
-        worst_max_insertion_latency_ns: summary.worst_max_insertion_latency_ns,
-        target_unmet_count: summary.target_unmet_count,
-      },
-    ].filter((row) => Object.values(row).some(isDisplayValue))
-  }
-  if (detail.presentation === 'place_map_summary') {
-    return arrayRows(summary.maps).map((row) => ({
-      group: row.group,
-      metric: row.metric,
-      top_5_percent_average: row.top_5_percent_average,
-      max: row.max,
-      high_bin_ratio: row.high_bin_ratio,
-    }))
-  }
-  if (detail.presentation === 'layer_table') {
-    return arrayRows(summary.layers).map((row) => ({
-      layer: row.layer,
-      dr_wirelength: recordValue(row.dr, 'wirelength'),
-      dr_via_count: recordValue(row.dr, 'via_count'),
-      la_overflow: recordValue(row.la, 'overflow'),
-    }))
-  }
-  const key = {
-    rule_layer_table: 'top_violations',
-    rcx_spef_corner_table: 'rc_corners',
-    path_group_table: 'records',
-  }[detail.presentation]
-  const rows = key && Array.isArray(summary[key]) ? summary[key] : []
-  return rows.filter(isRecord)
+/** Keeps the artifact path reachable for the channels that get no evidence card. */
+function issueRowTitle(issue: StepIssue): string {
+  return [issue.location ?? issue.source, issue.diagnosis].filter(Boolean).join(' · ')
 }
 
-function detailFields(detail: ProjectQorDetailDescriptor): string[] {
-  const fields = {
-    place_map_summary: [
-      'group',
-      'metric',
-      'top_5_percent_average',
-      'max',
-      'high_bin_ratio',
-    ],
-    cts_clock_skew_table: [
-      'clock_count',
-      'worst_optimized_skew_ns',
-      'worst_max_insertion_latency_ns',
-      'target_unmet_count',
-    ],
-    layer_table: ['layer', 'dr_wirelength', 'dr_via_count', 'la_overflow'],
-    rule_layer_table: ['display_name', 'value', 'unit'],
-    rcx_spef_corner_table: [
-      'rc_corner',
-      'availability',
-      'total_capacitance_ff',
-      'coupling_capacitance_ff',
-      'total_resistance_ohm',
-    ],
-    path_group_table: ['corner_context', 'path_group', 'setup', 'hold'],
-  }[detail.presentation]
-  return fields ?? Object.keys(detailRows(detail)[0] ?? {}).slice(0, 5)
+/**
+ * Some channels use the artifact path as their metric id, or already name the metric in
+ * the evidence selector, so printing it again would just repeat the line.
+ */
+function evidenceMetricId(issue: StepIssue): string | null {
+  const source = issue.location ?? issue.source
+  return source.includes(issue.metric) ? null : issue.metric
 }
 
-function detailCoverage(detail: ProjectQorDetailDescriptor): {
-  status: string
-  expected: number | string
-  available: number | string
-} | null {
-  const coverage = isRecord(detail.summary.coverage) ? detail.summary.coverage : null
-  if (!coverage) return null
-  const status = stringValue(coverage.status)
-  const expected = coverage.expected_count
-  const available = coverage.available_count
-  if (!status || !isDisplayValue(expected) || !isDisplayValue(available)) return null
-  return { status, expected, available }
+function metricRowTitle(row: StepMetricRow): string {
+  return [row.label, row.descriptor, row.corner, row.sourceFile]
+    .filter(Boolean)
+    .join(' · ')
 }
 
-function detailValue(row: Record<string, unknown>, field: string): string {
-  const value = row[field]
-  if (isRecord(value)) {
-    const label = stringValue(value.label)
-    if (label) return label
-    const wns = value.worst_wns ?? value.wns
-    const tns = value.worst_tns ?? value.tns
-    return [wns, tns].filter(isDisplayValue).join(' / ') || 'N/A'
-  }
-  return isDisplayValue(value) ? String(value) : 'N/A'
+function compareCellTitle(row: StepCompareRow, cell: StepCompareCell): string {
+  const change = cell.deltaPercent ? `${cell.delta} (${cell.deltaPercent})` : cell.delta
+  return [
+    `${cell.workspaceName} ${row.label}: ${cell.value}`,
+    cell.unavailableReason ? `Not applicable: ${cell.unavailableReason}` : null,
+    change ?? cell.deltaNote,
+    cell.leads ? `best reported value (${row.descriptor})` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
-function detailEmptyMessage(detail: ProjectQorDetailDescriptor): string {
-  return detail.presentation === 'rule_layer_table'
-    ? 'No DRC violations.'
-    : 'No bounded detail rows are available.'
-}
-
-function detailRowKey(
-  detail: ProjectQorDetailDescriptor,
-  row: Record<string, unknown>,
-  index: number,
-): string {
-  const id =
-    row.rc_corner ??
-    row.path_group ??
-    row.layer ??
-    row.metric ??
-    row.display_name ??
-    index
-  return `${detail.id}-${String(id)}`
-}
-
-function fieldLabel(field: string): string {
-  const labels: Record<string, string> = {
-    corner_context: 'PVT / RC corner',
-    clock_count: 'Clock count',
-    worst_optimized_skew_ns: 'Worst skew [ns]',
-    worst_max_insertion_latency_ns: 'Worst insertion latency [ns]',
-    target_unmet_count: 'Target unmet',
-    top_5_percent_average: 'Top 5% average',
-    max: 'Maximum',
-    high_bin_ratio: 'High-bin ratio',
-    dr_wirelength: 'DR wirelength',
-    dr_via_count: 'DR via count',
-    la_overflow: 'LA overflow',
-  }
-  if (labels[field]) return labels[field]
-  return field.replace(/_/g, ' ')
-}
-
-function arrayRows(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value.filter(isRecord) : []
-}
-
-function recordValue(value: unknown, field: string): unknown {
-  return isRecord(value) ? value[field] : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function isDisplayValue(value: unknown): value is string | number {
-  return (
-    typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))
-  )
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+/**
+ * Grows the fill out of the track's centre line, which every cell of a column shares, so
+ * a reader compares bar against bar rather than reading each one on its own.
+ */
+function deltaBarStyle(cell: StepCompareCell): Record<string, string> {
+  const ratio = cell.barRatio ?? 0
+  const width = `${Math.abs(ratio) * 50}%`
+  return ratio < 0 ? { right: '50%', width } : { left: '50%', width }
 }
 </script>
 
-<style scoped>
-.stage-workbench {
-  display: grid;
-  grid-template-columns: 116px minmax(0, 1fr) minmax(176px, 0.28fr);
-  height: 100%;
-  min-height: 0;
-  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-secondary) 36%, transparent);
-  overflow: hidden;
-}
-
-.stage-rail,
-.findings-rail {
-  min-width: 0;
-  min-height: 0;
-  padding: 10px 8px;
-  background: color-mix(in srgb, var(--bg-primary) 65%, transparent);
-}
-
-.stage-rail {
-  display: grid;
-  grid-template-rows: 16px minmax(0, 1fr);
-  border-right: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-}
-
-.stage-rail-list {
-  display: grid;
-  align-content: start;
-  grid-auto-flow: row;
-  grid-auto-rows: 40px;
-  min-height: 0;
-  gap: 4px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-
-.stage-rail-label,
-.stage-kicker,
-.stage-surface-header small,
-.findings-rail header small,
-.stage-detail-view header small {
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 760;
-  text-transform: uppercase;
-}
-
-.stage-rail-item {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 6px;
-  box-sizing: border-box;
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
-  border: 0;
-  border-left: 2px solid transparent;
-  padding: 6px 6px 6px 8px;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  overflow: hidden;
-}
-
-.stage-rail-item:hover,
-.stage-rail-item.selected {
-  color: var(--text-primary);
-  background: var(--success-bg);
-}
-
-.stage-rail-item.selected {
-  border-left-color: var(--success-color);
-}
-
-.stage-rail-item strong {
-  overflow: hidden;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage-rail-item span,
-.stage-rail-item i {
-  align-self: center;
-  overflow: hidden;
-  font-size: 10px;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage-rail-item i {
-  grid-column: 2;
-  color: var(--warning-color);
-}
-
-.stage-main {
-  display: grid;
-  grid-template-rows: 64px minmax(0, 1.06fr) minmax(0, 0.94fr);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.stage-header,
-.stage-surface-header,
-.stage-detail-view header,
-.findings-rail header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.stage-header {
-  box-sizing: border-box;
-  height: 64px;
-  min-height: 64px;
-  padding: 10px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-  overflow: hidden;
-}
-
-.stage-status-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 4px;
-  color: var(--text-secondary);
-  font-size: 11px;
-}
-
-.stage-status-row strong {
-  color: var(--text-primary);
-}
-
-.stage-status-row .warning {
-  color: var(--warning-color);
-}
-
-.stage-signoff-status {
-  font-weight: 760;
-  text-transform: uppercase;
-}
-
-.stage-signoff-status.pass {
-  color: var(--success-color);
-}
-.stage-signoff-status.blocked {
-  color: var(--error-color);
-}
-.stage-signoff-status.incomplete,
-.stage-signoff-status.unavailable {
-  color: var(--warning-color);
-}
-
-.stage-baseline {
-  color: var(--warning-color);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.stage-metric-surface,
-.stage-detail-surface {
-  display: grid;
-  grid-template-rows: 28px minmax(0, 1fr);
-  min-height: 0;
-  padding: 10px 12px;
-  gap: 8px;
-}
-
-.stage-metric-surface {
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-}
-
-.stage-surface-header {
-  box-sizing: border-box;
-  height: 28px;
-  min-height: 28px;
-  margin: 0;
-  font-size: 12px;
-  font-weight: 760;
-  overflow: hidden;
-}
-
-.stage-surface-header > span,
-.stage-surface-header > small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage-metric-table {
-  display: grid;
-  grid-auto-flow: row;
-  grid-auto-rows: 40px;
-  grid-template-columns: minmax(160px, 1.35fr) repeat(
-      var(--workspace-count),
-      minmax(104px, 1fr)
-    );
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
-  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-  border-radius: 6px;
-}
-
-.stage-metric-heading,
-.stage-workspace-cell,
-.stage-metric-cell {
-  box-sizing: border-box;
-  min-width: 0;
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
-  border: 0;
-  border-right: 1px solid color-mix(in srgb, var(--border-color) 64%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 64%, transparent);
-  padding: 7px 8px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 10px;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage-metric-heading {
-  font-weight: 760;
-  text-transform: uppercase;
-}
-
-.stage-metric-heading.metric {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background: var(--bg-secondary);
-}
-
-.stage-workspace-cell,
-.stage-metric-cell {
-  cursor: pointer;
-}
-
-.stage-workspace-heading {
-  color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-weight: 760;
-}
-
-.stage-workspace-cell:hover,
-.stage-workspace-cell.selected,
-.stage-metric-cell:hover {
-  background: color-mix(in srgb, var(--success-bg) 72%, transparent);
-}
-
-.stage-workspace-cell.selected {
-  color: var(--success-color);
-}
-
-.stage-metric-cell strong {
-  display: block;
-  overflow: hidden;
-  color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage-metric-cell.bad strong {
-  color: var(--error-color);
-}
-.stage-metric-cell.warn strong {
-  color: var(--warning-color);
-}
-.stage-metric-cell.good strong {
-  color: var(--success-color);
-}
-
-.stage-detail-list {
-  display: grid;
-  align-content: start;
-  grid-auto-flow: row;
-  grid-auto-rows: 176px;
-  gap: 8px;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-
-.stage-detail-view {
-  display: grid;
-  grid-template-rows: 28px minmax(0, 1fr);
-  box-sizing: border-box;
-  height: 176px;
-  min-height: 176px;
-  max-height: 176px;
-  gap: 6px;
-  border-top: 1px solid color-mix(in srgb, var(--border-color) 66%, transparent);
-  padding-top: 6px;
-  overflow: hidden;
-}
-
-.stage-detail-view header {
-  min-width: 0;
-  height: 28px;
-  min-height: 28px;
-  font-size: 11px;
-  font-weight: 760;
-  overflow: hidden;
-}
-
-.stage-detail-view header span,
-.stage-detail-view header small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage-detail-content {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-height: 0;
-  gap: 6px;
-}
-
-.stage-detail-content > .detail-table-wrap:first-child,
-.stage-detail-content > .stage-empty:first-child {
-  grid-row: 1 / -1;
-}
-
-.detail-coverage {
-  box-sizing: border-box;
-  min-height: 20px;
-  max-height: 20px;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 10px;
-  overflow: hidden;
-}
-
-.detail-coverage span,
-.detail-coverage strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail-coverage strong.pass {
-  color: var(--success-color);
-}
-.detail-coverage strong.blocked {
-  color: var(--error-color);
-}
-.detail-coverage strong.incomplete,
-.detail-coverage strong.unavailable {
-  color: var(--warning-color);
-}
-
-.detail-table-wrap {
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
-  border: 1px solid color-mix(in srgb, var(--border-color) 68%, transparent);
-  border-radius: 6px;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 10px;
-}
-
-th,
-td {
-  box-sizing: border-box;
-  height: 32px;
-  min-height: 32px;
-  max-height: 32px;
-  min-width: 92px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent);
-  padding: 6px 7px;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-th {
-  color: var(--text-secondary);
-  font-weight: 760;
-  text-transform: capitalize;
-}
-
-.findings-rail {
-  display: grid;
-  grid-template-rows: 28px minmax(0, 1fr);
-  gap: 8px;
-  border-left: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-  overflow: hidden;
-}
-
-.findings-rail header {
-  box-sizing: border-box;
-  height: 28px;
-  min-height: 28px;
-  margin: 0;
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.findings-rail ul {
-  display: grid;
-  align-content: start;
-  grid-auto-flow: row;
-  grid-auto-rows: minmax(108px, max-content);
-  gap: 6px;
-  margin: 0;
-  min-height: 0;
-  padding: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  list-style: none;
-}
-
-.findings-rail > .stage-empty {
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-
-.findings-rail li {
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  min-height: 108px;
-  border-left: 2px solid var(--text-secondary);
-  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
-  overflow: hidden;
-}
-
-.findings-rail li.critical {
-  border-left-color: var(--error-color);
-}
-.findings-rail li.warning {
-  border-left-color: var(--warning-color);
-}
-
-.findings-rail .finding-select {
-  display: grid;
-  grid-template-rows: 12px 14px 13px minmax(0, 1fr);
-  width: 100%;
-  box-sizing: border-box;
-  height: 78px;
-  min-height: 78px;
-  max-height: 78px;
-  gap: 3px;
-  border: 0;
-  padding: 7px 8px;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  overflow: hidden;
-}
-
-.findings-rail .finding-select:hover {
-  background: var(--success-bg);
-}
-.findings-rail .finding-select span {
-  overflow: hidden;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.findings-rail .finding-select strong {
-  color: var(--text-primary);
-  overflow: hidden;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.findings-rail .finding-select em {
-  color: var(--warning-color);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  overflow: hidden;
-  font-size: 10px;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.findings-rail li.critical .finding-select em {
-  color: var(--error-color);
-}
-.findings-rail .finding-select small {
-  display: -webkit-box;
-  overflow: hidden;
-  font-size: 10px;
-  line-height: 1.25;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.finding-detail-info {
-  box-sizing: border-box;
-  height: 30px;
-  min-height: 30px;
-  max-height: 30px;
-  border-top: 1px solid color-mix(in srgb, var(--border-color) 54%, transparent);
-  color: var(--text-secondary);
-  font-size: 10px;
-  overflow: hidden;
-}
-
-.finding-detail-info[open] {
-  height: 150px;
-  min-height: 150px;
-  max-height: 150px;
-  background: var(--bg-secondary);
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-
-.finding-detail-info summary {
-  box-sizing: border-box;
-  height: 29px;
-  min-height: 29px;
-  padding: 6px 8px;
-  color: var(--success-color);
-  cursor: pointer;
-  font-weight: 760;
-}
-
-.finding-detail-info dl {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0 8px 8px;
-}
-
-.finding-detail-info dl div {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 6px;
-}
-
-.finding-detail-info dt {
-  color: var(--text-secondary);
-}
-
-.finding-detail-info dd {
-  min-width: 0;
-  margin: 0;
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
-}
-
-.stage-empty {
-  align-self: center;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 11px;
-  text-align: center;
-}
-
-@media (max-width: 1080px) {
-  .stage-workbench {
-    grid-template-columns: 94px minmax(0, 1fr);
-  }
-  .findings-rail {
-    grid-column: 1 / -1;
-    border-top: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-    border-left: 0;
-  }
-}
-</style>
+<style scoped src="./projectStepAnalysisPanel.css"></style>

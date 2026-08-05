@@ -1,0 +1,12 @@
+[package]
+name = "chip-view-db"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+chipgeom-format = { path = "../chipgeom-format" }
+chipgeom-reader = { path = "../chipgeom-reader" }
+rstar.workspace = true

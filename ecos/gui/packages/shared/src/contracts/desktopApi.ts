@@ -15,10 +15,10 @@ import type {
   ResourceInstallRequest,
   ResourceJob,
   ResourceList,
+  MpcSpecReadResult,
   ResourceOperationResult,
   ResourceUpdateCheckResult,
 } from './resources.ts'
-import type { RemoteContentApi } from './remoteContent.ts'
 import type { EccRuntimeApi } from './eccRuntime.ts'
 import type {
   ProjectManifestMutationRequest,
@@ -133,15 +133,17 @@ export interface DesktopProjectDirectoryEntry {
   type: 'file' | 'directory'
 }
 
-export interface LayoutViewerOpenRequest {
+export interface ChipViewerOpenRequest {
   projectPath: string
-  viewJsonPackageRoot: string
-  rebuildPackage?: boolean
+  step: string
+  mode?: 'view' | 'edit'
 }
 
-export interface LayoutViewerOpenResult {
-  packageRoot: string
-  layoutPackagePath: string
+export interface ChipViewerOpenResult {
+  editCommandDirectory?: string
+  editResultDirectory?: string
+  geometryManifestPath: string
+  workspaceStepDirectory: string
   spawned: boolean
 }
 
@@ -191,7 +193,6 @@ export interface DesktopApi {
     set(key: string, value: DesktopSettingsValue): Promise<void>
     delete(key: string): Promise<void>
   }
-  remoteContent: RemoteContentApi
   projectManifest: {
     mutate(
       request: ProjectManifestMutationRequest,
@@ -251,8 +252,8 @@ export interface DesktopApi {
       listener: (event: DesktopProjectFileChangedEvent) => void,
     ): Promise<DesktopEventUnsubscribe>
   }
-  layoutViewer: {
-    open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
+  chipViewer: {
+    open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
   }
   workspaceResources: {
     getIndex(): Promise<WorkspaceResourceIndex>
@@ -264,6 +265,7 @@ export interface DesktopApi {
   resources: {
     list(): Promise<ResourceList>
     get(resourceId: string): Promise<ResourceInfo>
+    readMpcSpec(resourceId: string): Promise<MpcSpecReadResult>
     install(request: ResourceInstallRequest): Promise<ResourceOperationResult>
     update(resourceId: string): Promise<ResourceOperationResult>
     cancel(resourceId: string): Promise<ResourceOperationResult>

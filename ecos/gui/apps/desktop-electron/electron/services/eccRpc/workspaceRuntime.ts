@@ -4,6 +4,14 @@ import type {
   EccFlowRunResult,
   EccFlowRunStepRequest,
   EccFlowRunStepResult,
+  EccLayoutEditApplyRequest,
+  EccLayoutEditApplyResult,
+  EccLayoutEditBeginRequest,
+  EccLayoutEditBeginResult,
+  EccLayoutEditDiscardRequest,
+  EccLayoutEditDiscardResult,
+  EccLayoutEditSaveRequest,
+  EccLayoutEditSaveResult,
   EccRpcHelloResult,
   EccRpcPingResult,
   EccRpcShutdownResult,
@@ -405,6 +413,60 @@ export class EccWorkspaceRuntime {
         )
       },
     )
+  }
+
+  layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
+    return this.enqueue('layout.edit.begin', request.workspaceHandle, async () => {
+      const client = await this.ensureStarted()
+      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+      return await client.call<EccLayoutEditBeginResult>('layout.edit.begin', {
+        ...(request.expectedSourceFingerprint
+          ? { expectedSourceFingerprint: request.expectedSourceFingerprint }
+          : {}),
+        step: request.step,
+        workspaceId,
+      })
+    })
+  }
+
+  layoutEditApply(request: EccLayoutEditApplyRequest): Promise<EccLayoutEditApplyResult> {
+    return this.enqueue('layout.edit.apply', request.workspaceHandle, async () => {
+      const client = await this.ensureStarted()
+      await this.resolveEccWorkspaceId(request.workspaceHandle)
+      return await client.call<EccLayoutEditApplyResult>('layout.edit.apply', {
+        baseRevision: request.baseRevision,
+        commandId: request.commandId,
+        editSessionId: request.editSessionId,
+        operation: request.operation,
+      })
+    })
+  }
+
+  layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult> {
+    return this.enqueue('layout.edit.save', request.workspaceHandle, async () => {
+      const client = await this.ensureStarted()
+      await this.resolveEccWorkspaceId(request.workspaceHandle)
+      return await client.call<EccLayoutEditSaveResult>(
+        'layout.edit.save',
+        {
+          editSessionId: request.editSessionId,
+          expectedRevision: request.expectedRevision,
+        },
+        { timeoutMs: 0 },
+      )
+    })
+  }
+
+  layoutEditDiscard(
+    request: EccLayoutEditDiscardRequest,
+  ): Promise<EccLayoutEditDiscardResult> {
+    return this.enqueue('layout.edit.discard', request.workspaceHandle, async () => {
+      const client = await this.ensureStarted()
+      await this.resolveEccWorkspaceId(request.workspaceHandle)
+      return await client.call<EccLayoutEditDiscardResult>('layout.edit.discard', {
+        editSessionId: request.editSessionId,
+      })
+    })
   }
 
   runFlow(request: EccFlowRunRequest): Promise<EccFlowRunResult> {

@@ -40,7 +40,7 @@ describe('EccRpcSidecarProcess', () => {
     vi.useRealTimers()
   })
 
-  it('spawns ecc rpc serve --stdio', async () => {
+  it('spawns ECC with persistent DB support for GUI edit sessions', async () => {
     const child = new FakeChild()
     const spawn = vi.fn(() => child)
     const sidecar = new EccRpcSidecarProcess({
@@ -50,10 +50,14 @@ describe('EccRpcSidecarProcess', () => {
 
     await sidecar.start()
 
-    expect(spawn).toHaveBeenCalledWith('ecc', ['rpc', 'serve', '--stdio'], {
-      env: { PATH: '/bin' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    expect(spawn).toHaveBeenCalledWith(
+      'ecc',
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      {
+        env: { PATH: '/bin' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
   })
 
   it('uses a runtime-specific launch resolver', async () => {
@@ -126,10 +130,14 @@ describe('EccRpcSidecarProcess', () => {
 
     expect(secondClient).not.toBe(firstClient)
     expect(spawn).toHaveBeenCalledTimes(2)
-    expect(spawn).toHaveBeenLastCalledWith('ecc', ['rpc', 'serve', '--stdio'], {
-      env: { PATH: '/tools/v2/bin' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    expect(spawn).toHaveBeenLastCalledWith(
+      'ecc',
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      {
+        env: { PATH: '/tools/v2/bin' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
   })
 
   it('reuses the last successful environment when the provider temporarily fails', async () => {

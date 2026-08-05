@@ -131,11 +131,6 @@ const desktopBridge = {
     set: settingsSet,
     delete: settingsDelete,
   },
-  remoteContent: {
-    listFiles: async () => [],
-    readTextFile: async () => '',
-    readJsonFile: async <T = unknown>() => null as T,
-  },
   projectManifest: {
     mutate: async () => ({ content: '' }),
   },
@@ -172,9 +167,6 @@ const desktopBridge = {
     addDesignFiles: async () => ({ added: [], skipped: [] }),
     removeDesignFile: async () => null,
   },
-  layoutViewer: {
-    open: async () => ({ layoutPackagePath: '', packageRoot: '', spawned: true }),
-  },
   workspaceResources: {
     getIndex: async () => ({
       design: '',
@@ -208,6 +200,9 @@ const desktopBridge = {
   resources: {
     list: async () => ({ diagnostics: [], resources: [] }),
     get: async () => {
+      throw new Error('not found')
+    },
+    readMpcSpec: async () => {
       throw new Error('not found')
     },
     install: async (request) => ({
@@ -285,6 +280,13 @@ const desktopBridge = {
     kill: async () => undefined,
     onData: () => () => undefined,
     onExit: () => () => undefined,
+  },
+  chipViewer: {
+    open: async () => ({
+      geometryManifestPath: '/tmp/geometry/geometry.manifest',
+      spawned: true,
+      workspaceStepDirectory: '/tmp/Floorplan_ecc',
+    }),
   },
 } satisfies DesktopApi
 

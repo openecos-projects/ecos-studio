@@ -1,6 +1,6 @@
 import type { InstallProgress, ResourceAction, ResourceItem } from '@/api/plugin'
 
-export type ResourceType = 'tool' | 'pdk'
+export type ResourceType = 'tool' | 'pdk' | 'mpc'
 export type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
 export type RowAction =
   | 'install'
@@ -61,6 +61,8 @@ const toolMeta: Record<string, { icon: string; accent: string }> = {
   iverilog: { icon: 'I', accent: '#4f7f75' },
 }
 
+const mpcMeta = { icon: 'MPC', accent: '#3f7cac' }
+
 export function formatResourceSize(size: number | null): {
   sizeLabel: string
   sizeMb: number
@@ -93,6 +95,9 @@ function iconFor(resource: ResourceItem): string {
   if (resource.type === 'pdk') {
     return (resource.name || label).slice(0, 5)
   }
+  if (resource.type === 'mpc') {
+    return mpcMeta.icon
+  }
 
   const haystack = `${resource.name} ${resource.display_name}`.toLowerCase()
   const match = Object.entries(toolMeta).find(([key]) => haystack.includes(key))
@@ -105,6 +110,9 @@ function iconFor(resource: ResourceItem): string {
 function accentFor(resource: ResourceItem): string {
   if (resource.type === 'pdk') {
     return resource.active ? '#4f7f75' : '#6b7078'
+  }
+  if (resource.type === 'mpc') {
+    return mpcMeta.accent
   }
 
   const haystack = `${resource.name} ${resource.display_name}`.toLowerCase()

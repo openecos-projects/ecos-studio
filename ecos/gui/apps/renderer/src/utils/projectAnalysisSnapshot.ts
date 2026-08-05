@@ -30,6 +30,7 @@ import {
 } from './projectQorTrend'
 
 export type ProjectAnalysisArtifactStatus = 'available' | 'missing' | 'invalid'
+export type ProjectAnalysisAvailability = 'available' | 'incomplete' | 'unavailable'
 
 export interface ProjectAnalysisStepSnapshot {
   step: FlowStep
@@ -55,6 +56,24 @@ export interface ProjectAnalysisSnapshot {
   steps: Partial<Record<FlowStep, ProjectAnalysisStepSnapshot>>
   signoffReadiness: ProjectQorSignoffReadiness
   timingConstraints: ProjectQorTimingConstraints
+}
+
+/**
+ * A snapshot exists for every flow step, including ones with no analysis files. Keep
+ * object existence separate from whether the step has a complete, readable report.
+ */
+export function stepAnalysisAvailability(
+  snapshot: ProjectAnalysisStepSnapshot | null | undefined,
+): ProjectAnalysisAvailability {
+  if (!snapshot || snapshot.artifactStatus !== 'available') return 'unavailable'
+  if (
+    snapshot.summaryArtifactStatus !== 'available' ||
+    snapshot.hotspotArtifactStatus !== 'available' ||
+    snapshot.summaryStatus === null
+  ) {
+    return 'incomplete'
+  }
+  return 'available'
 }
 
 export function buildProjectAnalysisSnapshot(

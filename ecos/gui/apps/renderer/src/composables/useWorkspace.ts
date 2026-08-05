@@ -1075,6 +1075,7 @@ export function useWorkspace() {
                   )
                 : toNumber(frontendParams.core_utilization, 0.5),
           },
+          ...(creationConfig?.mpc ? { MPC: creationConfig.mpc } : {}),
         }
 
         const resolvedPdkRoot = creationConfig?.pdk_root || ''

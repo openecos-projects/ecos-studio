@@ -49,11 +49,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       set: async () => undefined,
       delete: async () => undefined,
     },
-    remoteContent: {
-      listFiles: async () => [],
-      readTextFile: async () => '',
-      readJsonFile: async <T = unknown>() => null as T,
-    },
     projectManifest: {
       mutate: async () => ({ content: '' }),
     },
@@ -103,9 +98,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       addDesignFiles: async () => ({ added: [], skipped: [] }),
       removeDesignFile: async () => null,
     },
-    layoutViewer: {
-      open: async () => ({ layoutPackagePath: '', packageRoot: '', spawned: true }),
-    },
     workspaceResources: {
       getIndex: async () => ({
         design: '',
@@ -139,6 +131,9 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     resources: {
       list: async () => ({ diagnostics: [], resources: [] }),
       get: async () => {
+        throw new Error('not found')
+      },
+      readMpcSpec: async () => {
         throw new Error('not found')
       },
       install: async (request) => ({
@@ -229,6 +224,13 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       kill: async () => undefined,
       onData: () => () => undefined,
       onExit: () => () => undefined,
+    },
+    chipViewer: {
+      open: async () => ({
+        geometryManifestPath: '/tmp/geometry/geometry.manifest',
+        spawned: true,
+        workspaceStepDirectory: '/tmp/Floorplan_ecc',
+      }),
     },
   } satisfies DesktopApi
 }

@@ -372,4 +372,25 @@ describe('Resource Manager tool API adapter', () => {
       message: 'Downloading...',
     })
   })
+
+  it('maps MPC jobs to install progress rows with resource identity', () => {
+    expect(
+      resourceJobToInstallProgress({
+        id: 'job-3',
+        resource_id: 'mpc:mpc-frame',
+        action: 'install',
+        phase: 'extracting',
+        progress: 0.75,
+        message: 'Extracting MPC Frame...',
+        error: null,
+      }),
+    ).toEqual({
+      resourceId: 'mpc:mpc-frame',
+      resourceName: 'mpc-frame',
+      tool: 'mpc-frame',
+      phase: 'extracting',
+      progress: 0.75,
+      message: 'Extracting MPC Frame...',
+    })
+  })
 })

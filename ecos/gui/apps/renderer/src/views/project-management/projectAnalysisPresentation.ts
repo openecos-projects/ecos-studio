@@ -4,7 +4,6 @@ import type {
   ProjectMetricPoint,
   ProjectMetricRow,
   ProjectRunStateSlice,
-  ProjectWorkspace,
 } from '@/utils/projectManagement'
 
 export const DASHBOARD_METRIC_ORDER = [
@@ -32,11 +31,6 @@ export const BEST_WORKSPACE_PPA_METRIC_ORDER = [
 export interface ProjectDashboardMetricCell {
   metric: ProjectMetricRow
   point: ProjectMetricPoint
-}
-
-export interface ProjectDashboardWorkspaceMetricRow {
-  workspaceId: string
-  cells: ProjectDashboardMetricCell[]
 }
 
 export interface BestWorkspacePpaMetric {
@@ -72,32 +66,6 @@ export function buildDashboardMetricRows(
       points: [...flowMetricSummary.memoryPoints],
     },
   ]
-}
-
-export function buildDashboardWorkspaceMetricRows(
-  workspaces: readonly Pick<ProjectWorkspace, 'id'>[],
-  metrics: readonly ProjectMetricRow[],
-): ProjectDashboardWorkspaceMetricRow[] {
-  return workspaces.map((workspace) => ({
-    workspaceId: workspace.id,
-    cells: metrics.map((metric) => ({
-      metric,
-      point: metricPointForWorkspace(metric, workspace.id),
-    })),
-  }))
-}
-
-export function findBestFrequencyWorkspace(
-  metrics: readonly ProjectMetricRow[],
-): ProjectMetricPoint | null {
-  const frequency = metrics.find((metric) => metric.id === 'frequency')
-  return (
-    frequency?.points
-      .filter(
-        (point): point is ProjectMetricPoint & { value: number } => point.value !== null,
-      )
-      .sort((left, right) => right.value - left.value)[0] ?? null
-  )
 }
 
 export function buildBestWorkspacePpaMetrics(
@@ -152,50 +120,56 @@ export function metricValueClass(state: ProjectMetricPoint['state']): string {
   return classes[state]
 }
 
-export function metricInlineWidth(
-  point: ProjectMetricPoint,
-  points: readonly ProjectMetricPoint[] = [],
-): number {
-  if (point.value === null) return 28
+export type MetricTableSortDirection = 'asc' | 'desc'
+/** Dashboard metric ids, workspace column, or step-compare metric ids. */
+export type MetricTableSortKey = 'workspace' | ProjectMetricId | (string & {})
 
-  const values = points
-    .map((item) => Math.abs(item.value ?? 0))
-    .filter((value) => value > 0)
-  const maxValue = Math.max(...values, 0)
-  if (maxValue === 0) return 8
+const ASCENDING_FIRST_SORT_KEYS = new Set<string>([
+  'workspace',
+  'drc',
+  'runtime',
+  'memory',
+])
 
-  return Math.max(8, Math.min(100, (Math.abs(point.value) / maxValue) * 100))
+export interface MetricTableSortState {
+  key: MetricTableSortKey
+  direction: MetricTableSortDirection
+}
+
+/** First-click direction: lower-is-better metrics ascend, others descend. */
+export function initialMetricSortDirection(
+  key: MetricTableSortKey,
+): MetricTableSortDirection {
+  return ASCENDING_FIRST_SORT_KEYS.has(key) ? 'asc' : 'desc'
+}
+
+export function nextMetricSortState(
+  current: MetricTableSortState | null,
+  key: MetricTableSortKey,
+): MetricTableSortState {
+  if (!current || current.key !== key) {
+    return { key, direction: initialMetricSortDirection(key) }
+  }
+  return {
+    key,
+    direction: current.direction === 'asc' ? 'desc' : 'asc',
+  }
+}
+
+export function metricSortAriaValue(
+  sort: MetricTableSortState | null,
+  key: MetricTableSortKey,
+): 'ascending' | 'descending' | 'none' {
+  if (!sort || sort.key !== key) return 'none'
+  return sort.direction === 'asc' ? 'ascending' : 'descending'
+}
+
+export function metricHasComparableData(
+  metric: Pick<ProjectMetricRow, 'points'>,
+): boolean {
+  return metric.points.some((point) => point.value !== null)
 }
 
 export function runStateSliceClass(state: ProjectRunStateSlice['state']): string {
   return `run-state-${state}`
-}
-
-export function buildRunStatePieBackground(
-  slices: readonly ProjectRunStateSlice[],
-): string {
-  if (slices.length === 0) {
-    return 'conic-gradient(color-mix(in srgb, var(--text-secondary) 14%, transparent) 0deg 360deg)'
-  }
-
-  let cursor = 0
-  const segments = slices.map((slice) => {
-    const end = cursor + (slice.percent / 100) * 360
-    const segment = `${runStateSliceColor(slice.state)} ${cursor}deg ${end}deg`
-    cursor = end
-    return segment
-  })
-
-  return `conic-gradient(${segments.join(', ')})`
-}
-
-function runStateSliceColor(state: ProjectRunStateSlice['state']): string {
-  const colors: Record<ProjectRunStateSlice['state'], string> = {
-    success: 'var(--success-color)',
-    failed: 'var(--danger-color)',
-    running: 'var(--warn-color)',
-    unstart: 'color-mix(in srgb, var(--text-secondary) 62%, transparent)',
-    skipped: 'color-mix(in srgb, var(--text-secondary) 36%, transparent)',
-  }
-  return colors[state]
 }

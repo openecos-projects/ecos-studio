@@ -1,4 +1,4 @@
-export type ResourceType = 'tool' | 'pdk'
+export type ResourceType = 'tool' | 'pdk' | 'mpc'
 
 export type ResourceStatus =
   | 'available'
@@ -82,6 +82,13 @@ export interface ResourceOperationResult {
   status: string
   resource_id: string
   version?: string
+}
+
+export interface MpcSpecReadResult {
+  resource_id: string
+  installed_version: string
+  spec_path: string
+  spec: unknown
 }
 
 export interface ResourceImportPdkRequest {

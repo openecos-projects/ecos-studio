@@ -3,6 +3,7 @@ import type {
   ResourceInfo as DesktopResourceInfo,
   ResourceJob as DesktopResourceJob,
   ResourceList as DesktopResourceList,
+  MpcSpecReadResult as DesktopMpcSpecReadResult,
   ResourceStatus as DesktopResourceStatus,
   ResourceType as DesktopResourceType,
 } from '@ecos-studio/shared'
@@ -13,6 +14,7 @@ export type ResourceStatus = DesktopResourceStatus
 export type ResourceInfo = DesktopResourceInfo
 export type ResourceList = DesktopResourceList
 export type ResourceJob = DesktopResourceJob
+export type MpcSpecReadResult = DesktopMpcSpecReadResult
 
 export type ToolStatus =
   | 'available'
@@ -65,7 +67,7 @@ function resourceIdForTool(name: string): string {
 }
 
 function resourceNameFromId(resourceId: string): string {
-  return resourceId.replace(/^(tool|pdk):/, '')
+  return resourceId.replace(/^(tool|pdk|mpc):/, '')
 }
 
 export function resourceToToolInfo(resource: ResourceInfo): ToolInfo {
@@ -120,6 +122,10 @@ export async function listResourcesApi(): Promise<ResourceItem[]> {
 export async function getToolStatusApi(name: string): Promise<ToolInfo> {
   const resource = await getDesktopApi().resources.get(resourceIdForTool(name))
   return resourceToToolInfo(resource)
+}
+
+export function readMpcSpecApi(resourceId: string): Promise<MpcSpecReadResult> {
+  return getDesktopApi().resources.readMpcSpec(resourceId)
 }
 
 export function activatePdkApi(resourceId: string) {

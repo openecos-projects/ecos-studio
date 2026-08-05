@@ -1,3 +1,5 @@
+import type { ProjectManifestMpc } from '../utils/projectManifest'
+
 export type WorkspaceStatus =
   | 'success'
   | 'failed'
@@ -69,6 +71,7 @@ export interface WorkspaceConfig {
     liberty: string[]
   }
   pdk_json?: string
+  mpc?: ProjectManifestMpc | null
   replaceExistingWorkspace?: boolean
   keepReplacementBackup?: boolean
   project_context?: {
