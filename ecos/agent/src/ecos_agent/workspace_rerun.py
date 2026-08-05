@@ -19,6 +19,8 @@ from ecos_agent.parameter_authorization import assert_authorized_parameter_patch
 _STEP_NAMES = {step.value: step for step in ECCStepName}
 _STEP_INDEX = {step: index for index, step in enumerate(_STEP_NAMES)}
 _RERUN_SCOPES = ("single_step", "full_flow")
+# Last entry of ECCStepName is the catalog terminus (today Harden; grows with the enum).
+_CATALOG_END_STEP = list(ECCStepName)[-1]
 _STAGE_OUTPUT_SUFFIXES = (".def.gz", ".v.gz", ".gds")
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_-]+$")
 _INTEGER_KNOBS = frozenset(
@@ -221,7 +223,7 @@ class GuiWorkspaceRerunResolver:
             end_step=(
                 _STEP_NAMES[target_step]
                 if execution_scope == "single_step"
-                else source.end_step
+                else _CATALOG_END_STEP
             ),
             execution_scope=execution_scope,
             source_flow_json_sha256=source.flow_json_sha256,
@@ -290,6 +292,7 @@ class GuiWorkspaceRerunResolver:
 
     @staticmethod
     def _flow_end_step(flow: dict[str, object]) -> ECCStepName:
+        """Source workspace's configured last step (may be short of the catalog end)."""
         for record in reversed(flow["steps"]):
             if not isinstance(record, dict):
                 continue
@@ -323,6 +326,11 @@ class GuiWorkspaceRerunResolver:
         for item in patch.items:
             _validate_value(item)
         return patch
+
+
+def catalog_end_step() -> ECCStepName:
+    """Standard ECC flow terminus used by full_flow reruns."""
+    return _CATALOG_END_STEP
 
 
 _MISSING = object()

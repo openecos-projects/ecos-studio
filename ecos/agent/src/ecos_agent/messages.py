@@ -87,46 +87,83 @@ def project_root_prompt(language: str, *, creating: bool = False) -> str:
 
 
 def workspace_name_prompt(language: str, recommendation: str = "") -> str:
-    suffix = f" 推荐：{recommendation}" if recommendation else ""
-    english_suffix = f" Suggested: {recommendation}" if recommendation else ""
+    if recommendation:
+        return _prompt(
+            language,
+            "Workspace 名称是什么？这将是 Project 下的子目录名，例如 ws_0001。可点击使用下方推荐，或输入其他名称。",
+            "What is the Workspace Name? This becomes the subdirectory under the Project, for example ws_0001. Use the suggestion below, or enter another name.",
+        )
     return _prompt(
         language,
-        f"Workspace 名称是什么？这将是 Project 下的子目录名，例如 ws_0001。{suffix}",
-        f"What is the Workspace Name? This becomes the subdirectory under the Project, for example ws_0001.{english_suffix}",
+        "Workspace 名称是什么？这将是 Project 下的子目录名，例如 ws_0001。",
+        "What is the Workspace Name? This becomes the subdirectory under the Project, for example ws_0001.",
     )
 
 
 def design_name_prompt(language: str, recommendation: str = "") -> str:
-    suffix = f" 推荐：{recommendation}" if recommendation else ""
-    english_suffix = f" Suggested: {recommendation}" if recommendation else ""
+    if recommendation:
+        return _prompt(
+            language,
+            "设计名（Design Name）是什么？例如：gcd。这是设计标识，不必等于 Workspace 目录名。可点击使用下方推荐，或输入其他名称。",
+            "What is the Design Name? For example: gcd. This is the design id, not necessarily the Workspace directory name. Use the suggestion below, or enter another name.",
+        )
     return _prompt(
         language,
-        f"设计名（Design Name）是什么？例如：gcd。这是设计标识，不必等于 Workspace 目录名。{suffix}",
-        f"What is the Design Name? For example: gcd. This is the design id, not necessarily the Workspace directory name.{english_suffix}",
+        "设计名（Design Name）是什么？例如：gcd。这是设计标识，不必等于 Workspace 目录名。",
+        "What is the Design Name? For example: gcd. This is the design id, not necessarily the Workspace directory name.",
     )
 
 
 def flow_end_prompt(language: str) -> str:
-    lines = [
-        "选择 end step：输入 0 执行全部步骤。" if language == "zh" else "Choose the end step. Enter 0 to run all steps."
-    ]
-    lines.extend(f"{index}. {step}" for index, step in enumerate(GUI_WORKSPACE_FLOW_STEPS, 1))
-    return "\n".join(lines)
+    return _prompt(
+        language,
+        "选择 flow 的终止阶段。可执行全部步骤，或停在某一阶段。",
+        "Choose where the flow should stop. Run all steps, or end after a specific stage.",
+    )
+
+
+def flow_end_choice(language: str, prompt_id: str) -> dict[str, Any]:
+    labeled_values = (
+        (_prompt(language, "执行全部步骤", "Run all steps"), "0"),
+        *(
+            (step, str(index))
+            for index, step in enumerate(GUI_WORKSPACE_FLOW_STEPS, 1)
+        ),
+    )
+    return _choice(
+        prompt_id,
+        _prompt(language, "选择终止阶段", "Choose the end step"),
+        (),
+        variant="list",
+        labeled_values=labeled_values,
+    )
 
 
 def rtl_prompt(language: str, recommendation: str = "") -> str:
-    suffix = f" 推荐路径：{recommendation}" if recommendation else ""
-    english_suffix = f" Recommended local path: {recommendation}" if recommendation else ""
-    return _prompt(language, f"RTL 文件路径是什么？{suffix}", f"What is the RTL file path?{english_suffix}")
+    if recommendation:
+        return _prompt(
+            language,
+            "RTL 文件路径是什么？可点击使用下方推荐路径，或输入其他本地路径。",
+            "What is the RTL file path? Use the recommended path below, or enter another local path.",
+        )
+    return _prompt(
+        language,
+        "RTL 文件路径是什么？请输入本地 .v / .sv 文件路径。",
+        "What is the RTL file path? Enter a local .v / .sv file path.",
+    )
 
 
 def optional_file_prompt(language: str, label: str, extension: str, recommendation: str = "") -> str:
-    suffix = f" 推荐路径：{recommendation}" if recommendation else ""
-    english_suffix = f" Recommended local path: {recommendation}" if recommendation else ""
+    if recommendation:
+        return _prompt(
+            language,
+            f"可选 {label} 路径：点击下方使用推荐或跳过，也可输入后缀为 {extension} 的路径。",
+            f"Optional {label} path: use the recommendation below, skip, or enter a path with suffix {extension}.",
+        )
     return _prompt(
         language,
-        f"可选 {label} 路径：点击下方跳过或使用推荐，也可输入后缀为 {extension} 的路径。{suffix}",
-        f"Optional {label} path: skip or use the recommendation below, or enter a path with suffix {extension}.{english_suffix}",
+        f"可选 {label} 路径：点击下方跳过，也可输入后缀为 {extension} 的路径。",
+        f"Optional {label} path: skip below, or enter a path with suffix {extension}.",
     )
 
 
@@ -139,29 +176,33 @@ def pdk_prompt(language: str, recommendation: str = "") -> str:
         )
     return _prompt(
         language,
-        f"PDK 路径是什么？可点击使用推荐路径，或输入其他已存在的 PDK 目录：{recommendation}",
-        f"What is the PDK path? Use the recommended path below, or enter another existing PDK directory: {recommendation}",
+        "PDK 路径是什么？可点击使用下方推荐路径，或输入其他已存在的 PDK 目录。",
+        "What is the PDK path? Use the recommended path below, or enter another existing PDK directory.",
     )
 
 
 def default_value_prompt(language: str, label: str, value: object) -> str:
     return _prompt(
         language,
-        f"{label} 是什么？可点击使用默认值，或输入其他值。默认值：{value}",
-        f"What is {label}? Use the default below, or enter another value. Default: {value}",
+        f"{label} 是什么？可点击使用下方默认值，或输入其他值。",
+        f"What is {label}? Use the default below, or enter another value.",
     )
 
 
 def number_prompt(language: str, label: str, value: object, lower: float, upper: float) -> str:
     return _prompt(
         language,
-        f"{label} 是什么？范围 {lower:g}-{upper:g}；可点击使用默认值，或输入其他数值。默认值：{value}",
-        f"What is {label}? Range {lower:g}-{upper:g}; use the default below, or enter another value. Default: {value}",
+        f"{label} 是什么？范围 {lower:g}-{upper:g}；可点击使用下方默认值，或输入其他数值。",
+        f"What is {label}? Range {lower:g}-{upper:g}; use the default below, or enter another value.",
     )
 
 
 def invalid_choice(language: str) -> str:
-    return _prompt(language, "请输入列出的数字。", "Enter one of the listed numbers.")
+    return _prompt(
+        language,
+        "请从下方选项中选择，或按提示输入有效内容。",
+        "Choose one of the options below, or enter a valid value as prompted.",
+    )
 
 
 def invalid_value(language: str, label: str, rule: str) -> str:
@@ -191,8 +232,8 @@ def workspace_execution_started(language: str) -> str:
 def workspace_creation_failed(language: str, error: str) -> str:
     return _prompt(
         language,
-        f"Workspace 创建失败：{error}。请修正相关 Spec 后再次输入 1 确认。",
-        f"Workspace creation failed: {error}. Correct the affected specification, then enter 1 to try again.",
+        f"Workspace 创建失败：{error}。请修正相关 Spec 后，再次点击确认。",
+        f"Workspace creation failed: {error}. Correct the affected specification, then confirm again.",
     )
 
 
@@ -216,8 +257,8 @@ def rerun_workspace_prompt(language: str, default_path: str | None) -> str:
     if default_path:
         return _prompt(
             language,
-            f"重跑源 workspace 路径是什么？留空使用当前 GUI workspace：{default_path}；也可输入其他已有路径。",
-            f"What is the source workspace path? Submit an empty input to use the current GUI workspace: {default_path}; or enter another existing path.",
+            "重跑源 workspace 路径是什么？可点击使用下方当前 GUI workspace，或输入其他已有路径。",
+            "What is the source workspace path? Use the current GUI workspace below, or enter another existing path.",
         )
     return _prompt(
         language,
@@ -226,13 +267,38 @@ def rerun_workspace_prompt(language: str, default_path: str | None) -> str:
     )
 
 
+def workspace_parameter_request_prompt(language: str) -> str:
+    return _prompt(
+        language,
+        "请描述要保存到当前 workspace 的参数修改，例如降低 density 或关闭 routability optimization。",
+        "Describe the parameter change to save in the current workspace, for example lower density or disable routability optimization.",
+    )
+
+
 def rerun_stage_prompt(language: str, stages: tuple[str, ...]) -> str:
-    return _prompt(language, "请选择重跑起始阶段。", "Choose the rerun start stage.")
+    return _prompt(
+        language,
+        (
+            "请选择重跑的起始阶段：这一阶及之后会在隔离 workspace 中重算；"
+            "之前的阶段会沿用源 workspace 的结果，不会从 Synthesis 重新跑起。"
+        ),
+        (
+            "Choose the start stage for rerun: that stage and later ones will be "
+            "recomputed in an isolated workspace. Earlier stages keep the source "
+            "workspace results — this does not restart from Synthesis."
+        ),
+    )
 
 
 def rerun_parameter_prompt(
     language: str, parameter_values: tuple[tuple[str, object], ...]
 ) -> str:
+    if not parameter_values:
+        return _prompt(
+            language,
+            "该阶段当前没有可配置的重跑参数；将保持现有配置继续。",
+            "This stage has no tunable rerun parameters; the current configuration will be kept.",
+        )
     title = "该阶段可修改的参数：" if language == "zh" else "Parameters available for this stage:"
     prompt = (
         "请输入要修改的参数和数值。"
@@ -250,15 +316,47 @@ def rerun_parameter_prompt(
     return "\n".join([title, *rows, prompt])
 
 
-def rerun_scope_prompt(language: str) -> str:
-    return _prompt(language, "请选择执行范围。", "Choose the execution scope.")
+def rerun_no_parameters_prompt(language: str, flow_end: str) -> str:
+    return _prompt(
+        language,
+        (
+            "该阶段当前没有可配置的重跑参数，将保持现有配置。"
+            f"请选择：只重跑该阶段后停止，或从该阶段继续跑到标准流程终点（{flow_end}）。"
+        ),
+        (
+            "This stage has no tunable rerun parameters; the current configuration will be kept. "
+            f"Choose: stop after this stage, or continue from it through the standard flow end ({flow_end})."
+        ),
+    )
+
+
+def rerun_scope_prompt(language: str, flow_end: str) -> str:
+    return _prompt(
+        language,
+        (
+            "请选择执行范围：只重跑所选阶段后停止，"
+            f"或从所选阶段继续跑到标准流程终点（{flow_end}），而不是源 workspace 原先规划的终点。"
+        ),
+        (
+            "Choose the execution scope: stop after the selected stage, "
+            f"or continue from it through the standard flow end ({flow_end}) — "
+            "not the source workspace's original planned end."
+        ),
+    )
 
 
 def source_run_prompt(language: str, run_ids: tuple[str, ...]) -> str:
     return _prompt(
         language,
-        "请选择当前冻结源 run，或输入其他已有 workspace 路径。",
-        "Choose the current frozen source run, or enter another existing workspace path.",
+        (
+            "请确认重跑的源 workspace（将复制到隔离目录，不会覆盖源目录）。"
+            "可使用当前路径，或输入其他已有 workspace。"
+        ),
+        (
+            "Confirm the source workspace for rerun (it will be copied into an "
+            "isolated directory; the source is not overwritten). Use the current "
+            "path, or enter another existing workspace."
+        ),
     )
 
 
@@ -345,19 +443,27 @@ def known_project_choice(
 def rerun_stage_choice(language: str, prompt_id: str, stages: tuple[str, ...]) -> dict[str, Any]:
     return _choice(
         prompt_id,
-        _prompt(language, "选择重跑起始阶段", "Choose the rerun start stage"),
+        _prompt(language, "起始阶段", "Start stage"),
         stages,
         variant="list",
     )
 
 
-def rerun_scope_choice(language: str, prompt_id: str) -> dict[str, Any]:
+def rerun_scope_choice(language: str, prompt_id: str, flow_end: str) -> dict[str, Any]:
     return _choice(
         prompt_id,
         _prompt(language, "选择执行范围", "Choose the execution scope"),
         (
-            _prompt(language, "重跑该阶段后停止", "Rerun this stage, then stop"),
-            _prompt(language, "继续执行至流程结束", "Continue to the end of the flow"),
+            _prompt(
+                language,
+                "只重跑所选阶段，然后停止",
+                "Rerun only the selected stage, then stop",
+            ),
+            _prompt(
+                language,
+                f"从所选阶段重跑，并继续到标准流程终点（{flow_end}）",
+                f"Rerun from the selected stage through the standard flow end ({flow_end})",
+            ),
         ),
         variant="list",
     )
@@ -366,10 +472,28 @@ def rerun_scope_choice(language: str, prompt_id: str) -> dict[str, Any]:
 def source_run_choice(language: str, prompt_id: str, run_ids: tuple[str, ...]) -> dict[str, Any]:
     return _choice(
         prompt_id,
-        _prompt(language, "选择冻结源 run", "Choose the frozen source run"),
+        _prompt(language, "源 workspace", "Source workspace"),
         run_ids,
         variant="list",
         allow_free_text=True,
+    )
+
+
+def rerun_workspace_choice(
+    language: str, prompt_id: str, default_path: str
+) -> dict[str, Any]:
+    return _choice(
+        prompt_id,
+        _prompt(language, "选择源 workspace", "Choose the source workspace"),
+        (),
+        variant="buttons",
+        allow_free_text=True,
+        labeled_values=(
+            (
+                _prompt(language, "使用当前 GUI workspace", "Use current GUI workspace"),
+                default_path,
+            ),
+        ),
     )
 
 
@@ -414,11 +538,15 @@ def optional_file_choice(
 
 
 def recommended_path_choice(
-    language: str, prompt_id: str, recommendation: str
+    language: str,
+    prompt_id: str,
+    recommendation: str,
+    *,
+    field: str = "PDK",
 ) -> dict[str, Any]:
     return _choice(
         prompt_id,
-        _prompt(language, "PDK 路径", "PDK path"),
+        _prompt(language, f"{field} 路径", f"{field} path"),
         (),
         variant="buttons",
         allow_free_text=True,
@@ -470,13 +598,18 @@ def number_default_choice(
     )
 
 
-def keep_parameters_choice(language: str, prompt_id: str) -> dict[str, Any]:
+def keep_parameters_choice(
+    language: str,
+    prompt_id: str,
+    *,
+    allow_free_text: bool = True,
+) -> dict[str, Any]:
     return _choice(
         prompt_id,
         _prompt(language, "参数调整", "Parameter changes"),
         (),
         variant="buttons",
-        allow_free_text=True,
+        allow_free_text=allow_free_text,
         labeled_values=(
             (
                 _prompt(language, "保持当前参数", "Keep current parameters"),

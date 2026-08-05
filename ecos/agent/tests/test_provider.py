@@ -8,7 +8,11 @@ from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.messages import EMPTY_CHOICE_VALUE
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
-from ecos_agent.workspace_setup import display_path, workspace_search_roots
+from ecos_agent.workspace_setup import (
+    display_path,
+    recommended_workspace_name,
+    workspace_search_roots,
+)
 
 
 def _proposal(**overrides: object) -> GuiWorkspaceSetupProposal:
@@ -241,23 +245,63 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
     assert provider.sessions[session_id].phase == "rerun_source_run"
     assert provider.sessions[session_id].design_id == "gcd"
     source_choice = _last_event(events, "choice")["choice"]
-    assert source_choice["title"] == "Choose the frozen source run"
+    assert source_choice["title"] == "Source workspace"
     assert source_choice["variant"] == "list"
     assert source_choice["allowFreeText"] is True
     assert [
         (option["label"], option["value"]) for option in source_choice["options"]
     ] == [(str(workspace), "1")]
-    assert not any(event["type"] == "tool" for event in events)
+    assert any(
+        event["type"] == "tool" and "Preparing stage rerun" in str(event.get("text", ""))
+        for event in events
+    )
 
     _send(provider, session_id, "1")
 
     assert provider.sessions[session_id].phase == "rerun_stage"
     stage_choice = _last_event(events, "choice")["choice"]
-    assert stage_choice["title"] == "Choose the rerun start stage"
+    assert stage_choice["title"] == "Start stage"
     assert [
         (option["label"], option["value"]) for option in stage_choice["options"]
     ] == [("place", "1")]
-    assert not any(event["type"] == "tool" for event in events)
+
+
+def test_rerun_skips_empty_parameter_table_for_fixfanout(tmp_path: Path) -> None:
+    workspace = tmp_path / "source-workspace"
+    flow = workspace / "home" / "flow.json"
+    flow.parent.mkdir(parents=True)
+    flow.write_text(
+        '{"steps": [{"name": "fixFanout", "tool": "ecc", "state": "Success"}]}',
+        encoding="utf-8",
+    )
+    output = workspace / "fixFanout_ecc" / "output"
+    output.mkdir(parents=True)
+    (output / "gcd_fixFanout.def.gz").write_bytes(b"def")
+    (workspace / "home" / "parameters.json").write_text(
+        '{"Design": "gcd"}', encoding="utf-8"
+    )
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    for message in ("2", "1", "1"):
+        _send(provider, session_id, message)
+
+    session = provider.sessions[session_id]
+    assert session.phase == "rerun_scope"
+    assert session.rerun_stage == "fixFanout"
+    assert session.rerun_parameter_patch == []
+    assert any(
+        event["type"] == "message"
+        and "no tunable rerun parameters" in str(event["text"]).lower()
+        for event in events
+    )
+    assert not any(
+        event["type"] == "message" and "| Parameter | Current value |" in str(event["text"])
+        for event in events
+    )
 
 
 def test_home_mode_hides_rerun_and_only_offers_workspace_create() -> None:
@@ -373,7 +417,7 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     rerun = _last_event(events, "workspace_rerun")["workspaceRerun"]
     assert rerun["schema_version"] == "flow-agent.workspace_rerun_contract.v1"
     assert rerun["execution_scope"] == "full_flow"
-    assert rerun["end_step"] == "place"
+    assert rerun["end_step"] == "Harden"
     assert parser_contexts[0]["natural_language_request"] == (
         "set place.routability_opt to 0,set target_overflow to 0.1"
     )
@@ -390,6 +434,204 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     )
 
     assert provider.sessions[session_id].phase == "operation"
+    operation_choice = _last_event(events, "choice")["choice"]
+    assert operation_choice["title"] == "Choose an operation"
+    assert _last_event(events, "status")["status"] == "awaiting_choice"
+
+
+def test_rerun_workspace_invalid_path_reemits_current_workspace_choice(tmp_path: Path) -> None:
+    workspace = tmp_path / "source-workspace"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    session = provider.sessions[session_id]
+    session.phase = "rerun_workspace"
+    session.design_id = "gcd"
+
+    _send(provider, session_id, str(tmp_path / "missing-workspace"))
+
+    assert session.phase == "rerun_workspace"
+    choice = _last_event(events, "choice")["choice"]
+    assert choice["title"] == "Choose the source workspace"
+    assert choice["variant"] == "buttons"
+    assert choice["allowFreeText"] is True
+    assert [(option["label"], option["value"]) for option in choice["options"]] == [
+        ("Use current GUI workspace", str(workspace))
+    ]
+    assert _last_event(events, "status")["status"] == "awaiting_choice"
+    assert any(
+        event["type"] == "message"
+        and "Use the current GUI workspace below" in str(event["text"])
+        for event in events
+    )
+
+
+def test_workspace_contract_validation_failure_reemits_top_choice(tmp_path: Path) -> None:
+    rtl, _filelist, _sdc, pdk = _write_workspace_inputs(tmp_path)
+    rtl.write_text("module other(input clk); endmodule\n", encoding="utf-8")
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({})["sessionId"]
+    session = provider.sessions[session_id]
+    session.workspace_inputs.project_root = str(tmp_path)
+    session.workspace_inputs.project_name = tmp_path.name
+    session.workspace_inputs.rtl_path = str(rtl)
+    session.workspace_inputs.pdk_root = str(pdk)
+    session.workspace_setup = _proposal(
+        workspace_name="ws_0001",
+        design_name="gcd",
+        top_module="gcd",
+        clock_name="clk",
+        frequency_mhz=100,
+        max_fanout=32,
+        utilitization=0.7,
+        target_density=0.5,
+        target_overflow=0.1,
+        rtl_path=str(rtl),
+        pdk_root=str(pdk),
+        project_root=str(tmp_path),
+    )
+    session.phase = "workspace_overflow"
+
+    _send(provider, session_id, "0.1")
+
+    assert session.phase == "workspace_top"
+    choice = _last_event(events, "choice")["choice"]
+    assert choice["title"] == "Top Module Name"
+    assert [option["value"] for option in choice["options"]] == ["gcd"]
+    assert _last_event(events, "status")["status"] == "awaiting_choice"
+
+
+def test_workspace_parameter_request_uses_describe_change_prompt(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "1")
+
+    assert provider.sessions[session_id].phase == "workspace_parameter_request"
+    assert any(
+        event["type"] == "message"
+        and "Describe the parameter change to save in the current workspace" in str(event["text"])
+        for event in events
+    )
+    assert not any(
+        event["type"] == "message"
+        and "no tunable rerun parameters" in str(event["text"]).lower()
+        for event in events
+    )
+
+
+def _workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
+    workspace = tmp_path / "gcd"
+    flow = workspace / "home" / "flow.json"
+    flow.parent.mkdir(parents=True)
+    flow.write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {"name": "fixFanout", "tool": "ecc", "state": "Success"},
+                    {"name": "place", "tool": "dreamplace", "state": "Success"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    for step, tool, suffix in (
+        ("fixFanout", "ecc", ".def.gz"),
+        ("place", "dreamplace", ".def.gz"),
+    ):
+        output = workspace / f"{step}_{tool}" / "output"
+        output.mkdir(parents=True)
+        (output / f"gcd_{step}{suffix}").write_bytes(b"def")
+    config = workspace / "config"
+    config.mkdir()
+    (config / "dreamplace.json").write_text(
+        '{"target_density": 0.55, "routability_opt_flag": true, "stop_overflow": 0.1}',
+        encoding="utf-8",
+    )
+    (workspace / "home" / "parameters.json").write_text(
+        '{"Design": "gcd", "Target density": 0.55}',
+        encoding="utf-8",
+    )
+    return workspace
+
+
+def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -> None:
+    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    events: list[dict[str, object]] = []
+    parser_contexts: list[dict[str, object]] = []
+
+    def parse_parameter(context: dict[str, object]) -> dict[str, object]:
+        parser_contexts.append(context)
+        return {
+            "schema_version": "flow-agent.gui_workspace_rerun_parameter_proposal.v1",
+            "parameter_patch": [{"knob_id": "place.target_density", "value": 0.4}],
+            "summary": "Lower target density.",
+        }
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        rerun_parameter_parser=parse_parameter,
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    _send(provider, session_id, "1")
+    _send(provider, session_id, "lower target density")
+
+    assert provider.sessions[session_id].phase == "workspace_parameter_confirmation"
+    assert "place.target_density" in parser_contexts[0]["allowed_knobs"]
+    contract = _last_event(events, "contract")["contract"]
+    assert contract["presentation"] == "workspace_parameter_update"
+    assert contract["fields"] == [
+        {"label": "Workspace", "value": str(workspace)},
+        {"label": "place.target_density", "value": "0.55 → 0.4"},
+    ]
+
+
+def test_workspace_parameter_update_rejects_empty_patch(tmp_path: Path) -> None:
+    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    events: list[dict[str, object]] = []
+
+    def empty_patch(_context: dict[str, object]) -> dict[str, object]:
+        return {
+            "schema_version": "flow-agent.gui_workspace_rerun_parameter_proposal.v1",
+            "parameter_patch": [],
+            "summary": "No changes.",
+        }
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        rerun_parameter_parser=empty_patch,
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    _send(provider, session_id, "1")
+    _send(provider, session_id, "lower target density")
+
+    assert provider.sessions[session_id].phase == "workspace_parameter_request"
+    assert any(
+        event["type"] == "error" and "no parameter changes were proposed" in str(event["text"])
+        for event in events
+    )
+    assert not any(event["type"] == "contract" for event in events)
+
+
+def test_invalid_choice_and_creation_failed_copy_point_to_cards() -> None:
+    from ecos_agent.messages import invalid_choice, workspace_creation_failed
+
+    assert "listed numbers" not in invalid_choice("en").lower()
+    assert "enter 1" not in workspace_creation_failed("en", "disk full").lower()
+    assert "confirm again" in workspace_creation_failed("en", "disk full").lower()
 
 
 def test_rerun_allocates_a_numbered_target_when_the_default_exists(tmp_path: Path) -> None:
@@ -641,6 +883,118 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     assert provider.sessions[session_id].phase == "workspace_flow_end"
     assert provider.sessions[session_id].workspace_setup.workspace_name == "ws_0003"
     assert provider.sessions[session_id].workspace_setup.design_name == "gcd"
+    flow_end_choice = _last_event(events, "choice")["choice"]
+    assert flow_end_choice["title"] == "Choose the end step"
+    assert flow_end_choice["variant"] == "list"
+    assert flow_end_choice["options"][0] == {
+        "id": flow_end_choice["options"][0]["id"],
+        "label": "Run all steps",
+        "value": "0",
+    }
+    assert [option["label"] for option in flow_end_choice["options"][1:4]] == [
+        "Synthesis",
+        "Floorplan",
+        "fixFanout",
+    ]
+    assert flow_end_choice["options"][-1]["label"] == "Harden"
+
+    _send(provider, session_id, "4")
+    assert provider.sessions[session_id].phase == "workspace_rtl"
+    assert provider.sessions[session_id].workspace_setup.flow_end == "place"
+
+
+def test_rtl_recommendation_emits_a_path_choice_without_embedding_the_path(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "projects"
+    project_root.mkdir()
+    rtl, filelist, sdc, _pdk = _write_workspace_inputs(project_root)
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        workspace_path_recommender=lambda _context: _proposal(
+            rtl_path=str(rtl),
+            filelist_path=str(filelist),
+            sdc_path=str(sdc),
+        ),
+    )
+    session_id = provider.start_session({})["sessionId"]
+    for message in ("1", "2", str(project_root), "ws_0001", "gcd", "0"):
+        _send(provider, session_id, message)
+
+    assert provider.sessions[session_id].phase == "workspace_rtl"
+    rtl_choice = _last_event(events, "choice")["choice"]
+    assert rtl_choice["title"] == "RTL path"
+    assert rtl_choice["allowFreeText"] is True
+    assert [option["label"] for option in rtl_choice["options"]] == ["Use recommended path"]
+    assert rtl_choice["options"][0]["value"] == display_path(str(rtl))
+    rtl_prompt_text = next(
+        event["text"]
+        for event in reversed(events)
+        if event["type"] == "message" and "RTL file path" in str(event.get("text", ""))
+    )
+    assert "Recommended local path:" not in str(rtl_prompt_text)
+    assert str(rtl) not in str(rtl_prompt_text)
+
+
+def test_workspace_name_offers_auto_suggestion_and_accepts_custom_input(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "gcd"
+    project_root.mkdir()
+    (project_root / "ws_0001").mkdir()
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "workspaces": [
+                    {
+                        "workspace_id": "ws_0002",
+                        "workspace_path": str(project_root / "ws_0002"),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert recommended_workspace_name(str(project_root)) == "ws_0003"
+
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    for message in ("1", "2", str(project_root)):
+        _send(provider, session_id, message)
+
+    session = provider.sessions[session_id]
+    assert session.phase == "workspace_name"
+    prompt = str(_last_event(events, "message")["text"])
+    assert "Suggested:" not in prompt
+    assert "ws_0003" not in prompt
+    assert "Use the suggestion below" in prompt
+    choice = _last_event(events, "choice")["choice"]
+    assert choice["options"][0]["value"] == "ws_0003"
+    assert choice["options"][0]["label"] == "Use default: ws_0003"
+    assert choice["allowFreeText"] is True
+    assert _last_event(events, "status")["status"] == "awaiting_choice"
+
+    _send(provider, session_id, "my_custom_ws")
+    assert session.phase == "workspace_design"
+    assert session.workspace_setup.workspace_name == "my_custom_ws"
+
+
+def test_workspace_name_default_choice_accepts_auto_suggestion(tmp_path: Path) -> None:
+    project_root = tmp_path / "gcd"
+    project_root.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    for message in ("1", "2", str(project_root)):
+        _send(provider, session_id, message)
+
+    choice = _last_event(events, "choice")["choice"]
+    _send(provider, session_id, choice["options"][0]["value"])
+    session = provider.sessions[session_id]
+    assert session.workspace_setup.workspace_name == "ws_0001"
+    assert session.phase == "workspace_design"
 
 
 def test_workspace_mode_option_four_prefills_project_root(tmp_path: Path) -> None:

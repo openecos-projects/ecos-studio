@@ -1,5 +1,6 @@
 """Typed values and deterministic helpers for the GUI workspace wizard."""
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from ecos_agent.contracts import (
     resolve_gui_workspace_setup,
 )
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_WORKSPACE_ID = re.compile(r"^ws_(\d+)$")
 _MODULE = re.compile(r"^\s*module\s+([A-Za-z_][A-Za-z0-9_$]*)\b", re.MULTILINE)
 _CLOCK = re.compile(r"\b(?:input|inout)\b[^;]*?\b([A-Za-z_][A-Za-z0-9_$]*(?:clk|clock)[A-Za-z0-9_$]*)\b", re.IGNORECASE)
 _SDC_PERIOD = re.compile(r"\bcreate_clock\b[^\n]*?\s-period\s+([0-9]+(?:\.[0-9]+)?)")
@@ -141,6 +143,47 @@ def derive_project_name(project_root: str) -> str:
     if not _IDENTIFIER.fullmatch(name):
         raise ValueError("Project Root must end with a valid project name")
     return name
+
+
+def recommended_workspace_name(project_root: str) -> str:
+    """Next unused ws_NNNN under the Project Root (matches GUI New Project Wizard)."""
+    root = Path(project_root).expanduser()
+    occupied = _occupied_workspace_names(root)
+    numbers = [
+        int(match.group(1))
+        for name in occupied
+        if (match := _WORKSPACE_ID.fullmatch(name))
+    ]
+    next_index = max(numbers, default=0) + 1
+    return f"ws_{next_index:04d}"
+
+
+def _occupied_workspace_names(project_root: Path) -> set[str]:
+    names: set[str] = set()
+    if project_root.is_dir():
+        for entry in project_root.iterdir():
+            if entry.is_dir():
+                names.add(entry.name)
+    manifest_path = project_root / "project.json"
+    if not manifest_path.is_file():
+        return names
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return names
+    workspaces = payload.get("workspaces") if isinstance(payload, dict) else None
+    if not isinstance(workspaces, list):
+        return names
+    for item in workspaces:
+        if not isinstance(item, dict):
+            continue
+        workspace_id = item.get("workspace_id")
+        if isinstance(workspace_id, str) and workspace_id.strip():
+            names.add(workspace_id.strip())
+        workspace_path = item.get("workspace_path")
+        if isinstance(workspace_path, str) and workspace_path.strip():
+            names.add(Path(workspace_path).name)
+    return names
 
 
 def normalize_identifier(value: str, *, label: str) -> str:

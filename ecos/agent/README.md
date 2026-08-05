@@ -73,9 +73,9 @@ Agent 会将操作、重跑源、阶段、执行范围和最终确认显示为�
    GDS 流程”。
 2. 选择「使用已有 Project」或「新建 Project」；已有 Project 可从 Project
    Management 历史列表选择，或输入含 `project.json` 的根目录。
-3. 填写 Workspace Name（子目录名，如 `ws_0001`）、Design Name、流程终止阶段、
-   RTL；可选 filelist/SDC 可点“跳过”或“使用推荐路径”，PDK/默认参数可点
-   “使用推荐/默认值”，也可继续手动输入。Workspace 路径为
+3. 填写 Workspace Name（自动建议下一个 `ws_NNNN`，也可点“使用默认值”或自行输入）、
+   Design Name、流程终止阶段、RTL；可选 filelist/SDC 可点“跳过”或“使用推荐路径”，
+   PDK/默认参数可点“使用推荐/默认值”，也可继续手动输入。Workspace 路径为
    `<project_root>/<workspace_name>`。
 4. 检查 Agent 展示的设置合同（Project Root / Workspace / Design Name 分栏）。
    需要修改时，可以用自然语言说明需要调整的字段。
@@ -94,11 +94,15 @@ workspace 中重跑。原始 workspace 不会被覆盖。
 2. 确认当前 workspace 作为 source（可按需改选）；设计名由当前工程推断。
 3. Agent 从该 workspace 的流程记录和产物中发现允许重跑的阶段；只能选择有
    完成证据的阶段。
-4. 选择目标阶段，描述需要调整的参数，并选择单阶段执行或继续执行到流程终点。
-5. 检查冻结的重跑合同，包括源/目标 workspace、目标阶段、终止阶段、参数补丁和
+4. 选择起始阶段，描述需要调整的参数，并选择执行范围：
+   - 只重跑所选阶段后停止；或
+   - 从所选阶段重跑，并继续到**标准流程终点**（当前为 Harden；随 ECC
+     流程序列扩展而变化），而不是源 workspace 原先规划/跑到的终点。
+5. 检查冻结的重跑合同，包括源/目标 workspace、起始阶段、终点阶段、参数补丁和
    执行范围。
-6. 点击“确认并开始运行”。ECOS Studio 创建隔离重跑 workspace，并通过固定 ECC
-   RPC 执行合同中的重跑动作；点击“取消”会返回操作选择，不执行重跑。
+6. 点击“确认并开始运行”。ECOS Studio 创建隔离重跑 workspace，必要时把 flow
+   补齐到标准终点，并通过固定 ECC RPC 执行合同中的重跑动作；点击“取消”会返回
+   操作选择，不执行重跑。
 
 ### 3. Workspace：继续未完成 flow
 

@@ -31,16 +31,20 @@ from ecos_agent.messages import (
     workspace_confirmation_prompt,
     workspace_execution_started,
     workspace_name_prompt,
+    workspace_parameter_request_prompt,
 )
 from ecos_agent.workspace_rerun import (
     GuiWorkspaceRerunContract,
+    GuiWorkspaceRerunDiscovery,
     GuiWorkspaceRerunParameterProposal,
     GuiWorkspaceRerunResolver,
+    catalog_end_step,
 )
 from ecos_agent.workspace_setup import (
     WorkspaceInputs,
     display_path,
     normalize_path,
+    recommended_workspace_name,
     workspace_search_roots,
     workspace_setup_contract,
 )
@@ -121,6 +125,7 @@ def _handle_workspace_rerun_result(provider: Any, session: Any, message: str) ->
     if status == "succeeded":
         provider._emit(session, "message", _rerun_completion_message(session.language))
         provider._reset(session)
+        provider._emit_phase_choice(session)
         return
     provider._emit(session, "error", f"Workspace rerun failed: {error}")
     provider._emit(session, "message", confirmation_menu(session.language))
@@ -132,6 +137,48 @@ def _rerun_resolver(session: Any) -> GuiWorkspaceRerunResolver:
     if session.rerun_resolver is None:
         raise ValueError("Rerun workspace recommendation is missing")
     return session.rerun_resolver
+
+
+def _tunable_workspace_parameters(
+    resolver: GuiWorkspaceRerunResolver,
+    discovery: GuiWorkspaceRerunDiscovery,
+) -> tuple[tuple[str, object], ...]:
+    """Union of authorized knobs across completed stages (save-only parameter updates)."""
+    merged: dict[str, object] = {}
+    for stage in discovery.allowed_stages:
+        try:
+            for knob_id, value in resolver.parameter_values(discovery.source, stage):
+                merged.setdefault(knob_id, value)
+        except ValueError:
+            continue
+    return tuple(merged.items())
+
+
+def _validate_workspace_parameter_patch(
+    resolver: GuiWorkspaceRerunResolver,
+    discovery: GuiWorkspaceRerunDiscovery,
+    patch: list[dict[str, object]],
+) -> None:
+    if not patch:
+        raise ValueError(
+            "no parameter changes were proposed; describe a concrete knob change such as lower target density"
+        )
+    stage_by_knob: dict[str, str] = {}
+    for stage in discovery.allowed_stages:
+        try:
+            for knob_id, _value in resolver.parameter_values(discovery.source, stage):
+                stage_by_knob.setdefault(knob_id, stage)
+        except ValueError:
+            continue
+    by_stage: dict[str, list[dict[str, object]]] = {}
+    for item in patch:
+        knob_id = str(item.get("knob_id", ""))
+        stage = stage_by_knob.get(knob_id)
+        if stage is None:
+            raise ValueError(f"parameter {knob_id} is not available in this workspace")
+        by_stage.setdefault(stage, []).append(item)
+    for stage, items in by_stage.items():
+        resolver._validate_patch(stage, items)
 
 
 def _propose_gui_workspace_setup(context: dict[str, Any]) -> GuiWorkspaceSetupProposal:
@@ -288,16 +335,19 @@ def _workspace_rerun_execution_contract(
         ]
     if language == "zh":
         scope = (
-            "隔离 workspace 中该阶段后停止"
+            "只重跑所选阶段，然后停止"
             if contract.execution_scope == "single_step"
-            else "隔离 workspace 中执行至 flow 结束"
+            else (
+                f"从所选阶段重跑，并继续到标准流程终点"
+                f"（{contract.end_step.value}）"
+            )
         )
         fields = [
             {"label": "Design", "value": contract.design_id},
             {"label": "源 workspace", "value": contract.source_workspace},
             {"label": "目标 workspace", "value": contract.target_workspace},
-            {"label": "重跑阶段", "value": contract.target_step.value},
-            {"label": "终止阶段", "value": contract.end_step.value},
+            {"label": "起始阶段", "value": contract.target_step.value},
+            {"label": "终点阶段", "value": contract.end_step.value},
             {"label": "执行范围", "value": scope},
             *parameter_fields,
             {"label": "确认", "value": "required"},
@@ -305,15 +355,18 @@ def _workspace_rerun_execution_contract(
         title = "冻结的重跑执行合同"
     else:
         scope = (
-            "stop after this stage in an isolated workspace"
+            "rerun only the selected stage, then stop"
             if contract.execution_scope == "single_step"
-            else "continue to the end of the flow in an isolated workspace"
+            else (
+                "rerun from the selected stage through the standard flow end "
+                f"({contract.end_step.value})"
+            )
         )
         fields = [
             {"label": "Design", "value": contract.design_id},
             {"label": "Source workspace", "value": contract.source_workspace},
             {"label": "Target workspace", "value": contract.target_workspace},
-            {"label": "Rerun stage", "value": contract.target_step.value},
+            {"label": "Start stage", "value": contract.target_step.value},
             {"label": "End stage", "value": contract.end_step.value},
             {"label": "Execution scope", "value": scope},
             *parameter_fields,
@@ -351,14 +404,25 @@ def _prompt_for_phase(session: _Session) -> str:
         ),
         "rerun_parameter": rerun_parameter_prompt(
             session.language,
-            (),
+            ()
+            if session.rerun_discovery is None or session.rerun_stage is None
+            else _rerun_resolver(session).parameter_values(
+                session.rerun_discovery.source, session.rerun_stage
+            ),
         ),
-        "rerun_scope": rerun_scope_prompt(session.language),
+        "rerun_scope": rerun_scope_prompt(
+            session.language, catalog_end_step().value
+        ),
         "workspace_project_mode": project_mode_prompt(session.language),
         "workspace_project_root": project_root_prompt(
             session.language, creating=session.creating_project
         ),
-        "workspace_name": workspace_name_prompt(session.language),
+        "workspace_name": workspace_name_prompt(
+            session.language,
+            recommended_workspace_name(session.workspace_inputs.project_root)
+            if session.workspace_inputs.project_root
+            else "",
+        ),
         "workspace_design": design_name_prompt(
             session.language,
             session.inherited_design_name or session.workspace_inputs.project_name or "",
@@ -380,6 +444,7 @@ def _prompt_for_phase(session: _Session) -> str:
         "workspace_density": number_prompt(session.language, "Placement Target Density", session.workspace_setup.target_density, 0.01, 1),
         "workspace_overflow": number_prompt(session.language, "Placement Target Overflow", session.workspace_setup.target_overflow, 0, 1),
         "workspace_confirmation": workspace_confirmation_prompt(session.language),
+        "workspace_parameter_request": workspace_parameter_request_prompt(session.language),
         "confirmation": confirmation_menu(session.language),
     }
     return prompts.get(session.phase, operation_prompt(session.language))
