@@ -77,7 +77,7 @@
         :aria-pressed="chatButtonActive"
         @click="handleAgentChatClick"
       >
-        <i class="ri-chat-3-line text-base" aria-hidden="true"></i>
+        <i class="ri-sparkling-2-line text-base" aria-hidden="true"></i>
       </button>
       <button
         @click="toggleTheme"
