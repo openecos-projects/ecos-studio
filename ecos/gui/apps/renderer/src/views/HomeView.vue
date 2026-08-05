@@ -517,7 +517,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
@@ -550,6 +550,7 @@ import {
 
 const { config } = useParameters()
 const router = useRouter()
+const route = useRoute()
 const { currentProject } = useWorkspace()
 const { flowStages, isLoading: flowLoading } = useFlowStages()
 const {
@@ -961,7 +962,7 @@ function openStepQorAnalysis(step: string): void {
   void router.push({
     name: ':step',
     params: { step },
-    query: { panel: 'analysis' },
+    query: { ...route.query, panel: 'analysis' },
   })
 }
 

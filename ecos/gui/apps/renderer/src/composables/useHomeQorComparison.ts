@@ -44,6 +44,17 @@ const EMPTY_STATE: HomeQorComparisonState = {
   comparison: null,
 }
 
+const homeQorComparisonCache = new Map<string, HomeQorComparisonState>()
+
+function homeQorComparisonCacheKey(workspacePath: string, projectRoot: string): string {
+  return `${workspacePath.trim()}\u0000${projectRoot.trim()}`
+}
+
+/** Clears route-scoped QoR comparison snapshots when the workspace is closed. */
+export function clearHomeQorComparisonCache(): void {
+  homeQorComparisonCache.clear()
+}
+
 /**
  * Loads Home's QoR data from the parent project named by the Project view route. The
  * desktop bridge grants that parent as an additional read root without changing the
@@ -52,7 +63,15 @@ const EMPTY_STATE: HomeQorComparisonState = {
 export function useHomeQorComparison() {
   const route = useRoute()
   const { currentProject, resourceVersions } = useWorkspace()
-  const state = ref<HomeQorComparisonState>(EMPTY_STATE)
+  const initialWorkspacePath = currentProject.value?.path
+  const initialProjectRoot = routeString(route.query.projectRoot)
+  const initialCacheKey =
+    initialWorkspacePath && initialProjectRoot
+      ? homeQorComparisonCacheKey(initialWorkspacePath, initialProjectRoot)
+      : null
+  const state = ref<HomeQorComparisonState>(
+    initialCacheKey ? homeQorComparisonCache.get(initialCacheKey) ?? EMPTY_STATE : EMPTY_STATE,
+  )
   let requestToken = 0
 
   async function refresh(): Promise<void> {
@@ -64,12 +83,24 @@ export function useHomeQorComparison() {
       return
     }
 
-    state.value = {
-      status: 'loading',
-      projectName: null,
-      baselineWorkspaceName: null,
-      baselineSource: null,
-      comparison: null,
+    const cacheKey = homeQorComparisonCacheKey(workspacePath, projectRoot)
+    const cachedState = homeQorComparisonCache.get(cacheKey)
+    if (cachedState) {
+      state.value = cachedState
+    } else {
+      state.value = {
+        status: 'loading',
+        projectName: null,
+        baselineWorkspaceName: null,
+        baselineSource: null,
+        comparison: null,
+      }
+    }
+
+    function updateState(nextState: HomeQorComparisonState): void {
+      if (token !== requestToken) return
+      state.value = nextState
+      homeQorComparisonCache.set(cacheKey, nextState)
     }
 
     try {
@@ -79,7 +110,7 @@ export function useHomeQorComparison() {
         projectPath: registeredRoot,
       })
       if (!manifestText) {
-        if (token === requestToken) state.value = EMPTY_STATE
+        updateState(EMPTY_STATE)
         return
       }
 
@@ -88,7 +119,7 @@ export function useHomeQorComparison() {
         samePath(workspace.workspace_path, workspacePath),
       )
       if (!currentWorkspace) {
-        if (token === requestToken) state.value = EMPTY_STATE
+        updateState(EMPTY_STATE)
         return
       }
 
@@ -97,15 +128,13 @@ export function useHomeQorComparison() {
         currentWorkspace.workspace_id,
       )
       if (!baseline) {
-        if (token === requestToken) {
-          state.value = {
-            status: 'unavailable',
-            projectName: manifest.name || null,
-            baselineWorkspaceName: null,
-            baselineSource: null,
-            comparison: null,
-          }
-        }
+        updateState({
+          status: 'unavailable',
+          projectName: manifest.name || null,
+          baselineWorkspaceName: null,
+          baselineSource: null,
+          comparison: null,
+        })
         return
       }
       if (baseline.source === 'default') {
@@ -143,23 +172,27 @@ export function useHomeQorComparison() {
           ? 'available'
           : 'unavailable'
 
-      state.value = {
+      updateState({
         status,
         projectName: manifest.name || null,
         baselineWorkspaceName: comparison.baselineWorkspaceName,
         baselineSource: baseline.source,
         comparison,
-      }
+      })
     } catch (error) {
       if (token !== requestToken) return
       console.warn('Failed to load project QoR comparison for Home:', error)
-      state.value = {
+      if (cachedState) {
+        state.value = cachedState
+        return
+      }
+      updateState({
         status: 'unavailable',
         projectName: null,
         baselineWorkspaceName: null,
         baselineSource: null,
         comparison: null,
-      }
+      })
     }
   }
 

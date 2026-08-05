@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
-import Splitter from 'primevue/splitter'
-import SplitterPanel from 'primevue/splitterpanel'
-import DrawingArea from '@/components/DrawingArea.vue'
-import ThumbnailGallery from '@/components/ThumbnailGallery.vue'
+import StepDashboard from '@/components/StepDashboard.vue'
 import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
@@ -95,16 +92,7 @@ onUnmounted(() => {
 <template>
   <WorkspaceWorkbench :flow-title="flowTitle" :loading="isLoading" :nodes="flowNodes">
     <template #left>
-      <div class="step-presentation">
-        <Splitter layout="vertical" class="step-presentation-splitter" :gutter-size="4">
-          <SplitterPanel :size="72" :min-size="30" class="step-presentation-main">
-            <DrawingArea />
-          </SplitterPanel>
-          <SplitterPanel :size="28" class="step-presentation-thumbnails">
-            <ThumbnailGallery />
-          </SplitterPanel>
-        </Splitter>
-      </div>
+      <StepDashboard />
     </template>
     <template #right-log>
       <FlowLogPanel
@@ -119,50 +107,3 @@ onUnmounted(() => {
     </template>
   </WorkspaceWorkbench>
 </template>
-
-<style scoped>
-.step-presentation {
-  display: flex;
-  height: 100%;
-  min-height: 0;
-  min-width: 0;
-}
-
-.step-presentation-splitter {
-  background: transparent;
-  border: 0;
-  min-height: 0;
-  min-width: 0;
-  width: 100%;
-}
-
-.step-presentation-splitter :deep(.p-splitterpanel) {
-  display: flex;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.step-presentation-splitter :deep(.p-splitterpanel > *) {
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-}
-
-.step-presentation-splitter :deep(.p-splitter-gutter) {
-  background: var(--border-color);
-}
-
-.step-presentation-splitter :deep(.p-splitter-gutter:hover) {
-  background: var(--accent-color);
-}
-
-.step-presentation-splitter :deep(.p-splitter-gutter-handle) {
-  display: none;
-}
-
-.step-presentation-splitter :deep(.p-splitter-vertical > .p-splitter-gutter) {
-  cursor: row-resize;
-  height: 4px;
-}
-</style>

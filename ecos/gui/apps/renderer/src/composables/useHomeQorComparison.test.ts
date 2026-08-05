@@ -53,7 +53,10 @@ vi.mock('@/views/project-management/projectWorkspaceAnalysisData', () => ({
   readProjectWorkspaceFlowStates: testState.readProjectWorkspaceFlowStates,
 }))
 
-import { useHomeQorComparison } from './useHomeQorComparison'
+import {
+  clearHomeQorComparisonCache,
+  useHomeQorComparison,
+} from './useHomeQorComparison'
 
 function projectManifest(includeBaseline = true) {
   const draft = createProjectManifestDraft({
@@ -94,6 +97,7 @@ describe('useHomeQorComparison', () => {
   let scope: EffectScope
 
   beforeEach(() => {
+    clearHomeQorComparisonCache()
     scope = effectScope()
     testState.currentProject = ref({ path: '/projects/gcd/ws_0004' })
     testState.resourceVersions = ref({ home: 0, parameters: 0, step: 0, all: 0 })
@@ -114,6 +118,7 @@ describe('useHomeQorComparison', () => {
 
   afterEach(() => {
     scope.stop()
+    clearHomeQorComparisonCache()
   })
 
   it('uses only the routed parent project and its selected baseline workspace', async () => {
@@ -135,6 +140,52 @@ describe('useHomeQorComparison', () => {
     expect(testState.readOptionalProjectTextFile).toHaveBeenCalledWith('project.json', {
       projectPath: '/projects/gcd',
     })
+  })
+
+  it('retains the baseline comparison while a resource refresh is pending', async () => {
+    const comparison = scope.run(() => useHomeQorComparison())!
+    await vi.waitFor(() => {
+      expect(comparison.state.value.status).toBe('available')
+    })
+    const previousComparison = comparison.state.value.comparison
+
+    let releaseManifest: ((value: string) => void) | undefined
+    testState.readOptionalProjectTextFile.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseManifest = resolve
+        }),
+    )
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      step: 1,
+    }
+
+    await vi.waitFor(() => {
+      expect(testState.readOptionalProjectTextFile).toHaveBeenCalledTimes(2)
+    })
+    expect(comparison.state.value.status).toBe('available')
+    expect(comparison.state.value.comparison).toBe(previousComparison)
+
+    releaseManifest?.(JSON.stringify(projectManifest()))
+    await vi.waitFor(() => {
+      expect(comparison.state.value.status).toBe('available')
+    })
+  })
+
+  it('reuses the last baseline comparison when the dashboard is recreated', async () => {
+    const first = scope.run(() => useHomeQorComparison())!
+    await vi.waitFor(() => {
+      expect(first.state.value.status).toBe('available')
+    })
+    const previousComparison = first.state.value.comparison
+
+    scope.stop()
+    scope = effectScope()
+    const restored = scope.run(() => useHomeQorComparison())!
+
+    expect(restored.state.value.status).toBe('available')
+    expect(restored.state.value.comparison).toBe(previousComparison)
   })
 
   it('does not infer a baseline when the project route is absent', async () => {

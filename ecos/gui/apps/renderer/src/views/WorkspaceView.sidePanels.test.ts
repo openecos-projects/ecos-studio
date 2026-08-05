@@ -11,9 +11,11 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).not.toContain('hasLayoutInspectorContent')
   })
 
-  it('keeps the drawing and thumbnail column in the shared workbench', () => {
-    expect(source).toContain('<DrawingArea />')
-    expect(source).toContain('<ThumbnailGallery />')
+  it('keeps the step dashboard in the shared workbench', () => {
+    expect(source).toContain("import StepDashboard from '@/components/StepDashboard.vue'")
+    expect(source).toContain('<StepDashboard />')
+    expect(source).not.toContain('<DrawingArea />')
+    expect(source).not.toContain('<ThumbnailGallery />')
     expect(source).toContain('<WorkspaceWorkbench')
     expect(source).toContain('useSubflow')
     expect(source).not.toContain('<ChatInspectorPanel />')
@@ -32,7 +34,9 @@ describe('WorkspaceView layout side panels', () => {
   })
 
   it('renders the current flow step log with the same Home log panel', () => {
-    expect(source).toContain("import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'")
+    expect(source).toContain(
+      "import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'",
+    )
     expect(source).toContain('useHomeData()')
     expect(source).toContain('const currentStepLogNode')
     expect(source).toContain('const stepKey = typeof route.params.step')
@@ -42,11 +46,9 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).toContain(':ensure-content="ensureFlowLogSegmentContentLoaded"')
   })
 
-  it('keeps Step splitter styles out of the shared right-side workbench', () => {
-    expect(source).toContain('.step-presentation-splitter :deep(.p-splitterpanel > *)')
-    expect(source).toContain(
-      '.step-presentation-splitter :deep(.p-splitter-vertical > .p-splitter-gutter)',
-    )
+  it('leaves split-pane ownership to the shared workbench', () => {
+    expect(source).not.toContain('SplitterPanel')
+    expect(source).not.toContain('step-presentation-splitter')
     expect(source).not.toContain('\n:deep(.p-splitterpanel > *)')
   })
 })

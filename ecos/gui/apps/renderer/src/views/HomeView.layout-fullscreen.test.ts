@@ -99,6 +99,7 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('class="qor-step-list"')
     expect(homeViewSource).toContain('class="qor-step-link"')
     expect(homeViewSource).toContain('openStepQorAnalysis(step.label)')
+    expect(homeViewSource).toContain("query: { ...route.query, panel: 'analysis' }")
     expect(homeViewSource).toContain("state.baselineSource === 'default'")
     expect(homeViewSource).toContain('Default baseline')
     expect(homeViewSource).toContain('QoR score')
