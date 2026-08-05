@@ -48,6 +48,8 @@ function methodToCommand(
   if (method === 'flow.run') return 'rtl2gds'
   if (method === 'flow.run_step') return 'run_step'
   if (method === 'candidate.rerun' && executionScope === 'full_flow') return 'rtl2gds'
+  // Agent isolated reruns use candidate.rerun; single_step must refresh step UI like run_step.
+  if (method === 'candidate.rerun' && executionScope === 'single_step') return 'run_step'
   return method
 }
 
@@ -58,7 +60,7 @@ function isFlowMethod(
   return (
     method === 'flow.run' ||
     method === 'flow.run_step' ||
-    (method === 'candidate.rerun' && executionScope === 'full_flow')
+    method === 'candidate.rerun'
   )
 }
 
@@ -90,7 +92,13 @@ function notifyTypeFromEvent(event: EccRuntimeEvent): RuntimeNotifyType | null {
   if (!isFlowMethod(event.method, event.executionScope)) return null
 
   if (event.type === 'operation.started') {
-    return event.method === 'flow.run_step' ? 'step_start' : 'message'
+    if (
+      event.method === 'flow.run_step' ||
+      (event.method === 'candidate.rerun' && event.executionScope === 'single_step')
+    ) {
+      return 'step_start'
+    }
+    return 'message'
   }
   return isFullFlowMethod(event.method, event.executionScope)
     ? 'task_complete'

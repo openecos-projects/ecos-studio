@@ -345,6 +345,15 @@ export function useSubflow() {
     { immediate: true },
   )
 
+  // Same step after Agent rerun workspace switch must not keep the previous workspace cache.
+  watch(
+    () => currentProject.value?.path,
+    async (nextPath, previousPath) => {
+      if (!nextPath || nextPath === previousPath) return
+      await refreshCurrentSubflow()
+    },
+  )
+
   watch(
     () => [resourceVersions.value.step, resourceVersions.value.all],
     async () => {

@@ -79,6 +79,52 @@ export async function resolveProjectRouteContextForWorkspace(
   }
 }
 
+/**
+ * Resolve the managed project that should own a workspace path.
+ * Prefers an explicit context (tab/route); otherwise uses the parent directory
+ * only when it already contains project.json (avoids inventing a project).
+ */
+export async function resolveManagedProjectContext(options: {
+  preferred?: ProjectRouteContext | null
+  workspacePath: string
+}): Promise<ProjectRouteContext | null> {
+  const preferredRoot = normalizePath(options.preferred?.projectRoot ?? '')
+  if (preferredRoot) {
+    return {
+      projectRoot: preferredRoot,
+      projectName:
+        optionalString(options.preferred?.projectName) ||
+        basenamePath(preferredRoot) ||
+        undefined,
+    }
+  }
+
+  const workspacePath = normalizePath(options.workspacePath)
+  if (!workspacePath) return null
+  const projectRoot = parentPath(workspacePath)
+  if (!projectRoot || projectRoot === workspacePath) return null
+
+  const registeredRoot = await registerLocalProjectRoot(projectRoot)
+  if (!registeredRoot) return null
+
+  const manifestText = await readOptionalProjectTextFile(
+    joinPath(registeredRoot, 'project.json'),
+  )
+  if (!manifestText) return null
+
+  let projectName = basenamePath(registeredRoot) || undefined
+  try {
+    const manifest = JSON.parse(manifestText) as { name?: unknown }
+    if (typeof manifest.name === 'string' && manifest.name.trim()) {
+      projectName = manifest.name.trim()
+    }
+  } catch {
+    // Keep directory basename when the manifest is not JSON-parsable.
+  }
+
+  return { projectRoot: registeredRoot, projectName }
+}
+
 export async function registerProjectManagedWorkspace(
   input: ProjectManagedWorkspaceRegistrationInput,
 ): Promise<void> {
@@ -160,16 +206,20 @@ function basenamePath(path: string): string {
   return normalizePath(path).split('/').filter(Boolean).pop() ?? ''
 }
 
-function normalizePath(path: string): string {
-  const normalized = path.replace(/\\/g, '/')
-  if (normalized.endsWith('/') && normalized.length > 1) return normalized.slice(0, -1)
-  return normalized
-}
-
 function parentPath(path: string): string {
   const normalized = normalizePath(path)
   const parts = normalized.split('/').filter(Boolean)
   if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
   const parent = parts.slice(0, -1).join('/')
   return normalized.startsWith('/') ? `/${parent}` : parent
+}
+
+function joinPath(root: string, child: string): string {
+  return `${normalizePath(root)}/${child.replace(/^\/+/, '')}`
+}
+
+function normalizePath(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  if (normalized.endsWith('/') && normalized.length > 1) return normalized.slice(0, -1)
+  return normalized
 }

@@ -26,7 +26,9 @@ import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { mergePlannedFlowLogSegments } from './flowLogSegmentPlan'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
+  clearAgentWorkspaceRerunHomePrepared,
   consumePendingHomeRunArtifactReset,
+  isAgentWorkspaceRerunHomePrepared,
   isHomeRunArtifactResetAwaitingBackendStart,
   onHomeRunArtifactReset,
 } from './homeRunArtifacts'
@@ -2091,7 +2093,9 @@ export function useHomeData() {
             pollFlowJsonTimer ||
             pollHomeJsonTimer,
           )
-        clearHomeRunArtifactsForRerun(projectPath)
+        if (!isAgentWorkspaceRerunHomePrepared(projectPath)) {
+          clearHomeRunArtifactsForRerun(projectPath)
+        }
         markFlowExecutionActiveForWorkspace(projectPath)
         if (!hasLiveWatchForProject) {
           void startFlowLogLiveWatchForCurrentProject({
@@ -2104,6 +2108,7 @@ export function useHomeData() {
       if (isCurrentWorkspaceRerunTerminalEvent(event, projectPath)) {
         _pendingRerunResetConfirmationWorkspace = ''
         _pendingRerunStaleHomeSignature = ''
+        clearAgentWorkspaceRerunHomePrepared(projectPath)
       }
     },
   )

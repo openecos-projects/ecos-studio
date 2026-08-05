@@ -55,12 +55,18 @@ describe('useAgentFlowProgress', () => {
 
   it('reports step execution and persisted primary artifacts', async () => {
     const messages: string[] = []
-    const progress = useAgentFlowProgress((message) => messages.push(message))
+    const flowChanges: number[] = []
+    const progress = useAgentFlowProgress(
+      (message) => messages.push(message),
+      () => flowChanges.push(flowChanges.length + 1),
+    )
 
     await progress.start('/runs/gcd')
+    expect(flowChanges).toEqual([])
     testState.flow = flow('Ongoing')
     testState.listeners[0]!()
     await vi.waitFor(() => expect(messages).toEqual(['Running place.']))
+    await vi.waitFor(() => expect(flowChanges).toEqual([1]))
 
     testState.flow = flow('Success')
     testState.listeners[0]!()
@@ -70,6 +76,7 @@ describe('useAgentFlowProgress', () => {
         'Completed place. Saved: /runs/gcd/place_dreamplace/output/gcd_place.def.gz; /runs/gcd/place_dreamplace/output/gcd_place.gds',
       ]),
     )
+    await vi.waitFor(() => expect(flowChanges).toEqual([1, 2]))
 
     progress.stop()
     expect(testState.unwatch).toHaveBeenCalledOnce()

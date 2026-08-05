@@ -7,6 +7,7 @@ import {
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
+  resolveManagedProjectContext,
   resolveProjectRouteContextForWorkspace,
 } from './projectManifestRegistration'
 
@@ -38,6 +39,7 @@ describe('projectManifestRegistration', () => {
     readOptionalProjectTextFile.mockReset()
     registerProjectRoot.mockImplementation(async (path: string) => path)
     mutateProjectManifest.mockResolvedValue(undefined)
+    readOptionalProjectTextFile.mockResolvedValue(null)
   })
 
   it('derives project context from wizard project_context payload', () => {
@@ -148,5 +150,47 @@ describe('projectManifestRegistration', () => {
       resolveProjectRouteContextForWorkspace('/workspaces/orphan/ws_0001'),
     ).resolves.toBeNull()
     expect(registerProjectRoot).toHaveBeenCalledWith('/workspaces/orphan/ws_0001')
+  })
+
+  it('prefers an explicit project context when resolving managed ownership', async () => {
+    await expect(
+      resolveManagedProjectContext({
+        preferred: {
+          projectRoot: '/projects/gcd/',
+          projectName: 'gcd',
+        },
+        workspacePath: '/projects/gcd/ws_0030',
+      }),
+    ).resolves.toEqual({
+      projectRoot: '/projects/gcd',
+      projectName: 'gcd',
+    })
+    expect(readOptionalProjectTextFile).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a parent directory that already has project.json', async () => {
+    readOptionalProjectTextFile.mockResolvedValue(
+      JSON.stringify({ name: 'gcd-project', workspaces: [] }),
+    )
+
+    await expect(
+      resolveManagedProjectContext({
+        workspacePath: '/projects/gcd/ws_0030',
+      }),
+    ).resolves.toEqual({
+      projectRoot: '/projects/gcd',
+      projectName: 'gcd-project',
+    })
+    expect(registerProjectRoot).toHaveBeenCalledWith('/projects/gcd')
+    expect(readOptionalProjectTextFile).toHaveBeenCalledWith('/projects/gcd/project.json')
+  })
+
+  it('does not invent a project when the parent has no project.json', async () => {
+    await expect(
+      resolveManagedProjectContext({
+        workspacePath: '/orphan/ws_0030',
+      }),
+    ).resolves.toBeNull()
+    expect(mutateProjectManifest).not.toHaveBeenCalled()
   })
 })

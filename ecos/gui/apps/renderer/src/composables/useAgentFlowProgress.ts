@@ -38,7 +38,10 @@ function outputDirectory(workspacePath: string, step: FlowStep): string {
   return `${workspacePath.replace(/\/+$/, '')}/${step.name}_${step.tool}/output`
 }
 
-export function useAgentFlowProgress(report: (message: string) => void) {
+export function useAgentFlowProgress(
+  report: (message: string) => void,
+  onFlowChanged?: () => void,
+) {
   let generation = 0
   let unwatch: (() => void) | null = null
   let states = new Map<string, string>()
@@ -71,11 +74,16 @@ export function useAgentFlowProgress(report: (message: string) => void) {
       `${workspacePath}/home/flow.json`,
     )
     if (activeGeneration !== generation) return
+
+    let flowChanged = false
     for (const step of flowSteps(content)) {
       if (activeGeneration !== generation) return
       const key = `${step.name}:${step.tool}`
       const previous = states.get(key)
       states.set(key, step.state)
+      if (previous !== undefined && previous !== step.state) {
+        flowChanged = true
+      }
       if (step.state === 'Ongoing' && previous !== 'Ongoing') {
         report(`Running ${step.name}.`)
         continue
@@ -89,6 +97,10 @@ export function useAgentFlowProgress(report: (message: string) => void) {
           ? `Completed ${step.name}. Saved: ${artifacts.join('; ')}`
           : `Completed ${step.name}.`,
       )
+    }
+
+    if (flowChanged && activeGeneration === generation) {
+      onFlowChanged?.()
     }
   }
 

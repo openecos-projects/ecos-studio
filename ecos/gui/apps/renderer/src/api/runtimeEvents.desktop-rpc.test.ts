@@ -82,6 +82,50 @@ describe('createRuntimeEventClient desktop ECC events', () => {
     expect(client.getState()).toBe('disconnected')
   })
 
+  it('maps single-step candidate.rerun completion onto run_step step_complete', async () => {
+    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    setWindow({
+      ecosDesktop: {
+        ecc: {
+          events: {
+            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+              listeners.push(listener)
+              return () => undefined
+            },
+          },
+        },
+      },
+    })
+
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const allHandler = vi.fn()
+    const stepCompleteHandler = vi.fn()
+    client.onAll(allHandler)
+    client.on('step_complete', stepCompleteHandler)
+    client.connect()
+
+    listeners[0]({
+      executionScope: 'single_step',
+      method: 'candidate.rerun',
+      operationId: 'operation-single-rerun',
+      rerun: true,
+      type: 'operation.completed',
+      workspaceHandle: 'workspace-handle-1',
+    } as EccRuntimeEvent)
+
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'run_step',
+          method: 'candidate.rerun',
+          type: 'step_complete',
+        }),
+      }),
+    )
+    expect(stepCompleteHandler).toHaveBeenCalledTimes(1)
+  })
+
   it('maps flow rerun start metadata onto renderer notifications', async () => {
     const listeners: Array<(event: EccRuntimeEvent) => void> = []
     setWindow({
