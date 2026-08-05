@@ -25,8 +25,10 @@ describe('AgentWorkspaceSetupPanel', () => {
     expect(source).not.toContain('<dl')
   })
 
-  it('uses the design name as the displayed workspace name', () => {
-    expect(source).toContain("['Workspace Name', parameters.design]")
+  it('shows Workspace Name from the directory leaf and Design Name separately', () => {
+    expect(source).toContain("['Workspace Name', workspaceName]")
+    expect(source).toContain("['Design Name', parameters.design]")
+    expect(source).toContain("['Project Root', contract.project_context.project_root]")
   })
 
   it('keeps the specification selectable and permits retrying a failed setup id', () => {
@@ -38,5 +40,7 @@ describe('AgentWorkspaceSetupPanel', () => {
   it('renders the confirmation after the resolved specification', () => {
     expect(source).toContain('confirmationText?: string')
     expect(source).toContain(':confirmation-text="confirmationText"')
+    expect(source).toContain(':choice="choice"')
+    expect(source).toContain(':choice-disabled="choiceDisabled"')
   })
 })

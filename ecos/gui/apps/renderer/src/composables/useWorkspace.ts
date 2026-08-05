@@ -17,6 +17,7 @@ import * as runtimeEventApi from '../api/runtimeEvents'
 import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
 import { setDesktopWindowTitle } from './windowTitle'
 import { useMessageStore } from '@/stores/messageStore'
+import { useAgentShellStore } from '@/stores/agentShellStore'
 import {
   useWorkspaceLifecycle,
   type WorkspaceSession,
@@ -723,7 +724,11 @@ export function useWorkspace() {
         workspaceLifecycle.setSessionLoading(activeSession.sessionId)
 
         currentProject.value = loadedProject
-        messageStore.clearMessages()
+        if (!useAgentShellStore().shouldPreserveMessages()) {
+          messageStore.clearMessages()
+        } else {
+          useAgentShellStore().consumePreserveMessages()
+        }
         if (claimedAffinityPath && claimedAffinityPath !== canonicalProjectRoot) {
           await unbindWorkspaceWindow(claimedAffinityPath)
         }
@@ -1045,7 +1050,11 @@ export function useWorkspace() {
         }
 
         currentProject.value = createdProject
-        messageStore.clearMessages()
+        if (!useAgentShellStore().shouldPreserveMessages()) {
+          messageStore.clearMessages()
+        } else {
+          useAgentShellStore().consumePreserveMessages()
+        }
         if (claimedCreatePath && claimedCreatePath !== canonicalProjectRoot) {
           await unbindWorkspaceWindow(claimedCreatePath)
         }
@@ -1298,6 +1307,7 @@ export function useWorkspace() {
     const closingProjectPath = currentProject.value?.path
     currentProject.value = null
     messageStore.clearMessages()
+    useAgentShellStore().resetShell()
     disconnectRuntimeEvents()
     workspaceLifecycle.closeSession()
     runtimeBackendConnecting.value = false

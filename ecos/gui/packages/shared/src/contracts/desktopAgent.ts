@@ -9,12 +9,26 @@ export interface DesktopAgentProviderRequest {
   providerId?: string
 }
 
+export interface DesktopAgentInterruptRequest extends DesktopAgentProviderRequest {
+  sessionId: string
+}
+
 export interface DesktopAgentStartRequest extends DesktopAgentProviderRequest {
   directory?: string
 }
 
+export type DesktopAgentSessionMode = 'home' | 'workspace'
+
+export interface DesktopAgentKnownProject {
+  name: string
+  path: string
+}
+
 export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderRequest {
   directory?: string
+  knownProjects?: DesktopAgentKnownProject[]
+  mode?: DesktopAgentSessionMode
+  projectRoot?: string
   sessionId?: string
   workspaceId?: string
 }
@@ -78,9 +92,23 @@ export interface DesktopAgentContractField {
 
 export interface DesktopAgentExecutionContract {
   fields: DesktopAgentContractField[]
-  presentation?: 'workspace_rerun'
+  presentation?: 'workspace_rerun' | 'workspace_continue' | 'workspace_parameter_update'
   schema_version: 'flow-agent.resolved_execution_contract.v1'
   title: string
+}
+
+export interface DesktopAgentWorkspaceContinueContract {
+  continue_id: string
+  rerun: false
+  schema_version: 'flow-agent.workspace_continue_contract.v1'
+  workspace: string
+}
+
+export interface DesktopAgentWorkspaceParameterUpdateContract {
+  parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
+  schema_version: 'flow-agent.workspace_parameter_update_contract.v1'
+  update_id: string
+  workspace: string
 }
 
 export interface DesktopAgentWorkspaceSetupParameters {
@@ -178,19 +206,49 @@ export type DesktopAgentEventType =
   | 'session'
   | 'message'
   | 'tool'
+  | 'choice'
   | 'contract'
   | 'workspace_setup'
   | 'workspace_create'
   | 'workspace_rerun'
+  | 'workspace_continue'
+  | 'workspace_parameter_update'
   | 'error'
 
+export type DesktopAgentRunStatus =
+  | 'idle'
+  | 'running'
+  | 'awaiting_choice'
+  | 'interrupted'
+  | 'error'
+
+export interface DesktopAgentChoiceOption {
+  id: string
+  label: string
+  value: string
+}
+
+export interface DesktopAgentChoice {
+  promptId: string
+  title: string
+  options: DesktopAgentChoiceOption[]
+  allowFreeText?: boolean
+  variant: 'buttons' | 'list'
+}
+
 export interface DesktopAgentEvent {
+  choice?: DesktopAgentChoice
   contract?: DesktopAgentExecutionContract
+  delta?: string
+  messageId?: string
   providerId?: string
   sessionId?: string
+  status?: DesktopAgentRunStatus
   text?: string
   type: DesktopAgentEventType
+  workspaceContinue?: DesktopAgentWorkspaceContinueContract
   workspaceCreateSetupId?: string
+  workspaceParameterUpdate?: DesktopAgentWorkspaceParameterUpdateContract
   workspaceRerun?: DesktopAgentWorkspaceRerunContract
   workspaceRerunToken?: string
   workspaceSetup?: DesktopAgentWorkspaceSetupContract

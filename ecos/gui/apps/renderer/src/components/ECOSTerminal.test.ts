@@ -50,7 +50,7 @@ describe('ECOSTerminal', () => {
 
   it('is mounted as a VS Code-style bottom panel above the status bar', () => {
     expect(appSource).toMatch(
-      /<div\s+class="app-main"[\s\S]*>\s*<div\s+class="app-content"[\s\S]*>\s*<router-view\s*\/>\s*<\/div>\s*<ECOSTerminal[^>]*\/>\s*<\/div>\s*<StatusBar/,
+      /<div\s+class="app-main"[\s\S]*>\s*<div\s+class="app-content"[\s\S]*>\s*<router-view\s*\/>\s*<\/div>\s*(?:<HomeAgentDrawer[^>]*\/>\s*)?<ECOSTerminal[^>]*\/>\s*<\/div>\s*<StatusBar/,
     )
     expect(appSource).toMatch(
       /:style="\s*terminalExpanded\s*\?\s*\{\s*'--terminal-panel-height': terminalPanelHeight\s*\}\s*:\s*undefined\s*"/,

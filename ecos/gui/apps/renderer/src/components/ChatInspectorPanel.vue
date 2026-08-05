@@ -61,6 +61,7 @@
         <!-- KeepAlive：避免 v-if 销毁聊天导致 blob 图重新加载/裂图；状态与滚动由子组件 onActivated 恢复 -->
         <KeepAlive>
           <AIChatPanel
+            shell="workspace"
             class="h-full min-h-0 w-full max-w-full min-w-0 flex-1 overflow-hidden"
           />
         </KeepAlive>

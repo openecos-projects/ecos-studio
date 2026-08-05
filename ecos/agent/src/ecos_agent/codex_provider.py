@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
@@ -35,12 +36,26 @@ class CodexAppServerProposalProvider:
         self.progress_callback = progress_callback
         self._client: _JsonLineRpcProcessClient | None = None
         self._thread_id: str | None = None
+        self._active_turn_id: str | None = None
+        self._interrupted = False
+        self._state_lock = threading.Lock()
 
     def close(self) -> None:
         if self._client is not None:
             self._client.close()
             self._client = None
             self._thread_id = None
+
+    def interrupt(self) -> None:
+        with self._state_lock:
+            self._interrupted = True
+            client = self._client
+            turn_id = self._active_turn_id
+        if client is not None:
+            if turn_id is not None:
+                client.interrupt_turn(turn_id)
+            else:
+                client.close()
 
     def propose_gui_workspace_setup(self, context: dict[str, Any]) -> dict[str, Any]:
         return self._proposal(
@@ -124,6 +139,9 @@ class CodexAppServerProposalProvider:
         return payload
 
     def _run_turn(self, prompt: str, output_schema: dict[str, Any]) -> str:
+        with self._state_lock:
+            if self._interrupted:
+                raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
         self._report_progress("Codex is analyzing the bounded request.")
         client = self._ensure_client()
         thread_id = self._ensure_thread(client)
@@ -152,10 +170,22 @@ class CodexAppServerProposalProvider:
         turn_id = _read_nested_string(response, (("turn", "id"), ("turnId",), ("id",)))
         if not turn_id:
             raise CodexProviderError("Codex turn/start response missing turn id", failure_class="tool_error")
+        with self._state_lock:
+            self._active_turn_id = turn_id
         self._report_progress("Codex request accepted; waiting for read-only activity.")
-        text, _ = client.wait_for_turn_details(
-            turn_id, thread_id=thread_id, activity_callback=self._report_progress
-        )
+        try:
+            text, _ = client.wait_for_turn_details(
+                turn_id, thread_id=thread_id, activity_callback=self._report_progress
+            )
+        except CodexProviderError as exc:
+            if self._interrupted:
+                raise CodexProviderError("Codex turn interrupted", failure_class="interrupted") from exc
+            raise
+        finally:
+            with self._state_lock:
+                self._active_turn_id = None
+        if self._interrupted:
+            raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
         self._report_progress("Codex returned a structured proposal for local validation.")
         return text
 

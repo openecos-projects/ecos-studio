@@ -3,7 +3,10 @@ import { randomUUID } from 'node:crypto'
 import type {
   DesktopAgentEventType,
   DesktopAgentEvent,
+  DesktopAgentChoice,
   DesktopAgentExecutionContract,
+  DesktopAgentWorkspaceContinueContract,
+  DesktopAgentWorkspaceParameterUpdateContract,
   DesktopAgentWorkspaceRerunContract,
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
@@ -334,10 +337,13 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'session',
   'message',
   'tool',
+  'choice',
   'contract',
   'workspace_setup',
   'workspace_create',
   'workspace_rerun',
+  'workspace_continue',
+  'workspace_parameter_update',
   'error',
 ])
 
@@ -348,27 +354,93 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     return null
   }
   const contract = readExecutionContract(record.contract)
+  const choice = readAgentChoice(record.choice)
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
   const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
   const workspaceRerun = readWorkspaceRerunContract(record.workspaceRerun)
+  const workspaceContinue = readWorkspaceContinueContract(record.workspaceContinue)
+  const workspaceParameterUpdate = readWorkspaceParameterUpdateContract(
+    record.workspaceParameterUpdate,
+  )
+  const status = readAgentRunStatus(record.status)
+  const delta = readEventText(record.delta)
+  const messageId = readOptionalIdentifier(record.messageId)
+  if (type === 'choice' && !choice) return null
+  if (type === 'status' && !status) return null
   if (type === 'contract' && !contract) return null
   if (type === 'workspace_setup' && !workspaceSetup) return null
   if (type === 'workspace_create' && !workspaceCreateSetupId) return null
   if (type === 'workspace_rerun' && !workspaceRerun) return null
+  if (type === 'workspace_continue' && !workspaceContinue) return null
+  if (type === 'workspace_parameter_update' && !workspaceParameterUpdate) return null
   const providerId = readEventText(record.providerId)
   const sessionId = readEventText(record.sessionId)
   const text = readEventText(record.text)
 
   return {
+    ...(choice ? { choice } : {}),
     ...(contract ? { contract } : {}),
+    ...(delta ? { delta } : {}),
+    ...(messageId ? { messageId } : {}),
     ...(providerId ? { providerId } : {}),
     ...(sessionId ? { sessionId } : {}),
+    ...(status ? { status } : {}),
     ...(text ? { text } : {}),
     ...(workspaceSetup ? { workspaceSetup } : {}),
     ...(workspaceCreateSetupId ? { workspaceCreateSetupId } : {}),
     ...(workspaceRerun ? { workspaceRerun } : {}),
+    ...(workspaceContinue ? { workspaceContinue } : {}),
+    ...(workspaceParameterUpdate ? { workspaceParameterUpdate } : {}),
     type: type as DesktopAgentEventType,
   }
+}
+
+function readAgentChoice(value: unknown): DesktopAgentChoice | null {
+  const record = readRecord(value)
+  const promptId = readOptionalIdentifier(record.promptId)
+  const title = readEventText(record.title)
+  const allowFreeText =
+    record.allowFreeText === undefined
+      ? undefined
+      : typeof record.allowFreeText === 'boolean'
+        ? record.allowFreeText
+        : null
+  if (
+    !promptId ||
+    !title ||
+    (record.variant !== 'buttons' && record.variant !== 'list') ||
+    !Array.isArray(record.options) ||
+    record.options.length < 1 ||
+    record.options.length > 32 ||
+    allowFreeText === null
+  ) {
+    return null
+  }
+  const options = record.options.map((value) => {
+    const option = readRecord(value)
+    const id = readOptionalIdentifier(option.id)
+    const label = readEventText(option.label)
+    const optionValue = readEventText(option.value)
+    return id && label && optionValue ? { id, label, value: optionValue } : null
+  })
+  if (options.some((option) => option === null)) return null
+  return {
+    ...(allowFreeText === undefined ? {} : { allowFreeText }),
+    options: options as DesktopAgentChoice['options'],
+    promptId,
+    title,
+    variant: record.variant,
+  }
+}
+
+function readAgentRunStatus(value: unknown): DesktopAgentEvent['status'] | null {
+  return value === 'idle' ||
+    value === 'running' ||
+    value === 'awaiting_choice' ||
+    value === 'interrupted' ||
+    value === 'error'
+    ? value
+    : null
 }
 
 const workspaceSetupFlowSteps = [
@@ -722,13 +794,60 @@ function readFiniteNumber(
     : null
 }
 
+function readWorkspaceContinueContract(
+  value: unknown,
+): DesktopAgentWorkspaceContinueContract | null {
+  const record = readRecord(value)
+  const workspace = readEventText(record.workspace)
+  const continueId = readOptionalIdentifier(record.continue_id)
+  if (
+    record.schema_version !== 'flow-agent.workspace_continue_contract.v1' ||
+    !workspace ||
+    !continueId ||
+    record.rerun !== false
+  ) {
+    return null
+  }
+  return {
+    continue_id: continueId,
+    rerun: false,
+    schema_version: 'flow-agent.workspace_continue_contract.v1',
+    workspace,
+  }
+}
+
+function readWorkspaceParameterUpdateContract(
+  value: unknown,
+): DesktopAgentWorkspaceParameterUpdateContract | null {
+  const record = readRecord(value)
+  const workspace = readEventText(record.workspace)
+  const updateId = readOptionalIdentifier(record.update_id)
+  const patch = readWorkspaceRerunPatch(record.parameter_patch)
+  if (
+    record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v1' ||
+    !workspace ||
+    !updateId ||
+    !patch
+  ) {
+    return null
+  }
+  return {
+    parameter_patch: patch,
+    schema_version: 'flow-agent.workspace_parameter_update_contract.v1',
+    update_id: updateId,
+    workspace,
+  }
+}
+
 function readExecutionContract(value: unknown): DesktopAgentExecutionContract | null {
   const record = readRecord(value)
   const presentation =
     record.presentation === undefined
       ? undefined
-      : record.presentation === 'workspace_rerun'
-        ? 'workspace_rerun'
+      : record.presentation === 'workspace_rerun' ||
+          record.presentation === 'workspace_continue' ||
+          record.presentation === 'workspace_parameter_update'
+        ? record.presentation
         : null
   if (
     record.schema_version !== 'flow-agent.resolved_execution_contract.v1' ||

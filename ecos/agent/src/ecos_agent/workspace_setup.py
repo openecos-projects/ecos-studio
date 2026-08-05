@@ -45,6 +45,7 @@ def merge_workspace_setup(
     if stage != "spec":
         raise ValueError("workspace setup stage is invalid")
     fields = {
+        "workspace_name",
         "design_name",
         "top_module",
         "clock_name",
@@ -313,6 +314,8 @@ def _validated_workspace_inputs(inputs: WorkspaceInputs) -> WorkspaceInputs:
 def _validate_workspace_proposal(
     proposal: GuiWorkspaceSetupProposal, inputs: WorkspaceInputs
 ) -> None:
+    if not proposal.workspace_name:
+        raise ValueError("Workspace Name must be provided")
     if not proposal.design_name:
         raise ValueError("Design Name must be provided")
     if not proposal.top_module:
@@ -323,12 +326,12 @@ def _validate_workspace_proposal(
 
 
 def _workspace_directory(inputs: WorkspaceInputs, proposal: GuiWorkspaceSetupProposal) -> str:
-    design_name = proposal.design_name
-    if not design_name:
-        raise ValueError("Design Name must be provided")
-    directory = Path(inputs.project_root) / design_name
+    workspace_name = proposal.workspace_name
+    if not workspace_name:
+        raise ValueError("Workspace Name must be provided")
+    directory = Path(inputs.project_root) / workspace_name
     if directory.exists():
-        raise ValueError("Workspace directory already exists; choose a different Project Root")
+        raise ValueError("Workspace directory already exists; choose a different Workspace Name")
     return str(directory)
 
 

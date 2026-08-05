@@ -1,25 +1,37 @@
 <template>
   <AgentExecutionContractPanel
+    :answered-option-id="answeredOptionId"
+    :choice="choice"
+    :choice-disabled="choiceDisabled"
     :confirmation-text="confirmationText"
     :execution-state="executionState"
     :rows="specRows"
     :title="contract?.title ?? ''"
+    @select="emit('select', $event)"
   />
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { DesktopAgentWorkspaceSetupContract } from '@ecos-studio/shared'
+import type {
+  DesktopAgentChoice,
+  DesktopAgentChoiceOption,
+  DesktopAgentWorkspaceSetupContract,
+} from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
 import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 
 const props = defineProps<{
+  answeredOptionId?: string
+  choice?: DesktopAgentChoice
+  choiceDisabled?: boolean
   contract?: DesktopAgentWorkspaceSetupContract
   confirmationText?: string
   createSetupId?: string
 }>()
 const emit = defineEmits<{
   createWorkspace: [config: WorkspaceConfig, contract: DesktopAgentWorkspaceSetupContract]
+  select: [option: DesktopAgentChoiceOption]
 }>()
 
 const submittedSetupId = ref('')
@@ -32,11 +44,13 @@ const specRows = computed<[string, string][]>(() => {
   const contract = props.contract
   if (!contract) return []
   const parameters = contract.parameters
+  const workspaceName = leafName(contract.directory)
   return [
-    ['Workspace', contract.directory],
     ['Project Root', contract.project_context.project_root],
     ['Project Name', contract.project_context.project_name],
-    ['Workspace Name', parameters.design],
+    ['Workspace', contract.directory],
+    ['Workspace Name', workspaceName],
+    ['Design Name', parameters.design],
     ['Flow', `${contract.flow_config.start_step} to ${contract.flow_config.end_step}`],
     ['Flow Steps', contract.flow_config.steps.join(' to ')],
     ['RTL', contract.rtl_list[0] ?? '-'],
@@ -46,7 +60,6 @@ const specRows = computed<[string, string][]>(() => {
     ['PDK', contract.pdk],
     ['PDK Root', contract.pdk_root],
     ['PDK Config Mode', contract.pdk_config_mode],
-    ['Design', parameters.design],
     ['Top Module', parameters.top_module],
     ['Clock', parameters.clock],
     ['Frequency Max (MHz)', String(parameters.frequency_max)],
@@ -101,5 +114,10 @@ function workspaceConfig(contract: DesktopAgentWorkspaceSetupContract): Workspac
 
 function optionalValue(value: string | number | undefined): string {
   return value === undefined || value === '' ? '-' : String(value)
+}
+
+function leafName(path: string): string {
+  const parts = path.split(/[/\\]/).filter(Boolean)
+  return parts.at(-1) || path
 }
 </script>

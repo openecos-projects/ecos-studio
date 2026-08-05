@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from typing import Any
 
 from ecos_agent.provider import EcosAgentProvider
@@ -11,11 +12,15 @@ from ecos_agent.provider import EcosAgentProvider
 
 class EcosAgentProtocolServer:
     def __init__(self) -> None:
+        self._threads: list[threading.Thread] = []
+        self._write_lock = threading.Lock()
         self.provider = EcosAgentProvider(emit=self._emit)
 
     def serve(self) -> int:
         for raw_line in sys.stdin:
             self._handle_line(raw_line)
+        for thread in self._threads:
+            thread.join()
         return 0
 
     def _handle_line(self, raw_line: str) -> None:
@@ -23,6 +28,17 @@ class EcosAgentProtocolServer:
         if request is None:
             self._write({"id": request_id, "error": {"message": "Invalid provider request."}})
             return
+        if request.get("method") == "sendMessage":
+            self._threads = [thread for thread in self._threads if thread.is_alive()]
+            thread = threading.Thread(
+                target=self._handle_request, args=(request, request_id), daemon=True
+            )
+            self._threads.append(thread)
+            thread.start()
+            return
+        self._handle_request(request, request_id)
+
+    def _handle_request(self, request: dict[str, Any], request_id: str | None) -> None:
         try:
             result = self._dispatch(request)
         except Exception as exc:
@@ -53,10 +69,10 @@ class EcosAgentProtocolServer:
     def _emit(self, event: dict[str, Any]) -> None:
         self._write({"type": "event", "event": event})
 
-    @staticmethod
-    def _write(payload: dict[str, Any]) -> None:
-        sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        sys.stdout.flush()
+    def _write(self, payload: dict[str, Any]) -> None:
+        with self._write_lock:
+            sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
 
 
 def _protocol_request(raw_line: str) -> tuple[dict[str, Any] | None, str | None]:

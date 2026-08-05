@@ -285,6 +285,7 @@ describe('registerIpc', () => {
   it('binds rerun tokens to the agent window and its source workspace', async () => {
     let emitAgentEvent: ((event: Record<string, unknown>) => void) | undefined
     const agentRuntimeService = {
+      interrupt: vi.fn(async () => {}),
       onEvent: vi.fn((listener) => {
         emitAgentEvent = listener
         return () => undefined
@@ -309,7 +310,13 @@ describe('registerIpc', () => {
       once: vi.fn(),
       send: vi.fn(),
     }
-    const session = { providerId: 'ecos_agent', sessionId: 'gui-session-1' }
+    const session = {
+      providerId: 'ecos_agent',
+      sessionId: 'gui-session-1',
+      projectRoot: '/runs',
+      knownProjects: [{ name: 'runs', path: '/runs' }],
+      mode: 'workspace' as const,
+    }
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
       { sender: owner },
       session,
@@ -358,6 +365,7 @@ describe('registerIpc', () => {
   it('keeps a rerun token usable when source workspace binding is restored', async () => {
     let emitAgentEvent: ((event: Record<string, unknown>) => void) | undefined
     const agentRuntimeService = {
+      interrupt: vi.fn(async () => {}),
       onEvent: vi.fn((listener) => {
         emitAgentEvent = listener
         return () => undefined
@@ -521,6 +529,7 @@ describe('registerIpc', () => {
         }) => void)
       | undefined
     const agentRuntimeService = {
+      interrupt: vi.fn(async () => {}),
       onEvent: vi.fn((listener) => {
         emitAgentEvent = listener
         return () => undefined
@@ -569,6 +578,9 @@ describe('registerIpc', () => {
       messageId: 'message-1',
       sessionId: session.sessionId,
     })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentInterrupt)?.(event, session),
+    ).resolves.toBeUndefined()
 
     expect(sender.send).toHaveBeenCalledWith(desktopApiEventChannels.agentEvent, {
       providerId: session.providerId,
@@ -580,6 +592,7 @@ describe('registerIpc', () => {
       ...session,
       message: '',
     })
+    expect(agentRuntimeService?.interrupt).toHaveBeenCalledWith(session)
   })
 
   it('returns version information from the app info service', async () => {

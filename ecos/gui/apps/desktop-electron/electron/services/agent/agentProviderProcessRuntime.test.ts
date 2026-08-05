@@ -58,6 +58,8 @@ describe('AgentProviderProcessRuntime', () => {
 
     const response = runtime.startSession({
       directory: '/work/demo',
+      knownProjects: [{ name: 'work', path: '/work' }],
+      projectRoot: '/work',
       providerId: 'codex',
     })
     const child = harness.children[0]
@@ -73,6 +75,8 @@ describe('AgentProviderProcessRuntime', () => {
       method: 'startSession',
       params: {
         directory: '/work/demo',
+        knownProjects: [{ name: 'work', path: '/work' }],
+        projectRoot: '/work',
         providerId: 'codex',
       },
     })
@@ -171,6 +175,61 @@ describe('AgentProviderProcessRuntime', () => {
       providerId: 'local',
       text: 'working',
       type: 'message',
+    })
+  })
+
+  it('forwards structured choice, status, and streaming fields', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          choice: {
+            promptId: 'confirm-1',
+            title: 'Confirm execution',
+            options: [
+              { id: 'confirm-yes', label: 'Confirm', value: '1' },
+              { id: 'confirm-no', label: 'Cancel', value: '2' },
+            ],
+            variant: 'buttons',
+          },
+          delta: 'working',
+          messageId: 'message-1',
+          sessionId: 'session-1',
+          status: 'awaiting_choice',
+          type: 'choice',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      choice: expect.objectContaining({
+        options: expect.arrayContaining([
+          { id: 'confirm-yes', label: 'Confirm', value: '1' },
+        ]),
+        variant: 'buttons',
+      }),
+      delta: 'working',
+      messageId: 'message-1',
+      providerId: 'local',
+      sessionId: 'session-1',
+      status: 'awaiting_choice',
+      type: 'choice',
     })
   })
 

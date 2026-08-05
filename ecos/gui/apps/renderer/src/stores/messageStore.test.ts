@@ -63,4 +63,75 @@ describe('messageStore', () => {
       },
     ])
   })
+
+  it('records one answer for the matching choice prompt', () => {
+    const store = useMessageStore()
+    const choice = {
+      promptId: 'prompt-1',
+      title: 'Choose a stage',
+      options: [
+        { id: 'prompt-1-1', label: 'place', value: '1' },
+        { id: 'prompt-1-2', label: 'route', value: '2' },
+      ],
+      variant: 'list' as const,
+    }
+
+    store.addChoice(choice, 'choice-message')
+
+    expect(store.answerChoice(choice.promptId, choice.options[0])).toBe(true)
+    expect(store.answerChoice(choice.promptId, choice.options[1])).toBe(false)
+    expect(store.messages[0]).toMatchObject({
+      answeredOptionId: 'prompt-1-1',
+      id: 'choice-message',
+      type: 'choice',
+    })
+  })
+
+  it('merges tool deltas with the same provider message id', () => {
+    const store = useMessageStore()
+
+    store.upsertAgentEvent({
+      delta: 'Inspecting inputs.\n',
+      messageId: 'turn-1-tool',
+      type: 'tool',
+    })
+    store.upsertAgentEvent({
+      delta: 'Validating proposal.\n',
+      messageId: 'turn-1-tool',
+      type: 'tool',
+    })
+
+    expect(store.messages).toMatchObject([
+      {
+        content: 'Inspecting inputs.\nValidating proposal.\n',
+        id: 'turn-1-tool',
+        status: 'loading',
+        type: 'tool',
+      },
+    ])
+
+    store.finishStreamingMessages()
+    expect(store.messages[0]?.status).toBe('done')
+  })
+
+  it('appends local flow progress into one loading tool timeline', () => {
+    const store = useMessageStore()
+
+    store.appendToolProgress('Running place.')
+    store.appendToolProgress(
+      'Completed place. Saved: /runs/gcd/place_dreamplace/output/gcd_place.def.gz',
+    )
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      status: 'loading',
+      type: 'tool',
+    })
+    expect(store.messages[0]?.content).toContain('Running place.')
+    expect(store.messages[0]?.content).toContain('Completed place.')
+
+    store.finishToolProgress()
+    expect(store.messages[0]?.status).toBe('done')
+  })
 })
+

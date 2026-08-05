@@ -24,6 +24,7 @@
         >
           <router-view />
         </div>
+        <HomeAgentDrawer v-if="!isWorkspaceRoute" />
         <ECOSTerminal
           :expanded="terminalExpanded"
           :maximized="terminalPanelMaximized"
@@ -142,6 +143,7 @@ import {
 } from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
+import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
@@ -156,6 +158,7 @@ import {
 } from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
+import HomeAgentDrawer from '@/components/HomeAgentDrawer.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
@@ -185,6 +188,7 @@ const router = useRouter()
 const themeStore = useThemeStore()
 const route = useRoute()
 const isWelcome = computed(() => route.path === '/')
+const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
 const {
   loadRecentProjects,
   currentProject,
@@ -253,8 +257,14 @@ async function createWorkspaceFromAgent(
   config: WorkspaceConfig,
   contract: DesktopAgentWorkspaceSetupContract,
 ): Promise<import('@/composables/agentWorkspaceSetup').AgentWorkspaceCreationResult> {
+  const agentShell = useAgentShellStore()
+  agentShell.beginPreserveForAgentWorkspaceSwitch()
   const success = await newProject(config)
-  if (!success) return { created: false, error: lastWorkspaceCreationError.value }
+  if (!success) {
+    agentShell.consumePreserveMessages()
+    agentShell.consumePreserveSession()
+    return { created: false, error: lastWorkspaceCreationError.value }
+  }
   const workspacePath = currentProject.value?.path
   if (!workspacePath) throw new Error('Workspace creation did not return a project path.')
   const api = desktopApi.value ?? (await waitForDesktopApi())
@@ -264,7 +274,14 @@ async function createWorkspaceFromAgent(
     `${JSON.stringify(contract, null, 2)}\n`,
   )
   await syncProjectManagedWorkspace(config)
-  await router.push('/workspace')
+  agentShell.closeHomeAgent()
+  agentShell.setPendingPostCreateFlow({
+    setupId: contract.setup_id,
+    workspacePath,
+  })
+  agentShell.setMode('workspace')
+  agentShell.expandWorkspaceChat()
+  await router.push('/workspace/home')
   await nextTick()
   return { created: true, workspacePath }
 }

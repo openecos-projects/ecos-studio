@@ -86,6 +86,9 @@ class _JsonLineRpcProcessClient:
         process = self._process
         if process is None:
             return
+        for pending in tuple(self._pending.values()):
+            pending.put({"error": {"message": "Codex request interrupted"}})
+        self._pending.clear()
         try:
             if process.stdin:
                 process.stdin.close()
@@ -99,6 +102,15 @@ class _JsonLineRpcProcessClient:
                 process.kill()
                 process.wait(timeout=2)
         self._process = None
+
+    def interrupt_turn(self, turn_id: str) -> None:
+        self._notifications.put(
+            {
+                "method": "error",
+                "params": {"error": {"code": "interrupted"}, "turnId": turn_id},
+            }
+        )
+        self.close()
 
     def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         process = self._process

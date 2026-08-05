@@ -92,6 +92,7 @@ export const desktopApiIpcChannels = {
   agentStart: 'agent:start',
   agentStartSession: 'agent:start-session',
   agentSendMessage: 'agent:send-message',
+  agentInterrupt: 'agent:interrupt',
   shellCreateSession: 'shell:create-session',
   shellWrite: 'shell:write',
   shellResize: 'shell:resize',

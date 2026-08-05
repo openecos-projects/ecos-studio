@@ -38,6 +38,7 @@ import {
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
+  type DesktopAgentInterruptRequest,
   type DesktopAgentWorkspaceRerunContract,
   type DesktopAgentSendMessageRequest,
   type DesktopAgentStartRequest,
@@ -591,7 +592,7 @@ export function registerIpc(
 
   const requireAgentSessionOwner = (
     sender: IpcMainInvokeEvent['sender'],
-    request: DesktopAgentSendMessageRequest,
+    request: DesktopAgentInterruptRequest | DesktopAgentSendMessageRequest,
   ): void => {
     const providerId = readAgentProviderId(request)
     const subscription = agentSessionSubscriptions.get(
@@ -1502,6 +1503,12 @@ export function registerIpc(
     return await requireAgentRuntime(services).sendMessage(agentRequest)
   })
 
+  handle(desktopApiIpcChannels.agentInterrupt, async (event, request) => {
+    const agentRequest = readAgentInterruptRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    await requireAgentRuntime(services).interrupt(agentRequest)
+  })
+
   handle(desktopApiIpcChannels.shellCreateSession, async (event, options) => {
     const sender = event.sender
     const isSenderDestroyed = (): boolean =>
@@ -1581,10 +1588,39 @@ function readAgentStartRequest(value: unknown): DesktopAgentStartRequest {
 
 function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionRequest {
   const record = readAgentRecord(value)
+  const mode = record.mode
+  const projectRoot =
+    typeof record.projectRoot === 'string' && record.projectRoot.trim()
+      ? record.projectRoot.trim()
+      : undefined
+  const knownProjects = readAgentKnownProjects(record.knownProjects)
   return {
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
+    mode: mode === 'home' || mode === 'workspace' ? mode : undefined,
+    ...(projectRoot ? { projectRoot } : {}),
+    ...(knownProjects ? { knownProjects } : {}),
   }
+}
+
+function readAgentKnownProjects(
+  value: unknown,
+): DesktopAgentStartSessionRequest['knownProjects'] {
+  if (!Array.isArray(value)) return undefined
+  const projects = value
+    .slice(0, 32)
+    .map((item) => {
+      if (!isRecord(item)) return null
+      const path = typeof item.path === 'string' ? item.path.trim() : ''
+      if (!path) return null
+      const name =
+        typeof item.name === 'string' && item.name.trim()
+          ? item.name.trim()
+          : path.split(/[/\\]/).filter(Boolean).at(-1) || path
+      return { name, path }
+    })
+    .filter((item): item is { name: string; path: string } => item !== null)
+  return projects.length > 0 ? projects : undefined
 }
 
 function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageRequest {
@@ -1595,6 +1631,14 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
   }
   return {
     message,
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readAgentInterruptRequest(value: unknown): DesktopAgentInterruptRequest {
+  const record = readAgentRecord(value)
+  return {
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
   }

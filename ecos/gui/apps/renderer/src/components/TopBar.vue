@@ -69,6 +69,17 @@
         aria-hidden="true"
       ></span>
       <button
+        type="button"
+        class="window-btn"
+        :class="{ active: chatButtonActive }"
+        title="ECOS Agent"
+        aria-label="ECOS Agent"
+        :aria-pressed="chatButtonActive"
+        @click="handleAgentChatClick"
+      >
+        <i class="ri-chat-3-line text-base" aria-hidden="true"></i>
+      </button>
+      <button
         @click="toggleTheme"
         class="window-btn theme-btn"
         :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'"
@@ -182,7 +193,9 @@
 import type { AppMenuAction } from '@ecos-studio/shared'
 import { appMenuActionIds } from '@ecos-studio/shared'
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useThemeStore } from '@/stores/themeStore'
+import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useRoute, useRouter } from 'vue-router'
 import type { DesktopApi } from '@ecos-studio/shared'
 import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
@@ -224,10 +237,25 @@ const workspaceFocusId = computed(
 )
 
 const themeStore = useThemeStore()
+const agentShell = useAgentShellStore()
+const { homeAgentOpen, workspaceChatExpanded } = storeToRefs(agentShell)
 const isDark = computed(() => themeStore.themeName === 'dark')
+const chatButtonActive = computed(() =>
+  isWorkspaceRoute.value ? workspaceChatExpanded.value : homeAgentOpen.value,
+)
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const toggleTheme = () => {
   themeStore.toggleTheme()
+}
+
+function handleAgentChatClick(): void {
+  activeMenu.value = null
+  quickMenuOpen.value = false
+  if (isWorkspaceRoute.value) {
+    agentShell.toggleWorkspaceChat()
+    return
+  }
+  agentShell.toggleHomeAgent()
 }
 
 const handleGoHome = () => {
@@ -801,6 +829,11 @@ const handleClose = async () => {
 .window-btn:hover {
   background: var(--bg-secondary);
   color: var(--text-primary);
+}
+
+.window-btn.active {
+  background: var(--bg-secondary);
+  color: var(--accent-color);
 }
 
 .theme-btn {

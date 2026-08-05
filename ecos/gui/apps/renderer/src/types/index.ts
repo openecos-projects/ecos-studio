@@ -1,4 +1,5 @@
 import type {
+  DesktopAgentChoice,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
   WorkspaceStatus as SharedWorkspaceStatus,
@@ -42,7 +43,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'info' | 'map'
+  type?: 'text' | 'image' | 'info' | 'map' | 'choice' | 'tool'
   status?: 'loading' | 'done' | 'error'
   image?: {
     url: string
@@ -53,6 +54,8 @@ export interface Message {
   }
   infoData?: InfoData
   mapData?: MapData
+  choice?: DesktopAgentChoice
+  answeredOptionId?: string
 }
 
 export interface Thumbnail {

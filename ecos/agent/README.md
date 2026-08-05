@@ -48,37 +48,76 @@ Agent 仅接受可执行的 `ECOS_AGENT_CODEX_BIN`，否则回退到 GUI 进程 
 
 ## 在 ECOS Studio 中使用
 
-打开桌面应用后，进入 Agent 聊天面板，按提示选择操作：`1` 为运行完整流程，
-`2` 为从特定阶段重跑。Agent 会在关键位置显示待确认的结构化合同；确认前不会
-执行流程。
+Agent 区分 **Project**（含 `project.json` 的容器）与 **Workspace**（可打开跑
+flow 的子目录）。Design Name 是设计标识（`parameters.design`），不必等于
+Workspace 目录名。
 
-### 1. 运行完整流程
+按上下文分流：
 
-此功能用于从 RTL 开始创建 workspace 并执行完整 ECC 流程。
+- **未打开 workspace（首页）**：Topbar Chat 打开右侧 Agent 抽屉。先选择或新建
+  Project，再创建其下的 Workspace 并运行完整流程。
+- **已打开 workspace**：Topbar Chat 展开右侧聊天栏（Home / 步骤页共用）。欢迎语
+  同时展示 Project 与 Workspace。操作是「修改参数（只保存）」「从指定阶段重跑」
+  「继续未完成 flow」「在当前 Project 下新建 Workspace」。Standalone workspace
+  （无 `project.json` 父目录）不提供第 4 项。
 
-1. 在 Agent 聊天面板输入 `1`。
-2. 依次填写项目根目录、流程终止阶段、设计名、RTL 文件、可选 filelist/SDC、
-   PDK 路径、顶层模块、时钟与物理设计参数。
-3. 检查 Agent 展示的 workspace 设置合同。需要修改时，可以用自然语言说明
-   需要调整的字段。
-4. 选择确认执行。ECOS Studio 创建 workspace，并通过固定 ECC RPC 启动完整流程。
-5. 只有 ECC 返回终态成功后，Agent 才会报告该次 workspace 创建和流程执行成功；
+Agent 会将操作、重跑源、阶段、执行范围和最终确认显示为结构化选项；合同确认前
+不会执行流程。运行时状态条显示 Agent 状态，工具活动合并在可展开的 Tool 卡中。
+可以 Stop 中断当前 turn，也可排队一条后续消息。
+
+### 1. 首页：先 Project，再 Workspace
+
+此功能用于在 Project 下创建 Workspace，并从 RTL 执行完整 ECC 流程。
+
+1. 在首页打开 Topbar Chat，点击“在 Project 下创建 Workspace 并运行完整 RTL 到
+   GDS 流程”。
+2. 选择「使用已有 Project」或「新建 Project」；已有 Project 可从 Project
+   Management 历史列表选择，或输入含 `project.json` 的根目录。
+3. 填写 Workspace Name（子目录名，如 `ws_0001`）、Design Name、流程终止阶段、
+   RTL；可选 filelist/SDC 可点“跳过”或“使用推荐路径”，PDK/默认参数可点
+   “使用推荐/默认值”，也可继续手动输入。Workspace 路径为
+   `<project_root>/<workspace_name>`。
+4. 检查 Agent 展示的设置合同（Project Root / Workspace / Design Name 分栏）。
+   需要修改时，可以用自然语言说明需要调整的字段。
+5. 点击“确认并开始运行”。ECOS Studio 创建 workspace，写入 `project.json`，进入
+   工程并展开侧栏 Agent，再通过固定 ECC RPC 启动完整流程；点击“取消”不会创建
+   workspace 或执行 ECC。
+6. 只有 ECC 返回终态成功后，Agent 才会报告该次 workspace 创建和流程执行成功；
    失败会报告失败原因，不会将未完成流程标记为成功。
 
-### 2. 从特定阶段重跑
+### 2. Workspace：从特定阶段重跑
 
-此功能用于基于已有 workspace 的可验证产物，从指定阶段开始在隔离 workspace
-中重跑。原始 workspace 不会被覆盖。
+此功能用于基于当前已打开 workspace 的可验证产物，从指定阶段开始在隔离
+workspace 中重跑。原始 workspace 不会被覆盖。
 
-1. 在 Agent 聊天面板输入 `2`。
-2. 输入设计名，并确认当前 GUI workspace 或填写已有 source workspace 路径。
+1. 在已打开的工程中展开 Agent，点击“从指定阶段重跑”。
+2. 确认当前 workspace 作为 source（可按需改选）；设计名由当前工程推断。
 3. Agent 从该 workspace 的流程记录和产物中发现允许重跑的阶段；只能选择有
    完成证据的阶段。
 4. 选择目标阶段，描述需要调整的参数，并选择单阶段执行或继续执行到流程终点。
 5. 检查冻结的重跑合同，包括源/目标 workspace、目标阶段、终止阶段、参数补丁和
    执行范围。
-6. 选择确认执行。ECOS Studio 创建隔离重跑 workspace，并通过固定 ECC RPC
-   执行合同中的重跑动作。
+6. 点击“确认并开始运行”。ECOS Studio 创建隔离重跑 workspace，并通过固定 ECC
+   RPC 执行合同中的重跑动作；点击“取消”会返回操作选择，不执行重跑。
+
+### 3. Workspace：继续未完成 flow
+
+对齐 Agent 接入前的 GUI：在当前 workspace 原地执行 `runAllFlow({ rerun: false })`。
+确认合同后不会创建隔离 target。
+
+### 4. Workspace：修改参数（只保存）
+
+描述参数变更并确认合同后，GUI 将补丁写入当前 workspace 的
+`home/parameters.json`，**不会**自动跑 flow。
+
+### 5. Workspace：在当前 Project 下新建 Workspace
+
+当 Agent 已绑定 Project Root 时可选。跳过 Project 选择，直接询问 Workspace
+Name 与 Design Name（可默认继承当前设计名），其余 setup 与首页相同；创建成功后
+仍自动 `runAllFlow` 并打开新 workspace。
+
+选择卡作答后会保留“已选择”状态且不可重复点击。底层仍发送兼容状态机的选项值，
+但用户不需要手动输入数字。
 
 ## Codex CLI 在哪里发挥作用
 

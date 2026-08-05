@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { DesktopAgentExecutionContract } from '@ecos-studio/shared'
+import type {
+  DesktopAgentChoice,
+  DesktopAgentChoiceOption,
+  DesktopAgentEvent,
+  DesktopAgentExecutionContract,
+} from '@ecos-studio/shared'
 import type { Message, Thumbnail, InfoData, MapData } from '../types'
 
 // 生成唯一 ID
@@ -121,6 +126,92 @@ export const useMessageStore = defineStore('messages', () => {
       })),
     })
 
+  const addChoice = (choice: DesktopAgentChoice, id = generateId()): string => {
+    messages.value.push({
+      id,
+      role: 'assistant',
+      content: choice.title,
+      type: 'choice',
+      status: 'done',
+      choice,
+    })
+    return id
+  }
+
+  const answerChoice = (promptId: string, option: DesktopAgentChoiceOption): boolean => {
+    const message = messages.value.find(
+      (candidate) => candidate.choice?.promptId === promptId,
+    )
+    if (
+      !message?.choice ||
+      message.answeredOptionId ||
+      !message.choice.options.some((candidate) => candidate.id === option.id)
+    ) {
+      return false
+    }
+    message.answeredOptionId = option.id
+    return true
+  }
+
+  const upsertAgentEvent = (event: DesktopAgentEvent): string => {
+    const id = event.messageId ?? generateId()
+    const existing = messages.value.find((message) => message.id === id)
+    if (existing) {
+      if (event.delta) existing.content += event.delta
+      else if (event.text) existing.content = event.text
+      existing.status =
+        event.type === 'error' ? 'error' : event.delta ? 'loading' : 'done'
+      return id
+    }
+    messages.value.push({
+      id,
+      role: 'assistant',
+      content: event.delta ?? event.text ?? '',
+      type: event.type === 'tool' ? 'tool' : 'text',
+      status: event.type === 'error' ? 'error' : event.delta ? 'loading' : 'done',
+    })
+    return id
+  }
+
+  const finishStreamingMessages = (): void => {
+    for (const message of messages.value) {
+      if (message.role === 'assistant' && message.status === 'loading') {
+        message.status = 'done'
+      }
+    }
+  }
+
+  /**
+   * Append a local progress line into the active tool timeline (flow / rerun prep).
+   */
+  const appendToolProgress = (text: string): string => {
+    const line = text.endsWith('\n') ? text : `${text}\n`
+    const existing = [...messages.value]
+      .reverse()
+      .find((message) => message.type === 'tool' && message.status === 'loading')
+    if (existing) {
+      existing.content += line
+      return existing.id
+    }
+    const id = generateId()
+    messages.value.push({
+      id,
+      role: 'assistant',
+      content: line,
+      type: 'tool',
+      status: 'loading',
+    })
+    return id
+  }
+
+  const finishToolProgress = (): void => {
+    for (const message of messages.value) {
+      if (message.type === 'tool' && message.status === 'loading') {
+        message.status = 'done'
+      }
+    }
+  }
+
   /**
    * 添加 Map 消息（展示热力图/密度图）
    */
@@ -163,6 +254,12 @@ export const useMessageStore = defineStore('messages', () => {
     addImageMessage,
     addInfoMessage,
     addExecutionContract,
+    addChoice,
+    answerChoice,
+    upsertAgentEvent,
+    finishStreamingMessages,
+    appendToolProgress,
+    finishToolProgress,
     addMapMessage,
     removeMessage,
     clearMessages,

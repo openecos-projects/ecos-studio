@@ -350,6 +350,7 @@ const desktopApi: DesktopApi = {
     },
   },
   agent: {
+    interrupt: (request) => invokeDesktop(desktopApiIpcChannels.agentInterrupt, request),
     start: (request) => invokeDesktop(desktopApiIpcChannels.agentStart, request),
     startSession: (request) =>
       invokeDesktop(desktopApiIpcChannels.agentStartSession, request),

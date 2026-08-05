@@ -19,6 +19,7 @@ from ecos_agent.messages import (
     operation_prompt,
     optional_file_prompt,
     pdk_prompt,
+    project_mode_prompt,
     project_root_prompt,
     rerun_design_prompt,
     rerun_parameter_prompt,
@@ -26,8 +27,10 @@ from ecos_agent.messages import (
     rerun_stage_prompt,
     rerun_workspace_prompt,
     rtl_prompt,
+    source_run_prompt,
     workspace_confirmation_prompt,
     workspace_execution_started,
+    workspace_name_prompt,
 )
 from ecos_agent.workspace_rerun import (
     GuiWorkspaceRerunContract,
@@ -65,6 +68,7 @@ def _confirm_workspace_execution(provider: Any, session: Any, message: str) -> N
     if message == "2":
         provider._reset(session)
         provider._emit(session, "message", cancellation_message(session.language))
+        provider._emit_phase_choice(session)
         return
     try:
         proposed = GuiWorkspaceSetupProposal.model_validate(
@@ -76,10 +80,12 @@ def _confirm_workspace_execution(provider: Any, session: Any, message: str) -> N
                     "recommended_defaults": session.workspace_setup.model_dump(mode="json"),
                     "workspace_inputs": _workspace_inputs_payload(session.workspace_inputs),
                     "filesystem_roots": list(workspace_search_roots(session.workspace_inputs.project_root)),
-                    "_progress_callback": lambda text: provider._emit(session, "tool", text),
+                    "_progress_callback": lambda text: provider._progress(session, text),
+                    "_register_interrupt": lambda callback: provider._register_interrupt(session, callback),
                 }
             )
         )
+        provider._check_interrupted(session)
         corrected_setup, corrected_inputs = provider._corrected_workspace_state(session, proposed, message)
         workspace_setup_contract(
             corrected_setup,
@@ -88,8 +94,11 @@ def _confirm_workspace_execution(provider: Any, session: Any, message: str) -> N
             session.workspace_setup_id or "pending",
         )
     except (CodexProviderError, ValueError) as exc:
+        provider._check_interrupted(session)
+        provider._raise_if_interrupted(exc)
         provider._emit(session, "error", f"Unable to correct the workspace specification: {exc}")
         provider._emit(session, "message", workspace_confirmation_prompt(session.language))
+        provider._emit_phase_choice(session)
         return
     session.workspace_setup = corrected_setup
     session.workspace_inputs = corrected_inputs
@@ -116,6 +125,7 @@ def _handle_workspace_rerun_result(provider: Any, session: Any, message: str) ->
     provider._emit(session, "error", f"Workspace rerun failed: {error}")
     provider._emit(session, "message", confirmation_menu(session.language))
     session.phase = "confirmation"
+    provider._emit_phase_choice(session)
 
 
 def _rerun_resolver(session: Any) -> GuiWorkspaceRerunResolver:
@@ -125,27 +135,31 @@ def _rerun_resolver(session: Any) -> GuiWorkspaceRerunResolver:
 
 
 def _propose_gui_workspace_setup(context: dict[str, Any]) -> GuiWorkspaceSetupProposal:
-    progress_callback, request_context = _gui_workspace_request_context(context)
+    progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
     provider = _gui_workspace_codex_provider(request_context, progress_callback)
+    register_interrupt(provider.interrupt)
     try:
         return GuiWorkspaceSetupProposal.model_validate(provider.propose_gui_workspace_setup(request_context))
     finally:
+        register_interrupt(None)
         provider.close()
 
 
 def _propose_gui_workspace_path_discovery(context: dict[str, Any]) -> GuiWorkspaceSetupProposal:
-    progress_callback, request_context = _gui_workspace_request_context(context)
+    progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
     provider = _gui_workspace_codex_provider(request_context, progress_callback)
+    register_interrupt(provider.interrupt)
     try:
         return GuiWorkspaceSetupProposal.model_validate(provider.propose_gui_workspace_path_discovery(request_context))
     finally:
+        register_interrupt(None)
         provider.close()
 
 
 def _propose_gui_workspace_rerun_patch(
     context: dict[str, Any],
 ) -> GuiWorkspaceRerunParameterProposal:
-    progress_callback, request_context = _gui_workspace_request_context(context)
+    progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
     workspace = request_context.get("workspace")
     if not isinstance(workspace, str) or not workspace:
         raise CodexProviderError("GUI rerun workspace is missing", failure_class="missing_input")
@@ -157,21 +171,26 @@ def _propose_gui_workspace_rerun_patch(
         runtime_workspace_roots=(source,),
         progress_callback=progress_callback,
     )
+    register_interrupt(provider.interrupt)
     try:
         return GuiWorkspaceRerunParameterProposal.model_validate(
             provider.propose_gui_workspace_rerun_patch(request_context)
         )
     finally:
+        register_interrupt(None)
         provider.close()
 
 
 def _gui_workspace_request_context(
     context: Mapping[str, Any],
-) -> tuple[Callable[[str], None] | None, dict[str, Any]]:
+) -> tuple[Callable[[str], None] | None, Callable[[Callable[[], None] | None], None], dict[str, Any]]:
     callback = context.get("_progress_callback")
-    return (callback if callable(callback) else None), {
-        key: value for key, value in context.items() if key != "_progress_callback"
-    }
+    register_interrupt = context.get("_register_interrupt")
+    return (
+        callback if callable(callback) else None,
+        register_interrupt if callable(register_interrupt) else lambda _callback: None,
+        {key: value for key, value in context.items() if not key.startswith("_")},
+    )
 
 
 def _gui_workspace_codex_provider(
@@ -319,6 +338,10 @@ def _prompt_for_phase(session: _Session) -> str:
     prompts = {
         "operation": operation_prompt(session.language),
         "rerun_design": rerun_design_prompt(session.language),
+        "rerun_source_run": source_run_prompt(
+            session.language,
+            (session.rerun_workspace_path,) if session.rerun_workspace_path else (),
+        ),
         "rerun_workspace": rerun_workspace_prompt(
             session.language, session.rerun_workspace_path
         ),
@@ -331,9 +354,16 @@ def _prompt_for_phase(session: _Session) -> str:
             (),
         ),
         "rerun_scope": rerun_scope_prompt(session.language),
-        "workspace_project_root": project_root_prompt(session.language),
+        "workspace_project_mode": project_mode_prompt(session.language),
+        "workspace_project_root": project_root_prompt(
+            session.language, creating=session.creating_project
+        ),
+        "workspace_name": workspace_name_prompt(session.language),
+        "workspace_design": design_name_prompt(
+            session.language,
+            session.inherited_design_name or session.workspace_inputs.project_name or "",
+        ),
         "workspace_flow_end": flow_end_prompt(session.language),
-        "workspace_design": design_name_prompt(session.language),
         "workspace_rtl": rtl_prompt(session.language, _recommended_path(session, "rtl")),
         "workspace_filelist": optional_file_prompt(
             session.language, "filelist", ".f", _recommended_path(session, "filelist")
@@ -379,7 +409,7 @@ def _flow_steps() -> list[str]:
 
 
 def _operation_choice(message: str) -> str | None:
-    match = re.search(r"(?<![0-9])([12])(?![0-9])", message)
+    match = re.search(r"(?<![0-9])([1234])(?![0-9])", message)
     return match.group(1) if match else None
 
 

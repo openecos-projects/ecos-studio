@@ -36,6 +36,7 @@ import type {
 } from './desktopShell.ts'
 import type {
   DesktopAgentEvent,
+  DesktopAgentInterruptRequest,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
   DesktopAgentWorkspaceRerunPrepareResult,
@@ -302,6 +303,7 @@ export interface DesktopApi {
   }
   ecc: EccRuntimeApi
   agent?: {
+    interrupt(request: DesktopAgentInterruptRequest): Promise<void>
     start(request: DesktopAgentStartRequest): Promise<void>
     startSession(
       request: DesktopAgentStartSessionRequest,

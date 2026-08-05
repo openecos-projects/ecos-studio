@@ -46,6 +46,7 @@ async function loadDesktopBridge() {
       }
     }
     agent: {
+      interrupt(request: unknown): Promise<void>
       onEvent(listener: (event: unknown) => void): () => void
       sendMessage(request: unknown): Promise<unknown>
       start(request: unknown): Promise<void>
@@ -212,6 +213,7 @@ describe('preload desktop bridge contract', () => {
       messageId: 'message-1',
       sessionId: session.sessionId,
     })
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
 
     await expect(
       bridge.agent.start({ providerId: session.providerId }),
@@ -223,6 +225,7 @@ describe('preload desktop bridge contract', () => {
         sessionId: session.sessionId,
       },
     )
+    await expect(bridge.agent.interrupt(session)).resolves.toBeUndefined()
     const unsubscribe = bridge.agent.onEvent(listener)
     const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
     eventListener?.({}, { ...session, text: 'Select language', type: 'message' })
@@ -242,6 +245,11 @@ describe('preload desktop bridge contract', () => {
       3,
       desktopApiIpcChannels.agentSendMessage,
       { ...session, message: '1' },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      4,
+      desktopApiIpcChannels.agentInterrupt,
+      session,
     )
     expect(ipcRenderer.on).toHaveBeenCalledWith(
       desktopApiEventChannels.agentEvent,
