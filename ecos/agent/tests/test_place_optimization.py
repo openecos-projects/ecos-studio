@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.place_optimization import OptimizationRunSpec, append_evaluation, generate_candidates
+from ecos_agent.place_optimization import (
+    OptimizationEvaluation,
+    OptimizationRunSpec,
+    append_evaluation,
+    generate_candidates,
+)
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunSource
 
 
@@ -47,6 +52,11 @@ def test_rejects_an_empty_target_density_interval() -> None:
         )
 
 
+def test_rejects_success_without_complete_fixed_rpc_evidence() -> None:
+    with pytest.raises(ValueError, match="evidence is incomplete"):
+        OptimizationEvaluation(candidate_id="candidate_1", status="succeeded")
+
+
 def test_appends_a_non_secret_evaluation_record(tmp_path: Path) -> None:
     append_evaluation(
         tmp_path / "memory.jsonl",
@@ -61,6 +71,28 @@ def test_appends_a_non_secret_evaluation_record(tmp_path: Path) -> None:
     record = json.loads((tmp_path / "memory.jsonl").read_text(encoding="utf-8"))
     assert record["status"] == "succeeded"
     assert record["metrics"] == {"place_hpwl": 12.5}
+
+
+def test_evaluation_memory_keeps_frozen_run_metadata_without_workspace_paths(tmp_path: Path) -> None:
+    append_evaluation(
+        tmp_path / "memory.jsonl",
+        run_spec=_spec(),
+        design_id="gcd",
+        protected_metrics=["place_hpwl"],
+        candidate_id="candidate_1",
+        status="failed",
+        value=0.7,
+        metrics={},
+        artifact_refs=[],
+        reason="execution_failed",
+    )
+
+    record = json.loads((tmp_path / "memory.jsonl").read_text(encoding="utf-8"))
+    assert record["fixed_rpc_operation"] == "candidate.rerun"
+    assert record["run_spec"]["seed"] == 3000
+    assert "source_workspace" not in record["run_spec"]
+    assert record["input_artifact_refs"] == []
+    assert record["error"] == "execution_failed"
 
 
 def test_freezes_baseline_and_four_candidates_as_isolated_rerun_contracts(tmp_path: Path) -> None:

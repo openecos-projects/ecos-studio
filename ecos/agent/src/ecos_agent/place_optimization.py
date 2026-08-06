@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,62 @@ class OptimizationCandidate(BaseModel):
 
     candidate_id: str
     value: float
+
+
+class OptimizationEvaluation(BaseModel):
+    """Terminal evidence reported by the fixed GUI RPC for one frozen candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(min_length=1, max_length=160)
+    status: Literal["succeeded", "failed", "cancelled", "blocked"]
+    metrics: dict[str, float] = Field(default_factory=dict, max_length=32)
+    artifact_refs: list[str] = Field(default_factory=list, max_length=16)
+    reason: str | None = Field(default=None, pattern=r"^[a-z_]{1,64}$")
+
+    @field_validator("metrics")
+    @classmethod
+    def validate_metrics(cls, value: dict[str, float]) -> dict[str, float]:
+        if any(not math.isfinite(metric) for metric in value.values()):
+            raise ValueError("optimization metrics are invalid")
+        return value
+
+    @field_validator("artifact_refs")
+    @classmethod
+    def validate_artifact_refs(cls, value: list[str]) -> list[str]:
+        if any(Path(item).is_absolute() or ".." in Path(item).parts for item in value):
+            raise ValueError("optimization artifact reference is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_success_evidence(self) -> "OptimizationEvaluation":
+        hpwl = self.metrics.get("place_hpwl")
+        if self.status == "succeeded" and (not self.artifact_refs or hpwl is None or hpwl <= 0):
+            raise ValueError("successful optimization evidence is incomplete")
+        return self
+
+
+class OptimizationResult(BaseModel):
+    """A complete batch result; values remain derived from the frozen contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(min_length=1, max_length=128)
+    evaluations: list[OptimizationEvaluation] = Field(min_length=5, max_length=5)
+
+    @field_validator("run_id")
+    @classmethod
+    def validate_run_id(cls, value: str) -> str:
+        if not _RUN_ID.fullmatch(value):
+            raise ValueError("optimization identifier is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_candidates(self) -> "OptimizationResult":
+        ids = [item.candidate_id for item in self.evaluations]
+        if len(set(ids)) != len(ids):
+            raise ValueError("optimization candidates are duplicated")
+        return self
 
 
 class OptimizationRequest(BaseModel):
@@ -189,19 +246,30 @@ def freeze_rerun_contracts(
 def append_evaluation(
     path: Path,
     *,
-    run_id: str,
+    run_id: str | None = None,
+    run_spec: OptimizationRunSpec | None = None,
+    design_id: str | None = None,
+    protected_metrics: list[str] | None = None,
+    input_artifact_refs: list[str] | None = None,
     candidate_id: str,
     status: Literal["planned", "running", "succeeded", "failed", "cancelled", "blocked"],
     value: float,
     metrics: dict[str, float],
     artifact_refs: list[str],
+    reason: str | None = None,
 ) -> None:
+    run_id = run_spec.run_id if run_spec is not None else run_id
     if not run_id or not candidate_id or not math.isfinite(value):
         raise ValueError("optimization evaluation is invalid")
     if any(not math.isfinite(metric) for metric in metrics.values()):
         raise ValueError("optimization metrics are invalid")
     if any(Path(reference).is_absolute() or ".." in Path(reference).parts for reference in artifact_refs):
         raise ValueError("optimization artifact reference is invalid")
+    if input_artifact_refs and any(
+        Path(reference).is_absolute() or ".." in Path(reference).parts
+        for reference in input_artifact_refs
+    ):
+        raise ValueError("optimization input artifact reference is invalid")
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "schema_version": "ecos-place-optimization-evaluation.v1",
@@ -212,6 +280,27 @@ def append_evaluation(
         "parameter": {"place.target_density": value},
         "metrics": metrics,
         "artifact_refs": artifact_refs,
+        "fixed_rpc_operation": "candidate.rerun",
     }
+    if run_spec is not None:
+        record["run_spec"] = {
+            "budget": run_spec.budget,
+            "direction": run_spec.direction,
+            "knob_id": run_spec.knob_id,
+            "lower": run_spec.lower,
+            "objective": run_spec.objective,
+            "seed": run_spec.seed,
+            "upper": run_spec.upper,
+        }
+        record["design_id"] = design_id
+        record["input_artifact_refs"] = input_artifact_refs or []
+        record["protected_metrics"] = protected_metrics or []
+    if reason is not None:
+        record["error"] = reason
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def default_experiment_memory_path() -> Path:
+    root = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    return root / "ecos-agent" / "place-experiment-memory.jsonl"

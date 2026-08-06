@@ -97,6 +97,7 @@ export type {
 export { DESKTOP_CODEX_BIN_SETTING_KEY } from './contracts/desktopCodex.ts'
 export type {
   DesktopAgentEvent,
+  DesktopAgentPlaceOptimizationEvidence,
   DesktopAgentChoice,
   DesktopAgentChoiceOption,
   DesktopAgentContractField,

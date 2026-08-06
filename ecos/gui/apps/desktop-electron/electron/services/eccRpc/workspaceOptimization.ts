@@ -77,7 +77,10 @@ export async function executePlaceOptimization(
     }
   }
   const best = evaluations
-    .filter((item) => item.status === 'succeeded' && item.evidence)
+    .filter(
+      (item) =>
+        item.candidateId !== contracts[0]?.rerun_id && item.status === 'succeeded' && item.evidence,
+    )
     .sort((left, right) => left.evidence!.hpwl - right.evidence!.hpwl)[0]
   return { ...(best ? { bestCandidateId: best.candidateId } : {}), evaluations }
 }

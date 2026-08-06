@@ -48,6 +48,13 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('messageStore.finishStreamingMessages(event.sessionId)')
   })
 
+  it('returns fixed-RPC optimization evidence to the provider after every frozen candidate', () => {
+    expect(source).toContain('workspace_optimization_result:')
+    expect(source).toContain('candidate_id: rerun.rerun_id')
+    expect(source).toContain('artifact_refs: execution.artifactRefs')
+    expect(source).toContain('metrics: execution.metrics')
+  })
+
   it('keeps the transcript pinned while tool progress content grows in place', () => {
     expect(source).toContain('const stickToBottom = ref(true)')
     expect(source).toContain('@scroll.passive="onScrollContainerScroll"')

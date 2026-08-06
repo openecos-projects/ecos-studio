@@ -205,6 +205,12 @@ export interface DesktopAgentWorkspaceRerunExecuteRequest {
   token: string
 }
 
+export interface DesktopAgentPlaceOptimizationEvidence {
+  artifactRefs: string[]
+  hpwl: number
+  metrics: Record<string, number>
+}
+
 export interface DesktopAgentWorkspaceOptimizationPrepareRequest {
   candidateIndex: number
   token: string

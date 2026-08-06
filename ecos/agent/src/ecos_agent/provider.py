@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,7 +63,11 @@ from ecos_agent.place_assistant import PlaceAssistant
 from ecos_agent.place_contracts import PlaceEvidence
 from ecos_agent.place_evidence import build_place_evidence
 from ecos_agent.place_optimization import (
+    OptimizationEvaluation,
+    OptimizationResult,
     PlaceOptimizationContract,
+    append_evaluation,
+    default_experiment_memory_path,
     freeze_place_optimization_contract,
 )
 from ecos_agent.place_strategy import select_applicable_strategies
@@ -225,12 +230,14 @@ class EcosAgentProvider:
         workspace_path_recommender: _WorkspacePathRecommender | None = None,
         rerun_parameter_parser: _RerunParameterParser | None = None,
         place_assistant: PlaceAssistant | None = None,
+        experiment_memory_path: Path | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.place_assistant = place_assistant or PlaceAssistant.from_environment()
+        self.experiment_memory_path = experiment_memory_path or default_experiment_memory_path()
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
 
@@ -401,6 +408,7 @@ class EcosAgentProvider:
             "workspace_parameter_confirmation": self._confirm_workspace_parameter_update,
             "workspace_parameter_pending": self._handle_workspace_parameter_update_result,
             "place_optimization_confirmation": self._confirm_place_optimization,
+            "workspace_optimization_pending": self._handle_place_optimization_result,
             "confirmation": self._confirm_rerun_execution,
         }
         handler = handlers.get(session.phase)
@@ -1379,6 +1387,19 @@ class EcosAgentProvider:
         if contract is None:
             self._emit(session, "error", "The place optimization contract is missing.")
             return
+        for rerun_id, value in _optimization_candidate_values(contract).items():
+            append_evaluation(
+                self.experiment_memory_path,
+                run_spec=contract.run_spec,
+                design_id=contract.rerun_contracts[0].design_id,
+                input_artifact_refs=[contract.rerun_contracts[0].source_stage_artifact],
+                protected_metrics=contract.request.protected_metrics,
+                candidate_id=rerun_id,
+                status="planned",
+                value=value,
+                metrics={},
+                artifact_refs=[],
+            )
         self._emit(
             session,
             "workspace_optimization",
@@ -1386,6 +1407,45 @@ class EcosAgentProvider:
             workspace_optimization=contract.model_dump(mode="json"),
         )
         session.phase = "workspace_optimization_pending"
+
+    def _handle_place_optimization_result(self, session: _Session, message: str) -> None:
+        prefix = "workspace_optimization_result:"
+        contract = session.place_optimization_contract
+        if not message.startswith(prefix) or contract is None:
+            raise ValueError("Optimization result is invalid.")
+        try:
+            result = OptimizationResult.model_validate(json.loads(message[len(prefix) :]))
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ValueError("Optimization result is invalid.") from exc
+        values = _optimization_candidate_values(contract)
+        if result.run_id != contract.run_spec.run_id or {item.candidate_id for item in result.evaluations} != set(values):
+            raise ValueError("Optimization result is not bound to the frozen contract.")
+        for item in result.evaluations:
+            append_evaluation(
+                self.experiment_memory_path,
+                run_spec=contract.run_spec,
+                design_id=contract.rerun_contracts[0].design_id,
+                input_artifact_refs=[contract.rerun_contracts[0].source_stage_artifact],
+                protected_metrics=contract.request.protected_metrics,
+                candidate_id=item.candidate_id,
+                status=item.status,
+                value=values[item.candidate_id],
+                metrics=item.metrics,
+                artifact_refs=item.artifact_refs,
+                reason=item.reason,
+            )
+        best = _best_place_candidate(contract, result)
+        self._reset(session)
+        if best is None:
+            text = "The isolated place-only scan completed without a valid candidate HPWL result. The source workspace was not changed."
+        else:
+            text = (
+                f"The isolated place-only scan completed. Lowest recorded candidate place_hpwl: "
+                f"{best.candidate_id} ({best.metrics['place_hpwl']}). "
+                "This is not a PPA claim and the source workspace was not changed."
+            )
+        self._emit(session, "message", text)
+        self._emit_phase_choice(session)
 
     def _handle_workspace_rerun_result(self, session: _Session, message: str) -> None:
         _handle_workspace_rerun_result(self, session, message)
@@ -1839,6 +1899,39 @@ class EcosAgentProvider:
         session.workspace_contract = None
         session.workspace_continue_id = None
         session.workspace_parameter_update = None
+
+
+def _optimization_candidate_values(contract: PlaceOptimizationContract) -> dict[str, float]:
+    baseline_value = (
+        contract.run_spec.upper
+        if contract.run_spec.direction == "decrease"
+        else contract.run_spec.lower
+    )
+    values = {contract.rerun_contracts[0].rerun_id: baseline_value}
+    for rerun in contract.rerun_contracts[1:]:
+        patch = rerun.parameter_patch
+        if len(patch) != 1 or patch[0].knob_id != contract.run_spec.knob_id:
+            raise ValueError("Optimization contract is invalid.")
+        value = patch[0].value
+        if type(value) not in {int, float} or not math.isfinite(value):
+            raise ValueError("Optimization contract is invalid.")
+        values[rerun.rerun_id] = float(value)
+    return values
+
+
+def _best_place_candidate(
+    contract: PlaceOptimizationContract, result: OptimizationResult
+) -> OptimizationEvaluation | None:
+    baseline_id = contract.rerun_contracts[0].rerun_id
+    valid = [
+        item
+        for item in result.evaluations
+        if item.candidate_id != baseline_id
+        and item.status == "succeeded"
+        and (hpwl := item.metrics.get("place_hpwl")) is not None
+        and hpwl > 0
+    ]
+    return min(valid, key=lambda item: item.metrics["place_hpwl"]) if valid else None
 
 
 def main() -> int:
