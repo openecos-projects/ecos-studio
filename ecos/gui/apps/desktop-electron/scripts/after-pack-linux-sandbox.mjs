@@ -64,6 +64,7 @@ export async function validatePackagedAgent(appOutDir) {
       throw new Error('agent manifest does not match the bundled provider')
     }
     await execFileAsync(agentPath, ['--version'], { timeout: 10_000 })
+    await execFileAsync(agentPath, ['--knowledge-status'], { timeout: 10_000 })
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     throw new Error(

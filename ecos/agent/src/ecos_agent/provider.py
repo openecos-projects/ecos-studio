@@ -58,6 +58,8 @@ from ecos_agent.messages import (
     workspace_name_prompt,
     workspace_parameter_request_prompt,
 )
+from ecos_agent.place_assistant import PlaceAssistant
+from ecos_agent.place_evidence import build_place_evidence
 from ecos_agent.workspace_setup import (
     WorkspaceInputs,
     derive_project_name,
@@ -215,11 +217,13 @@ class EcosAgentProvider:
         workspace_setup_parser: _WorkspaceSetupParser | None = None,
         workspace_path_recommender: _WorkspacePathRecommender | None = None,
         rerun_parameter_parser: _RerunParameterParser | None = None,
+        place_assistant: PlaceAssistant | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
+        self.place_assistant = place_assistant or PlaceAssistant.from_environment()
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
 
@@ -335,6 +339,25 @@ class EcosAgentProvider:
         self.stopped = True
 
     def _handle_input(self, session: _Session, message: str) -> None:
+        if session.phase == "operation" and self.place_assistant is not None:
+            evidence = None
+            if session.mode == "workspace" and self.place_assistant.requires_evidence(message):
+                workspace = session.rerun_workspace_path
+                if workspace:
+                    try:
+                        evidence = build_place_evidence(Path(workspace))
+                    except ValueError as exc:
+                        self._emit(session, "error", f"Unable to collect Placement evidence: {exc}")
+            answer = self.place_assistant.reply(message, language=session.language, evidence=evidence)
+            if answer is not None:
+                self._emit(
+                    session,
+                    "message",
+                    answer.text,
+                    contract=answer.model_dump(mode="json"),
+                )
+                self._emit_phase_choice(session)
+                return
         handlers = {
             "operation": self._select_operation,
             "rerun_design": self._select_rerun_design,
