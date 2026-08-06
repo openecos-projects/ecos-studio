@@ -43,6 +43,7 @@ import {
   type DesktopAgentSendMessageRequest,
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
+  type DesktopCodexInstallProgressEvent,
   type RemoteContentFile,
   type RemoteContentListFilesRequest,
   type RemoteContentReadJsonFileRequest,
@@ -104,7 +105,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface DesktopBridgeServices {
-  agentRuntimeService?: AgentProviderRuntime
+  agentRuntimeService?: AgentProviderRuntime & {
+    syncEnvironmentOverrides?(
+      overrides: Record<string, string | undefined>,
+      request?: DesktopAgentStartRequest,
+    ): void
+  }
+  codexDependencyService?: {
+    getStatus(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    install(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    login(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    recheck(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    setBinPath(
+      pathValue: string,
+    ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    resolveBinPathForAgent(): Promise<string | undefined>
+    onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
+  }
   appInfoService: {
     getVersions(): Promise<VersionInfo>
   }
@@ -519,7 +536,8 @@ export function registerIpc(
   const workspaceHandleSubscriptions = new Map<
     string,
     {
-      directory: string
+      /** Request path and ECC-canonical path may both be registered for one handle. */
+      directories: Set<string>
       sender: IpcMainInvokeEvent['sender']
       onDestroyed: () => void
     }
@@ -624,7 +642,7 @@ export function registerIpc(
 
     const deliveredSenders = new Set<IpcMainInvokeEvent['sender']>()
     for (const subscription of workspaceHandleSubscriptions.values()) {
-      if (subscription.directory !== normalizedDirectory) continue
+      if (!subscription.directories.has(normalizedDirectory)) continue
       if (deliveredSenders.has(subscription.sender)) continue
       deliveredSenders.add(subscription.sender)
       sendEccEventToSender(subscription.sender, {
@@ -754,19 +772,25 @@ export function registerIpc(
     }
 
     const previous = workspaceHandleSubscriptions.get(workspaceHandle)
-    if (previous && typeof previous.sender.off === 'function') {
+    if (
+      previous &&
+      previous.sender !== sender &&
+      typeof previous.sender.off === 'function'
+    ) {
       previous.sender.off('destroyed', previous.onDestroyed)
     }
 
     const onDestroyed = (): void => {
       void closeTrackedWorkspaceHandle(workspaceHandle)
     }
+    const directories = previous?.directories ?? new Set<string>()
+    directories.add(normalizedDirectory)
     workspaceHandleSubscriptions.set(workspaceHandle, {
-      directory: normalizedDirectory,
+      directories,
       sender,
-      onDestroyed,
+      onDestroyed: previous?.sender === sender ? previous.onDestroyed : onDestroyed,
     })
-    if (typeof sender.once === 'function') {
+    if (previous?.sender !== sender && typeof sender.once === 'function') {
       sender.once('destroyed', onDestroyed)
     }
 
@@ -803,7 +827,7 @@ export function registerIpc(
     for (const [workspaceHandle, subscription] of workspaceHandleSubscriptions) {
       if (
         subscription.sender === sender &&
-        subscription.directory === normalizedDirectory
+        subscription.directories.has(normalizedDirectory)
       ) {
         return workspaceHandle
       }
@@ -929,9 +953,30 @@ export function registerIpc(
     ) {
       throw new Error('Workspace rerun target is not bound to this window.')
     }
-    const workspaceHandle = workspaceHandleForSender(event.sender, targetWorkspace)
+    let workspaceHandle =
+      workspaceHandleForSender(event.sender, targetWorkspace) ||
+      workspaceHandleForSender(event.sender, pending.contract.target_workspace)
     if (!workspaceHandle) {
-      throw new Error('Workspace rerun target is not active in this window.')
+      // openProject may have bound the window while ECC returned a different
+      // canonical directory than the contract path; open/track under both.
+      const opened = await services.eccRuntimeService.openWorkspace({
+        directory: targetWorkspace,
+      })
+      const openedHandle = workspaceHandleFromResult(opened)
+      const openedDirectory = workspaceDirectoryFromResult(opened)
+      if (!openedHandle) {
+        throw new Error('Workspace rerun target is not active in this window.')
+      }
+      trackWorkspaceHandle(event.sender, openedHandle, targetWorkspace)
+      trackWorkspaceHandle(
+        event.sender,
+        openedHandle,
+        pending.contract.target_workspace,
+      )
+      if (openedDirectory) {
+        trackWorkspaceHandle(event.sender, openedHandle, openedDirectory)
+      }
+      workspaceHandle = openedHandle
     }
     pendingWorkspaceRerunExecutions.delete(token)
     await executeWorkspaceRerun(
@@ -1406,25 +1451,33 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceCreate, async (event, request) => {
-    const result = await services.eccRuntimeService.createWorkspace(
-      request as EccWorkspaceCreateRequest,
-    )
+    const createRequest = request as EccWorkspaceCreateRequest
+    const result = await services.eccRuntimeService.createWorkspace(createRequest)
     const workspaceHandle = workspaceHandleFromResult(result)
     const directory = workspaceDirectoryFromResult(result)
-    if (workspaceHandle && directory) {
-      trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+    if (workspaceHandle) {
+      if (typeof createRequest.directory === 'string') {
+        trackWorkspaceHandle(event.sender, workspaceHandle, createRequest.directory)
+      }
+      if (directory) {
+        trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+      }
     }
     return result
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceOpen, async (event, request) => {
-    const result = await services.eccRuntimeService.openWorkspace(
-      request as EccWorkspaceOpenRequest,
-    )
+    const openRequest = request as EccWorkspaceOpenRequest
+    const result = await services.eccRuntimeService.openWorkspace(openRequest)
     const workspaceHandle = workspaceHandleFromResult(result)
     const directory = workspaceDirectoryFromResult(result)
-    if (workspaceHandle && directory) {
-      trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+    if (workspaceHandle) {
+      if (typeof openRequest.directory === 'string') {
+        trackWorkspaceHandle(event.sender, workspaceHandle, openRequest.directory)
+      }
+      if (directory) {
+        trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+      }
     }
     return result
   })
@@ -1485,7 +1538,46 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.agentStart, async (_event, request) => {
-    await requireAgentRuntime(services).start(readAgentStartRequest(request))
+    const agentRequest = readAgentStartRequest(request)
+    await applyCodexBinEnv(services, agentRequest)
+    await requireAgentRuntime(services).start(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentCodexGetStatus, async () => {
+    return await requireCodexDependencyService(services).getStatus()
+  })
+
+  handle(desktopApiIpcChannels.agentCodexRecheck, async () => {
+    return await requireCodexDependencyService(services).recheck()
+  })
+
+  handle(desktopApiIpcChannels.agentCodexInstall, async (event) => {
+    const sender = event.sender
+    const unsubscribe = requireCodexDependencyService(services).onProgress((payload) => {
+      if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return
+      if (typeof sender.send === 'function') {
+        sender.send(desktopApiEventChannels.agentCodexProgress, payload)
+      }
+    })
+    try {
+      return await requireCodexDependencyService(services).install()
+    } finally {
+      unsubscribe()
+      await applyCodexBinEnv(services)
+    }
+  })
+
+  handle(desktopApiIpcChannels.agentCodexLogin, async () => {
+    const status = await requireCodexDependencyService(services).login()
+    await applyCodexBinEnv(services)
+    return status
+  })
+
+  handle(desktopApiIpcChannels.agentCodexSetBinPath, async (_event, request) => {
+    const pathValue = readCodexBinPathRequest(request)
+    const status = await requireCodexDependencyService(services).setBinPath(pathValue)
+    await applyCodexBinEnv(services)
+    return status
   })
 
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
@@ -1585,6 +1677,38 @@ function requireAgentRuntime(services: DesktopBridgeServices): AgentProviderRunt
     )
   }
   return services.agentRuntimeService
+}
+
+function requireCodexDependencyService(
+  services: DesktopBridgeServices,
+): NonNullable<DesktopBridgeServices['codexDependencyService']> {
+  if (!services.codexDependencyService) {
+    throw new Error('Codex dependency service is unavailable.')
+  }
+  return services.codexDependencyService
+}
+
+async function applyCodexBinEnv(
+  services: DesktopBridgeServices,
+  request?: DesktopAgentStartRequest,
+): Promise<void> {
+  const runtime = services.agentRuntimeService
+  if (!runtime?.syncEnvironmentOverrides || !services.codexDependencyService) {
+    return
+  }
+  const binPath = await services.codexDependencyService.resolveBinPathForAgent()
+  runtime.syncEnvironmentOverrides(
+    { ECOS_AGENT_CODEX_BIN: binPath },
+    request,
+  )
+}
+
+function readCodexBinPathRequest(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (isRecord(value) && typeof value.path === 'string') {
+    return value.path
+  }
+  throw new Error('Invalid Codex binary path request')
 }
 
 function readAgentStartRequest(value: unknown): DesktopAgentStartRequest {

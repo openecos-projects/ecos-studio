@@ -46,6 +46,11 @@ import type {
   DesktopAgentStartSessionRequest,
   DesktopAgentStartSessionResponse,
 } from './desktopAgent.ts'
+import type {
+  DesktopCodexDependencyStatus,
+  DesktopCodexInstallProgressEvent,
+  DesktopCodexSetBinPathRequest,
+} from './desktopCodex.ts'
 
 export type DesktopSettingsValue =
   | string
@@ -312,6 +317,16 @@ export interface DesktopApi {
       request: DesktopAgentSendMessageRequest,
     ): Promise<DesktopAgentSendMessageResponse>
     onEvent(listener: (event: DesktopAgentEvent) => void): DesktopEventUnsubscribe
+    codex?: {
+      getStatus(): Promise<DesktopCodexDependencyStatus>
+      install(): Promise<DesktopCodexDependencyStatus>
+      login(): Promise<DesktopCodexDependencyStatus>
+      recheck(): Promise<DesktopCodexDependencyStatus>
+      setBinPath(request: DesktopCodexSetBinPathRequest): Promise<DesktopCodexDependencyStatus>
+      onProgress(
+        listener: (event: DesktopCodexInstallProgressEvent) => void,
+      ): DesktopEventUnsubscribe
+    }
   }
   shell: {
     createSession(options: DesktopShellSessionOptions): Promise<DesktopShellSession>

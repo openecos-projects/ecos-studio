@@ -12,11 +12,22 @@ ECOS Studio 负责 workspace、合同、执行和结果记录，使交互效率�
 ## 使用前准备
 
 打包版 ECOS Studio 已包含 Agent 的 Python 运行时，但**不包含 Codex CLI、
-登录状态或任何凭据**。使用 Agent 前，请自行安装并完成 Codex CLI 认证。
+登录状态或任何凭据**。Agent 依赖本机可用的 Codex CLI。
 
-### 配置 Codex CLI（使 GUI 可识别）
+### 推荐：在 GUI 内一键就绪（Linux）
 
-在终端执行以下命令安装、登录并检查 Codex CLI：
+打开 Agent 聊天后，若未检测到 Codex CLI，会显示就绪引导卡：
+
+1. **一键安装**：下载官方 Linux musl 二进制到 Studio 托管目录（`userData/codex-cli`），并自动写入设置中的 `agent.codexBin`。
+2. **打开登录**：拉起 `codex login`（通常会打开浏览器）；完成后点「我已完成登录」。
+3. **继续使用 Agent**：检测通过后自动重试启动。
+
+也可在卡上选择本机已有的 `codex` 可执行文件。探测顺序为：应用设置路径 →
+`ECOS_AGENT_CODEX_BIN` → 托管安装路径 → 进程 `PATH` 中的 `codex`。
+
+### 手动配置（可选）
+
+若更希望自行安装，可在终端执行：
 
 ```bash
 npm install -g @openai/codex
@@ -26,15 +37,13 @@ codex --version
 codex app-server --help
 ```
 
-从同一终端启动 ECOS Studio 时，下面的命令会将 Codex 的绝对路径和当前 `PATH`
-一同传给 GUI。请在 AppImage 所在目录执行：
+从同一终端启动 ECOS Studio 时，可将绝对路径传给 GUI：
 
 ```bash
 ECOS_AGENT_CODEX_BIN="$(command -v codex)" ./ECOS-Studio_*.AppImage
 ```
 
-若始终从桌面图标启动应用，请在使用 systemd 的 Linux 桌面环境中持久化 Codex
-绝对路径，然后注销并重新登录桌面会话，再启动 ECOS Studio：
+或在 systemd 桌面环境写入：
 
 ```bash
 codex_bin="$(command -v codex)" || exit 1
@@ -43,8 +52,8 @@ printf 'ECOS_AGENT_CODEX_BIN=%s\n' "$codex_bin" \
   > "$HOME/.config/environment.d/ecos-agent.conf"
 ```
 
-Agent 仅接受可执行的 `ECOS_AGENT_CODEX_BIN`，否则回退到 GUI 进程 `PATH` 中的
-`codex`。启动检查失败时不会创建 workspace，也不会启动 ECC 流程。
+Agent 仅接受可执行的 `ECOS_AGENT_CODEX_BIN` / 设置路径，否则回退到 GUI 进程
+`PATH` 中的 `codex`。启动检查失败时不会创建 workspace，也不会启动 ECC 流程。
 
 ## 在 ECOS Studio 中使用
 
@@ -154,10 +163,9 @@ Codex CLI 仅用于生成**只读、带类型约束的建议**，不会取得流
 
 **Agent 无法启动，提示需要 Codex CLI**
 
-按上文“配置 Codex CLI（使 GUI 可识别）”执行 `command -v codex`、
-`codex --version` 与 `codex app-server --help`。若终端检查通过而桌面应用仍失败，
-使用 `ECOS_AGENT_CODEX_BIN="$(command -v codex)"` 从该终端启动应用，或写入
-`~/.config/environment.d/ecos-agent.conf` 后注销并重新登录。
+优先在 Agent 聊天的就绪引导卡中使用「一键安装」与「打开登录」（Linux）。
+也可按上文手动安装后，用「选择本地 codex」或 `ECOS_AGENT_CODEX_BIN` /
+`~/.config/environment.d/ecos-agent.conf` 暴露路径。
 
 **为什么不能任意选择重跑阶段？**
 

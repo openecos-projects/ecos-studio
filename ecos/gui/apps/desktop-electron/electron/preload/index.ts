@@ -22,6 +22,8 @@ import type {
   DesktopShellExitEvent,
   DesktopShellSessionOptions,
   DesktopAgentEvent,
+  DesktopCodexInstallProgressEvent,
+  DesktopCodexSetBinPathRequest,
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
 
@@ -363,6 +365,21 @@ const desktopApi: DesktopApi = {
           listener(payload as DesktopAgentEvent)
         },
       ),
+    codex: {
+      getStatus: () => invokeDesktop(desktopApiIpcChannels.agentCodexGetStatus),
+      install: () => invokeDesktop(desktopApiIpcChannels.agentCodexInstall),
+      login: () => invokeDesktop(desktopApiIpcChannels.agentCodexLogin),
+      recheck: () => invokeDesktop(desktopApiIpcChannels.agentCodexRecheck),
+      setBinPath: (request: DesktopCodexSetBinPathRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentCodexSetBinPath, request),
+      onProgress: (listener) =>
+        subscribeToDesktopEvent(
+          desktopApiEventChannels.agentCodexProgress,
+          (_event, payload: unknown) => {
+            listener(payload as DesktopCodexInstallProgressEvent)
+          },
+        ),
+    },
   },
   shell: {
     createSession: (options: DesktopShellSessionOptions) =>

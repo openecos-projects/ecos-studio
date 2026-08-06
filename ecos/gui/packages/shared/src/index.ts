@@ -88,6 +88,14 @@ export type {
   DesktopShellSessionOptions,
 } from './contracts/desktopShell.ts'
 export type {
+  DesktopCodexAuthState,
+  DesktopCodexDependencyState,
+  DesktopCodexDependencyStatus,
+  DesktopCodexInstallProgressEvent,
+  DesktopCodexSetBinPathRequest,
+} from './contracts/desktopCodex.ts'
+export { DESKTOP_CODEX_BIN_SETTING_KEY } from './contracts/desktopCodex.ts'
+export type {
   DesktopAgentEvent,
   DesktopAgentChoice,
   DesktopAgentChoiceOption,

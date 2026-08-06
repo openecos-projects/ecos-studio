@@ -7,6 +7,7 @@ import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
 import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
+import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
 import {
   getElectronLatestMainLogFile,
@@ -48,6 +49,7 @@ let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
+  codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
@@ -162,9 +164,18 @@ function getDesktopServices() {
     workspaceResourceService,
   })
 
+  const codexDependencyService = new CodexDependencyService({
+    env: process.env,
+    installRoot: join(app.getPath('userData'), 'codex-cli'),
+    platform: process.platform,
+    arch: process.arch,
+    settingsStore,
+  })
+
   services = {
     appInfoService,
     chipViewerService,
+    codexDependencyService,
     eccRuntimeService,
     projectManifestService,
     resourceManagerService,
@@ -199,6 +210,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
     registerIpc(undefined, {
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
+      codexDependencyService: desktopServices.codexDependencyService,
       createWindow: async (options) => {
         await launchWindow({
           initialRoute:

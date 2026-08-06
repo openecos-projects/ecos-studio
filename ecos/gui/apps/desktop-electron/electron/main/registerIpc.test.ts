@@ -534,6 +534,88 @@ describe('registerIpc', () => {
     )
   })
 
+  it('executes a rerun when ECC opens the target under a canonical path alias', async () => {
+    let emitAgentEvent: ((event: Record<string, unknown>) => void) | undefined
+    const agentRuntimeService = {
+      onEvent: vi.fn((listener) => {
+        emitAgentEvent = listener
+        return () => undefined
+      }),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const window = {
+      focus: vi.fn(),
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      restore: vi.fn(),
+      show: vi.fn(),
+    }
+    const owner = {
+      id: 102,
+      isDestroyed: vi.fn(() => false),
+      once: vi.fn(),
+      send: vi.fn(),
+    }
+    const contract = {
+      design_id: 'gcd',
+      end_step: 'place',
+      execution_scope: 'full_flow' as const,
+      parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+      requires_gui_review: true as const,
+      rerun_id: 'gcd_rerun_place',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1' as const,
+      source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+      source_flow_json_sha256: 'a'.repeat(64),
+      source_stage_artifact_sha256: 'b'.repeat(64),
+      source_workspace: '/runs/gcd',
+      target_step: 'place',
+      target_workspace: '/runs/gcd_rerun_place',
+    }
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register(contract.source_workspace, window)
+    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: owner },
+      { providerId: 'ecos_agent', sessionId: 'gui-session-alias' },
+    )
+    emitAgentEvent?.({
+      providerId: 'ecos_agent',
+      sessionId: 'gui-session-alias',
+      type: 'workspace_rerun',
+      workspaceRerun: contract,
+    })
+    const forwarded = owner.send.mock.calls[0]?.[1] as { workspaceRerunToken: string }
+    const prepared = (await handlers.get(
+      desktopApiIpcChannels.workspacePrepareFlowAgentRerun,
+    )?.({ sender: owner }, { token: forwarded.workspaceRerunToken })) as {
+      executionToken: string
+    }
+    workspaceWindowRegistry.register(contract.target_workspace, window)
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/canonical/gcd_rerun_place',
+      workspaceHandle: 'aliased-handle',
+    })
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+      { sender: owner },
+      { directory: contract.target_workspace },
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun)?.(
+        { sender: owner },
+        { token: prepared.executionToken },
+      ),
+    ).resolves.toBeUndefined()
+    expect(executeWorkspaceRerunMock).toHaveBeenCalledWith(
+      contract,
+      services.eccRuntimeService,
+      'aliased-handle',
+    )
+  })
+
   it('binds an agent session before forwarding its first provider event', async () => {
     let emitAgentEvent:
       | ((event: {

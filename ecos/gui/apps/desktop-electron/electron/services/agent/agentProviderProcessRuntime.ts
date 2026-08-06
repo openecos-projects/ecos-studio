@@ -56,6 +56,8 @@ interface AgentProviderProcessRuntimeOptions {
   spawn?: SpawnLike
 }
 
+export type AgentProviderEnvOverrides = Record<string, string | undefined>
+
 interface PendingRequest {
   reject(error: Error): void
   resolve(value: unknown): void
@@ -66,7 +68,8 @@ const SENSITIVE_STDERR_PATTERN =
   /\b(?:api[ _-]?key|authorization|password|secret|token)\b/i
 
 export class AgentProviderProcessRuntime implements AgentProviderRuntime {
-  private readonly env: NodeJS.ProcessEnv
+  private readonly baseEnv: NodeJS.ProcessEnv
+  private env: NodeJS.ProcessEnv
   private readonly eventFanout = new RuntimeEventFanout<DesktopAgentEvent>()
   private readonly manifest: ResolvedAgentProviderManifest
   private readonly pendingRequests = new Map<string, PendingRequest>()
@@ -76,9 +79,35 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private stdoutBuffer = ''
 
   constructor(options: AgentProviderProcessRuntimeOptions) {
-    this.env = { ...(options.env ?? process.env), ...options.manifest.environment }
+    this.baseEnv = { ...(options.env ?? process.env) }
+    this.env = { ...this.baseEnv, ...options.manifest.environment }
     this.manifest = options.manifest
     this.spawnImpl = options.spawn ?? spawnChild
+  }
+
+  /**
+   * Merge runtime overrides (e.g. settings-backed ECOS_AGENT_CODEX_BIN).
+   * Restarts the provider child when an override value changes so the next
+   * request spawns with the updated environment.
+   */
+  syncEnvironmentOverrides(overrides: AgentProviderEnvOverrides): void {
+    const next: NodeJS.ProcessEnv = {
+      ...this.baseEnv,
+      ...this.manifest.environment,
+    }
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined || value === '') {
+        delete next[key]
+      } else {
+        next[key] = value
+      }
+    }
+    const previousCodex = this.env.ECOS_AGENT_CODEX_BIN
+    const nextCodex = next.ECOS_AGENT_CODEX_BIN
+    this.env = next
+    if (previousCodex !== nextCodex && this.child) {
+      this.disposeChildForEnvReload()
+    }
   }
 
   async start(request?: DesktopAgentStartRequest): Promise<void> {
@@ -306,6 +335,20 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.child = null
     this.stderrTail = ''
     this.stdoutBuffer = ''
+  }
+
+  private disposeChildForEnvReload(): void {
+    const child = this.child
+    if (!child) return
+    this.child = null
+    this.stderrTail = ''
+    this.stdoutBuffer = ''
+    this.rejectPending(new Error('Agent provider restarted to apply Codex CLI path'))
+    try {
+      child.kill()
+    } catch {
+      // Best-effort restart.
+    }
   }
 }
 

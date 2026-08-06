@@ -119,6 +119,38 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('reloads the provider child when Codex bin override changes', async () => {
+    const harness = createSpawnHarness()
+    const env = { HOME: '/home/tester', PATH: '/tools/bin' }
+    const runtime = new AgentProviderProcessRuntime({
+      env,
+      manifest: {
+        command: 'ecos-agent-provider',
+        manifestPath: '/plugins/ecos-agent/agent-provider.json',
+        pluginRoot: '/plugins/ecos-agent',
+        providerId: 'ecos_agent',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const pending = runtime.getStatus({ providerId: 'ecos_agent' })
+    expect(harness.children).toHaveLength(1)
+
+    runtime.syncEnvironmentOverrides({
+      ECOS_AGENT_CODEX_BIN: '/managed/bin/codex',
+    })
+    await expect(pending).rejects.toThrow('restarted to apply Codex CLI path')
+    expect(harness.children[0].kill).toHaveBeenCalled()
+
+    void runtime.getStatus({ providerId: 'ecos_agent' })
+    expect(harness.spawn).toHaveBeenLastCalledWith('ecos-agent-provider', [], {
+      cwd: '/plugins/ecos-agent',
+      env: { ...env, ECOS_AGENT_CODEX_BIN: '/managed/bin/codex' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  })
+
   it('includes a bounded provider stderr diagnostic when the process exits', async () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
@@ -290,7 +322,7 @@ describe('AgentProviderProcessRuntime', () => {
             })),
             presentation: 'workspace_rerun',
             schema_version: 'flow-agent.resolved_execution_contract.v1',
-            title: 'Frozen workspace rerun contract',
+            title: 'Workspace rerun plan',
           },
           type: 'contract',
         },
@@ -333,7 +365,7 @@ describe('AgentProviderProcessRuntime', () => {
           workspaceSetup: {
             schema_version: 'flow-agent.workspace_setup_contract.v2',
             setup_id: 'setup-1',
-            title: 'Frozen workspace execution contract',
+            title: 'Workspace run plan',
             directory: '/runs/gcd_trial',
             pdk: 'ics55',
             pdk_root: '/pdk/ics55',
