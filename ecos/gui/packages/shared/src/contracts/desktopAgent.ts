@@ -205,6 +205,11 @@ export interface DesktopAgentWorkspaceRerunExecuteRequest {
   token: string
 }
 
+export interface DesktopAgentWorkspaceOptimizationPrepareRequest {
+  candidateIndex: number
+  token: string
+}
+
 export interface DesktopAgentWorkspaceOptimizationRequest {
   direction: 'increase' | 'decrease'
   knob_id: 'place.target_density'

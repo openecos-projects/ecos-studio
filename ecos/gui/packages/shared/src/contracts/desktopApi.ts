@@ -37,6 +37,7 @@ import type {
 import type {
   DesktopAgentEvent,
   DesktopAgentInterruptRequest,
+  DesktopAgentWorkspaceOptimizationPrepareRequest,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
   DesktopAgentWorkspaceRerunPrepareResult,
@@ -230,6 +231,9 @@ export interface DesktopApi {
     openOrFocus(path: string): Promise<WorkspaceOpenOrFocusResult>
     prepareFlowAgentRerun?(
       request: DesktopAgentWorkspaceRerunPrepareRequest,
+    ): Promise<DesktopAgentWorkspaceRerunPrepareResult>
+    prepareFlowAgentOptimization?(
+      request: DesktopAgentWorkspaceOptimizationPrepareRequest,
     ): Promise<DesktopAgentWorkspaceRerunPrepareResult>
     executeFlowAgentRerun?(
       request: DesktopAgentWorkspaceRerunExecuteRequest,

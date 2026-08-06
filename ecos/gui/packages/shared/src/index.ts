@@ -107,6 +107,7 @@ export type {
   DesktopAgentWorkspaceOptimizationContract,
   DesktopAgentWorkspaceOptimizationRequest,
   DesktopAgentWorkspaceOptimizationRunSpec,
+  DesktopAgentWorkspaceOptimizationPrepareRequest,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunParameterPatch,
   DesktopAgentWorkspaceRerunParameterValue,
