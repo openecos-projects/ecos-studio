@@ -51,6 +51,8 @@ from ecos_agent.messages import (
     source_run_prompt,
     welcome_message,
     workspace_confirmation_prompt,
+    workspace_continue_prompt,
+    workspace_continue_title,
     workspace_creation_failed,
     workspace_execution_started,
     workspace_name_prompt,
@@ -484,15 +486,13 @@ class EcosAgentProvider:
         self._emit(
             session,
             "contract",
-            confirmation_menu(session.language),
+            workspace_continue_prompt(session.language, workspace),
             {
                 "schema_version": "flow-agent.resolved_execution_contract.v1",
-                "title": "Continue unfinished flow",
+                "title": workspace_continue_title(session.language),
                 "presentation": "workspace_continue",
-                "fields": [
-                    {"label": "Workspace", "value": workspace},
-                    {"label": "Command", "value": "runAllFlow({ rerun: false })"},
-                ],
+                # Continue has no reviewable knobs — keep a compact confirm card, not a Key/Value table.
+                "fields": [],
             },
         )
         self._emit_phase_choice(session)

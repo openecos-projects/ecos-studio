@@ -529,6 +529,28 @@ def test_workspace_parameter_request_uses_describe_change_prompt(tmp_path: Path)
     )
 
 
+def test_workspace_continue_uses_compact_confirm_without_command_table(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "gcd"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "3")
+
+    assert provider.sessions[session_id].phase == "workspace_continue_confirmation"
+    contract = _last_event(events, "contract")
+    assert contract["contract"]["presentation"] == "workspace_continue"
+    assert contract["contract"]["fields"] == []
+    assert "runAllFlow" not in str(contract["text"])
+    assert str(workspace) in str(contract["text"])
+    assert "Continue the unfinished flow in the current workspace" in str(contract["text"])
+
+
 def _workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
     workspace = tmp_path / "gcd"
     flow = workspace / "home" / "flow.json"

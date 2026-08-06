@@ -368,6 +368,18 @@ def confirmation_menu(language: str) -> str:
     )
 
 
+def workspace_continue_prompt(language: str, workspace: str) -> str:
+    return _prompt(
+        language,
+        f"确认在当前 workspace 继续未完成的 flow？\n{workspace}\n\n请选择确认并开始运行，或取消。",
+        f"Continue the unfinished flow in the current workspace?\n{workspace}\n\nChoose Confirm and start, or cancel.",
+    )
+
+
+def workspace_continue_title(language: str) -> str:
+    return _prompt(language, "继续未完成的 flow", "Continue unfinished flow")
+
+
 def operation_choice(
     language: str,
     prompt_id: str,

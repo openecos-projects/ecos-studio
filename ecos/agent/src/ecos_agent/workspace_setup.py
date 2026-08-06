@@ -299,7 +299,7 @@ def workspace_setup_contract(
     workspace_directory = _workspace_directory(inputs, proposal)
     return {
         "schema_version": "flow-agent.workspace_setup_contract.v2",
-        "title": "冻结的 Workspace 执行合同" if language == "zh" else "Frozen workspace execution contract",
+        "title": "Workspace 运行方案" if language == "zh" else "Workspace run plan",
         "setup_id": setup_id,
         "requires_gui_review": True,
         "directory": workspace_directory,

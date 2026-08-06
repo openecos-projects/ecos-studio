@@ -352,7 +352,7 @@ def _workspace_rerun_execution_contract(
             *parameter_fields,
             {"label": "确认", "value": "required"},
         ]
-        title = "冻结的重跑执行合同"
+        title = "Workspace 重跑方案"
     else:
         scope = (
             "rerun only the selected stage, then stop"
@@ -372,7 +372,7 @@ def _workspace_rerun_execution_contract(
             *parameter_fields,
             {"label": "Confirmation", "value": "required"},
         ]
-        title = "Frozen workspace rerun contract"
+        title = "Workspace rerun plan"
     return {
         "presentation": "workspace_rerun",
         "schema_version": "flow-agent.resolved_execution_contract.v1",
