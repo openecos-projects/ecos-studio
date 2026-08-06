@@ -12,6 +12,17 @@ async function writeRpcCapableEcc(appOutDir: string): Promise<void> {
   await mkdir(binariesDir, { recursive: true })
   await writeFile(
     eccPath,
+    '#!/bin/sh\nif [ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --help ]; then exit 0; fi\n[ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --stdio ] && [ "$4" = --persistent-db ] && [ "$5" = --agent ] || exit 64\n',
+  )
+  await chmod(eccPath, 0o755)
+}
+
+async function writeHelpOnlyRpcEcc(appOutDir: string): Promise<void> {
+  const binariesDir = join(appOutDir, 'resources', 'binaries')
+  const eccPath = join(binariesDir, 'ecc')
+  await mkdir(binariesDir, { recursive: true })
+  await writeFile(
+    eccPath,
     '#!/bin/sh\n[ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --help ] || exit 64\n',
   )
   await chmod(eccPath, 0o755)
@@ -107,6 +118,27 @@ describe('afterPackLinuxSandbox', () => {
     tempDirs.push(appOutDir)
     await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
     await writeNonRpcEcc(appOutDir)
+    await writePackagedAgent(appOutDir)
+
+    await expect(
+      afterPackLinuxSandbox({
+        appOutDir,
+        electronPlatformName: 'linux',
+        packager: {
+          appInfo: {
+            productFilename: 'ecos-studio',
+          },
+          executableName: 'ecos-studio',
+        },
+      }),
+    ).rejects.toThrow('Packaged ECC RPC sidecar validation failed')
+  })
+
+  it('rejects Linux packaging when the ECC binary lacks the Agent RPC runtime', async () => {
+    const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
+    tempDirs.push(appOutDir)
+    await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
+    await writeHelpOnlyRpcEcc(appOutDir)
     await writePackagedAgent(appOutDir)
 
     await expect(
