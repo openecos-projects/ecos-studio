@@ -207,6 +207,45 @@ describe('CodexDependencyService', () => {
       '不是可执行的 Codex CLI',
     )
   })
+
+  it('uses the selected Codex directory for NVM Node script execution', async () => {
+    const root = await createRoot()
+    const binDir = join(root, '.nvm', 'versions', 'node', 'v20', 'bin')
+    const codexBin = join(binDir, 'codex')
+    await mkdir(binDir, { recursive: true })
+    await writeFile(codexBin, '#!/usr/bin/env node\n')
+    await chmod(codexBin, 0o755)
+
+    const spawn = vi.fn((_command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
+      const child = new FakeChild()
+      queueMicrotask(() => {
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+          child.emit('close', 0)
+          return
+        }
+        child.stdout.emit('data', 'Logged in\n')
+        child.emit('close', 0)
+      })
+      return child as never
+    })
+    const service = new CodexDependencyService({
+      env: { PATH: '/usr/bin:/bin', HOME: root },
+      installRoot: join(root, 'managed'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore: new MemorySettingsStore(),
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    await expect(service.setBinPath(codexBin)).resolves.toMatchObject({ state: 'ready' })
+    await expect(service.resolveEnvironmentForAgent()).resolves.toEqual({
+      ECOS_AGENT_CODEX_BIN: codexBin,
+      PATH: `${binDir}:/usr/bin:/bin`,
+    })
+    expect(spawn.mock.calls[0]?.[2]?.env?.PATH).toBe(`${binDir}:/usr/bin:/bin`)
+  })
 })
 
 async function buildTinyGzipTarWithCodex(): Promise<Uint8Array> {

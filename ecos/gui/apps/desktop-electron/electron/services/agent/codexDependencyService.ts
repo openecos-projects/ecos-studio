@@ -12,7 +12,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import {
@@ -187,7 +187,7 @@ export class CodexDependencyService {
       throw new Error('请先安装或选择 Codex CLI')
     }
     await this.runCommand(bin, ['login'], {
-      env: this.env,
+      env: this.commandEnv(bin),
       stdio: 'ignore',
       detached: true,
     }).catch(() => {
@@ -198,8 +198,12 @@ export class CodexDependencyService {
     return await this.getStatus()
   }
 
-  async resolveBinPathForAgent(): Promise<string | undefined> {
-    return (await this.resolveBinPath()) ?? undefined
+  async resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>> {
+    const binPath = await this.resolveBinPath()
+    return {
+      ECOS_AGENT_CODEX_BIN: binPath ?? undefined,
+      PATH: binPath ? prependPath(dirname(binPath), this.env.PATH) : undefined,
+    }
   }
 
   private async runInstall(): Promise<DesktopCodexDependencyStatus> {
@@ -360,7 +364,7 @@ export class CodexDependencyService {
   private async readVersion(bin: string): Promise<string | null> {
     try {
       const { stdout } = await this.runCommandCapture(bin, ['--version'], {
-        env: this.env,
+        env: this.commandEnv(bin),
         timeoutMs: 8_000,
       })
       const line = stdout.trim().split(/\r?\n/)[0]?.trim()
@@ -373,7 +377,7 @@ export class CodexDependencyService {
   private async detectAuthState(bin: string): Promise<DesktopCodexAuthState> {
     try {
       const { stdout, stderr } = await this.runCommandCapture(bin, ['login', 'status'], {
-        env: this.env,
+        env: this.commandEnv(bin),
         timeoutMs: 8_000,
       })
       const text = `${stdout}\n${stderr}`.toLowerCase()
@@ -403,6 +407,10 @@ export class CodexDependencyService {
     for (const listener of this.progressListeners) {
       listener(event)
     }
+  }
+
+  private commandEnv(bin: string): NodeJS.ProcessEnv {
+    return { ...this.env, PATH: prependPath(dirname(bin), this.env.PATH) }
   }
 
   private async runTarExtract(archivePath: string, destination: string): Promise<void> {
@@ -495,6 +503,11 @@ function expandUserPath(pathValue: string, resolveHome: () => string): string {
     return join(resolveHome(), pathValue.slice(2))
   }
   return pathValue
+}
+
+function prependPath(directory: string, pathValue: string | undefined): string {
+  const entries = pathValue?.split(delimiter).filter((entry) => entry && entry !== directory) ?? []
+  return [directory, ...entries].join(delimiter)
 }
 
 async function downloadToFile(

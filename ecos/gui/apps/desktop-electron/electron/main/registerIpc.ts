@@ -115,7 +115,7 @@ export interface DesktopBridgeServices {
     setBinPath(
       pathValue: string,
     ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
-    resolveBinPathForAgent(): Promise<string | undefined>
+    resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>>
     onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
   }
   appInfoService: {
@@ -1688,8 +1688,10 @@ async function applyCodexBinEnv(
   if (!runtime?.syncEnvironmentOverrides || !services.codexDependencyService) {
     return
   }
-  const binPath = await services.codexDependencyService.resolveBinPathForAgent()
-  runtime.syncEnvironmentOverrides({ ECOS_AGENT_CODEX_BIN: binPath }, request)
+  runtime.syncEnvironmentOverrides(
+    await services.codexDependencyService.resolveEnvironmentForAgent(),
+    request,
+  )
 }
 
 function readCodexBinPathRequest(value: unknown): string {
