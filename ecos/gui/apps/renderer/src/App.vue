@@ -370,6 +370,9 @@ async function openWorkspaceReconfigureWizard() {
     const api = desktopApi.value ?? (await waitForDesktopApi())
     desktopApi.value = api
     await api.workspace.registerProjectRoot(normalizedWorkspacePath)
+    await api.workspace.registerProjectReadRoot(
+      queryString(route.query.projectRoot) || parentLocalPath(normalizedWorkspacePath),
+    )
 
     workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
       normalizedWorkspacePath,

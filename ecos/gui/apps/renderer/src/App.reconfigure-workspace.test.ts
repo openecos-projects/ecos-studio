@@ -29,6 +29,8 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('keepReplacementBackup')
     expect(appSource).toContain('lockWorkspaceDirectory: true')
     expect(appSource).toContain('readOptionalProjectTextFile')
+    expect(appSource).toContain('registerProjectReadRoot')
+    expect(appSource).toContain('parentLocalPath(normalizedWorkspacePath)')
   })
 
   it('asks whether to keep the old workspace backup before running update workspace', () => {
