@@ -12,7 +12,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ecos_agent.ecc_contracts import ECCStepName
-from ecos_agent.workspace_rerun import GuiWorkspaceRerunContract, GuiWorkspaceRerunSource
+from ecos_agent.place_contracts import PlaceStrategy
+from ecos_agent.workspace_rerun import (
+    GuiWorkspaceRerunContract,
+    GuiWorkspaceRerunResolver,
+    GuiWorkspaceRerunSource,
+)
 
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -64,6 +69,35 @@ class OptimizationCandidate(BaseModel):
     value: float
 
 
+class OptimizationRequest(BaseModel):
+    """Strategy-derived intent; it does not contain candidate values."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["ecos-place-optimization-request.v1"] = (
+        "ecos-place-optimization-request.v1"
+    )
+    strategy_id: str = Field(min_length=1, max_length=160)
+    objective: Literal["place_hpwl"]
+    knob_id: Literal["place.target_density"]
+    direction: Literal["increase", "decrease"]
+    protected_metrics: list[str] = Field(default_factory=list, max_length=16)
+    requires_gui_review: Literal[True]
+
+
+class PlaceOptimizationContract(BaseModel):
+    """GUI-owned batch contract containing no executable command text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flow-agent.place_optimization_contract.v1"] = (
+        "flow-agent.place_optimization_contract.v1"
+    )
+    request: OptimizationRequest
+    run_spec: OptimizationRunSpec
+    rerun_contracts: list[GuiWorkspaceRerunContract] = Field(min_length=5, max_length=5)
+
+
 def generate_candidates(spec: OptimizationRunSpec) -> list[OptimizationCandidate]:
     span = spec.upper - spec.lower
     values = (
@@ -75,6 +109,47 @@ def generate_candidates(spec: OptimizationRunSpec) -> list[OptimizationCandidate
         OptimizationCandidate(candidate_id=f"candidate_{index}", value=round(value, 10))
         for index, value in enumerate(values, start=1)
     ]
+
+
+def freeze_place_optimization_contract(
+    workspace: Path, design_id: str, strategy: PlaceStrategy, run_id: str
+) -> PlaceOptimizationContract:
+    direction = strategy.allowed_directions.get("place.target_density")
+    if direction is None:
+        raise ValueError("reviewed strategy does not authorize target density")
+    resolver = GuiWorkspaceRerunResolver(workspace.resolve().parent)
+    discovery = resolver.discover_workspace(workspace, design_id)
+    values = dict(resolver.parameter_values(discovery.source, "place"))
+    density = values.get("place.target_density")
+    if type(density) not in {int, float} or not math.isfinite(density):
+        raise ValueError("workspace target density is unavailable")
+    lower, upper = (0.1, float(density)) if direction == "decrease" else (float(density), 0.95)
+    request = OptimizationRequest(
+        strategy_id=strategy.strategy_id,
+        objective="place_hpwl",
+        knob_id="place.target_density",
+        direction=direction,
+        protected_metrics=strategy.protected_metrics,
+        requires_gui_review=True,
+    )
+    run_spec = OptimizationRunSpec(
+        run_id=run_id,
+        source_workspace=str(workspace.resolve()),
+        baseline_id="baseline",
+        objective=request.objective,
+        knob_id=request.knob_id,
+        lower=lower,
+        upper=upper,
+        direction=request.direction,
+        seed=0,
+        budget=5,
+        requires_gui_review=True,
+    )
+    return PlaceOptimizationContract(
+        request=request,
+        run_spec=run_spec,
+        rerun_contracts=freeze_rerun_contracts(run_spec, discovery.source),
+    )
 
 
 def freeze_rerun_contracts(

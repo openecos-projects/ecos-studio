@@ -59,7 +59,13 @@ from ecos_agent.messages import (
     workspace_parameter_request_prompt,
 )
 from ecos_agent.place_assistant import PlaceAssistant
+from ecos_agent.place_contracts import PlaceEvidence
 from ecos_agent.place_evidence import build_place_evidence
+from ecos_agent.place_optimization import (
+    PlaceOptimizationContract,
+    freeze_place_optimization_contract,
+)
+from ecos_agent.place_strategy import select_applicable_strategies
 from ecos_agent.workspace_setup import (
     WorkspaceInputs,
     derive_project_name,
@@ -193,6 +199,7 @@ class _Session:
     rerun_discovery: GuiWorkspaceRerunDiscovery | None = None
     rerun_parameter_patch: list[dict[str, Any]] = field(default_factory=list)
     workspace_rerun_contract: GuiWorkspaceRerunContract | None = None
+    place_optimization_contract: PlaceOptimizationContract | None = None
     workspace_setup: GuiWorkspaceSetupProposal = field(default_factory=recommended_workspace_setup)
     workspace_inputs: WorkspaceInputs = field(default_factory=WorkspaceInputs)
     path_recommendations: dict[str, str] = field(default_factory=dict)
@@ -350,6 +357,9 @@ class EcosAgentProvider:
                         self._emit(session, "error", f"Unable to collect Placement evidence: {exc}")
             answer = self.place_assistant.reply(message, language=session.language, evidence=evidence)
             if answer is not None:
+                if answer.intent == "apply_request":
+                    self._begin_place_optimization(session, evidence)
+                    return
                 self._emit(
                     session,
                     "message",
@@ -390,6 +400,7 @@ class EcosAgentProvider:
             "workspace_parameter_request": self._select_workspace_parameter_request,
             "workspace_parameter_confirmation": self._confirm_workspace_parameter_update,
             "workspace_parameter_pending": self._handle_workspace_parameter_update_result,
+            "place_optimization_confirmation": self._confirm_place_optimization,
             "confirmation": self._confirm_rerun_execution,
         }
         handler = handlers.get(session.phase)
@@ -432,6 +443,56 @@ class EcosAgentProvider:
                 return
         self._emit(session, "message", invalid_choice(session.language))
         self._emit(session, "message", operation_prompt(session.language))
+        self._emit_phase_choice(session)
+
+    def _begin_place_optimization(
+        self, session: _Session, evidence: PlaceEvidence | None
+    ) -> None:
+        workspace = session.rerun_workspace_path
+        if workspace is None or evidence is None or self.place_assistant is None:
+            self._emit(session, "message", "Placement optimization requires valid workspace evidence.")
+            self._emit_phase_choice(session)
+            return
+        strategies = select_applicable_strategies(self.place_assistant.entities, evidence)
+        strategy = next(
+            (
+                item
+                for item in strategies
+                if "place.target_density" in item.allowed_directions
+            ),
+            None,
+        )
+        design_id = _design_id_for_workspace(workspace)
+        if strategy is None or design_id is None:
+            self._emit(session, "message", "No reviewed density-scan strategy is applicable.")
+            self._emit_phase_choice(session)
+            return
+        try:
+            contract = freeze_place_optimization_contract(
+                Path(workspace), design_id, strategy, f"place_density_{uuid.uuid4().hex}"
+            )
+        except ValueError as exc:
+            self._emit(session, "message", f"Placement optimization is blocked: {exc}")
+            self._emit_phase_choice(session)
+            return
+        session.place_optimization_contract = contract
+        session.phase = "place_optimization_confirmation"
+        self._emit(
+            session,
+            "contract",
+            "Review the isolated baseline and four candidate place-only reruns before execution.",
+            {
+                "schema_version": "flow-agent.resolved_execution_contract.v1",
+                "presentation": "workspace_optimization",
+                "title": "Place-only target-density scan",
+                "fields": [
+                    {"label": "Strategy", "value": strategy.strategy_id},
+                    {"label": "Objective", "value": contract.run_spec.objective},
+                    {"label": "Budget", "value": str(contract.run_spec.budget)},
+                    {"label": "Source workspace", "value": contract.run_spec.source_workspace},
+                ],
+            },
+        )
         self._emit_phase_choice(session)
 
     def _begin_create_workspace_in_project(self, session: _Session) -> None:
@@ -1304,6 +1365,28 @@ class EcosAgentProvider:
         )
         session.phase = "workspace_rerun_pending"
 
+    def _confirm_place_optimization(self, session: _Session, message: str) -> None:
+        if message == "2":
+            self._reset(session)
+            self._emit(session, "message", cancellation_message(session.language))
+            self._emit_phase_choice(session)
+            return
+        if message != "1":
+            self._emit(session, "message", confirmation_menu(session.language))
+            self._emit_phase_choice(session)
+            return
+        contract = session.place_optimization_contract
+        if contract is None:
+            self._emit(session, "error", "The place optimization contract is missing.")
+            return
+        self._emit(
+            session,
+            "workspace_optimization",
+            "Starting the confirmed isolated place-only scan.",
+            workspace_optimization=contract.model_dump(mode="json"),
+        )
+        session.phase = "workspace_optimization_pending"
+
     def _handle_workspace_rerun_result(self, session: _Session, message: str) -> None:
         _handle_workspace_rerun_result(self, session, message)
 
@@ -1444,6 +1527,7 @@ class EcosAgentProvider:
         workspace_setup: dict[str, Any] | None = None,
         workspace_create_setup_id: str | None = None,
         workspace_rerun: dict[str, Any] | None = None,
+        workspace_optimization: dict[str, Any] | None = None,
         workspace_continue: dict[str, Any] | None = None,
         workspace_parameter_update: dict[str, Any] | None = None,
         choice: dict[str, Any] | None = None,
@@ -1470,6 +1554,8 @@ class EcosAgentProvider:
             event["workspaceCreateSetupId"] = workspace_create_setup_id
         if workspace_rerun is not None:
             event["workspaceRerun"] = workspace_rerun
+        if workspace_optimization is not None:
+            event["workspaceOptimization"] = workspace_optimization
         if workspace_continue is not None:
             event["workspaceContinue"] = workspace_continue
         if workspace_parameter_update is not None:
@@ -1634,6 +1720,7 @@ class EcosAgentProvider:
             choice = confirmation_choice(session.language, prompt_id, allow_free_text=True)
         elif session.phase in {
             "confirmation",
+            "place_optimization_confirmation",
             "workspace_continue_confirmation",
             "workspace_parameter_confirmation",
         }:
@@ -1714,6 +1801,7 @@ class EcosAgentProvider:
                 "workspace_confirmation",
                 "workspace_continue_confirmation",
                 "workspace_parameter_confirmation",
+                "place_optimization_confirmation",
                 "confirmation",
             }
             else "idle"
@@ -1743,6 +1831,7 @@ class EcosAgentProvider:
         session.rerun_discovery = None
         session.rerun_parameter_patch = []
         session.workspace_rerun_contract = None
+        session.place_optimization_contract = None
         session.workspace_setup = recommended_workspace_setup()
         session.workspace_inputs = WorkspaceInputs()
         session.path_recommendations = {}

@@ -93,7 +93,7 @@ class PlaceAssistant:
 
     @staticmethod
     def requires_evidence(message: str) -> bool:
-        return bool(_ANALYZE_RE.search(message))
+        return bool(_ANALYZE_RE.search(message) or _APPLY_RE.search(message))
 
     def _query(self, message: str, language: str) -> PlaceQuery | None:
         normalized = message.casefold()

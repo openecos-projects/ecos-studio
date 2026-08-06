@@ -6,6 +6,7 @@ from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProvi
 from ecos_agent.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.messages import EMPTY_CHOICE_VALUE
+from ecos_agent.place_assistant import PlaceAssistant
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
 from ecos_agent.workspace_setup import (
@@ -63,6 +64,67 @@ def _write_workspace_inputs(root: Path) -> tuple[Path, Path, Path, Path]:
     sdc.write_text("create_clock -period 10 [get_ports clk]\n", encoding="utf-8")
     pdk.mkdir()
     return rtl, filelist, sdc, pdk
+
+
+def _approved_place_assistant(path: Path) -> PlaceAssistant:
+    entities = [
+        {
+            "id": "parameter.dreamplace.target_density",
+            "type": "parameter",
+            "aliases": ["target density"],
+            "stage_scope": ["place"],
+            "status": "user_settable",
+            "document": "parameters.md",
+            "anchor": "parameter.dreamplace.target_density",
+            "review_status": "approved",
+            "evidence": [],
+        },
+        {
+            "id": "strategy.place.reduce_density",
+            "type": "strategy",
+            "aliases": ["congestion"],
+            "stage_scope": ["place"],
+            "status": "directly_supported",
+            "document": "strategies.md",
+            "anchor": "strategy.place.reduce_density",
+            "review_status": "approved",
+            "evidence": [],
+            "strategy": {
+                "strategy_id": "strategy.place.reduce_density",
+                "status": "directly_supported",
+                "required_metrics": ["place_congestion_egr_overflow_max"],
+                "allowed_directions": {"place.target_density": "decrease"},
+                "protected_metrics": ["place_hpwl"],
+                "verification": "Run the frozen scan.",
+                "rollback": "Keep the source workspace unchanged.",
+                "escalation": "Escalate to floorplan.",
+                "review_status": "approved",
+            },
+        },
+    ]
+    return PlaceAssistant(entities, path)
+
+
+def _write_place_workspace(workspace: Path) -> None:
+    (workspace / "home").mkdir(parents=True)
+    (workspace / "home" / "flow.json").write_text(
+        '{"steps": [{"name": "place", "tool": "dreamplace", "state": "Success"}]}',
+        encoding="utf-8",
+    )
+    (workspace / "config").mkdir()
+    (workspace / "config" / "dreamplace.json").write_text(
+        '{"target_density": 0.8}', encoding="utf-8"
+    )
+    output = workspace / "place_dreamplace" / "output"
+    output.mkdir(parents=True)
+    (output / "gcd_place.def.gz").write_bytes(b"def")
+    analysis = workspace / "place_dreamplace" / "analysis"
+    analysis.mkdir()
+    (analysis / "qor_metrics.json").write_text(
+        '{"metrics": [{"id": "place_hpwl", "value": 12}, '
+        '{"id": "place_congestion_egr_overflow_max", "value": 3}]}',
+        encoding="utf-8",
+    )
 
 
 def test_codex_bin_expands_the_user_home_directory(tmp_path: Path, monkeypatch) -> None:
@@ -264,6 +326,32 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
     assert [
         (option["label"], option["value"]) for option in stage_choice["options"]
     ] == [("place", "1")]
+
+
+def test_approved_place_apply_request_freezes_a_five_run_gui_contract(tmp_path: Path) -> None:
+    workspace = tmp_path / "source-workspace"
+    _write_place_workspace(workspace)
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        place_assistant=_approved_place_assistant(tmp_path / "audit.jsonl"),
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "Optimize target density")
+
+    contract = _last_event(events, "contract")["contract"]
+    assert contract["presentation"] == "workspace_optimization"
+    assert provider.sessions[session_id].phase == "place_optimization_confirmation"
+    assert not any(event["type"] == "workspace_rerun" for event in events)
+
+    _send(provider, session_id, "1")
+
+    event = _last_event(events, "workspace_optimization")
+    assert event["workspaceOptimization"]["run_spec"]["budget"] == 5
+    assert len(event["workspaceOptimization"]["rerun_contracts"]) == 5
 
 
 def test_rerun_skips_empty_parameter_table_for_fixfanout(tmp_path: Path) -> None:
