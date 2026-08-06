@@ -82,14 +82,14 @@ defineEmits<{
 .agent-tab {
   display: inline-flex;
   max-width: 8.5rem;
-  min-width: 3.75rem;
+  min-width: 0;
   flex: 0 1 auto;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.2rem;
   border: none;
   border-radius: 0.375rem 0.375rem 0 0;
   margin-top: 0.25rem;
-  padding: 0 0.3rem 0 0.55rem;
+  padding: 0 0.25rem 0 0.5rem;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -101,8 +101,6 @@ defineEmits<{
 }
 
 .agent-tab--active {
-  max-width: min(14rem, 72%);
-  flex: 1 1 auto;
   background: var(--bg-primary);
   color: var(--text-primary);
   box-shadow: inset 0 -1px 0 var(--bg-primary);
@@ -110,7 +108,7 @@ defineEmits<{
 
 .agent-tab__title {
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -12,13 +12,34 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('messageStore.addMessage(choiceSelectionText(option))')
   })
 
-  it('renders Cursor-style full-width turns with sticky user nodes', () => {
+  it('renders Cursor-style centered turns with sticky user cards', () => {
     expect(source).toContain('groupMessagesIntoTurns')
     expect(source).toContain('conversationTurns')
     expect(source).toContain('chat-turn__user')
     expect(source).toContain('position: sticky')
     expect(source).toContain('v-for="msg in turn.responses"')
     expect(source).toContain('turnIndex === conversationTurns.length - 1')
+    expect(source).toContain('.chat-turn__body')
+    expect(source).toContain('background: transparent')
+    expect(source).toContain('margin-inline: auto')
+    expect(source).toContain('text-align: left')
+    expect(source).toContain('.chat-turn__user {\n  position: sticky')
+    expect(source).toContain('display: block')
+    expect(source).not.toContain('border-left: 2px solid')
+    expect(source).not.toContain('var(--bg-sidebar) 82%')
+  })
+
+  it('keeps confirmed run plans above progress and awaiting plans after Q&A', () => {
+    expect(source).toContain('AgentSessionContractPanels')
+    expect(source).toContain('mode="committed"')
+    expect(source).toContain('mode="awaiting"')
+    expect(source.indexOf('mode="committed"')).toBeLessThan(
+      source.indexOf('v-for="msg in turn.responses"'),
+    )
+    expect(source.indexOf('v-for="msg in turn.responses"')).toBeLessThan(
+      source.indexOf('mode="awaiting"'),
+    )
+    expect(source).toContain("activeUi.value.workspaceSetupAnchorTurnId = turnId")
   })
 
   it('keeps tool activity and streaming updates on the structured message path', () => {
@@ -75,14 +96,14 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toMatch(
       /if \(event\.contract\.presentation === 'workspace_rerun'\) \{[\s\S]*ui\.workspaceRerunContract = event\.contract[\s\S]*ui\.workspaceRerunMessage = event\.text \?\? ''[\s\S]*ui\.lastContractSurface = 'rerun'/,
     )
-    expect(source).toContain('AgentExecutionContractPanel')
-    expect(source).toContain(':rows="workspaceRerunRows"')
+    expect(source).toContain('AgentSessionContractPanels')
+    expect(source).toContain('workspaceRerunRows:')
     expect(source).toContain('workspaceRerunExecutionState')
   })
 
   it('keeps workspace setup inside chat instead of reopening the native wizard', () => {
     expect(source).toContain("event.type === 'workspace_setup'")
-    expect(source).toContain('AgentWorkspaceSetupPanel')
+    expect(source).toContain('AgentSessionContractPanels')
     expect(source).toContain('ui.workspaceSetupContract = event.workspaceSetup')
     expect(source).not.toContain('openWorkspaceSetup?.(event.workspaceSetup)')
   })
@@ -120,7 +141,10 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain(
       'await desktopApi.workspace.bindWindow(contract.source_workspace)',
     )
-    expect(source).not.toContain('path: contract.source_workspace')
+    expect(source).toContain(
+      'Restored the source workspace after the rerun failed to start.',
+    )
+    expect(source).toContain('path: contract.source_workspace')
     expect(source).not.toContain('const sourceOpened =')
     expect(source).toContain('prepareRerun({ token })')
     expect(source).toContain('workspace_rerun_result:')

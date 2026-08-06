@@ -17,7 +17,21 @@
       @scroll.passive="onScrollContainerScroll"
     >
       <div
-        v-if="messages.length === 0"
+        v-if="codexSetupStatus && codexSetupStatus.state !== 'ready'"
+        class="flex h-full flex-col items-center justify-center px-4 py-10"
+      >
+        <AgentCodexSetupCard
+          :busy="codexSetupBusy || isAgentConnecting"
+          :status="codexSetupStatus"
+          @install="installCodexCli"
+          @login="loginCodexCli"
+          @recheck="recheckCodexCli"
+          @pick-bin="pickCodexBin"
+          @retry="retryAfterCodexReady"
+        />
+      </div>
+      <div
+        v-else-if="messages.length === 0"
         class="flex h-full flex-col items-center justify-center px-4 py-10 text-center"
       >
         <div
@@ -55,6 +69,19 @@
             </div>
           </header>
           <div class="chat-turn__body">
+            <!-- Confirmed plans stay above the run progress they produced -->
+            <AgentSessionContractPanels
+              mode="committed"
+              :choice-disabled="isRunning"
+              :is-last-turn="turnIndex === conversationTurns.length - 1"
+              :turn-id="turn.id"
+              v-bind="contractPanelBind"
+              @create-workspace="createWorkspaceFromAgent"
+              @setup-select="handleWorkspaceSetupChoice"
+              @rerun-select="handleWorkspaceRerunChoice"
+              @continue-select="handleWorkspaceContinueChoice"
+              @parameter-select="handleWorkspaceParameterChoice"
+            />
             <MessageItem
               v-for="msg in turn.responses"
               :key="msg.id"
@@ -78,48 +105,20 @@
               <span class="agent-pending__dot" aria-hidden="true"></span>
               <span class="agent-pending__dot" aria-hidden="true"></span>
             </div>
-            <template v-if="turnIndex === conversationTurns.length - 1">
-              <AgentWorkspaceSetupPanel
-                :answered-option-id="workspaceSetupAnsweredOptionId"
-                :choice="workspaceSetupChoice"
-                :choice-disabled="isRunning"
-                :contract="workspaceSetupContract"
-                :confirmation-text="workspaceSetupMessage"
-                :create-setup-id="workspaceCreateSetupId"
-                @create-workspace="createWorkspaceFromAgent"
-                @select="handleWorkspaceSetupChoice"
-              />
-              <AgentExecutionContractPanel
-                :answered-option-id="workspaceRerunAnsweredOptionId"
-                :choice="workspaceRerunChoice"
-                :choice-disabled="isRunning"
-                :confirmation-text="workspaceRerunMessage"
-                :execution-state="workspaceRerunExecutionState"
-                :rows="workspaceRerunRows"
-                :title="workspaceRerunContract?.title ?? ''"
-                @select="handleWorkspaceRerunChoice"
-              />
-              <AgentExecutionContractPanel
-                :answered-option-id="workspaceContinueAnsweredOptionId"
-                :choice="workspaceContinueChoice"
-                :choice-disabled="isRunning"
-                :confirmation-text="workspaceContinueMessage"
-                :execution-state="workspaceContinueExecutionState"
-                :rows="workspaceContinueRows"
-                :title="workspaceContinueContract?.title ?? ''"
-                @select="handleWorkspaceContinueChoice"
-              />
-              <AgentExecutionContractPanel
-                :answered-option-id="workspaceParameterAnsweredOptionId"
-                :choice="workspaceParameterChoice"
-                :choice-disabled="isRunning"
-                :confirmation-text="workspaceParameterMessage"
-                :execution-state="workspaceParameterExecutionState"
-                :rows="workspaceParameterRows"
-                :title="workspaceParameterContract?.title ?? ''"
-                @select="handleWorkspaceParameterChoice"
-              />
-            </template>
+            <!-- Awaiting confirmation stays after Q&A, at the end of the latest turn -->
+            <AgentSessionContractPanels
+              v-if="turnIndex === conversationTurns.length - 1"
+              mode="awaiting"
+              :choice-disabled="isRunning"
+              :is-last-turn="true"
+              :turn-id="turn.id"
+              v-bind="contractPanelBind"
+              @create-workspace="createWorkspaceFromAgent"
+              @setup-select="handleWorkspaceSetupChoice"
+              @rerun-select="handleWorkspaceRerunChoice"
+              @continue-select="handleWorkspaceContinueChoice"
+              @parameter-select="handleWorkspaceParameterChoice"
+            />
           </div>
         </section>
       </div>
@@ -198,19 +197,23 @@ import type {
   DesktopAgentChoice,
   DesktopAgentChoiceOption,
   DesktopAgentEvent,
+  DesktopCodexDependencyStatus,
+  DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
-import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
-import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
+import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
+import AgentSessionContractPanels from './AgentSessionContractPanels.vue'
 import {
   createAgentSessionUiState,
   getAgentSessionUi,
   GUI_SWITCH_PROMPT,
   removeAgentSessionUi,
+  type AgentContractSurface,
   type PendingGuiAction,
 } from './agentSessionUi'
 import { choiceSelectionText } from './agentChoiceDisplay'
+import { displayAgentContractTitle } from './agentContractDisplay'
 import { groupMessagesIntoTurns } from './chatTurns'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
@@ -242,6 +245,9 @@ const AGENT_PROVIDER_ID = 'ecos_agent'
 const messageStore = useMessageStore()
 const agentShell = useAgentShellStore()
 const { messages } = storeToRefs(messageStore)
+const codexSetupStatus = ref<DesktopCodexDependencyStatus | null>(null)
+const codexSetupBusy = ref(false)
+let unsubscribeCodexProgress: (() => void) | null = null
 const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(agentShell)
 const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
@@ -385,25 +391,80 @@ const workspaceParameterRows = computed<[string, string][]>(
 )
 const workspaceRerunExecutionState = computed(() =>
   isWorkspaceRerunPending.value
-    ? 'Rerunning in isolated workspace'
+    ? 'Running'
     : workspaceRerunAnsweredOptionId.value
-      ? 'Confirmation submitted'
-      : 'Awaiting confirmation',
+      ? contractAnswerState(
+          workspaceRerunChoice.value,
+          workspaceRerunAnsweredOptionId.value,
+        )
+      : 'Review',
 )
 const workspaceContinueExecutionState = computed(() =>
   isWorkspaceContinuePending.value
-    ? 'Continuing unfinished flow'
+    ? 'Running'
     : workspaceContinueAnsweredOptionId.value
-      ? 'Confirmation submitted'
-      : 'Awaiting confirmation',
+      ? contractAnswerState(
+          workspaceContinueChoice.value,
+          workspaceContinueAnsweredOptionId.value,
+        )
+      : 'Review',
 )
 const workspaceParameterExecutionState = computed(() =>
   isWorkspaceParameterPending.value
-    ? 'Saving parameters'
+    ? 'Saving'
     : workspaceParameterAnsweredOptionId.value
-      ? 'Confirmation submitted'
-      : 'Awaiting confirmation',
+      ? contractAnswerState(
+          workspaceParameterChoice.value,
+          workspaceParameterAnsweredOptionId.value,
+        )
+      : 'Review',
 )
+
+function contractAnswerState(
+  choice: DesktopAgentChoice | undefined,
+  answeredOptionId: string,
+): string {
+  const option = choice?.options.find((candidate) => candidate.id === answeredOptionId)
+  if (option?.value === '2' || /cancel/i.test(option?.label ?? '')) return 'Cancelled'
+  return 'Confirmed'
+}
+
+const contractPanelBind = computed(() => ({
+  workspaceContinueAnsweredOptionId: workspaceContinueAnsweredOptionId.value,
+  workspaceContinueAnchorTurnId: activeUi.value.workspaceContinueAnchorTurnId,
+  workspaceContinueChoice: workspaceContinueChoice.value,
+  workspaceContinueExecutionState: workspaceContinueExecutionState.value,
+  workspaceContinueMessage: workspaceContinueMessage.value,
+  workspaceContinueRows: workspaceContinueRows.value,
+  workspaceContinueTitle: displayAgentContractTitle(
+    workspaceContinueContract.value?.title ?? '',
+  ),
+  workspaceCreateSetupId: workspaceCreateSetupId.value,
+  workspaceParameterAnsweredOptionId: workspaceParameterAnsweredOptionId.value,
+  workspaceParameterAnchorTurnId: activeUi.value.workspaceParameterAnchorTurnId,
+  workspaceParameterChoice: workspaceParameterChoice.value,
+  workspaceParameterExecutionState: workspaceParameterExecutionState.value,
+  workspaceParameterMessage: workspaceParameterMessage.value,
+  workspaceParameterRows: workspaceParameterRows.value,
+  workspaceParameterTitle: displayAgentContractTitle(
+    workspaceParameterContract.value?.title ?? '',
+  ),
+  workspaceRerunAnsweredOptionId: workspaceRerunAnsweredOptionId.value,
+  workspaceRerunAnchorTurnId: activeUi.value.workspaceRerunAnchorTurnId,
+  workspaceRerunChoice: workspaceRerunChoice.value,
+  workspaceRerunExecutionState: workspaceRerunExecutionState.value,
+  workspaceRerunMessage: workspaceRerunMessage.value,
+  workspaceRerunRows: workspaceRerunRows.value,
+  workspaceRerunTitle: displayAgentContractTitle(
+    workspaceRerunContract.value?.title ?? '',
+  ),
+  workspaceSetupAnsweredOptionId: workspaceSetupAnsweredOptionId.value,
+  workspaceSetupAnchorTurnId: activeUi.value.workspaceSetupAnchorTurnId,
+  workspaceSetupChoice: workspaceSetupChoice.value,
+  workspaceSetupContract: workspaceSetupContract.value,
+  workspaceSetupMessage: workspaceSetupMessage.value,
+}))
+
 const isRunning = computed(
   () =>
     isAgentRequestPending.value ||
@@ -513,6 +574,8 @@ onMounted(() => {
 onUnmounted(() => {
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = undefined
+  unsubscribeCodexProgress?.()
+  unsubscribeCodexProgress = null
   agentFlowProgress.stop()
   scrollContentObserver?.disconnect()
   scrollContentObserver = undefined
@@ -611,6 +674,11 @@ async function startProviderSession(sessionId: string): Promise<void> {
   const ui = sessionUi(sessionId)
   ui.isConnecting = true
   try {
+    const readiness = await ensureCodexReady()
+    if (!readiness) {
+      ui.runStatus = 'error'
+      return
+    }
     await agent.start({ providerId: AGENT_PROVIDER_ID })
     const knownProjects = (await loadProjectHistory()).map((project) => ({
       name: project.name,
@@ -625,13 +693,177 @@ async function startProviderSession(sessionId: string): Promise<void> {
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
     })
     agentShell.markTabStarted(sessionId)
+    codexSetupStatus.value = null
   } catch (error) {
     ui.runStatus = 'error'
     messageStore.setActiveSessionId(sessionId)
-    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+    const reason = agentErrorMessage(error)
+    if (isCodexMissingError(reason)) {
+      await refreshCodexStatus()
+      return
+    }
+    messageStore.addAssistantMessage(reason, 'error', sessionId)
   } finally {
     ui.isConnecting = false
   }
+}
+
+function isCodexMissingError(message: string): boolean {
+  return /codex cli is required/i.test(message)
+}
+
+async function ensureCodexReady(): Promise<boolean> {
+  const status = await refreshCodexStatus()
+  if (!status) return true
+  return status.state === 'ready'
+}
+
+async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) {
+    codexSetupStatus.value = null
+    return null
+  }
+  try {
+    const status = await codex.getStatus()
+    codexSetupStatus.value = status.state === 'ready' ? null : status
+    return status
+  } catch (error) {
+    codexSetupStatus.value = {
+      authState: 'unknown',
+      message: agentErrorMessage(error),
+      platformSupportsInstall: false,
+      state: 'error',
+    }
+    return codexSetupStatus.value
+  }
+}
+
+function bindCodexProgress(): void {
+  unsubscribeCodexProgress?.()
+  unsubscribeCodexProgress = null
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex?.onProgress) return
+  unsubscribeCodexProgress = codex.onProgress((event: DesktopCodexInstallProgressEvent) => {
+    if (!codexSetupStatus.value) {
+      codexSetupStatus.value = {
+        authState: 'unknown',
+        platformSupportsInstall: true,
+        state: 'installing',
+      }
+    }
+    codexSetupStatus.value = {
+      ...codexSetupStatus.value,
+      progressMessage: event.message,
+      progressRatio: event.progress,
+      state: event.phase === 'error' ? 'error' : 'installing',
+    }
+  })
+}
+
+async function installCodexCli(): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  bindCodexProgress()
+  try {
+    const status = await codex.install()
+    codexSetupStatus.value = status.state === 'ready' ? null : status
+    if (status.state === 'ready') {
+      const sessionId = agentSessionId.value
+      if (sessionId) await startProviderSession(sessionId)
+    }
+  } catch (error) {
+    codexSetupStatus.value = {
+      authState: 'unknown',
+      message: agentErrorMessage(error),
+      platformSupportsInstall: true,
+      state: 'error',
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function loginCodexCli(): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  try {
+    const status = await codex.login()
+    codexSetupStatus.value = status.state === 'ready' ? null : status
+  } catch (error) {
+    codexSetupStatus.value = {
+      ...(codexSetupStatus.value ?? {
+        authState: 'unknown',
+        platformSupportsInstall: false,
+        state: 'error',
+      }),
+      message: agentErrorMessage(error),
+      state: 'error',
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function recheckCodexCli(): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  try {
+    const status = await codex.recheck()
+    codexSetupStatus.value = status.state === 'ready' ? null : status
+    if (status.state === 'ready') {
+      const sessionId = agentSessionId.value
+      if (sessionId) await startProviderSession(sessionId)
+    }
+  } catch (error) {
+    codexSetupStatus.value = {
+      authState: 'unknown',
+      message: agentErrorMessage(error),
+      platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
+      state: 'error',
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function pickCodexBin(): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  const codex = desktopApi?.agent?.codex
+  if (!desktopApi || !codex) return
+  const files = await desktopApi.dialog.pickFiles({
+    title: '选择 Codex CLI 可执行文件',
+  })
+  const selected = files?.[0]
+  if (!selected) return
+  codexSetupBusy.value = true
+  try {
+    const status = await codex.setBinPath({ path: selected })
+    codexSetupStatus.value = status.state === 'ready' ? null : status
+    if (status.state === 'ready') {
+      const sessionId = agentSessionId.value
+      if (sessionId) await startProviderSession(sessionId)
+    }
+  } catch (error) {
+    codexSetupStatus.value = {
+      authState: 'unknown',
+      binPath: selected,
+      message: agentErrorMessage(error),
+      platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
+      state: 'error',
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function retryAfterCodexReady(): Promise<void> {
+  const sessionId = agentSessionId.value
+  if (!sessionId) return
+  await startProviderSession(sessionId)
 }
 
 function isActiveGuiOwner(sessionId: string): boolean {
@@ -713,6 +945,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       ui.workspaceRerunMessage = event.text ?? ''
       ui.workspaceRerunChoice = undefined
       ui.workspaceRerunAnsweredOptionId = ''
+      ui.workspaceRerunAnchorTurnId = undefined
       ui.lastContractSurface = 'rerun'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -722,6 +955,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       ui.workspaceContinueMessage = event.text ?? ''
       ui.workspaceContinueChoice = undefined
       ui.workspaceContinueAnsweredOptionId = ''
+      ui.workspaceContinueAnchorTurnId = undefined
       ui.lastContractSurface = 'continue'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -731,6 +965,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       ui.workspaceParameterMessage = event.text ?? ''
       ui.workspaceParameterChoice = undefined
       ui.workspaceParameterAnsweredOptionId = ''
+      ui.workspaceParameterAnchorTurnId = undefined
       ui.lastContractSurface = 'parameter'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -743,6 +978,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     ui.workspaceSetupMessage = event.text ?? ''
     ui.workspaceSetupChoice = undefined
     ui.workspaceSetupAnsweredOptionId = ''
+    ui.workspaceSetupAnchorTurnId = undefined
     ui.lastContractSurface = 'setup'
     if (isActive) scrollWorkspaceSetupIntoView()
     return
@@ -1033,7 +1269,7 @@ function handleWorkspaceSetupChoice(option: DesktopAgentChoiceOption): void {
     return
   }
   activeUi.value.workspaceSetupAnsweredOptionId = option.id
-  void submitChoice(option)
+  void submitChoice(option, 'setup')
 }
 
 function handleWorkspaceRerunChoice(option: DesktopAgentChoiceOption): void {
@@ -1043,7 +1279,7 @@ function handleWorkspaceRerunChoice(option: DesktopAgentChoiceOption): void {
     return
   }
   activeUi.value.workspaceRerunAnsweredOptionId = option.id
-  void submitChoice(option)
+  void submitChoice(option, 'rerun')
 }
 
 function handleWorkspaceContinueChoice(option: DesktopAgentChoiceOption): void {
@@ -1053,7 +1289,7 @@ function handleWorkspaceContinueChoice(option: DesktopAgentChoiceOption): void {
     return
   }
   activeUi.value.workspaceContinueAnsweredOptionId = option.id
-  void submitChoice(option)
+  void submitChoice(option, 'continue')
 }
 
 function handleWorkspaceParameterChoice(option: DesktopAgentChoiceOption): void {
@@ -1063,11 +1299,23 @@ function handleWorkspaceParameterChoice(option: DesktopAgentChoiceOption): void 
     return
   }
   activeUi.value.workspaceParameterAnsweredOptionId = option.id
-  void submitChoice(option)
+  void submitChoice(option, 'parameter')
 }
 
-async function submitChoice(option: DesktopAgentChoiceOption): Promise<void> {
+async function submitChoice(
+  option: DesktopAgentChoiceOption,
+  contractSurface?: AgentContractSurface,
+): Promise<void> {
   messageStore.addMessage(choiceSelectionText(option))
+  const turnId = conversationTurns.value.at(-1)?.id
+  if (contractSurface && turnId) {
+    if (contractSurface === 'setup') activeUi.value.workspaceSetupAnchorTurnId = turnId
+    if (contractSurface === 'rerun') activeUi.value.workspaceRerunAnchorTurnId = turnId
+    if (contractSurface === 'continue')
+      activeUi.value.workspaceContinueAnchorTurnId = turnId
+    if (contractSurface === 'parameter')
+      activeUi.value.workspaceParameterAnchorTurnId = turnId
+  }
   await sendAgentMessage(option.value, false)
 }
 
@@ -1238,6 +1486,38 @@ async function executeWorkspaceRerun(
       await reportWorkspaceRerunResult(contract.rerun_id, 'failed', reason, ownerSessionId)
     } catch {
       messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
+    }
+    // openProject already switched the GUI to the wiped rerun workspace; restore
+    // the source so the original project does not look "empty/lost".
+    if (preparedDirectory) {
+      try {
+        agentShell.beginPreserveForAgentWorkspaceSwitch()
+        await openProject({
+          id: contract.source_workspace,
+          lastOpened: new Date(),
+          name: baseName(contract.source_workspace) || 'workspace',
+          path: contract.source_workspace,
+        })
+        await desktopApi.workspace.bindWindow(contract.source_workspace)
+        invalidateWorkspaceResources([
+          'home',
+          'flow',
+          'step',
+          'maps',
+          'logs',
+          'parameters',
+        ])
+        messageStore.appendToolProgress(
+          'Restored the source workspace after the rerun failed to start.',
+          ownerSessionId,
+        )
+      } catch (restoreError) {
+        messageStore.addAssistantMessage(
+          `Could not restore the source workspace: ${agentErrorMessage(restoreError)}`,
+          'error',
+          ownerSessionId,
+        )
+      }
     }
   } finally {
     if (preparedDirectory) {
@@ -1492,9 +1772,13 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 /* 消息容器约束 - 防止内容撑开父容器；勿设 overflow:hidden / contain，否则 sticky 用户节点失效 */
-
+/* Cursor light: centered conversation column; user is not a right-side bubble */
 .messages-container {
   box-sizing: border-box;
+  width: 100%;
+  max-width: 44rem;
+  margin-inline: auto;
+  padding-inline: 0.875rem;
 }
 
 .chat-turn {
@@ -1505,39 +1789,49 @@ const handleKeyDown = (e: KeyboardEvent) => {
   position: sticky;
   top: 0;
   z-index: 5;
-  display: flex;
-  justify-content: flex-end;
+  display: block;
   margin: 0;
-  padding: 0.5rem 0 0.375rem;
-  background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+  padding: 0.625rem 0 0.375rem;
+  background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
   backdrop-filter: blur(8px);
 }
 
+/* Cursor light: white card, centered in the column, text left-aligned */
 .chat-turn__user-inner {
   position: relative;
-  max-width: 85%;
+  width: 100%;
   min-width: 0;
-  padding: 0.5rem 0.75rem;
-  border: none;
-  border-radius: 0.875rem;
-  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-primary));
+  padding: 0.75rem 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: 0.75rem;
+  background: var(--bg-primary);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
 
 .chat-turn__user-text {
   margin: 0;
   color: var(--text-primary);
   font-size: 0.8125rem;
-  line-height: 1.45;
+  line-height: 1.5;
+  text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
+/* Cursor light: agent reply is plain text in the centered column — no gray card */
 .chat-turn__body {
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
-  padding: 0.375rem 0 1rem;
+  margin: 0.125rem 0 0.875rem;
+  padding: 0.25rem 0.125rem 0.5rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
 }
 
 .agent-pending {

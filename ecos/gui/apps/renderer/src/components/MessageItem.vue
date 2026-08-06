@@ -299,7 +299,7 @@
         'message-bubble group relative w-full max-w-full min-w-0 text-sm',
         message.role === 'user'
           ? 'rounded-lg border border-(--border-color) bg-(--bg-secondary) text-(--text-primary)'
-          : 'text-(--text-primary)',
+          : 'message-bubble--assistant text-(--text-primary)',
       ]"
     >
       <!-- 图片消息 -->
@@ -684,9 +684,16 @@ function csvRows(content: string): string[][] {
 </script>
 
 <style scoped>
+.message-bubble--assistant .markdown-body {
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
 .markdown-body {
-  line-height: 1.6;
+  line-height: 1.55;
   word-break: break-word;
+  color: var(--text-primary);
 }
 
 .markdown-body :deep(p) {
