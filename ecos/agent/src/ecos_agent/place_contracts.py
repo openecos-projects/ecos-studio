@@ -47,9 +47,20 @@ class PlaceStrategy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     strategy_id: str = Field(min_length=1, max_length=160)
-    status: Literal["directly_supported", "internally_effective", "approximated", "cross_stage", "unsupported", "evidence_gap"]
-    allowed_knob_ids: list[str] = Field(default_factory=list, max_length=8)
+    status: Literal[
+        "directly_supported",
+        "internally_effective",
+        "approximated",
+        "cross_stage",
+        "unsupported",
+        "evidence_gap",
+    ]
+    required_metrics: list[str] = Field(default_factory=list, max_length=16)
     allowed_directions: dict[str, Literal["increase", "decrease"]] = Field(default_factory=dict)
+    protected_metrics: list[str] = Field(default_factory=list, max_length=16)
+    verification: str = Field(min_length=1, max_length=512)
+    rollback: str = Field(min_length=1, max_length=512)
+    escalation: str = Field(min_length=1, max_length=512)
     review_status: Literal["approved"]
 
 
