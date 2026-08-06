@@ -52,7 +52,8 @@ const { panelWidthStyle, onResizePointerDown } = useAgentPanelResize(viewportRef
   min-width: 280px;
   max-width: min(720px, 100vw);
   flex-direction: column;
-  border-left: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  border-left: 1px solid var(--border-color);
+  /* Keep the same surface as the shell so the drawer is not a solid square slab. */
   background: var(--bg-primary);
   box-shadow: -6px 0 24px rgb(0 0 0 / 6%);
 }

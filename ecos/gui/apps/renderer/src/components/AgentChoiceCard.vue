@@ -110,6 +110,13 @@ const stackOptions = computed(
 }
 
 .choice-card__option {
+  /* Keep the <button> fill transparent. Linux/Electron UA button painting often
+   * ignores border-radius and leaves a square slab behind the rounded stroke.
+   * Surface + border live on ::before, which does clip to the radius. */
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  isolation: isolate;
   display: flex;
   min-width: 0;
   min-height: 2.125rem;
@@ -118,14 +125,28 @@ const stackOptions = computed(
   justify-content: center;
   gap: 0.125rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  overflow: hidden;
+  border: 0;
   border-radius: 0.625rem;
-  background: color-mix(in srgb, var(--bg-secondary) 45%, var(--bg-primary));
+  background: transparent;
+  background-color: transparent;
   color: var(--text-primary);
+  font: inherit;
   font-size: 0.8125rem;
   line-height: 1.4;
   text-align: left;
   cursor: pointer;
+}
+
+.choice-card__option::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border: 1px solid var(--border-color);
+  border-radius: inherit;
+  background-color: var(--bg-secondary);
+  pointer-events: none;
   transition:
     border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
     background-color 160ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -183,10 +204,14 @@ const stackOptions = computed(
 
 .choice-card__options--buttons .choice-card__option:first-child,
 .choice-card__options--list .choice-card__option:first-child {
-  border-color: color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
-  background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-primary));
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.choice-card__options--buttons .choice-card__option:first-child::before,
+.choice-card__options--list .choice-card__option:first-child::before {
+  border-color: color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
+  background-color: color-mix(in srgb, var(--accent-color) 9%, var(--bg-primary));
 }
 
 .choice-card__options--list {
@@ -206,13 +231,13 @@ const stackOptions = computed(
   line-height: 1.35;
 }
 
-.choice-card__option:hover:not(:disabled) {
+.choice-card__option:hover:not(:disabled)::before {
   border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
-  background: color-mix(in srgb, var(--accent-color) 7%, var(--bg-primary));
+  background-color: color-mix(in srgb, var(--accent-color) 7%, var(--bg-primary));
 }
 
 .choice-card__option:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent-color) 65%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 65%, var(--border-color));
   outline-offset: 2px;
 }
 
@@ -228,7 +253,7 @@ const stackOptions = computed(
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .choice-card__option {
+  .choice-card__option::before {
     transition: none;
   }
 }

@@ -118,6 +118,18 @@ describe('AgentChoiceCard', () => {
     expect(wrapper.find('.choice-card__options--buttons').exists()).toBe(true)
   })
 
+  it('paints option surfaces on ::before so rounded options do not leave square fills', async () => {
+    const source = (await import('./AgentChoiceCard.vue?raw')).default as string
+
+    expect(source).toContain('-webkit-appearance: none')
+    expect(source).toContain('appearance: none')
+    expect(source).toContain('.choice-card__option::before')
+    expect(source).toContain('background: transparent')
+    expect(source).toContain('background-color: transparent')
+    expect(source).toContain('border-radius: inherit')
+    expect(source).toContain('background-color: var(--bg-secondary)')
+  })
+
   it('keeps long list option labels fully readable instead of single-line clipping', () => {
     const longLabel =
       'Rerun from the selected stage through the standard flow end (Harden)'

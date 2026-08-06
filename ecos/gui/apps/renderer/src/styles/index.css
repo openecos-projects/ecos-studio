@@ -12,7 +12,7 @@
   --bg-primary: #ffffff;
   --bg-secondary: #f9fafb;
   --bg-sidebar: #f3f4f6;
-  --border-color: #e5e7eb;
+  --border-color: #d1d5db;
   --text-primary: #111827;
   --text-secondary: #4b5563;
   --accent-color: #00bfa5;
@@ -72,7 +72,7 @@ code,
   --bg-primary: #18181c;
   --bg-secondary: #222226;
   --bg-sidebar: #222226;
-  --border-color: #36363a;
+  --border-color: #52525b;
   --text-primary: #e3e3e8;
   --text-secondary: #a1a1aa;
   --accent-color: #00bfa5;
@@ -97,38 +97,26 @@ body {
   padding: 0;
   min-width: 320px;
   min-height: 100vh;
-  /* 透明背景支持窗口圆角 */
-  background: transparent;
+  /* Opaque shell: matches BrowserWindow backgroundColor and keeps 1px borders
+   * stable under remote/software compositors. */
+  background: var(--bg-primary);
   color: var(--text-primary);
 }
 
 #app {
   /*
    * 使用 fixed + inset 代替 100vw/100vh：
-   * 在 Linux (WebKitGTK) 透明 + 无装饰窗口下，窗口尺寸突变（尤其是最大化）
-   * 时 100vw/100vh 单位可能延迟一帧才更新，导致 DOM 没撑满 webview，
-   * 露出 webview 的默认白色画布 → 最大化白屏。
-   * fixed + inset 让浏览器直接把四边钉到 viewport，无需等单位换算。
+   * 窗口尺寸突变（尤其是最大化）时，100vw/100vh 可能延迟一帧才更新，
+   * 导致 DOM 没撑满 webview。fixed + inset 直接钉到 viewport。
    */
   position: fixed;
   inset: 0;
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background: transparent;
+  background: var(--bg-primary);
   display: flex;
   flex-direction: column;
-}
-
-/*
- * 最大化状态：窗口已占满整个屏幕，"透明圆角浮岛"视觉本来就看不到了。
- * 此时强制主题色底 + 去掉圆角/边框，既防止 webview 白画布从任何角落露出，
- * 也规避 WebKitGTK 对透明+最大化的 viewport 更新延迟问题。
- * 由 App.vue 在 onResized 时根据 isMaximized() 同步这个 class。
- */
-body.window-maximized,
-body.window-maximized #app {
-  background: var(--bg-primary);
 }
 
 * {
