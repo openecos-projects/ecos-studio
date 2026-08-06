@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.workspace_rerun import GuiWorkspaceRerunContract, GuiWorkspaceRerunSource
+
+
+_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class OptimizationRunSpec(BaseModel):
@@ -36,6 +43,13 @@ class OptimizationRunSpec(BaseModel):
             raise ValueError("target density is outside the authorized range")
         return value
 
+    @field_validator("run_id", "baseline_id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _RUN_ID.fullmatch(value):
+            raise ValueError("optimization identifier is invalid")
+        return value
+
     @model_validator(mode="after")
     def validate_interval(self) -> "OptimizationRunSpec":
         if self.lower >= self.upper:
@@ -61,6 +75,40 @@ def generate_candidates(spec: OptimizationRunSpec) -> list[OptimizationCandidate
         OptimizationCandidate(candidate_id=f"candidate_{index}", value=round(value, 10))
         for index, value in enumerate(values, start=1)
     ]
+
+
+def freeze_rerun_contracts(
+    spec: OptimizationRunSpec, source: GuiWorkspaceRerunSource
+) -> list[GuiWorkspaceRerunContract]:
+    workspace = source.workspace_path.resolve()
+    if str(workspace) != spec.source_workspace or "place" not in source.allowed_stages:
+        raise ValueError("optimization source evidence is invalid")
+    labels = [(spec.baseline_id, None)] + [
+        (candidate.candidate_id, candidate.value) for candidate in generate_candidates(spec)
+    ]
+    contracts = []
+    for label, value in labels:
+        target = workspace.with_name(f"{workspace.name}_optimization_{spec.run_id}_{label}")
+        if target.exists():
+            raise ValueError("optimization target workspace already exists")
+        contracts.append(
+            GuiWorkspaceRerunContract(
+                source_workspace=str(workspace),
+                target_workspace=str(target),
+                rerun_id=f"{spec.run_id}_{label}",
+                design_id=source.design_id,
+                target_step=ECCStepName.PLACEMENT,
+                end_step=ECCStepName.PLACEMENT,
+                execution_scope="single_step",
+                source_flow_json_sha256=source.flow_json_sha256,
+                source_stage_artifact=source.stage_artifact_ref["place"],
+                source_stage_artifact_sha256=source.stage_artifact_sha256["place"],
+                parameter_patch=(
+                    [] if value is None else [{"knob_id": spec.knob_id, "value": value}]
+                ),
+            )
+        )
+    return contracts
 
 
 def append_evaluation(

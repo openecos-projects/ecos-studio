@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.place_optimization import OptimizationRunSpec, append_evaluation, generate_candidates
+from ecos_agent.workspace_rerun import GuiWorkspaceRerunSource
 
 
 def _spec() -> OptimizationRunSpec:
@@ -60,3 +61,30 @@ def test_appends_a_non_secret_evaluation_record(tmp_path: Path) -> None:
     record = json.loads((tmp_path / "memory.jsonl").read_text(encoding="utf-8"))
     assert record["status"] == "succeeded"
     assert record["metrics"] == {"place_hpwl": 12.5}
+
+
+def test_freezes_baseline_and_four_candidates_as_isolated_rerun_contracts(tmp_path: Path) -> None:
+    from ecos_agent.place_optimization import freeze_rerun_contracts
+
+    source = GuiWorkspaceRerunSource(
+        workspace_path=tmp_path / "gcd",
+        design_id="gcd",
+        flow_json_sha256="sha256:flow",
+        end_step="place",
+        allowed_stages=("place",),
+        stage_artifact_ref={"place": "place_dreamplace/output/gcd_place.def.gz"},
+        stage_artifact_sha256={"place": "sha256:artifact"},
+    )
+    spec = _spec().model_copy(update={"source_workspace": str(source.workspace_path)})
+    contracts = freeze_rerun_contracts(spec, source)
+
+    assert [contract.rerun_id for contract in contracts] == [
+        "scan_001_baseline",
+        "scan_001_candidate_1",
+        "scan_001_candidate_2",
+        "scan_001_candidate_3",
+        "scan_001_candidate_4",
+    ]
+    assert contracts[0].parameter_patch == []
+    assert [item.value for item in contracts[1].parameter_patch] == [0.7]
+    assert len({contract.target_workspace for contract in contracts}) == 5
