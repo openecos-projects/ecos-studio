@@ -164,6 +164,7 @@ export {
   recordReplacementBackupInManifest,
   registerWorkspaceInManifest,
   serializeProjectManifest,
+  setQorBaselineInManifest,
 } from './utils/projectManifest.ts'
 export type {
   ProjectManifest,
@@ -173,6 +174,7 @@ export type {
   ProjectManifestMetricSummary,
   ProjectManifestMpc,
   ProjectManifestMpcDesign,
+  ProjectManifestQorBaseline,
   ProjectManifestMutation,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,

@@ -1,6 +1,6 @@
+import type { ProjectManifest } from '@ecos-studio/shared'
 import type {
   FlowStep,
-  ProjectManifest,
   ProjectWorkspaceAnalysisInput,
   ProjectWorkspaceAnalysisInputsById,
   ProjectWorkspaceFlowStatesById,

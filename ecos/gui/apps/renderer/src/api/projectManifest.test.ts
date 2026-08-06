@@ -11,7 +11,7 @@ vi.mock('@/platform/desktop', () => ({
   })),
 }))
 
-vi.mock('@/utils/projectManagement', () => ({
+vi.mock('@ecos-studio/shared', () => ({
   parseProjectManifest: vi.fn((content: string) => JSON.parse(content)),
 }))
 

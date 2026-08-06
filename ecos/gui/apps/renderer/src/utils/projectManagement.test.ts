@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import type { ResourceInfo } from '@ecos-studio/shared'
+import {
+  createProjectManifestDraft,
+  parseProjectManifest,
+  registerWorkspaceInManifest,
+  setQorBaselineInManifest,
+  type ResourceInfo,
+} from '@ecos-studio/shared'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
-  createProjectManifestDraft,
   createSelectionState,
-  parseProjectManifest,
   parseWorkspaceFlowStateMap,
   projectMpcOptionFromResource,
-  registerWorkspaceInManifest,
-  setQorBaselineInManifest,
   workspaceStatusFromFlow,
   type FlowStep,
   type ProjectStepStatus,
@@ -348,7 +350,7 @@ describe('project management V3 model', () => {
           },
         }),
       ),
-    ).toThrow('Invalid project manifest MPC spec_path.')
+    ).toThrow('mpc.spec_path must reference spec/spec.json.in')
   })
 
   it('uses the fixed project flow step order', () => {
@@ -614,14 +616,16 @@ describe('project management V3 model', () => {
     ).toMatchObject({ configuredCount: 1, successCount: 1 })
   })
 
-  it('keeps baseline selection as project metadata without manifest metrics', () => {
+  it('keeps baseline selection as project metadata without populating manifest metrics', () => {
     const manifest = manifestWithWorkspace()
     const updated = setQorBaselineInManifest(manifest, 'ws_0004')
     expect(updated.qor_baseline).toEqual({
       workspace_id: 'ws_0004',
       reason: 'Selected from Project QoR Trend',
     })
-    expect(updated.workspaces[0]).not.toHaveProperty('metrics_summary')
-    expect(updated.workspaces[0]).not.toHaveProperty('step_metrics')
+    expect(updated.workspaces[0]).toMatchObject({
+      metrics_summary: {},
+      step_metrics: {},
+    })
   })
 })

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  archiveWorkspaceInManifest,
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
   parseProjectManifest,
   registerWorkspaceInManifest,
+  setQorBaselineInManifest,
 } from './projectManifest'
 
 describe('project manifest parsing', () => {
@@ -47,7 +49,9 @@ describe('project manifest parsing', () => {
       best_workspace: null,
     }
 
-    expect(parseProjectManifest(JSON.stringify(legacyManifest)).mpc).toBeNull()
+    const parsedLegacyManifest = parseProjectManifest(JSON.stringify(legacyManifest))
+    expect(parsedLegacyManifest.mpc).toBeNull()
+    expect(parsedLegacyManifest.qor_baseline).toBeNull()
     expect(() =>
       parseProjectManifest(
         JSON.stringify({
@@ -64,6 +68,38 @@ describe('project manifest parsing', () => {
         }),
       ),
     ).toThrow('mpc.spec_path must reference spec/spec.json.in')
+  })
+
+  it('owns QoR baseline normalization and lifecycle in the shared manifest contract', () => {
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        now: '2026-07-01T00:00:00.000Z',
+      }),
+      {
+        projectRoot: '/work/gcd',
+        workspacePath: '/work/gcd/ws_0001',
+        now: '2026-07-01T00:00:00.000Z',
+      },
+    )
+
+    const selected = setQorBaselineInManifest(
+      manifest,
+      'ws_0001',
+      'Selected for comparison',
+      '2026-07-02T00:00:00.000Z',
+    )
+    expect(selected.qor_baseline).toEqual({
+      workspace_id: 'ws_0001',
+      reason: 'Selected for comparison',
+    })
+    expect(parseProjectManifest(JSON.stringify(selected)).qor_baseline).toEqual(
+      selected.qor_baseline,
+    )
+    expect(setQorBaselineInManifest(selected, 'missing')).toBe(selected)
+    expect(archiveWorkspaceInManifest(selected, 'ws_0001').qor_baseline).toBeNull()
+    expect(deleteWorkspaceFromManifest(selected, 'ws_0001').qor_baseline).toBeNull()
   })
 
   it('rejects a non-null MPC association without a selected design snapshot', () => {
