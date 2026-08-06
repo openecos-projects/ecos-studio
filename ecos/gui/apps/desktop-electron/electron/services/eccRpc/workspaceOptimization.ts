@@ -97,7 +97,7 @@ function validateContracts(contracts: DesktopAgentWorkspaceRerunContract[]): voi
   }
 }
 
-async function readPlaceOptimizationEvidence(directory: string): Promise<PlaceOptimizationEvidence> {
+export async function readPlaceOptimizationEvidence(directory: string): Promise<PlaceOptimizationEvidence> {
   const relativePath = 'place_dreamplace/analysis/qor_metrics.json'
   const payload = JSON.parse(await readFile(join(directory, relativePath), 'utf8')) as {
     metrics?: Array<{ id?: unknown; value?: unknown }>

@@ -79,6 +79,7 @@ import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
+import { readPlaceOptimizationEvidence } from '../services/eccRpc/workspaceOptimization'
 import {
   executeWorkspaceRerun,
   prepareWorkspaceRerun,
@@ -558,6 +559,7 @@ export function registerIpc(
     string,
     {
       contract: DesktopAgentWorkspaceRerunContract
+      optimization?: true
       sender: IpcMainInvokeEvent['sender']
     }
   >()
@@ -977,7 +979,11 @@ export function registerIpc(
     }
     const prepared = await prepareWorkspaceRerun(contract)
     const executionToken = randomUUID()
-    pendingWorkspaceRerunExecutions.set(executionToken, { contract, sender: event.sender })
+    pendingWorkspaceRerunExecutions.set(executionToken, {
+      contract,
+      optimization: true,
+      sender: event.sender,
+    })
     return { ...prepared, executionToken }
   })
 
@@ -1026,6 +1032,9 @@ export function registerIpc(
       services.eccRuntimeService,
       workspaceHandle,
     )
+    return pending.optimization
+      ? await readPlaceOptimizationEvidence(pending.contract.target_workspace)
+      : undefined
   })
 
   handle(desktopApiIpcChannels.workspaceBindWindow, async (event, path) => {
