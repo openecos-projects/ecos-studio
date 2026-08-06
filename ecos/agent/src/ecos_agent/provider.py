@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,6 +63,14 @@ from ecos_agent.messages import (
 from ecos_agent.place_assistant import PlaceAssistant
 from ecos_agent.place_contracts import PlaceEvidence
 from ecos_agent.place_evidence import build_place_evidence
+from ecos_agent.place_network import (
+    PublicKnowledgeHit,
+    append_knowledge_candidate,
+    default_candidate_path,
+    public_lookup_query,
+    search_public_metadata,
+    validate_public_hit,
+)
 from ecos_agent.place_optimization import (
     OptimizationEvaluation,
     OptimizationResult,
@@ -127,6 +136,8 @@ PROVIDER_ID = "ecos_agent"
 _WorkspaceSetupParser = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _WorkspacePathRecommender = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]]
+_PublicKnowledgeLookup = Callable[[str], list[PublicKnowledgeHit]]
+_PUBLIC_LOOKUP_RE = re.compile(r"\b(search|web|online|internet)\b|联网|网页|文献", re.IGNORECASE)
 
 
 def _project_root_for_workspace(workspace: str) -> str | None:
@@ -205,6 +216,8 @@ class _Session:
     rerun_parameter_patch: list[dict[str, Any]] = field(default_factory=list)
     workspace_rerun_contract: GuiWorkspaceRerunContract | None = None
     place_optimization_contract: PlaceOptimizationContract | None = None
+    public_knowledge_hits: list[PublicKnowledgeHit] = field(default_factory=list)
+    public_knowledge_query: str | None = None
     workspace_setup: GuiWorkspaceSetupProposal = field(default_factory=recommended_workspace_setup)
     workspace_inputs: WorkspaceInputs = field(default_factory=WorkspaceInputs)
     path_recommendations: dict[str, str] = field(default_factory=dict)
@@ -231,6 +244,8 @@ class EcosAgentProvider:
         rerun_parameter_parser: _RerunParameterParser | None = None,
         place_assistant: PlaceAssistant | None = None,
         experiment_memory_path: Path | None = None,
+        public_knowledge_lookup: _PublicKnowledgeLookup | None = None,
+        candidate_path: Path | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
@@ -238,6 +253,8 @@ class EcosAgentProvider:
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.place_assistant = place_assistant or PlaceAssistant.from_environment()
         self.experiment_memory_path = experiment_memory_path or default_experiment_memory_path()
+        self.public_knowledge_lookup = public_knowledge_lookup or search_public_metadata
+        self.candidate_path = candidate_path or default_candidate_path()
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
 
@@ -375,6 +392,9 @@ class EcosAgentProvider:
                 )
                 self._emit_phase_choice(session)
                 return
+            if _PUBLIC_LOOKUP_RE.search(message):
+                self._begin_public_knowledge_lookup(session, message)
+                return
         handlers = {
             "operation": self._select_operation,
             "rerun_design": self._select_rerun_design,
@@ -408,6 +428,8 @@ class EcosAgentProvider:
             "workspace_parameter_confirmation": self._confirm_workspace_parameter_update,
             "workspace_parameter_pending": self._handle_workspace_parameter_update_result,
             "place_optimization_confirmation": self._confirm_place_optimization,
+            "place_network_confirmation": self._confirm_public_knowledge_lookup,
+            "place_candidate_confirmation": self._confirm_knowledge_candidate,
             "workspace_optimization_pending": self._handle_place_optimization_result,
             "confirmation": self._confirm_rerun_execution,
         }
@@ -502,6 +524,82 @@ class EcosAgentProvider:
             },
         )
         self._emit_phase_choice(session)
+
+    def _begin_public_knowledge_lookup(self, session: _Session, message: str) -> None:
+        session.public_knowledge_query = public_lookup_query(message)
+        session.phase = "place_network_confirmation"
+        self._emit(
+            session,
+            "message",
+            "Local reviewed Placement knowledge is insufficient. Search public metadata with a sanitized generic query?",
+        )
+        self._emit_public_lookup_choice(session)
+
+    def _confirm_public_knowledge_lookup(self, session: _Session, message: str) -> None:
+        if message != "1":
+            self._clear_public_knowledge(session)
+            self._emit(session, "message", "Public metadata lookup was not started.")
+            self._emit_phase_choice(session)
+            return
+        query = session.public_knowledge_query
+        if query is None:
+            raise ValueError("Public metadata lookup is invalid.")
+        try:
+            hits = [validate_public_hit(item) for item in self.public_knowledge_lookup(query)]
+        except Exception:
+            self._clear_public_knowledge(session)
+            self._emit(session, "message", "Public metadata lookup is unavailable; local knowledge remains unchanged.")
+            self._emit_phase_choice(session)
+            return
+        if not hits:
+            self._clear_public_knowledge(session)
+            self._emit(session, "message", "No public metadata was found; local knowledge remains unchanged.")
+            self._emit_phase_choice(session)
+            return
+        session.public_knowledge_hits = hits[:3]
+        session.phase = "place_candidate_confirmation"
+        if self.place_assistant is not None:
+            self.place_assistant.audit_public_lookup(query, [item.url for item in hits[:3]])
+        self._emit(
+            session,
+            "message",
+            "Public metadata is unreviewed and cannot become a strategy or execution proposal. "
+            f"Sources: {', '.join(item.url for item in hits[:3])}. Save it for offline review?",
+        )
+        self._emit_public_lookup_choice(session)
+
+    def _confirm_knowledge_candidate(self, session: _Session, message: str) -> None:
+        if message == "1" and session.public_knowledge_query is not None:
+            for hit in session.public_knowledge_hits:
+                append_knowledge_candidate(self.candidate_path, session.public_knowledge_query, hit)
+            text = "Unreviewed public metadata was saved for offline review; the published knowledge bundle was not changed."
+        else:
+            text = "Public metadata was not saved; the published knowledge bundle was not changed."
+        self._clear_public_knowledge(session)
+        self._emit(session, "message", text)
+        self._emit_phase_choice(session)
+
+    def _emit_public_lookup_choice(self, session: _Session) -> None:
+        self._emit(
+            session,
+            "choice",
+            "Choose whether to continue.",
+            choice={
+                "promptId": uuid.uuid4().hex,
+                "title": "Public metadata lookup",
+                "options": [
+                    {"id": "confirm", "label": "Continue", "value": "1"},
+                    {"id": "cancel", "label": "Cancel", "value": "2"},
+                ],
+                "variant": "buttons",
+            },
+        )
+
+    @staticmethod
+    def _clear_public_knowledge(session: _Session) -> None:
+        session.public_knowledge_hits = []
+        session.public_knowledge_query = None
+        session.phase = "operation"
 
     def _begin_create_workspace_in_project(self, session: _Session) -> None:
         project_root = session.project_root
@@ -1862,6 +1960,8 @@ class EcosAgentProvider:
                 "workspace_continue_confirmation",
                 "workspace_parameter_confirmation",
                 "place_optimization_confirmation",
+                "place_network_confirmation",
+                "place_candidate_confirmation",
                 "confirmation",
             }
             else "idle"
@@ -1892,6 +1992,8 @@ class EcosAgentProvider:
         session.rerun_parameter_patch = []
         session.workspace_rerun_contract = None
         session.place_optimization_contract = None
+        session.public_knowledge_hits = []
+        session.public_knowledge_query = None
         session.workspace_setup = recommended_workspace_setup()
         session.workspace_inputs = WorkspaceInputs()
         session.path_recommendations = {}

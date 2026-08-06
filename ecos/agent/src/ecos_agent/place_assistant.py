@@ -190,6 +190,18 @@ class PlaceAssistant:
         with self.audit_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
 
+    def audit_public_lookup(self, query: str, urls: list[str]) -> None:
+        self.audit_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema_version": "ecos-place-audit.v1",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "public_metadata_lookup",
+            "query": query,
+            "urls": urls,
+        }
+        with self.audit_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+
 
 def _matches(entity: dict[str, Any], message: str) -> bool:
     return any(str(alias).casefold() in message for alias in entity.get("aliases", []))

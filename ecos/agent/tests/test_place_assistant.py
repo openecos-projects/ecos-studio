@@ -3,6 +3,7 @@ from pathlib import Path
 
 from ecos_agent.place_assistant import PlaceAssistant
 from ecos_agent.place_contracts import PlaceEvidence
+from ecos_agent.place_network import PublicKnowledgeHit, public_lookup_query
 from ecos_agent.provider import EcosAgentProvider
 
 
@@ -141,3 +142,47 @@ def test_analysis_reports_an_approved_strategy_with_required_evidence(tmp_path: 
         "parameter.dreamplace.target_density",
         "strategy.place.reduce_density",
     ]
+
+
+def test_public_lookup_query_never_reuses_private_user_text() -> None:
+    query = public_lookup_query(
+        "Search online for /private/gcd.v metrics=8.2 and token=secret"
+    )
+
+    assert query == "DREAMPlace placement target density congestion"
+    assert "/private" not in query
+    assert "secret" not in query
+
+
+def test_provider_saves_public_results_only_as_unreviewed_candidates(tmp_path: Path) -> None:
+    events: list[dict[str, object]] = []
+    candidate_path = tmp_path / "candidates.jsonl"
+    seen_queries: list[str] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        candidate_path=candidate_path,
+        place_assistant=PlaceAssistant.from_bundle(
+            _bundle(tmp_path / "bundle"), audit_path=tmp_path / "audit.jsonl"
+        ),
+        public_knowledge_lookup=lambda query: (
+            seen_queries.append(query)
+            or [PublicKnowledgeHit(title="Public placement paper", url="https://doi.org/10.1/example")]
+        ),
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    provider.send_message({"sessionId": session_id, "message": "Search the web for placement papers"})
+    assert provider.sessions[session_id].phase == "place_network_confirmation"
+
+    provider.send_message({"sessionId": session_id, "message": "1"})
+    assert seen_queries == ["DREAMPlace placement target density congestion"]
+    assert provider.sessions[session_id].phase == "place_candidate_confirmation"
+    response = next(event for event in reversed(events) if event["type"] == "message")["text"]
+    assert "unreviewed" in response
+    assert "https://doi.org/10.1/example" in response
+
+    provider.send_message({"sessionId": session_id, "message": "1"})
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    assert candidate["review_status"] == "unreviewed"
+    assert candidate["kind"] == "public_metadata"
+    assert provider.sessions[session_id].phase == "operation"
