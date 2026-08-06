@@ -322,7 +322,9 @@ export interface DesktopApi {
       install(): Promise<DesktopCodexDependencyStatus>
       login(): Promise<DesktopCodexDependencyStatus>
       recheck(): Promise<DesktopCodexDependencyStatus>
-      setBinPath(request: DesktopCodexSetBinPathRequest): Promise<DesktopCodexDependencyStatus>
+      setBinPath(
+        request: DesktopCodexSetBinPathRequest,
+      ): Promise<DesktopCodexDependencyStatus>
       onProgress(
         listener: (event: DesktopCodexInstallProgressEvent) => void,
       ): DesktopEventUnsubscribe

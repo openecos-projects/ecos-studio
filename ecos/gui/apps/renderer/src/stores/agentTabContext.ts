@@ -61,24 +61,19 @@ export function resolveAgentTabContext(input: {
       workspaceName:
         input.currentWorkspaceName?.trim() || baseName(workspacePath) || undefined,
       projectRoot:
-        input.currentProjectRoot?.trim() ||
-        input.routeProjectRoot?.trim() ||
-        undefined,
+        input.currentProjectRoot?.trim() || input.routeProjectRoot?.trim() || undefined,
       projectName: input.currentProjectName?.trim() || undefined,
       step: input.step?.trim() || undefined,
     }
   }
 
   const projectRoot =
-    input.currentProjectRoot?.trim() ||
-    input.routeProjectRoot?.trim() ||
-    undefined
+    input.currentProjectRoot?.trim() || input.routeProjectRoot?.trim() || undefined
   if (projectRoot) {
     return {
       mode: 'home',
       projectRoot,
-      projectName:
-        input.currentProjectName?.trim() || baseName(projectRoot) || undefined,
+      projectName: input.currentProjectName?.trim() || baseName(projectRoot) || undefined,
     }
   }
 

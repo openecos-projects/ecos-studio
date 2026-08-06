@@ -75,10 +75,7 @@ describe('useAgentFlowProgress', () => {
     expect(flowChanges).toEqual([])
 
     testState.files.set(FLOW_PATH, flow('Ongoing'))
-    testState.files.set(
-      SUBFLOW_PATH,
-      subflow([{ name: 'load data', state: 'Ongoing' }]),
-    )
+    testState.files.set(SUBFLOW_PATH, subflow([{ name: 'load data', state: 'Ongoing' }]))
     emit(FLOW_PATH)
     await vi.waitFor(() =>
       expect(messages).toEqual(['Running place.', 'place › load data']),

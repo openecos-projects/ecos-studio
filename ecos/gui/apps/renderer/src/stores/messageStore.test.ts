@@ -177,4 +177,3 @@ describe('messageStore', () => {
     expect(store.messages[0]?.status).toBe('done')
   })
 })
-

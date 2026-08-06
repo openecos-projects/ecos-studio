@@ -3,7 +3,9 @@
     <div class="codex-setup__header">
       <div class="codex-setup__heading min-w-0 flex-1">
         <h3 class="codex-setup__title">需要 Codex CLI</h3>
-        <p class="codex-setup__message selectable">{{ status.message || defaultMessage }}</p>
+        <p class="codex-setup__message selectable">
+          {{ status.message || defaultMessage }}
+        </p>
       </div>
       <span class="codex-setup__state" role="status">{{ stateLabel }}</span>
     </div>

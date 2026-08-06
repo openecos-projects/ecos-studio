@@ -28,7 +28,9 @@
       </div>
 
       <div
-        v-if="step.detailLines?.length && (step.status === 'running' || isExpanded(step.id))"
+        v-if="
+          step.detailLines?.length && (step.status === 'running' || isExpanded(step.id))
+        "
         class="step__detail"
       >
         <p
@@ -51,10 +53,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import {
-  buildAgentToolSteps,
-  type AgentToolStepStatus,
-} from './agentToolSteps'
+import { buildAgentToolSteps, type AgentToolStepStatus } from './agentToolSteps'
 
 const props = withDefaults(
   defineProps<{

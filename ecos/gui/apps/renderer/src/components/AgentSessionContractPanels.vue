@@ -93,10 +93,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   continueSelect: [option: DesktopAgentChoiceOption]
-  createWorkspace: [
-    config: WorkspaceConfig,
-    contract: DesktopAgentWorkspaceSetupContract,
-  ]
+  createWorkspace: [config: WorkspaceConfig, contract: DesktopAgentWorkspaceSetupContract]
   parameterSelect: [option: DesktopAgentChoiceOption]
   rerunSelect: [option: DesktopAgentChoiceOption]
   setupSelect: [option: DesktopAgentChoiceOption]

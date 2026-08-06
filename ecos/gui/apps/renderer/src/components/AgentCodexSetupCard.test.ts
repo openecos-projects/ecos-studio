@@ -51,9 +51,9 @@ describe('AgentCodexSetupCard', () => {
     }
     const wrapper = mount(AgentCodexSetupCard, { props: { status } })
 
-    expect(
-      wrapper.findAll('button').some((button) => button.text() === '一键安装'),
-    ).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text() === '一键安装')).toBe(
+      false,
+    )
     expect(
       wrapper.findAll('button').some((button) => button.text() === '选择本地 codex'),
     ).toBe(true)

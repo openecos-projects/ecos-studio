@@ -181,7 +181,8 @@ watch(isCommitted, (committed) => {
 
 function summarizeValue(value: string): string {
   if (/[/\\]/.test(value)) {
-    const leaf = value.split(/[/\\]/).filter(Boolean).at(-1)
+    const parts = value.split(/[/\\]/).filter(Boolean)
+    const leaf = parts[parts.length - 1]
     if (leaf) return leaf
   }
   return value

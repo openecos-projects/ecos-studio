@@ -164,12 +164,12 @@ function stepFromRoutePath(): StepEnum | undefined {
 /** 仅步骤路由显示 Config/QoR；Home/tech/configure 只保留 Chat */
 const showStepConfigInspector = computed(() => {
   const step = stepFromRoutePath()
-  return Boolean(step) && step !== StepEnum.SYNTHESIS
+  return step !== undefined && step !== StepEnum.SYNTHESIS
 })
 const showStepQorAnalysis = computed(() => {
   const step = stepFromRoutePath()
   return (
-    Boolean(step) &&
+    step !== undefined &&
     [StepEnum.PLACEMENT, StepEnum.ROUTING, StepEnum.STA].includes(step)
   )
 })

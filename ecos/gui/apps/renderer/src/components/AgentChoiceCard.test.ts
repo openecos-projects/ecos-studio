@@ -128,7 +128,11 @@ describe('AgentChoiceCard', () => {
           title: 'Start stage',
           variant: 'list' as const,
           options: [
-            { id: 'scope-1-1', label: 'Rerun only the selected stage, then stop', value: '1' },
+            {
+              id: 'scope-1-1',
+              label: 'Rerun only the selected stage, then stop',
+              value: '1',
+            },
             { id: 'scope-1-2', label: longLabel, value: '2' },
           ],
         },

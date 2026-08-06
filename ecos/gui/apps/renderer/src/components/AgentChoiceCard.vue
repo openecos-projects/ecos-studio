@@ -30,10 +30,9 @@
         @click="emit('select', option.source)"
       >
         <span class="choice-card__option-label">{{ option.label }}</span>
-        <span
-          v-if="option.detail"
-          class="choice-card__option-detail"
-        >{{ option.detail }}</span>
+        <span v-if="option.detail" class="choice-card__option-detail">{{
+          option.detail
+        }}</span>
       </button>
     </div>
   </section>
@@ -132,7 +131,8 @@ const stackOptions = computed(
     background-color 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.choice-card__options--buttons:not(.choice-card__options--stack) .choice-card__option:not(.choice-card__option--stacked) {
+.choice-card__options--buttons:not(.choice-card__options--stack)
+  .choice-card__option:not(.choice-card__option--stacked) {
   align-items: center;
 }
 
@@ -170,7 +170,9 @@ const stackOptions = computed(
   min-width: 0;
   width: 100%;
   color: var(--text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-size: 0.6875rem;
   font-weight: 400;
   line-height: 1.35;

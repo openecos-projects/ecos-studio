@@ -30,7 +30,11 @@ function parseArtifactPaths(saved: string): string[] {
 }
 
 function subflowDetailKey(detail: string): string {
-  return detail.replace(/\s+failed$/i, '').split('·')[0]!.trim().toLowerCase()
+  return detail
+    .replace(/\s+failed$/i, '')
+    .split('·')[0]!
+    .trim()
+    .toLowerCase()
 }
 
 export function parseToolContentLines(content: string): string[] {
@@ -76,13 +80,14 @@ export function buildAgentToolSteps(
   }
 
   const findFlowStep = (name: string, preferRunning = false): MutableStep | undefined => {
-    const matches = steps.filter(
-      (step) => step.kind === 'flow' && step.summary === name,
-    )
+    const matches = steps.filter((step) => step.kind === 'flow' && step.summary === name)
     if (preferRunning) {
-      return [...matches].reverse().find((step) => step.status === 'running') ?? matches.at(-1)
+      return (
+        [...matches].reverse().find((step) => step.status === 'running') ??
+        matches[matches.length - 1]
+      )
     }
-    return matches.at(-1)
+    return matches[matches.length - 1]
   }
 
   for (const [index, line] of lines.entries()) {

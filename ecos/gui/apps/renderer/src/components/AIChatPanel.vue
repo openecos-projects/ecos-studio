@@ -54,10 +54,7 @@
           </button>
         </div>
       </div>
-      <div
-        v-else
-        class="messages-container w-full max-w-full min-w-0 py-2"
-      >
+      <div v-else class="messages-container w-full max-w-full min-w-0 py-2">
         <section
           v-for="(turn, turnIndex) in conversationTurns"
           :key="turn.id"
@@ -93,9 +90,7 @@
               class="message-item w-full max-w-full min-w-0"
             />
             <div
-              v-if="
-                turnIndex === conversationTurns.length - 1 && showPendingPlaceholder
-              "
+              v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
               class="agent-pending"
               role="status"
               aria-live="polite"
@@ -492,7 +487,8 @@ const activeChoice = computed(
     (lastContractSurface.value === 'continue' && !workspaceContinueAnsweredOptionId.value
       ? workspaceContinueChoice.value
       : undefined) ??
-    (lastContractSurface.value === 'parameter' && !workspaceParameterAnsweredOptionId.value
+    (lastContractSurface.value === 'parameter' &&
+    !workspaceParameterAnsweredOptionId.value
       ? workspaceParameterChoice.value
       : undefined) ??
     pendingMessageChoice.value,
@@ -532,7 +528,8 @@ const statusLabel = computed(() => {
 /** Quiet waiting cue (no "thinking" copy) until the first reply lands. */
 const showPendingPlaceholder = computed(() => {
   if (!isRunning.value) return false
-  const last = conversationTurns.value.at(-1)
+  const turns = conversationTurns.value
+  const last = turns[turns.length - 1]
   if (!last?.user) return false
   return last.responses.length === 0
 })
@@ -551,8 +548,7 @@ const emptyStateSuggestions = computed(() => {
     { label: 'Rerun a completed stage', value: '2' },
     { label: 'Continue unfinished flow', value: '3' },
   ]
-  const projectRoot =
-    activeTab.value?.projectRoot || queryString(route.query.projectRoot)
+  const projectRoot = activeTab.value?.projectRoot || queryString(route.query.projectRoot)
   if (projectRoot) {
     suggestions.push({
       label: 'Create another workspace in this project',
@@ -744,21 +740,23 @@ function bindCodexProgress(): void {
   unsubscribeCodexProgress = null
   const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex?.onProgress) return
-  unsubscribeCodexProgress = codex.onProgress((event: DesktopCodexInstallProgressEvent) => {
-    if (!codexSetupStatus.value) {
-      codexSetupStatus.value = {
-        authState: 'unknown',
-        platformSupportsInstall: true,
-        state: 'installing',
+  unsubscribeCodexProgress = codex.onProgress(
+    (event: DesktopCodexInstallProgressEvent) => {
+      if (!codexSetupStatus.value) {
+        codexSetupStatus.value = {
+          authState: 'unknown',
+          platformSupportsInstall: true,
+          state: 'installing',
+        }
       }
-    }
-    codexSetupStatus.value = {
-      ...codexSetupStatus.value,
-      progressMessage: event.message,
-      progressRatio: event.progress,
-      state: event.phase === 'error' ? 'error' : 'installing',
-    }
-  })
+      codexSetupStatus.value = {
+        ...codexSetupStatus.value,
+        progressMessage: event.message,
+        progressRatio: event.progress,
+        state: event.phase === 'error' ? 'error' : 'installing',
+      }
+    },
+  )
 }
 
 async function installCodexCli(): Promise<void> {
@@ -987,10 +985,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'setup') {
       ui.workspaceSetupChoice = event.choice
       ui.workspaceSetupAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'rerun'
-    ) {
+    } else if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'rerun') {
       ui.workspaceRerunChoice = event.choice
       ui.workspaceRerunAnsweredOptionId = ''
     } else if (
@@ -1080,10 +1075,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       })
       return
     }
-    void executeWorkspaceParameterUpdate(
-      event.workspaceParameterUpdate,
-      event.sessionId,
-    )
+    void executeWorkspaceParameterUpdate(event.workspaceParameterUpdate, event.sessionId)
     return
   }
   if (event.type === 'error') {
@@ -1191,7 +1183,7 @@ const onImageLoad = () => {
 watch(
   () => {
     const list = messages.value
-    const last = list.at(-1)
+    const last = list[list.length - 1]
     return [
       list.length,
       last?.id ?? '',
@@ -1307,7 +1299,8 @@ async function submitChoice(
   contractSurface?: AgentContractSurface,
 ): Promise<void> {
   messageStore.addMessage(choiceSelectionText(option))
-  const turnId = conversationTurns.value.at(-1)?.id
+  const turns = conversationTurns.value
+  const turnId = turns[turns.length - 1]?.id
   if (contractSurface && turnId) {
     if (contractSurface === 'setup') activeUi.value.workspaceSetupAnchorTurnId = turnId
     if (contractSurface === 'rerun') activeUi.value.workspaceRerunAnchorTurnId = turnId
@@ -1359,7 +1352,11 @@ async function createWorkspaceFromAgent(
 ): Promise<void> {
   const ownerSessionId = agentSessionId.value
   if (!ownerSessionId || !isActiveGuiOwner(ownerSessionId)) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done', ownerSessionId ?? undefined)
+    messageStore.addAssistantMessage(
+      GUI_SWITCH_PROMPT,
+      'done',
+      ownerSessionId ?? undefined,
+    )
     return
   }
   if (!createAgentWorkspace || isWorkspaceCreationPending.value) return
@@ -1483,7 +1480,12 @@ async function executeWorkspaceRerun(
     const reason = agentErrorMessage(error)
     messageStore.addAssistantMessage(`Rerun failed: ${reason}`, 'error', ownerSessionId)
     try {
-      await reportWorkspaceRerunResult(contract.rerun_id, 'failed', reason, ownerSessionId)
+      await reportWorkspaceRerunResult(
+        contract.rerun_id,
+        'failed',
+        reason,
+        ownerSessionId,
+      )
     } catch {
       messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
     }
@@ -1542,10 +1544,7 @@ async function registerAgentRerunWorkspaceInProject(
         activeTab.value?.projectRoot ||
         queryString(route.query.projectRoot) ||
         '',
-      projectName:
-        ownerTab?.projectName ||
-        activeTab.value?.projectName ||
-        undefined,
+      projectName: ownerTab?.projectName || activeTab.value?.projectName || undefined,
     },
     workspacePath: contract.source_workspace,
   })

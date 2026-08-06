@@ -345,18 +345,15 @@ export function useSubflow() {
     { immediate: true },
   )
 
-  // Same step after Agent rerun workspace switch must not keep the previous workspace cache.
+  // Coalesce a workspace switch and its resource invalidation into one refresh.
   watch(
-    () => currentProject.value?.path,
-    async (nextPath, previousPath) => {
-      if (!nextPath || nextPath === previousPath) return
-      await refreshCurrentSubflow()
-    },
-  )
-
-  watch(
-    () => [resourceVersions.value.step, resourceVersions.value.all],
-    async () => {
+    [
+      () => currentProject.value?.path,
+      () => resourceVersions.value.step,
+      () => resourceVersions.value.all,
+    ],
+    async ([nextPath], [previousPath]) => {
+      if (!nextPath && nextPath !== previousPath) return
       await refreshCurrentSubflow()
     },
   )

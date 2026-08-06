@@ -77,7 +77,10 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(() => {
         if (args[0] === '--version') {
-          child.stdout.emit('data', `${command.includes('settings') ? 'settings' : 'path'} 1.0\n`)
+          child.stdout.emit(
+            'data',
+            `${command.includes('settings') ? 'settings' : 'path'} 1.0\n`,
+          )
           child.emit('close', 0)
           return
         }
@@ -146,7 +149,10 @@ describe('CodexDependencyService', () => {
         if (command === 'tar') {
           const destFlag = args.indexOf('-C')
           const destination = destFlag >= 0 ? args[destFlag + 1] : ''
-          await writeFile(join(destination, 'codex-x86_64-unknown-linux-musl'), '#!/bin/sh\necho 0.1\n')
+          await writeFile(
+            join(destination, 'codex-x86_64-unknown-linux-musl'),
+            '#!/bin/sh\necho 0.1\n',
+          )
           await chmod(join(destination, 'codex-x86_64-unknown-linux-musl'), 0o755)
           child.emit('close', 0)
           return

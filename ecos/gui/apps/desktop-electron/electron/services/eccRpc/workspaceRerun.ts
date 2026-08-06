@@ -575,9 +575,7 @@ async function rewriteAndPruneWorkspaceRerunHome(options: {
     throw new Error('Workspace rerun home prune target is invalid.')
   }
 
-  const flow = parseWorkspaceFlow(
-    await readFile(join(home, 'flow.json'), 'utf8'),
-  )
+  const flow = parseWorkspaceFlow(await readFile(join(home, 'flow.json'), 'utf8'))
   const toolByStep = new Map(flow.steps.map((step) => [step.name, step.tool]))
   const wipedStageNames = new Set<string>(FLOW_STEP_SEQUENCE.slice(targetIndex))
   const wipedDirectories = new Set<string>()
@@ -667,7 +665,10 @@ async function pruneWorkspaceRerunHomeJson(
     throw new Error('Workspace rerun home.json is invalid.')
   }
 
-  if (typeof data.layout === 'string' && pathBelongsToWipedStage(data.layout, options.wipedDirectories)) {
+  if (
+    typeof data.layout === 'string' &&
+    pathBelongsToWipedStage(data.layout, options.wipedDirectories)
+  ) {
     data.layout = ''
   }
   if (
@@ -680,7 +681,10 @@ async function pruneWorkspaceRerunHomeJson(
   if (data.metrics && typeof data.metrics === 'object' && !Array.isArray(data.metrics)) {
     const metrics = { ...(data.metrics as Record<string, unknown>) }
     for (const [key, value] of Object.entries(metrics)) {
-      if (typeof value === 'string' && pathBelongsToWipedStage(value, options.wipedDirectories)) {
+      if (
+        typeof value === 'string' &&
+        pathBelongsToWipedStage(value, options.wipedDirectories)
+      ) {
         delete metrics[key]
       }
     }
@@ -796,7 +800,11 @@ async function pruneWorkspaceRerunChecklistJson(
       continue
     }
     const record = item as { state?: unknown; blocked?: unknown }
-    if (record.blocked === true || record.state === 'failed' || record.state === 'blocked') {
+    if (
+      record.blocked === true ||
+      record.state === 'failed' ||
+      record.state === 'blocked'
+    ) {
       blocked += 1
     } else if (record.state === 'pass' || record.state === 'passed') {
       passed += 1

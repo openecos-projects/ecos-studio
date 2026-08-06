@@ -149,7 +149,10 @@ onBeforeRouteLeave(async () => {
   left: 3px;
   width: 1px;
   background: transparent;
-  transition: background-color 120ms ease, width 120ms ease, left 120ms ease;
+  transition:
+    background-color 120ms ease,
+    width 120ms ease,
+    left 120ms ease;
 }
 
 .agent-panel-resize-handle:hover::before,

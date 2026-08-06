@@ -267,7 +267,9 @@ describe('prepareWorkspaceRerun', () => {
       'utf8',
     )
     expect(contractText).toContain(source)
-    expect(contractText).not.toContain(`"source_workspace": "${contract.target_workspace}"`)
+    expect(contractText).not.toContain(
+      `"source_workspace": "${contract.target_workspace}"`,
+    )
   })
 
   it('executes the frozen contract through the target GUI workspace handle', async () => {

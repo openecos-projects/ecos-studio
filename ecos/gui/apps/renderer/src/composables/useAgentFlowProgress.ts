@@ -88,9 +88,7 @@ function isOngoing(state: string): boolean {
 function isFailed(state: string): boolean {
   const normalized = state.toLowerCase()
   return (
-    normalized === 'failed' ||
-    normalized === 'incomplete' ||
-    normalized === 'invalid'
+    normalized === 'failed' || normalized === 'incomplete' || normalized === 'invalid'
   )
 }
 

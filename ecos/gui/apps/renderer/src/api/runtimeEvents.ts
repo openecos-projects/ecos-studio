@@ -55,12 +55,10 @@ function methodToCommand(
 
 function isFlowMethod(
   method: string | undefined,
-  executionScope: string | undefined,
+  _executionScope: string | undefined,
 ): boolean {
   return (
-    method === 'flow.run' ||
-    method === 'flow.run_step' ||
-    method === 'candidate.rerun'
+    method === 'flow.run' || method === 'flow.run_step' || method === 'candidate.rerun'
   )
 }
 

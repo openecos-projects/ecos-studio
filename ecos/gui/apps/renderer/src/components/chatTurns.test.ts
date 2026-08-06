@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '../types'
 import { groupMessagesIntoTurns } from './chatTurns'
 
-function msg(
-  partial: Pick<Message, 'id' | 'role'> & Partial<Message>,
-): Message {
+function msg(partial: Pick<Message, 'id' | 'role'> & Partial<Message>): Message {
   return {
     content: '',
     type: 'text',

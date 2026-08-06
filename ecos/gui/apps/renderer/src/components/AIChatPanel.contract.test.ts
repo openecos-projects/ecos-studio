@@ -39,7 +39,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source.indexOf('v-for="msg in turn.responses"')).toBeLessThan(
       source.indexOf('mode="awaiting"'),
     )
-    expect(source).toContain("activeUi.value.workspaceSetupAnchorTurnId = turnId")
+    expect(source).toContain('activeUi.value.workspaceSetupAnchorTurnId = turnId')
   })
 
   it('keeps tool activity and streaming updates on the structured message path', () => {
@@ -197,7 +197,9 @@ describe('AIChatPanel flow contracts', () => {
   it('prevents replaying stale choice cards after the conversation moves on', () => {
     expect(source).toContain('messageStore.dismissOpenChoices()')
     expect(source).toContain('activeChoicePromptId')
-    expect(source).toContain(':choice-interactive="msg.choice?.promptId === activeChoicePromptId"')
+    expect(source).toContain(
+      ':choice-interactive="msg.choice?.promptId === activeChoicePromptId"',
+    )
     expect(source).toContain(
       'if (activeChoicePromptId.value && activeChoicePromptId.value !== promptId) return',
     )

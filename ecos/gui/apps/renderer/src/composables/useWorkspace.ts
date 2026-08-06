@@ -16,7 +16,6 @@ import {
 import * as runtimeEventApi from '../api/runtimeEvents'
 import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
 import { setDesktopWindowTitle } from './windowTitle'
-import { useMessageStore } from '@/stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import {
   useWorkspaceLifecycle,
@@ -159,7 +158,6 @@ async function updateWindowTitle(projectName?: string) {
 
 export function useWorkspace() {
   const router = useRouter()
-  const messageStore = useMessageStore()
   // 在组件 setup 上下文中初始化 Toast（仅初始化一次）
   if (!_toast && getCurrentInstance()) {
     _toast = useToast()
@@ -1349,10 +1347,7 @@ export function useWorkspace() {
             asString(response.data.directory) ??
             currentProject.value?.path ??
             asString(response.data.workspaceId)
-          if (
-            resetProjectPath &&
-            !isAgentWorkspaceRerunHomePrepared(resetProjectPath)
-          ) {
+          if (resetProjectPath && !isAgentWorkspaceRerunHomePrepared(resetProjectPath)) {
             clearHomeRunArtifactResetAwaitingBackendStart(resetProjectPath)
             requestHomeRunArtifactReset(resetProjectPath)
           }

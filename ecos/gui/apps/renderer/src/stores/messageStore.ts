@@ -85,9 +85,7 @@ export const useMessageStore = defineStore('messages', () => {
     sessionId?: string,
   ): string => {
     const id = generateId()
-    const bucket = sessionId
-      ? sessionMessages(sessionId)
-      : requireActiveMessages()
+    const bucket = sessionId ? sessionMessages(sessionId) : requireActiveMessages()
     bucket.push({
       id,
       role: 'assistant',
@@ -173,9 +171,7 @@ export const useMessageStore = defineStore('messages', () => {
     sessionId?: string,
   ): string => {
     const id = generateId()
-    const bucket = sessionId
-      ? sessionMessages(sessionId)
-      : requireActiveMessages()
+    const bucket = sessionId ? sessionMessages(sessionId) : requireActiveMessages()
     bucket.push({
       id,
       role: 'assistant',
@@ -195,13 +191,8 @@ export const useMessageStore = defineStore('messages', () => {
     return id
   }
 
-  const dismissOpenChoices = (
-    exceptPromptId?: string,
-    sessionId?: string,
-  ): void => {
-    const bucket = sessionId
-      ? sessionMessages(sessionId)
-      : tryActiveMessages()
+  const dismissOpenChoices = (exceptPromptId?: string, sessionId?: string): void => {
+    const bucket = sessionId ? sessionMessages(sessionId) : tryActiveMessages()
     if (!bucket) return
     for (const message of bucket) {
       if (
@@ -277,9 +268,7 @@ export const useMessageStore = defineStore('messages', () => {
   }
 
   const finishStreamingMessages = (sessionId?: string): void => {
-    const bucket = sessionId
-      ? sessionMessages(sessionId)
-      : tryActiveMessages()
+    const bucket = sessionId ? sessionMessages(sessionId) : tryActiveMessages()
     if (!bucket) return
     for (const message of bucket) {
       if (message.role === 'assistant' && message.status === 'loading') {
@@ -293,9 +282,7 @@ export const useMessageStore = defineStore('messages', () => {
    */
   const appendToolProgress = (text: string, sessionId?: string): string => {
     const line = text.endsWith('\n') ? text : `${text}\n`
-    const bucket = sessionId
-      ? sessionMessages(sessionId)
-      : requireActiveMessages()
+    const bucket = sessionId ? sessionMessages(sessionId) : requireActiveMessages()
     const existing = [...bucket]
       .reverse()
       .find((message) => message.type === 'tool' && message.status === 'loading')
@@ -315,9 +302,7 @@ export const useMessageStore = defineStore('messages', () => {
   }
 
   const finishToolProgress = (sessionId?: string): void => {
-    const bucket = sessionId
-      ? sessionMessages(sessionId)
-      : tryActiveMessages()
+    const bucket = sessionId ? sessionMessages(sessionId) : tryActiveMessages()
     if (!bucket) return
     for (const message of bucket) {
       if (message.type === 'tool' && message.status === 'loading') {

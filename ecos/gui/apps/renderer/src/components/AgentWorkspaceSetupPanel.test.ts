@@ -46,7 +46,9 @@ describe('AgentWorkspaceSetupPanel', () => {
 
   it('collapses committed setups into a short summary with progressive status', () => {
     expect(source).toContain(':summary="committedSummary"')
-    expect(source).toContain("return [workspaceName, design, flow].filter(Boolean).join(' · ')")
+    expect(source).toContain(
+      "return [workspaceName, design, flow].filter(Boolean).join(' · ')",
+    )
     expect(source).toContain("return 'Running'")
     expect(source).toContain("return 'Review'")
     expect(source).toContain("return 'Cancelled'")
@@ -58,4 +60,3 @@ describe('AgentWorkspaceSetupPanel', () => {
     expect(source).toContain(':title="displayTitle"')
   })
 })
-

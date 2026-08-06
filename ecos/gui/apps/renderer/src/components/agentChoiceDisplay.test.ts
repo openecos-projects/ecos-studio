@@ -16,12 +16,10 @@ describe('agentChoiceDisplay', () => {
   })
 
   it('hides numeric and empty sentinel values from the detail line', () => {
-    expect(
-      choiceOptionDetail({ id: '1', label: 'Confirm and start', value: '1' }),
-    ).toBe('')
-    expect(
-      choiceOptionDetail({ id: '2', label: 'Skip', value: '__empty__' }),
-    ).toBe('')
+    expect(choiceOptionDetail({ id: '1', label: 'Confirm and start', value: '1' })).toBe(
+      '',
+    )
+    expect(choiceOptionDetail({ id: '2', label: 'Skip', value: '__empty__' })).toBe('')
     expect(
       choiceOptionDetail({
         id: '3',

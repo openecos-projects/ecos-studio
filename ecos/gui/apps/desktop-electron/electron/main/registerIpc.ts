@@ -44,10 +44,6 @@ import {
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
   type DesktopCodexInstallProgressEvent,
-  type RemoteContentFile,
-  type RemoteContentListFilesRequest,
-  type RemoteContentReadJsonFileRequest,
-  type RemoteContentReadTextFileRequest,
   type ResourceImportPdkRequest,
   type ResourceImportLocalRequest,
   type ResourceInstallRequest,
@@ -968,11 +964,7 @@ export function registerIpc(
         throw new Error('Workspace rerun target is not active in this window.')
       }
       trackWorkspaceHandle(event.sender, openedHandle, targetWorkspace)
-      trackWorkspaceHandle(
-        event.sender,
-        openedHandle,
-        pending.contract.target_workspace,
-      )
+      trackWorkspaceHandle(event.sender, openedHandle, pending.contract.target_workspace)
       if (openedDirectory) {
         trackWorkspaceHandle(event.sender, openedHandle, openedDirectory)
       }
@@ -1697,10 +1689,7 @@ async function applyCodexBinEnv(
     return
   }
   const binPath = await services.codexDependencyService.resolveBinPathForAgent()
-  runtime.syncEnvironmentOverrides(
-    { ECOS_AGENT_CODEX_BIN: binPath },
-    request,
-  )
+  runtime.syncEnvironmentOverrides({ ECOS_AGENT_CODEX_BIN: binPath }, request)
 }
 
 function readCodexBinPathRequest(value: unknown): string {

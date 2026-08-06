@@ -5,10 +5,7 @@ export type DesktopCodexDependencyState =
   | 'ready'
   | 'error'
 
-export type DesktopCodexAuthState =
-  | 'authenticated'
-  | 'unauthenticated'
-  | 'unknown'
+export type DesktopCodexAuthState = 'authenticated' | 'unauthenticated' | 'unknown'
 
 export interface DesktopCodexDependencyStatus {
   authState: DesktopCodexAuthState

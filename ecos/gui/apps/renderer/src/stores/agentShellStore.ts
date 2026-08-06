@@ -5,10 +5,7 @@ import {
   persistAgentPanelWidth,
   readStoredAgentPanelWidth,
 } from '@/composables/agentPanelWidth'
-import {
-  resolveAgentTabTitle,
-  type AgentTabContextInput,
-} from './agentTabContext'
+import { resolveAgentTabTitle, type AgentTabContextInput } from './agentTabContext'
 
 export type AgentShellMode = 'home' | 'workspace'
 

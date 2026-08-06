@@ -30,7 +30,7 @@ describe('AgentExecutionContractPanel', () => {
   })
 
   it('collapses to a compact receipt after confirmation without a wide status chip', () => {
-    expect(source).toContain("Boolean(props.answeredOptionId)")
+    expect(source).toContain('Boolean(props.answeredOptionId)')
     expect(source).toContain('contract-panel--committed')
     expect(source).toContain('contract-panel__summary')
     expect(source).toContain('contract-panel__title-row')

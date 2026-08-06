@@ -44,7 +44,9 @@ const answeredOption = computed(() =>
   props.choice?.options.find((option) => option.id === props.answeredOptionId),
 )
 const isCancelled = computed(
-  () => answeredOption.value?.value === '2' || /cancel/i.test(answeredOption.value?.label ?? ''),
+  () =>
+    answeredOption.value?.value === '2' ||
+    /cancel/i.test(answeredOption.value?.label ?? ''),
 )
 const executionState = computed(() => {
   if (props.createSetupId === props.contract?.setup_id) return 'Running'
@@ -138,6 +140,6 @@ function optionalValue(value: string | number | undefined): string {
 
 function leafName(path: string): string {
   const parts = path.split(/[/\\]/).filter(Boolean)
-  return parts.at(-1) || path
+  return parts[parts.length - 1] || path
 }
 </script>

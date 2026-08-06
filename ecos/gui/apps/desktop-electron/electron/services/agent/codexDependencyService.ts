@@ -64,7 +64,9 @@ export class CodexDependencyService {
   constructor(options: CodexDependencyServiceOptions) {
     this.env = options.env ?? process.env
     this.fetchImpl = options.fetchImpl ?? fetch
-    this.installRoot = options.installRoot ?? join(homedir(), '.local', 'share', 'ecos-studio', 'codex-cli')
+    this.installRoot =
+      options.installRoot ??
+      join(homedir(), '.local', 'share', 'ecos-studio', 'codex-cli')
     this.platform = options.platform ?? process.platform
     this.arch = options.arch ?? process.arch
     this.settingsStore = options.settingsStore
@@ -306,7 +308,9 @@ export class CodexDependencyService {
   }
 
   private async resolveBinPath(): Promise<string | null> {
-    const fromSettings = await this.settingsStore.get<string>(DESKTOP_CODEX_BIN_SETTING_KEY)
+    const fromSettings = await this.settingsStore.get<string>(
+      DESKTOP_CODEX_BIN_SETTING_KEY,
+    )
     if (typeof fromSettings === 'string' && fromSettings.trim()) {
       const validated = await this.validateExecutable(
         expandUserPath(fromSettings.trim(), this.resolveHomedir),
@@ -513,7 +517,9 @@ async function downloadToFile(
     return
   }
 
-  const nodeStream = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream)
+  const nodeStream = Readable.fromWeb(
+    response.body as import('node:stream/web').ReadableStream,
+  )
   const file = createWriteStream(destination)
   let downloaded = 0
   nodeStream.on('data', (chunk: Buffer | string) => {

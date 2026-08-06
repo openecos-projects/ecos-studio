@@ -8,10 +8,7 @@ export function clampAgentPanelWidth(
   width: number,
   options: { maxWidth?: number } = {},
 ): number {
-  const max = Math.max(
-    AGENT_PANEL_MIN_WIDTH,
-    options.maxWidth ?? AGENT_PANEL_MAX_WIDTH,
-  )
+  const max = Math.max(AGENT_PANEL_MIN_WIDTH, options.maxWidth ?? AGENT_PANEL_MAX_WIDTH)
   return Math.min(max, Math.max(AGENT_PANEL_MIN_WIDTH, Math.round(width)))
 }
 

@@ -288,9 +288,9 @@ describe('preload desktop bridge contract', () => {
     await expect(bridge.agent.codex.install()).resolves.toEqual(status)
     await expect(bridge.agent.codex.login()).resolves.toEqual(status)
     await expect(bridge.agent.codex.recheck()).resolves.toEqual(status)
-    await expect(
-      bridge.agent.codex.setBinPath({ path: '/bin/codex' }),
-    ).resolves.toEqual(status)
+    await expect(bridge.agent.codex.setBinPath({ path: '/bin/codex' })).resolves.toEqual(
+      status,
+    )
     const unsubscribe = bridge.agent.codex.onProgress(progressListener)
     const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
     eventListener?.({}, { message: 'downloading', phase: 'downloading', progress: 0.2 })
