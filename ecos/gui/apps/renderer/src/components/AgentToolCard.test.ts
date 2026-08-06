@@ -4,38 +4,48 @@ import { describe, expect, it } from 'vitest'
 import AgentToolCard from './AgentToolCard.vue'
 
 describe('AgentToolCard', () => {
-  it('renders flow progress as a quiet timeline with artifact basenames', async () => {
+  it('keeps the running stage open with live subflow, and collapses finished stages', async () => {
     const wrapper = mount(AgentToolCard, {
       props: {
         content: [
+          'Running Synthesis.',
+          'Synthesis › run yosys',
+          'Synthesis › analysis',
+          'Completed Synthesis.',
           'Running place.',
-          'Completed place. Saved: /runs/gcd/place_dreamplace/output/gcd_place.def.gz',
-          'Running Harden.',
+          'place › load data',
+          'place › run placement',
         ].join('\n'),
         status: 'loading',
       },
     })
 
+    expect(wrapper.text()).toContain('Synthesis')
+    expect(wrapper.text()).not.toContain('run yosys')
     expect(wrapper.text()).toContain('place')
-    expect(wrapper.text()).toContain('Harden')
-    expect(wrapper.text()).toContain('gcd_place.def.gz')
-    expect(wrapper.text()).not.toContain('/runs/gcd/place_dreamplace/output/')
-    expect(wrapper.text()).not.toContain('Agent activity')
+    expect(wrapper.text()).toContain('load data')
+    expect(wrapper.text()).toContain('run placement')
     expect(wrapper.find('.step__spinner').exists()).toBe(true)
+    expect(wrapper.find('.is-current').text()).toContain('run placement')
 
-    await wrapper.setProps({ status: 'done' })
-    expect(wrapper.find('.step__spinner').exists()).toBe(false)
+    await wrapper.get('.step__head').trigger('click')
+    expect(wrapper.text()).toContain('run yosys')
+    expect(wrapper.text()).toContain('analysis')
   })
 
-  it('collapses older steps into Earlier activity', async () => {
-    const content = Array.from({ length: 8 }, (_, index) => `Step ${index + 1}`).join('\n')
+  it('shows the full stage list without an earlier-stages fold', () => {
+    const content = [
+      'Preparing isolated rerun workspace.',
+      ...Array.from({ length: 8 }, (_, index) => `Running stage${index + 1}.`),
+      ...Array.from({ length: 8 }, (_, index) => `Completed stage${index + 1}.`),
+    ].join('\n')
     const wrapper = mount(AgentToolCard, {
-      props: { content, status: 'loading' },
+      props: { content, status: 'done' },
     })
 
-    expect(wrapper.text()).toMatch(/Earlier activity \(\d+\)/)
-    expect(wrapper.text()).toContain('Step 8')
-    await wrapper.get('.timeline__earlier-toggle').trigger('click')
-    expect(wrapper.text()).toContain('Step 1')
+    expect(wrapper.text()).not.toMatch(/earlier stages/i)
+    expect(wrapper.text()).toContain('Preparing isolated rerun workspace')
+    expect(wrapper.text()).toContain('stage1')
+    expect(wrapper.text()).toContain('stage8')
   })
 })

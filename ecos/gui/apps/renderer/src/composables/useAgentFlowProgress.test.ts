@@ -2,32 +2,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testState = {
   readError: null as Error | null,
-  flow: '',
-  listeners: [] as Array<() => void>,
+  files: new Map<string, string>(),
+  listeners: new Map<string, Array<() => void>>(),
   unwatch: vi.fn(),
 }
 
 vi.mock('@/platform/desktop', () => ({
   getOptionalDesktopApi: () => ({
     workspace: {
-      listProjectDirectory: vi.fn(async () => [
-        {
-          name: 'gcd_place.def.gz',
-          path: '/runs/gcd/place_dreamplace/output/gcd_place.def.gz',
-          type: 'file',
-        },
-        {
-          name: 'gcd_place.gds',
-          path: '/runs/gcd/place_dreamplace/output/gcd_place.gds',
-          type: 'file',
-        },
-      ]),
-      readOptionalProjectTextFile: vi.fn(async () => {
+      readOptionalProjectTextFile: vi.fn(async (path: string) => {
         if (testState.readError) throw testState.readError
-        return testState.flow
+        return testState.files.get(path) ?? null
       }),
-      watchProjectFile: vi.fn(async (_path: string, listener: () => void) => {
-        testState.listeners.push(listener)
+      watchProjectFile: vi.fn(async (path: string, listener: () => void) => {
+        const bucket = testState.listeners.get(path) ?? []
+        bucket.push(listener)
+        testState.listeners.set(path, bucket)
         return testState.unwatch
       }),
     },
@@ -36,24 +26,44 @@ vi.mock('@/platform/desktop', () => ({
 
 import { useAgentFlowProgress } from './useAgentFlowProgress'
 
+const FLOW_PATH = '/runs/gcd/home/flow.json'
+const SUBFLOW_PATH = '/runs/gcd/place_dreamplace/subflow.json'
+
 function flow(state: string): string {
   return JSON.stringify({
     steps: [
-      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
+      { name: 'FixFanout', state: 'Success', tool: 'ecc' },
       { name: 'place', state, tool: 'dreamplace' },
     ],
   })
 }
 
+function subflow(
+  steps: Array<{ name: string; state: string; runtime?: string; memory?: number }>,
+): string {
+  return JSON.stringify({
+    steps: steps.map((step) => ({
+      name: step.name,
+      state: step.state,
+      runtime: step.runtime ?? '0:0:0',
+      'peak memory (mb)': step.memory ?? 0,
+    })),
+  })
+}
+
+function emit(path: string): void {
+  for (const listener of testState.listeners.get(path) ?? []) listener()
+}
+
 describe('useAgentFlowProgress', () => {
   beforeEach(() => {
     testState.readError = null
-    testState.flow = flow('Unstart')
-    testState.listeners.length = 0
+    testState.files = new Map([[FLOW_PATH, flow('Unstart')]])
+    testState.listeners = new Map()
     testState.unwatch.mockReset()
   })
 
-  it('reports step execution and persisted primary artifacts', async () => {
+  it('reports stage progress with live subflow steps instead of artifact paths', async () => {
     const messages: string[] = []
     const flowChanges: number[] = []
     const progress = useAgentFlowProgress(
@@ -63,23 +73,60 @@ describe('useAgentFlowProgress', () => {
 
     await progress.start('/runs/gcd')
     expect(flowChanges).toEqual([])
-    testState.flow = flow('Ongoing')
-    testState.listeners[0]!()
-    await vi.waitFor(() => expect(messages).toEqual(['Running place.']))
+
+    testState.files.set(FLOW_PATH, flow('Ongoing'))
+    testState.files.set(
+      SUBFLOW_PATH,
+      subflow([{ name: 'load data', state: 'Ongoing' }]),
+    )
+    emit(FLOW_PATH)
+    await vi.waitFor(() =>
+      expect(messages).toEqual(['Running place.', 'place › load data']),
+    )
     await vi.waitFor(() => expect(flowChanges).toEqual([1]))
 
-    testState.flow = flow('Success')
-    testState.listeners[0]!()
+    testState.files.set(
+      SUBFLOW_PATH,
+      subflow([
+        { name: 'load data', state: 'Success' },
+        { name: 'run placement', state: 'Ongoing', memory: 29.883, runtime: '0:1:10' },
+      ]),
+    )
+    emit(SUBFLOW_PATH)
     await vi.waitFor(() =>
       expect(messages).toEqual([
         'Running place.',
-        'Completed place. Saved: /runs/gcd/place_dreamplace/output/gcd_place.def.gz; /runs/gcd/place_dreamplace/output/gcd_place.gds',
+        'place › load data',
+        'place › run placement',
+      ]),
+    )
+
+    testState.files.set(
+      SUBFLOW_PATH,
+      subflow([
+        { name: 'load data', state: 'Success' },
+        { name: 'run placement', state: 'Success', memory: 29.883, runtime: '0:1:10' },
+        { name: 'save data', state: 'Success', memory: 29.887 },
+        { name: 'analysis', state: 'Success', memory: 0.004 },
+      ]),
+    )
+    testState.files.set(FLOW_PATH, flow('Success'))
+    emit(FLOW_PATH)
+    await vi.waitFor(() =>
+      expect(messages).toEqual([
+        'Running place.',
+        'place › load data',
+        'place › run placement',
+        'place › save data',
+        'place › analysis',
+        'Completed place.',
       ]),
     )
     await vi.waitFor(() => expect(flowChanges).toEqual([1, 2]))
+    expect(messages.some((message) => message.includes('Saved:'))).toBe(false)
 
     progress.stop()
-    expect(testState.unwatch).toHaveBeenCalledOnce()
+    expect(testState.unwatch).toHaveBeenCalled()
   })
 
   it('does not block execution when progress tracking is unavailable', async () => {

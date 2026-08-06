@@ -34,9 +34,32 @@ describe('agentToolSteps', () => {
     expect(steps[1]?.detailLines).toEqual(['gcd_harden.v'])
   })
 
+  it('attaches subflow lines under the active stage instead of listing artifacts', () => {
+    const steps = buildAgentToolSteps(
+      [
+        'Running place.',
+        'place › load data',
+        'place › run placement',
+        'place › save data',
+        'place › analysis',
+        'Completed place.',
+      ].join('\n'),
+      'loading',
+    )
+
+    expect(steps).toEqual([
+      {
+        id: 'tool-0',
+        summary: 'place',
+        status: 'done',
+        detailLines: ['load data', 'run placement', 'save data', 'analysis'],
+      },
+    ])
+  })
+
   it('keeps the active flow step running until Completed arrives', () => {
     const steps = buildAgentToolSteps(
-      'Preparing isolated rerun workspace.\nRunning place.\n',
+      'Preparing isolated rerun workspace.\nRunning place.\nplace › load data\n',
       'loading',
     )
     expect(steps).toEqual([
@@ -49,6 +72,7 @@ describe('agentToolSteps', () => {
         id: 'tool-1',
         summary: 'place',
         status: 'running',
+        detailLines: ['load data'],
       },
     ])
   })
