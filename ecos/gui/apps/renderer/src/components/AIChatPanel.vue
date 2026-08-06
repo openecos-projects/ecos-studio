@@ -884,6 +884,10 @@ async function flushPendingGuiActionForActiveTab(): Promise<void> {
     await executeWorkspaceRerun(pending.contract, pending.token, sessionId)
     return
   }
+  if (pending.type === 'optimization') {
+    await executeWorkspaceOptimization(pending.contract, pending.token, sessionId)
+    return
+  }
   if (pending.type === 'continue') {
     await executeWorkspaceContinue(pending.payload, sessionId)
     return
@@ -1039,6 +1043,31 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     void executeWorkspaceRerun(
       event.workspaceRerun,
       event.workspaceRerunToken,
+      event.sessionId,
+    )
+    return
+  }
+  if (
+    event.type === 'workspace_optimization' &&
+    event.workspaceOptimization &&
+    event.workspaceOptimizationToken
+  ) {
+    messageStore.addAssistantMessage(
+      event.text ?? 'Starting the confirmed place-only scan.',
+      'done',
+      event.sessionId,
+    )
+    if (!isActive) {
+      deferGuiAction(event.sessionId, {
+        type: 'optimization',
+        contract: event.workspaceOptimization,
+        token: event.workspaceOptimizationToken,
+      })
+      return
+    }
+    void executeWorkspaceOptimization(
+      event.workspaceOptimization,
+      event.workspaceOptimizationToken,
       event.sessionId,
     )
     return
@@ -1528,6 +1557,64 @@ async function executeWorkspaceRerun(
     agentFlowProgress.stop()
     messageStore.finishToolProgress(ownerSessionId)
     ui.isWorkspaceRerunPending = false
+  }
+}
+
+async function executeWorkspaceOptimization(
+  contract: NonNullable<DesktopAgentEvent['workspaceOptimization']>,
+  token: string,
+  ownerSessionId = agentSessionId.value ?? '',
+): Promise<void> {
+  const ui = sessionUi(ownerSessionId)
+  const desktopApi = getOptionalDesktopApi()
+  const prepare = desktopApi?.workspace.prepareFlowAgentOptimization
+  const execute = desktopApi?.workspace.executeFlowAgentRerun
+  if (!desktopApi || !prepare || !execute || !isActiveGuiOwner(ownerSessionId)) {
+    if (!isActiveGuiOwner(ownerSessionId)) {
+      deferGuiAction(ownerSessionId, { type: 'optimization', contract, token })
+    }
+    return
+  }
+  if (ui.isWorkspaceOptimizationPending) return
+  ui.isWorkspaceOptimizationPending = true
+  messageStore.setActiveSessionId(ownerSessionId)
+  try {
+    for (const [candidateIndex, rerun] of contract.rerun_contracts.entries()) {
+      await desktopApi.workspace.bindWindow(rerun.source_workspace)
+      try {
+        const prepared = await prepare({ candidateIndex, token })
+        agentShell.beginPreserveForAgentWorkspaceSwitch()
+        const opened = await openProject({
+          id: prepared.directory,
+          lastOpened: new Date(),
+          name: rerun.rerun_id,
+          path: prepared.directory,
+        })
+        if (!opened) throw new Error('The optimization workspace could not be opened.')
+        await desktopApi.workspace.bindWindow(prepared.directory)
+        await agentFlowProgress.start(prepared.directory)
+        await execute({ token: prepared.executionToken })
+        messageStore.appendToolProgress(`Completed ${rerun.rerun_id}.`, ownerSessionId)
+      } catch (error) {
+        messageStore.appendToolProgress(
+          `${rerun.rerun_id} failed: ${agentErrorMessage(error)}`,
+          ownerSessionId,
+        )
+      } finally {
+        agentFlowProgress.stop()
+        agentShell.beginPreserveForAgentWorkspaceSwitch()
+        await openProject({
+          id: rerun.source_workspace,
+          lastOpened: new Date(),
+          name: baseName(rerun.source_workspace) || 'workspace',
+          path: rerun.source_workspace,
+        })
+        await desktopApi.workspace.bindWindow(rerun.source_workspace)
+      }
+    }
+  } finally {
+    messageStore.finishToolProgress(ownerSessionId)
+    ui.isWorkspaceOptimizationPending = false
   }
 }
 

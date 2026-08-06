@@ -14,6 +14,11 @@ export type PendingGuiAction =
       token: string
     }
   | {
+      type: 'optimization'
+      contract: NonNullable<DesktopAgentEvent['workspaceOptimization']>
+      token: string
+    }
+  | {
       type: 'continue'
       payload: NonNullable<DesktopAgentEvent['workspaceContinue']>
     }
@@ -31,6 +36,7 @@ export interface AgentSessionUiState {
   isInterruptPending: boolean
   isWorkspaceCreationPending: boolean
   isWorkspaceRerunPending: boolean
+  isWorkspaceOptimizationPending: boolean
   isWorkspaceContinuePending: boolean
   isWorkspaceParameterPending: boolean
   workspaceSetupContract?: DesktopAgentEvent['workspaceSetup']
@@ -69,6 +75,7 @@ export function createAgentSessionUiState(): AgentSessionUiState {
     isInterruptPending: false,
     isWorkspaceCreationPending: false,
     isWorkspaceRerunPending: false,
+    isWorkspaceOptimizationPending: false,
     isWorkspaceContinuePending: false,
     isWorkspaceParameterPending: false,
     workspaceSetupMessage: '',
