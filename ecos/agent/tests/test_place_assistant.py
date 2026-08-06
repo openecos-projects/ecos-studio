@@ -87,3 +87,57 @@ def test_analysis_does_not_claim_a_strategy_when_the_bundle_has_none(tmp_path: P
     assert answer.intent == "analyze"
     assert answer.evidence_ids == ["parameter.dreamplace.target_density"]
     assert "No reviewed PlaceStrategy" in answer.text
+
+
+def test_analysis_reports_an_approved_strategy_with_required_evidence(tmp_path: Path) -> None:
+    root = _bundle(tmp_path / "bundle")
+    catalog_path = root / "catalog.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog["entities"].append(
+        {
+            "id": "strategy.place.reduce_density",
+            "type": "strategy",
+            "aliases": ["congestion"],
+            "stage_scope": ["place"],
+            "tool_scope": "ecos_dreamplace",
+            "status": "directly_supported",
+            "document": "strategies.md",
+            "anchor": "strategy.place.reduce_density",
+            "review_status": "approved",
+            "evidence": [],
+            "relationships": [],
+            "strategy": {
+                "strategy_id": "strategy.place.reduce_density",
+                "status": "directly_supported",
+                "required_metrics": ["place_congestion_egr_overflow_max"],
+                "allowed_directions": {"place.target_density": "decrease"},
+                "protected_metrics": ["place_hpwl"],
+                "verification": "Run the frozen place-only scan.",
+                "rollback": "Do not modify the source workspace.",
+                "escalation": "Escalate to floorplan when congestion persists.",
+                "review_status": "approved",
+            },
+        }
+    )
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    (root / "knowledge" / "strategies.md").write_text(
+        '<a id="strategy.place.reduce_density"></a>', encoding="utf-8"
+    )
+    assistant = PlaceAssistant.from_bundle(root, audit_path=tmp_path / "audit.jsonl")
+
+    answer = assistant.reply(
+        "Analyze target density",
+        language="en",
+        evidence=PlaceEvidence(
+            workspace_id="gcd",
+            metrics={"place_congestion_egr_overflow_max": 3, "place_hpwl": 12},
+        ),
+    )
+
+    assert "strategy.place.reduce_density" in answer.text
+    assert "decrease" in answer.text
+    assert "does not execute" in answer.text
+    assert answer.evidence_ids == [
+        "parameter.dreamplace.target_density",
+        "strategy.place.reduce_density",
+    ]

@@ -11,7 +11,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ecos_agent.place_contracts import KnowledgeHit, PlaceAnswer, PlaceEvidence, PlaceQuery
+from ecos_agent.place_contracts import (
+    KnowledgeHit,
+    PlaceAnswer,
+    PlaceEvidence,
+    PlaceQuery,
+    PlaceStrategy,
+)
+from ecos_agent.place_strategy import select_applicable_strategies
 
 
 _APPLY_RE = re.compile(r"\b(apply|optimi[sz]e|scan|execute)\b|应用|优化|扫描|执行", re.IGNORECASE)
@@ -144,20 +151,15 @@ class PlaceAssistant:
         state = evidence.step_status.get("place", "unavailable")
         hpwl = evidence.metrics.get("place_hpwl")
         detail = "unavailable" if hpwl is None else str(hpwl)
-        text = (
-            f"Observation: place status is `{state}` and `place_hpwl` is `{detail}`. "
-            "No reviewed PlaceStrategy is available, so this analysis does not propose a parameter change."
-        )
-        if query.language == "zh":
-            text = (
-                f"观测：place 状态为 `{state}`，`place_hpwl` 为 `{detail}`。"
-                "当前没有已审核的 PlaceStrategy，因此不会提出参数变更。"
-            )
+        strategies = select_applicable_strategies(self.entities, evidence)
+        strategy = strategies[0] if strategies else None
+        evidence_ids = list(dict.fromkeys([*query.entity_ids, *([strategy.strategy_id] if strategy else [])]))
+        text = _analysis_text(query.language, state, detail, strategy)
         return PlaceAnswer(
             intent="analyze",
             text=text,
-            evidence_ids=query.entity_ids,
-            hits=self._hits(query.entity_ids),
+            evidence_ids=evidence_ids,
+            hits=self._hits(evidence_ids),
         )
 
     def _hits(self, entity_ids: list[str]) -> list[KnowledgeHit]:
@@ -214,3 +216,33 @@ def _evidence_required_text(language: str) -> str:
     if language == "zh":
         return "设计级分析需要当前 workspace 的有效 PlaceEvidence；当前不会推断根因或参数方向。"
     return "Design-level analysis requires valid PlaceEvidence from the current workspace; no root cause or parameter direction is inferred."
+
+
+def _analysis_text(
+    language: str, state: str, hpwl: str, strategy: PlaceStrategy | None
+) -> str:
+    if strategy is None:
+        if language == "zh":
+            return (
+                f"观测：place 状态为 `{state}`，`place_hpwl` 为 `{hpwl}`。"
+                "当前没有已审核的 PlaceStrategy，因此不会提出参数变更。"
+            )
+        return (
+            f"Observation: place status is `{state}` and `place_hpwl` is `{hpwl}`. "
+            "No reviewed PlaceStrategy is available, so this analysis does not propose a parameter change."
+        )
+    directions = ", ".join(
+        f"`{key}`: {value}" for key, value in strategy.allowed_directions.items()
+    )
+    protected = ", ".join(f"`{metric}`" for metric in strategy.protected_metrics) or "none"
+    if language == "zh":
+        return (
+            f"观测：place 状态为 `{state}`，`place_hpwl` 为 `{hpwl}`。"
+            f"已审核策略 `{strategy.strategy_id}` 仅允许趋势 `{directions}`，并保护 {protected}；"
+            "这不是可执行参数变更。"
+        )
+    return (
+        f"Observation: place status is `{state}` and `place_hpwl` is `{hpwl}`. "
+        f"Reviewed strategy `{strategy.strategy_id}` permits only {directions} while "
+        f"protecting {protected}; this does not execute a parameter change."
+    )
