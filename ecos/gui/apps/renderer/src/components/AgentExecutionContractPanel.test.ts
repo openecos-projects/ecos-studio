@@ -23,4 +23,22 @@ describe('AgentExecutionContractPanel', () => {
     expect(source).toContain(':disabled="choiceDisabled"')
     expect(source).toContain('@select="emit(\'select\', $event)"')
   })
+
+  it('keeps compact confirm cards without a key-value table when fields are empty', () => {
+    expect(source).toContain('v-if="title"')
+    expect(source).toContain('v-if="rows.length"')
+  })
+
+  it('collapses to a compact receipt after confirmation without a wide status chip', () => {
+    expect(source).toContain("Boolean(props.answeredOptionId)")
+    expect(source).toContain('contract-panel--committed')
+    expect(source).toContain('contract-panel__summary')
+    expect(source).toContain('contract-panel__title-row')
+    expect(source).toContain("detailsOpen ? 'Hide details' : 'Details'")
+    expect(source).not.toContain('contract-state')
+    expect(source).toContain('v-if="confirmationText"')
+    expect(source.indexOf('isCommitted')).toBeLessThan(
+      source.indexOf('v-if="confirmationText"'),
+    )
+  })
 })

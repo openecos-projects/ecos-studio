@@ -6,7 +6,8 @@
     :confirmation-text="confirmationText"
     :execution-state="executionState"
     :rows="specRows"
-    :title="contract?.title ?? ''"
+    :summary="committedSummary"
+    :title="displayTitle"
     @select="emit('select', $event)"
   />
 </template>
@@ -19,6 +20,7 @@ import type {
   DesktopAgentWorkspaceSetupContract,
 } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
+import { displayAgentContractTitle } from './agentContractDisplay'
 import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 
 const props = defineProps<{
@@ -35,11 +37,29 @@ const emit = defineEmits<{
 }>()
 
 const submittedSetupId = ref('')
-const executionState = computed(() =>
-  props.createSetupId === props.contract?.setup_id
-    ? 'Creating and running'
-    : 'Awaiting confirmation',
+const displayTitle = computed(() =>
+  displayAgentContractTitle(props.contract?.title ?? ''),
 )
+const answeredOption = computed(() =>
+  props.choice?.options.find((option) => option.id === props.answeredOptionId),
+)
+const isCancelled = computed(
+  () => answeredOption.value?.value === '2' || /cancel/i.test(answeredOption.value?.label ?? ''),
+)
+const executionState = computed(() => {
+  if (props.createSetupId === props.contract?.setup_id) return 'Running'
+  if (!props.answeredOptionId) return 'Review'
+  if (isCancelled.value) return 'Cancelled'
+  return 'Confirmed'
+})
+const committedSummary = computed(() => {
+  const contract = props.contract
+  if (!contract) return ''
+  const workspaceName = leafName(contract.directory)
+  const design = contract.parameters.design
+  const flow = `${contract.flow_config.start_step} to ${contract.flow_config.end_step}`
+  return [workspaceName, design, flow].filter(Boolean).join(' · ')
+})
 const specRows = computed<[string, string][]>(() => {
   const contract = props.contract
   if (!contract) return []

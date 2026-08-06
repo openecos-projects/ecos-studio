@@ -43,4 +43,19 @@ describe('AgentWorkspaceSetupPanel', () => {
     expect(source).toContain(':choice="choice"')
     expect(source).toContain(':choice-disabled="choiceDisabled"')
   })
+
+  it('collapses committed setups into a short summary with progressive status', () => {
+    expect(source).toContain(':summary="committedSummary"')
+    expect(source).toContain("return [workspaceName, design, flow].filter(Boolean).join(' · ')")
+    expect(source).toContain("return 'Running'")
+    expect(source).toContain("return 'Review'")
+    expect(source).toContain("return 'Cancelled'")
+    expect(source).toContain("return 'Confirmed'")
+  })
+
+  it('shows a user-facing run-plan title instead of frozen-contract jargon', () => {
+    expect(source).toContain('displayAgentContractTitle')
+    expect(source).toContain(':title="displayTitle"')
+  })
 })
+

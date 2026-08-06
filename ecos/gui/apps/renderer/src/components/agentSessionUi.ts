@@ -37,19 +37,23 @@ export interface AgentSessionUiState {
   workspaceSetupMessage: string
   workspaceSetupChoice?: DesktopAgentChoice
   workspaceSetupAnsweredOptionId: string
+  workspaceSetupAnchorTurnId?: string
   workspaceCreateSetupId?: string
   workspaceRerunContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceRerunMessage: string
   workspaceRerunChoice?: DesktopAgentChoice
   workspaceRerunAnsweredOptionId: string
+  workspaceRerunAnchorTurnId?: string
   workspaceContinueContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceContinueMessage: string
   workspaceContinueChoice?: DesktopAgentChoice
   workspaceContinueAnsweredOptionId: string
+  workspaceContinueAnchorTurnId?: string
   workspaceParameterContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceParameterMessage: string
   workspaceParameterChoice?: DesktopAgentChoice
   workspaceParameterAnsweredOptionId: string
+  workspaceParameterAnchorTurnId?: string
   pendingParameterUpdate?: NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>
   lastContractSurface?: AgentContractSurface
   pendingGuiAction?: PendingGuiAction
