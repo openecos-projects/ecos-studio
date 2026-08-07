@@ -59,7 +59,6 @@ def _source_inventory() -> dict[str, object]:
     return {
         "schema_version": "ecos-place-sources.v1",
         "repositories": {
-            "ecos_studio": _revision(ECOS_ROOT),
             "ecc": _revision(ECOS_ROOT / "ecc"),
             "ecc_dreamplace": _revision(ECOS_ROOT / "ecc/chipcompiler/thirdparty/ecc-dreamplace"),
             "ecc_tools": _revision(ECOS_ROOT / "ecc/chipcompiler/thirdparty/ecc-tools"),
