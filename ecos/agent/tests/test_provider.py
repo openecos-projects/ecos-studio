@@ -392,17 +392,27 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
     captured: dict[str, object] = {}
 
-    def capture_proposal(
-        _context: dict[str, object], system: str, schema: dict[str, object], model: object
-    ) -> dict[str, object]:
-        captured.update(system=system, schema=schema, model=model)
-        return _chat_response(answer="Hello.")
+    def capture_turn(prompt: str, schema: dict[str, object]) -> str:
+        captured.update(prompt=prompt, schema=schema)
+        return json.dumps(_chat_response(answer="Hello."))
 
-    monkeypatch.setattr(provider, "_proposal", capture_proposal)
-    response = provider.respond_to_gui_chat({"allowed_operations": []})
+    monkeypatch.setattr(provider, "_run_turn", capture_turn)
+    response = provider.respond_to_gui_chat(
+        {
+            "allowed_operations": [],
+            "retrieved_knowledge": {
+                "schema_version": "ecos-place-answer.v1",
+                "read_only": True,
+                "entity_ids": ["parameter.dreamplace.stop_overflow"],
+                "source_ids": ["dreamplace.config"],
+                "text": "Audited target-overflow knowledge.",
+            },
+        }
+    )
 
     assert response["answer"] == "Hello."
-    assert "Do not invent flow state" in str(captured["system"])
+    assert "Use retrieved_knowledge only as read-only factual context" in str(captured["prompt"])
+    assert "Audited target-overflow knowledge." in str(captured["prompt"])
     assert captured["schema"]["required"] == ["schema_version", "operation", "answer"]
 
 
@@ -1346,17 +1356,19 @@ def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> 
 def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_path: Path) -> None:
     workspace = _workspace_with_fixfanout_and_place(tmp_path)
     events: list[dict[str, object]] = []
+    chat_contexts: list[dict[str, object]] = []
 
     def unexpected_parameter_update(_context: dict[str, object]) -> dict[str, object]:
         raise AssertionError("a question must not enter the parameter-update parser")
 
-    def unexpected_chat_fallback(_context: dict[str, object]) -> dict[str, object]:
-        raise AssertionError("published knowledge must answer this question")
+    def answer_with_retrieved_knowledge(context: dict[str, object]) -> dict[str, object]:
+        chat_contexts.append(context)
+        return _chat_response(answer="The stop-overflow threshold ends global placement.")
 
     provider = EcosAgentProvider(
         emit=events.append,
         rerun_parameter_parser=unexpected_parameter_update,
-        chat_response_parser=unexpected_chat_fallback,
+        chat_response_parser=answer_with_retrieved_knowledge,
     )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
@@ -1366,8 +1378,31 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
 
     answer = _last_event(events, "message")
     assert provider.sessions[session_id].phase == "operation"
+    assert chat_contexts[0]["allowed_operations"] == []
+    retrieved = chat_contexts[0]["retrieved_knowledge"]
+    assert retrieved["entity_ids"] == ["parameter.dreamplace.stop_overflow"]
+    assert "acceptable global-placement overflow threshold" in str(retrieved["text"])
+    assert answer["contract"]["knowledge"]["entity_ids"] == retrieved["entity_ids"]
+
+
+def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp_path: Path) -> None:
+    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    events: list[dict[str, object]] = []
+
+    def unavailable_codex(_context: dict[str, object]) -> dict[str, object]:
+        raise CodexProviderError("Codex timed out", failure_class="timeout")
+
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=unavailable_codex)
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "what is the target overflow in placer")
+
+    answer = _last_event(events, "message")
     assert "acceptable global-placement overflow threshold" in str(answer["text"])
     assert answer["contract"]["schema_version"] == "ecos-place-answer.v1"
+    assert not any(event["type"] == "error" for event in events)
 
 
 def test_operation_question_codex_fallback_disallows_operations(tmp_path: Path) -> None:

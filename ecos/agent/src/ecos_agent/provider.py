@@ -10,6 +10,7 @@ from typing import Any, Callable, Mapping
 
 from ecos_agent.codex_provider import CodexProviderError, validate_required_codex_cli
 from ecos_agent.contracts import GuiChatResponseProposal, GuiWorkspaceSetupProposal
+from ecos_agent.knowledge_bundle import KnowledgeAnswer
 from ecos_agent.step_knowledge import StepKnowledge, load_default_step_knowledge
 from ecos_agent.messages import (
     cancellation_message,
@@ -441,12 +442,11 @@ class EcosAgentProvider:
         self, session: _Session, message: str, *, allow_operations: bool
     ) -> None:
         answer = self._knowledge_answer(message)
-        if answer is not None:
-            self._emit(session, "message", answer.text, contract=answer.contract)
-            return
-        self._answer_with_codex(session, message, allow_operations=allow_operations)
+        self._answer_with_codex(
+            session, message, allow_operations=allow_operations, knowledge_answer=answer
+        )
 
-    def _knowledge_answer(self, message: str):
+    def _knowledge_answer(self, message: str) -> KnowledgeAnswer | None:
         for knowledge in self.knowledge:
             answer = knowledge.reply(message)
             if answer is not None:
@@ -505,23 +505,41 @@ class EcosAgentProvider:
         return None
 
     def _answer_with_codex(
-        self, session: _Session, message: str, *, allow_operations: bool
+        self,
+        session: _Session,
+        message: str,
+        *,
+        allow_operations: bool,
+        knowledge_answer: KnowledgeAnswer | None,
     ) -> None:
         allowed_options = self._chat_allowed_operations(session) if allow_operations else []
-        response = self._parse_chat_response(session, message, allowed_options)
+        response = self._parse_chat_response(
+            session,
+            message,
+            allowed_options,
+            knowledge_answer=knowledge_answer,
+            report_error=knowledge_answer is None,
+        )
         if response is None:
+            if knowledge_answer is not None:
+                self._emit(
+                    session, "message", knowledge_answer.text, contract=knowledge_answer.contract
+                )
             return
         if response.operation is None:
+            contract: dict[str, Any] = {
+                "schema_version": "flow-agent.gui_chat_response.v1",
+                "intent": "answer",
+                "read_only": True,
+                "backend": "local_codex_cli",
+            }
+            if knowledge_answer is not None:
+                contract["knowledge"] = knowledge_answer.contract
             self._emit(
                 session,
                 "message",
                 response.answer or "",
-                contract={
-                    "schema_version": "flow-agent.gui_chat_response.v1",
-                    "intent": "answer",
-                    "read_only": True,
-                    "backend": "local_codex_cli",
-                },
+                contract=contract,
             )
             return
         allowed_ids = {option["id"] for option in allowed_options}
@@ -544,31 +562,39 @@ class EcosAgentProvider:
         )
 
     def _parse_chat_response(
-        self, session: _Session, message: str, allowed_options: list[dict[str, str]]
+        self,
+        session: _Session,
+        message: str,
+        allowed_options: list[dict[str, str]],
+        *,
+        knowledge_answer: KnowledgeAnswer | None,
+        report_error: bool,
     ) -> GuiChatResponseProposal | None:
+        context: dict[str, Any] = {
+            "schema_version": "flow-agent.gui_chat_request_context.v1",
+            "natural_language_request": message,
+            "mode": session.mode,
+            "phase": session.phase,
+            "allowed_operations": allowed_options,
+            "workspace": session.rerun_workspace_path or "",
+            "project_root": session.project_root or "",
+            "_progress_callback": lambda text: self._progress(session, text),
+            "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
+        }
+        if knowledge_answer is not None:
+            context["retrieved_knowledge"] = {
+                **knowledge_answer.contract,
+                "entity_ids": list(knowledge_answer.entity_ids),
+                "text": knowledge_answer.text,
+            }
         try:
-            response = GuiChatResponseProposal.model_validate(
-                self.chat_response_parser(
-                    {
-                        "schema_version": "flow-agent.gui_chat_request_context.v1",
-                        "natural_language_request": message,
-                        "mode": session.mode,
-                        "phase": session.phase,
-                        "allowed_operations": allowed_options,
-                        "workspace": session.rerun_workspace_path or "",
-                        "project_root": session.project_root or "",
-                        "_progress_callback": lambda text: self._progress(session, text),
-                        "_register_interrupt": lambda callback: self._register_interrupt(
-                            session, callback
-                        ),
-                    }
-                )
-            )
+            response = GuiChatResponseProposal.model_validate(self.chat_response_parser(context))
             self._check_interrupted(session)
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
             self._raise_if_interrupted(exc)
-            self._emit(session, "error", f"Unable to answer the request: {exc}")
+            if report_error:
+                self._emit(session, "error", f"Unable to answer the request: {exc}")
             return None
         return response
 

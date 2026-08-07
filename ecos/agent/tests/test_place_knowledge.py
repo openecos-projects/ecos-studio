@@ -176,14 +176,27 @@ def test_bundle_rejects_a_markdown_chunk_with_a_changed_hash(tmp_path: Path) -> 
 
 def test_provider_answers_place_questions_without_changing_operation_state() -> None:
     events: list[dict[str, object]] = []
-    provider = EcosAgentProvider(emit=events.append)
+    contexts: list[dict[str, object]] = []
+
+    def answer_with_retrieved_knowledge(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return {
+            "schema_version": "flow-agent.gui_chat_response.v1",
+            "operation": None,
+            "answer": str(context["retrieved_knowledge"]["text"]),
+        }
+
+    provider = EcosAgentProvider(
+        emit=events.append, chat_response_parser=answer_with_retrieved_knowledge
+    )
     session_id = provider.start_session({"mode": "home"})["sessionId"]
 
     provider.send_message({"sessionId": session_id, "message": "RUDY指标是如何计算的？"})
 
     answer = next(event for event in reversed(events) if event["type"] == "message")
     assert "overlap_area" in str(answer["text"])
-    assert answer["contract"]["schema_version"] == "ecos-place-answer.v1"
+    assert contexts[0]["allowed_operations"] == []
+    assert answer["contract"]["knowledge"]["schema_version"] == "ecos-place-answer.v1"
     assert provider.sessions[session_id].phase == "home_ready"
     assert not any(event["type"] in {"workspace_rerun", "workspace_create"} for event in events)
 
