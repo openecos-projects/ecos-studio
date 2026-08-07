@@ -107,6 +107,7 @@ export function createWorkspaceApi(options: {
   project_context?: Record<string, unknown>
   cpu_filelist?: string
   cpu_rtl_files?: string[]
+  cpu_top_module?: string
   soc_filelist?: string
   testbench?: string
   sim_cpp_sources?: string[]
@@ -141,6 +142,7 @@ export function createWorkspaceApi(options: {
     const payload = toDesktopBridgeData({
       cpu_filelist: options.cpu_filelist || '',
       cpu_rtl_files: options.cpu_rtl_files || [],
+      cpu_top_module: options.cpu_top_module || '',
       designTool: 'frontend',
       directory: options.directory || '',
       filelist: options.filelist || '',

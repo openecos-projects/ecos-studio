@@ -98,6 +98,44 @@ describe('workspace desktop bridge', () => {
     )
   })
 
+  it('forwards the CPU module independently from the frontend SoC top', async () => {
+    const create = vi.fn(async () => ({
+      directory: '/workspace/frontend-demo',
+      workspaceHandle: 'workspace-frontend-1',
+    }))
+    setWindow({
+      ecosDesktop: {
+        runtime: {
+          workspace: {
+            create,
+          },
+        },
+      },
+    })
+
+    const { createWorkspaceApi } = await import('./workspace')
+    await createWorkspaceApi({
+      cpu_top_module: 'ysyx_00000000',
+      designTool: 'frontend',
+      directory: '/workspace/frontend-demo',
+      parameters: {
+        'Top module': 'ecos_sim_top',
+        cpu_top_module: 'ysyx_00000000',
+      },
+    })
+
+    expect(create).toHaveBeenCalledWith({
+      designTool: 'frontend',
+      payload: expect.objectContaining({
+        cpu_top_module: 'ysyx_00000000',
+        parameters: {
+          'Top module': 'ecos_sim_top',
+          cpu_top_module: 'ysyx_00000000',
+        },
+      }),
+    })
+  })
+
   it('forwards workspace close requests with the GUI handle', async () => {
     const close = vi.fn(async () => ({ ok: true }))
     setWindow({

@@ -2440,6 +2440,7 @@ describe('useWorkspace openProject', () => {
         pdk_root: '',
         parameters: {
           cpu_filelist: '',
+          cpu_top_module: 'ysyx_00000000',
           design: 'frontend_project',
           frontend_core_id: 'custom-filelist',
           soc_harness_id: 'ysyx-am-soc',
@@ -2457,7 +2458,12 @@ describe('useWorkspace openProject', () => {
       expect.objectContaining({
         cpu_filelist: '',
         cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
+        cpu_top_module: 'ysyx_00000000',
         designTool: 'frontend',
+        parameters: expect.objectContaining({
+          'Top module': 'ecos_sim_top',
+          cpu_top_module: 'ysyx_00000000',
+        }),
       }),
     )
   })

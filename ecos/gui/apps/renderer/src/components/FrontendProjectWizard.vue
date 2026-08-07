@@ -252,6 +252,39 @@
                     </div>
                   </section>
 
+                  <section v-if="selectedCoreId === CUSTOM_FILELIST_ID" class="group">
+                    <label
+                      for="cpu-top-module"
+                      class="mb-2 block text-sm font-semibold text-(--text-primary) transition-colors group-focus-within:text-(--accent-color)"
+                    >
+                      CPU Top Module <span class="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="cpu-top-module"
+                      v-model.trim="config.parameters.cpu_top_module"
+                      type="text"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="e.g. ysyx_00000000"
+                      :aria-invalid="Boolean(cpuTopModuleError)"
+                      :class="[
+                        'w-full rounded-xl border bg-(--bg-secondary)/40 px-4 py-3.5 font-mono text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80 focus:outline-none',
+                        cpuTopModuleError
+                          ? 'border-red-500 focus:border-red-500'
+                          : 'border-(--border-color) focus:border-(--accent-color)',
+                      ]"
+                    />
+                    <p
+                      v-if="cpuTopModuleError"
+                      class="mt-2 flex items-center gap-1 text-xs text-red-500"
+                    >
+                      <i class="ri-error-warning-fill"></i> {{ cpuTopModuleError }}
+                    </p>
+                    <p v-else class="mt-2 text-xs text-(--text-secondary)">
+                      This must match the module declaration in the selected CPU sources.
+                    </p>
+                  </section>
+
                   <section
                     v-if="selectedCore?.requires_filelist !== false"
                     class="cpu-source-setup"
@@ -410,8 +443,9 @@
                       class="mt-3 text-xs leading-relaxed text-(--text-secondary)"
                     >
                       The selected CPU sources must define exactly one
-                      <code>cpu_top</code> module. The fixed ECOS SoC instantiates it
-                      directly, and source filenames are unrestricted.
+                      <code>{{ config.parameters.cpu_top_module }}</code> module with the
+                      YSYX BlackBox interface shown below. Source filenames are
+                      unrestricted.
                     </p>
                   </section>
 
@@ -648,6 +682,12 @@
                   >
                     <ReviewItem label="CPU Source" :value="selectedCore?.name || '-'" />
                     <ReviewItem
+                      v-if="selectedCoreId === CUSTOM_FILELIST_ID"
+                      label="CPU Top Module"
+                      :value="requiredCpuTopModule || '-'"
+                      monospace
+                    />
+                    <ReviewItem
                       label="Core Capability"
                       :value="
                         capabilityLabel(
@@ -797,13 +837,18 @@ import {
   type FrontendCatalogEntry,
   type FrontendCatalogPayload,
   type FrontendCompatibilityEntry,
-  type FrontendCpuPortContract,
   type FrontendValidationIssue,
+  type FrontendValidationRequest,
   type FrontendValidationResult,
 } from '@/api/frontendCatalog'
 import { waitForDesktopApi } from '@/platform/desktop'
 import type { WorkspaceConfig } from '../types'
-import { formatCpuTopModule, normalizeCpuPortContract } from './frontendCpuContract'
+import {
+  formatCpuTopModule,
+  isVerilogIdentifier,
+  normalizeCpuPortContract,
+  YSYX_BLACKBOX_CPU_PORT_CONTRACT,
+} from './frontendCpuContract'
 
 const FINAL_STEP = 3
 const CUSTOM_FILELIST_ID = 'custom-filelist'
@@ -811,52 +856,13 @@ const LEGACY_STANDARD_CPU_FILELIST_ID = 'standard-cpu-filelist'
 type CpuSourceMode = 'filelist' | 'files'
 const CUSTOM_CPU_TOP_MODULE = 'cpu_top'
 const CUSTOM_CPU_RESET_VECTOR = '0x20000000'
-const CUSTOM_CPU_TOP_PORT_CONTRACT: FrontendCpuPortContract[] = [
-  { name: 'clock', direction: 'input', width: 1 },
-  { name: 'reset', direction: 'input', width: 1 },
-  { name: 'io_extIrq', direction: 'input', width: 1 },
-  { name: 'io_timerIrq', direction: 'input', width: 1 },
-  { name: 'io_master_aw_ready', direction: 'input', width: 1 },
-  { name: 'io_master_aw_valid', direction: 'output', width: 1 },
-  { name: 'io_master_aw_bits_awaddr', direction: 'output', width: 32 },
-  { name: 'io_master_aw_bits_awid', direction: 'output', width: 4 },
-  { name: 'io_master_aw_bits_awlen', direction: 'output', width: 8 },
-  { name: 'io_master_aw_bits_awsize', direction: 'output', width: 3 },
-  { name: 'io_master_aw_bits_awburst', direction: 'output', width: 2 },
-  { name: 'io_master_aw_bits_awlock', direction: 'output', width: 1 },
-  { name: 'io_master_aw_bits_awcache', direction: 'output', width: 4 },
-  { name: 'io_master_aw_bits_awprot', direction: 'output', width: 3 },
-  { name: 'io_master_w_ready', direction: 'input', width: 1 },
-  { name: 'io_master_w_valid', direction: 'output', width: 1 },
-  { name: 'io_master_w_bits_wdata', direction: 'output', width: 32 },
-  { name: 'io_master_w_bits_wstrb', direction: 'output', width: 4 },
-  { name: 'io_master_w_bits_wlast', direction: 'output', width: 1 },
-  { name: 'io_master_b_ready', direction: 'output', width: 1 },
-  { name: 'io_master_b_valid', direction: 'input', width: 1 },
-  { name: 'io_master_b_bits_bresp', direction: 'input', width: 2 },
-  { name: 'io_master_b_bits_bid', direction: 'input', width: 4 },
-  { name: 'io_master_ar_ready', direction: 'input', width: 1 },
-  { name: 'io_master_ar_valid', direction: 'output', width: 1 },
-  { name: 'io_master_ar_bits_araddr', direction: 'output', width: 32 },
-  { name: 'io_master_ar_bits_arid', direction: 'output', width: 4 },
-  { name: 'io_master_ar_bits_arlen', direction: 'output', width: 8 },
-  { name: 'io_master_ar_bits_arsize', direction: 'output', width: 3 },
-  { name: 'io_master_ar_bits_arburst', direction: 'output', width: 2 },
-  { name: 'io_master_ar_bits_arlock', direction: 'output', width: 1 },
-  { name: 'io_master_ar_bits_arcache', direction: 'output', width: 4 },
-  { name: 'io_master_ar_bits_arprot', direction: 'output', width: 3 },
-  { name: 'io_master_r_ready', direction: 'output', width: 1 },
-  { name: 'io_master_r_valid', direction: 'input', width: 1 },
-  { name: 'io_master_r_bits_rresp', direction: 'input', width: 2 },
-  { name: 'io_master_r_bits_rdata', direction: 'input', width: 32 },
-  { name: 'io_master_r_bits_rlast', direction: 'input', width: 1 },
-  { name: 'io_master_r_bits_rid', direction: 'input', width: 4 },
-]
+const CUSTOM_CPU_TOP_PORT_CONTRACT = YSYX_BLACKBOX_CPU_PORT_CONTRACT
 
 interface FrontendParameters extends Record<string, unknown> {
   design: string
   description: string
   top_module: string
+  cpu_top_module: string
   clock: string
   frequency_max: number
   cpu_filelist: string
@@ -941,6 +947,7 @@ const config = ref<FrontendWorkspaceConfig>({
     design: '',
     description: '',
     top_module: 'ecos_sim_top',
+    cpu_top_module: CUSTOM_CPU_TOP_MODULE,
     clock: 'clk',
     frequency_max: 100,
     cpu_filelist: '',
@@ -993,11 +1000,15 @@ const cpuSourceReviewValue = computed(() => {
     return `${selectedCpuRtlFiles.value.length} RTL files selected`
   return effectiveCpuFilelist.value || '-'
 })
+const configuredCpuTopModule = computed(() =>
+  config.value.parameters.cpu_top_module.trim(),
+)
 const requiredCpuTopModule = computed(
   () =>
-    validation.value?.normalized?.required_cpu_top_module ||
-    selectedCore.value?.required_cpu_top_module ||
-    '',
+    (selectedCoreId.value === CUSTOM_FILELIST_ID
+      ? configuredCpuTopModule.value
+      : validation.value?.normalized?.required_cpu_top_module ||
+        selectedCore.value?.required_cpu_top_module) || '',
 )
 const requiredCpuTopPortContract = computed(() =>
   normalizeCpuPortContract(
@@ -1141,6 +1152,16 @@ const directoryError = computed(() => {
   return ''
 })
 
+const cpuTopModuleError = computed(() => {
+  if (selectedCoreId.value !== CUSTOM_FILELIST_ID) return ''
+  const moduleName = configuredCpuTopModule.value
+  if (!moduleName) return 'CPU top module is required'
+  if (!isVerilogIdentifier(moduleName)) {
+    return 'CPU top module must be a valid Verilog identifier'
+  }
+  return ''
+})
+
 const cpuInputReady = computed(() => {
   if (!requiresCpuInput.value) return true
   if (cpuSourceMode.value === 'files') return selectedCpuRtlFiles.value.length > 0
@@ -1164,6 +1185,7 @@ const canProceed = computed(() => {
         selectedToolchainId.value !== '' &&
         selectedTestSuiteId.value !== '' &&
         cpuInputReady.value &&
+        !cpuTopModuleError.value &&
         validationOk.value &&
         !validationBusy.value
       )
@@ -1181,6 +1203,7 @@ watch(
     cpuSourceMode,
     selectedCpuRtlFiles,
     () => config.value.parameters.cpu_filelist,
+    () => config.value.parameters.cpu_top_module,
   ],
   () => {
     syncParameters()
@@ -1312,7 +1335,7 @@ function syncParameters(): void {
   )
 }
 
-function validationPayload(): Record<string, unknown> {
+function validationPayload(): FrontendValidationRequest {
   const includeCpuInput = requiresCpuInput.value
   return {
     core_id: selectedCoreId.value,
@@ -1322,6 +1345,8 @@ function validationPayload(): Record<string, unknown> {
         : '',
     cpu_rtl_files:
       includeCpuInput && cpuSourceMode.value === 'files' ? selectedCpuRtlFiles.value : [],
+    cpu_top_module:
+      selectedCoreId.value === CUSTOM_FILELIST_ID ? configuredCpuTopModule.value : '',
     soc_harness_id: selectedSocHarnessId.value,
     toolchain_id: selectedToolchainId.value,
     test_suite_id: selectedTestSuiteId.value,
@@ -1348,6 +1373,16 @@ function localValidationIssues(): FrontendValidationIssue[] {
           : 'CPU filelist is required.',
     })
   }
+  if (cpuTopModuleError.value) {
+    issues.push({
+      severity: 'error',
+      code: configuredCpuTopModule.value
+        ? 'invalid_cpu_top_module'
+        : 'missing_cpu_top_module',
+      field: 'cpu_top_module',
+      message: cpuTopModuleError.value,
+    })
+  }
   return issues
 }
 
@@ -1359,7 +1394,7 @@ function normalizeCoreEntry(
     ...entry,
     name: 'My CPU Top',
     description:
-      'Use a CPU RTL filelist that provides exactly one cpu_top module matching the fixed ECOS CPU interface. The ECOS SoC instantiates cpu_top directly.',
+      'Use CPU RTL sources that provide one configurable top module matching the YSYX BlackBox interface.',
     top_module: CUSTOM_CPU_TOP_MODULE,
     cpu_wrapper_top: CUSTOM_CPU_TOP_MODULE,
     required_cpu_top_module: CUSTOM_CPU_TOP_MODULE,
@@ -1621,6 +1656,8 @@ const createProject = () => {
         : [],
     parameters: {
       ...config.value.parameters,
+      cpu_top_module:
+        selectedCore.value.id === CUSTOM_FILELIST_ID ? configuredCpuTopModule.value : '',
       cpu_filelist:
         requiresCpuInput.value && cpuSourceMode.value === 'filelist'
           ? config.value.parameters.cpu_filelist

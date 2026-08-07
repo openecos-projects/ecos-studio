@@ -52,6 +52,7 @@ describe('frontend catalog desktop bridge', () => {
     const config = reactive({
       core_id: 'custom-filelist',
       cpu_rtl_files: ['/rtl/cpu_top.sv'],
+      cpu_top_module: 'ysyx_00000000',
       soc_harness_id: 'ysyx-am-soc',
       test_suite_id: 'cpu-tests',
       toolchain_id: 'riscv32-unknown-elf',
@@ -64,6 +65,7 @@ describe('frontend catalog desktop bridge', () => {
     expect(validateConfig).toHaveBeenCalledWith({
       core_id: 'custom-filelist',
       cpu_rtl_files: ['/rtl/cpu_top.sv'],
+      cpu_top_module: 'ysyx_00000000',
       soc_harness_id: 'ysyx-am-soc',
       test_suite_id: 'cpu-tests',
       toolchain_id: 'riscv32-unknown-elf',

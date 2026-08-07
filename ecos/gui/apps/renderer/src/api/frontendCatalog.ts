@@ -55,6 +55,16 @@ export interface FrontendCompatibilityEntry {
   requires_cpu_filelist: boolean
 }
 
+export interface FrontendValidationRequest extends Record<string, unknown> {
+  core_id: string
+  cpu_filelist?: string
+  cpu_rtl_files?: string[]
+  cpu_top_module?: string
+  soc_harness_id: string
+  test_suite_id: string
+  toolchain_id: string
+}
+
 export interface FrontendValidationIssue {
   severity: 'error' | 'warning'
   code: string
@@ -80,6 +90,7 @@ export interface FrontendValidationResult {
     cpu_wrapper_contract?: string
     cpu_socket_contract?: string
     cpu_wrapper_top?: string
+    cpu_top_module?: string
     required_cpu_top_module?: string
     required_cpu_top_ports?: string[]
     required_cpu_top_port_contract?: FrontendCpuPortContract[]
@@ -117,7 +128,7 @@ export function listFrontendCatalogApi() {
     })) as Promise<ResponseData<FrontendCatalogPayload>>
 }
 
-export function validateFrontendConfigApi(config: Record<string, unknown>) {
+export function validateFrontendConfigApi(config: FrontendValidationRequest) {
   return getDesktopApi()
     .runtime.frontend.validateConfig(toDesktopBridgeData(config))
     .then((data) => ({

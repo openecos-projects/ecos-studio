@@ -13,7 +13,7 @@ describe('FrontendProjectWizard catalog ownership', () => {
   it('renders CPU IO and address contracts with a custom CPU fallback for stale catalogs', () => {
     expect(wizardSource).not.toContain('CPU_TOP_PORT_DECLARATIONS')
     expect(wizardSource).toContain('CUSTOM_CPU_TOP_PORT_CONTRACT')
-    expect(wizardSource).toContain('io_master_aw_bits_awaddr')
+    expect(wizardSource).toContain('YSYX_BLACKBOX_CPU_PORT_CONTRACT')
     expect(wizardSource).toContain('required_cpu_top_port_contract')
     expect(wizardSource).toContain('required_cpu_reset_vector')
     expect(wizardSource).toContain('soc_bootloader_payload_link_base')
@@ -40,7 +40,11 @@ describe('FrontendProjectWizard catalog ownership', () => {
     expect(wizardSource).toContain(
       'container.scrollTop + targetRect.top - containerRect.top - 12',
     )
-    expect(wizardSource).toMatch(/fixed ECOS SoC instantiates it\s+directly/)
+    expect(wizardSource).toContain('CPU Top Module')
+    expect(wizardSource).toContain('config.parameters.cpu_top_module')
+    expect(wizardSource).toContain('configuredCpuTopModule.value')
+    expect(wizardSource).toContain('selectedCoreId.value === CUSTOM_FILELIST_ID')
+    expect(wizardSource).toContain('YSYX BlackBox interface shown below')
   })
 
   it('supports filelist and direct RTL selection without exposing the generated filelist', () => {

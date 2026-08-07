@@ -995,6 +995,7 @@ export function useWorkspace() {
         response = await createWorkspaceApi({
           cpu_filelist: String(frontendParams.cpu_filelist || ''),
           cpu_rtl_files: creationConfig?.cpu_rtl_files || [],
+          cpu_top_module: String(frontendParams.cpu_top_module || ''),
           designTool: 'frontend',
           directory: selectedPath,
           parameters,
