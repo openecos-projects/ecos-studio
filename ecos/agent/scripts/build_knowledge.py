@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import tempfile
 from pathlib import Path
 
-from knowledge import place, steps
+from knowledge import steps
 
 
 AGENT_ROOT = Path(__file__).parents[1]
@@ -15,12 +17,31 @@ DEFAULT_OUTPUT = AGENT_ROOT / "knowledge"
 
 
 def _build(output: Path) -> None:
-    place._build(output / "place")
     steps.build_all(output)
 
 
 def _tree(root: Path) -> dict[Path, bytes]:
     return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def _json_bytes(value: object) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _normalised_tree(root: Path) -> dict[Path, bytes]:
+    tree = _tree(root)
+    for sources_path in (path for path in tree if path.name == "sources.json"):
+        sources = json.loads(tree[sources_path])
+        if "ecos_studio" not in sources["repositories"]:
+            continue
+        sources["repositories"]["ecos_studio"] = "<workspace-revision>"
+        sources_bytes = _json_bytes(sources)
+        tree[sources_path] = sources_bytes
+        manifest_path = sources_path.with_name("manifest.json")
+        manifest = json.loads(tree[manifest_path])
+        manifest["files"]["sources.json"] = hashlib.sha256(sources_bytes).hexdigest()
+        tree[manifest_path] = _json_bytes(manifest)
+    return tree
 
 
 def main() -> int:
@@ -34,7 +55,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as directory:
         generated = Path(directory)
         _build(generated)
-        if _tree(generated) != _tree(args.output):
+        if _normalised_tree(generated) != _normalised_tree(args.output):
             raise SystemExit("knowledge bundles are stale; run scripts/build_knowledge.py")
     return 0
 

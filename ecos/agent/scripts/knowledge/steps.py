@@ -1,4 +1,4 @@
-"""Build source-audited ECOS knowledge bundles for non-placement flow steps."""
+"""Build source-audited ECOS knowledge bundles for every flow stage."""
 
 from __future__ import annotations
 
@@ -10,7 +10,12 @@ from pathlib import Path
 
 from .algorithm_details import ALGORITHM_DETAILS, SOURCE_PATHS as ALGORITHM_SOURCE_PATHS
 from .metric_details import METRIC_DETAILS, SOURCE_PATHS as METRIC_SOURCE_PATHS
-from .place import PARAMETER_SEMANTICS as DREAMPLACE_PARAMETER_SEMANTICS
+from .place_details import (
+    PLACE_PARAMETER_SEMANTICS,
+    PLACE_REGRESSION_CASES,
+    PLACE_SOURCE_PATHS,
+    add_place_entries,
+)
 
 AGENT_ROOT = Path(__file__).parents[2]
 ECOS_ROOT = AGENT_ROOT.parents[1]
@@ -69,6 +74,16 @@ STAGES = (
         "The step cannot execute when ECC input loading fails. The reported maximum fanout is evidence from the saved feature database or workspace parameter, not proof that every timing or electrical constraint is closed.",
         "ECC publishes maximum fanout together with database instance and net counts after net optimization.",
         "ecc/chipcompiler/tools/ecc/configs/no_default_config_fixfanout.json",
+    ),
+    Stage(
+        "place",
+        "Place",
+        ("place", "placement", "place stage", "布局阶段"),
+        "The DreamPlace runner loads the current ECC design, constructs the placement engine, runs global placement with its acceptance gate, then optionally legalizes and refines the result before publishing maps, artifacts, and QoR analysis.",
+        "A missing ECC module, a failed DreamPlace import, or infinite HPWL prevents a successful placement result. Subflow progress is not terminal evidence; inspect the tool result and published artifacts.",
+        "DreamPlace and ECC publish placement wirelength, density, and congestion facts together with the placement-map resources consumed by the GUI.",
+        "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace.json",
+        ("dreamplace.runner", "dreamplace.module", "ecc.runner", "ecc.module"),
     ),
     Stage(
         "cts",
@@ -305,10 +320,9 @@ def _stage_sources(stage: Stage) -> tuple[dict[str, str], tuple[str, ...]]:
     return paths, source_ids
 
 
-def _source_inventory(stage: Stage) -> dict[str, object]:
-    paths, _source_ids = _stage_sources(stage)
+def _source_inventory(paths: dict[str, str], schema_version: str) -> dict[str, object]:
     return {
-        "schema_version": "ecos-step-sources.v1",
+        "schema_version": schema_version,
         "repositories": {
             "ecos_studio": _revision(ECOS_ROOT),
             "ecc": _revision(ECOS_ROOT / "ecc"),
@@ -320,6 +334,11 @@ def _source_inventory(stage: Stage) -> dict[str, object]:
             for source_id, path in paths.items()
         ],
     }
+
+
+def _stage_source_inventory(stage: Stage) -> dict[str, object]:
+    paths, _source_ids = _stage_sources(stage)
+    return _source_inventory(paths, "ecos-step-sources.v1")
 
 
 def _section(entity_id: str, body: str, evidence: tuple[str, ...]) -> str:
@@ -379,8 +398,8 @@ def _parameter_detail(stage: Stage, key: str) -> tuple[str, str]:
     if stage.slug == "legalization":
         if key in LEGALIZATION_OVERRIDES:
             return LEGALIZATION_OVERRIDES[key]
-        if key in DREAMPLACE_PARAMETER_SEMANTICS:
-            return DREAMPLACE_PARAMETER_SEMANTICS[key]
+        if key in PLACE_PARAMETER_SEMANTICS:
+            return PLACE_PARAMETER_SEMANTICS[key]
     detail = PARAMETER_DETAILS.get(stage.slug, {}).get(key)
     if detail is not None:
         return detail
@@ -681,7 +700,9 @@ def _build_bundle(stage: Stage, output: Path) -> None:
         "entities": entries,
     }
     (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
-    (output / "sources.json").write_text(_json(_source_inventory(stage)) + "\n", encoding="utf-8")
+    (output / "sources.json").write_text(
+        _json(_stage_source_inventory(stage)) + "\n", encoding="utf-8"
+    )
     _write_regression(stage, output, entries)
     files = {
         str(path.relative_to(output)): _sha256(path.read_bytes())
@@ -692,6 +713,47 @@ def _build_bundle(stage: Stage, output: Path) -> None:
     (output / "manifest.json").write_text(_json(manifest) + "\n", encoding="utf-8")
 
 
+def _build_place_bundle(output: Path) -> None:
+    config_path = ECOS_ROOT / PLACE_SOURCE_PATHS["dreamplace.config"]
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    output.mkdir(parents=True, exist_ok=True)
+    knowledge = output / "knowledge"
+    knowledge.mkdir(exist_ok=True)
+    entries: list[dict[str, object]] = []
+    documents: dict[str, list[str]] = {}
+    add_place_entries(entries, documents, config)
+    for name, chunks in documents.items():
+        (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
+    catalog = {
+        "schema_version": "ecos-place-catalog.v2",
+        "domain": "ecos_placement",
+        "publication": {
+            "status": "source-audited",
+            "scope": "ECOS place and DreamPlace source snapshot",
+        },
+        "entities": entries,
+    }
+    (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
+    sources = _source_inventory(PLACE_SOURCE_PATHS, "ecos-place-sources.v1")
+    (output / "sources.json").write_text(_json(sources) + "\n", encoding="utf-8")
+    regression = output / "regression"
+    regression.mkdir(exist_ok=True)
+    regression.joinpath("place_questions.jsonl").write_text(
+        "".join(_json(case) + "\n" for case in PLACE_REGRESSION_CASES), encoding="utf-8"
+    )
+    files = {
+        str(path.relative_to(output)): _sha256(path.read_bytes())
+        for path in sorted(output.rglob("*"))
+        if path.is_file() and path.name != "manifest.json"
+    }
+    manifest = {"schema_version": "ecos-place-manifest.v1", "files": files, "entity_count": len(entries)}
+    (output / "manifest.json").write_text(_json(manifest) + "\n", encoding="utf-8")
+
+
 def build_all(output: Path) -> None:
     for stage in STAGES:
-        _build_bundle(stage, output / stage.slug)
+        bundle_output = output / stage.slug
+        if stage.slug == "place":
+            _build_place_bundle(bundle_output)
+        else:
+            _build_bundle(stage, bundle_output)

@@ -36,6 +36,37 @@ def test_flow_knowledge_specs_include_place_in_canonical_order() -> None:
     ]
 
 
+def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path: Path) -> None:
+    output = tmp_path / "knowledge"
+    subprocess.run(
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--output", str(output)],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert sorted(path.name for path in output.iterdir()) == sorted(
+        spec.slug for spec in STEP_KNOWLEDGE_SPECS
+    )
+    place_catalog = json.loads((output / "place" / "catalog.json").read_text(encoding="utf-8"))
+    assert place_catalog["schema_version"] == "ecos-place-catalog.v2"
+    assert not (AGENT_ROOT / "scripts" / "knowledge" / "place.py").exists()
+    assert "from knowledge import steps" in (AGENT_ROOT / "scripts" / "build_knowledge.py").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_committed_stage_bundles_pass_generator_check() -> None:
+    subprocess.run(
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--check"],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_every_flow_step_has_a_source_audited_knowledge_bundle() -> None:
     for spec in STEP_KNOWLEDGE_SPECS:
         root = KNOWLEDGE_ROOT / spec.slug

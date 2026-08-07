@@ -1,17 +1,10 @@
-"""Build the source-audited ECOS placement knowledge bundle."""
+"""Placement-specific content for the unified flow-stage knowledge builder."""
 
 from __future__ import annotations
 
 import hashlib
-import json
-import subprocess
-from pathlib import Path
 
-
-AGENT_ROOT = Path(__file__).parents[2]
-ECOS_ROOT = AGENT_ROOT.parents[1]
-
-SOURCE_PATHS = {
+PLACE_SOURCE_PATHS = {
     "dreamplace.config": "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace.json",
     "dreamplace.overrides": "ecc/chipcompiler/tools/ecc_dreamplace/parameter_overrides.py",
     "ecos.params": "ecc/chipcompiler/cli/project/params.py",
@@ -52,31 +45,6 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def _json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
-def _revision(path: Path) -> str:
-    return subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
-
-
-def _source_inventory() -> dict[str, object]:
-    sources = []
-    for source_id, relative_path in SOURCE_PATHS.items():
-        path = ECOS_ROOT / relative_path
-        sources.append({"id": source_id, "path": relative_path, "sha256": _sha256(path.read_bytes())})
-    return {
-        "schema_version": "ecos-place-sources.v1",
-        "repositories": {
-            "ecos_studio": _revision(ECOS_ROOT),
-            "ecc": _revision(ECOS_ROOT / "ecc"),
-            "ecc_dreamplace": _revision(ECOS_ROOT / "ecc/chipcompiler/thirdparty/ecc-dreamplace"),
-            "ecc_tools": _revision(ECOS_ROOT / "ecc/chipcompiler/thirdparty/ecc-tools"),
-        },
-        "sources": sources,
-    }
-
-
 def _section(entity_id: str, body: str, evidence: tuple[str, ...], *, include_evidence: bool, evidence_label: str) -> str:
     references = ", ".join(f"**{source_id}**" for source_id in evidence)
     suffix = f"\n\n**{evidence_label}** {references}" if include_evidence else ""
@@ -98,7 +66,7 @@ def _add(entries: list[dict[str, object]], documents: dict[str, list[str]], *, e
     })
 
 
-PARAMETER_SEMANTICS = {
+PLACE_PARAMETER_SEMANTICS = {
     "aux_input": ("The Bookshelf AUX input descriptor.", "It supplies the design entry point for Bookshelf-format input."),
     "lef_input": ("The LEF file set.", "It provides technology layers, sites, and cell geometry to the placement database."),
     "def_input": ("The input DEF path.", "It provides physical locations and constraints; ECOS replaces it with the current step input at runtime."),
@@ -195,7 +163,7 @@ PARAMETER_SEMANTICS = {
 
 
 def _parameter_body(name: str, _default: object) -> str:
-    meaning, role = PARAMETER_SEMANTICS[name]
+    meaning, role = PLACE_PARAMETER_SEMANTICS[name]
     return f"**Meaning:** {meaning}\n\n**Role:** {role}"
 
 
@@ -449,8 +417,7 @@ def _add_failures(entries: list[dict[str, object]], documents: dict[str, list[st
         _add(entries, documents, entity_id=f"failure.place.{name}", kind="failure_mode", aliases=aliases, document="failures.md", body=body, evidence=evidence, evidence_label="Source evidence:")
 
 
-def _write_regression(output: Path) -> None:
-    cases = [
+PLACE_REGRESSION_CASES = (
         {"id": "target-density", "question": "place阶段的target density这个参数的含义是什么？", "entity_id": "parameter.dreamplace.target_density", "required_text": "target placement density"},
         {"id": "execution", "question": "place内部算法是如何执行的？", "entity_id": "algorithm.place.execution", "required_text": "global placement -> acceptance gate -> legalization -> detailed placement"},
         {"id": "rudy", "question": "RUDY指标是如何计算的？", "entity_id": "metric.place_rudy_utilization_max", "required_text": "overlap_area"},
@@ -463,31 +430,14 @@ def _write_regression(output: Path) -> None:
         {"id": "place-def-artifact", "question": "What does the placed DEF contain?", "entity_id": "artifact.place.output_def", "required_text": "standard-cell placement coordinates"},
         {"id": "qor-hotspots-artifact", "question": "How does qor_hotspots.json select place hotspots?", "entity_id": "artifact.place.qor_hotspots", "required_text": "value > 0"},
         {"id": "failure", "question": "dreamplace import failed 怎么理解？", "entity_id": "failure.place.dreamplace_import", "required_text": "dreamplace: import failed"},
-    ]
-    regression = output / "regression"
-    regression.mkdir(exist_ok=True)
-    regression.joinpath("place_questions.jsonl").write_text("".join(_json(case) + "\n" for case in cases), encoding="utf-8")
+)
 
 
-def _build(output: Path) -> None:
-    config = json.loads((ECOS_ROOT / SOURCE_PATHS["dreamplace.config"]).read_text(encoding="utf-8"))
-    output.mkdir(parents=True, exist_ok=True)
-    knowledge = output / "knowledge"
-    knowledge.mkdir(exist_ok=True)
-    entries: list[dict[str, object]] = []
-    documents: dict[str, list[str]] = {}
+def add_place_entries(
+    entries: list[dict[str, object]], documents: dict[str, list[str]], config: dict[str, object]
+) -> None:
     _add_parameters(entries, documents, config)
     _add_algorithms(entries, documents)
     _add_metrics(entries, documents)
     _add_artifacts(entries, documents)
     _add_failures(entries, documents)
-    for name, chunks in documents.items():
-        (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
-    sources = _source_inventory()
-    catalog = {"schema_version": "ecos-place-catalog.v2", "domain": "ecos_placement", "publication": {"status": "source-audited", "scope": "ECOS place and DreamPlace source snapshot"}, "entities": entries}
-    (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
-    (output / "sources.json").write_text(_json(sources) + "\n", encoding="utf-8")
-    _write_regression(output)
-    files = {str(path.relative_to(output)): _sha256(path.read_bytes()) for path in sorted(output.rglob("*")) if path.is_file() and path.name != "manifest.json"}
-    manifest = {"schema_version": "ecos-place-manifest.v1", "files": files, "entity_count": len(entries)}
-    (output / "manifest.json").write_text(_json(manifest) + "\n", encoding="utf-8")
