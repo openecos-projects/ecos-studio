@@ -13,6 +13,7 @@ from pathlib import Path
 
 from build_place_knowledge import PARAMETER_SEMANTICS as DREAMPLACE_PARAMETER_SEMANTICS
 from step_algorithm_details import ALGORITHM_DETAILS, SOURCE_PATHS as ALGORITHM_SOURCE_PATHS
+from step_metric_details import METRIC_DETAILS, SOURCE_PATHS as METRIC_SOURCE_PATHS
 
 AGENT_ROOT = Path(__file__).parents[1]
 ECOS_ROOT = AGENT_ROOT.parents[1]
@@ -160,6 +161,7 @@ SOURCE_PATHS = {
     "dreamplace.runner": "ecc/chipcompiler/tools/ecc_dreamplace/runner.py",
     "dreamplace.module": "ecc/chipcompiler/tools/ecc_dreamplace/module.py",
     **ALGORITHM_SOURCE_PATHS,
+    **METRIC_SOURCE_PATHS,
 }
 
 FAILURE_DETAILS = {
@@ -207,49 +209,6 @@ FAILURE_DETAILS = {
         ("engine", ("harden ECC unavailable", "harden load data failed"), "Without an ECC module, abstract LEF, timing-model LIB, and hardened GDS are not generated."),
         ("delivery", ("harden artifact missing", "harden package incomplete"), "The final missing-artifact metric counts absent GDS, LEF, or LIB. It is a package-completeness gate, not a substitute for checking their contents."),
     ),
-}
-
-METRIC_DETAILS = {
-    "synthesis_cell_area": ("The total mapped cell area after Yosys synthesis.", "Yosys reads `design.area` from its stat JSON and rounds it to two decimal places before publishing the normalized record."),
-    "synthesis_cell_count": ("The number of mapped cells in the synthesized design.", "Yosys reads `design.num_cells` from the stat JSON; it is a post-synthesis structural count."),
-    "synthesis_port_count": ("The number of synthesized port bits.", "Yosys reads `design.num_port_bits` from the stat JSON."),
-    "synthesis_wire_count": ("The number of synthesized wires.", "Yosys reads `design.num_wires` from the stat JSON."),
-    "die_area": ("The physical die area in square micrometers.", "ECC reads `Design Layout.die_area` from the saved database feature summary and rounds the displayed value to three decimals."),
-    "core_area": ("The physical core area in square micrometers.", "ECC reads `Design Layout.core_area` from the saved database feature summary and rounds the displayed value to three decimals."),
-    "core_utilization": ("The fraction of usable core area occupied by the design.", "ECC maps `Design Layout.core_usage` into the normalized core-utilization metric; availability follows the saved database feature summary."),
-    "instance_count": ("The current number of design instances.", "ECC reads `Design Statis.num_instances` from the saved database feature summary after the stage has mutated the database."),
-    "net_count": ("The current number of design nets.", "ECC reads `Design Statis.num_nets` from the saved database feature summary after the stage has mutated the database."),
-    "fanout_max": ("The maximum observed pin fanout after net optimization.", "ECC uses `Pins.max_fanout` from the feature database; only when it is absent does the metric builder use the workspace Max fanout parameter as a fallback."),
-    "io_pin_count": ("The current number of IO pins.", "ECC reads `Design Statis.num_iopins` from the saved database feature summary."),
-    "clock_path_max_buffer": ("The largest buffer count on a clock path.", "ECC reads `CTS.clock_path_max_buffer` from the CTS step feature record."),
-    "clock_path_min_buffer": ("The smallest buffer count on a clock path.", "ECC reads `CTS.clock_path_min_buffer` from the CTS step feature record."),
-    "clock_wirelength": ("The total clock-network wirelength.", "ECC reads `CTS.total_clock_wirelength` and publishes it through the normalized clock-wirelength metric."),
-    "cts_buffer_area": ("The total area of buffers inserted by CTS.", "ECC reads `CTS.buffer_area` from the CTS step feature record."),
-    "cts_buffer_count": ("The number of buffers inserted by CTS.", "ECC reads `CTS.buffer_num` from the CTS step feature record."),
-    "cts_clock_tree_max_level": ("The maximum hierarchy level of a clock tree.", "ECC reads `CTS.max_level_of_clock_tree` from the CTS step feature record."),
-    "cts_clock_wirelength_max": ("The maximum wirelength of an individual clock tree.", "ECC reads `CTS.max_clock_wirelength` from the CTS step feature record."),
-    "cts_worst_optimized_skew_ns": ("The worst optimized clock skew in nanoseconds.", "When `CTS.timing_quality.availability` is `available`, ECC reads `worst_optimized_skew_ns`; otherwise the metric is omitted."),
-    "cts_worst_max_insertion_latency_ns": ("The largest clock insertion latency in nanoseconds.", "When CTS timing quality is available, ECC reads `timing_quality.worst_max_insertion_latency_ns`; otherwise the metric is omitted."),
-    "cts_skew_target_unmet_count": ("The number of clocks whose skew target remains unmet.", "When CTS timing quality is available, ECC reads `timing_quality.target_unmet_count`; otherwise the metric is omitted."),
-    "route_wirelength": ("The total routed-net wirelength represented in the ECC database.", "ECC reads `Nets.wire_len` from the saved database feature summary."),
-    "route_via_count": ("The total via count represented in the ECC database.", "ECC reads `Nets.num_via` from the saved database feature summary."),
-    "route_dr_total_patch_count": ("The total detailed-routing patch count.", "The QoR record is selected from the route step feature's detailed-routing `route.DR` facts."),
-    "route_dr_total_via_count": ("The total detailed-routing via count.", "The QoR record is selected from the route step feature's detailed-routing `route.DR` facts."),
-    "route_dr_total_violation_count": ("The total detailed-routing violation count.", "The QoR record is selected from the route step feature's detailed-routing `route.DR` facts."),
-    "route_dr_total_wirelength": ("The total detailed-routing wirelength.", "The QoR record is selected from the route step feature's detailed-routing `route.DR` facts."),
-    "route_la_total_demand": ("The total layer-assignment routing demand.", "The QoR record is selected from the route step feature's layer-assignment `route.LA` facts."),
-    "route_la_total_overflow": ("The total layer-assignment routing overflow.", "The QoR record is selected from the route step feature's layer-assignment `route.LA` facts."),
-    "drc_count": ("The total number of reported DRC violations.", "ECC reads `drc.number` from the DRC step feature record; no record means the metric is unavailable, not zero."),
-    "rcx_missing_corner_count": ("The number of expected RCX corners without a published SPEF.", "ECC counts missing expected corners in the persisted `rcx.signoff_metrics` facts."),
-    "rcx_spef_parse_failure_count": ("The number of SPEF files that could not be parsed for electrical aggregation.", "ECC reads `rcx.electrical_summary.parse_failure_count` after parsing the published SPEFs."),
-    "rcx_worst_total_capacitance_ff": ("The largest total capacitance across parsed RCX corners in femtofarads.", "ECC takes the worst parsed per-corner total capacitance in `rcx.electrical_summary`."),
-    "rcx_worst_total_resistance_ohm": ("The largest total resistance across parsed RCX corners in ohms.", "ECC takes the worst parsed per-corner total resistance in `rcx.electrical_summary`."),
-    "sta_setup_wns": ("The worst setup slack across loaded STA corners.", "ECC selects the minimum `setup_wns` from all available corner QoR summaries and records the responsible corner."),
-    "sta_setup_tns": ("The worst setup total negative slack across loaded STA corners.", "ECC selects the minimum `setup_tns` from all available corner QoR summaries and records the responsible corner."),
-    "sta_hold_wns": ("The worst hold slack across loaded STA corners.", "ECC selects the minimum `hold_wns` from all available corner QoR summaries and records the responsible corner."),
-    "sta_hold_tns": ("The worst hold total negative slack across loaded STA corners.", "ECC selects the minimum `hold_tns` from all available corner QoR summaries and records the responsible corner."),
-    "sta_frequency_mhz": ("The lowest analyzed operating frequency across loaded STA corners.", "ECC selects the minimum corner `frequency_mhz`; missing configured corners remain recorded in STA coverage facts."),
-    "harden_artifact_missing_count": ("The number of required final delivery artifacts that are absent.", "ECC checks the hardened GDS, abstract LEF, and timing-model LIB paths and sums the missing checks."),
 }
 
 PARAMETER_DETAILS = {
@@ -498,14 +457,24 @@ def _add_parameters(
 def _add_metrics(
     stage: Stage, entries: list[dict[str, object]], documents: dict[str, list[str]]
 ) -> None:
-    evidence = (*stage.tool_source_ids, "ecc.metrics", "gui.step_metrics")
+    evidence = (*stage.tool_source_ids, "ecc.metrics", "gui.step_metrics", "gui.qor_trend", "gui.qor_data")
     metric_ids = METRICS[stage.slug]
     if not metric_ids:
         records = (
-            ("database_summary", "The saved ECC database summary used by downstream analysis.", "The shared analysis path reads the stage feature database after persistence; it provides structural context but no stage-specific GUI comparison metric."),
-            ("qor_availability", "The availability state of the stage QoR artifacts.", "Metrics, summary, and hotspot payloads are written only when the shared metric builder finds valid source facts; absent artifacts remain unavailable."),
+            (
+                "database_summary",
+                "The saved ECC database summary available to shared QoR analysis.",
+                "After stage persistence, the shared metric builder may read `Design Layout` and `Design Statis` facts from the feature database to publish generic structural records.",
+                "Legalization and filler currently publish no stage-specific numeric comparison metric; shared database facts are context, not a movement, legality, or filler-coverage result.",
+            ),
+            (
+                "qor_availability",
+                "Whether this stage has publishable structured QoR records for the GUI.",
+                "ECC writes `qor_metrics.json` only from finite numeric records with valid `feature/` sources, and the GUI accepts schema-v3 records with valid source metadata.",
+                "An available QoR artifact proves only that its records passed the publication contract. Missing artifacts or filtered records must not be interpreted as zero-valued metrics or stage success.",
+            ),
         )
-        for name, meaning, calculation in records:
+        for name, meaning, calculation, boundary in records:
             _add(
                 entries,
                 documents,
@@ -513,12 +482,12 @@ def _add_metrics(
                 kind="metric",
                 aliases=tuple(f"{alias} {name.replace('_', ' ')}" for alias in stage.aliases),
                 document="metrics.md",
-                body=f"**Meaning:** {meaning}\n\n**Calculation:** {calculation}",
+                body=f"**Meaning:** {meaning}\n\n**Calculation:** {calculation}\n\n**Boundary:** {boundary}",
                 evidence=evidence,
             )
         return
     for metric_id in metric_ids:
-        meaning, calculation = METRIC_DETAILS[metric_id]
+        meaning, calculation, boundary, source_ids = METRIC_DETAILS[metric_id]
         display_name = metric_id.replace("_", " ")
         _add(
             entries,
@@ -527,8 +496,8 @@ def _add_metrics(
             kind="metric",
             aliases=(display_name, *(f"{alias} {display_name}" for alias in stage.aliases)),
             document="metrics.md",
-            body=f"**Meaning:** {meaning}\n\n**Calculation:** {calculation}",
-            evidence=evidence,
+            body=f"**Meaning:** {meaning}\n\n**Calculation:** {calculation}\n\n**Boundary:** {boundary}",
+            evidence=tuple(dict.fromkeys((*evidence, *source_ids))),
         )
 
 

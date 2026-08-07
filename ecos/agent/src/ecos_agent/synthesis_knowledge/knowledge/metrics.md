@@ -1,35 +1,43 @@
 <a id="metric.synthesis_cell_area"></a>
 ## metric.synthesis_cell_area
 
-**Meaning:** The total mapped cell area after Yosys synthesis.
+**Meaning:** The total mapped standard-cell area reported by Yosys after technology mapping.
 
-**Calculation:** Yosys reads `design.area` from its stat JSON and rounds it to two decimal places before publishing the normalized record.
+**Calculation:** `yosys/metrics.py` reads `/design/area` from the Yosys stat JSON and publishes `round(area, 2)`.
 
-**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It is a library-area estimate of the synthesized netlist, not placed area, utilization, or post-route area.
+
+**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
 
 <a id="metric.synthesis_cell_count"></a>
 ## metric.synthesis_cell_count
 
-**Meaning:** The number of mapped cells in the synthesized design.
+**Meaning:** The number of mapped cells in the synthesized netlist.
 
-**Calculation:** Yosys reads `design.num_cells` from the stat JSON; it is a post-synthesis structural count.
+**Calculation:** Yosys reads `/design/num_cells` from the stat JSON and publishes that structural count.
 
-**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It counts the current mapped netlist only; it does not include later CTS, fanout-repair, filler, or routing edits.
+
+**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
 
 <a id="metric.synthesis_port_count"></a>
 ## metric.synthesis_port_count
 
 **Meaning:** The number of synthesized port bits.
 
-**Calculation:** Yosys reads `design.num_port_bits` from the stat JSON.
+**Calculation:** Yosys reads `/design/num_port_bits` from the stat JSON without a cross-stage aggregation.
 
-**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** This is a bit count, not a count of logical port declarations and not a physical IO-pin count.
+
+**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
 
 <a id="metric.synthesis_wire_count"></a>
 ## metric.synthesis_wire_count
 
-**Meaning:** The number of synthesized wires.
+**Meaning:** The number of wires in the synthesized Yosys netlist.
 
-**Calculation:** Yosys reads `design.num_wires` from the stat JSON.
+**Calculation:** Yosys reads `/design/num_wires` from the stat JSON and publishes the resulting structural count.
 
-**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** A Yosys wire is a netlist representation; it is not routed wirelength or a count of physical nets after implementation.
+
+**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**

@@ -61,6 +61,7 @@ def test_step_bundles_have_entity_level_algorithm_artifact_metric_and_failure_kn
         assert "**Meaning:**" in documents["parameters.md"]
         assert "**Role:**" in documents["parameters.md"]
         assert "is the normalized" not in documents["metrics.md"]
+        assert documents["metrics.md"].count("**Boundary:**") == len(anchors["metrics.md"])
         assert all(case["entity_id"] in knowledge.entity_ids for case in cases)
 
         if spec.slug in {"synthesis", "harden"}:

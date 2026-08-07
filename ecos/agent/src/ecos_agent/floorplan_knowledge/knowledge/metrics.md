@@ -1,44 +1,54 @@
 <a id="metric.die_area"></a>
 ## metric.die_area
 
-**Meaning:** The physical die area in square micrometers.
+**Meaning:** The current physical die area in square micrometres.
 
-**Calculation:** ECC reads `Design Layout.die_area` from the saved database feature summary and rounds the displayed value to three decimals.
+**Calculation:** The feature parser writes `Design Layout.die_area`; the metric builder converts it to a finite number and publishes `round(value, 3)`.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It is a database geometry fact at this step, not cell area and not evidence that utilization or DRC constraints pass.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.feature.summary**
 
 <a id="metric.core_area"></a>
 ## metric.core_area
 
-**Meaning:** The physical core area in square micrometers.
+**Meaning:** The current usable core area in square micrometres.
 
-**Calculation:** ECC reads `Design Layout.core_area` from the saved database feature summary and rounds the displayed value to three decimals.
+**Calculation:** The feature parser writes `Design Layout.core_area`; the metric builder publishes the finite value rounded to three decimals.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It describes the saved core rectangle, not the free placement area after macro halos, blockages, or routing reservations.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.feature.summary**
 
 <a id="metric.core_utilization"></a>
 ## metric.core_utilization
 
-**Meaning:** The fraction of usable core area occupied by the design.
+**Meaning:** The feature database's current core-usage ratio.
 
-**Calculation:** ECC maps `Design Layout.core_usage` into the normalized core-utilization metric; availability follows the saved database feature summary.
+**Calculation:** The parser publishes `Design Layout.core_usage`, and the metric builder normalizes its finite numeric value before publication.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It is the tool's summary ratio, not a proof of legal placement, density closure, or available routing capacity.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.feature.summary**
 
 <a id="metric.instance_count"></a>
 ## metric.instance_count
 
-**Meaning:** The current number of design instances.
+**Meaning:** The number of instances in the saved physical database.
 
-**Calculation:** ECC reads `Design Statis.num_instances` from the saved database feature summary after the stage has mutated the database.
+**Calculation:** The parser writes `Design Statis.num_instances`; the stage metric builder publishes that finite count after the stage mutation is saved.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** This includes whatever the current database represents at that stage and is not limited to movable standard cells.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.feature.summary**
 
 <a id="metric.net_count"></a>
 ## metric.net_count
 
-**Meaning:** The current number of design nets.
+**Meaning:** The number of nets in the saved physical database.
 
-**Calculation:** ECC reads `Design Statis.num_nets` from the saved database feature summary after the stage has mutated the database.
+**Calculation:** The parser writes `Design Statis.num_nets`; the metric builder publishes that finite count after persistence.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It is a database connectivity count, not a count of routed nets, timing paths, or DRC violations.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.feature.summary**

@@ -1,116 +1,142 @@
 <a id="metric.clock_path_max_buffer"></a>
 ## metric.clock_path_max_buffer
 
-**Meaning:** The largest buffer count on a clock path.
+**Meaning:** The largest inserted-buffer count found on a reachable clock path.
 
-**Calculation:** ECC reads `CTS.clock_path_max_buffer` from the CTS step feature record.
+**Calculation:** CTS evaluates clock-path depth statistics and writes `CTS.clock_path_max_buffer`, which the metric builder reads directly.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** When path statistics are unavailable the native summary currently retains zero, so zero is not independently validated proof of a buffer-free clock tree.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.qor**, **icts.qor_metrics**, **icts.api**, **ecc.feature.tools**
 
 <a id="metric.clock_path_min_buffer"></a>
 ## metric.clock_path_min_buffer
 
-**Meaning:** The smallest buffer count on a clock path.
+**Meaning:** The smallest inserted-buffer count found on a reachable clock path.
 
-**Calculation:** ECC reads `CTS.clock_path_min_buffer` from the CTS step feature record.
+**Calculation:** CTS writes the minimum path-depth statistic to `CTS.clock_path_min_buffer`, and the metric builder publishes it directly.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It is a descriptive minimum rather than a closure target; an unavailable native path statistic can currently appear as zero.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.qor**, **icts.qor_metrics**, **icts.api**, **ecc.feature.tools**
 
 <a id="metric.clock_wirelength"></a>
 ## metric.clock_wirelength
 
-**Meaning:** The total clock-network wirelength.
+**Meaning:** The total wirelength of reachable clock nets reported by CTS.
 
-**Calculation:** ECC reads `CTS.total_clock_wirelength` and publishes it through the normalized clock-wirelength metric.
+**Calculation:** CTS sums clock-net wirelengths into `total_clock_network_wirelength_dbu`; the current feature bridge writes that DBU field as `CTS.total_clock_wirelength`, and the metric builder publishes it.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** The GUI metadata labels this metric `um`, but the current C++ bridge supplies a DBU field without conversion. Do not treat the displayed value as verified micrometres until that interface is reconciled.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.qor**, **icts.qor_metrics**, **icts.api**, **ecc.feature.tools**
 
 <a id="metric.cts_buffer_area"></a>
 ## metric.cts_buffer_area
 
-**Meaning:** The total area of buffers inserted by CTS.
+**Meaning:** The total area of unique buffers inserted into clock trees, in square micrometres when the layout query is available.
 
-**Calculation:** ECC reads `CTS.buffer_area` from the CTS step feature record.
+**Calculation:** CTS de-duplicates clock-buffer instances and sums `queryCellAreaUm2(master)` into `CTS.buffer_area`; the metric builder publishes the finite result.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** If the layout or a buffer-master area is unavailable the native value is null and this metric is omitted; omission is not zero inserted-buffer area.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.qor**, **icts.api**, **ecc.feature.tools**
 
 <a id="metric.cts_buffer_count"></a>
 ## metric.cts_buffer_count
 
-**Meaning:** The number of buffers inserted by CTS.
+**Meaning:** The number of unique buffer instances counted across constructed clock trees.
 
-**Calculation:** ECC reads `CTS.buffer_num` from the CTS step feature record.
+**Calculation:** CTS inserts each clock-buffer instance into a set and increments `final_clock_buffer_count` only on first occurrence; it is emitted as `CTS.buffer_num`.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It counts buffers identified by the CTS evaluator, not every buffer cell in the full design database.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.qor**, **icts.api**, **ecc.feature.tools**
 
 <a id="metric.cts_clock_tree_max_level"></a>
 ## metric.cts_clock_tree_max_level
 
-**Meaning:** The maximum hierarchy level of a clock tree.
+**Meaning:** The maximum CTS clock-tree path level.
 
-**Calculation:** ECC reads `CTS.max_level_of_clock_tree` from the CTS step feature record.
+**Calculation:** The CTS bridge writes `pathBufferStats().max_buffer_count` into `CTS.max_level_of_clock_tree`, and the metric builder publishes it.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** In the current implementation this is the same path-buffer-depth statistic, not an independently computed topology-level metric.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.qor_metrics**, **icts.api**, **ecc.feature.tools**
 
 <a id="metric.cts_clock_wirelength_max"></a>
 ## metric.cts_clock_wirelength_max
 
-**Meaning:** The maximum wirelength of an individual clock tree.
+**Meaning:** The greatest wirelength of one reachable clock net reported by CTS.
 
-**Calculation:** ECC reads `CTS.max_clock_wirelength` from the CTS step feature record.
+**Calculation:** CTS finds the maximum clock-net wirelength in DBU and writes it as `CTS.max_clock_wirelength`; the metric builder reads that field.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** As with total clock wirelength, GUI metadata says `um` while the current C++ bridge writes DBU, so the published unit is not source-verified.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.qor**, **icts.qor_metrics**, **icts.api**, **ecc.feature.tools**
 
 <a id="metric.cts_worst_optimized_skew_ns"></a>
 ## metric.cts_worst_optimized_skew_ns
 
-**Meaning:** The worst optimized clock skew in nanoseconds.
+**Meaning:** The largest optimized skew over clocks for which CTS timing facts are available, in nanoseconds.
 
-**Calculation:** When `CTS.timing_quality.availability` is `available`, ECC reads `worst_optimized_skew_ns`; otherwise the metric is omitted.
+**Calculation:** The native CTS timing bridge takes `max(clock.optimized_skew_ns)` and the metric builder publishes it only when `CTS.timing_quality.availability == 'available'`.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** This is CTS timing-feature coverage, not multi-corner post-route STA signoff; unavailable timing facts omit the metric rather than reporting zero skew.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.api**
 
 <a id="metric.cts_worst_max_insertion_latency_ns"></a>
 ## metric.cts_worst_max_insertion_latency_ns
 
-**Meaning:** The largest clock insertion latency in nanoseconds.
+**Meaning:** The largest maximum insertion latency over available CTS clock timing facts, in nanoseconds.
 
-**Calculation:** When CTS timing quality is available, ECC reads `timing_quality.worst_max_insertion_latency_ns`; otherwise the metric is omitted.
+**Calculation:** The native CTS timing bridge takes `max(clock.max_insertion_latency_ns)` and the metric builder requires `timing_quality.availability == 'available'` before publishing it.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It is omitted when CTS timing facts are unavailable and must not be substituted by a default latency or an STA result.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.api**
 
 <a id="metric.cts_skew_target_unmet_count"></a>
 ## metric.cts_skew_target_unmet_count
 
-**Meaning:** The number of clocks whose skew target remains unmet.
+**Meaning:** The number of available CTS clocks whose skew target is not met.
 
-**Calculation:** When CTS timing quality is available, ECC reads `timing_quality.target_unmet_count`; otherwise the metric is omitted.
+**Calculation:** The native timing bridge sums `1` for each clock with `target_met == false`; publication is gated by `CTS.timing_quality.availability`.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It only covers clocks returned by the CTS timing feature and is not a count of timing-path violations across all STA corners.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **icts.api**
 
 <a id="metric.instance_count"></a>
 ## metric.instance_count
 
-**Meaning:** The current number of design instances.
+**Meaning:** The number of instances in the saved physical database.
 
-**Calculation:** ECC reads `Design Statis.num_instances` from the saved database feature summary after the stage has mutated the database.
+**Calculation:** The parser writes `Design Statis.num_instances`; the stage metric builder publishes that finite count after the stage mutation is saved.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** This includes whatever the current database represents at that stage and is not limited to movable standard cells.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.feature.summary**
 
 <a id="metric.io_pin_count"></a>
 ## metric.io_pin_count
 
-**Meaning:** The current number of IO pins.
+**Meaning:** The number of IO pins in the saved physical database.
 
-**Calculation:** ECC reads `Design Statis.num_iopins` from the saved database feature summary.
+**Calculation:** The parser writes `Design Statis.num_iopins`, which the metric builder publishes as a finite count.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It is a physical IO-pin count at the saved step state, not Yosys port-bit count or a measure of IO-placement legality.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.feature.summary**
 
 <a id="metric.net_count"></a>
 ## metric.net_count
 
-**Meaning:** The current number of design nets.
+**Meaning:** The number of nets in the saved physical database.
 
-**Calculation:** ECC reads `Design Statis.num_nets` from the saved database feature summary after the stage has mutated the database.
+**Calculation:** The parser writes `Design Statis.num_nets`; the metric builder publishes that finite count after persistence.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** It is a database connectivity count, not a count of routed nets, timing paths, or DRC violations.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.feature.summary**

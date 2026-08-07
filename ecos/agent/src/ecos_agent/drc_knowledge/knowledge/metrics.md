@@ -1,8 +1,10 @@
 <a id="metric.drc_count"></a>
 ## metric.drc_count
 
-**Meaning:** The total number of reported DRC violations.
+**Meaning:** The total DRC violations reported by the saved DRC feature record.
 
-**Calculation:** ECC reads `drc.number` from the DRC step feature record; no record means the metric is unavailable, not zero.
+**Calculation:** The metric builder reads `drc.number` from the DRC step feature and publishes the finite count; the DRC clean gate requires it to equal zero.
 
-**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** A missing or malformed feature is unavailable, not zero violations, and this number does not describe which rules or shapes caused the violations.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **idrc.interface**, **ecc.feature.tools**

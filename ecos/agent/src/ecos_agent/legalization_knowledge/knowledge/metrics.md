@@ -1,17 +1,21 @@
 <a id="metric.legalization.database_summary"></a>
 ## metric.legalization.database_summary
 
-**Meaning:** The saved ECC database summary used by downstream analysis.
+**Meaning:** The saved ECC database summary available to shared QoR analysis.
 
-**Calculation:** The shared analysis path reads the stage feature database after persistence; it provides structural context but no stage-specific GUI comparison metric.
+**Calculation:** After stage persistence, the shared metric builder may read `Design Layout` and `Design Statis` facts from the feature database to publish generic structural records.
 
-**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** Legalization and filler currently publish no stage-specific numeric comparison metric; shared database facts are context, not a movement, legality, or filler-coverage result.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
 
 <a id="metric.legalization.qor_availability"></a>
 ## metric.legalization.qor_availability
 
-**Meaning:** The availability state of the stage QoR artifacts.
+**Meaning:** Whether this stage has publishable structured QoR records for the GUI.
 
-**Calculation:** Metrics, summary, and hotspot payloads are written only when the shared metric builder finds valid source facts; absent artifacts remain unavailable.
+**Calculation:** ECC writes `qor_metrics.json` only from finite numeric records with valid `feature/` sources, and the GUI accepts schema-v3 records with valid source metadata.
 
-**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
+**Boundary:** An available QoR artifact proves only that its records passed the publication contract. Missing artifacts or filtered records must not be interpreted as zero-valued metrics or stage success.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
