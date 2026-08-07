@@ -1343,6 +1343,55 @@ def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> 
     )
 
 
+def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_path: Path) -> None:
+    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    events: list[dict[str, object]] = []
+
+    def unexpected_parameter_update(_context: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("a question must not enter the parameter-update parser")
+
+    def unexpected_chat_fallback(_context: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("published knowledge must answer this question")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        rerun_parameter_parser=unexpected_parameter_update,
+        chat_response_parser=unexpected_chat_fallback,
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "what is the target overflow in placer")
+
+    answer = _last_event(events, "message")
+    assert provider.sessions[session_id].phase == "operation"
+    assert "acceptable global-placement overflow threshold" in str(answer["text"])
+    assert answer["contract"]["schema_version"] == "ecos-place-answer.v1"
+
+
+def test_operation_question_codex_fallback_disallows_operations(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
+
+    def answer_chat(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return _chat_response(answer="This workspace has no published answer for that question.")
+
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=answer_chat)
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "what is the placement policy for this design?")
+
+    assert contexts[0]["allowed_operations"] == []
+    assert provider.sessions[session_id].phase == "operation"
+    assert _last_event(events, "message")["contract"]["read_only"] is True
+
+
 def test_operation_codex_fallback_maps_nl_to_rerun(tmp_path: Path) -> None:
     workspace = _workspace_with_fixfanout_and_place(tmp_path)
     events: list[dict[str, object]] = []

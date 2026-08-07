@@ -420,11 +420,14 @@ class EcosAgentProvider:
             self._handle_idle_input(session, message)
             return
         if _is_conversational_input(message):
-            self._answer_non_state_input(session, message)
+            self._answer_non_state_input(session, message, allow_operations=False)
             return
         handler(session, message)
 
     def _handle_idle_input(self, session: _Session, message: str) -> None:
+        if _is_conversational_input(message):
+            self._answer_non_state_input(session, message, allow_operations=False)
+            return
         choice = self._resolve_operation_choice(session, message)
         if choice is not None:
             if session.phase == "home_ready":
@@ -432,14 +435,16 @@ class EcosAgentProvider:
             else:
                 self._select_operation(session, message, choice)
             return
-        self._answer_non_state_input(session, message)
+        self._answer_non_state_input(session, message, allow_operations=True)
 
-    def _answer_non_state_input(self, session: _Session, message: str) -> None:
+    def _answer_non_state_input(
+        self, session: _Session, message: str, *, allow_operations: bool
+    ) -> None:
         answer = self._knowledge_answer(message)
         if answer is not None:
             self._emit(session, "message", answer.text, contract=answer.contract)
             return
-        self._answer_with_codex(session, message)
+        self._answer_with_codex(session, message, allow_operations=allow_operations)
 
     def _knowledge_answer(self, message: str):
         for knowledge in self.knowledge:
@@ -499,8 +504,10 @@ class EcosAgentProvider:
             return keyword
         return None
 
-    def _answer_with_codex(self, session: _Session, message: str) -> None:
-        allowed_options = self._chat_allowed_operations(session)
+    def _answer_with_codex(
+        self, session: _Session, message: str, *, allow_operations: bool
+    ) -> None:
+        allowed_options = self._chat_allowed_operations(session) if allow_operations else []
         response = self._parse_chat_response(session, message, allowed_options)
         if response is None:
             return

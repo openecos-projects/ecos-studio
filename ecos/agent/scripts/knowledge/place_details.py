@@ -174,7 +174,10 @@ def _add_parameters(entries: list[dict[str, object]], documents: dict[str, list[
             evidence += ("ecos.params",)
         if name == "target_density":
             evidence += ("dreamplace.objective",)
-        _add(entries, documents, entity_id=f"parameter.dreamplace.{name}", kind="parameter", aliases=(name, name.replace("_", " "), f"DreamPlace {name}"), document="parameters.md", body=_parameter_body(name, default), evidence=evidence, include_evidence=False)
+        aliases = (name, name.replace("_", " "), f"DreamPlace {name}")
+        if name == "stop_overflow":
+            aliases += ("target overflow", "placement target overflow", "placer target overflow")
+        _add(entries, documents, entity_id=f"parameter.dreamplace.{name}", kind="parameter", aliases=aliases, document="parameters.md", body=_parameter_body(name, default), evidence=evidence, include_evidence=False)
 
 
 def _add_algorithms(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
@@ -419,6 +422,7 @@ def _add_failures(entries: list[dict[str, object]], documents: dict[str, list[st
 
 PLACE_REGRESSION_CASES = (
         {"id": "target-density", "question": "place阶段的target density这个参数的含义是什么？", "entity_id": "parameter.dreamplace.target_density", "required_text": "target placement density"},
+        {"id": "target-overflow", "question": "what is the target overflow in placer", "entity_id": "parameter.dreamplace.stop_overflow", "required_text": "acceptable global-placement overflow threshold"},
         {"id": "execution", "question": "place内部算法是如何执行的？", "entity_id": "algorithm.place.execution", "required_text": "global placement -> acceptance gate -> legalization -> detailed placement"},
         {"id": "rudy", "question": "RUDY指标是如何计算的？", "entity_id": "metric.place_rudy_utilization_max", "required_text": "overlap_area"},
         {"id": "hpwl", "question": "place HPWL指标来自哪里？", "entity_id": "metric.place_hpwl", "required_text": "/Wirelength/HPWL"},
