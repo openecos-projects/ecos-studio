@@ -552,7 +552,7 @@ function workspaceRerunExecutionSteps(
   if (targetIndex < 0 || endIndex < targetIndex) {
     throw new Error('Workspace rerun flow range is invalid.')
   }
-  return [...FLOW_STEP_SEQUENCE.slice(targetIndex, endIndex + 1)]
+  return FLOW_STEP_SEQUENCE.slice(targetIndex, endIndex + 1)
 }
 
 async function materializeWorkspaceRerunParameterWrites(
