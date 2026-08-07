@@ -216,7 +216,7 @@ describe('CodexDependencyService', () => {
     await writeFile(codexBin, '#!/usr/bin/env node\n')
     await chmod(codexBin, 0o755)
 
-    const spawn = vi.fn((_command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
+    const spawn = vi.fn((_command: string, args: string[], _options: { env?: NodeJS.ProcessEnv }) => {
       const child = new FakeChild()
       queueMicrotask(() => {
         if (args[0] === '--version') {
