@@ -152,11 +152,6 @@ const stackOptions = computed(
     background-color 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.choice-card__options--buttons:not(.choice-card__options--stack)
-  .choice-card__option:not(.choice-card__option--stacked) {
-  align-items: center;
-}
-
 .choice-card__options--buttons .choice-card__option--stacked {
   align-items: stretch;
   padding-top: 0.625rem;
@@ -172,21 +167,10 @@ const stackOptions = computed(
 .choice-card__option-label {
   min-width: 0;
   width: 100%;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  /* break-word (not anywhere) so CJK wraps naturally without splitting latin words. */
+  overflow-wrap: break-word;
   white-space: normal;
 }
-
-/* Compact Confirm/Cancel rows stay single-line; list options wrap in the narrow rail. */
-.choice-card__options--buttons:not(.choice-card__options--stack)
-  .choice-card__option:not(.choice-card__option--stacked)
-  .choice-card__option-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: center;
-}
-
 .choice-card__option-detail {
   min-width: 0;
   width: 100%;
