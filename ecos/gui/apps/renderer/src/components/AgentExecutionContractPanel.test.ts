@@ -9,7 +9,7 @@ describe('AgentExecutionContractPanel', () => {
     expect(source).toContain('v-for="[key, value] in rows"')
     expect(source).toContain('{{ key }}')
     expect(source).toContain('{{ value }}')
-    expect(source).toContain('class="w-full table-fixed')
+    expect(source).toMatch(/class="[^"]*\bw-full\b[^"]*\btable-fixed\b/)
     expect(source).toContain('class="contract-table-shell selectable"')
     expect(source).toContain('max-height: min(18rem, 42vh)')
     expect(source.indexOf('</table>')).toBeLessThan(

@@ -52,8 +52,9 @@ printf 'ECOS_AGENT_CODEX_BIN=%s\n' "$codex_bin" \
   > "$HOME/.config/environment.d/ecos-agent.conf"
 ```
 
-Agent 仅接受可执行的 `ECOS_AGENT_CODEX_BIN` / 设置路径，否则回退到 GUI 进程
-`PATH` 中的 `codex`。启动检查失败时不会创建 workspace，也不会启动 ECC 流程。
+Agent 仅接受可执行的 `ECOS_AGENT_CODEX_BIN` / 设置路径；无效时依次回退到托管安装
+路径和 GUI 进程 `PATH` 中的 `codex`。启动检查失败时不会创建 workspace，也不会启动
+ECC 流程。
 
 ## 在 ECOS Studio 中使用
 
@@ -63,15 +64,14 @@ Workspace 目录名。
 
 按上下文分流：
 
-- **未打开 workspace（首页）**：Topbar Chat 打开右侧 Agent 抽屉。开场给出主 CTA
+- **未打开 workspace（首页）**：Topbar Chat 打开 Agent 聊天。开场给出主 CTA
   「开始创建 Workspace」，也可直接用自然语言说明意图（例如已有 Project 路径、
-  Workspace 名、设计名）；寒暄或无关输入会失败关闭并留在开场。随后选择或新建
-  Project，再创建其下的 Workspace 并运行完整流程。
-- **已打开 workspace**：Topbar Chat 展开右侧聊天栏（Home / 步骤页共用）。欢迎语
-  同时展示 Project 与 Workspace。操作是「修改参数（只保存）」「从指定阶段重跑」
+  Workspace 名、设计名）；寒暄或无关输入会留在开场；Agent 可提供只读答复，无法处理时会提示错误或重新展示可用选项。随后选择或新建Project，再创建其下的 Workspace 并运行完整流程。
+- **已打开 workspace**：Home / 步骤页共用 Topbar Chat。欢迎语同时展示 Project 与
+  Workspace。操作是「修改参数（只保存）」「从指定阶段重跑」
   「继续未完成 flow」「在当前 Project 下新建 Workspace」。Standalone workspace
   （无 `project.json` 父目录）不提供第 4 项。自然语言仅在能明确映射到上述操作时
-  前进，否则失败关闭并重新展示选项。
+  前进；其他输入会给出只读答复并保留当前操作选项。
 
 Agent 会将操作、重跑源、阶段、执行范围和最终确认显示为结构化选项；合同确认前
 不会执行流程。运行时状态条显示 Agent 状态，工具活动合并在可展开的 Tool 卡中。
@@ -147,7 +147,8 @@ Codex CLI 仅用于生成**只读、带类型约束的建议**，不会取得流
   不能自行选择没有证据的阶段、不能创建或覆盖 workspace，也不能宣称流程成功。
 
 项目根目录和重跑 source workspace 是 Codex 可读取建议的边界。Codex 不可用、
-超时或返回不符合合同的内容时，当前操作会失败关闭，ECC 不会被调用。
+超时或返回不符合合同的内容时，不会生成可执行合同或调用 ECC；Agent 会保留当前
+输入步骤，供用户修正输入后重试。
 
 ### 边界靠什么保证
 

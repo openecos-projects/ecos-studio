@@ -21,6 +21,7 @@ const testState = vi.hoisted(() => ({
   writeProjectTextFile: vi.fn(),
   readProjectWorkspaceAnalysisInputs: vi.fn(),
   readProjectWorkspaceFlowStates: vi.fn(),
+  resolveProjectRouteContextForWorkspace: vi.fn(),
 }))
 
 vi.mock('./useWorkspace', () => ({
@@ -51,6 +52,11 @@ vi.mock('@/utils/projectFiles', () => ({
 vi.mock('@/views/project-management/projectWorkspaceAnalysisData', () => ({
   readProjectWorkspaceAnalysisInputs: testState.readProjectWorkspaceAnalysisInputs,
   readProjectWorkspaceFlowStates: testState.readProjectWorkspaceFlowStates,
+}))
+
+vi.mock('@/utils/projectManifestRegistration', () => ({
+  resolveProjectRouteContextForWorkspace:
+    testState.resolveProjectRouteContextForWorkspace,
 }))
 
 import { clearHomeQorComparisonCache, useHomeQorComparison } from './useHomeQorComparison'
@@ -106,6 +112,8 @@ describe('useHomeQorComparison', () => {
     testState.writeProjectTextFile.mockReset()
     testState.readProjectWorkspaceAnalysisInputs.mockReset()
     testState.readProjectWorkspaceFlowStates.mockReset()
+    testState.resolveProjectRouteContextForWorkspace.mockReset()
+    testState.resolveProjectRouteContextForWorkspace.mockResolvedValue(null)
     testState.readOptionalProjectTextFile.mockResolvedValue(
       JSON.stringify(projectManifest()),
     )
@@ -185,14 +193,20 @@ describe('useHomeQorComparison', () => {
     expect(restored.state.value.comparison).toBe(previousComparison)
   })
 
-  it('does not infer a baseline when the project route is absent', async () => {
+  it('restores a project context from a parent manifest that owns the workspace', async () => {
     testState.route.query = {}
+    testState.resolveProjectRouteContextForWorkspace.mockResolvedValue({
+      projectRoot: '/projects/gcd',
+      projectName: 'gcd',
+    })
     const comparison = scope.run(() => useHomeQorComparison())!
 
     await vi.waitFor(() => {
-      expect(comparison.state.value.status).toBe('no-project')
+      expect(comparison.state.value.status).toBe('available')
     })
-    expect(testState.registerProjectReadRoot).not.toHaveBeenCalled()
+    expect(testState.resolveProjectRouteContextForWorkspace).toHaveBeenCalledWith(
+      '/projects/gcd/ws_0004',
+    )
   })
 
   it('uses the first other workspace as the legacy project default baseline without writing', async () => {

@@ -15,4 +15,10 @@ describe('agent workspace creation', () => {
     expect(source).toContain('lastWorkspaceCreationError.value')
     expect(source).toContain('created: false')
   })
+
+  it('keeps the managed project context when opening the new workspace home', () => {
+    expect(source).toContain("path: '/workspace/home'")
+    expect(source).toContain('projectRoot: contract.project_context.project_root')
+    expect(source).toContain('projectName: contract.project_context.project_name')
+  })
 })
