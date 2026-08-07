@@ -127,11 +127,12 @@ function getDesktopServices() {
       platform: process.platform,
     })
   const eccRuntimeService = new EccRpcRuntimeService({
-    createSidecar: (directory, onEvent) =>
+    createSidecar: (_directory, onEvent) =>
       new EccRpcSidecarProcess({
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
-        logDirectoryProvider: () => resolveEccSidecarLogDirectory(directory),
+        logDirectoryProvider: () =>
+          resolveEccSidecarLogDirectory(getLogSessionDirectory()),
         onEvent,
       }),
   })

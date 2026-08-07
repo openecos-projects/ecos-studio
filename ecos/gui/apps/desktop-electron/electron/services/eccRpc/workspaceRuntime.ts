@@ -48,6 +48,7 @@ export interface EccRpcRuntimeClient {
 
 export interface EccRpcRuntimeSidecar {
   logFile: string | null
+  relocateLogFileFrom?(workspaceDirectory: string | null): void
   shutdown(): Promise<void>
   start(): Promise<EccRpcRuntimeClient>
 }
@@ -428,6 +429,9 @@ export class EccWorkspaceRuntime {
       request.workspaceHandle,
       async () => {
         const client = await this.ensureStarted()
+        if (rerun) {
+          this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+        }
         const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
         return await client.call<EccFlowRunResult>(
           'flow.run',
@@ -449,6 +453,9 @@ export class EccWorkspaceRuntime {
       request.workspaceHandle,
       async () => {
         const client = await this.ensureStarted()
+        if (rerun) {
+          this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+        }
         const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
         return await client.call<EccFlowRunStepResult>(
           'flow.run_step',
