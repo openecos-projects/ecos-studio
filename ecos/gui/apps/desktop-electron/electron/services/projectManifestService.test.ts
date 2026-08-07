@@ -97,9 +97,34 @@ describe('ProjectManifestService', () => {
       await readFile(join(projectRoot, 'project.json'), 'utf8'),
     )
     expect(manifest.name).toBe('gcd')
+    expect(manifest.project_type).toBe('backend')
     expect(
       (await readdir(projectRoot)).filter((entry) => entry.endsWith('.tmp')),
     ).toEqual([])
+  })
+
+  it('creates a frontend project manifest and rejects unsupported project types', async () => {
+    const projectRoot = await createTemporaryProject()
+    const service = createService(projectRoot)
+
+    const result = await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd-fe', projectType: 'frontend' },
+    })
+    expect(parseProjectManifest(result.content).project_type).toBe('frontend')
+
+    const otherProjectRoot = await createTemporaryProject()
+    const otherService = createService(otherProjectRoot)
+    await expect(
+      otherService.mutate({
+        projectRoot: otherProjectRoot,
+        mutation: {
+          type: 'create',
+          name: 'invalid',
+          projectType: 'software',
+        } as never,
+      }),
+    ).rejects.toThrow('projectType must be backend or frontend')
   })
 
   it('writes the selected MPC association when creating a project manifest', async () => {

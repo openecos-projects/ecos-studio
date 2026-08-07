@@ -15,6 +15,10 @@ export const projectManifestFlowSteps = [
 
 export type ProjectManifestFlowStep = (typeof projectManifestFlowSteps)[number]
 
+export const projectManifestTypes = ['backend', 'frontend'] as const
+
+export type ProjectManifestType = (typeof projectManifestTypes)[number]
+
 export type ProjectManifestWorkspaceStatus =
   | 'success'
   | 'failed'
@@ -87,6 +91,7 @@ export interface ProjectManifestQorBaseline {
 
 export interface ProjectManifest {
   schema_version: 1
+  project_type: ProjectManifestType
   project_id: string
   name: string
   description: string
@@ -110,6 +115,7 @@ export interface ProjectManifest {
 export interface ProjectManifestDraftInput {
   rootPath: string
   name: string
+  projectType?: ProjectManifestType
   mpc?: ProjectManifestMpc | null
   now?: string
 }
@@ -149,7 +155,12 @@ export interface ProjectManifestResolvedReplacementBackupInput {
 }
 
 export type ProjectManifestMutation =
-  | { type: 'create'; name: string; mpc?: ProjectManifestMpc | null }
+  | {
+      type: 'create'
+      name: string
+      projectType?: ProjectManifestType
+      mpc?: ProjectManifestMpc | null
+    }
   | { input: ProjectManifestWorkspaceRegistrationInput; type: 'register-workspace' }
   | { type: 'archive-workspace'; workspaceId: string }
   | {
@@ -210,6 +221,7 @@ export function createProjectManifestDraft(
     optionalString(input.name) || basenameProjectManifestPath(rootPath) || 'project'
   return {
     schema_version: 1,
+    project_type: input.projectType ?? 'backend',
     project_id: `proj_${slugify(name)}`,
     name,
     description: '',
@@ -271,6 +283,7 @@ export function parseProjectManifest(content: string): ProjectManifest {
   return {
     ...source,
     schema_version: 1,
+    project_type: normalizeProjectManifestType(source.project_type),
     project_id: optionalString(source.project_id) || `proj_${slugify(name)}`,
     name,
     description: optionalString(source.description),
@@ -298,6 +311,7 @@ export function applyProjectManifestMutation(
       return createProjectManifestDraft({
         name: mutation.name,
         rootPath: projectRoot,
+        projectType: mutation.projectType,
         mpc: mutation.mpc,
       })
     case 'register-workspace': {
@@ -327,6 +341,10 @@ export function applyProjectManifestMutation(
         'Replacement backup mutations must be resolved by the desktop manifest service.',
       )
   }
+}
+
+export function isProjectManifestType(value: unknown): value is ProjectManifestType {
+  return projectManifestTypes.some((projectType) => projectType === value)
 }
 
 export function registerWorkspaceInManifest(
@@ -716,6 +734,12 @@ function normalizeBestWorkspace(value: unknown): ProjectManifest['best_workspace
   const workspaceId = optionalString(source?.workspace_id)
   if (!workspaceId) return null
   return { workspace_id: workspaceId, reason: optionalString(source?.reason) }
+}
+
+function normalizeProjectManifestType(value: unknown): ProjectManifestType {
+  if (value === undefined) return 'backend'
+  if (isProjectManifestType(value)) return value
+  throw new Error('Invalid project manifest: project_type must be backend or frontend.')
 }
 
 function normalizeQorBaseline(value: unknown): ProjectManifest['qor_baseline'] {

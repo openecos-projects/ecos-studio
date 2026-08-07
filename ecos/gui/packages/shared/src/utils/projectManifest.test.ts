@@ -50,6 +50,7 @@ describe('project manifest parsing', () => {
     }
 
     const parsedLegacyManifest = parseProjectManifest(JSON.stringify(legacyManifest))
+    expect(parsedLegacyManifest.project_type).toBe('backend')
     expect(parsedLegacyManifest.mpc).toBeNull()
     expect(parsedLegacyManifest.qor_baseline).toBeNull()
     expect(() =>
@@ -68,6 +69,36 @@ describe('project manifest parsing', () => {
         }),
       ),
     ).toThrow('mpc.spec_path must reference spec/spec.json.in')
+  })
+
+  it('creates typed projects and rejects unsupported project types', () => {
+    expect(
+      createProjectManifestDraft({ rootPath: '/work/backend', name: 'backend' })
+        .project_type,
+    ).toBe('backend')
+    expect(
+      createProjectManifestDraft({
+        rootPath: '/work/frontend',
+        name: 'frontend',
+        projectType: 'frontend',
+      }).project_type,
+    ).toBe('frontend')
+
+    const frontendDraft = createProjectManifestDraft({
+      rootPath: '/work/frontend',
+      name: 'frontend',
+      projectType: 'frontend',
+    })
+    const frontendManifest = parseProjectManifest(JSON.stringify(frontendDraft))
+    expect(frontendManifest.project_type).toBe('frontend')
+    expect(() =>
+      parseProjectManifest(
+        JSON.stringify({
+          ...frontendDraft,
+          project_type: 'software',
+        }),
+      ),
+    ).toThrow('project_type must be backend or frontend')
   })
 
   it('owns QoR baseline normalization and lifecycle in the shared manifest contract', () => {

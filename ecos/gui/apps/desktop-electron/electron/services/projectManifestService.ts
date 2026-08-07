@@ -3,6 +3,7 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import {
   applyProjectManifestMutation,
+  isProjectManifestType,
   parseProjectManifest,
   recordReplacementBackupInManifest,
   serializeProjectManifest,
@@ -253,6 +254,14 @@ function validateProjectManifestMutation(
   switch (mutation.type) {
     case 'create':
       requireString(mutation.name, 'Project manifest create mutation name')
+      if (
+        mutation.projectType !== undefined &&
+        !isProjectManifestType(mutation.projectType)
+      ) {
+        throw new Error(
+          'Project manifest create mutation projectType must be backend or frontend',
+        )
+      }
       validateProjectManifestMpc(mutation.mpc)
       return
     case 'register-workspace': {
