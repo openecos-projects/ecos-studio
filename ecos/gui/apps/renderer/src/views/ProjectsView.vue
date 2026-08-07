@@ -776,7 +776,7 @@ import {
 } from '@ecos-studio/shared'
 import {
   FLOW_STEPS,
-  buildProjectManagementProject,
+  buildBackendProjectManagementProject,
   createWorkspaceBranchDraft,
   type ProjectManifestMpcCandidate,
   projectMpcOptionFromResource,
@@ -909,7 +909,7 @@ const projectCards = computed<ProjectCard[]>(() => {
     )
     .map((project) => ({
       source: project,
-      model: buildProjectManagementProject(
+      model: buildBackendProjectManagementProject(
         project,
         projectManifests.value[project.path] ?? null,
         workspaceFlowStates.value[project.path] ?? {},
@@ -972,7 +972,9 @@ const selectedProject = computed<ProjectManagementProject>(() => {
     (project) => project.model.id === selectedProjectId.value,
   )
   return (
-    selected?.model ?? projectCards.value[0]?.model ?? buildProjectManagementProject(null)
+    selected?.model ??
+    projectCards.value[0]?.model ??
+    buildBackendProjectManagementProject(null)
   )
 })
 
