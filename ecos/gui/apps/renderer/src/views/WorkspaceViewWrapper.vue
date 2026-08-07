@@ -3,7 +3,8 @@
     <!-- 主内容区域 -->
     <main class="workspace-main">
       <!-- 最左侧工具栏  -->
-      <LeftSidebar />
+      <FrontendLeftSidebar v-if="currentProject?.designTool === 'frontend'" />
+      <LeftSidebar v-else />
       <router-view class="editor-view" />
       <!-- 最右侧属性栏 -->
       <!-- <RightSidebar /> -->
@@ -13,6 +14,7 @@
 
 <script setup lang="ts">
 import { onBeforeRouteLeave } from 'vue-router'
+import FrontendLeftSidebar from '../components/FrontendLeftSidebar.vue'
 import LeftSidebar from '../components/LeftSidebar.vue'
 import { clearHomeQorComparisonCache } from '../composables/useHomeQorComparison'
 import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'
@@ -20,7 +22,7 @@ import { clearStepDashboardDataCache } from '../composables/useStepDashboardData
 // import RightSidebar from '../components/RightSidebar.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 
-const { closeProject } = useWorkspace()
+const { closeProject, currentProject } = useWorkspace()
 
 onBeforeRouteLeave(async () => {
   await closeProject()
