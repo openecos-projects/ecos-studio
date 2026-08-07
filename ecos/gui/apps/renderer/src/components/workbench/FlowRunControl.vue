@@ -53,11 +53,14 @@ import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useFlowStages } from '@/composables/useFlowStages'
+import { rerunHomeWorkspace } from '@/composables/homeFlowRerun'
 import { useSubflow } from '@/composables/useSubflow'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { getDesktopApi } from '@/platform/desktop'
 import { flowNodeStatus } from './flowStatus'
 
 const rerunConfirmationVisible = ref(false)
+const preparingRerun = ref(false)
 const { currentStage } = useCurrentStage()
 const { isRunning, runFlow, runAllFlow, state: flowRunState } = useFlowRunner()
 const { startFlowRunArtifactCapture } = useFlowRunArtifacts()
@@ -69,9 +72,11 @@ const {
   setRunStepOngoingByPath,
 } = useFlowStages()
 const { overallStatus, refreshCurrentSubflow } = useSubflow()
-const { ensureApiReady } = useWorkspace()
+const { currentProject, ensureApiReady, showToast } = useWorkspace()
 
-const flowRunControlBusy = computed(() => isRunning.value || hasOngoingRunStage.value)
+const flowRunControlBusy = computed(
+  () => preparingRerun.value || isRunning.value || hasOngoingRunStage.value,
+)
 const isHomeStage = computed(() => currentStage.value === 'home')
 const runTargetLabel = computed(() => (isHomeStage.value ? 'the full flow' : 'this step'))
 const runButtonLabel = computed(() =>
@@ -114,6 +119,32 @@ async function executeRun(rerun: boolean): Promise<void> {
     return
   }
 
+  if (rerun) {
+    preparingRerun.value = true
+    try {
+      if (isHomeStage.value) {
+        const rebuilt = await rerunHomeWorkspace()
+        if (!rebuilt) {
+          await refreshFlowStages()
+          return
+        }
+        await refreshFlowStages()
+      } else if (!(await canRerunCurrentStep())) {
+        return
+      }
+    } catch (error) {
+      showToast({
+        severity: 'error',
+        summary: 'Unable to Prepare Rerun',
+        detail: error instanceof Error ? error.message : String(error),
+        life: 5000,
+      })
+      return
+    } finally {
+      preparingRerun.value = false
+    }
+  }
+
   const capture = await startFlowRunArtifactCapture({
     stepNames: isHomeStage.value
       ? dynamicFlowStages.value.map((stage) => stage.path)
@@ -123,7 +154,11 @@ async function executeRun(rerun: boolean): Promise<void> {
   try {
     if (isHomeStage.value) {
       setFirstRunStepOngoing()
-      await runAllFlow({ rerun })
+      if (rerun) {
+        await runAllFlow({ rerun: false })
+      } else {
+        await runAllFlow({ rerun })
+      }
       await refreshFlowStages()
       await capture.settle({
         forceStepNames:
@@ -143,6 +178,25 @@ async function executeRun(rerun: boolean): Promise<void> {
   } finally {
     capture.stop()
   }
+}
+
+async function canRerunCurrentStep(): Promise<boolean> {
+  const projectPath = currentProject.value?.path
+  if (!projectPath) return true
+
+  const viewer = await getDesktopApi().chipViewer.isOpen({
+    projectPath,
+    step: currentStage.value,
+  })
+  if (!viewer.open) return true
+
+  showToast({
+    severity: 'warn',
+    summary: 'Close Chip Viewer First',
+    detail: 'Close the rendered layout for this step before rerunning it.',
+    life: 6000,
+  })
+  return false
 }
 </script>
 

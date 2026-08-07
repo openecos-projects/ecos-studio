@@ -262,6 +262,8 @@ const desktopApi: DesktopApi = {
   chipViewer: {
     open: (request: ChipViewerOpenRequest) =>
       invokeDesktop(desktopApiIpcChannels.chipViewerOpen, request),
+    isOpen: (request: ChipViewerOpenRequest) =>
+      invokeDesktop(desktopApiIpcChannels.chipViewerIsOpen, request),
   },
   workspaceResources: {
     getIndex: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesGetIndex),

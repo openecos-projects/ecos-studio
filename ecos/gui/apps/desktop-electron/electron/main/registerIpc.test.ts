@@ -167,6 +167,7 @@ function registerHandlers() {
       write: vi.fn(),
     },
     chipViewerService: {
+      isOpen: vi.fn(),
       open: vi.fn(),
     },
   }
@@ -956,6 +957,19 @@ describe('registerIpc', () => {
     })
 
     expect(services.chipViewerService.open).toHaveBeenCalledWith(request)
+  })
+
+  it('reports whether a step Chip Viewer is still open', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = { projectPath: '/tmp/project', step: 'Floorplan' }
+    services.chipViewerService.isOpen.mockReturnValue({ open: true })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.chipViewerIsOpen)?.(event, request),
+    ).resolves.toEqual({ open: true })
+
+    expect(services.chipViewerService.isOpen).toHaveBeenCalledWith(request)
   })
 
   it('delegates workspace resource calls to the resource service', async () => {

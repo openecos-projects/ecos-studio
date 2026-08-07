@@ -54,13 +54,18 @@ describe('flow status presentation', () => {
       peakMemoryMb: null,
     }
 
-    expect(nextFlowNodeSelection([synthesis, floorplan], 'floorplan', 'synthesis')).toEqual({
+    expect(
+      nextFlowNodeSelection([synthesis, floorplan], 'floorplan', 'synthesis'),
+    ).toEqual({
       runningNodeId: 'synthesis',
       selectedNodeId: 'floorplan',
     })
     expect(
       nextFlowNodeSelection(
-        [{ ...synthesis, status: 'succeeded' }, { ...floorplan, status: 'running' }],
+        [
+          { ...synthesis, status: 'succeeded' },
+          { ...floorplan, status: 'running' },
+        ],
         'synthesis',
         'synthesis',
       ),

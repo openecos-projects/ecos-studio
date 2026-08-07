@@ -645,7 +645,9 @@ describe('project management V3 model', () => {
       workspaceId: 'ws_0004',
       source: 'default',
     })
-    expect(resolveProjectQorBaselineWorkspace(manifestWithWorkspace(), 'ws_0004')).toEqual({
+    expect(
+      resolveProjectQorBaselineWorkspace(manifestWithWorkspace(), 'ws_0004'),
+    ).toEqual({
       workspaceId: 'ws_0004',
       source: 'selected',
     })

@@ -145,6 +145,10 @@ export interface ChipViewerOpenResult {
   spawned: boolean
 }
 
+export interface ChipViewerOpenStatus {
+  open: boolean
+}
+
 export interface WorkspaceDirectoryReplacement {
   id: string
   targetPath: string
@@ -252,6 +256,7 @@ export interface DesktopApi {
   }
   chipViewer: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
+    isOpen(request: ChipViewerOpenRequest): Promise<ChipViewerOpenStatus>
   }
   workspaceResources: {
     getIndex(): Promise<WorkspaceResourceIndex>

@@ -43,6 +43,16 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('Do Not Backup')
   })
 
+  it('rebuilds the current workspace without a backup before a Home rerun', () => {
+    expect(appSource).toContain('registerHomeWorkspaceRerun')
+    expect(appSource).toContain('rebuildCurrentWorkspaceForHomeRerun')
+    expect(appSource).toContain('replaceExistingWorkspace: true')
+    expect(appSource).toContain('keepReplacementBackup: false')
+    expect(appSource).toContain(
+      'buildReconfigureWizardInitialConfig(targetWorkspacePath)',
+    )
+  })
+
   it('prefers the current workspace origin files when building reconfigure defaults', () => {
     expect(appSource).toContain('scanWorkspaceOriginDesignInputs')
     const rtlStart = appSource.indexOf('const rtlList =')

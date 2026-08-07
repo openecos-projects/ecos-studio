@@ -1,10 +1,20 @@
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
-import type { PdkDetectedFiles, ScannedPdkDirectory } from '@ecos-studio/shared'
+import {
+  parseProjectManifest,
+  type PdkDetectedFiles,
+  type ProjectManifest,
+  type ScannedPdkDirectory,
+} from '@ecos-studio/shared'
 import { requireWindowScopeId } from './windowScopeContext'
 
 const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
+
+interface ProjectReadScope {
+  projectRoot: string
+  workspaceRoots: string[]
+}
 
 async function canonicalizeExistingPath(path: string): Promise<string> {
   return await realpath(path)
@@ -32,6 +42,10 @@ function isWithinRoot(candidatePath: string, rootPath: string): boolean {
   return (
     relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
   )
+}
+
+function pathsEqual(leftPath: string, rightPath: string): boolean {
+  return relative(resolve(leftPath), resolve(rightPath)) === ''
 }
 
 async function canonicalizePotentialPathWithinRoot(
@@ -69,6 +83,28 @@ async function canonicalizePotentialPathWithinRoot(
   }
 
   return resolvedPrefix
+}
+
+async function manifestWorkspaceRoots(
+  manifest: ProjectManifest,
+  projectRoot: string,
+): Promise<string[]> {
+  const manifestRoot = await canonicalizeExistingDirectory(manifest.root_path)
+  if (!pathsEqual(manifestRoot, projectRoot)) {
+    throw new Error('Project read root manifest does not match the requested directory')
+  }
+
+  return await Promise.all(
+    manifest.workspaces.map(async (workspace) => {
+      const workspacePath = resolve(workspace.workspace_path)
+      if (!pathsEqual(dirname(workspacePath), projectRoot)) {
+        throw new Error(
+          'Project read root manifest contains a workspace outside the project',
+        )
+      }
+      return await canonicalizePotentialPathWithinRoot(workspacePath, projectRoot)
+    }),
+  )
 }
 
 async function scanTopLevelEntries(path: string): Promise<PdkDetectedFiles> {
@@ -146,7 +182,7 @@ function getPathLeafName(path: string): string | null {
 
 export class ProjectScopeService {
   private readonly rootsByWindowId = new Map<number, string>()
-  private readonly readRootsByWindowId = new Map<number, string>()
+  private readonly readScopesByWindowId = new Map<number, ProjectReadScope>()
 
   async resolveProjectRoot(path: string): Promise<string> {
     return await canonicalizeExistingDirectory(path)
@@ -165,13 +201,13 @@ export class ProjectScopeService {
     const windowId = requireWindowScopeId()
     const canonicalPath = await this.resolveProjectRoot(path)
     this.rootsByWindowId.set(windowId, canonicalPath)
-    this.readRootsByWindowId.delete(windowId)
+    this.readScopesByWindowId.delete(windowId)
     return canonicalPath
   }
 
   /**
-   * Allows a workspace to read its containing project without replacing the active
-   * workspace root used by WorkspaceResourceService.
+   * Allows a managed workspace to read its containing project without replacing
+   * the active workspace root used by WorkspaceResourceService.
    */
   async registerProjectReadRoot(path: string): Promise<string> {
     const windowId = requireWindowScopeId()
@@ -181,28 +217,53 @@ export class ProjectScopeService {
     }
 
     const canonicalPath = await this.resolveProjectRoot(path)
-    if (
-      canonicalPath !== activeProjectRoot &&
-      canonicalPath !== dirname(activeProjectRoot)
-    ) {
+    if (pathsEqual(canonicalPath, activeProjectRoot)) {
+      this.readScopesByWindowId.delete(windowId)
+      return canonicalPath
+    }
+    if (!pathsEqual(canonicalPath, dirname(activeProjectRoot))) {
       throw new Error(
         'Project read root must be the active workspace root or its parent directory',
       )
     }
 
-    this.readRootsByWindowId.set(windowId, canonicalPath)
+    let manifest: ProjectManifest
+    try {
+      manifest = parseProjectManifest(
+        await readFile(join(canonicalPath, 'project.json'), 'utf8'),
+      )
+    } catch (error) {
+      throw new Error(
+        `Project read root must have a valid project.json: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+    const workspaceRoots = await manifestWorkspaceRoots(manifest, canonicalPath)
+    if (
+      !workspaceRoots.some((workspaceRoot) =>
+        pathsEqual(workspaceRoot, activeProjectRoot),
+      )
+    ) {
+      throw new Error('Project read root manifest does not declare the active workspace')
+    }
+
+    this.readScopesByWindowId.set(windowId, {
+      projectRoot: canonicalPath,
+      workspaceRoots,
+    })
     return canonicalPath
   }
 
   async clearProjectRoot(): Promise<void> {
     const windowId = requireWindowScopeId()
     this.rootsByWindowId.delete(windowId)
-    this.readRootsByWindowId.delete(windowId)
+    this.readScopesByWindowId.delete(windowId)
   }
 
   clearWindow(windowId: number): void {
     this.rootsByWindowId.delete(windowId)
-    this.readRootsByWindowId.delete(windowId)
+    this.readScopesByWindowId.delete(windowId)
   }
 
   async requestProjectPathAccess(path: string): Promise<string> {
@@ -213,11 +274,15 @@ export class ProjectScopeService {
     }
 
     const candidatePath = resolve(path)
-    const readProjectRoot = this.readRootsByWindowId.get(windowId)
-    const roots =
-      readProjectRoot && readProjectRoot !== activeProjectRoot
-        ? [activeProjectRoot, readProjectRoot]
-        : [activeProjectRoot]
+    const readScope = this.readScopesByWindowId.get(windowId)
+    const roots = [activeProjectRoot]
+    if (readScope) {
+      if (pathsEqual(candidatePath, join(readScope.projectRoot, 'project.json'))) {
+        roots.push(readScope.projectRoot)
+      } else {
+        roots.push(...readScope.workspaceRoots)
+      }
+    }
 
     for (const root of roots) {
       if (!isWithinRoot(candidatePath, root)) continue
@@ -228,6 +293,31 @@ export class ProjectScopeService {
     throw new Error(
       `Refusing to grant access outside current project root: ${candidatePath}`,
     )
+  }
+
+  /**
+   * Mutating APIs must stay within the active workspace even when a managed
+   * project has supplied additional read-only artifact roots.
+   */
+  async requestWritableProjectPathAccess(path: string): Promise<string> {
+    const activeProjectRoot = await this.getProjectRoot()
+    const candidatePath = resolve(path)
+    if (!isWithinRoot(candidatePath, activeProjectRoot)) {
+      throw new Error(
+        `Refusing to grant access outside current project root: ${candidatePath}`,
+      )
+    }
+
+    const canonicalPath = await canonicalizePotentialPathWithinRoot(
+      path,
+      activeProjectRoot,
+    )
+    if (!isWithinRoot(canonicalPath, activeProjectRoot)) {
+      throw new Error(
+        `Refusing to grant access outside current project root: ${candidatePath}`,
+      )
+    }
+    return canonicalPath
   }
 
   async isProjectDirectory(path: string): Promise<boolean> {

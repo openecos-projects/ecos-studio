@@ -141,6 +141,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
+import { registerHomeWorkspaceRerun } from '@/composables/homeFlowRerun'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
@@ -330,6 +331,64 @@ async function runWorkspaceUpdate(keepReplacementBackup: boolean) {
     })
   }
 }
+
+async function rebuildCurrentWorkspaceForHomeRerun(): Promise<boolean> {
+  const workspacePath = currentProject.value?.path
+  if (!workspacePath) {
+    showToast({
+      severity: 'warn',
+      summary: 'Workspace Required',
+      detail: 'Open a workspace before running the full flow again.',
+      life: 3000,
+    })
+    return false
+  }
+
+  try {
+    const targetWorkspacePath = normalizeLocalPath(workspacePath)
+    const initialConfig = await buildReconfigureWizardInitialConfig(targetWorkspacePath)
+    const config: WorkspaceConfig = {
+      directory: targetWorkspacePath,
+      pdk: initialConfig.pdk ?? 'ics55',
+      pdk_root: initialConfig.pdk_root ?? '',
+      parameters: initialConfig.parameters ?? {},
+      origin_def: initialConfig.origin_def ?? '',
+      origin_verilog: initialConfig.origin_verilog ?? '',
+      rtl_list: initialConfig.rtl_list ?? [],
+      filelist: initialConfig.filelist,
+      design_input_mode: initialConfig.design_input_mode,
+      sdc: initialConfig.sdc,
+      pdk_config_mode: initialConfig.pdk_config_mode,
+      pdk_config: initialConfig.pdk_config,
+      pdk_json: initialConfig.pdk_json,
+      project_context: initialConfig.project_context,
+      replaceExistingWorkspace: true,
+      keepReplacementBackup: false,
+    }
+    const success = await newProject(config)
+    if (!success) return false
+
+    await syncProjectManagedWorkspace(config, targetWorkspacePath)
+    await router.push({
+      path: route.path.startsWith('/workspace') ? route.path : '/workspace',
+      query: route.query,
+    })
+    return true
+  } catch (error) {
+    console.error('Failed to rebuild workspace for full-flow rerun:', error)
+    showToast({
+      severity: 'error',
+      summary: 'Failed to Rebuild Workspace',
+      detail: error instanceof Error ? error.message : String(error),
+      life: 5000,
+    })
+    return false
+  }
+}
+
+const unregisterHomeWorkspaceRerun = registerHomeWorkspaceRerun(
+  rebuildCurrentWorkspaceForHomeRerun,
+)
 
 async function syncProjectManagedWorkspace(
   config: WorkspaceConfig,
@@ -963,6 +1022,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unregisterHomeWorkspaceRerun()
   document.removeEventListener('selectstart', handleSelectStart)
   if (resizeIdleTimer) {
     clearTimeout(resizeIdleTimer)

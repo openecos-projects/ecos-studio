@@ -36,6 +36,7 @@ function createProjectScopeProvider(
     registerProjectReadRoot: vi.fn(),
     registerProjectRoot: vi.fn(),
     requestProjectPathAccess: vi.fn().mockResolvedValue(canonicalPath),
+    requestWritableProjectPathAccess: vi.fn().mockResolvedValue(canonicalPath),
     scanPdkDirectory: vi.fn(),
   }
 }
@@ -253,7 +254,7 @@ describe('WorkspaceService', () => {
     ).resolves.toBeUndefined()
 
     await expect(readFile(filePath, 'utf8')).resolves.toBe('{"PDK":"ics55"}')
-    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
+    expect(projectScopeProvider.requestWritableProjectPathAccess).toHaveBeenCalledWith(
       '/workspace/home/parameters.json',
     )
   })
@@ -313,7 +314,7 @@ describe('WorkspaceService', () => {
     await expect(
       readFile(join(replacement?.backupPath ?? '', 'origin', 'top.v'), 'utf8'),
     ).resolves.toBe('module top; endmodule')
-    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
+    expect(projectScopeProvider.requestWritableProjectPathAccess).toHaveBeenCalledWith(
       '/project/ws_0001',
     )
   })

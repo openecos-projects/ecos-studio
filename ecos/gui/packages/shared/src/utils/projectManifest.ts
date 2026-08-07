@@ -715,10 +715,11 @@ export function ensureProjectQorBaseline(
 ): ProjectManifest['qor_baseline'] {
   const hasAvailableBaseline = Boolean(
     baseline &&
-      workspaces.some(
-        (workspace) =>
-          workspace.workspace_id === baseline.workspace_id && workspace.status !== 'archived',
-      ),
+    workspaces.some(
+      (workspace) =>
+        workspace.workspace_id === baseline.workspace_id &&
+        workspace.status !== 'archived',
+    ),
   )
   if (hasAvailableBaseline) return baseline
 

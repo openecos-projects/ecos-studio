@@ -53,10 +53,7 @@ vi.mock('@/views/project-management/projectWorkspaceAnalysisData', () => ({
   readProjectWorkspaceFlowStates: testState.readProjectWorkspaceFlowStates,
 }))
 
-import {
-  clearHomeQorComparisonCache,
-  useHomeQorComparison,
-} from './useHomeQorComparison'
+import { clearHomeQorComparisonCache, useHomeQorComparison } from './useHomeQorComparison'
 
 function projectManifest(includeBaseline = true) {
   const draft = createProjectManifestDraft({
@@ -198,7 +195,7 @@ describe('useHomeQorComparison', () => {
     expect(testState.registerProjectReadRoot).not.toHaveBeenCalled()
   })
 
-  it('stores the first other workspace as the legacy project default baseline', async () => {
+  it('uses the first other workspace as the legacy project default baseline without writing', async () => {
     testState.readOptionalProjectTextFile.mockResolvedValue(
       JSON.stringify(projectManifest(false)),
     )
@@ -209,11 +206,7 @@ describe('useHomeQorComparison', () => {
     })
 
     expect(comparison.state.value.baselineSource).toBe('default')
-    expect(testState.writeProjectTextFile).toHaveBeenCalledWith(
-      'project.json',
-      expect.stringContaining('"workspace_id": "ws_0001"'),
-      { projectPath: '/projects/gcd' },
-    )
+    expect(testState.writeProjectTextFile).not.toHaveBeenCalled()
   })
 
   it('uses the current workspace as the legacy default when it is the only workspace', async () => {
@@ -229,10 +222,6 @@ describe('useHomeQorComparison', () => {
 
     expect(comparison.state.value.baselineWorkspaceName).toBe('ws_0004')
     expect(comparison.state.value.baselineSource).toBe('default')
-    expect(testState.writeProjectTextFile).toHaveBeenCalledWith(
-      'project.json',
-      expect.stringContaining('"workspace_id": "ws_0004"'),
-      { projectPath: '/projects/gcd' },
-    )
+    expect(testState.writeProjectTextFile).not.toHaveBeenCalled()
   })
 })

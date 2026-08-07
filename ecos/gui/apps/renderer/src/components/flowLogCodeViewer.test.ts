@@ -702,11 +702,19 @@ describe('flowLogCodeViewer helpers', () => {
   it('exposes a fixed, draggable vertical scrollbar beside the log viewport', () => {
     expect(flowLogCodeViewerSource).toContain('flow-log-vertical-scrollbar')
     expect(flowLogCodeViewerSource).toContain('flow-log-vertical-scrollbar-thumb')
-    expect(flowLogCodeViewerSource).toContain('@pointerdown.stop.prevent="onFlowLogScrollbarPointerDown"')
+    expect(flowLogCodeViewerSource).toContain(
+      '@pointerdown.stop.prevent="onFlowLogScrollbarPointerDown"',
+    )
     expect(flowLogCodeViewerSource).toContain('@wheel="onFlowLogWheel"')
-    expect(flowLogCodeViewerSource).toContain('flowLogVerticalScrollbarGeometry(view.scrollDOM)')
-    expect(flowLogCodeViewerSource).toContain("window.addEventListener?.('pointermove', onFlowLogScrollbarPointerMove)")
-    expect(flowLogCodeViewerSource).toContain("window.removeEventListener?.('pointermove', onFlowLogScrollbarPointerMove)")
+    expect(flowLogCodeViewerSource).toContain(
+      'flowLogVerticalScrollbarGeometry(view.scrollDOM)',
+    )
+    expect(flowLogCodeViewerSource).toContain(
+      "window.addEventListener?.('pointermove', onFlowLogScrollbarPointerMove)",
+    )
+    expect(flowLogCodeViewerSource).toContain(
+      "window.removeEventListener?.('pointermove', onFlowLogScrollbarPointerMove)",
+    )
     expect(flowLogCodeViewerSource).toContain('width: 20px')
     expect(flowLogCodeViewerSource).toContain('background: rgba(166, 166, 176, 0.66)')
     expect(flowLogCodeViewerSource).toContain(':deep(.cm-scroller)')
@@ -716,7 +724,9 @@ describe('flowLogCodeViewer helpers', () => {
     expect(flowLogCodeViewerSource).toContain('overscroll-behavior: contain')
     expect(flowLogCodeViewerSource).toContain('width: 12px')
     expect(flowLogCodeViewerSource).toContain('background: var(--bg-secondary)')
-    expect(flowLogCodeViewerSource).toContain('background-color: rgba(190, 196, 207, 0.86)')
+    expect(flowLogCodeViewerSource).toContain(
+      'background-color: rgba(190, 196, 207, 0.86)',
+    )
   })
 
   it('renders a blinking terminal cursor while live log content is visible', () => {

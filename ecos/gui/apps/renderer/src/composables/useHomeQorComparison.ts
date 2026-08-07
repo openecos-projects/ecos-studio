@@ -4,15 +4,13 @@ import {
   buildProjectQorTrendForManifest,
   parseProjectManifest,
   resolveProjectQorBaselineWorkspace,
-  serializeProjectManifest,
-  setQorBaselineInManifest,
   type ProjectQorBaselineSource,
 } from '@/utils/projectManagement'
 import {
   buildProjectQorWorkspaceComparison,
   type ProjectQorWorkspaceComparison,
 } from '@/utils/projectQorTrend'
-import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
+import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
   readProjectWorkspaceAnalysisInputs,
   readProjectWorkspaceFlowStates,
@@ -70,7 +68,9 @@ export function useHomeQorComparison() {
       ? homeQorComparisonCacheKey(initialWorkspacePath, initialProjectRoot)
       : null
   const state = ref<HomeQorComparisonState>(
-    initialCacheKey ? homeQorComparisonCache.get(initialCacheKey) ?? EMPTY_STATE : EMPTY_STATE,
+    initialCacheKey
+      ? (homeQorComparisonCache.get(initialCacheKey) ?? EMPTY_STATE)
+      : EMPTY_STATE,
   )
   let requestToken = 0
 
@@ -137,17 +137,6 @@ export function useHomeQorComparison() {
         })
         return
       }
-      if (baseline.source === 'default') {
-        manifest = setQorBaselineInManifest(
-          manifest,
-          baseline.workspaceId,
-          'Default project QoR baseline',
-        )
-        await writeProjectTextFile('project.json', serializeProjectManifest(manifest), {
-          projectPath: registeredRoot,
-        })
-      }
-
       const [flowStates, analysisInputs] = await Promise.all([
         readProjectWorkspaceFlowStates(manifest),
         readProjectWorkspaceAnalysisInputs(manifest),

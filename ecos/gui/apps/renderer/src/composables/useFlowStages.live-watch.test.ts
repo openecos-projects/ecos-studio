@@ -175,8 +175,9 @@ describe('useFlowStages live project file watchers', () => {
       expect(findStageState('floorplan')).toBe('Ongoing')
     })
     expect(
-      flow.dynamicFlowStages.value.find((stage) => stage.path.toLowerCase() === 'floorplan')
-        ?.tool,
+      flow.dynamicFlowStages.value.find(
+        (stage) => stage.path.toLowerCase() === 'floorplan',
+      )?.tool,
     ).toBe('yosys')
   })
 

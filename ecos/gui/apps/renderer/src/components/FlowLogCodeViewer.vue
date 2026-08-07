@@ -161,7 +161,10 @@ function setFlowLogScrollFromPointer(event: PointerEvent): void {
   if (!scrollDOM || !scrollbar || !drag) return
 
   const bounds = scrollbar.getBoundingClientRect()
-  const thumbTravel = Math.max(0, bounds.height - flowLogVerticalScrollbar.value.thumbHeight)
+  const thumbTravel = Math.max(
+    0,
+    bounds.height - flowLogVerticalScrollbar.value.thumbHeight,
+  )
   if (thumbTravel === 0 || flowLogVerticalScrollbar.value.maxScrollTop === 0) return
 
   const thumbOffset = Math.max(

@@ -15,6 +15,7 @@ import {
   normalizeLocalPath,
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
+  type ChipViewerOpenStatus,
   type EccLayoutEditApplyRequest,
   type EccLayoutEditApplyResult,
   type EccLayoutEditBeginRequest,
@@ -537,6 +538,7 @@ export class ChipViewerService {
   private readonly workspaceResourceService: ChipViewerServiceOptions['workspaceResourceService']
   private readonly editBridgeWatchers = new Map<string, DirectoryWatcher>()
   private readonly layoutEditContexts = new Map<string, LayoutEditContext>()
+  private readonly openViewerCounts = new Map<string, number>()
   private readonly processedEditCommands = new Set<string>()
   private nextEditBridgeId = 1
 
@@ -627,6 +629,7 @@ export class ChipViewerService {
       }
     }
 
+    const releaseViewer = this.trackOpenViewer(projectPath, request.step)
     try {
       await this.launchViewer(
         binaries.viewerPath,
@@ -635,11 +638,15 @@ export class ChipViewerService {
           ...viewerSnapshotInputs,
           manifestPath: viewerManifestPath,
         },
-        mode === 'edit' && editCommandDirectory
-          ? () => this.releaseLayoutEditBridgeAfterViewerExit(editCommandDirectory)
-          : undefined,
+        () => {
+          releaseViewer()
+          if (mode === 'edit' && editCommandDirectory) {
+            void this.releaseLayoutEditBridgeAfterViewerExit(editCommandDirectory)
+          }
+        },
       )
     } catch (error) {
+      releaseViewer()
       if (mode === 'edit' && editCommandDirectory) {
         await this.releaseLayoutEditBridge(editCommandDirectory).catch(() => undefined)
       }
@@ -653,6 +660,34 @@ export class ChipViewerService {
       spawned: true,
       workspaceStepDirectory: snapshotInputs.workspaceStepDirectory,
     }
+  }
+
+  async isOpen(request: ChipViewerOpenRequest): Promise<ChipViewerOpenStatus> {
+    return {
+      open:
+        (this.openViewerCounts.get(this.viewerKey(request.projectPath, request.step)) ??
+          0) > 0,
+    }
+  }
+
+  private trackOpenViewer(projectPath: string, step: string): () => void {
+    const key = this.viewerKey(projectPath, step)
+    this.openViewerCounts.set(key, (this.openViewerCounts.get(key) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const count = this.openViewerCounts.get(key) ?? 0
+      if (count <= 1) {
+        this.openViewerCounts.delete(key)
+      } else {
+        this.openViewerCounts.set(key, count - 1)
+      }
+    }
+  }
+
+  private viewerKey(projectPath: string, step: string): string {
+    return `${normalizeLocalPath(projectPath)}\u0000${step.trim()}`
   }
 
   private async resolveSnapshotInputs(

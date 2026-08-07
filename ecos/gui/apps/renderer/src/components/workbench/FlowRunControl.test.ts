@@ -4,8 +4,16 @@ import source from './FlowRunControl.vue?raw'
 describe('FlowRunControl', () => {
   it('keeps full-flow and per-step execution controls after removing the old sidebar', () => {
     expect(source).toContain('runAllFlow({ rerun })')
+    expect(source).toContain('runAllFlow({ rerun: false })')
     expect(source).toContain('runFlow({ rerun })')
     expect(source).toContain("currentStage.value === 'home'")
+  })
+
+  it('rebuilds Home and blocks a step rerun while its Chip Viewer is open', () => {
+    expect(source).toContain('rerunHomeWorkspace()')
+    expect(source).toContain('canRerunCurrentStep')
+    expect(source).toContain('chipViewer.isOpen')
+    expect(source).toContain('Close Chip Viewer First')
   })
 
   it('captures each successful run step output for the information panel', () => {

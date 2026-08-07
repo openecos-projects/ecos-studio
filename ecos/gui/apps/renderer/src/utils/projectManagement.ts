@@ -1277,7 +1277,8 @@ export function setQorBaselineInManifest(
   now = new Date().toISOString(),
 ): ProjectManifest {
   const hasWorkspace = manifest.workspaces.some(
-    (workspace) => workspace.workspace_id === workspaceId && workspace.status !== 'archived',
+    (workspace) =>
+      workspace.workspace_id === workspaceId && workspace.status !== 'archived',
   )
   if (!hasWorkspace) return manifest
 

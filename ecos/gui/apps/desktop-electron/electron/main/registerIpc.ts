@@ -158,6 +158,7 @@ export interface DesktopBridgeServices {
   }
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
+    isOpen(request: ChipViewerOpenRequest): Promise<{ open: boolean }>
   }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
@@ -1092,6 +1093,10 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.chipViewerOpen, async (_event, request) => {
     return await services.chipViewerService.open(request as ChipViewerOpenRequest)
+  })
+
+  handle(desktopApiIpcChannels.chipViewerIsOpen, async (_event, request) => {
+    return await services.chipViewerService.isOpen(request as ChipViewerOpenRequest)
   })
 
   handle(desktopApiIpcChannels.workspaceResourcesGetIndex, async () => {
