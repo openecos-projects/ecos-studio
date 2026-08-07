@@ -186,5 +186,5 @@ def test_provider_answers_place_questions_without_changing_operation_state() -> 
 def test_packaged_agent_spec_uses_the_built_in_knowledge_bundle() -> None:
     spec = (AGENT_ROOT / "packaging" / "ecos-agent.spec").read_text(encoding="utf-8")
 
-    assert "place_knowledge" in spec
+    assert "*_knowledge" in spec
     assert "ecos-place-knowledge" not in spec

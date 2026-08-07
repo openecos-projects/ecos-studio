@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping
 from ecos_agent.codex_provider import CodexProviderError, validate_required_codex_cli
 from ecos_agent.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.place_knowledge import PlaceKnowledge
+from ecos_agent.step_knowledge import StepKnowledge, load_default_step_knowledge
 from ecos_agent.messages import (
     cancellation_message,
     confirmation_choice,
@@ -217,12 +218,14 @@ class EcosAgentProvider:
         workspace_path_recommender: _WorkspacePathRecommender | None = None,
         rerun_parameter_parser: _RerunParameterParser | None = None,
         place_knowledge: PlaceKnowledge | None = None,
+        step_knowledge: tuple[StepKnowledge, ...] | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.place_knowledge = place_knowledge or PlaceKnowledge.from_default()
+        self.step_knowledge = step_knowledge or load_default_step_knowledge()
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
 
@@ -339,7 +342,7 @@ class EcosAgentProvider:
 
     def _handle_input(self, session: _Session, message: str) -> None:
         if session.phase == "operation":
-            answer = self.place_knowledge.reply(message)
+            answer = self._knowledge_answer(message)
             if answer is not None:
                 self._emit(session, "message", answer.text, contract=answer.contract)
                 self._emit_phase_choice(session)
@@ -383,6 +386,13 @@ class EcosAgentProvider:
             self._emit(session, "error", "The current ECOS Agent session is not actionable.")
             return
         handler(session, message)
+
+    def _knowledge_answer(self, message: str):
+        for knowledge in (self.place_knowledge, *self.step_knowledge):
+            answer = knowledge.reply(message)
+            if answer is not None:
+                return answer
+        return None
 
     def _select_operation(self, session: _Session, message: str) -> None:
         choice = _operation_choice(message)

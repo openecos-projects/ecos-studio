@@ -4,13 +4,17 @@ from pathlib import Path
 
 
 ROOT = Path(SPECPATH).parent.parent
+KNOWLEDGE_ROOT = ROOT / "src" / "ecos_agent"
 
 
 a = Analysis(
     [str(ROOT / "packaging" / "run_ecos_agent.py")],
     pathex=[str(ROOT / "src")],
     binaries=[],
-    datas=[(str(ROOT / "src" / "ecos_agent" / "place_knowledge"), "place-knowledge")],
+    datas=[
+        (str(path), path.stem.replace("_", "-"))
+        for path in sorted(KNOWLEDGE_ROOT.glob("*_knowledge"))
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
