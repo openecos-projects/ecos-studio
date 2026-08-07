@@ -113,6 +113,8 @@ function registerHandlers(
       registerProjectReadRoot: vi.fn(),
       registerProjectRoot: vi.fn(),
       listProjectDirectory: vi.fn(),
+      pathExists: vi.fn(),
+      discardFailedWorkspaceCreate: vi.fn(),
       requestProjectPathAccess: vi.fn(),
       scanPdkDirectory: vi.fn(),
       scanRtlDirectory: vi.fn(),

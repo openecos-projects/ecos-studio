@@ -160,6 +160,8 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       readProjectBinaryFile: vi.fn(),
       writeProjectTextFile: vi.fn(),
       listProjectDirectory: vi.fn(),
+      pathExists: vi.fn(async () => false),
+      discardFailedWorkspaceCreate: vi.fn(async () => false),
       prepareProjectDirectoryReplacement: vi.fn(),
       restoreProjectDirectoryReplacement: vi.fn(),
       finalizeProjectDirectoryReplacement: vi.fn(),
@@ -2774,6 +2776,62 @@ describe('useWorkspace openProject', () => {
     expect(
       desktopApi.workspace.finalizeProjectDirectoryReplacement,
     ).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
+  })
+
+  it('discards a brand-new incomplete workspace directory when create fails', async () => {
+    const workspace = useWorkspace()
+    vi.mocked(desktopApi.workspace.pathExists).mockResolvedValueOnce(false)
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'error',
+      data: {},
+      message: ['PDK path is missing'],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/project/ws_0036',
+        pdk: 'ics55',
+        pdk_root: '/missing/pdk',
+        parameters: {
+          design: 'gcd',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(false)
+
+    expect(workspace.lastWorkspaceCreationError.value).toBe('PDK path is missing')
+    expect(desktopApi.workspace.discardFailedWorkspaceCreate).toHaveBeenCalledWith(
+      '/work/project/ws_0036',
+    )
+  })
+
+  it('does not discard a pre-existing directory when create fails', async () => {
+    const workspace = useWorkspace()
+    vi.mocked(desktopApi.workspace.pathExists).mockResolvedValueOnce(true)
+    createWorkspaceApiMock.mockRejectedValueOnce(new Error('PDK path is missing'))
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/project/ws_0036',
+        pdk: 'ics55',
+        pdk_root: '/missing/pdk',
+        parameters: {
+          design: 'gcd',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(false)
+
+    expect(desktopApi.workspace.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
   })
 
   it('does not invalidate resources for read-only runtime events', async () => {

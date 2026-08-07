@@ -813,6 +813,9 @@ export function useWorkspace() {
     let candidateWorkspaceHandle = ''
     let claimedCreatePath: string | null = null
     let previousCreatePath: string | null = null
+    let selectedPath = ''
+    let existedBeforeCreate = false
+    let usedDirectoryReplacement = false
     const restoreReplacement = async () => {
       if (!replacement || committedReplacement) return
       const desktopApi = await waitForDesktopApi()
@@ -826,13 +829,28 @@ export function useWorkspace() {
       committedReplacement = true
       replacement = null
     }
+    const discardFailedCreateIfNeeded = async () => {
+      // Replacement failures restore the prior workspace; only discard brand-new residue.
+      if (
+        !selectedPath ||
+        existedBeforeCreate ||
+        usedDirectoryReplacement ||
+        candidateWorkspaceCommitted
+      ) {
+        return
+      }
+      try {
+        const desktopApi = await waitForDesktopApi()
+        await desktopApi.workspace.discardFailedWorkspaceCreate(selectedPath)
+      } catch (cleanupError) {
+        console.error('Failed to discard incomplete workspace create:', cleanupError)
+      }
+    }
     try {
       runtimeBackendTitle.value = 'Creating your workspace'
       runtimeBackendSubtitle.value =
         'Writing project files and preparing the workspace view'
       runtimeBackendConnecting.value = true
-
-      let selectedPath: string
 
       if (config) {
         // 使用向导提供的配置
@@ -881,6 +899,7 @@ export function useWorkspace() {
         replacement =
           await desktopApi.workspace.prepareProjectDirectoryReplacement(selectedPath)
         if (replacement) {
+          usedDirectoryReplacement = true
           replacement = {
             id: replacement.id,
             targetPath: normalizePath(replacement.targetPath),
@@ -930,6 +949,9 @@ export function useWorkspace() {
       runtimeBackendSubtitle.value =
         'Writing project files and preparing the workspace view'
       workspaceLifecycle.setSessionLoading(session.sessionId)
+
+      const desktopApiForCreate = await waitForDesktopApi()
+      existedBeforeCreate = await desktopApiForCreate.workspace.pathExists(selectedPath)
 
       // 3. 通过 ECC RPC 创建工作区（传递 Wizard 配置信息）
       const frontendParams = creationConfig?.parameters || {}
@@ -1084,6 +1106,7 @@ export function useWorkspace() {
         return true
       } else {
         await restoreReplacement()
+        await discardFailedCreateIfNeeded()
         workspaceLifecycle.failSession(session.sessionId)
         const error = response.message?.join('; ') || 'Unknown error'
         lastWorkspaceCreationError.value = error
@@ -1103,6 +1126,7 @@ export function useWorkspace() {
           console.error('Failed to restore workspace replacement backup:', restoreError)
         }
       }
+      await discardFailedCreateIfNeeded()
       if (sessionId) workspaceLifecycle.failSession(sessionId)
       lastWorkspaceCreationError.value =
         error instanceof Error ? error.message : String(error)

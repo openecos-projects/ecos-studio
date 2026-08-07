@@ -185,6 +185,8 @@ export interface DesktopBridgeServices {
     ): Promise<string>
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
+    pathExists(path: string): Promise<boolean>
+    discardFailedWorkspaceCreate(path: string): Promise<boolean>
   }
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
@@ -1203,6 +1205,23 @@ export function registerIpc(
   handle(desktopApiIpcChannels.workspaceListProjectDirectory, async (_event, path) => {
     return await services.workspaceService.listProjectDirectory(path as string)
   })
+
+  handle(desktopApiIpcChannels.workspacePathExists, async (_event, path) => {
+    if (typeof path !== 'string') {
+      throw new Error('Workspace path must be a string')
+    }
+    return await services.workspaceService.pathExists(path)
+  })
+
+  handle(
+    desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate,
+    async (_event, path) => {
+      if (typeof path !== 'string') {
+        throw new Error('Workspace path must be a string')
+      }
+      return await services.workspaceService.discardFailedWorkspaceCreate(path)
+    },
+  )
 
   handle(
     desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,

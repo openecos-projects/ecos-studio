@@ -374,6 +374,11 @@ def _workspace_directory(inputs: WorkspaceInputs, proposal: GuiWorkspaceSetupPro
         raise ValueError("Workspace Name must be provided")
     directory = Path(inputs.project_root) / workspace_name
     if directory.exists():
+        try:
+            # Empty residue from a failed create may be reused after correcting the spec.
+            next(directory.iterdir())
+        except StopIteration:
+            return str(directory)
         raise ValueError("Workspace directory already exists; choose a different Workspace Name")
     return str(directory)
 

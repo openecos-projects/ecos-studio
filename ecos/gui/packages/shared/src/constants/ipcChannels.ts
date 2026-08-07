@@ -39,6 +39,9 @@ export const desktopApiIpcChannels = {
   workspaceReadProjectBinaryFile: 'workspace:read-project-binary-file',
   workspaceWriteProjectTextFile: 'workspace:write-project-text-file',
   workspaceListProjectDirectory: 'workspace:list-project-directory',
+  workspacePathExists: 'workspace:path-exists',
+  workspaceDiscardFailedWorkspaceCreate:
+    'workspace:discard-failed-workspace-create',
   workspacePrepareProjectDirectoryReplacement:
     'workspace:prepare-project-directory-replacement',
   workspaceRestoreProjectDirectoryReplacement:

@@ -261,6 +261,8 @@ export interface DesktopApi {
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
+    pathExists(path: string): Promise<boolean>
+    discardFailedWorkspaceCreate(path: string): Promise<boolean>
     prepareProjectDirectoryReplacement(
       path: string,
     ): Promise<WorkspaceDirectoryReplacement | null>
