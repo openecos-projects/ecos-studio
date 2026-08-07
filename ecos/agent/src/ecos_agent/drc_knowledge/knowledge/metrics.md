@@ -1,8 +1,8 @@
 <a id="metric.drc_count"></a>
 ## metric.drc_count
 
-**Meaning:** `drc_count` is the normalized drc metric shown by ECOS when its source fact is available.
+**Meaning:** The total number of reported DRC violations.
 
-**Calculation:** ECC reads the `drc.number` feature fact to publish the DRC count used by the GUI. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `drc.number` from the DRC step feature record; no record means the metric is unavailable, not zero.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**

@@ -1,116 +1,116 @@
 <a id="metric.clock_path_max_buffer"></a>
 ## metric.clock_path_max_buffer
 
-**Meaning:** `clock_path_max_buffer` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The largest buffer count on a clock path.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `CTS.clock_path_max_buffer` from the CTS step feature record.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.clock_path_min_buffer"></a>
 ## metric.clock_path_min_buffer
 
-**Meaning:** `clock_path_min_buffer` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The smallest buffer count on a clock path.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `CTS.clock_path_min_buffer` from the CTS step feature record.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.clock_wirelength"></a>
 ## metric.clock_wirelength
 
-**Meaning:** `clock_wirelength` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The total clock-network wirelength.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `CTS.total_clock_wirelength` and publishes it through the normalized clock-wirelength metric.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.cts_buffer_area"></a>
 ## metric.cts_buffer_area
 
-**Meaning:** `cts_buffer_area` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The total area of buffers inserted by CTS.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `CTS.buffer_area` from the CTS step feature record.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.cts_buffer_count"></a>
 ## metric.cts_buffer_count
 
-**Meaning:** `cts_buffer_count` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The number of buffers inserted by CTS.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `CTS.buffer_num` from the CTS step feature record.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.cts_clock_tree_max_level"></a>
 ## metric.cts_clock_tree_max_level
 
-**Meaning:** `cts_clock_tree_max_level` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The maximum hierarchy level of a clock tree.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `CTS.max_level_of_clock_tree` from the CTS step feature record.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.cts_clock_wirelength_max"></a>
 ## metric.cts_clock_wirelength_max
 
-**Meaning:** `cts_clock_wirelength_max` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The maximum wirelength of an individual clock tree.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `CTS.max_clock_wirelength` from the CTS step feature record.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.cts_worst_optimized_skew_ns"></a>
 ## metric.cts_worst_optimized_skew_ns
 
-**Meaning:** `cts_worst_optimized_skew_ns` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The worst optimized clock skew in nanoseconds.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** When `CTS.timing_quality.availability` is `available`, ECC reads `worst_optimized_skew_ns`; otherwise the metric is omitted.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.cts_worst_max_insertion_latency_ns"></a>
 ## metric.cts_worst_max_insertion_latency_ns
 
-**Meaning:** `cts_worst_max_insertion_latency_ns` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The largest clock insertion latency in nanoseconds.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** When CTS timing quality is available, ECC reads `timing_quality.worst_max_insertion_latency_ns`; otherwise the metric is omitted.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.cts_skew_target_unmet_count"></a>
 ## metric.cts_skew_target_unmet_count
 
-**Meaning:** `cts_skew_target_unmet_count` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The number of clocks whose skew target remains unmet.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** When CTS timing quality is available, ECC reads `timing_quality.target_unmet_count`; otherwise the metric is omitted.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.instance_count"></a>
 ## metric.instance_count
 
-**Meaning:** `instance_count` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The current number of design instances.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `Design Statis.num_instances` from the saved database feature summary after the stage has mutated the database.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.io_pin_count"></a>
 ## metric.io_pin_count
 
-**Meaning:** `io_pin_count` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The current number of IO pins.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `Design Statis.num_iopins` from the saved database feature summary.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.net_count"></a>
 ## metric.net_count
 
-**Meaning:** `net_count` is the normalized CTS metric shown by ECOS when its source fact is available.
+**Meaning:** The current number of design nets.
 
-**Calculation:** ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `Design Statis.num_nets` from the saved database feature summary after the stage has mutated the database.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**

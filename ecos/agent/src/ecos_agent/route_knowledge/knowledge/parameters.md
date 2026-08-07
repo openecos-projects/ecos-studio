@@ -1,62 +1,62 @@
 <a id="parameter.route.rt__bottom_routing_layer"></a>
 ## parameter.route.rt__bottom_routing_layer
 
-**Meaning:** `RT.-bottom_routing_layer` is a committed configuration field for the route stage.
+**Meaning:** The lowest routing layer available to routing.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It constrains the lower bound of the routing stack.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.route**
 
 <a id="parameter.route.rt__enable_timing"></a>
 ## parameter.route.rt__enable_timing
 
-**Meaning:** `RT.-enable_timing` is a committed configuration field for the route stage.
+**Meaning:** The routing timing-awareness switch.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It controls whether the runner initializes STA before routing.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.route**
 
 <a id="parameter.route.rt__output_csv"></a>
 ## parameter.route.rt__output_csv
 
-**Meaning:** `RT.-output_csv` is a committed configuration field for the route stage.
+**Meaning:** The routing CSV-export switch.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It controls emission of routing data in CSV form.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.route**
 
 <a id="parameter.route.rt__output_inter_result"></a>
 ## parameter.route.rt__output_inter_result
 
-**Meaning:** `RT.-output_inter_result` is a committed configuration field for the route stage.
+**Meaning:** The routing intermediate-result switch.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It controls persistence of intermediate routing results.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.route**
 
 <a id="parameter.route.rt__temp_directory_path"></a>
 ## parameter.route.rt__temp_directory_path
 
-**Meaning:** `RT.-temp_directory_path` is a committed configuration field for the route stage.
+**Meaning:** The routing temporary-directory path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects scratch storage for the routing engine.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.route**
 
 <a id="parameter.route.rt__thread_number"></a>
 ## parameter.route.rt__thread_number
 
-**Meaning:** `RT.-thread_number` is a committed configuration field for the route stage.
+**Meaning:** The routing worker-thread count.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It bounds routing-engine parallelism.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.route**
 
 <a id="parameter.route.rt__top_routing_layer"></a>
 ## parameter.route.rt__top_routing_layer
 
-**Meaning:** `RT.-top_routing_layer` is a committed configuration field for the route stage.
+**Meaning:** The highest routing layer available to routing.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It constrains the upper bound of the routing stack.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.route**

@@ -1,44 +1,44 @@
 <a id="metric.die_area"></a>
 ## metric.die_area
 
-**Meaning:** `die_area` is the normalized Floorplan metric shown by ECOS when its source fact is available.
+**Meaning:** The physical die area in square micrometers.
 
-**Calculation:** ECC reads design-layout and design-statistics facts to publish die/core area, core utilization, instance count, and net count. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `Design Layout.die_area` from the saved database feature summary and rounds the displayed value to three decimals.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.core_area"></a>
 ## metric.core_area
 
-**Meaning:** `core_area` is the normalized Floorplan metric shown by ECOS when its source fact is available.
+**Meaning:** The physical core area in square micrometers.
 
-**Calculation:** ECC reads design-layout and design-statistics facts to publish die/core area, core utilization, instance count, and net count. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `Design Layout.core_area` from the saved database feature summary and rounds the displayed value to three decimals.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.core_utilization"></a>
 ## metric.core_utilization
 
-**Meaning:** `core_utilization` is the normalized Floorplan metric shown by ECOS when its source fact is available.
+**Meaning:** The fraction of usable core area occupied by the design.
 
-**Calculation:** ECC reads design-layout and design-statistics facts to publish die/core area, core utilization, instance count, and net count. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC maps `Design Layout.core_usage` into the normalized core-utilization metric; availability follows the saved database feature summary.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.instance_count"></a>
 ## metric.instance_count
 
-**Meaning:** `instance_count` is the normalized Floorplan metric shown by ECOS when its source fact is available.
+**Meaning:** The current number of design instances.
 
-**Calculation:** ECC reads design-layout and design-statistics facts to publish die/core area, core utilization, instance count, and net count. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `Design Statis.num_instances` from the saved database feature summary after the stage has mutated the database.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**
 
 <a id="metric.net_count"></a>
 ## metric.net_count
 
-**Meaning:** `net_count` is the normalized Floorplan metric shown by ECOS when its source fact is available.
+**Meaning:** The current number of design nets.
 
-**Calculation:** ECC reads design-layout and design-statistics facts to publish die/core area, core utilization, instance count, and net count. Missing source data remains unavailable; it is not converted to zero or a success claim.
+**Calculation:** ECC reads `Design Statis.num_nets` from the saved database feature summary after the stage has mutated the database.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**

@@ -1,125 +1,125 @@
 <a id="parameter.cts.buffer_type"></a>
 ## parameter.cts.buffer_type
 
-**Meaning:** `buffer_type` is a committed configuration field for the CTS stage.
+**Meaning:** The buffer cell types eligible for CTS insertion.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It limits the implementation choices available to the clock-tree builder.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.cap_steps"></a>
 ## parameter.cts.cap_steps
 
-**Meaning:** `cap_steps` is a committed configuration field for the CTS stage.
+**Meaning:** The number of capacitance optimization steps.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It bounds CTS effort applied to capacitance repair.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.max_buf_tran"></a>
 ## parameter.cts.max_buf_tran
 
-**Meaning:** `max_buf_tran` is a committed configuration field for the CTS stage.
+**Meaning:** The maximum transition allowed at clock-buffer outputs.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It constrains inserted-buffer electrical behavior during CTS.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.max_cap"></a>
 ## parameter.cts.max_cap
 
-**Meaning:** `max_cap` is a committed configuration field for the CTS stage.
+**Meaning:** The maximum allowed clock-net capacitance.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It bounds clock-tree loading during buffering and routing.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.max_fanout"></a>
 ## parameter.cts.max_fanout
 
-**Meaning:** `max_fanout` is a committed configuration field for the CTS stage.
+**Meaning:** The maximum allowed clock-buffer fanout.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It limits how many sinks an inserted buffer may drive.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.max_length"></a>
 ## parameter.cts.max_length
 
-**Meaning:** `max_length` is a committed configuration field for the CTS stage.
+**Meaning:** The maximum permitted clock-wire segment length.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It encourages buffering or topology changes for long clock connections.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.max_sink_tran"></a>
 ## parameter.cts.max_sink_tran
 
-**Meaning:** `max_sink_tran` is a committed configuration field for the CTS stage.
+**Meaning:** The maximum transition allowed at clock sinks.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It constrains the delivered clock waveform at sink pins.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.net_list"></a>
 ## parameter.cts.net_list
 
-**Meaning:** `net_list` is a committed configuration field for the CTS stage.
+**Meaning:** The explicit clock-net list.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It identifies the nets that CTS should synthesize when explicit selection is enabled.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.root_input_slew"></a>
 ## parameter.cts.root_input_slew
 
-**Meaning:** `root_input_slew` is a committed configuration field for the CTS stage.
+**Meaning:** The transition assumed at a clock-tree root.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It seeds CTS timing propagation from the source clock pin.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.routing_layer"></a>
 ## parameter.cts.routing_layer
 
-**Meaning:** `routing_layer` is a committed configuration field for the CTS stage.
+**Meaning:** The routing layers available to CTS.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It constrains clock-tree routing to the selected layer set.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.skew_bound"></a>
 ## parameter.cts.skew_bound
 
-**Meaning:** `skew_bound` is a committed configuration field for the CTS stage.
+**Meaning:** The target upper bound for clock skew.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It directs CTS optimization and is compared against derived clock-quality facts.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.slew_steps"></a>
 ## parameter.cts.slew_steps
 
-**Meaning:** `slew_steps` is a committed configuration field for the CTS stage.
+**Meaning:** The number of transition optimization steps.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It bounds CTS effort applied to transition repair.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.use_netlist"></a>
 ## parameter.cts.use_netlist
 
-**Meaning:** `use_netlist` is a committed configuration field for the CTS stage.
+**Meaning:** The switch selecting a supplied clock-net list.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** When enabled, CTS uses `net_list` rather than discovering clock nets from the database.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**
 
 <a id="parameter.cts.wirelength_iterations"></a>
 ## parameter.cts.wirelength_iterations
 
-**Meaning:** `wirelength_iterations` is a committed configuration field for the CTS stage.
+**Meaning:** The number of clock-wirelength optimization iterations.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It bounds repeated CTS wirelength improvement passes.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.cts**

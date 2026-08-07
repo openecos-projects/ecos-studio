@@ -1,89 +1,89 @@
 <a id="parameter.fixfanout.file_path_def_file"></a>
 ## parameter.fixfanout.file_path_def_file
 
-**Meaning:** `file_path.def_file` is a committed configuration field for the fixFanout stage.
+**Meaning:** The net-optimization `def_file` path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It identifies an input or output consumed by the fanout-optimization tool.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.file_path_design_work_space"></a>
 ## parameter.fixfanout.file_path_design_work_space
 
-**Meaning:** `file_path.design_work_space` is a committed configuration field for the fixFanout stage.
+**Meaning:** The net-optimization `design_work_space` path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It identifies an input or output consumed by the fanout-optimization tool.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.file_path_gds_file"></a>
 ## parameter.fixfanout.file_path_gds_file
 
-**Meaning:** `file_path.gds_file` is a committed configuration field for the fixFanout stage.
+**Meaning:** The net-optimization `gds_file` path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It identifies an input or output consumed by the fanout-optimization tool.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.file_path_lef_files"></a>
 ## parameter.fixfanout.file_path_lef_files
 
-**Meaning:** `file_path.lef_files` is a committed configuration field for the fixFanout stage.
+**Meaning:** The LEF input collection.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It supplies physical cell and routing data to net optimization.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.file_path_lib_files"></a>
 ## parameter.fixfanout.file_path_lib_files
 
-**Meaning:** `file_path.lib_files` is a committed configuration field for the fixFanout stage.
+**Meaning:** The Liberty input collection.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It supplies cell timing and drive models to net optimization.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.file_path_output_def"></a>
 ## parameter.fixfanout.file_path_output_def
 
-**Meaning:** `file_path.output_def` is a committed configuration field for the fixFanout stage.
+**Meaning:** The net-optimization `output_def` path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It identifies an input or output consumed by the fanout-optimization tool.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.file_path_report_file"></a>
 ## parameter.fixfanout.file_path_report_file
 
-**Meaning:** `file_path.report_file` is a committed configuration field for the fixFanout stage.
+**Meaning:** The net-optimization `report_file` path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It identifies an input or output consumed by the fanout-optimization tool.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.file_path_sdc_file"></a>
 ## parameter.fixfanout.file_path_sdc_file
 
-**Meaning:** `file_path.sdc_file` is a committed configuration field for the fixFanout stage.
+**Meaning:** The timing-constraint input path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It supplies constraints used by the net-optimization tool.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.insert_buffer"></a>
 ## parameter.fixfanout.insert_buffer
 
-**Meaning:** `insert_buffer` is a committed configuration field for the fixFanout stage.
+**Meaning:** The buffer cell selection for fanout repair.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It supplies the buffer implementation used when net optimization inserts drivers.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**
 
 <a id="parameter.fixfanout.max_fanout"></a>
 ## parameter.fixfanout.max_fanout
 
-**Meaning:** `max_fanout` is a committed configuration field for the fixFanout stage.
+**Meaning:** The maximum allowed fanout constraint.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It is the threshold that directs fanout optimization and validates the resulting fanout metric.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.fixfanout**

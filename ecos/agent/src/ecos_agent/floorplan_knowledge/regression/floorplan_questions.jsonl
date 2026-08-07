@@ -1,1 +1,6 @@
 {"entity_id": "algorithm.floorplan.execution", "id": "floorplan-execution", "question": "How does the Floorplan stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.floorplan.subflow", "id": "floorplan-subflow", "question": "floorplan stage order", "required_text": "Source evidence:"}
+{"entity_id": "parameter.floorplan.die_builder_die_size_height_micron", "id": "floorplan-parameter", "question": "floorplan die_builder_die_size_height_micron", "required_text": "**Role:**"}
+{"entity_id": "metric.die_area", "id": "floorplan-metric", "question": "die area", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.floorplan.outputs", "id": "floorplan-artifact", "question": "floorplan artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.floorplan.preconditions", "id": "floorplan-failure", "question": "floorplan failed", "required_text": "**Failure mode:**"}

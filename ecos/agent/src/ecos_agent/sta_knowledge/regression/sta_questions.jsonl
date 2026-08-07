@@ -1,1 +1,6 @@
 {"entity_id": "algorithm.sta.execution", "id": "sta-execution", "question": "How does the sta stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.sta.signoff_matrix", "id": "sta-signoff_matrix", "question": "sta signoff matrix", "required_text": "Source evidence:"}
+{"entity_id": "parameter.sta.liberty", "id": "sta-parameter", "question": "sta liberty", "required_text": "**Role:**"}
+{"entity_id": "metric.sta_setup_wns", "id": "sta-metric", "question": "sta setup wns", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.sta.outputs", "id": "sta-artifact", "question": "sta artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.sta.preconditions", "id": "sta-failure", "question": "sta failed", "required_text": "**Failure mode:**"}

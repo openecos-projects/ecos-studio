@@ -1,1 +1,6 @@
 {"entity_id": "algorithm.cts.execution", "id": "cts-execution", "question": "How does the CTS stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.cts.subflow", "id": "cts-subflow", "question": "clock tree stage order", "required_text": "Source evidence:"}
+{"entity_id": "parameter.cts.buffer_type", "id": "cts-parameter", "question": "cts buffer_type", "required_text": "**Role:**"}
+{"entity_id": "metric.clock_path_max_buffer", "id": "cts-metric", "question": "clock path max buffer", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.cts.outputs", "id": "cts-artifact", "question": "cts artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.cts.preconditions", "id": "cts-failure", "question": "cts failed", "required_text": "**Failure mode:**"}

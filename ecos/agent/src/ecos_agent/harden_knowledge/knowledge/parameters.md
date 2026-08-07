@@ -1,17 +1,17 @@
 <a id="parameter.harden.liberty"></a>
 ## parameter.harden.liberty
 
-**Meaning:** `liberty` is a committed configuration field for the Harden stage.
+**Meaning:** The Liberty-corner inventory reused by Harden.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** Harden takes the selected signoff item's Liberty files to derive its timing-model LIB.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.harden**
 
 <a id="parameter.harden.signoff"></a>
 ## parameter.harden.signoff
 
-**Meaning:** `signoff` is a committed configuration field for the Harden stage.
+**Meaning:** The STA-to-RCX corner matrix reused by Harden.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** Harden requires the first resolved signoff item to locate the SDC and SPEF inputs for LIB generation.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.harden**

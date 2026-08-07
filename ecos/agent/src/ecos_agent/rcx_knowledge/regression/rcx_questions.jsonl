@@ -1,1 +1,6 @@
 {"entity_id": "algorithm.rcx.execution", "id": "rcx-execution", "question": "How does the RCX stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.rcx.extraction_lifecycle", "id": "rcx-extraction_lifecycle", "question": "rcx extraction lifecycle", "required_text": "Source evidence:"}
+{"entity_id": "parameter.rcx.output", "id": "rcx-parameter", "question": "rcx output", "required_text": "**Role:**"}
+{"entity_id": "metric.rcx_missing_corner_count", "id": "rcx-metric", "question": "rcx missing corner count", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.rcx.outputs", "id": "rcx-artifact", "question": "rcx artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.rcx.preconditions", "id": "rcx-failure", "question": "rcx failed", "required_text": "**Failure mode:**"}

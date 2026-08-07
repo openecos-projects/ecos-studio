@@ -1,278 +1,278 @@
 <a id="parameter.floorplan.die_builder_die_size_height_micron"></a>
 ## parameter.floorplan.die_builder_die_size_height_micron
 
-**Meaning:** `die_builder.die_size.height_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The explicit die height in micrometers.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It is used when the die-construction mode selects explicit dimensions.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_die_size_width_micron"></a>
 ## parameter.floorplan.die_builder_die_size_width_micron
 
-**Meaning:** `die_builder.die_size.width_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The explicit die width in micrometers.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It is used when the die-construction mode selects explicit dimensions.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_die_util_aspect_ratio"></a>
 ## parameter.floorplan.die_builder_die_util_aspect_ratio
 
-**Meaning:** `die_builder.die_util.aspect_ratio` is a committed configuration field for the Floorplan stage.
+**Meaning:** The target die aspect ratio in utilization mode.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It shapes the die dimensions while the target utilization determines area.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_die_util_utilization"></a>
 ## parameter.floorplan.die_builder_die_util_utilization
 
-**Meaning:** `die_builder.die_util.utilization` is a committed configuration field for the Floorplan stage.
+**Meaning:** The target die utilization in utilization mode.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It determines the die area required for the current design content.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_margin_bottom_micron"></a>
 ## parameter.floorplan.die_builder_margin_bottom_micron
 
-**Meaning:** `die_builder.margin.bottom_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The bottom die-to-core margin in micrometers.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It offsets the core boundary from the corresponding die edge.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_margin_left_micron"></a>
 ## parameter.floorplan.die_builder_margin_left_micron
 
-**Meaning:** `die_builder.margin.left_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The left die-to-core margin in micrometers.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It offsets the core boundary from the corresponding die edge.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_margin_right_micron"></a>
 ## parameter.floorplan.die_builder_margin_right_micron
 
-**Meaning:** `die_builder.margin.right_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The right die-to-core margin in micrometers.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It offsets the core boundary from the corresponding die edge.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_margin_top_micron"></a>
 ## parameter.floorplan.die_builder_margin_top_micron
 
-**Meaning:** `die_builder.margin.top_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The top die-to-core margin in micrometers.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It offsets the core boundary from the corresponding die edge.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_mode"></a>
 ## parameter.floorplan.die_builder_mode
 
-**Meaning:** `die_builder.mode` is a committed configuration field for the Floorplan stage.
+**Meaning:** The die-construction mode.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects whether die geometry is derived from utilization or an explicit size.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.die_builder_site_name"></a>
 ## parameter.floorplan.die_builder_site_name
 
-**Meaning:** `die_builder.site_name` is a committed configuration field for the Floorplan stage.
+**Meaning:** The core placement-site name.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects the technology site used to build core rows.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.ifp_temp_directory_path"></a>
 ## parameter.floorplan.ifp_temp_directory_path
 
-**Meaning:** `ifp.temp_directory_path` is a committed configuration field for the Floorplan stage.
+**Meaning:** The floorplan temporary-directory path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects the scratch location used by the floorplan engine.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.ifp_thread_number"></a>
 ## parameter.floorplan.ifp_thread_number
 
-**Meaning:** `ifp.thread_number` is a committed configuration field for the Floorplan stage.
+**Meaning:** The floorplan worker-thread count.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It bounds parallel work performed by the floorplan engine.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.io_placer_depth_micron"></a>
 ## parameter.floorplan.io_placer_depth_micron
 
-**Meaning:** `io_placer.depth_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The IO-pin depth in micrometers.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It defines the physical depth of generated IO-pin shapes.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.io_placer_io_layer_list"></a>
 ## parameter.floorplan.io_placer_io_layer_list
 
-**Meaning:** `io_placer.io_layer_list` is a committed configuration field for the Floorplan stage.
+**Meaning:** The routing layers eligible for IO-pin placement.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It constrains where the floorplan can place IO pins.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.io_placer_width_micron"></a>
 ## parameter.floorplan.io_placer_width_micron
 
-**Meaning:** `io_placer.width_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The IO-pin width in micrometers.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It defines the physical width of generated IO-pin shapes.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.macro_placer_macro_location_path"></a>
 ## parameter.floorplan.macro_placer_macro_location_path
 
-**Meaning:** `macro_placer.macro_location_path` is a committed configuration field for the Floorplan stage.
+**Meaning:** The macro-location input path.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It supplies fixed or guided macro positions to the macro placer.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.macro_placer_macro_placement_halo"></a>
 ## parameter.floorplan.macro_placer_macro_placement_halo
 
-**Meaning:** `macro_placer.macro_placement_halo` is a committed configuration field for the Floorplan stage.
+**Meaning:** The halo reserved around placed macros.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It keeps standard-cell and routing resources away from macro boundaries during macro placement.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.macro_placer_macro_routing_halo"></a>
 ## parameter.floorplan.macro_placer_macro_routing_halo
 
-**Meaning:** `macro_placer.macro_routing_halo` is a committed configuration field for the Floorplan stage.
+**Meaning:** The routing halo reserved around macros.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It reserves routing clearance around macro boundaries.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.pdn_generator_connect_layers"></a>
 ## parameter.floorplan.pdn_generator_connect_layers
 
-**Meaning:** `pdn_generator.connect_layers` is a committed configuration field for the Floorplan stage.
+**Meaning:** The PDN layer-connection definitions.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It specifies routing-layer pairs to connect through the power network.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.pdn_generator_global_connect"></a>
 ## parameter.floorplan.pdn_generator_global_connect
 
-**Meaning:** `pdn_generator.global_connect` is a committed configuration field for the Floorplan stage.
+**Meaning:** The global power/ground connection rules.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It maps instance pins to named power and ground nets before PDN construction.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.pdn_generator_rail"></a>
 ## parameter.floorplan.pdn_generator_rail
 
-**Meaning:** `pdn_generator.rail` is a committed configuration field for the Floorplan stage.
+**Meaning:** The follow-pin PDN rail definitions.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It creates local power rails on declared routing layers.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.pdn_generator_stripe"></a>
 ## parameter.floorplan.pdn_generator_stripe
 
-**Meaning:** `pdn_generator.stripe` is a committed configuration field for the Floorplan stage.
+**Meaning:** The PDN stripe definitions.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It creates wider periodic power stripes with declared width, pitch, and offset.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_boundary_tap_bottom_cell_name_list"></a>
 ## parameter.floorplan.phy_placer_boundary_tap_bottom_cell_name_list
 
-**Meaning:** `phy_placer.boundary_tap.bottom_cell_name_list` is a committed configuration field for the Floorplan stage.
+**Meaning:** The boundary-tap setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects boundary tap cells and their placement rule along the core edge.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_boundary_tap_rule_micron"></a>
 ## parameter.floorplan.phy_placer_boundary_tap_rule_micron
 
-**Meaning:** `phy_placer.boundary_tap.rule_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The boundary-tap setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects boundary tap cells and their placement rule along the core edge.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_boundary_tap_top_cell_name_list"></a>
 ## parameter.floorplan.phy_placer_boundary_tap_top_cell_name_list
 
-**Meaning:** `phy_placer.boundary_tap.top_cell_name_list` is a committed configuration field for the Floorplan stage.
+**Meaning:** The boundary-tap setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects boundary tap cells and their placement rule along the core edge.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_edge_endcap_bottom_cell_name_list"></a>
 ## parameter.floorplan.phy_placer_edge_endcap_bottom_cell_name_list
 
-**Meaning:** `phy_placer.edge_endcap.bottom_cell_name_list` is a committed configuration field for the Floorplan stage.
+**Meaning:** The boundary endcap-cell setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects cells that protect rows and block edges during physical-cell insertion.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_edge_endcap_top_cell_name_list"></a>
 ## parameter.floorplan.phy_placer_edge_endcap_top_cell_name_list
 
-**Meaning:** `phy_placer.edge_endcap.top_cell_name_list` is a committed configuration field for the Floorplan stage.
+**Meaning:** The boundary endcap-cell setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects cells that protect rows and block edges during physical-cell insertion.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_side_endcap_left_cell_name"></a>
 ## parameter.floorplan.phy_placer_side_endcap_left_cell_name
 
-**Meaning:** `phy_placer.side_endcap.left_cell_name` is a committed configuration field for the Floorplan stage.
+**Meaning:** The boundary endcap-cell setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects cells that protect rows and block edges during physical-cell insertion.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_side_endcap_right_cell_name"></a>
 ## parameter.floorplan.phy_placer_side_endcap_right_cell_name
 
-**Meaning:** `phy_placer.side_endcap.right_cell_name` is a committed configuration field for the Floorplan stage.
+**Meaning:** The boundary endcap-cell setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects cells that protect rows and block edges during physical-cell insertion.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_well_tap_cell_name"></a>
 ## parameter.floorplan.phy_placer_well_tap_cell_name
 
-**Meaning:** `phy_placer.well_tap.cell_name` is a committed configuration field for the Floorplan stage.
+**Meaning:** The well-tap insertion setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects the tap cell and maximum spacing used to maintain well connectivity.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.phy_placer_well_tap_distance_micron"></a>
 ## parameter.floorplan.phy_placer_well_tap_distance_micron
 
-**Meaning:** `phy_placer.well_tap.distance_micron` is a committed configuration field for the Floorplan stage.
+**Meaning:** The well-tap insertion setting.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It selects the tap cell and maximum spacing used to maintain well connectivity.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**

@@ -1,8 +1,17 @@
-<a id="parameter.synthesis.workspace_config"></a>
-## parameter.synthesis.workspace_config
+<a id="parameter.synthesis.input"></a>
+## parameter.synthesis.input
 
-**Meaning:** The workspace configuration boundary for the Synthesis stage.
+**Meaning:** The RTL-or-filelist source boundary.
 
-**Role:** The runner receives this stage configuration from the workspace; this source snapshot has no committed leaf defaults for this stage.
+**Role:** The Yosys runner requires at least one existing source before invoking `yosys_synthesis.tcl`.
+
+**Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**
+
+<a id="parameter.synthesis.runtime"></a>
+## parameter.synthesis.runtime
+
+**Meaning:** The bundled-or-PATH Yosys runtime selection.
+
+**Role:** The runner resolves it before synthesis and records an invalid subflow when no executable is available.
 
 **Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**

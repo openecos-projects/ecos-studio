@@ -1,4 +1,6 @@
 import shutil
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,63 @@ def test_every_non_place_step_has_a_source_audited_knowledge_bundle() -> None:
         assert answer.entity_ids == (f"algorithm.{spec.slug}.execution",)
         assert answer.contract["schema_version"] == f"ecos-{spec.slug}-answer.v1"
         assert answer.contract["read_only"] is True
+
+
+def test_step_bundles_have_entity_level_algorithm_artifact_metric_and_failure_knowledge() -> None:
+    for spec in STEP_KNOWLEDGE_SPECS:
+        root = KNOWLEDGE_ROOT / f"{spec.slug}_knowledge"
+        knowledge = StepKnowledge.from_directory(root, spec)
+        documents = {
+            name: (root / "knowledge" / name).read_text(encoding="utf-8")
+            for name in ("algorithms.md", "artifacts.md", "failures.md", "metrics.md", "parameters.md")
+        }
+        anchors = {
+            name: re.findall(r'<a id="([^"]+)"></a>', text)
+            for name, text in documents.items()
+        }
+        cases = [
+            json.loads(line)
+            for line in (root / "regression" / f"{spec.slug}_questions.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line
+        ]
+
+        assert len(anchors["algorithms.md"]) >= 3
+        assert len(anchors["failures.md"]) >= 3
+        assert len(cases) >= 5
+        assert "**Meaning:**" in documents["parameters.md"]
+        assert "**Role:**" in documents["parameters.md"]
+        assert "is the normalized" not in documents["metrics.md"]
+        assert all(case["entity_id"] in knowledge.entity_ids for case in cases)
+
+        if spec.slug in {"synthesis", "harden"}:
+            assert len(anchors["artifacts.md"]) >= 4
+        else:
+            assert len(anchors["artifacts.md"]) >= 10
+            assert f"artifact.{spec.slug}.output_def" in knowledge.entity_ids
+            assert f"artifact.{spec.slug}.qor_metrics" in knowledge.entity_ids
+
+
+def test_step_bundle_regression_questions_return_audited_read_only_answers() -> None:
+    for spec in STEP_KNOWLEDGE_SPECS:
+        root = KNOWLEDGE_ROOT / f"{spec.slug}_knowledge"
+        knowledge = StepKnowledge.from_directory(root, spec)
+        cases = [
+            json.loads(line)
+            for line in (root / "regression" / f"{spec.slug}_questions.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line
+        ]
+
+        for case in cases:
+            answer = knowledge.reply(case["question"])
+
+            assert answer is not None
+            assert case["entity_id"] in answer.entity_ids
+            assert case["required_text"] in answer.text
+            assert answer.contract["read_only"] is True
 
 
 def test_step_bundle_rejects_changed_markdown(tmp_path: Path) -> None:

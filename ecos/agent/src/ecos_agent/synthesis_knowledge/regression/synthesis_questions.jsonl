@@ -1,1 +1,6 @@
 {"entity_id": "algorithm.synthesis.execution", "id": "synthesis-execution", "question": "How does the Synthesis stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.synthesis.input_gate", "id": "synthesis-input_gate", "question": "yosys input validation", "required_text": "Source evidence:"}
+{"entity_id": "parameter.synthesis.input", "id": "synthesis-parameter", "question": "synthesis input", "required_text": "**Role:**"}
+{"entity_id": "metric.synthesis_cell_area", "id": "synthesis-metric", "question": "synthesis cell area", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.synthesis.outputs", "id": "synthesis-artifact", "question": "synthesis artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.synthesis.preconditions", "id": "synthesis-failure", "question": "synthesis failed", "required_text": "**Failure mode:**"}

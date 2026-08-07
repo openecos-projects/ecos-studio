@@ -1,17 +1,17 @@
 <a id="parameter.sta.liberty"></a>
 ## parameter.sta.liberty
 
-**Meaning:** `liberty` is a committed configuration field for the sta stage.
+**Meaning:** The Liberty-corner inventory.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It maps each STA corner name and temperature to the Liberty files used for timing runs.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.sta**
 
 <a id="parameter.sta.signoff"></a>
 ## parameter.sta.signoff
 
-**Meaning:** `signoff` is a committed configuration field for the sta stage.
+**Meaning:** The STA-to-RCX corner signoff matrix.
 
-**Role:** The stage runner passes the workspace configuration to its underlying tool; this field participates only according to that tool's configuration parser.
+**Role:** It expands each Liberty corner into the RCX corners that must be analyzed.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.sta**

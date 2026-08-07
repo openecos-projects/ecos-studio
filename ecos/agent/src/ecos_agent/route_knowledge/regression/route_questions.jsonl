@@ -1,1 +1,6 @@
 {"entity_id": "algorithm.route.execution", "id": "route-execution", "question": "How does the route stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.route.timing_setup", "id": "route-timing_setup", "question": "routing timing enable", "required_text": "Source evidence:"}
+{"entity_id": "parameter.route.rt__bottom_routing_layer", "id": "route-parameter", "question": "route rt__bottom_routing_layer", "required_text": "**Role:**"}
+{"entity_id": "metric.route_dr_total_patch_count", "id": "route-metric", "question": "route dr total patch count", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.route.outputs", "id": "route-artifact", "question": "route artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.route.preconditions", "id": "route-failure", "question": "route failed", "required_text": "**Failure mode:**"}

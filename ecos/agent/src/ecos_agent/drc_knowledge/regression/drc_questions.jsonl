@@ -1,1 +1,6 @@
 {"entity_id": "algorithm.drc.execution", "id": "drc-execution", "question": "How does the drc stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.drc.engine_lifecycle", "id": "drc-engine_lifecycle", "question": "drc report generation", "required_text": "Source evidence:"}
+{"entity_id": "parameter.drc.workspace_config", "id": "drc-parameter", "question": "drc workspace_config", "required_text": "**Role:**"}
+{"entity_id": "metric.drc_count", "id": "drc-metric", "question": "drc count", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.drc.outputs", "id": "drc-artifact", "question": "drc artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.drc.preconditions", "id": "drc-failure", "question": "drc failed", "required_text": "**Failure mode:**"}

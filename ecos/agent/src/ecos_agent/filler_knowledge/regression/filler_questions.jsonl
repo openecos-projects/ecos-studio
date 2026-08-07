@@ -1,1 +1,6 @@
 {"entity_id": "algorithm.filler.execution", "id": "filler-execution", "question": "How does the filler stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.filler.subflow", "id": "filler-subflow", "question": "filler stage order", "required_text": "Source evidence:"}
+{"entity_id": "parameter.filler.workspace_config", "id": "filler-parameter", "question": "filler workspace_config", "required_text": "**Role:**"}
+{"entity_id": "metric.filler.database_summary", "id": "filler-metric", "question": "filler.database summary", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.filler.outputs", "id": "filler-artifact", "question": "filler artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.filler.preconditions", "id": "filler-failure", "question": "filler failed", "required_text": "**Failure mode:**"}
