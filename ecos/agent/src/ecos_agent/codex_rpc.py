@@ -208,12 +208,22 @@ class _JsonLineRpcProcessClient:
             if activity:
                 self._report_progress(activity_callback, activity)
             if method == "error":
+                will_retry = params.get("willRetry") is True
                 self._record(
                     "turn_error_received",
                     error_code=self._error_code(params),
+                    will_retry=will_retry,
                 )
+                if will_retry:
+                    self._report_progress(
+                        activity_callback, "Codex received a transient error and is retrying."
+                    )
+                    continue
+                error_message = self._error_message(params)
                 raise CodexProviderError(
-                    "Codex app-server reported a turn error",
+                    f"Codex app-server turn error: {error_message}"
+                    if error_message
+                    else "Codex app-server reported a turn error",
                     failure_class="tool_error",
                 )
             if method == "item/agentMessage/delta":
@@ -398,6 +408,15 @@ class _JsonLineRpcProcessClient:
         error = params.get("error")
         code = error.get("code") if isinstance(error, Mapping) else None
         return code if isinstance(code, str) else None
+
+    @staticmethod
+    def _error_message(params: Mapping[str, Any]) -> str | None:
+        error = params.get("error")
+        message = error.get("message") if isinstance(error, Mapping) else None
+        if not isinstance(message, str):
+            return None
+        normalized = " ".join(message.split())
+        return normalized[:512] or None
 
 
 def _normalized_token_usage(usage: object) -> dict[str, int] | None:

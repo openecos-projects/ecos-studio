@@ -1,7 +1,7 @@
 import pytest
 
 from ecos_agent.codex_provider import CodexAppServerProposalProvider
-from ecos_agent.codex_rpc import _JsonLineRpcProcessClient
+from ecos_agent.codex_rpc import CodexProviderError, _JsonLineRpcProcessClient
 
 
 def _provider(tmp_path, **env_overrides) -> CodexAppServerProposalProvider:
@@ -106,3 +106,54 @@ def test_command_activity_reporting_is_unchanged() -> None:
         )
         is None
     )
+
+
+def test_retriable_turn_error_keeps_waiting_for_completion(tmp_path) -> None:
+    client = _JsonLineRpcProcessClient(
+        command="codex",
+        args=[],
+        cwd=tmp_path,
+        env={},
+        timeout_seconds=1,
+    )
+    client._notifications.put(
+        {
+            "method": "error",
+            "params": {
+                "turnId": "turn-1",
+                "willRetry": True,
+                "error": {"message": "temporary upstream failure"},
+            },
+        }
+    )
+    client._notifications.put(
+        {"method": "item/agentMessage/delta", "params": {"turnId": "turn-1", "delta": "{}"}}
+    )
+    client._notifications.put(
+        {"method": "turn/completed", "params": {"turn": {"id": "turn-1"}}}
+    )
+
+    assert client.wait_for_turn_text("turn-1") == "{}"
+
+
+def test_final_turn_error_includes_server_message(tmp_path) -> None:
+    client = _JsonLineRpcProcessClient(
+        command="codex",
+        args=[],
+        cwd=tmp_path,
+        env={},
+        timeout_seconds=1,
+    )
+    client._notifications.put(
+        {
+            "method": "error",
+            "params": {
+                "turnId": "turn-1",
+                "willRetry": False,
+                "error": {"message": "authentication required"},
+            },
+        }
+    )
+
+    with pytest.raises(CodexProviderError, match="authentication required"):
+        client.wait_for_turn_text("turn-1")
