@@ -13,3 +13,6 @@ package = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.setuptools.package-data]
+ecos_agent = ["place_knowledge/**/*.json", "place_knowledge/**/*.md", "place_knowledge/**/*.jsonl"]
