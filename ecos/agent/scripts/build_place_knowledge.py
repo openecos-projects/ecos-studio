@@ -292,16 +292,16 @@ def _add_artifacts(entries: list[dict[str, object]], documents: dict[str, list[s
 
 def _add_failures(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
     records = [
-        ("dreamplace_import", ("dreamplace import failed", "DreamPlace导入失败"), "is_eda_exist() 捕获 DreamPlace import 异常并记录 dreamplace: import failed，随后 step 返回 False。检查运行环境中的 dreamplace 模块和编译依赖。", ("dreamplace.utility", "dreamplace.runner")),
-        ("missing_ecc_module", ("ECC module unavailable", "ECC模块不可用"), "runner 只有在 get_eda_instance() 返回非空 ECC module 时才调用 DreamPlace；为空时 placement 不会进入 module。", ("dreamplace.runner",)),
-        ("overflow_or_nonfinite_objective", ("place overflow nan inf", "布局overflow或NaN"), "NonLinearPlace 在最后 overflow 超过 stop_overflow，或 objective 是 Inf 或 NaN 时跳过 legalization 和 detail，并返回无穷 HPWL。", ("dreamplace.nonlinear",)),
-        ("infinite_hpwl", ("hpwl inf", "HPWL无穷"), 'DreamplaceModule 将 ppa["hpwl"] == inf 视为失败并返回 False。', ("dreamplace.module",)),
-        ("missing_feature_map", ("place map missing", "place map缺失"), "runner 会请求 feature_placement_map(json_path=step.feature.map)；预期 map 缺失时不能声称 QoR 指标已经生成。", ("dreamplace.runner", "ecc.builder")),
-        ("missing_external_detailed_placer", ("detailed placer missing", "详细布局器缺失"), "如果设定了 detailed_place_engine 但路径不存在，PlacementEngine 仅记录 warning；当前默认 detailed placement 关闭。", ("dreamplace.placer", "dreamplace.config")),
-        ("misleading_subflow_success", ("subflow success", "subflow成功但失败"), "当前 runner 在 DreamPlace 返回后无条件把 subflow 的 run-placement 标为 success，再由 save_data 覆盖 reslut。因此 subflow success 不能单独作为布局成功证据；需核对终态、日志和产物。", ("dreamplace.runner", "dreamplace.module")),
+        ("dreamplace_import", ("dreamplace import failed", "DreamPlace导入失败"), "`is_eda_exist()` catches a DreamPlace import exception, records `dreamplace: import failed`, and makes the step return `False`. Check the runtime `dreamplace` module and its compiled dependencies.", ("dreamplace.utility", "dreamplace.runner")),
+        ("missing_ecc_module", ("ECC module unavailable", "ECC模块不可用"), "The runner invokes DreamPlace only when `get_eda_instance()` returns an ECC module. If it returns no module, placement does not enter the module.", ("dreamplace.runner",)),
+        ("overflow_or_nonfinite_objective", ("place overflow nan inf", "布局overflow或NaN"), "When final overflow exceeds `stop_overflow`, or the objective is `Inf` or `NaN`, `NonLinearPlace` skips legalization and detailed placement and returns infinite HPWL.", ("dreamplace.nonlinear",)),
+        ("infinite_hpwl", ("hpwl inf", "HPWL无穷"), '`DreamplaceModule` treats `ppa["hpwl"] == inf` as a failure and returns `False`.', ("dreamplace.module",)),
+        ("missing_feature_map", ("place map missing", "place map缺失"), "The runner requests `feature_placement_map(json_path=step.feature.map)`. When the expected map is missing, it must not claim that QoR metrics were generated.", ("dreamplace.runner", "ecc.builder")),
+        ("missing_external_detailed_placer", ("detailed placer missing", "详细布局器缺失"), "When `detailed_place_engine` is configured but its path does not exist, `PlacementEngine` records only a warning. Detailed placement is disabled in the current default flow.", ("dreamplace.placer", "dreamplace.config")),
+        ("misleading_subflow_success", ("subflow success", "subflow成功但失败"), "After DreamPlace returns, the runner unconditionally marks the subflow `run-placement` as successful, and `save_data` can later overwrite the result. Subflow success alone is not placement-success evidence; check terminal state, logs, and artifacts.", ("dreamplace.runner", "dreamplace.module")),
     ]
     for name, aliases, body, evidence in records:
-        _add(entries, documents, entity_id=f"failure.place.{name}", kind="failure_mode", aliases=aliases, document="failures.md", body=body, evidence=evidence)
+        _add(entries, documents, entity_id=f"failure.place.{name}", kind="failure_mode", aliases=aliases, document="failures.md", body=body, evidence=evidence, evidence_label="Source evidence:")
 
 
 def _write_regression(output: Path) -> None:

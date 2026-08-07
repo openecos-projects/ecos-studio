@@ -41,6 +41,13 @@ def test_parameter_chunks_are_english_meaning_and_role_only() -> None:
     }
 
 
+def test_failure_chunks_are_english() -> None:
+    failures = (BUNDLE_ROOT / "knowledge" / "failures.md").read_text(encoding="utf-8")
+
+    assert "**Source evidence:**" in failures
+    assert not any("\u4e00" <= character <= "\u9fff" for character in failures)
+
+
 def test_metrics_cover_gui_place_values_and_maps_with_english_calculations() -> None:
     gui_metrics = (
         ECOS_ROOT / "ecos/gui/apps/renderer/src/utils/projectManagement.ts"
