@@ -147,6 +147,7 @@ const desktopBridge = {
     getBoundPath: async () => null,
     isProjectDirectory: async () => false,
     registerProjectRoot: async (path: string) => path,
+    registerProjectReadRoot: async (path: string) => path,
     clearProjectRoot: async () => undefined,
     requestProjectPathAccess: async (path: string) => path,
     authorizeWaveform: async (path: string) => path,
@@ -282,6 +283,7 @@ const desktopBridge = {
     onExit: () => () => undefined,
   },
   chipViewer: {
+    isOpen: async () => ({ open: false }),
     open: async () => ({
       geometryManifestPath: '/tmp/geometry/geometry.manifest',
       spawned: true,

@@ -99,6 +99,10 @@ export interface ProjectManifest {
     workspace_id: string
     reason: string
   } | null
+  qor_baseline: {
+    workspace_id: string
+    reason: string
+  } | null
 }
 
 export interface ProjectManifestDraftInput {
@@ -227,6 +231,7 @@ export function createProjectManifestDraft(
     workspaces: [],
     mpc: normalizeProjectManifestMpc(input.mpc),
     best_workspace: null,
+    qor_baseline: null,
   }
 }
 
@@ -277,6 +282,7 @@ export function parseProjectManifest(content: string): ProjectManifest {
     ),
     mpc: normalizeProjectManifestMpc(source.mpc),
     best_workspace: normalizeBestWorkspace(source.best_workspace),
+    qor_baseline: normalizeQorBaseline(source.qor_baseline),
   }
 }
 
@@ -394,6 +400,7 @@ export function registerWorkspaceInManifest(
         item.workspace_id === existingWorkspace.workspace_id ? workspace : item,
       )
     : [...manifest.workspaces, workspace]
+  const qorBaseline = ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
 
   return {
     ...manifest,
@@ -404,6 +411,7 @@ export function registerWorkspaceInManifest(
       includeDesignParameter: !sourceWorkspaceId && !branchFrom,
     }),
     workspaces,
+    qor_baseline: qorBaseline,
   }
 }
 
@@ -412,6 +420,11 @@ export function archiveWorkspaceInManifest(
   workspaceId: string,
   now = new Date().toISOString(),
 ): ProjectManifest {
+  const workspaces = manifest.workspaces.map((workspace) =>
+    workspace.workspace_id === workspaceId
+      ? { ...workspace, status: 'archived' as const, updated_at: now }
+      : workspace,
+  )
   return {
     ...manifest,
     updated_at: now,
@@ -419,11 +432,8 @@ export function archiveWorkspaceInManifest(
       manifest.best_workspace?.workspace_id === workspaceId
         ? null
         : manifest.best_workspace,
-    workspaces: manifest.workspaces.map((workspace) =>
-      workspace.workspace_id === workspaceId
-        ? { ...workspace, status: 'archived', updated_at: now }
-        : workspace,
-    ),
+    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
+    workspaces,
   }
 }
 
@@ -432,6 +442,26 @@ export function deleteWorkspaceFromManifest(
   workspaceId: string,
   now = new Date().toISOString(),
 ): ProjectManifest {
+  const workspaces = manifest.workspaces
+    .filter((workspace) => workspace.workspace_id !== workspaceId)
+    .map((workspace) => {
+      const clearsSource =
+        workspace.source_workspace_id === workspaceId ||
+        workspace.branch_from?.source_workspace_id === workspaceId
+      if (!clearsSource) return workspace
+      return {
+        ...workspace,
+        source_workspace_id:
+          workspace.source_workspace_id === workspaceId
+            ? null
+            : workspace.source_workspace_id,
+        branch_from:
+          workspace.branch_from?.source_workspace_id === workspaceId
+            ? null
+            : workspace.branch_from,
+        updated_at: now,
+      }
+    })
   return {
     ...manifest,
     updated_at: now,
@@ -439,26 +469,8 @@ export function deleteWorkspaceFromManifest(
       manifest.best_workspace?.workspace_id === workspaceId
         ? null
         : manifest.best_workspace,
-    workspaces: manifest.workspaces
-      .filter((workspace) => workspace.workspace_id !== workspaceId)
-      .map((workspace) => {
-        const clearsSource =
-          workspace.source_workspace_id === workspaceId ||
-          workspace.branch_from?.source_workspace_id === workspaceId
-        if (!clearsSource) return workspace
-        return {
-          ...workspace,
-          source_workspace_id:
-            workspace.source_workspace_id === workspaceId
-              ? null
-              : workspace.source_workspace_id,
-          branch_from:
-            workspace.branch_from?.source_workspace_id === workspaceId
-              ? null
-              : workspace.branch_from,
-          updated_at: now,
-        }
-      }),
+    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
+    workspaces,
   }
 }
 
@@ -684,6 +696,37 @@ function normalizeBestWorkspace(value: unknown): ProjectManifest['best_workspace
   const workspaceId = optionalString(source?.workspace_id)
   if (!workspaceId) return null
   return { workspace_id: workspaceId, reason: optionalString(source?.reason) }
+}
+
+function normalizeQorBaseline(value: unknown): ProjectManifest['qor_baseline'] {
+  if (value === undefined || value === null) return null
+  const source = recordValue(value)
+  const workspaceId = optionalString(source?.workspace_id)
+  if (!workspaceId) return null
+  return {
+    workspace_id: workspaceId,
+    reason: optionalString(source?.reason) || 'Project QoR baseline',
+  }
+}
+
+export function ensureProjectQorBaseline(
+  baseline: ProjectManifest['qor_baseline'],
+  workspaces: readonly { workspace_id: string; status: string }[],
+): ProjectManifest['qor_baseline'] {
+  const hasAvailableBaseline = Boolean(
+    baseline &&
+    workspaces.some(
+      (workspace) =>
+        workspace.workspace_id === baseline.workspace_id &&
+        workspace.status !== 'archived',
+    ),
+  )
+  if (hasAvailableBaseline) return baseline
+
+  const workspace = workspaces.find((item) => item.status !== 'archived')
+  return workspace
+    ? { workspace_id: workspace.workspace_id, reason: 'Default project QoR baseline' }
+    : null
 }
 
 function normalizeStepMetrics(value: unknown): Record<string, Record<string, unknown>> {

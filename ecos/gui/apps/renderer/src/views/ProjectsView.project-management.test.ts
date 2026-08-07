@@ -463,7 +463,6 @@ describe('ProjectsView project management surface', () => {
   it('keeps the Step Analysis entry points in ProjectsView', () => {
     expect(source).toContain('const hasOpenedStepAnalysis = ref(false)')
     expect(source).toContain('handleAnalysisTabSelection')
-    expect(source).toContain('exportQorTrendReport')
     expect(source).toContain('setQorBaseline')
     expect(source).toContain('function openStepAnalysis()')
     expect(source).toContain("selectedStep.value = 'Synth'")

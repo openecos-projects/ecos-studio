@@ -55,7 +55,7 @@
         class="ri-bar-chart-box-line mb-3 text-4xl text-(--text-secondary) opacity-40"
       ></i>
       <p class="text-[12px] leading-relaxed text-(--text-secondary)">
-        Detailed QoR analysis is available for Place, Route, RCX, and STA steps.
+        QoR analysis is available after this step produces analysis artifacts.
       </p>
     </div>
 

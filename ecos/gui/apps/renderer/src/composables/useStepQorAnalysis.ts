@@ -95,12 +95,15 @@ function featureSource(value: unknown): StepQorFeatureSource | null {
 
 function detailData(
   metrics: unknown,
-  requestedDetailKey: string,
+  requestedDetailKey: string | undefined,
 ): {
   detail: Record<string, unknown> | null
   evidence: StepQorDetailEvidence | null
   invalidDetailIds: string[]
 } {
+  if (!requestedDetailKey) {
+    return { detail: null, evidence: null, invalidDetailIds: [] }
+  }
   if (
     !isRecord(metrics) ||
     metrics.schema_version !== 3 ||
@@ -216,7 +219,7 @@ function analysisIntegrity(
 
 function normalizeAnalysisData(
   payload: unknown,
-  requestedDetailKey: string,
+  requestedDetailKey: string | undefined,
 ): StepQorAnalysisData {
   const overview = metricOverview(payload)
   const detail = detailData(payload, requestedDetailKey)
@@ -325,7 +328,7 @@ export function useStepQorAnalysis() {
   const kind = computed(() =>
     currentStep.value ? KIND_BY_STEP[currentStep.value] : undefined,
   )
-  const isSupported = computed(() => Boolean(detailKey.value && kind.value))
+  const isSupported = computed(() => Boolean(currentStep.value))
   const isEmpty = computed(
     () =>
       !loading.value &&
@@ -362,7 +365,7 @@ export function useStepQorAnalysis() {
     const canApply = () =>
       workspaceLifecycle.isCurrentSession(sessionId) && activeFetchToken === fetchToken
 
-    if (!step || !requestedDetailKey) {
+    if (!step) {
       clear()
       loading.value = false
       return

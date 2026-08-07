@@ -6,6 +6,7 @@ import {
   isFlowExecutionActiveForWorkspace,
   markFlowExecutionActiveForWorkspace,
 } from './useFlowRunner'
+import { isSuccessfulFlowState } from './flowRunArtifacts'
 import {
   getWorkspaceResourceIndexApi,
   readWorkspaceHomeResourceApi,
@@ -89,6 +90,10 @@ export interface FlowLogSegment {
   stepName: string
   tool: string
   state: string
+  /** `home/flow.json` 中当前 step 的运行时长，用于日志标题。 */
+  runtime?: string
+  /** `home/flow.json` 中当前 step 的峰值内存（MB），用于日志标题。 */
+  peakMemoryMb?: number | null
   /** flow.json 中为 Incomplete / Invalid */
   failed: boolean
   /** 磁盘上不存在或无法读取 */
@@ -150,6 +155,7 @@ const flowLogErrorState = ref<string | null>(null)
 const flowLogLoadingState = ref(false)
 /** 递增的 load 会话号：新一次 loadAllFlowStepLogsFromFlowPath 发起后旧回调自动放弃 */
 let flowLogLoadSession = 0
+const flowLogContentGenerations = new Map<string, number>()
 
 function resetFlowLogState(): void {
   flowLogSegmentsState.value = []
@@ -157,6 +163,7 @@ function resetFlowLogState(): void {
   flowLogStepNameState.value = ''
   flowLogErrorState.value = null
   flowLogLoadingState.value = false
+  flowLogContentGenerations.clear()
   // 下发新的会话号，让进行中的 hydrate 早返回
   flowLogLoadSession++
 }
@@ -245,6 +252,44 @@ function clearFlowLogContent(key: string): void {
   const next = { ...flowLogContentState.value }
   delete next[key]
   flowLogContentState.value = next
+}
+
+function invalidateFlowLogContent(key: string): void {
+  flowLogContentGenerations.set(key, (flowLogContentGenerations.get(key) ?? 0) + 1)
+  clearFlowLogContent(key)
+}
+
+function flowLogContentGeneration(key: string): number {
+  return flowLogContentGenerations.get(key) ?? 0
+}
+
+/**
+ * Clears only the visible state for one step before a rerun starts. The backend
+ * owns the actual log file lifecycle; this prevents old output or an in-flight
+ * read from being rendered until the live step log supplies fresh content.
+ */
+export function prepareFlowLogSegmentForRerun(stepName: string): void {
+  const normalizedStepName = stepName.trim().toLowerCase()
+  if (!normalizedStepName) return
+
+  let matched = false
+  flowLogSegmentsState.value = flowLogSegmentsState.value.map((segment) => {
+    if (segment.stepName.trim().toLowerCase() !== normalizedStepName) return segment
+
+    matched = true
+    const key = flowLogSegmentKey(segment)
+    invalidateFlowLogContent(key)
+    invalidateLogFileCache(segment.logPath)
+    return {
+      ...segment,
+      missing: false,
+      truncated: false,
+      totalSize: 0,
+      lastReadOffsetBytes: 0,
+    }
+  })
+
+  if (matched) flowLogErrorState.value = null
 }
 
 function pruneFlowLogContentKeepOnly(aliveKeys: Iterable<string>): void {
@@ -1030,7 +1075,13 @@ export function useHomeData() {
 
     const fileContent = await readProjectTextFile(resolvedFlowPath)
     const flowData = JSON.parse(fileContent) as {
-      steps?: Array<{ name: string; tool: string; state: string }>
+      steps?: Array<{
+        name: string
+        tool: string
+        state: string
+        runtime?: unknown
+        'peak memory (mb)'?: unknown
+      }>
     }
     const steps = flowData.steps ?? []
     const root = resolvedWorkspaceRoot.replace(/\\/g, '/')
@@ -1059,6 +1110,12 @@ export function useHomeData() {
         stepName: step.name,
         tool: step.tool,
         state: step.state,
+        runtime: typeof step.runtime === 'string' ? step.runtime : '',
+        peakMemoryMb:
+          typeof step['peak memory (mb)'] === 'number' &&
+          Number.isFinite(step['peak memory (mb)'])
+            ? step['peak memory (mb)']
+            : null,
         failed,
         missing: false,
         ...(live ? { live: true } : {}),
@@ -1385,10 +1442,26 @@ export function useHomeData() {
       pruneFlowLogContentKeepOnly(logKeys)
       const segments = mergePlannedFlowLogSegments(plan.tasks, flowLogSegments.value)
       if (sid !== liveSession || currentProject.value?.path !== projectPath) return
+      const priorOngoingKey = lastOngoingKey
       flowLogSegments.value = segments
       const ongoing = segments.find((s) => s.live)
       flowLogStepName.value = ongoing?.stepName ?? ''
-      const key = ongoing ? `${ongoing.stepName}|${ongoing.tool}` : null
+      const key = ongoing ? flowLogSegmentKey(ongoing) : null
+
+      // Full-flow execution arrives as one RPC operation. Its flow.json does still
+      // record each step transition, so use the previous live step to detect a
+      // newly successful completion and refresh the Home panel immediately.
+      if (
+        priorOngoingKey &&
+        priorOngoingKey !== key &&
+        plan.tasks.some(
+          ({ seg }) =>
+            flowLogSegmentKey(seg) === priorOngoingKey &&
+            isSuccessfulFlowState(seg.state),
+        )
+      ) {
+        workspaceLifecycle.invalidate('all')
+      }
       if (key !== lastOngoingKey) {
         lastOngoingKey = key
         cleanupLogWatchOnly()
@@ -1412,6 +1485,7 @@ export function useHomeData() {
 
     const key = flowLogSegmentKey(segment)
     if (flowLogContentState.value[key]) return true
+    const contentGeneration = flowLogContentGeneration(key)
 
     const logPath = segment.logPath
     if (!logPath) return false
@@ -1425,6 +1499,10 @@ export function useHomeData() {
     if (idx < 0) return false
 
     const result = await readLogFileSmart(logPath)
+    if (contentGeneration !== flowLogContentGeneration(key)) {
+      invalidateLogFileCache(logPath)
+      return false
+    }
     const current = flowLogSegments.value[idx]
     if (!current) return false
 
@@ -1571,7 +1649,13 @@ export function useHomeData() {
 
     if (findIndex() < 0) return false
 
+    const key = flowLogSegmentKey(segment)
+    const contentGeneration = flowLogContentGeneration(key)
     const result = await readLogFileSmart(logPath, { forceFull: true, skipCache: true })
+    if (contentGeneration !== flowLogContentGeneration(key)) {
+      invalidateLogFileCache(logPath)
+      return false
+    }
     const idx = findIndex()
     if (idx < 0) return false
 

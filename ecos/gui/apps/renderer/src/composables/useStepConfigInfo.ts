@@ -70,8 +70,10 @@ function pinRouteStepConfigRoutingLayers(
 }
 
 function pickStepConfigPathFromInfo(data: Record<string, unknown>): string | undefined {
-  const v = data.config
-  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+  for (const value of [data.config, data.path]) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
 }
 
 function firstResponseMessage(
@@ -174,15 +176,6 @@ export function useStepConfigInfo() {
 
       if (response.response === 'missing') {
         info.value = payload
-        const configPath = payload ? pickStepConfigPathFromInfo(payload) : undefined
-        if (payload && configPath) {
-          responseKind.value = 'warning'
-          await loadStepConfigFileFromInfo(payload, sessionId, refetchToken)
-          if (canApply()) {
-            lastLoadedStep = stepEnum
-          }
-          return
-        }
         responseKind.value = 'idle'
         clearFileState()
         lastLoadedStep = stepEnum

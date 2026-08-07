@@ -6,91 +6,96 @@
         {
           'is-panel-fullscreen panel-fullscreen-card': isAnyPanelFullscreen,
           'is-chat-fullscreen': isChatFullscreen,
-          'is-step-config-fullscreen': isStepConfigFullscreen,
         },
       ]"
     >
-      <div
-        class="chat-inspector-topbar flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) px-3"
+      <Teleport
+        :to="props.toolbarTarget ?? 'body'"
+        :disabled="!props.toolbarTarget || isAnyPanelFullscreen"
       >
-        <div class="chat-inspector-tabs flex min-w-0 items-center gap-2">
-          <button
-            type="button"
-            @click="selectTab('chat')"
-            :class="tabClass(activeTab === 'chat')"
-            title="AI Chat"
-          >
-            <i class="ri-chat-3-line text-base"></i>
-          </button>
-          <button
-            v-if="showStepConfigInspector"
-            type="button"
-            @click="selectTab('inspector')"
-            :class="tabClass(activeTab === 'inspector')"
-            title="Configuration"
-          >
-            <i class="ri-layout-column-line text-base"></i>
-          </button>
-          <button
-            v-if="showStepQorAnalysis"
-            type="button"
-            @click="selectTab('analysis')"
-            :class="tabClass(activeTab === 'analysis')"
-            title="QoR Analysis"
-            aria-label="QoR Analysis"
-          >
-            <i class="ri-bar-chart-box-line text-base"></i>
-          </button>
-        </div>
-
-        <button
-          type="button"
-          class="chat-inspector-fullscreen-toggle"
-          :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
-          :aria-label="
-            activePanelFullscreen
-              ? activeTab === 'chat'
-                ? 'Exit AI Chat full screen'
-                : activeTab === 'inspector'
-                  ? 'Exit step configuration full screen'
-                  : 'Exit step QoR analysis full screen'
-              : activeTab === 'chat'
-                ? 'View AI Chat full screen'
-                : activeTab === 'inspector'
-                  ? 'View step configuration full screen'
-                  : 'View step QoR analysis full screen'
-          "
-          @click="toggleActivePanelFullscreen"
+        <div
+          class="chat-inspector-topbar flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) px-3"
         >
-          <i
-            :class="
-              activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
-            "
-          ></i>
-        </button>
-      </div>
+          <div class="chat-inspector-tabs flex min-w-0 items-center gap-2">
+            <span
+              class="flex h-8 w-9 items-center justify-center rounded border border-(--accent-color)/50 bg-(--accent-color)/20 text-(--accent-color)"
+              title="AI Chat"
+            >
+              <i class="ri-chat-3-line text-base"></i>
+            </span>
+          </div>
 
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div class="chat-inspector-actions">
+            <button
+              type="button"
+              class="chat-inspector-action-button chat-inspector-clear-button"
+              title="Clear all information"
+              aria-label="Clear all information"
+              :disabled="messages.length === 0"
+              @click="clearInformationConfirmationVisible = true"
+            >
+              <i class="ri-delete-bin-line" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
+              class="chat-inspector-action-button chat-inspector-fullscreen-toggle"
+              :title="isChatFullscreen ? 'Exit full screen' : 'Full screen'"
+              :aria-label="
+                isChatFullscreen ? 'Exit AI Chat full screen' : 'View AI Chat full screen'
+              "
+              @click="toggleChatFullscreen"
+            >
+              <i
+                :class="
+                  isChatFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
+                "
+              ></i>
+            </button>
+          </div>
+        </div>
+      </Teleport>
+
+      <div
+        class="chat-inspector-content flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      >
         <!-- KeepAlive：避免 v-if 销毁聊天导致 blob 图重新加载/裂图；状态与滚动由子组件 onActivated 恢复 -->
         <KeepAlive>
           <AIChatPanel
-            v-if="activeTab === 'chat'"
             class="h-full min-h-0 w-full max-w-full min-w-0 flex-1 overflow-hidden"
           />
         </KeepAlive>
-
-        <StepConfigPanel
-          v-if="activeTab === 'inspector' && showStepConfigInspector"
-          class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-        />
-
-        <StepQorAnalysisPanel
-          v-if="activeTab === 'analysis' && showStepQorAnalysis"
-          class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-        />
       </div>
     </div>
   </Teleport>
+
+  <Dialog
+    v-model:visible="clearInformationConfirmationVisible"
+    modal
+    header="Clear all information?"
+    :style="{ width: 'min(420px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <p class="clear-information-dialog-copy">
+      This removes all chat messages, reports, and layout cards from the information area.
+      Flow Status and Flow Step Log will be kept.
+    </p>
+    <div class="clear-information-dialog-actions">
+      <button
+        type="button"
+        class="clear-information-dialog-button"
+        @click="clearInformationConfirmationVisible = false"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        class="clear-information-dialog-button is-danger"
+        @click="confirmClearInformation"
+      >
+        Clear all
+      </button>
+    </div>
+  </Dialog>
 
   <Teleport to="body">
     <Transition name="panel-fullscreen-backdrop">
@@ -104,98 +109,34 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { StepEnum } from '@/api/type'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import Dialog from 'primevue/dialog'
+import { useMessageStore } from '@/stores/messageStore'
 import AIChatPanel from './AIChatPanel.vue'
-import StepConfigPanel from './StepConfigPanel.vue'
-import StepQorAnalysisPanel from './StepQorAnalysisPanel.vue'
 
-const route = useRoute()
-const stepEnumValues = Object.values(StepEnum)
+const props = defineProps<{
+  toolbarTarget?: HTMLElement | null
+}>()
 
-function stepFromRoutePath(): StepEnum | undefined {
-  const segment = route.path.split('/').pop() || ''
-  return stepEnumValues.find((s) => s.toLowerCase() === segment.toLowerCase())
-}
-
-/** Synthesis 不提供步骤配置编辑，隐藏 Inspector 标签与面板 */
-const showStepConfigInspector = computed(() => stepFromRoutePath() !== StepEnum.SYNTHESIS)
-const showStepQorAnalysis = computed(() =>
-  [StepEnum.PLACEMENT, StepEnum.ROUTING, StepEnum.STA].includes(
-    stepFromRoutePath() ?? StepEnum.INIT,
-  ),
-)
-
-const activeTab = ref<'chat' | 'inspector' | 'analysis'>('chat')
 const isChatFullscreen = ref(false)
-const isStepConfigFullscreen = ref(false)
-const isStepQorAnalysisFullscreen = ref(false)
+const clearInformationConfirmationVisible = ref(false)
+const messageStore = useMessageStore()
+const { messages } = storeToRefs(messageStore)
 
-const isAnyPanelFullscreen = computed(
-  () =>
-    isChatFullscreen.value ||
-    isStepConfigFullscreen.value ||
-    isStepQorAnalysisFullscreen.value,
-)
-const activePanelFullscreen = computed(() =>
-  activeTab.value === 'chat'
-    ? isChatFullscreen.value
-    : activeTab.value === 'inspector'
-      ? isStepConfigFullscreen.value
-      : isStepQorAnalysisFullscreen.value,
-)
-
-watch(
-  () => route.path,
-  () => {
-    if (!showStepConfigInspector.value && activeTab.value === 'inspector') {
-      activeTab.value = 'chat'
-    }
-    if (!showStepQorAnalysis.value && activeTab.value === 'analysis') {
-      activeTab.value = 'chat'
-    }
-    if (!showStepConfigInspector.value && isStepConfigFullscreen.value) {
-      closePanelFullscreen()
-    }
-    if (!showStepQorAnalysis.value && isStepQorAnalysisFullscreen.value) {
-      closePanelFullscreen()
-    }
-  },
-)
-
-function selectTab(tab: 'chat' | 'inspector' | 'analysis'): void {
-  if (tab === 'inspector' && !showStepConfigInspector.value) return
-  if (tab === 'analysis' && !showStepQorAnalysis.value) return
-  activeTab.value = tab
-
-  if (isAnyPanelFullscreen.value) {
-    openPanelFullscreen(tab)
-  }
-}
-
-function openPanelFullscreen(panel: 'chat' | 'inspector' | 'analysis'): void {
-  if (panel === 'inspector' && !showStepConfigInspector.value) return
-  if (panel === 'analysis' && !showStepQorAnalysis.value) return
-
-  activeTab.value = panel
-  isChatFullscreen.value = panel === 'chat'
-  isStepConfigFullscreen.value = panel === 'inspector'
-  isStepQorAnalysisFullscreen.value = panel === 'analysis'
-}
+const isAnyPanelFullscreen = isChatFullscreen
 
 function closePanelFullscreen(): void {
   isChatFullscreen.value = false
-  isStepConfigFullscreen.value = false
-  isStepQorAnalysisFullscreen.value = false
 }
 
-function toggleActivePanelFullscreen(): void {
-  if (activePanelFullscreen.value) {
-    closePanelFullscreen()
-    return
-  }
-  openPanelFullscreen(activeTab.value)
+function toggleChatFullscreen(): void {
+  isChatFullscreen.value = !isChatFullscreen.value
+}
+
+function confirmClearInformation(): void {
+  messageStore.clearMessages()
+  clearInformationConfirmationVisible.value = false
 }
 
 function onFullscreenKeydown(event: KeyboardEvent): void {
@@ -212,15 +153,6 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onFullscreenKeydown)
 })
-
-function tabClass(active: boolean) {
-  return [
-    'h-8 w-9 rounded flex items-center justify-center transition-all cursor-pointer border',
-    active
-      ? 'text-(--accent-color) bg-(--accent-color)/20 border-(--accent-color)/50'
-      : 'text-(--text-secondary) border-transparent hover:bg-(--bg-hover)',
-  ]
-}
 </script>
 
 <style scoped>
@@ -251,7 +183,18 @@ function tabClass(active: boolean) {
   flex: 1 1 auto;
 }
 
-.chat-inspector-fullscreen-toggle {
+.chat-inspector-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.chat-inspector-content {
+  flex: 1 1 0;
+}
+
+.chat-inspector-action-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -270,15 +213,56 @@ function tabClass(active: boolean) {
     transform 0.16s ease;
 }
 
-.chat-inspector-fullscreen-toggle:hover {
+.chat-inspector-action-button:hover:not(:disabled) {
   color: var(--accent-color);
   border-color: var(--accent-color);
   background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-primary));
   transform: translateY(-1px);
 }
 
-.chat-inspector-fullscreen-toggle:active {
+.chat-inspector-action-button:active:not(:disabled) {
   transform: translateY(0);
+}
+
+.chat-inspector-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.clear-information-dialog-copy {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.clear-information-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+
+.clear-information-dialog-button {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  min-width: 76px;
+  padding: 7px 10px;
+}
+
+.clear-information-dialog-button:hover {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.clear-information-dialog-button.is-danger {
+  background: var(--danger-color);
+  border-color: var(--danger-color);
+  color: #fff;
 }
 
 .panel-fullscreen-overlay {

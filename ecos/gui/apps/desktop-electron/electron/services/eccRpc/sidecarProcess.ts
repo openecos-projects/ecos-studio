@@ -1,7 +1,15 @@
 import { spawn as spawnChild } from 'node:child_process'
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
@@ -73,6 +81,16 @@ function environmentsEqual(
     }
   }
   return true
+}
+
+function pathIsWithin(path: string, directory: string): boolean {
+  const relativePath = relative(resolve(directory), resolve(path))
+  return (
+    relativePath !== '' &&
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) &&
+    !isAbsolute(relativePath)
+  )
 }
 
 export class EccRpcSidecarProcess {
@@ -219,6 +237,39 @@ export class EccRpcSidecarProcess {
     }
   }
 
+  /**
+   * Move a legacy workspace-owned sidecar log before ECC deletes rerun artifacts.
+   * stderr is appended by path, so updating logFile synchronously prevents the
+   * child from recreating the old file after this method returns.
+   */
+  relocateLogFileFrom(workspaceDirectory: string | null | undefined): void {
+    const previousLogFile = this.logFile
+    if (
+      !previousLogFile ||
+      !workspaceDirectory ||
+      !pathIsWithin(previousLogFile, workspaceDirectory)
+    ) {
+      return
+    }
+
+    const nextLogFile = this.createLogFile()
+    try {
+      try {
+        renameSync(previousLogFile, nextLogFile)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EXDEV') {
+          throw error
+        }
+        copyFileSync(previousLogFile, nextLogFile)
+        unlinkSync(previousLogFile)
+      }
+      this.logFile = nextLogFile
+    } catch (error) {
+      unlinkSync(nextLogFile)
+      throw error
+    }
+  }
+
   private async stopForRestart(child: SpawnedEccRpcSidecar): Promise<void> {
     let didExit = false
     let resolveExit: (() => void) | undefined
@@ -308,7 +359,7 @@ export class EccRpcSidecarProcess {
     const preferredDir = this.options.logDirectoryProvider?.()
     const logDir = preferredDir ?? join(this.tempDir, 'ecos-ecc-rpc-logs')
     mkdirSync(logDir, { recursive: true })
-    const path = join(logDir, `ecc-rpc-runtime-${timestampForFile()}.log`)
+    const path = join(logDir, `ecc-rpc-runtime-${timestampForFile()}-${randomUUID()}.log`)
     writeFileSync(path, '', { encoding: 'utf8', flag: 'w' })
     return path
   }

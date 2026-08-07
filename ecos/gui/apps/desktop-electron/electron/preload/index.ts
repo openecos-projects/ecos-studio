@@ -144,6 +144,8 @@ const desktopApi: DesktopApi = {
     getBoundPath: () => invokeDesktop(desktopApiIpcChannels.workspaceGetBoundPath),
     registerProjectRoot: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRegisterProjectRoot, path),
+    registerProjectReadRoot: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceRegisterProjectReadRoot, path),
     clearProjectRoot: () =>
       invokeDesktop(desktopApiIpcChannels.workspaceClearProjectRoot),
     requestProjectPathAccess: (path) =>
@@ -263,6 +265,8 @@ const desktopApi: DesktopApi = {
   chipViewer: {
     open: (request: ChipViewerOpenRequest) =>
       invokeDesktop(desktopApiIpcChannels.chipViewerOpen, request),
+    isOpen: (request: ChipViewerOpenRequest) =>
+      invokeDesktop(desktopApiIpcChannels.chipViewerIsOpen, request),
   },
   workspaceResources: {
     getIndex: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesGetIndex),

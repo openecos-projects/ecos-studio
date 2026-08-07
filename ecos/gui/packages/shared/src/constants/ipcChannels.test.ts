@@ -32,4 +32,8 @@ describe('desktop IPC channel constants', () => {
   it('defines a chip viewer launch channel', () => {
     expect(desktopApiIpcChannels.chipViewerOpen).toBe('chip-viewer:open')
   })
+
+  it('defines a chip viewer open-status channel', () => {
+    expect(desktopApiIpcChannels.chipViewerIsOpen).toBe('chip-viewer:is-open')
+  })
 })

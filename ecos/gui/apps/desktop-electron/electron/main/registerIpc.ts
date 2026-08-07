@@ -139,6 +139,7 @@ export interface DesktopBridgeServices {
       },
       listener: (event: DesktopProjectLogTailEvent) => void,
     ): Promise<string>
+    registerProjectReadRoot(path: string): Promise<string>
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
@@ -170,6 +171,7 @@ export interface DesktopBridgeServices {
   }
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
+    isOpen(request: ChipViewerOpenRequest): Promise<{ open: boolean }>
   }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
@@ -950,6 +952,10 @@ export function registerIpc(
     return await services.workspaceService.registerProjectRoot(path as string)
   })
 
+  handle(desktopApiIpcChannels.workspaceRegisterProjectReadRoot, async (_event, path) => {
+    return await services.workspaceService.registerProjectReadRoot(path as string)
+  })
+
   handle(desktopApiIpcChannels.workspaceClearProjectRoot, async (event) => {
     const sender = event.sender
     for (const [
@@ -1191,6 +1197,10 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.chipViewerOpen, async (_event, request) => {
     return await services.chipViewerService.open(request as ChipViewerOpenRequest)
+  })
+
+  handle(desktopApiIpcChannels.chipViewerIsOpen, async (_event, request) => {
+    return await services.chipViewerService.isOpen(request as ChipViewerOpenRequest)
   })
 
   handle(desktopApiIpcChannels.workspaceResourcesGetIndex, async () => {

@@ -1,3082 +1,2354 @@
 <template>
-  <div
-    :class="[
-      'home-view',
-      {
-        'layout-fullscreen-active': isLayoutFullscreen,
-        'flow-log-fullscreen-active': isFlowLogFullscreen,
-      },
-    ]"
-  >
-    <!-- 背景装饰 -->
-    <div class="bg-grid"></div>
-
-    <!-- ===== Dashboard Splitter ===== -->
-    <Splitter
-      class="dashboard-splitter"
-      layout="vertical"
-      :gutterSize="6"
-      @resizeend="onDashboardSplitterResizeEnd"
-    >
-      <!-- ================= Row 1: Chip Info | Runtime Monitoring ================= -->
-      <SplitterPanel :size="26" :minSize="10" class="dashboard-row">
-        <Splitter
-          class="dashboard-row-splitter"
-          :gutterSize="6"
-          @resizeend="onDashboardSplitterResizeEnd"
-        >
-          <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
-            <section class="section-card chip-info-area">
-              <div class="section-header">
-                <div class="header-icon"><i class="ri-cpu-line"></i></div>
+  <WorkspaceWorkbench flow-title="Flow status" :loading="flowLoading" :nodes="flowNodes">
+    <template #left>
+      <main class="home-dashboard" aria-label="Workspace dashboard">
+        <div class="home-dashboard-row home-dashboard-top">
+          <section class="dashboard-section chip-card">
+            <header class="dashboard-section-header">
+              <div>
+                <i class="ri-cpu-line" aria-hidden="true" />
                 <h2>Chip Basic Info</h2>
-                <span class="header-badge" v-if="config.pdk">{{ config.pdk }}</span>
               </div>
-              <div class="chip-info-content">
-                <div class="info-grid">
-                  <div class="info-item">
-                    <span class="info-label">Design</span>
-                    <span class="info-value highlight">{{ config.design || '--' }}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Top Module</span>
-                    <span class="info-value">{{ config.topModule || '--' }}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Die Size</span>
-                    <span class="info-value">{{
-                      config.die?.Size.join(' x ') || '--'
-                    }}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Core Size</span>
-                    <span class="info-value">{{
-                      config.core?.Size.join(' x ') || '--'
-                    }}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Target Frequency</span>
-                    <span class="info-value"
-                      >{{ config.frequencyMax || '--' }} <small>MHz</small></span
-                    >
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Utilization</span>
-                    <span class="info-value"
-                      >{{ ((config.core?.utilization || 0) * 100).toFixed(0) }}%</span
-                    >
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Clock</span>
-                    <span class="info-value">{{ config.clock || '--' }}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Layers</span>
-                    <span class="info-value"
-                      >{{ config.bottomLayer }} - {{ config.topLayer }}</span
-                    >
-                  </div>
-                </div>
+            </header>
+            <dl class="dashboard-parameter-grid chip-info-grid">
+              <div>
+                <dt>Project</dt>
+                <dd>{{ valueOrNA(qorComparisonState.projectName) }}</dd>
               </div>
-            </section>
-          </SplitterPanel>
+              <div>
+                <dt>SoC Template</dt>
+                <dd>{{ valueOrNA(mpcDisplayName) }}</dd>
+              </div>
+              <div>
+                <dt>Baseline workspace</dt>
+                <dd>{{ valueOrNA(qorComparisonState.baselineWorkspaceName) }}</dd>
+              </div>
+              <div>
+                <dt>Workspace</dt>
+                <dd>{{ valueOrNA(currentProject?.name) }}</dd>
+              </div>
+              <div>
+                <dt>PDK</dt>
+                <dd>{{ valueOrNA(config.pdk) }}</dd>
+              </div>
+              <div>
+                <dt>Design</dt>
+                <dd>{{ valueOrNA(config.design) }}</dd>
+              </div>
+              <div>
+                <dt>Top Module</dt>
+                <dd>{{ valueOrNA(config.topModule) }}</dd>
+              </div>
+              <div>
+                <dt>Target Die Area</dt>
+                <dd>{{ positiveNumberOrNA(config.die.area) }}</dd>
+              </div>
+              <div>
+                <dt>Target Frequency</dt>
+                <dd>{{ frequencyOrNA(config.frequencyMax) }}</dd>
+              </div>
+              <div>
+                <dt>Clock</dt>
+                <dd>{{ valueOrNA(config.clock) }}</dd>
+              </div>
+            </dl>
+          </section>
 
-          <SplitterPanel :size="55" :minSize="15" class="dashboard-cell">
-            <!-- ========== Row 1 Right: 运行时监控 ========== -->
-            <section class="section-card monitor-area">
-              <div class="section-header">
-                <div class="header-icon monitor"><i class="ri-pulse-line"></i></div>
-                <h2>Runtime Monitoring</h2>
+          <section class="dashboard-section constraint-card">
+            <header class="dashboard-section-header">
+              <div>
+                <i class="ri-ruler-2-line" aria-hidden="true" />
+                <h2>Constraints</h2>
               </div>
-              <div class="monitor-content" v-if="monitorData">
-                <div v-for="cfg in chartConfigs" :key="cfg.key" class="monitor-row">
-                  <span class="monitor-label">{{ cfg.label }}</span>
-                  <div class="monitor-chart-wrap">
-                    <div :ref="setChartRef(cfg.key)" class="monitor-chart"></div>
+            </header>
+            <dl class="dashboard-parameter-grid constraint-list">
+              <div v-if="mpcConstraints">
+                <dt>Minimum area</dt>
+                <dd>{{ valueOrDash(mpcConstraints.minimumArea) }}</dd>
+              </div>
+              <div v-if="mpcConstraints">
+                <dt>Maximum area</dt>
+                <dd>{{ valueOrDash(mpcConstraints.maximumArea) }}</dd>
+              </div>
+              <div v-if="mpcConstraints" :class="{ 'is-warning': cellLimitExceeded }">
+                <dt>Maximum cell count</dt>
+                <dd>{{ valueOrDash(mpcConstraints.maximumCellCount) }}</dd>
+              </div>
+              <div>
+                <dt>Max Fanout</dt>
+                <dd>{{ valueOrNA(maxFanout) }}</dd>
+              </div>
+            </dl>
+            <button
+              v-if="mpcConstraints"
+              type="button"
+              class="port-definition-link"
+              @click="showPorts = true"
+            >
+              Port Definition <i class="ri-arrow-right-up-line" aria-hidden="true" />
+            </button>
+          </section>
+
+          <section class="dashboard-section status-card">
+            <header class="dashboard-section-header">
+              <div><h2>Checklist</h2></div>
+            </header>
+            <div class="status-card-content">
+              <StatusPieChart
+                label="Checklist status distribution"
+                :slices="checklistSlices"
+                :center-primary="checklistCenterPrimary"
+                :center-secondary="checklistCenterSecondary"
+              />
+              <div class="status-summary-content" :class="`is-${checklistStatusTone}`">
+                <div>
+                  <strong class="status-summary-title">{{ checklistTitle }}</strong>
+                  <p>{{ checklistSummaryLabel }}</p>
+                </div>
+                <dl class="status-count-list">
+                  <div v-if="checklistSummary.total" class="is-pass">
+                    <dt>Passing</dt>
+                    <dd>{{ checklistSummary.passed }}/{{ checklistSummary.total }}</dd>
                   </div>
-                  <span class="monitor-value">{{ getMetricMax(cfg.key) }}</span>
-                </div>
-              </div>
-              <div v-else class="monitor-content">
-                <div class="monitor-placeholder">
-                  <i class="ri-pulse-line"></i>
-                  <p>No monitor data</p>
-                  <span
-                    >After running the flow, the monitoring data will be displayed.</span
-                  >
-                </div>
-              </div>
-            </section>
-          </SplitterPanel>
-        </Splitter>
-      </SplitterPanel>
-
-      <!-- ================= Row 2: Layout | Indicator Analysis ================= -->
-      <SplitterPanel :size="44" :minSize="15" class="dashboard-row">
-        <Splitter
-          class="dashboard-row-splitter"
-          :gutterSize="6"
-          @resizeend="onDashboardSplitterResizeEnd"
-        >
-          <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
-            <!-- ========== Row 2 Left+Center: Layout Preview ========== -->
-            <section class="section-card layout-area">
-              <div class="section-header">
-                <div class="header-icon layout">
-                  <i class="ri-layout-masonry-line"></i>
-                </div>
-                <h2>Layout</h2>
-                <span class="header-hint"
-                  >Displays the final step of the layout after the run is completed.</span
-                >
-                <div class="header-actions">
-                  <button
-                    class="action-btn"
-                    @click="toggleLayoutFullscreen"
-                    :title="isLayoutFullscreen ? 'Exit full screen' : 'full screen'"
-                  >
-                    <i
-                      :class="
-                        isLayoutFullscreen
-                          ? 'ri-fullscreen-exit-line'
-                          : 'ri-fullscreen-line'
-                      "
-                    ></i>
-                  </button>
-                </div>
-              </div>
-              <div class="layout-content">
-                <img
-                  v-if="layoutBlobUrl"
-                  :src="layoutBlobUrl"
-                  alt="Layout Preview"
-                  class="layout-image"
-                  draggable="false"
-                />
-                <!-- 科技感扫描线 -->
-                <!-- <div v-if="layoutBlobUrl && !isLayoutFullscreen" class="scanner-line"></div> -->
-                <div v-else-if="!layoutBlobUrl" class="layout-placeholder">
-                  <i class="ri-image-2-line"></i>
-                  <p>Layout Preview</p>
-                  <span>Waiting for layout data...</span>
-                </div>
-              </div>
-            </section>
-          </SplitterPanel>
-
-          <SplitterPanel :size="55" :minSize="15" class="dashboard-cell">
-            <!-- ========== Row 2 Right: 指标分析 ========== -->
-            <section class="section-card analysis-area">
-              <div class="section-header">
-                <div class="header-icon analysis"><i class="ri-pie-chart-line"></i></div>
-                <h2>Indicator Analysis</h2>
-              </div>
-              <div class="analysis-content">
-                <div class="charts-grid" v-if="analysisCharts.length > 0">
-                  <div
-                    class="chart-card"
-                    v-for="chart in analysisCharts"
-                    :key="chart.label"
-                    :title="chart.label"
-                    role="button"
-                    tabindex="0"
-                    @click="onAnalysisChartClick(chart)"
-                    @keydown.enter.prevent="onAnalysisChartClick(chart)"
-                    @keydown.space.prevent="onAnalysisChartClick(chart)"
-                  >
-                    <div class="chart-visual">
-                      <img
-                        v-if="chart.imageBlobUrl"
-                        :src="chart.imageBlobUrl"
-                        :alt="chart.label"
-                        class="chart-image"
-                        draggable="false"
-                      />
-                      <i v-else class="ri-image-2-line"></i>
-                    </div>
-                    <span class="chart-label">{{ chart.label }}</span>
+                  <div v-if="checklistSummary.total" class="is-blocked">
+                    <dt>Blocked</dt>
+                    <dd>{{ checklistSummary.blocked }}/{{ checklistSummary.total }}</dd>
                   </div>
-                </div>
-                <div v-else class="analysis-placeholder">
-                  <i class="ri-pie-chart-line"></i>
-                  <p>No metrics data</p>
-                  <span
-                    >After running the flow, the indicator analysis will be
-                    displayed.</span
-                  >
-                </div>
-              </div>
-            </section>
-          </SplitterPanel>
-        </Splitter>
-      </SplitterPanel>
-
-      <!-- ================= Row 3: Flow Log | Checklist ================= -->
-      <SplitterPanel :size="30" :minSize="10" class="dashboard-row">
-        <Splitter
-          class="dashboard-row-splitter"
-          :gutterSize="6"
-          @resizeend="onDashboardSplitterResizeEnd"
-        >
-          <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
-            <!-- ========== Row 3 Left: Flow step log ========== -->
-            <section class="section-card gds-area">
-              <div class="section-header">
-                <div class="header-icon gds"><i class="ri-terminal-line"></i></div>
-                <h2>Flow Step Log</h2>
-                <span v-if="flowLogStepName" class="header-badge">{{
-                  flowLogStepName
-                }}</span>
-                <div class="header-actions">
-                  <button
-                    type="button"
-                    class="action-btn flow-log-fullscreen-toggle"
-                    :title="isFlowLogFullscreen ? 'Exit full screen' : 'Full screen'"
-                    :aria-label="
-                      isFlowLogFullscreen
-                        ? 'Exit flow step log full screen'
-                        : 'View flow step log full screen'
-                    "
-                    @click="toggleFlowLogFullscreen"
-                  >
-                    <i
-                      :class="
-                        isFlowLogFullscreen
-                          ? 'ri-fullscreen-exit-line'
-                          : 'ri-fullscreen-line'
-                      "
-                    ></i>
-                  </button>
-                </div>
-              </div>
-              <div class="flow-log-content">
-                <div v-if="flowLogError" class="flow-log-error">{{ flowLogError }}</div>
-                <div v-else-if="flowLogListItems.length" class="flow-log-layout">
-                  <div class="flow-log-viewer-panel">
-                    <div class="flow-log-viewer-header">
-                      <div class="flow-log-viewer-header-main">
-                        <div
-                          v-if="selectedFlowLogSegment"
-                          class="flow-log-viewer-summary-row"
-                        >
-                          <span class="flow-log-viewer-title">{{
-                            selectedFlowLogSegment.stepName
-                          }}</span>
-                          <span class="flow-log-viewer-tool">{{
-                            selectedFlowLogSegment.tool
-                          }}</span>
-                          <span
-                            class="flow-log-viewer-state"
-                            :class="{
-                              failed: selectedFlowLogSegment.failed,
-                              live: selectedFlowLogSegment.live,
-                            }"
-                          >
-                            {{ selectedFlowLogSegment.state }}
-                          </span>
-                          <span
-                            v-if="selectedFlowLogSegment.totalSize"
-                            class="flow-log-viewer-size"
-                          >
-                            {{ formatKb(selectedFlowLogSegment.totalSize) }}
-                          </span>
-                          <span
-                            v-if="
-                              flowLogLoading ||
-                              loadingSelectedFlowLogKey === selectedFlowLogKey
-                            "
-                            class="flow-log-viewer-loading"
-                          >
-                            <i class="ri-loader-4-line spin"></i>
-                            {{ flowLogLoading ? 'Updating…' : 'Loading log…' }}
-                          </span>
-                        </div>
-                        <div v-else class="flow-log-viewer-summary-row empty">
-                          <span class="flow-log-viewer-title">Current step</span>
-                          <span class="flow-log-viewer-tool"
-                            >Select a step to inspect its output.</span
-                          >
-                        </div>
-                      </div>
-
-                      <div class="flow-log-viewer-actions">
-                        <button
-                          ref="flowLogStepChooserTriggerRef"
-                          type="button"
-                          class="flow-log-steps-trigger"
-                          aria-controls="flow-log-step-chooser-dialog"
-                          :aria-expanded="isFlowLogStepChooserOpen ? 'true' : 'false'"
-                          aria-haspopup="dialog"
-                          :aria-label="
-                            isFlowLogStepChooserOpen
-                              ? 'Hide flow step chooser'
-                              : 'Show flow step chooser'
-                          "
-                          @click="toggleFlowLogStepChooserFromTrigger"
-                        >
-                          <i class="ri-list-check"></i>
-                          <span>Steps</span>
-                        </button>
-                        <button
-                          v-if="selectedFlowLogSegment"
-                          type="button"
-                          class="flow-log-copy-btn"
-                          :class="{
-                            'is-copied': flowLogCopyFeedback === 'copied',
-                            'is-error':
-                              flowLogCopyFeedback === 'failed' ||
-                              flowLogCopyFeedback === 'empty',
-                          }"
-                          :disabled="!canCopyFlowLogText"
-                          :title="flowLogCopyButtonTitle"
-                          :aria-label="flowLogCopyButtonTitle"
-                          @click="onCopyFlowLogText"
-                        >
-                          <i
-                            :class="
-                              flowLogCopyFeedback === 'copied'
-                                ? 'ri-check-line'
-                                : 'ri-file-copy-line'
-                            "
-                          ></i>
-                          <span>{{
-                            flowLogCopyFeedback === 'copied' ? 'Copied' : 'Copy'
-                          }}</span>
-                        </button>
-                        <button
-                          v-if="liveFlowLogKey && liveFlowLogKey !== selectedFlowLogKey"
-                          type="button"
-                          class="flow-log-jump-live-btn"
-                          @click="jumpToLiveStep"
-                        >
-                          <i class="ri-skip-right-line"></i>
-                          <span>Jump to live</span>
-                        </button>
-                        <button
-                          v-if="selectedFlowLogSegment?.truncated"
-                          type="button"
-                          class="flow-log-expand-btn"
-                          :disabled="expandingFlowLogKeys[selectedFlowLogKey || '']"
-                          :title="`Load full log (${formatKb(selectedFlowLogSegment.totalSize)})`"
-                          @click="onExpandFullLog(selectedFlowLogSegment)"
-                        >
-                          <i
-                            :class="[
-                              expandingFlowLogKeys[selectedFlowLogKey || '']
-                                ? 'ri-loader-4-line flow-log-expand-btn-spinner'
-                                : 'ri-expand-up-down-line',
-                            ]"
-                          ></i>
-                          <span v-if="expandingFlowLogKeys[selectedFlowLogKey || '']"
-                            >Loading full log…</span
-                          >
-                          <span v-else>Show full log</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div class="flow-log-viewer-shell">
-                      <FlowLogCodeViewer
-                        v-if="selectedFlowLogSegment"
-                        :key="selectedFlowLogKey ?? 'no-selection'"
-                        :content="selectedFlowLogContent"
-                        :live="Boolean(selectedFlowLogSegment.live)"
-                        :missing="selectedFlowLogSegment.missing"
-                        :loading="loadingSelectedFlowLogKey === selectedFlowLogKey"
-                      />
-                      <div v-else class="flow-log-placeholder">
-                        <i class="ri-terminal-line"></i>
-                        <p>No step selected</p>
-                        <span
-                          >Open Steps to inspect a log once a flow step is
-                          available.</span
-                        >
-                      </div>
-                    </div>
+                  <div v-if="checklistSummary.total" class="is-warning">
+                    <dt>Warning</dt>
+                    <dd>{{ checklistSummary.warning }}/{{ checklistSummary.total }}</dd>
                   </div>
-                </div>
-                <div v-else-if="flowLogLoading" class="flow-log-loading">
-                  <i class="ri-loader-4-line flow-log-loading-icon"></i>
-                  <p>Loading flow step logs…</p>
-                  <span
-                    >Reading flow.json and log files from the workspace. Steps will appear
-                    as they load.</span
-                  >
-                </div>
-                <div v-else class="flow-log-placeholder">
-                  <i class="ri-terminal-line"></i>
-                  <p>No flow step log yet</p>
-                  <span
-                    >Unstarted steps are hidden. Logs show up here once a step begins or
-                    finishes.</span
-                  >
-                </div>
-              </div>
-            </section>
-          </SplitterPanel>
-
-          <SplitterPanel :size="55" :minSize="15" class="dashboard-cell">
-            <!-- ========== Row 3 Right: Checklist Table ========== -->
-            <section class="section-card checklist-area">
-              <div class="section-header">
-                <div class="header-icon checklist">
-                  <i class="ri-checkbox-multiple-line"></i>
-                </div>
-                <h2>Checklist Table</h2>
-                <span class="header-count"
-                  >{{ checklistCompletedCount }}/{{ checklistItems.length }}</span
-                >
-              </div>
-              <div class="checklist-content">
-                <ChecklistTable
-                  :items="checklistItems"
-                  :show-summary="false"
-                  empty-hint="After running the flow, the checklist will be displayed."
-                />
-              </div>
-            </section>
-          </SplitterPanel>
-        </Splitter>
-      </SplitterPanel>
-    </Splitter>
-
-    <Teleport to="body">
-      <Transition name="flow-log-chooser">
-        <div
-          v-if="isFlowLogStepChooserOpen"
-          class="flow-log-chooser-overlay"
-          @click="closeFlowLogStepChooser"
-        >
-          <div
-            id="flow-log-step-chooser-dialog"
-            ref="flowLogChooserDialogRef"
-            class="flow-log-chooser-anchor"
-            :style="flowLogChooserAnchorStyle"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Flow step chooser"
-            tabindex="-1"
-            @click.stop
-            @keydown="onFlowLogChooserKeydown"
-          >
-            <FlowLogStepChooser
-              :items="flowLogListItems"
-              :selected-key="selectedFlowLogKey"
-              :live-key="liveFlowLogKey"
-              @close="closeFlowLogStepChooser"
-              @jump-live="jumpToLiveStep"
-              @select="onSelectFlowLogStep"
-            />
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-
-    <!-- ===== Flow Step Log Fullscreen Overlay ===== -->
-    <Teleport to="body">
-      <Transition name="lightbox">
-        <div
-          v-if="isFlowLogFullscreen"
-          class="flow-log-fullscreen-overlay"
-          @click="closeFlowLogFullscreen"
-        >
-          <section class="section-card flow-log-fullscreen-card" @click.stop>
-            <div class="section-header">
-              <div class="header-icon gds"><i class="ri-terminal-line"></i></div>
-              <h2>Flow Step Log</h2>
-              <span v-if="flowLogStepName" class="header-badge">{{
-                flowLogStepName
-              }}</span>
-              <div class="header-actions">
+                  <div v-if="checklistSummary.unavailable" class="is-unavailable">
+                    <dt>Unavailable</dt>
+                    <dd>
+                      {{ checklistSummary.unavailable }}/{{ checklistSummary.total }}
+                    </dd>
+                  </div>
+                </dl>
                 <button
                   type="button"
-                  class="action-btn flow-log-fullscreen-toggle"
-                  title="Exit full screen"
-                  aria-label="Exit flow step log full screen"
-                  @click="closeFlowLogFullscreen"
+                  class="status-detail-link"
+                  title="View checklist details"
+                  @click="showChecklist = true"
                 >
-                  <i class="ri-fullscreen-exit-line"></i>
+                  Sign-off details <i class="ri-arrow-right-up-line" aria-hidden="true" />
                 </button>
               </div>
             </div>
-            <div class="flow-log-content flow-log-fullscreen-content">
-              <div v-if="flowLogError" class="flow-log-error">{{ flowLogError }}</div>
-              <div
-                v-else-if="flowLogListItems.length"
-                class="flow-log-layout flow-log-fullscreen-layout"
-              >
-                <div class="flow-log-viewer-panel">
-                  <div class="flow-log-viewer-header">
-                    <div class="flow-log-viewer-header-main">
-                      <div
-                        v-if="selectedFlowLogSegment"
-                        class="flow-log-viewer-summary-row"
-                      >
-                        <span class="flow-log-viewer-title">{{
-                          selectedFlowLogSegment.stepName
-                        }}</span>
-                        <span class="flow-log-viewer-tool">{{
-                          selectedFlowLogSegment.tool
-                        }}</span>
-                        <span
-                          class="flow-log-viewer-state"
-                          :class="{
-                            failed: selectedFlowLogSegment.failed,
-                            live: selectedFlowLogSegment.live,
-                          }"
-                        >
-                          {{ selectedFlowLogSegment.state }}
-                        </span>
-                        <span
-                          v-if="selectedFlowLogSegment.totalSize"
-                          class="flow-log-viewer-size"
-                        >
-                          {{ formatKb(selectedFlowLogSegment.totalSize) }}
-                        </span>
-                        <span
-                          v-if="
-                            flowLogLoading ||
-                            loadingSelectedFlowLogKey === selectedFlowLogKey
-                          "
-                          class="flow-log-viewer-loading"
-                        >
-                          <i class="ri-loader-4-line spin"></i>
-                          {{ flowLogLoading ? 'Updating…' : 'Loading log…' }}
-                        </span>
-                      </div>
-                      <div v-else class="flow-log-viewer-summary-row empty">
-                        <span class="flow-log-viewer-title">Current step</span>
-                        <span class="flow-log-viewer-tool"
-                          >Select a step to inspect its output.</span
-                        >
-                      </div>
-                    </div>
+          </section>
+        </div>
 
-                    <div class="flow-log-viewer-actions">
-                      <button
-                        type="button"
-                        class="flow-log-steps-trigger"
-                        aria-controls="flow-log-step-chooser-dialog"
-                        :aria-expanded="isFlowLogStepChooserOpen ? 'true' : 'false'"
-                        aria-haspopup="dialog"
-                        :aria-label="
-                          isFlowLogStepChooserOpen
-                            ? 'Hide flow step chooser'
-                            : 'Show flow step chooser'
-                        "
-                        @click="toggleFlowLogStepChooserFromTrigger"
-                      >
-                        <i class="ri-list-check"></i>
-                        <span>Steps</span>
-                      </button>
-                      <button
-                        v-if="selectedFlowLogSegment"
-                        type="button"
-                        class="flow-log-copy-btn"
-                        :class="{
-                          'is-copied': flowLogCopyFeedback === 'copied',
-                          'is-error':
-                            flowLogCopyFeedback === 'failed' ||
-                            flowLogCopyFeedback === 'empty',
-                        }"
-                        :disabled="!canCopyFlowLogText"
-                        :title="flowLogCopyButtonTitle"
-                        :aria-label="flowLogCopyButtonTitle"
-                        @click="onCopyFlowLogText"
-                      >
-                        <i
-                          :class="
-                            flowLogCopyFeedback === 'copied'
-                              ? 'ri-check-line'
-                              : 'ri-file-copy-line'
-                          "
-                        ></i>
-                        <span>{{
-                          flowLogCopyFeedback === 'copied' ? 'Copied' : 'Copy'
-                        }}</span>
-                      </button>
-                      <button
-                        v-if="liveFlowLogKey && liveFlowLogKey !== selectedFlowLogKey"
-                        type="button"
-                        class="flow-log-jump-live-btn"
-                        @click="jumpToLiveStep"
-                      >
-                        <i class="ri-skip-right-line"></i>
-                        <span>Jump to live</span>
-                      </button>
-                      <button
-                        v-if="selectedFlowLogSegment?.truncated"
-                        type="button"
-                        class="flow-log-expand-btn"
-                        :disabled="expandingFlowLogKeys[selectedFlowLogKey || '']"
-                        :title="`Load full log (${formatKb(selectedFlowLogSegment.totalSize)})`"
-                        @click="onExpandFullLog(selectedFlowLogSegment)"
-                      >
-                        <i
-                          :class="[
-                            expandingFlowLogKeys[selectedFlowLogKey || '']
-                              ? 'ri-loader-4-line flow-log-expand-btn-spinner'
-                              : 'ri-expand-up-down-line',
-                          ]"
-                        ></i>
-                        <span v-if="expandingFlowLogKeys[selectedFlowLogKey || '']"
-                          >Loading full log…</span
-                        >
-                        <span v-else>Show full log</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="flow-log-viewer-shell">
-                    <FlowLogCodeViewer
-                      v-if="selectedFlowLogSegment"
-                      :key="`fullscreen-${selectedFlowLogKey ?? 'no-selection'}`"
-                      :content="selectedFlowLogContent"
-                      :live="Boolean(selectedFlowLogSegment.live)"
-                      :missing="selectedFlowLogSegment.missing"
-                      :loading="loadingSelectedFlowLogKey === selectedFlowLogKey"
-                    />
-                    <div v-else class="flow-log-placeholder">
-                      <i class="ri-terminal-line"></i>
-                      <p>No step selected</p>
-                      <span
-                        >Open Steps to inspect a log once a flow step is available.</span
-                      >
-                    </div>
+        <div class="home-dashboard-row home-dashboard-middle">
+          <section class="dashboard-section status-card qor-card">
+            <header class="dashboard-section-header">
+              <div><h2>Quality of Results</h2></div>
+            </header>
+            <div class="qor-overview">
+              <div class="qor-visual-column">
+                <div
+                  class="qor-score-hero is-baseline"
+                  :class="`is-${qorBaselineScoreTone}`"
+                >
+                  <span>Baseline QoR score</span>
+                  <small :title="qorComparisonState.baselineWorkspaceName ?? undefined">
+                    {{ qorComparisonState.baselineWorkspaceName ?? 'Baseline workspace' }}
+                  </small>
+                  <div>
+                    <strong>{{ qorBaselineScoreValue }}</strong>
+                    <small v-if="qorBaselineScoreValue !== 'N/A'">/ 100</small>
                   </div>
                 </div>
+                <span class="qor-score-versus" aria-hidden="true">VS</span>
+                <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
+                  <span>QoR score</span>
+                  <div>
+                    <strong>{{ qorScoreValue }}</strong>
+                    <small v-if="qorScoreValue !== 'N/A'">/ 100</small>
+                  </div>
+                  <em>{{ qorScoreStatusLabel }}</em>
+                </div>
               </div>
-              <div v-else-if="flowLogLoading" class="flow-log-loading">
-                <i class="ri-loader-4-line flow-log-loading-icon"></i>
-                <p>Loading flow step logs…</p>
-                <span
-                  >Reading flow.json and log files from the workspace. Steps will appear
-                  as they load.</span
+              <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
+                <div>
+                  <strong class="status-summary-title">QoR comparison</strong>
+                  <p>{{ qorSummaryLabel }}</p>
+                </div>
+                <dl class="status-count-list">
+                  <div class="is-pass">
+                    <dt>Improved</dt>
+                    <dd>{{ qorComparisonSummary.improvedCount }}</dd>
+                  </div>
+                  <div class="is-blocked">
+                    <dt>Regressed</dt>
+                    <dd>{{ qorComparisonSummary.regressedCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>Compared</dt>
+                    <dd>{{ qorComparisonSummary.comparableCount }}</dd>
+                  </div>
+                </dl>
+                <div class="qor-comparison-pie">
+                  <StatusPieChart
+                    label="QoR comparison distribution"
+                    :slices="qorSlices"
+                    show-labels
+                  />
+                </div>
+                <button
+                  type="button"
+                  class="status-detail-link"
+                  title="View QoR details"
+                  @click="void openQorDetails()"
                 >
+                  QoR details <i class="ri-arrow-right-up-line" aria-hidden="true" />
+                </button>
               </div>
-              <div v-else class="flow-log-placeholder">
-                <i class="ri-terminal-line"></i>
-                <p>No flow step log yet</p>
-                <span
-                  >Unstarted steps are hidden. Logs show up here once a step begins or
-                  finishes.</span
+              <div class="qor-step-list">
+                <section
+                  v-for="step in qorDashboardSteps"
+                  :key="step.id"
+                  class="qor-step-row"
                 >
+                  <button
+                    type="button"
+                    class="qor-step-link"
+                    :title="`Open ${step.label} QoR analysis`"
+                    @click="openStepQorAnalysis(step.label)"
+                  >
+                    <span
+                      class="qor-step-status"
+                      :class="`is-${step.comparisonState}`"
+                      aria-hidden="true"
+                    />
+                    <strong>{{ step.label }}</strong>
+                    <i class="ri-arrow-right-up-line" aria-hidden="true" />
+                  </button>
+                  <div
+                    class="qor-step-trend"
+                    :aria-label="`${step.label}: ${step.improvedCount} improved, ${step.regressedCount} regressed, ${step.unchangedCount} unchanged, ${step.comparableCount} compared`"
+                  >
+                    <div class="qor-step-trend-bar" aria-hidden="true">
+                      <span
+                        v-if="step.improvedCount"
+                        class="is-improved"
+                        :style="{ flexGrow: step.improvedCount }"
+                      />
+                      <span
+                        v-if="step.regressedCount"
+                        class="is-regressed"
+                        :style="{ flexGrow: step.regressedCount }"
+                      />
+                      <span
+                        v-if="step.unchangedCount"
+                        class="is-neutral"
+                        :style="{ flexGrow: step.unchangedCount }"
+                      />
+                      <span
+                        v-if="!step.comparableCount"
+                        class="is-unavailable"
+                        :style="{ flexGrow: 1 }"
+                      />
+                    </div>
+                    <strong class="qor-step-total">{{ step.comparableCount }}</strong>
+                  </div>
+                </section>
+                <div v-if="!qorDashboardSteps.length" class="dashboard-empty compact">
+                  No QoR analysis yet
+                </div>
               </div>
             </div>
           </section>
-        </div>
-      </Transition>
-    </Teleport>
 
-    <!-- ===== Layout Fullscreen Overlay ===== -->
-    <Teleport to="body">
-      <Transition name="lightbox">
-        <div
-          v-if="isLayoutFullscreen"
-          class="layout-fullscreen-overlay"
-          @click="closeLayoutFullscreen"
-        >
-          <section class="section-card layout-fullscreen-card" @click.stop>
-            <div class="section-header">
-              <div class="header-icon layout"><i class="ri-layout-masonry-line"></i></div>
-              <h2>Layout</h2>
-              <span class="header-hint"
-                >Displays the final step of the layout after the run is completed.</span
+          <section class="dashboard-section layout-card">
+            <header class="dashboard-section-header">
+              <div>
+                <i class="ri-layout-masonry-line" aria-hidden="true" />
+                <h2>{{ layoutTitle }}</h2>
+              </div>
+              <button
+                type="button"
+                class="dashboard-icon-button"
+                :disabled="!canOpenLayoutChipViewer"
+                title="Open ChipView"
+                aria-label="Open ChipView"
+                @click="openLayoutChipViewer"
               >
-              <div class="header-actions">
+                <i
+                  class="ri-cpu-line"
+                  :class="{ 'animate-pulse': layoutChipViewerBusy }"
+                  aria-hidden="true"
+                />
+              </button>
+            </header>
+            <button
+              v-if="layoutPreviewUrl"
+              type="button"
+              class="layout-preview"
+              title="Open layout preview"
+              @click="preview = { label: 'Layout preview', url: layoutPreviewUrl }"
+            >
+              <img :src="layoutPreviewUrl" alt="Latest layout preview" />
+            </button>
+            <div v-else class="dashboard-empty">
+              <i class="ri-image-2-line" /><span>Waiting for layout data</span>
+            </div>
+          </section>
+        </div>
+
+        <div class="home-dashboard-row home-dashboard-bottom">
+          <section class="dashboard-section key-metrics-card">
+            <header class="dashboard-section-header">
+              <div>
+                <i class="ri-speed-up-line" aria-hidden="true" />
+                <h2>Key Metrics</h2>
+              </div>
+            </header>
+            <dl class="dashboard-parameter-grid key-metrics-grid">
+              <div v-for="metric in keyMetrics" :key="metric.id">
+                <dt>{{ metric.label }}</dt>
+                <dd>{{ formatDashboardMetric(metric) }}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="dashboard-section snapshot-card">
+            <header class="dashboard-section-header">
+              <div>
+                <i class="ri-gallery-line" aria-hidden="true" />
+                <h2>Data Snapshot</h2>
+              </div>
+              <span class="dashboard-muted">{{ homeSnapshots.length }} snapshots</span>
+            </header>
+            <div
+              v-if="homeSnapshots.length"
+              class="snapshot-grid"
+              aria-label="Flow snapshots"
+            >
+              <div
+                v-for="(snapshot, index) in homeSnapshotCells"
+                :key="snapshot?.id ?? `snapshot-empty-${index}`"
+                class="snapshot-grid-cell"
+                :class="{ 'is-empty': !snapshot }"
+              >
                 <button
-                  class="action-btn"
-                  @click="closeLayoutFullscreen"
-                  title="Exit full screen"
+                  v-if="snapshot"
+                  type="button"
+                  :title="snapshot.label"
+                  @click="
+                    snapshot.kind === 'image'
+                      ? (preview = { label: snapshot.label, url: snapshot.url })
+                      : openHomeSnapshotDetail(snapshot)
+                  "
                 >
-                  <i class="ri-fullscreen-exit-line"></i>
+                  <img
+                    v-if="snapshot.kind === 'image'"
+                    :src="snapshot.url"
+                    :alt="snapshot.label"
+                  />
+                  <StatusPieChart
+                    v-else
+                    class="home-snapshot-pie"
+                    :label="`${snapshot.label} distribution`"
+                    :slices="snapshot.slices"
+                    :center-primary="formatHomeSnapshotTotal(snapshot.total)"
+                    :center-secondary="snapshot.unit || 'count'"
+                  />
+                  <span>{{ snapshot.label }}</span>
                 </button>
               </div>
             </div>
-            <div
-              ref="layoutContentRef"
-              class="layout-content layout-fullscreen-content"
-              @wheel.prevent="onLayoutWheel"
-              @mousedown="onLayoutMouseDown"
-              @mousemove="onLayoutMouseMove"
-              @mouseup="onLayoutMouseUp"
-              @mouseleave="onLayoutMouseUp"
-            >
-              <img
-                v-if="layoutBlobUrl"
-                :src="layoutBlobUrl"
-                alt="Layout Preview"
-                class="layout-image layout-fullscreen-image"
-                :style="layoutImageTransform"
-                draggable="false"
-              />
-              <div v-else class="layout-placeholder">
-                <i class="ri-image-2-line"></i>
-                <p>Layout Preview</p>
-                <span>Waiting for layout data...</span>
-              </div>
-              <div v-if="layoutBlobUrl" class="zoom-indicator">
-                {{ Math.round(layoutScale * 100) }}%
-              </div>
+            <div v-else class="dashboard-empty">
+              <i class="ri-gallery-line" /><span>No flow snapshots</span>
             </div>
           </section>
         </div>
-      </Transition>
-    </Teleport>
+      </main>
+    </template>
 
-    <Teleport to="body">
-      <span
-        v-if="flowLogCopyFeedback"
-        ref="flowLogCopyTooltipRef"
-        class="flow-log-copy-tooltip"
-        :class="{
-          'is-copied': flowLogCopyFeedback === 'copied',
-          'is-error': flowLogCopyFeedback === 'failed' || flowLogCopyFeedback === 'empty',
-          'is-above': flowLogCopyTooltipStyle?.placement === 'above',
-        }"
-        :style="flowLogCopyTooltipInlineStyle"
-        role="status"
-      >
-        {{ flowLogCopyTooltip }}
-      </span>
-    </Teleport>
+    <template #right-log="{ selectedNode }">
+      <FlowLogPanel
+        :content-by-key="flowLogContentByKey"
+        :ensure-content="ensureFlowLogSegmentContentLoaded"
+        :error="flowLogError"
+        :execution-active="currentWorkspaceFlowExecutionActive"
+        :loading="flowLogLoading"
+        :selected-node="selectedNode"
+        :segments="flowLogSegments"
+      />
+    </template>
+  </WorkspaceWorkbench>
 
-    <!-- ===== 图表预览 Lightbox ===== -->
-    <Teleport to="body">
-      <Transition name="lightbox">
-        <div
-          v-if="chartPreview.visible"
-          class="chart-lightbox-overlay"
-          @click="closeChartPreview"
-        >
-          <div class="chart-lightbox-content" @click.stop>
-            <div class="chart-lightbox-header">
-              <span class="chart-lightbox-title">{{ chartPreview.label }}</span>
-              <button class="chart-lightbox-close" @click="closeChartPreview">
-                <i class="ri-close-line"></i>
-              </button>
-            </div>
-            <div class="chart-lightbox-body">
-              <img :src="chartPreview.url" :alt="chartPreview.label" />
-            </div>
-          </div>
+  <Dialog
+    v-model:visible="showPorts"
+    modal
+    header="Port Definition"
+    :style="{ width: 'min(760px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <table class="dashboard-detail-table">
+      <thead>
+        <tr>
+          <th>Port</th>
+          <th>Direction</th>
+          <th>Type</th>
+          <th>Width</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="port in mpcConstraints?.ports" :key="port.name">
+          <td>{{ port.name }}</td>
+          <td>{{ port.direction }}</td>
+          <td>{{ port.dataType }}</td>
+          <td>{{ port.width ?? '--' }}</td>
+          <td>{{ port.info || '--' }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p v-if="!mpcConstraints?.ports.length" class="dialog-empty">
+      No ports are declared by this MPC template.
+    </p>
+  </Dialog>
+
+  <Dialog
+    v-model:visible="showChecklist"
+    modal
+    header="Checklist Details"
+    :style="{ width: 'min(920px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <div v-if="checklistItems.length" class="checklist-detail-list">
+      <section v-for="item in checklistItems" :key="item.id" :class="`is-${item.state}`">
+        <div>
+          <strong>{{ item.title }}</strong
+          ><span>{{ item.step }}</span>
         </div>
-      </Transition>
-    </Teleport>
-  </div>
+        <p>{{ item.summary }}</p>
+        <code>{{ sourcePath(item.source) }}</code>
+      </section>
+    </div>
+    <p v-else class="dialog-empty">No checklist detail is available.</p>
+  </Dialog>
+
+  <Dialog
+    v-model:visible="showQor"
+    modal
+    maximizable
+    header="QoR Comparison"
+    class="qor-detail-dialog"
+    :style="{ width: 'min(1280px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <div v-if="qorDetail" class="qor-detail-waterfall">
+      <article class="qor-detail-card qor-detail-summary-card">
+        <header>
+          <div>
+            <span>QoR comparison</span>
+            <strong>Baseline and current workspace</strong>
+          </div>
+          <i class="ri-scales-3-line" aria-hidden="true" />
+        </header>
+        <div class="qor-detail-summary-grid">
+          <section class="is-baseline">
+            <span>Baseline</span>
+            <strong :title="qorDetail.baseline.workspaceName">
+              {{ qorDetail.baseline.workspaceName }}
+            </strong>
+            <div class="qor-detail-score-value">
+              <strong>{{ formatQorScore(qorDetail.baseline.score) }}</strong>
+              <span v-if="qorDetail.baseline.score !== null">/ 100</span>
+            </div>
+          </section>
+          <section class="is-current" :class="`is-${qorDetail.scoreState}`">
+            <span>Current workspace</span>
+            <strong :title="qorDetail.current.workspaceName">
+              {{ qorDetail.current.workspaceName }}
+            </strong>
+            <div class="qor-detail-score-value">
+              <strong>{{ formatQorScore(qorDetail.current.score) }}</strong>
+              <span v-if="qorDetail.current.score !== null">/ 100</span>
+            </div>
+          </section>
+          <dl class="qor-detail-summary-list">
+            <div>
+              <dt>Directional metrics</dt>
+              <dd>{{ qorDetail.summary.comparableCount }}</dd>
+            </div>
+            <div class="is-improvement">
+              <dt>Improved</dt>
+              <dd>{{ qorDetail.summary.improvedCount }}</dd>
+            </div>
+            <div class="is-regression">
+              <dt>Regressed</dt>
+              <dd>{{ qorDetail.summary.regressedCount }}</dd>
+            </div>
+            <div>
+              <dt>Score trend</dt>
+              <dd :class="`is-${qorDetail.scoreState}`">
+                {{
+                  qorScoreComparisonLabel(
+                    qorDetail.current.score,
+                    qorDetail.baseline.score,
+                  )
+                }}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <p v-if="!qorDetail.steps.length" class="qor-detail-no-metrics">
+        {{ qorDetailsEmptyLabel }}
+      </p>
+
+      <article
+        v-for="step in qorDetail.steps"
+        :key="step.step"
+        class="qor-detail-card qor-detail-step-card"
+      >
+        <header>
+          <div>
+            <span>Step {{ String(step.order).padStart(2, '0') }}</span>
+            <strong>{{ step.label }}</strong>
+          </div>
+          <small>
+            {{ step.metrics.length }} metrics · {{ step.improvedCount }} improved ·
+            {{ step.regressedCount }} regressed
+          </small>
+        </header>
+        <dl class="qor-detail-metric-list">
+          <div class="qor-detail-metric-heading" aria-hidden="true">
+            <dt>Metric</dt>
+            <dd>Baseline</dd>
+            <dd>Current</dd>
+            <p>Trend</p>
+          </div>
+          <div
+            v-for="metric in step.metrics"
+            :key="`${step.step}:${metric.metricName}`"
+            :class="`is-${metric.state}`"
+          >
+            <dt>
+              <span>{{ metric.displayName }}</span>
+              <small>{{ metric.metricName }}</small>
+            </dt>
+            <dd>{{ formatQorValue(metric.baselineValue, metric.unit) }}</dd>
+            <dd>{{ formatQorValue(metric.currentValue, metric.unit) }}</dd>
+            <p :class="`is-${metric.state}`">{{ qorMetricComparisonLabel(metric) }}</p>
+          </div>
+        </dl>
+      </article>
+    </div>
+    <p v-else class="dialog-empty">{{ qorDetailsEmptyLabel }}</p>
+  </Dialog>
+
+  <Dialog
+    v-model:visible="previewVisible"
+    modal
+    maximizable
+    :header="preview?.label ?? 'Preview'"
+    :style="{ width: 'min(1100px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <img
+      v-if="preview"
+      class="dashboard-image-preview"
+      :src="preview.url"
+      :alt="preview.label"
+    />
+  </Dialog>
+
+  <Dialog
+    v-model:visible="homeSnapshotDetailVisible"
+    modal
+    :header="selectedHomeSnapshot?.label ?? 'Snapshot Distribution'"
+    :style="{ width: 'min(880px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <div v-if="selectedHomeSnapshot" class="home-snapshot-detail">
+      <section class="home-snapshot-detail-chart">
+        <StatusPieChart
+          :label="`${selectedHomeSnapshot.label} distribution`"
+          :slices="selectedHomeSnapshot.slices"
+          :center-primary="formatHomeSnapshotTotal(selectedHomeSnapshot.total)"
+          :center-secondary="selectedHomeSnapshot.unit || 'count'"
+          show-labels
+        />
+      </section>
+      <dl class="home-snapshot-detail-list">
+        <div v-for="slice in selectedHomeSnapshot.slices" :key="slice.id">
+          <dt>
+            <span :style="{ backgroundColor: slice.color ?? undefined }" />
+            {{ slice.label }}
+          </dt>
+          <dd>{{ formatHomeSnapshotTotal(slice.value) }}</dd>
+        </div>
+      </dl>
+    </div>
+  </Dialog>
 </template>
 
-<script lang="ts">
-export interface FlowLogChooserEscapeEvent {
-  key: string
-  preventDefault?: () => void
-}
-
-export interface FlowLogChooserController {
-  selectedFlowLogKey: string | null
-  isFlowLogStepChooserOpen: boolean
-  toggleFlowLogStepChooser: () => void
-  closeFlowLogStepChooser: () => void
-  onSelectFlowLogStep: (key: string) => void
-  jumpToLiveStep: (liveKey: string | null) => void
-  onFlowLogChooserEscape: (event: FlowLogChooserEscapeEvent) => void
-}
-
-export function createFlowLogChooserController(
-  initialSelectedKey: string | null = null,
-): FlowLogChooserController {
-  const controller: FlowLogChooserController = {
-    selectedFlowLogKey: initialSelectedKey,
-    isFlowLogStepChooserOpen: false,
-    toggleFlowLogStepChooser(this: FlowLogChooserController) {
-      this.isFlowLogStepChooserOpen = !this.isFlowLogStepChooserOpen
-    },
-    closeFlowLogStepChooser(this: FlowLogChooserController) {
-      this.isFlowLogStepChooserOpen = false
-    },
-    onSelectFlowLogStep(this: FlowLogChooserController, key: string) {
-      this.selectedFlowLogKey = key
-      this.closeFlowLogStepChooser()
-    },
-    jumpToLiveStep(this: FlowLogChooserController, liveKey: string | null) {
-      if (!liveKey) return
-      this.selectedFlowLogKey = liveKey
-      this.closeFlowLogStepChooser()
-    },
-    onFlowLogChooserEscape(
-      this: FlowLogChooserController,
-      event: FlowLogChooserEscapeEvent,
-    ) {
-      if (event.key !== 'Escape' || !this.isFlowLogStepChooserOpen) return
-      if (typeof event.preventDefault === 'function') {
-        event.preventDefault()
-      }
-      this.closeFlowLogStepChooser()
-    },
-  }
-
-  return controller
-}
-
-export interface FlowLogChooserRect {
-  top: number
-  left: number
-  right: number
-  bottom: number
-  width: number
-  height: number
-}
-
-export interface FlowLogChooserViewport {
-  width: number
-  height: number
-}
-
-export interface FlowLogChooserSize {
-  width: number
-  height: number
-}
-
-export interface FlowLogChooserAnchorStyle {
-  left: string
-  top: string
-  transformOrigin: string
-}
-
-const FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX = 20
-const FLOW_LOG_CHOOSER_GAP_PX = 8
-const FLOW_LOG_CHOOSER_FALLBACK_WIDTH_PX = 320
-const FLOW_LOG_CHOOSER_FALLBACK_HEIGHT_PX = 320
-
-export function computeFlowLogChooserAnchorStyle(
-  triggerRect: FlowLogChooserRect,
-  viewport: FlowLogChooserViewport,
-  chooserSize: FlowLogChooserSize,
-): FlowLogChooserAnchorStyle {
-  const width = chooserSize.width || FLOW_LOG_CHOOSER_FALLBACK_WIDTH_PX
-  const height = chooserSize.height || FLOW_LOG_CHOOSER_FALLBACK_HEIGHT_PX
-  const maxLeft = Math.max(
-    FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX,
-    viewport.width - width - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX,
-  )
-  const preferredLeft = triggerRect.right - width
-  const left = Math.min(
-    Math.max(FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX, preferredLeft),
-    maxLeft,
-  )
-
-  const spaceBelow =
-    viewport.height - triggerRect.bottom - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX
-  const spaceAbove = triggerRect.top - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX
-  const placeBelow = spaceBelow >= height || spaceBelow >= spaceAbove
-  const preferredTop = placeBelow
-    ? triggerRect.bottom + FLOW_LOG_CHOOSER_GAP_PX
-    : triggerRect.top - height - FLOW_LOG_CHOOSER_GAP_PX
-  const maxTop = Math.max(
-    FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX,
-    viewport.height - height - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX,
-  )
-  const top = Math.min(
-    Math.max(FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX, preferredTop),
-    maxTop,
-  )
-
-  return {
-    left: `${Math.round(left)}px`,
-    top: `${Math.round(top)}px`,
-    transformOrigin: placeBelow ? 'top right' : 'bottom right',
-  }
-}
-</script>
-
 <script setup lang="ts">
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import Dialog from 'primevue/dialog'
+import { useRoute, useRouter } from 'vue-router'
+import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
+import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
+import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
+import StatusPieChart from '@/components/home/StatusPieChart.vue'
 import {
-  ref,
-  reactive,
-  computed,
-  onMounted,
-  onUnmounted,
-  watch,
-  nextTick,
-  toRef,
-} from 'vue'
-import type { ComponentPublicInstance } from 'vue'
-import * as echarts from 'echarts/core'
-import { LineChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
-import Splitter from 'primevue/splitter'
-import SplitterPanel from 'primevue/splitterpanel'
-import FlowLogCodeViewer from '@/components/FlowLogCodeViewer.vue'
-import FlowLogStepChooser from '@/components/FlowLogStepChooser.vue'
-import ChecklistTable from '@/components/ChecklistTable.vue'
+  checklistPieSlices,
+  checklistStatusSummary,
+  formatDashboardMetric,
+} from '@/components/home/dashboardData'
+import {
+  buildHomeQorDetailModel,
+  homeQorFlowStepForLabel,
+  summarizeHomeQorComparison,
+} from '@/components/home/qorComparisonData'
+import { useDashboardOverview } from '@/composables/useDashboardOverview'
+import { useFlowStages } from '@/composables/useFlowStages'
+import { useHomeData } from '@/composables/useHomeData'
+import {
+  useHomeSnapshots,
+  type HomeSnapshotDistribution,
+} from '@/composables/useHomeSnapshots'
+import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
 import { useParameters } from '@/composables/useParameters'
+import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
+import { useWorkspace } from '@/composables/useWorkspace'
+import { getDesktopApi } from '@/platform/desktop'
+import { readProjectBlobUrl } from '@/utils/projectFiles'
+import { resolveProjectPathAccess } from '@/utils/projectFs'
+import { QOR_SCORE_THRESHOLD } from '@/utils/projectQorTrend'
 import {
-  useHomeData,
-  type AnalysisChartItem,
-  type FlowLogSegment,
-} from '@/composables/useHomeData'
-import { isChecklistPassed } from '@/utils/checklistState'
-import { isWindowResizing } from '@/composables/useWindowResizeState'
-import {
-  flowLogStepKey,
-  getDefaultSelectedFlowLogKey,
-  reconcileSelectedFlowLogKey,
-  toFlowLogListItems,
-} from './homeViewFlowLogSelection'
-import {
-  computeFlowLogCopyTooltipStyle,
-  copyFlowLogText,
-  flowLogCopyFeedbackFromResult,
-  flowLogCopyFeedbackTooltip,
-  type FlowLogCopyFeedback,
-  type FlowLogCopyTooltipStyle,
-} from './homeViewFlowLogCopy'
-import { ensureMonitorChartInstance } from './homeMonitorCharts'
-
-// 注册 ECharts 组件（按需引入）
-echarts.use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
+  buildChipViewerOpenRequest,
+  canOpenChipViewer,
+} from '@/components/drawingAreaChipViewer'
 
 const { config } = useParameters()
+const router = useRouter()
+const route = useRoute()
+const { currentProject } = useWorkspace()
+const { flowStages, isLoading: flowLoading } = useFlowStages()
 const {
-  monitorData,
   checklistItems,
-  layoutBlobUrl,
-  analysisCharts,
-  flowLogSegments,
-  flowLogContentByKey,
-  flowLogStepName,
-  flowLogError,
-  flowLogLoading,
   currentWorkspaceFlowExecutionActive,
   ensureFlowLogSegmentContentLoaded,
-  expandFlowLogSegment,
+  flowLogContentByKey,
+  flowLogError,
+  flowLogLoading,
+  flowLogSegments,
+  layoutBlobUrl,
 } = useHomeData()
+const { items: homeSnapshots } = useHomeSnapshots()
+const {
+  index: dashboardResourceIndex,
+  keyMetrics,
+  maxFanout,
+  mpcDisplayName,
+  mpcConstraints,
+  qorSteps,
+} = useDashboardOverview()
+const { state: qorComparisonState, refresh: refreshQorComparison } =
+  useHomeQorComparison()
 
-/** 正在展开完整日志的 step key 集合，避免同一步连点多次以及按钮 loading 状态 */
-const expandingFlowLogKeys = reactive<Record<string, boolean>>({})
-
-function formatKb(totalChars: number | undefined): string {
-  if (!totalChars || totalChars <= 0) return '?'
-  const kb = totalChars / 1024
-  if (kb < 1) return `${totalChars} B`
-  if (kb < 1024) return `${Math.round(kb)} KB`
-  return `${(kb / 1024).toFixed(1)} MB`
-}
-
-async function onExpandFullLog(seg: FlowLogSegment): Promise<void> {
-  const key = flowLogStepKey(seg)
-  if (expandingFlowLogKeys[key]) return
-  expandingFlowLogKeys[key] = true
-  try {
-    await expandFlowLogSegment(seg)
-  } finally {
-    expandingFlowLogKeys[key] = false
-  }
-}
-
-const flowLogListItems = computed(() => toFlowLogListItems(flowLogSegments.value))
-const flowLogChooser = reactive(
-  createFlowLogChooserController(getDefaultSelectedFlowLogKey(flowLogSegments.value)),
+const showPorts = ref(false)
+const showChecklist = ref(false)
+const showQor = ref(false)
+const preview = ref<{ label: string; url: string } | null>(null)
+const selectedHomeSnapshot = ref<HomeSnapshotDistribution | null>(null)
+const layoutChipViewerBusy = ref(false)
+const layoutPreviewBlobUrl = ref('')
+const DATA_SNAPSHOT_ROWS = 4
+const DATA_SNAPSHOT_COLUMNS = 5
+let layoutPreviewLoadToken = 0
+let loadedLayoutPreviewSignature = ''
+const homeSnapshotCells = computed(() =>
+  Array.from(
+    { length: DATA_SNAPSHOT_ROWS * DATA_SNAPSHOT_COLUMNS },
+    (_, index) => homeSnapshots.value[index] ?? null,
+  ),
 )
-const selectedFlowLogKey = toRef(flowLogChooser, 'selectedFlowLogKey')
-const isFlowLogStepChooserOpen = toRef(flowLogChooser, 'isFlowLogStepChooserOpen')
-const flowLogChooserDialogRef = ref<HTMLElement | null>(null)
-const flowLogStepChooserTriggerRef = ref<HTMLButtonElement | null>(null)
-const flowLogChooserAnchorStyle = ref<FlowLogChooserAnchorStyle>({
-  left: `${FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX}px`,
-  top: `${FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX}px`,
-  transformOrigin: 'top right',
+const previewVisible = computed({
+  get: () => preview.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) preview.value = null
+  },
 })
-const loadingSelectedFlowLogKey = ref<string | null>(null)
-const liveFlowLogKey = computed(() => {
-  const liveSegment = flowLogSegments.value.find((segment) => segment.live)
-  return liveSegment ? flowLogStepKey(liveSegment) : null
+const homeSnapshotDetailVisible = computed({
+  get: () => selectedHomeSnapshot.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) selectedHomeSnapshot.value = null
+  },
 })
-const selectedFlowLogSegment = computed(() => {
-  if (!selectedFlowLogKey.value) return null
+
+function openHomeSnapshotDetail(snapshot: HomeSnapshotDistribution): void {
+  selectedHomeSnapshot.value = snapshot
+}
+
+function formatHomeSnapshotTotal(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 2,
+    notation: Math.abs(value) >= 1_000_000 ? 'compact' : 'standard',
+  }).format(value)
+}
+
+const flowNodes = computed<FlowStatusNode[]>(() =>
+  flowStages.value
+    .filter((stage) => stage.group === 'run')
+    .map((stage) => ({
+      id: `${stage.path}:${stage.label}`,
+      label: stage.label,
+      status: flowNodeStatus(stage.state),
+      runtime: stage.runtime,
+      peakMemoryMb: Number.isFinite(stage['peak memory (mb)'])
+        ? stage['peak memory (mb)']
+        : null,
+    })),
+)
+const layoutOutputStage = computed(() => {
   return (
-    flowLogSegments.value.find(
-      (segment) => flowLogStepKey(segment) === selectedFlowLogKey.value,
-    ) ?? null
+    [...flowStages.value]
+      .reverse()
+      .find(
+        (stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded',
+      ) ?? null
   )
 })
-const selectedFlowLogContent = computed(() => {
-  if (!selectedFlowLogKey.value) return ''
-  return flowLogContentByKey.value[selectedFlowLogKey.value] ?? ''
-})
-const canCopyFlowLogText = computed(
-  () =>
-    Boolean(selectedFlowLogSegment.value) &&
-    !selectedFlowLogSegment.value?.missing &&
-    selectedFlowLogContent.value.length > 0,
-)
-const flowLogCopyFeedback = ref<FlowLogCopyFeedback | null>(null)
-const flowLogCopyTooltipStyle = ref<FlowLogCopyTooltipStyle | null>(null)
-const flowLogCopyTooltipRef = ref<HTMLElement | null>(null)
-let flowLogCopyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
-let flowLogCopyFeedbackToken = 0
-const flowLogCopyTooltip = computed(() =>
-  flowLogCopyFeedbackTooltip(flowLogCopyFeedback.value),
-)
-const flowLogCopyButtonTitle = computed(() =>
-  flowLogCopyFeedback.value ? flowLogCopyTooltip.value : flowLogCopyFeedbackTooltip(null),
-)
-const flowLogCopyTooltipInlineStyle = computed(() => {
-  const style = flowLogCopyTooltipStyle.value
-  if (!style) return undefined
-  return {
-    left: style.left,
-    top: style.top,
+const layoutRenderStage = computed(() => {
+  const outputStage = layoutOutputStage.value
+  if (!outputStage || outputStage.label.trim().toLowerCase() !== 'harden') {
+    return outputStage
   }
-})
-const flowLogSelectionSignature = computed(() =>
-  flowLogSegments.value
-    .map((segment) =>
-      [flowLogStepKey(segment), segment.state, segment.live ? '1' : '0'].join(':'),
-    )
-    .join('\u001e'),
-)
 
-function clearFlowLogCopyFeedbackTimer(): void {
-  if (flowLogCopyFeedbackTimer) {
-    clearTimeout(flowLogCopyFeedbackTimer)
-    flowLogCopyFeedbackTimer = null
-  }
-}
-
-function getFlowLogCopyViewport() {
-  return {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }
-}
-
-function positionFlowLogCopyTooltip(
-  trigger: HTMLElement,
-  tooltipSize?: { width: number; height: number },
-): void {
-  const triggerRect = trigger.getBoundingClientRect()
-  flowLogCopyTooltipStyle.value = computeFlowLogCopyTooltipStyle(
-    triggerRect,
-    getFlowLogCopyViewport(),
-    tooltipSize
-      ? {
-          tooltipWidthPx: tooltipSize.width,
-          tooltipHeightPx: tooltipSize.height,
-        }
-      : undefined,
+  return (
+    [...flowStages.value]
+      .reverse()
+      .find(
+        (stage) =>
+          stage.group === 'run' &&
+          stage.path.trim().toLowerCase() === 'sta' &&
+          flowNodeStatus(stage.state) === 'succeeded',
+      ) ?? null
   )
+})
+const layoutPreviewImage = computed(() => {
+  const projectPath = currentProject.value?.path
+  const outputStage = layoutOutputStage.value
+  const resourceIndex = dashboardResourceIndex.value
+  if (!projectPath || resourceIndex?.root !== projectPath || !outputStage) return null
+
+  const stageKeys = new Set(
+    [outputStage.path, outputStage.label].map((value) => value.trim().toLowerCase()),
+  )
+  const image = resourceIndex.flow.steps.find((step) =>
+    stageKeys.has(step.name.trim().toLowerCase()),
+  )?.resources.output.image
+  return image?.exists ? image : null
+})
+const layoutPreviewUrl = computed(() =>
+  layoutPreviewImage.value ? layoutPreviewBlobUrl.value : layoutBlobUrl.value,
+)
+const layoutTitle = computed(() => {
+  const stage = layoutOutputStage.value
+  return `ChipView - ${stage?.label ?? '--'} - ${stage?.tool || '--'}`
+})
+const canOpenLayoutChipViewer = computed(() => {
+  const stage = layoutRenderStage.value
+  if (!stage || !layoutPreviewUrl.value) return false
+  return canOpenChipViewer({
+    chipViewerBusy: layoutChipViewerBusy.value,
+    chipViewerEditBusy: false,
+    isDesktopRuntime: isDesktopRuntime(),
+    projectPath: currentProject.value?.path,
+    step: stage.path,
+  })
+})
+
+function clearLayoutPreviewBlobUrl(): void {
+  const previousUrl = layoutPreviewBlobUrl.value
+  layoutPreviewBlobUrl.value = ''
+  loadedLayoutPreviewSignature = ''
+  if (previousUrl.startsWith('blob:')) URL.revokeObjectURL(previousUrl)
 }
 
-async function refineFlowLogCopyTooltipPosition(
-  trigger: HTMLElement,
-  token: number,
+async function loadLayoutPreviewImage(
+  image: { path: string; mtimeMs?: number; sizeBytes?: number } | null,
 ): Promise<void> {
-  await nextTick()
-  if (token !== flowLogCopyFeedbackToken) return
-  const tooltipEl = flowLogCopyTooltipRef.value
-  if (!tooltipEl || !trigger.isConnected) return
-
-  const tooltipRect = tooltipEl.getBoundingClientRect()
-  positionFlowLogCopyTooltip(trigger, {
-    width: tooltipRect.width,
-    height: tooltipRect.height,
-  })
-}
-
-function setFlowLogCopyFeedback(
-  feedback: FlowLogCopyFeedback,
-  trigger?: HTMLElement | null,
-): void {
-  clearFlowLogCopyFeedbackTimer()
-  const token = ++flowLogCopyFeedbackToken
-  flowLogCopyFeedback.value = feedback
-
-  if (trigger?.isConnected) {
-    positionFlowLogCopyTooltip(trigger)
-    void refineFlowLogCopyTooltipPosition(trigger, token)
-  } else {
-    flowLogCopyTooltipStyle.value = null
+  const projectPath = currentProject.value?.path
+  const token = ++layoutPreviewLoadToken
+  if (!image || !projectPath) {
+    clearLayoutPreviewBlobUrl()
+    return
   }
 
-  flowLogCopyFeedbackTimer = setTimeout(() => {
-    if (token !== flowLogCopyFeedbackToken) return
-    flowLogCopyFeedback.value = null
-    flowLogCopyTooltipStyle.value = null
-    flowLogCopyFeedbackTimer = null
-  }, 2000)
-}
+  const signature = `${image.path}:${image.mtimeMs ?? 0}:${image.sizeBytes ?? 0}`
+  if (signature === loadedLayoutPreviewSignature && layoutPreviewBlobUrl.value) return
 
-async function onCopyFlowLogText(event: MouseEvent): Promise<void> {
-  const trigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
-  const result = await copyFlowLogText(selectedFlowLogContent.value)
-  setFlowLogCopyFeedback(flowLogCopyFeedbackFromResult(result), trigger)
-}
-
-function toggleFlowLogStepChooser(): void {
-  flowLogChooser.toggleFlowLogStepChooser()
-}
-
-function toggleFlowLogStepChooserFromTrigger(event: MouseEvent): void {
-  if (event.currentTarget instanceof HTMLButtonElement) {
-    flowLogStepChooserTriggerRef.value = event.currentTarget
-  }
-  toggleFlowLogStepChooser()
-}
-
-function closeFlowLogStepChooser(): void {
-  flowLogChooser.closeFlowLogStepChooser()
-}
-
-function onFlowLogChooserKeydown(event: KeyboardEvent): void {
-  flowLogChooser.onFlowLogChooserEscape(event)
-}
-
-function onSelectFlowLogStep(key: string): void {
-  flowLogChooser.onSelectFlowLogStep(key)
-}
-
-function jumpToLiveStep(): void {
-  flowLogChooser.jumpToLiveStep(liveFlowLogKey.value)
-}
-
-function updateFlowLogChooserAnchorPosition(): void {
-  const trigger = flowLogStepChooserTriggerRef.value
-  const dialog = flowLogChooserDialogRef.value
-  if (!trigger || !dialog || typeof window === 'undefined') return
-
-  const triggerRect = trigger.getBoundingClientRect()
-  const dialogRect = dialog.getBoundingClientRect()
-  flowLogChooserAnchorStyle.value = computeFlowLogChooserAnchorStyle(
-    triggerRect,
-    {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    },
-    {
-      width: dialogRect.width,
-      height: dialogRect.height,
-    },
-  )
-}
-
-watch(
-  [flowLogSelectionSignature, currentWorkspaceFlowExecutionActive],
-  ([, isFlowRunning]) => {
-    selectedFlowLogKey.value = reconcileSelectedFlowLogKey(
-      flowLogSegments.value,
-      selectedFlowLogKey.value,
-      { preferLive: isFlowRunning },
-    )
-  },
-  { immediate: true },
-)
-
-watch(isFlowLogStepChooserOpen, async (isOpen, wasOpen) => {
-  await nextTick()
-  if (isOpen) {
-    requestAnimationFrame(() => {
-      updateFlowLogChooserAnchorPosition()
-      flowLogChooserDialogRef.value?.focus()
+  try {
+    const authorizedPath = await resolveProjectPathAccess(image.path)
+    if (!authorizedPath) throw new Error(`Cannot access layout preview: ${image.path}`)
+    const nextBlobUrl = await readProjectBlobUrl(authorizedPath, {
+      mimeType: 'image/png',
     })
-    if (typeof window !== 'undefined') {
-      window.addEventListener('resize', updateFlowLogChooserAnchorPosition)
+    if (token !== layoutPreviewLoadToken) {
+      if (nextBlobUrl.startsWith('blob:')) URL.revokeObjectURL(nextBlobUrl)
+      return
     }
-    return
+
+    const previousUrl = layoutPreviewBlobUrl.value
+    layoutPreviewBlobUrl.value = nextBlobUrl
+    loadedLayoutPreviewSignature = signature
+    if (previousUrl.startsWith('blob:')) URL.revokeObjectURL(previousUrl)
+  } catch (error) {
+    if (token !== layoutPreviewLoadToken) return
+    console.error('Failed to load the selected layout preview:', error)
+    clearLayoutPreviewBlobUrl()
   }
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('resize', updateFlowLogChooserAnchorPosition)
-  }
-  if (wasOpen) {
-    flowLogStepChooserTriggerRef.value?.focus()
-  }
-})
+}
 
 watch(
-  selectedFlowLogSegment,
-  async (segment) => {
-    if (!segment) {
-      loadingSelectedFlowLogKey.value = null
-      return
-    }
-    if (segment.live && !selectedFlowLogContent.value) {
-      if (loadingSelectedFlowLogKey.value === flowLogStepKey(segment)) {
-        loadingSelectedFlowLogKey.value = null
-      }
-      return
-    }
-    if (selectedFlowLogContent.value || segment.missing) {
-      if (loadingSelectedFlowLogKey.value === flowLogStepKey(segment)) {
-        loadingSelectedFlowLogKey.value = null
-      }
-      return
-    }
-
-    const key = flowLogStepKey(segment)
-    loadingSelectedFlowLogKey.value = key
-    try {
-      await ensureFlowLogSegmentContentLoaded(segment)
-    } finally {
-      if (loadingSelectedFlowLogKey.value === key) {
-        loadingSelectedFlowLogKey.value = null
-      }
-    }
+  () => layoutPreviewImage.value,
+  (image) => {
+    void loadLayoutPreviewImage(image)
   },
   { immediate: true },
 )
 
-// checklist 完成计数
-const checklistCompletedCount = computed(
-  () => checklistItems.value.filter((item) => isChecklistPassed(item.state)).length,
+onBeforeUnmount(() => {
+  layoutPreviewLoadToken += 1
+  clearLayoutPreviewBlobUrl()
+})
+const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
+const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
+const qorComparisonSummary = computed(() =>
+  summarizeHomeQorComparison(qorComparisonState.value.comparison),
+)
+const qorDetail = computed(() =>
+  buildHomeQorDetailModel(qorComparisonState.value.comparison),
 )
 
-// ============ Layout 全屏 & 缩放平移 ============
-const layoutContentRef = ref<HTMLElement>()
-const isLayoutFullscreen = ref(false)
-const isFlowLogFullscreen = ref(false)
+async function openQorDetails(): Promise<void> {
+  showQor.value = true
+  await refreshQorComparison()
+}
 
-// 缩放 & 平移状态
-const layoutScale = ref(1)
-const layoutTranslateX = ref(0)
-const layoutTranslateY = ref(0)
-// isDragging 必须是 ref，否则 layoutImageTransform 的 computed 不会在拖动时重算，
-// cursor 会卡在 'grab' 上。
-const isDragging = ref(false)
-let dragStartX = 0
-let dragStartY = 0
-let dragStartTX = 0
-let dragStartTY = 0
-
-const layoutImageTransform = computed(() => {
-  if (!isLayoutFullscreen.value) return {}
-  return {
-    transform: `translate(${layoutTranslateX.value}px, ${layoutTranslateY.value}px) scale(${layoutScale.value})`,
-    transformOrigin: 'center center',
-    cursor: isDragging.value ? 'grabbing' : layoutScale.value > 1 ? 'grab' : 'default',
-    // 拖动时关闭 transition：每帧 mousemove 都会设置新 transform，
-    // 留着 transition 反而让手感"延迟一帧"
-    transition: isDragging.value ? 'none' : undefined,
-    willChange: 'transform',
-  }
+const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
+const qorStatusTone = computed<'pass' | 'warning' | 'blocked' | 'unavailable'>(() => {
+  if (qorComparisonState.value.status !== 'available') return 'unavailable'
+  return qorComparisonSummary.value.regressedCount > 0 ? 'blocked' : 'pass'
 })
-
-function resetLayoutTransform() {
-  layoutScale.value = 1
-  layoutTranslateX.value = 0
-  layoutTranslateY.value = 0
-}
-
-function toggleLayoutFullscreen() {
-  isLayoutFullscreen.value = !isLayoutFullscreen.value
-  if (!isLayoutFullscreen.value) {
-    resetLayoutTransform()
-  }
-}
-
-function closeLayoutFullscreen() {
-  if (!isLayoutFullscreen.value) return
-  isLayoutFullscreen.value = false
-  resetLayoutTransform()
-}
-
-function toggleFlowLogFullscreen() {
-  isFlowLogFullscreen.value = !isFlowLogFullscreen.value
-}
-
-function closeFlowLogFullscreen() {
-  isFlowLogFullscreen.value = false
-}
-
-function onFullscreenKeydown(e: KeyboardEvent) {
-  if (e.key !== 'Escape') return
-  flowLogChooser.onFlowLogChooserEscape(e)
-  if (e.defaultPrevented) return
-  if (chartPreview.value.visible) {
-    closeChartPreview()
-    e.preventDefault()
-    return
-  }
-  if (isLayoutFullscreen.value) {
-    closeLayoutFullscreen()
-    e.preventDefault()
-    return
-  }
-  if (isFlowLogFullscreen.value) {
-    closeFlowLogFullscreen()
-    e.preventDefault()
-  }
-}
-
-function onLayoutWheel(e: WheelEvent) {
-  if (!isLayoutFullscreen.value) return
-
-  const delta = e.deltaY > 0 ? -0.1 : 0.1
-  const newScale = Math.min(Math.max(layoutScale.value + delta, 0.1), 20)
-
-  // 以鼠标位置为中心缩放
-  const container = layoutContentRef.value
-  if (container) {
-    const rect = container.getBoundingClientRect()
-    const mouseX = e.clientX - rect.left - rect.width / 2
-    const mouseY = e.clientY - rect.top - rect.height / 2
-
-    const scaleFactor = newScale / layoutScale.value
-    layoutTranslateX.value = mouseX - scaleFactor * (mouseX - layoutTranslateX.value)
-    layoutTranslateY.value = mouseY - scaleFactor * (mouseY - layoutTranslateY.value)
-  }
-
-  layoutScale.value = newScale
-}
-
-function onLayoutMouseDown(e: MouseEvent) {
-  if (!isLayoutFullscreen.value || layoutScale.value <= 1) return
-  isDragging.value = true
-  dragStartX = e.clientX
-  dragStartY = e.clientY
-  dragStartTX = layoutTranslateX.value
-  dragStartTY = layoutTranslateY.value
-}
-
-function onLayoutMouseMove(e: MouseEvent) {
-  if (!isDragging.value) return
-  layoutTranslateX.value = dragStartTX + (e.clientX - dragStartX)
-  layoutTranslateY.value = dragStartTY + (e.clientY - dragStartY)
-}
-
-function onLayoutMouseUp() {
-  isDragging.value = false
-}
-
-// ============ ECharts 折线图 ============
-
-// 动态图表 ref & 实例管理
-const chartRefs = new Map<string, HTMLDivElement>()
-const chartInstances = new Map<string, echarts.ECharts>()
-/** 已经完成首次 setOption 的实例集合；之后的更新走增量路径 */
-const chartInitialized = new WeakSet<echarts.ECharts>()
-
-// ResizeObserver
-let resizeObserver: ResizeObserver | null = null
-/** ResizeObserver 合并多个 entry 到单次 rAF，避免同一帧里反复 init + resize */
-let pendingResizeRaf: number | null = null
-let pendingDashboardSettleRaf: number | null = null
-
-/** 预置配色盘 —— 按 key 出现顺序循环取色 */
-const COLOR_PALETTE = [
-  '#ef4444',
-  '#3b82f6',
-  '#10b981',
-  '#a855f7',
-  '#f59e0b',
-  '#06b6d4',
-  '#ec4899',
-  '#84cc16',
-]
-
-/** 从 monitorData 动态提取除 step 以外的所有指标 key */
-const monitorKeys = computed<string[]>(() => {
-  if (!monitorData.value) return []
-  return Object.keys(monitorData.value).filter((k) => k !== 'step')
+const checklistCenterPrimary = computed(() =>
+  checklistSummary.value.passingPercent === null
+    ? '--'
+    : `${checklistSummary.value.passingPercent}%`,
+)
+const checklistCenterSecondary = computed(() =>
+  checklistSummary.value.total ? 'passing' : 'no data',
+)
+const qorUncomparedCount = computed(
+  () =>
+    qorComparisonState.value.comparison?.metrics.filter((metric) => !metric.isDirectional)
+      .length ?? 0,
+)
+const qorSlices = computed(() => {
+  if (qorComparisonState.value.status !== 'available') return []
+  return [
+    {
+      id: 'improved',
+      label: 'Improved',
+      value: qorComparisonSummary.value.improvedCount,
+      tone: 'good' as const,
+    },
+    {
+      id: 'regressed',
+      label: 'Regressed',
+      value: qorComparisonSummary.value.regressedCount,
+      tone: 'bad' as const,
+    },
+    {
+      id: 'unchanged',
+      label: 'Unchanged',
+      value: qorComparisonSummary.value.unchangedCount,
+      tone: 'neutral' as const,
+    },
+    {
+      id: 'not-compared',
+      label: 'Not compared',
+      value: qorUncomparedCount.value,
+      tone: 'warn' as const,
+    },
+  ].filter((slice) => slice.value > 0)
 })
-
-/** 动态生成图表配置列表 */
-const chartConfigs = computed(() => {
-  return monitorKeys.value.map((key, idx) => ({
-    key,
-    label: key,
-    color: COLOR_PALETTE[idx % COLOR_PALETTE.length],
-  }))
+const qorScoreValue = computed(() => {
+  return formatQorScore(qorComparisonState.value.comparison?.score)
 })
-
-/** 设置图表 DOM ref 的回调（用于 v-for 中的 :ref） */
-function setChartRef(key: string) {
-  return (el: Element | ComponentPublicInstance | null) => {
-    if (el instanceof HTMLDivElement) {
-      chartRefs.set(key, el)
-    } else {
-      chartRefs.delete(key)
+const qorBaselineScoreValue = computed(() =>
+  formatQorScore(qorComparisonState.value.comparison?.baselineScore),
+)
+const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
+  const score = qorComparisonState.value.comparison?.score
+  if (score === null || score === undefined) return 'unrated'
+  return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
+})
+const qorBaselineScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
+  const score = qorComparisonState.value.comparison?.baselineScore
+  if (score === null || score === undefined) return 'unrated'
+  return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
+})
+const qorScoreStatusLabel = computed(() => {
+  if (qorScoreTone.value === 'unrated') return 'Not rated'
+  return qorScoreTone.value === 'pass'
+    ? `PASS >= ${QOR_SCORE_THRESHOLD}`
+    : `FAIL < ${QOR_SCORE_THRESHOLD}`
+})
+const qorSummaryLabel = computed(() => {
+  const state = qorComparisonState.value
+  if (state.status === 'loading') return 'Loading project comparison...'
+  if (state.status === 'baseline') {
+    return `Baseline: ${state.baselineWorkspaceName ?? '--'} · ${formatQorScore(
+      state.comparison?.baselineScore,
+    )} / 100`
+  }
+  if (state.status === 'available') {
+    const label = state.baselineSource === 'default' ? 'Default baseline' : 'Baseline'
+    return `${label}: ${state.baselineWorkspaceName ?? '--'} · ${formatQorScore(
+      state.comparison?.baselineScore,
+    )} / 100`
+  }
+  if (state.status === 'no-baseline') return 'No baseline workspace is selected'
+  if (state.status === 'no-project') return 'Project comparison is unavailable'
+  return 'Baseline artifacts are not available for comparison'
+})
+const qorDashboardSteps = computed(() => {
+  const comparisonByStep = new Map(
+    qorComparisonSummary.value.steps.map((step) => [step.step, step]),
+  )
+  const comparisonReady = qorComparisonState.value.status === 'available'
+  return qorSteps.value.map((step) => {
+    const comparisonStep = homeQorFlowStepForLabel(step.label)
+      ? comparisonByStep.get(homeQorFlowStepForLabel(step.label)!)
+      : null
+    const improvedCount = comparisonReady ? (comparisonStep?.improvedCount ?? 0) : 0
+    const regressedCount = comparisonReady ? (comparisonStep?.regressedCount ?? 0) : 0
+    const unchangedCount = comparisonReady ? (comparisonStep?.unchangedCount ?? 0) : 0
+    const comparableCount = comparisonReady ? (comparisonStep?.comparableCount ?? 0) : 0
+    return {
+      ...step,
+      improvedCount,
+      regressedCount,
+      unchangedCount,
+      comparableCount,
+      comparisonState: !comparisonReady
+        ? 'unavailable'
+        : regressedCount > 0
+          ? 'regressed'
+          : improvedCount > 0
+            ? 'improved'
+            : 'neutral',
     }
+  })
+})
+const qorDetailsEmptyLabel = computed(() => {
+  if (qorComparisonState.value.status === 'baseline') {
+    return 'This workspace is the project baseline.'
   }
-}
-
-/** 将 "h:m:s" 格式的时间字符串转换为秒数 */
-function parseTimeToSeconds(val: string): number {
-  const parts = val.split(':').map(Number)
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
-  if (parts.length === 2) return parts[0] * 60 + parts[1]
-  return Number(val) || 0
-}
-
-/** 判断一个值数组是否全部为 "h:m:s" 格式的时间字符串 */
-function isTimeFormatArray(arr: any[]): boolean {
+  if (qorComparisonState.value.status === 'no-baseline') {
+    return 'No baseline workspace is selected for this project.'
+  }
+  if (qorComparisonState.value.status === 'available') {
+    return 'No QoR metrics can be paired with the baseline.'
+  }
+  return 'Project QoR comparison is not available.'
+})
+const checklistTitle = computed(() => {
+  if (!checklistSummary.value.total) return 'Checklist pending'
+  if (checklistSummary.value.blocked) return 'Sign-off blocked'
+  if (checklistSummary.value.warning) return 'Sign-off attention'
+  if (checklistSummary.value.unavailable) return 'Sign-off unavailable'
+  return 'Sign-off ready'
+})
+const checklistSummaryLabel = computed(() => {
+  if (!checklistSummary.value.total) return 'Run a flow step to populate checks'
+  if (checklistSummary.value.blocked) return 'Blocking checklist items need review'
+  if (checklistSummary.value.warning) return 'Checklist has warning items'
+  if (checklistSummary.value.unavailable) return 'Some checklist items are unavailable'
+  return 'All checklist items passed'
+})
+const currentCellCount = computed(
+  () => keyMetrics.value.find((metric) => metric.id === 'instances')?.value ?? null,
+)
+const cellLimitExceeded = computed(() => {
+  const constraints = mpcConstraints.value
   return (
-    arr.length > 0 && arr.every((v) => typeof v === 'string' && /^\d+:\d+:\d+$/.test(v))
+    constraints?.maximumCellCount !== null &&
+    constraints?.maximumCellCount !== undefined &&
+    currentCellCount.value !== null &&
+    currentCellCount.value > constraints.maximumCellCount
   )
+})
+function valueOrDash(value: number | null): string {
+  return value === null ? '--' : String(value)
 }
 
-/** 获取某个维度的数值数组（自动检测字符串/数字） */
-function getMetricValues(key: string): number[] {
-  if (!monitorData.value) return []
-  const raw = (monitorData.value as Record<string, any>)[key]
-  if (!raw || !Array.isArray(raw)) return []
+function valueOrNA(value: string | number | null | undefined): string {
+  if (typeof value === 'string') return value.trim() || 'N/A'
+  return value === null || value === undefined ? 'N/A' : String(value)
+}
 
-  // 时间格式 "h:m:s" → 秒数
-  if (isTimeFormatArray(raw)) {
-    return raw.map(parseTimeToSeconds)
+function positiveNumberOrNA(value: number): string {
+  return Number.isFinite(value) && value > 0 ? String(value) : 'N/A'
+}
+
+function frequencyOrNA(value: number): string {
+  return Number.isFinite(value) && value > 0 ? `${value} MHz` : 'N/A'
+}
+
+function sourcePath(value: Record<string, unknown>): string {
+  return typeof value.path === 'string' ? value.path : '--'
+}
+
+function formatQorValue(value: number, unit?: string): string {
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(3)
+  return unit ? `${formatted} ${unit}` : formatted
+}
+
+function formatQorScore(score: number | null | undefined): string {
+  if (score === null || score === undefined) return 'N/A'
+  return Number.isInteger(score) ? String(score) : score.toFixed(1)
+}
+
+function qorDeltaLabel(delta: {
+  absoluteDelta: number
+  relativeDeltaPct: number | null
+  state: 'improvement' | 'regression' | 'neutral'
+  unit?: string
+}): string {
+  if (delta.state === 'neutral') return 'Unchanged'
+  const direction = delta.state === 'improvement' ? 'Improved' : 'Regressed'
+  const amount = formatQorValue(Math.abs(delta.absoluteDelta), delta.unit)
+  const percent =
+    delta.relativeDeltaPct === null ? '' : ` (${Math.abs(delta.relativeDeltaPct)}%)`
+  return `${direction} by ${amount}${percent}`
+}
+
+function qorMetricComparisonLabel(metric: {
+  absoluteDelta: number
+  relativeDeltaPct: number | null
+  state: 'improvement' | 'regression' | 'neutral'
+  unit?: string
+  isDirectional: boolean
+  polarity: string
+  baselinePolarity: string
+}): string {
+  if (!metric.isDirectional) {
+    return metric.polarity === metric.baselinePolarity
+      ? 'No directional QoR rule'
+      : 'QoR rule changed'
   }
-  // 字符串数字 → Number
-  return raw.map((v: any) => Number(v) || 0)
+  return qorDeltaLabel(metric)
 }
 
-/** 获取某个维度的最大值显示 */
-function getMetricMax(key: string): string {
-  const values = getMetricValues(key)
-  if (values.length === 0) return '--'
-  const max = Math.max(...values)
-  // 整数显示为整数，小数保留 1 位
-  return Number.isInteger(max) ? `${max}` : `${max.toFixed(1)}`
+function qorScoreComparisonLabel(
+  currentScore: number | null,
+  baselineScore: number | null,
+): string {
+  if (currentScore === null || baselineScore === null) return 'Unavailable'
+  const delta = currentScore - baselineScore
+  if (delta === 0) return 'Unchanged'
+  const direction = delta > 0 ? 'Improved' : 'Regressed'
+  return `${direction} ${Math.abs(delta).toFixed(1)}`
 }
 
-/** 获取某个维度的原始显示值 */
-function getMetricDisplay(key: string, idx: number): string {
-  if (!monitorData.value) return '--'
-  const raw = (monitorData.value as Record<string, any>)[key]
-  if (!raw || !Array.isArray(raw) || raw[idx] == null) return '--'
-  const v = raw[idx]
-  // 如果原始值是字符串（如 "h:m:s"），直接展示
-  if (typeof v === 'string') return v
-  // 数字：整数原样，小数保留 1 位
-  return Number.isInteger(v) ? `${v}` : `${Number(v).toFixed(1)}`
+function statusTone(summary: {
+  total: number
+  blocked: number
+  warning: number
+  unavailable: number
+}): 'pass' | 'warning' | 'blocked' | 'unavailable' {
+  if (!summary.total) return 'unavailable'
+  if (summary.blocked) return 'blocked'
+  if (summary.warning) return 'warning'
+  if (summary.unavailable) return 'unavailable'
+  return 'pass'
 }
 
-/** 构建所有图表共享的 tooltip formatter（动态根据 monitorKeys 生成） */
-function buildSharedTooltipFormatter(params: any): string {
-  const idx = params[0]?.dataIndex ?? 0
-  const steps = monitorData.value?.step || []
-  const stepName = steps[idx] || `Step #${idx}`
-
-  const configs = chartConfigs.value
-  const rows = configs
-    .map((cfg) => {
-      const value = getMetricDisplay(cfg.key, idx)
-      return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
-       <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${cfg.color}"></span>
-       <span style="flex:1;color:#aaa">${cfg.label}</span>
-       <span style="font-weight:600;color:#e5e5e5;font-family:'JetBrains Mono',monospace">${value}</span>
-     </div>`
-    })
-    .join('')
-
-  return `<div style="font-size:11px;font-weight:700;margin-bottom:4px;color:#fff;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:4px">${stepName}</div>
-          <div style="font-size:10px">${rows}</div>`
-}
-
-/** 构建单个折线图的 option */
-function buildChartOption(key: string, color: string): echarts.EChartsCoreOption {
-  const values = getMetricValues(key)
-  const steps = monitorData.value?.step || []
-
-  return {
-    grid: {
-      left: 4,
-      right: 4,
-      top: 6,
-      bottom: 6,
-      containLabel: false,
-    },
-    tooltip: {
-      trigger: 'axis',
-      appendToBody: true,
-      backgroundColor: 'rgba(20, 20, 24, 0.95)',
-      borderColor: 'rgba(255,255,255,0.08)',
-      borderWidth: 1,
-      borderRadius: 6,
-      padding: [8, 10],
-      extraCssText: 'pointer-events: none;',
-      textStyle: {
-        color: '#e5e5e5',
-        fontSize: 10,
-      },
-      axisPointer: {
-        type: 'line',
-        lineStyle: {
-          color: 'rgba(255,255,255,0.15)',
-          type: 'dashed',
-        },
-      },
-      formatter: buildSharedTooltipFormatter,
-    },
-    xAxis: {
-      type: 'category',
-      show: false,
-      data: steps,
-      boundaryGap: false,
-      axisPointer: {
-        show: true,
-      },
-    },
-    yAxis: {
-      type: 'value',
-      show: false,
-    },
-    series: [
-      {
-        type: 'line',
-        data: values,
-        smooth: 0.3,
-        symbol: 'circle',
-        symbolSize: 6,
-        showSymbol: true,
-        showAllSymbol: true,
-        itemStyle: {
-          color,
-          borderColor: '#fff',
-          borderWidth: 1.5,
-        },
-        emphasis: {
-          itemStyle: {
-            color,
-            borderColor: '#fff',
-            borderWidth: 2,
-            shadowColor: color + '80',
-            shadowBlur: 8,
-          },
-          scale: 1.8,
-        },
-        lineStyle: {
-          color,
-          width: 2,
-        },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: color + '30' },
-            { offset: 1, color: color + '05' },
-          ]),
-        },
-      },
-    ],
-    animation: true,
-    animationDuration: 600,
-  }
-}
-
-/** 获取所有已初始化的图表实例 */
-function getAllChartInstances(): echarts.ECharts[] {
-  return Array.from(chartInstances.values())
-}
-
-/** 图表联动分组 ID —— 同组图表的 axisPointer 自动同步 */
-const CHART_GROUP = 'monitor-linked'
-
-/** 当前鼠标所在的图表实例，用于控制仅在悬浮图表上显示 tooltip 内容 */
-let activeChartInstance: echarts.ECharts | null = null
-
-/**
- * 为图表绑定联动事件。
- * 使用 echarts.connect 实现轴指针自动同步（数据索引精确对齐），
- * 并通过动态切换 showContent 控制仅在悬浮图表上显示 tooltip。
- */
-function bindChartLinkEvents(instance: echarts.ECharts) {
-  // 加入联动分组，轴指针 & 高亮自动同步到同组所有图表
-  instance.group = CHART_GROUP
-
-  // 鼠标进入此图表时：仅此图表显示 tooltip 内容，其余图表隐藏内容
-  instance.getZr().on('mousemove', () => {
-    if (activeChartInstance === instance) return
-    activeChartInstance = instance
-    for (const chart of getAllChartInstances()) {
-      chart.setOption(
-        { tooltip: { showContent: chart === instance } },
-        { lazyUpdate: true },
-      )
-    }
-  })
-
-  // 鼠标离开此图表
-  instance.getZr().on('globalout', () => {
-    if (activeChartInstance === instance) {
-      activeChartInstance = null
-    }
+function openStepQorAnalysis(step: string): void {
+  void router.push({
+    name: ':step',
+    params: { step },
+    query: { ...route.query, panel: 'analysis' },
   })
 }
 
-/**
- * 构建仅包含 series data 的最小化 option patch，用于增量更新。
- * 相比 buildChartOption 全量替换，能省掉 grid/tooltip/axis 等配置的 diff。
- */
-function buildChartDataPatch(key: string): echarts.EChartsCoreOption {
-  const values = getMetricValues(key)
-  const steps = monitorData.value?.step || []
-  return {
-    xAxis: { data: steps },
-    series: [{ data: values }],
-  }
-}
+async function openLayoutChipViewer(): Promise<void> {
+  const stage = layoutRenderStage.value
+  const projectPath = currentProject.value?.path
+  if (!stage || !projectPath || !canOpenLayoutChipViewer.value) return
 
-/** 初始化或更新所有图表 */
-function initOrUpdateCharts() {
-  let newInstanceCreated = false
-
-  for (const cfg of chartConfigs.value) {
-    const el = chartRefs.get(cfg.key)
-    if (!el) continue
-
-    // 跳过尺寸为 0 的元素，等待 ResizeObserver 回调再初始化
-    if (!el.clientWidth || !el.clientHeight) continue
-
-    const { instance, created } = ensureMonitorChartInstance(
-      cfg.key,
-      el,
-      chartInstances,
-      (target) => echarts.init(target, undefined, { renderer: 'canvas' }),
-      bindChartLinkEvents,
+  layoutChipViewerBusy.value = true
+  try {
+    const desktopApi = getDesktopApi()
+    await desktopApi.chipViewer.open(
+      buildChipViewerOpenRequest(projectPath, stage.path, 'view'),
     )
-    if (created) {
-      newInstanceCreated = true
-    }
-
-    if (!chartInitialized.has(instance)) {
-      // 首次：全量 option + 触发入场动画
-      instance.setOption(buildChartOption(cfg.key, cfg.color), true)
-      chartInitialized.add(instance)
-    } else {
-      // 之后：只更新数据，保留轴/tooltip/样式配置，跳过入场动画避免抖动
-      instance.setOption(buildChartDataPatch(cfg.key), {
-        notMerge: false,
-        lazyUpdate: true,
-      })
-    }
+  } catch (error) {
+    console.error('Failed to open ChipView from Home:', error)
+  } finally {
+    layoutChipViewerBusy.value = false
   }
-
-  // 有新图表加入分组时，重新注册 connect 以确保联动生效
-  if (newInstanceCreated) {
-    echarts.connect(CHART_GROUP)
-  }
-}
-
-/** 销毁所有图表 */
-function disposeCharts() {
-  for (const instance of chartInstances.values()) {
-    instance.dispose()
-  }
-  chartInstances.clear()
-}
-
-/** 所有图表 resize */
-function resizeAllCharts() {
-  for (const instance of chartInstances.values()) {
-    instance.resize()
-  }
-}
-
-function onDashboardSplitterResizeEnd() {
-  if (pendingDashboardSettleRaf !== null) {
-    cancelAnimationFrame(pendingDashboardSettleRaf)
-  }
-
-  pendingDashboardSettleRaf = requestAnimationFrame(() => {
-    pendingDashboardSettleRaf = requestAnimationFrame(() => {
-      pendingDashboardSettleRaf = null
-      if (monitorData.value) initOrUpdateCharts()
-      resizeAllCharts()
-    })
-  })
-}
-
-/**
- * 监听图表容器尺寸变化，处理首次初始化和 resize。
- *
- * 合并策略：
- *  - 多个 entry 同帧触发时合并为一次 rAF 回调
- *  - 窗口缩放期间（isWindowResizing=true）**完全跳过** canvas 重绘：
- *    ECharts 的 canvas 会被 CSS 自然拉伸展示，拖动手感最滑。
- *    缩放结束时由下方 `watch(isWindowResizing)` 再做一次清晰重绘。
- */
-function setupResizeObserver() {
-  resizeObserver?.disconnect()
-  resizeObserver = new ResizeObserver(() => {
-    if (pendingResizeRaf !== null) return
-    pendingResizeRaf = requestAnimationFrame(() => {
-      pendingResizeRaf = null
-      // 窗口正在缩放：完全跳过图表工作。canvas 由 CSS 自然拉伸，
-      // 之前还跑 initOrUpdateCharts 是为了 cover 首次 init，但那个
-      // 新容器也完全可以推迟到 resize 结束后的 watcher 里统一 init，
-      // 省下每帧的 setOption diff（长序列下这个 diff 不便宜）。
-      if (isWindowResizing.value) return
-      if (monitorData.value) initOrUpdateCharts()
-      resizeAllCharts()
-    })
-  })
-
-  for (const el of chartRefs.values()) {
-    if (el) resizeObserver.observe(el)
-  }
-}
-
-// 窗口缩放结束的瞬间把所有 canvas 按当前容器尺寸一次性清晰重绘；
-// 拖拽过程中累计的尺寸变化都在这里"补上"，顺带 init 在 resize
-// 期间才第一次拿到尺寸的新图表容器。
-watch(isWindowResizing, (resizing) => {
-  if (resizing) return
-  if (pendingResizeRaf !== null) {
-    cancelAnimationFrame(pendingResizeRaf)
-    pendingResizeRaf = null
-  }
-  // 使用 rAF 而非同步调用，确保此时布局已稳定
-  requestAnimationFrame(() => {
-    if (monitorData.value) initOrUpdateCharts()
-    resizeAllCharts()
-  })
-})
-
-/**
- * 监听 monitorData 变化更新图表。
- * useHomeData 每次都会给 monitorData.value 赋值新对象，浅层 watch 即可触发；
- * 避免原先 deep: true 对 MonitorData 里的每个数组递归 traverse —— 数据量大时
- * 这一步会明显消耗主线程。
- */
-watch(monitorData, async () => {
-  await nextTick()
-  setupResizeObserver()
-  initOrUpdateCharts()
-})
-
-onMounted(async () => {
-  await nextTick()
-  setupResizeObserver()
-  if (monitorData.value) {
-    initOrUpdateCharts()
-  }
-  document.addEventListener('keydown', onFullscreenKeydown)
-})
-
-onUnmounted(() => {
-  disposeCharts()
-  resizeObserver?.disconnect()
-  resizeObserver = null
-  if (pendingResizeRaf !== null) {
-    cancelAnimationFrame(pendingResizeRaf)
-    pendingResizeRaf = null
-  }
-  if (pendingDashboardSettleRaf !== null) {
-    cancelAnimationFrame(pendingDashboardSettleRaf)
-    pendingDashboardSettleRaf = null
-  }
-  clearFlowLogCopyFeedbackTimer()
-  flowLogCopyFeedbackToken += 1
-  flowLogCopyFeedback.value = null
-  flowLogCopyTooltipStyle.value = null
-  document.removeEventListener('keydown', onFullscreenKeydown)
-})
-
-// ============ 指标分析 ============
-// analysisCharts 数据从 useHomeData() 动态获取（基于 home.json 的 metrics 字段）
-
-// 图表预览 Lightbox
-const chartPreview = ref<{ visible: boolean; url: string; label: string }>({
-  visible: false,
-  url: '',
-  label: '',
-})
-
-function openChartPreview(url: string, label: string) {
-  chartPreview.value = { visible: true, url, label }
-}
-
-function onAnalysisChartClick(chart: AnalysisChartItem) {
-  if (!chart.imageBlobUrl) return
-  openChartPreview(chart.imageBlobUrl, chart.label)
-}
-
-function closeChartPreview() {
-  chartPreview.value.visible = false
 }
 </script>
 
 <style scoped>
-/* ==================== 基础布局 ==================== */
-.home-view {
+.home-dashboard {
+  box-sizing: border-box;
+  display: grid;
+  gap: 8px;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   height: 100%;
-  position: relative;
-  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.home-dashboard-row {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.home-dashboard-top {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 3fr);
+}
+
+.home-dashboard-middle {
+  grid-template-columns: minmax(0, 5fr) minmax(0, 2fr);
+}
+
+.home-dashboard-bottom {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboard-section {
   background: var(--bg-primary);
-}
-
-.bg-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(var(--accent-rgb, 59, 130, 246), 0.03) 1px, transparent 1px),
-    linear-gradient(
-      90deg,
-      rgba(var(--accent-rgb, 59, 130, 246), 0.03) 1px,
-      transparent 1px
-    );
-  background-size: 32px 32px;
-  pointer-events: none;
-}
-
-/* ==================== Dashboard Splitter ==================== */
-.dashboard-splitter {
-  position: relative;
-  z-index: 1;
-  height: 100%;
-  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
   display: flex;
   flex-direction: column;
-  min-width: 0;
   min-height: 0;
-  padding: 8px;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-sizing: border-box;
-}
-
-/*
- * 行/列面板需要提供一个确定的 block，内部的 section-card 才能 height:100%。
- * PrimeVue 的 SplitterPanel 默认是 flex 容器，这里显式交代 min 尺寸避免
- * 内容强行撑开破坏拖拽比例。
- */
-.dashboard-splitter :deep(.p-splitterpanel.dashboard-row),
-.dashboard-splitter :deep(.p-splitterpanel.dashboard-cell) {
-  display: flex;
   min-width: 0;
-  min-height: 0;
   overflow: hidden;
-}
-
-.dashboard-row-splitter {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  flex: 1;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-}
-
-/* SplitterPanel 只放一个 section-card，让 card 100% 填满面板 */
-.dashboard-splitter :deep(.p-splitterpanel.dashboard-cell) > .section-card {
-  flex: 1;
-  width: 100%;
-  height: 100%;
-}
-
-/* Splitter 拖拽条：窄、低调，hover 时变为主题色 */
-.dashboard-splitter :deep(.p-splitter-gutter) {
-  background: transparent;
   position: relative;
-  transition: background 0.15s ease;
 }
 
-.dashboard-splitter :deep(.p-splitter-gutter::after) {
+.dashboard-section::before {
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      top left / 23px 2px no-repeat,
+    linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      top left / 2px 23px no-repeat,
+    linear-gradient(
+        270deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      top right / 23px 2px no-repeat,
+    linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      top right / 2px 23px no-repeat,
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      bottom left / 23px 2px no-repeat,
+    linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      bottom left / 2px 23px no-repeat,
+    linear-gradient(
+        270deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      bottom right / 23px 2px no-repeat,
+    linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      bottom right / 2px 23px no-repeat;
   content: '';
-  position: absolute;
-  background: var(--border-color);
-  border-radius: 2px;
-  transition: background 0.15s ease;
-}
-
-/* 垂直布局的 gutter 水平条 */
-.dashboard-splitter > :deep(.p-splitter-gutter) {
-  height: 6px;
-}
-.dashboard-splitter > :deep(.p-splitter-gutter::after) {
-  left: 50%;
-  top: 50%;
-  width: 48px;
-  height: 2px;
-  transform: translate(-50%, -50%);
-}
-
-/* 横向行内的 gutter 竖直条 */
-.dashboard-row-splitter > :deep(.p-splitter-gutter) {
-  width: 6px;
-}
-.dashboard-row-splitter > :deep(.p-splitter-gutter::after) {
-  top: 50%;
-  left: 50%;
-  width: 2px;
-  height: 48px;
-  transform: translate(-50%, -50%);
-}
-
-.dashboard-splitter :deep(.p-splitter-gutter:hover),
-.dashboard-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing='true']) {
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
-}
-
-.dashboard-splitter :deep(.p-splitter-gutter:hover::after),
-.dashboard-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing='true']::after) {
-  background: var(--accent-color);
-  box-shadow: 0 0 8px rgba(var(--accent-rgb, 59, 130, 246), 0.45);
-}
-
-.dashboard-splitter :deep(.p-splitter-gutter-handle) {
-  display: none;
-}
-
-.layout-fullscreen-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 19990;
-  display: flex;
-  align-items: stretch;
-  justify-content: stretch;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.78);
-  box-sizing: border-box;
-}
-
-.flow-log-fullscreen-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 19995;
-  display: flex;
-  align-items: stretch;
-  justify-content: stretch;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.78);
-  box-sizing: border-box;
-}
-
-.layout-fullscreen-card {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  border-radius: 0;
-  background: var(--bg-primary);
-}
-
-.flow-log-fullscreen-card {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  border-radius: 0;
-  background: var(--bg-primary);
-}
-
-.layout-fullscreen-content {
-  margin: 0;
-  border: none;
-  border-radius: 0;
-  overflow: hidden;
-  position: relative;
-  background-image: none;
-}
-
-.layout-fullscreen-image {
-  object-fit: contain;
-  /*
-   * 仅在滚轮缩放时给 50ms 缓动，拖动时由 inline style 设为 'none'，
-   * 避免 transition 打断每帧 mousemove 造成视觉拖尾。
-   */
-  transition: transform 0.05s ease-out;
-  user-select: none;
-  will-change: transform;
-}
-
-/* 缩放百分比指示器 */
-.zoom-indicator {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  padding: 4px 10px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #e5e5e5;
-  font-size: 11px;
-  font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
-  border-radius: 4px;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--success-color) 48%, transparent));
+  inset: -1px;
   pointer-events: none;
-  z-index: 10;
-}
-
-.analysis-area {
-  position: relative;
+  position: absolute;
   z-index: 2;
 }
 
-/* ==================== Section Card 通用样式 ==================== */
-.section-card {
-  background: var(--bg-secondary);
-  border: 1px solid rgba(var(--accent-rgb, 59, 130, 246), 0.2);
-  border-radius: 4px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
-  min-height: 0;
-  position: relative;
-  box-shadow: inset 0 0 20px rgba(var(--accent-rgb, 59, 130, 246), 0.02);
-  /*
-   * 告诉浏览器：卡片内部的布局 / 绘制 / 样式变化都不会影响外部。
-   * 这样 dashboard-grid 的尺寸改变时，浏览器只需对变化的卡片内部重排，
-   * 不用把重排向上传播到整个页面，对 grid 布局场景尤其显著。
-   */
-  contain: layout paint style;
-}
-
-/* HUD 瞄准框角标 */
-.section-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(to right, var(--accent-color) 2px, transparent 2px) 0 0,
-    linear-gradient(to bottom, var(--accent-color) 2px, transparent 2px) 0 0,
-    linear-gradient(to left, var(--accent-color) 2px, transparent 2px) 100% 0,
-    linear-gradient(to bottom, var(--accent-color) 2px, transparent 2px) 100% 0,
-    linear-gradient(to right, var(--accent-color) 2px, transparent 2px) 0 100%,
-    linear-gradient(to top, var(--accent-color) 2px, transparent 2px) 0 100%,
-    linear-gradient(to left, var(--accent-color) 2px, transparent 2px) 100% 100%,
-    linear-gradient(to top, var(--accent-color) 2px, transparent 2px) 100% 100%;
-  background-repeat: no-repeat;
-  background-size: 8px 8px;
-  opacity: 0.6;
-  z-index: 10;
-}
-
-/* Section Header */
-.section-header {
-  display: flex;
+.dashboard-section-header {
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: transparent;
   border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.header-icon {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  font-size: 16px;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 33px;
+  padding: 6px 9px;
 }
 
-.section-header h2 {
-  flex: 1;
+.dashboard-section-header > div {
+  align-items: center;
+  color: var(--text-primary);
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dashboard-section-header h2 {
+  font-size: 11px;
+  font-weight: 700;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-section-header i {
+  color: var(--accent-color);
   font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.header-badge {
-  padding: 2px 8px;
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.1);
-  color: var(--accent-color);
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.header-hint {
+.dashboard-badge,
+.dashboard-muted {
+  color: var(--text-secondary);
   font-size: 9px;
-  color: var(--text-secondary);
-  opacity: 0.7;
   white-space: nowrap;
 }
 
-.header-count {
-  padding: 2px 8px;
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 4px;
-  border: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 3px;
-  flex-shrink: 0;
-}
-
-.action-btn {
-  width: 22px;
-  height: 22px;
+.dashboard-badge {
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  display: flex;
+  padding: 2px 5px;
+}
+
+.dashboard-icon-button {
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    color 0.15s ease,
-    background-color 0.15s ease;
-  font-size: 11px;
-}
-
-.action-btn:hover {
-  border-color: var(--accent-color);
-  color: var(--accent-color);
-}
-
-/* ==================== Chip Basic Info ==================== */
-.chip-info-content {
-  flex: 1;
-  padding: 10px;
-  overflow: auto;
-}
-
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  height: 100%;
-}
-
-.info-item {
-  padding: 8px 10px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  transition: border-color 0.15s ease;
-}
-
-.info-item:hover {
-  border-color: var(--accent-color);
-}
-
-.info-label {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 3px;
-}
-
-.info-value {
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
-  letter-spacing: 0;
-}
-
-html.dark .info-value {
-  text-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
-}
-
-.info-value.highlight {
-  color: var(--accent-color);
-  text-shadow: 0 0 10px rgba(var(--accent-rgb, 59, 130, 246), 0.4);
-}
-
-html.dark .info-value.highlight {
-  text-shadow: 0 0 12px rgba(var(--accent-rgb, 59, 130, 246), 0.8);
-}
-
-.info-value small {
-  font-size: 9px;
-  font-weight: 500;
-  opacity: 0.7;
-}
-
-/* ==================== 运行时监控 ==================== */
-.monitor-content {
-  flex: 1;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow: auto;
-}
-
-.monitor-row {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 10px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  min-height: 0;
-}
-
-.monitor-label {
-  width: 100px;
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  flex-shrink: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.monitor-chart-wrap {
-  flex: 1;
-  height: 100%;
-  min-height: 24px;
-  min-width: 0;
-  /*
-   * 图表容器内只有一个 canvas，隔离它的布局/绘制不影响外部。
-   * 不使用 `contain: size`，避免 flex 计算时容器被当成 0 尺寸。
-   */
-  contain: layout paint style;
-}
-
-.monitor-chart {
-  width: 100%;
-  height: 100%;
-  min-height: 24px;
-}
-
-.monitor-value {
-  min-width: 80px;
-  text-align: right;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-family: 'JetBrains Mono', monospace;
-  flex-shrink: 0;
-}
-
-html.dark .monitor-value {
-  text-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
-}
-
-.monitor-placeholder {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 20px;
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-}
-
-.monitor-placeholder i {
-  font-size: 28px;
-  color: var(--text-secondary);
-  opacity: 0.3;
-}
-
-.monitor-placeholder p {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
-.monitor-placeholder span {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.6;
-}
-
-/* ==================== Layout Preview ==================== */
-.layout-content {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: var(--bg-primary);
-  background-image:
-    linear-gradient(rgba(var(--accent-rgb, 59, 130, 246), 0.08) 1px, transparent 1px),
-    linear-gradient(
-      90deg,
-      rgba(var(--accent-rgb, 59, 130, 246), 0.08) 1px,
-      transparent 1px
-    );
-  background-size: 20px 20px;
-  background-position: center center;
-  margin: 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(var(--accent-rgb, 59, 130, 246), 0.15);
-  overflow: hidden;
-  position: relative;
-}
-
-.scanner-line {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--accent-color);
-  box-shadow:
-    0 0 15px 3px rgba(var(--accent-rgb, 59, 130, 246), 0.4),
-    0 0 30px 6px rgba(var(--accent-rgb, 59, 130, 246), 0.2);
-  opacity: 0.8;
-  animation: scan-animation 3.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  will-change: transform, opacity;
-  pointer-events: none;
-  z-index: 5;
-}
-
-@keyframes scan-animation {
-  0% {
-    transform: translateY(-10px);
-    opacity: 0;
-  }
-  10% {
-    opacity: 0.8;
-  }
-  90% {
-    opacity: 0.8;
-  }
-  100% {
-    transform: translateY(100vh);
-    opacity: 0;
-  }
-}
-
-.layout-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 24px;
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  background:
-    linear-gradient(
-      90deg,
-      rgba(var(--accent-rgb, 59, 130, 246), 0.02) 1px,
-      transparent 1px
-    ),
-    linear-gradient(rgba(var(--accent-rgb, 59, 130, 246), 0.02) 1px, transparent 1px);
-  background-size: 16px 16px;
-}
-
-.layout-placeholder i {
-  font-size: 36px;
-  color: var(--text-secondary);
-  opacity: 0.3;
-}
-
-.layout-placeholder p {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
-.layout-placeholder span {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.6;
-}
-
-.layout-image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-  /* 让浏览器尽量为这张图建立独立合成层，resize 时不会反复重采样 */
-  will-change: transform;
-}
-
-/* ==================== 指标分析 ==================== */
-.analysis-content {
-  flex: 1;
-  min-height: 0;
-  padding: 8px;
-  overflow: auto;
-}
-
-/*
- * 关键点：
- * 1) 用 minmax(0, 1fr) 代替裸 1fr。裸 1fr 等价于 minmax(auto, 1fr)，
- *    会把 track 的下限抬到子元素的最小内容尺寸 —— 指标图片的固有大小
- *    会反向把某一行顶大、另一行挤成细条。
- * 2) grid-auto-rows 也用 minmax(0, 1fr) 兜底：万一卡片数量 × 列数组合
- *    意外创建了第 3 行（例如 7 个卡片 + 3 列），这一行默认 auto 又会被
- *    图片固有尺寸撑开，引发和 (1) 同类的错位。
- */
-.charts-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: minmax(0, 1fr);
-  gap: 6px;
-  height: 100%;
-}
-
-/*
- * 仅当恰好有 7 个卡片（且 7 是最后一个）时，让第 7 个跨占 4 列布局下
- * 第二行剩下的两列。其它数量（5/6/7 在 3 列下等）让其走自动排布，
- * 否则 grid-column: 1 会和第 4 个卡片的默认位置冲突，把第 5 个挤到新行。
- */
-.chart-card:nth-child(7):last-child {
-  grid-column: 3 / 5;
-}
-
-.chart-card {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px;
-  min-width: 0;
-  min-height: 0;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
-  cursor: pointer;
-  overflow: hidden;
-  /* 指标图表卡片内容不影响外部，resize 时也不会牵连兄弟卡片重排 */
-  contain: layout paint style;
-}
-
-.chart-card:hover {
-  border-color: var(--accent-color);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  transform: translateY(-2px);
-}
-
-html.dark .chart-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-.chart-visual {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  font-size: 28px;
-  color: var(--text-secondary);
-  background-color: #ffffff;
-  border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  padding: 4px;
-  overflow: hidden;
-}
-
-.chart-visual i {
-  opacity: 0.25;
-}
-
-.chart-visual img.chart-image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-
-.chart-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-primary);
-  text-align: center;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.analysis-placeholder {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 20px;
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-}
-
-.analysis-placeholder i {
-  font-size: 28px;
-  color: var(--text-secondary);
-  opacity: 0.3;
-}
-
-.analysis-placeholder p {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
-.analysis-placeholder span {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.6;
-}
-
-/* 指标图表预览 Lightbox（Teleport 到 body，样式仍属本组件 scoped） */
-.chart-lightbox-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 20000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.72);
-  box-sizing: border-box;
-}
-
-.chart-lightbox-content {
-  max-width: min(96vw, 1200px);
-  max-height: min(90vh, 900px);
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
-}
-
-.chart-lightbox-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.chart-lightbox-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chart-lightbox-close {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 6px;
   background: transparent;
+  border: 0;
   color: var(--text-secondary);
   cursor: pointer;
-}
-
-.chart-lightbox-close:hover {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-}
-
-.chart-lightbox-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: #ffffff;
-}
-
-.chart-lightbox-body img {
-  max-width: 100%;
-  max-height: min(80vh, 820px);
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  display: block;
-}
-
-.lightbox-enter-active,
-.lightbox-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.lightbox-enter-from,
-.lightbox-leave-to {
-  opacity: 0;
-}
-
-.lightbox-enter-active .chart-lightbox-content,
-.lightbox-leave-active .chart-lightbox-content {
-  transition: transform 0.2s ease;
-}
-
-.lightbox-enter-from .chart-lightbox-content,
-.lightbox-leave-to .chart-lightbox-content {
-  transform: scale(0.96);
-}
-
-/* ==================== Flow step log ==================== */
-.flow-log-content {
-  flex: 1;
-  min-height: 0;
-  padding: 8px 10px 10px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.flow-log-layout {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-}
-
-.flow-log-viewer-panel {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.flow-log-viewer-header {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  flex-shrink: 0;
-}
-
-.flow-log-viewer-header-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.flow-log-viewer-summary-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.flow-log-viewer-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.flow-log-viewer-tool {
-  font-size: 9px;
-  color: var(--text-secondary);
-  font-family: 'JetBrains Mono', monospace;
-  white-space: nowrap;
-}
-
-.flow-log-viewer-state {
-  padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--border-color);
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.flow-log-viewer-state.failed {
-  color: #f87171;
-  border-color: rgba(248, 113, 113, 0.45);
-  background: rgba(248, 113, 113, 0.08);
-}
-
-.flow-log-viewer-state.live {
-  color: var(--accent-color);
-  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.35);
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
-}
-
-.flow-log-viewer-size,
-.flow-log-viewer-loading {
-  font-size: 9px;
-  color: var(--text-secondary);
-}
-
-.flow-log-viewer-loading {
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.flow-log-viewer-summary-row.empty .flow-log-viewer-title {
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.flow-log-viewer-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-}
-
-.flow-log-viewer-shell {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-}
-
-.flow-log-fullscreen-content {
-  padding: 10px;
-}
-
-.flow-log-fullscreen-layout {
-  border-radius: 4px;
-}
-
-.flow-log-steps-trigger,
-.flow-log-copy-btn,
-.flow-log-jump-live-btn,
-.flow-log-expand-btn,
-.flow-log-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition:
-    color 120ms ease,
-    border-color 120ms ease,
-    background 120ms ease;
-  line-height: 1.3;
-}
-
-.flow-log-steps-trigger:hover:not(:disabled),
-.flow-log-copy-btn:hover:not(:disabled),
-.flow-log-jump-live-btn:hover:not(:disabled),
-.flow-log-expand-btn:hover:not(:disabled),
-.flow-log-icon-btn:hover:not(:disabled) {
-  color: var(--text-primary);
-  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.45);
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
-}
-
-.flow-log-copy-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.flow-log-copy-btn.is-copied {
-  color: var(--text-primary);
-  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.45);
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
-}
-
-.flow-log-copy-btn.is-error {
-  color: var(--text-primary);
-  border-color: rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.08);
-}
-
-.flow-log-copy-tooltip {
-  position: fixed;
-  z-index: 20020;
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-}
-
-.flow-log-copy-tooltip.is-copied {
-  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.45);
-}
-
-.flow-log-copy-tooltip.is-error {
-  border-color: rgba(239, 68, 68, 0.45);
-}
-
-.flow-log-copy-tooltip::after {
-  content: '';
-  position: absolute;
-  bottom: 100%;
-  right: 12px;
-  border: 5px solid transparent;
-  border-bottom-color: var(--border-color);
-}
-
-.flow-log-copy-tooltip.is-above::after {
-  top: 100%;
-  bottom: auto;
-  border-bottom-color: transparent;
-  border-top-color: var(--border-color);
-}
-
-.flow-log-expand-btn:disabled {
-  opacity: 0.7;
-  cursor: progress;
-}
-
-.flow-log-steps-trigger i,
-.flow-log-copy-btn i,
-.flow-log-jump-live-btn i,
-.flow-log-expand-btn i,
-.flow-log-icon-btn i {
-  font-size: 12px;
-  line-height: 1;
-}
-
-.flow-log-icon-btn {
-  width: 24px;
   height: 24px;
   justify-content: center;
   padding: 0;
+  width: 24px;
 }
 
-.flow-log-expand-btn-spinner {
-  animation: flow-log-expand-spin 900ms linear infinite;
+.dashboard-icon-button:hover {
+  color: var(--accent-color);
+}
+.dashboard-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.dashboard-icon-button i {
+  color: inherit;
 }
 
-@keyframes flow-log-expand-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.dashboard-parameter-grid {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  margin: 0;
+  min-height: 0;
+  padding: 8px;
 }
 
-.flow-log-error {
+.dashboard-parameter-grid > div {
+  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 43px;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.chip-info-grid,
+.key-metrics-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chip-info-grid {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.key-metrics-grid {
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.constraint-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chip-info-grid dt,
+.key-metrics-grid dt,
+.constraint-list dt {
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.2;
+  margin: 0 0 3px;
+}
+
+.chip-info-grid dd,
+.key-metrics-grid dd,
+.constraint-list dd {
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.25;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.key-metrics-grid dd {
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.key-metrics-grid > div {
+  min-height: 0;
+  padding: 5px 7px;
+}
+
+.key-metrics-grid dt {
+  font-size: 9px;
+  margin-bottom: 2px;
+}
+
+.port-definition-link {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--accent-color);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 10px;
+  gap: 4px;
+  margin: auto 10px 9px;
+  padding: 0;
+  width: fit-content;
+}
+
+.layout-preview {
+  background: var(--bg-secondary);
+  border: 0;
+  cursor: zoom-in;
   flex: 1;
-  min-height: 80px;
-  padding: 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.08);
-  color: #f87171;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.layout-preview img {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.dashboard-empty {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  font-size: 10px;
+  gap: 6px;
+  justify-content: center;
+  min-height: 0;
+  padding: 8px;
+  text-align: center;
+}
+.dashboard-empty i {
+  font-size: 20px;
+  opacity: 0.6;
+}
+.dashboard-empty.compact {
+  min-height: 40px;
+}
+
+.status-card-content,
+.qor-overview {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.status-card-content {
+  grid-template-columns: minmax(104px, 0.45fr) minmax(0, 1fr);
+}
+
+.status-card-content > .status-pie,
+.qor-visual-column {
+  align-self: stretch;
+  border-right: 1px solid var(--border-color);
+  height: 100%;
+  min-height: 108px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.qor-visual-column {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 20px minmax(0, 1fr);
+  padding: 0;
+}
+
+.qor-score-hero {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  justify-content: center;
+  min-height: 0;
+  padding: 5px 8px;
+  text-align: center;
+}
+
+.qor-score-hero > span,
+.qor-score-hero em {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.qor-score-hero.is-baseline > small {
+  color: var(--text-secondary);
+  font-size: 9px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qor-score-hero > div {
+  align-items: baseline;
+  display: flex;
+  gap: 3px;
+}
+
+.qor-score-hero strong {
+  color: var(--text-primary);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.qor-score-hero small {
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.qor-score-hero.is-pass strong,
+.qor-score-hero.is-pass em {
+  color: var(--success-color);
+}
+
+.qor-score-hero.is-fail strong,
+.qor-score-hero.is-fail em {
+  color: var(--danger-color);
+}
+
+.qor-score-versus {
+  align-items: center;
+  color: var(--accent-color);
+  display: flex;
+  font-size: 10px;
+  font-weight: 800;
+  justify-content: center;
+  letter-spacing: 0;
+}
+
+.qor-comparison-pie {
+  align-content: center;
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 140px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 0;
+}
+
+.qor-comparison-pie :deep(.status-pie-chart-wrap) {
+  min-height: 140px;
+}
+
+.status-summary-content,
+.qor-summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  padding: 9px 11px;
+}
+
+.status-summary-title {
+  color: var(--text-primary);
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.status-summary-content p,
+.qor-summary-content p {
+  color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.4;
-  overflow: auto;
+  margin: 4px 0 0;
 }
 
-.flow-log-placeholder {
-  flex: 1;
-  min-height: 120px;
+.status-count-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  min-width: 0;
+}
+
+.status-count-list > div {
+  color: var(--text-secondary);
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 16px;
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
+  font-size: 11px;
+  justify-content: space-between;
+  min-width: 0;
 }
 
-.flow-log-placeholder i {
-  font-size: 28px;
-  color: var(--text-secondary);
-  opacity: 0.35;
-}
-
-.flow-log-placeholder p {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
+.status-count-list dt,
+.status-count-list dd {
   margin: 0;
 }
 
-.flow-log-placeholder span {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.65;
-  text-align: center;
-  max-width: 260px;
+.status-count-list dd {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.flow-log-loading {
+.status-summary-content.is-pass .status-summary-title,
+.qor-summary-content.is-pass .status-summary-title {
+  color: var(--success-color);
+}
+.status-summary-content.is-warning .status-summary-title,
+.qor-summary-content.is-warning .status-summary-title {
+  color: var(--warn-color);
+}
+.status-summary-content.is-blocked .status-summary-title,
+.qor-summary-content.is-blocked .status-summary-title {
+  color: var(--danger-color);
+}
+.status-count-list > .is-blocked dt,
+.status-count-list > .is-blocked dd {
+  color: var(--danger-color);
+}
+.status-count-list > .is-pass dt,
+.status-count-list > .is-pass dd {
+  color: var(--success-color);
+}
+.status-count-list > .is-warning dt,
+.status-count-list > .is-warning dd {
+  color: var(--warn-color);
+}
+.status-count-list > .is-unavailable dt,
+.status-count-list > .is-unavailable dd {
+  color: var(--text-secondary);
+}
+
+.status-detail-link {
+  align-items: center;
+  align-self: flex-end;
+  background: transparent;
+  border: 0;
+  color: var(--accent-color);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 10px;
+  gap: 3px;
+  margin-top: auto;
+  padding: 0;
+}
+
+.status-detail-link:hover {
+  color: var(--text-primary);
+}
+
+.qor-step-status {
+  background: var(--text-secondary);
+  border-radius: 50%;
+  content: '';
+  flex: 0 0 auto;
+  height: 6px;
+  width: 6px;
+}
+.qor-step-status.is-improved {
+  background: var(--success-color);
+}
+.qor-step-status.is-regressed {
+  background: var(--danger-color);
+}
+
+.qor-overview {
+  grid-template-columns: minmax(112px, 0.34fr) minmax(160px, 0.62fr) minmax(0, 1fr);
+}
+
+.qor-summary-content {
+  border-right: 1px solid var(--border-color);
+}
+
+.qor-step-list {
+  display: grid;
   flex: 1;
-  min-height: 120px;
+  gap: 4px 6px;
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 8px;
+}
+.qor-step-row {
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 16px;
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
+  min-height: 0;
+  min-width: 0;
+  padding: 4px 6px;
 }
-
-.flow-log-loading-icon {
-  font-size: 28px;
+.qor-step-link {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+.qor-step-link strong {
+  color: var(--text-primary);
+  font-size: 9px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qor-step-link i {
   color: var(--text-secondary);
-  opacity: 0.75;
-  animation: flow-log-spin 0.85s linear infinite;
-}
-
-.flow-log-loading p {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
-.flow-log-loading span {
   font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.7;
-  text-align: center;
-  max-width: 280px;
-  line-height: 1.45;
+}
+.qor-step-link:hover strong,
+.qor-step-link:focus-visible strong,
+.qor-step-link:hover i,
+.qor-step-link:focus-visible i {
+  color: var(--accent-color);
+}
+.qor-step-link:focus-visible {
+  outline: 1px solid var(--accent-color);
+  outline-offset: 2px;
+}
+.qor-step-trend {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 6px 0 0;
+  min-width: 0;
 }
 
-.flow-log-chooser-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 20010;
-  background: rgba(17, 24, 39, 0.12);
+.qor-step-trend-bar {
+  background: color-mix(in srgb, var(--border-color) 80%, transparent);
+  border-radius: 2px;
+  display: flex;
+  height: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.flow-log-chooser-anchor {
-  position: absolute;
-  width: min(calc(100vw - 40px), 20rem);
-  max-width: 20rem;
+.qor-step-trend-bar > span {
+  min-width: 0;
 }
 
-.flow-log-chooser-enter-active,
-.flow-log-chooser-leave-active {
-  transition: opacity 140ms ease;
+.qor-step-trend-bar > .is-improved {
+  background: var(--success-color);
 }
 
-.flow-log-chooser-enter-active .flow-log-chooser-anchor,
-.flow-log-chooser-leave-active .flow-log-chooser-anchor {
-  transition:
-    transform 140ms ease,
-    opacity 140ms ease;
+.qor-step-trend-bar > .is-regressed {
+  background: var(--danger-color);
 }
 
-.flow-log-chooser-enter-from,
-.flow-log-chooser-leave-to {
-  opacity: 0;
+.qor-step-trend-bar > .is-neutral {
+  background: var(--text-secondary);
 }
 
-.flow-log-chooser-enter-from .flow-log-chooser-anchor,
-.flow-log-chooser-leave-to .flow-log-chooser-anchor {
-  opacity: 0;
-  transform: translateY(-8px);
+.qor-step-trend-bar > .is-unavailable {
+  background: color-mix(in srgb, var(--text-secondary) 45%, transparent);
 }
 
-@keyframes flow-log-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.qor-step-total {
+  color: var(--text-primary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
 }
 
-/* ==================== Checklist Table ==================== */
-.checklist-content {
+.status-card .dashboard-section-header h2 {
+  font-size: 13px;
+}
+
+.snapshot-grid {
+  display: grid;
   flex: 1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  min-height: 0;
+  padding: 7px;
+}
+
+.snapshot-grid-cell {
+  border-bottom: 1px dashed color-mix(in srgb, var(--text-secondary) 45%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--text-secondary) 45%, transparent);
+  min-height: 0;
+  min-width: 0;
+}
+
+.snapshot-grid-cell:nth-child(5n) {
+  border-right: 0;
+}
+
+.snapshot-grid-cell:nth-child(n + 16) {
+  border-bottom: 0;
+}
+
+.snapshot-grid-cell button {
+  align-items: stretch;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6% 7% 4%;
+  width: 100%;
+}
+
+.snapshot-grid-cell button:hover,
+.snapshot-grid-cell button:focus-visible {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+  outline: none;
+}
+
+.snapshot-grid-cell img {
+  align-self: stretch;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  display: block;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  width: 100%;
+}
+
+.home-snapshot-pie {
+  align-self: stretch;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.home-snapshot-pie :deep(.status-pie-chart-wrap) {
+  min-height: 0;
+}
+
+.home-snapshot-pie :deep(.status-pie-center strong) {
+  font-size: 12px;
+}
+
+.home-snapshot-pie :deep(.status-pie-center span) {
+  font-size: 8px;
+}
+
+.snapshot-grid-cell i {
+  align-self: center;
+  font-size: 18px;
+}
+
+.snapshot-grid-cell span {
+  align-self: end;
+  font-size: 8px;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  padding-top: 4%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-detail-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  min-width: 100%;
+  width: 100%;
+}
+.dashboard-detail-table th,
+.dashboard-detail-table td {
+  border-bottom: 1px solid var(--border-color);
   padding: 8px;
-  overflow: auto;
-  contain: content;
+  text-align: left;
+  vertical-align: top;
+}
+.dashboard-detail-table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.dialog-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin: 20px 0;
+  text-align: center;
 }
 
-/* ==================== 通用动画 ==================== */
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
+.checklist-detail-list {
+  display: grid;
+  gap: 8px;
+}
+.checklist-detail-list section {
+  border-left: 3px solid var(--text-secondary);
+  padding: 8px 10px;
+}
+.checklist-detail-list section.is-pass {
+  border-left-color: var(--success-color);
+}
+.checklist-detail-list section.is-warning {
+  border-left-color: var(--warn-color);
+}
+.checklist-detail-list section.is-failed {
+  border-left-color: var(--danger-color);
+}
+.checklist-detail-list div {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+.checklist-detail-list strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.checklist-detail-list span,
+.checklist-detail-list p,
+.checklist-detail-list code {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+.checklist-detail-list p {
+  margin: 4px 0;
+}
+.checklist-detail-list code {
+  overflow-wrap: anywhere;
+}
+
+.qor-detail-waterfall {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: min(700px, 72vh);
+  min-height: 440px;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 5px 8px 0;
+  scrollbar-color: color-mix(in srgb, var(--text-secondary) 52%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+:deep(.qor-detail-dialog.p-dialog-maximized .p-dialog-content) {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.qor-detail-dialog.p-dialog-maximized) .qor-detail-waterfall {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.qor-detail-card header > span,
+.qor-detail-step-card header span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.qor-detail-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--text-secondary);
+  border-radius: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.qor-detail-card > header {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+.qor-detail-card > header i {
+  color: var(--accent-color);
+  font-size: 15px;
+}
+
+.qor-detail-summary-card > header > div,
+.qor-detail-step-card header > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.qor-detail-step-card header strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.qor-detail-step-card header small {
+  color: var(--text-secondary);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qor-detail-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qor-detail-summary-grid > section {
+  min-width: 0;
+  padding: 10px 12px 8px;
+}
+
+.qor-detail-summary-grid > section + section {
+  border-left: 1px solid var(--border-color);
+}
+
+.qor-detail-summary-grid > section > span {
+  color: var(--text-secondary);
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.qor-detail-summary-grid > section > strong {
+  color: var(--text-primary);
+  display: block;
+  font-size: 14px;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qor-detail-score-value {
+  align-items: baseline;
+  display: flex;
+  gap: 4px;
+  padding: 9px 0 0;
+}
+
+.qor-detail-score-value strong {
+  color: var(--text-primary);
+  font-size: 31px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.qor-detail-summary-grid > .is-current.is-improvement .qor-detail-score-value strong {
+  color: var(--success-color);
+}
+
+.qor-detail-summary-grid > .is-current.is-regression .qor-detail-score-value strong {
+  color: var(--danger-color);
+}
+
+.qor-detail-score-value > span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.qor-detail-summary-list,
+.qor-detail-metric-list {
+  margin: 0;
+}
+
+.qor-detail-summary-list {
+  display: grid;
+  gap: 0;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0 12px 10px;
+}
+
+.qor-detail-summary-list > div {
+  border-top: 1px solid var(--border-color);
+  min-width: 0;
+  padding: 7px 5px 0 0;
+}
+
+.qor-detail-summary-list > div + div {
+  padding-left: 8px;
+}
+
+.qor-detail-summary-list dt {
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin: 0;
+}
+
+.qor-detail-summary-list dd {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qor-detail-summary-list .is-improvement dd,
+.qor-detail-metric-list p.is-improvement {
+  color: var(--success-color);
+}
+
+.qor-detail-summary-list .is-regression dd,
+.qor-detail-metric-list p.is-regression {
+  color: var(--danger-color);
+}
+
+.qor-detail-summary-list .is-neutral {
+  color: var(--text-secondary);
+}
+
+.qor-detail-no-metrics {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 2px 0;
+  padding: 4px 2px;
+}
+
+.qor-detail-metric-list > div {
+  align-items: start;
+  border-bottom: 1px solid var(--border-color);
+  display: grid;
+  gap: 6px 16px;
+  grid-template-columns:
+    minmax(180px, 1.4fr) minmax(118px, 0.8fr) minmax(118px, 0.8fr)
+    minmax(176px, 1fr);
+  min-width: 0;
+  padding: 9px 12px;
+}
+
+.qor-detail-metric-list > div:last-child {
+  border-bottom: 0;
+}
+
+.qor-detail-metric-list > .qor-detail-metric-heading {
+  align-items: center;
+  background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  padding-bottom: 7px;
+  padding-top: 7px;
+}
+
+.qor-detail-metric-heading dt,
+.qor-detail-metric-heading dd,
+.qor-detail-metric-heading p {
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  margin: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.qor-detail-metric-list dt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.qor-detail-metric-list dt > span {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qor-detail-metric-list dt small {
+  color: var(--text-secondary);
+  font-family: var(--font-family-mono, monospace);
+  font-size: 9px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qor-detail-metric-list dd {
+  color: var(--text-primary);
+  font-family: var(--font-family-mono, monospace);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  margin: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.qor-detail-metric-list > div.is-improvement dd:nth-of-type(2) {
+  color: var(--success-color);
+}
+
+.qor-detail-metric-list > div.is-regression dd:nth-of-type(2) {
+  color: var(--danger-color);
+}
+
+.qor-detail-metric-list p {
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.3;
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .qor-detail-waterfall {
+    height: min(720px, 74vh);
+    padding-right: 0;
   }
 
-  to {
-    transform: rotate(360deg);
+  :deep(.qor-detail-dialog.p-dialog-maximized) .qor-detail-waterfall {
+    height: auto;
+  }
+
+  .qor-detail-summary-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qor-detail-metric-list > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qor-detail-metric-list > .qor-detail-metric-heading {
+    display: none;
+  }
+
+  .qor-detail-metric-list dt,
+  .qor-detail-metric-list p {
+    grid-column: 1 / -1;
+  }
+
+  .qor-detail-metric-list dd::before {
+    color: var(--text-secondary);
+    display: block;
+    font-family: var(--font-family-base, sans-serif);
+    font-size: 9px;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+
+  .qor-detail-metric-list dd:nth-of-type(1)::before {
+    content: 'Baseline';
+  }
+
+  .qor-detail-metric-list dd:nth-of-type(2)::before {
+    content: 'Current';
+  }
+}
+.dashboard-image-preview {
+  display: block;
+  height: auto;
+  max-height: min(75vh, 820px);
+  object-fit: contain;
+  width: 100%;
+}
+
+.home-snapshot-detail {
+  align-items: stretch;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1fr);
+  min-width: 0;
+}
+
+.home-snapshot-detail-chart {
+  min-height: 280px;
+}
+
+.home-snapshot-detail-list {
+  align-content: start;
+  display: grid;
+  gap: 7px 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+}
+
+.home-snapshot-detail-list > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.home-snapshot-detail-list dt,
+.home-snapshot-detail-list dd {
+  margin: 0;
+}
+
+.home-snapshot-detail-list dt {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-snapshot-detail-list dt span {
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.home-snapshot-detail-list dd {
+  color: var(--text-primary);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+@media (max-width: 680px) {
+  .home-snapshot-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-snapshot-detail-chart {
+    min-height: 240px;
   }
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-/* ==================== 响应式 ==================== */
-@media (max-width: 1200px) {
-  .info-grid {
-    grid-template-columns: repeat(2, 1fr);
+@media (max-width: 1180px) {
+  .home-dashboard {
+    grid-template-rows: auto auto auto;
   }
-
-  .charts-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .home-dashboard-top,
+  .home-dashboard-middle,
+  .home-dashboard-bottom {
+    grid-template-columns: 1fr;
   }
-
-  /* 3 列布局下不需要 4 列模式的 span，让第 7 个卡片走自动排布 */
-  .chart-card:nth-child(7):last-child {
-    grid-column: auto;
+  .dashboard-section {
+    min-height: 180px;
   }
 }
 
-@media (max-width: 900px) {
-  .charts-grid {
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-    grid-template-rows: none;
-    grid-auto-rows: minmax(120px, 1fr);
-    align-content: start;
+@media (max-width: 720px) {
+  .qor-overview {
+    grid-template-columns: minmax(78px, 0.32fr) minmax(122px, 0.55fr) minmax(0, 1fr);
   }
-
-  .chart-card:nth-child(7):last-child {
-    grid-column: auto;
+  .status-summary-content,
+  .qor-summary-content,
+  .qor-step-list {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .qor-step-row {
+    gap: 3px;
+  }
+  .qor-step-list {
+    grid-template-columns: repeat(auto-fit, minmax(114px, 1fr));
+  }
+  .qor-step-total {
+    font-size: 7px;
   }
 }
 </style>

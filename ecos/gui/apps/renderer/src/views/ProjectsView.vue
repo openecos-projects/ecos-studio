@@ -464,7 +464,6 @@
               @select-step="selectStep"
               @select-workspace="selectWorkspace"
               @select-issue-metric="selectIssueMetric"
-              @export-report="exportQorTrendReport"
               @set-baseline="setQorBaseline"
               @import-project="importProject"
               @new-project="openNewProjectDialog"
@@ -800,7 +799,6 @@ import {
   rememberProjectHistoryEntry,
   removeProjectHistoryEntry,
 } from '@/utils/projectHistory'
-import { serializeProjectQorTrendReport } from '@/utils/projectQorTrend'
 
 type BranchDraft = WorkspaceBranchDraft
 type ModalId = 'new-project' | 'workspace-draft' | 'delete-workspace' | 'delete-project'
@@ -1172,35 +1170,6 @@ function handleAnalysisTabSelection(tab: 'dashboard' | 'step') {
     return
   }
   selectedAnalysisTab.value = tab
-}
-
-async function exportQorTrendReport() {
-  const project = selectedProject.value
-  if (!project.path) return
-
-  try {
-    await writeProjectTextFile(
-      'qor_trend.json',
-      serializeProjectQorTrendReport(project.qorTrendSummary, {
-        projectId: project.id,
-        projectName: project.name,
-        projectPath: project.path,
-      }),
-      { projectPath: project.path },
-    )
-    showToast({
-      severity: 'success',
-      summary: 'QoR report exported',
-      detail: 'qor_trend.json was written to the project root.',
-    })
-  } catch (error) {
-    console.warn('Failed to export QoR trend report.', error)
-    showToast({
-      severity: 'warn',
-      summary: 'QoR report not exported',
-      detail: writeFailureDetail('qor_trend.json', error),
-    })
-  }
 }
 
 async function setQorBaseline(payload: { workspaceId: string }) {

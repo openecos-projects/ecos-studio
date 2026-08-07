@@ -97,6 +97,7 @@ function registerHandlers() {
       readOptionalProjectTextFileUpdate: vi.fn(),
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
+      registerProjectReadRoot: vi.fn(),
       registerProjectRoot: vi.fn(),
       listProjectDirectory: vi.fn(),
       requestProjectPathAccess: vi.fn(),
@@ -190,6 +191,7 @@ function registerHandlers() {
       write: vi.fn(),
     },
     chipViewerService: {
+      isOpen: vi.fn(),
       open: vi.fn(),
     },
   }
@@ -700,6 +702,7 @@ describe('registerIpc', () => {
       Uint8Array.from([0x45, 0x43, 0x4f, 0x53]),
     )
     services.workspaceService.registerProjectRoot.mockResolvedValue('/tmp/project')
+    services.workspaceService.registerProjectReadRoot.mockResolvedValue('/tmp/project')
     services.workspaceService.requestProjectPathAccess.mockResolvedValue(
       '/tmp/project/home.json',
     )
@@ -765,6 +768,12 @@ describe('registerIpc', () => {
     ).resolves.toBe(true)
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceRegisterProjectRoot)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toBe('/tmp/project')
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceRegisterProjectReadRoot)?.(
         event,
         '/tmp/project',
       ),
@@ -1046,6 +1055,19 @@ describe('registerIpc', () => {
     })
 
     expect(services.chipViewerService.open).toHaveBeenCalledWith(request)
+  })
+
+  it('reports whether a step Chip Viewer is still open', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = { projectPath: '/tmp/project', step: 'Floorplan' }
+    services.chipViewerService.isOpen.mockReturnValue({ open: true })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.chipViewerIsOpen)?.(event, request),
+    ).resolves.toEqual({ open: true })
+
+    expect(services.chipViewerService.isOpen).toHaveBeenCalledWith(request)
   })
 
   it('delegates workspace resource calls to the resource service', async () => {

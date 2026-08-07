@@ -42,6 +42,7 @@ jobs:
               - 'ecos/gui/package.json'
               - 'ecos/gui/apps/*/package.json'
               - 'ecos/gui/packages/*/package.json'
+              - 'ecc/'
             gui:
               - 'ecos/gui/apps/**'
               - 'ecos/gui/packages/**'

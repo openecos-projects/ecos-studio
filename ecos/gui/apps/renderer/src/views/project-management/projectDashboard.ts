@@ -10,8 +10,9 @@ import type {
   ProjectWorkspace,
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
-import type {
-  ProjectQorTrendSummary,
+import {
+  QOR_SCORE_THRESHOLD,
+  type ProjectQorTrendSummary,
   QorGateStatus,
   QorStatus,
 } from '@/utils/projectQorTrend'
@@ -26,9 +27,6 @@ import {
 export type DashboardTone = 'good' | 'warn' | 'bad' | 'neutral'
 export type DashboardSeverity = 'critical' | 'warning' | 'info'
 export type DashboardAnalysisState = 'clean' | 'findings' | 'incomplete' | 'unavailable'
-
-/** The 0-100 QoR score line that marks a workspace as analysis-ready. */
-export const QOR_SCORE_THRESHOLD = 60
 
 export interface DashboardCheck {
   id: string

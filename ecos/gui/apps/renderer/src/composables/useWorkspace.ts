@@ -1512,10 +1512,12 @@ export function useWorkspace() {
       return null
     }
 
+    // A direct step run can update every Home data source. During a full flow,
+    // keep intermediate step events incremental and perform the broad refresh
+    // only when the task reaches its terminal event.
+    const isIntermediateFullFlowStep = cmd === 'rtl2gds' && eventType === 'step_complete'
     const scopes = new Set<WorkspaceInvalidationScope>(
-      cmd === 'rtl2gds' && eventType === 'task_complete'
-        ? ['all']
-        : ['flow', 'step', 'maps', 'logs'],
+      isIntermediateFullFlowStep ? ['flow', 'step', 'maps', 'logs'] : ['all'],
     )
 
     const info = event.info

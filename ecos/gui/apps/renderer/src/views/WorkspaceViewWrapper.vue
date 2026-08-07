@@ -14,6 +14,9 @@
 <script setup lang="ts">
 import { onBeforeRouteLeave } from 'vue-router'
 import LeftSidebar from '../components/LeftSidebar.vue'
+import { clearHomeQorComparisonCache } from '../composables/useHomeQorComparison'
+import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'
+import { clearStepDashboardDataCache } from '../composables/useStepDashboardData'
 // import RightSidebar from '../components/RightSidebar.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 
@@ -21,6 +24,9 @@ const { closeProject } = useWorkspace()
 
 onBeforeRouteLeave(async () => {
   await closeProject()
+  clearStepDashboardDataCache()
+  clearHomeQorComparisonCache()
+  clearHomeSnapshotCache()
 })
 </script>
 

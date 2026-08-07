@@ -10,28 +10,9 @@ describe('LeftSidebar workspace navigation', () => {
     expect(source).not.toContain(`:to="'/workspace/' + stage.path"`)
   })
 
-  it('uses the flow overview instead of backend subflow data for frontend steps', () => {
-    const overviewTemplate = source.slice(
-      source.indexOf('<template v-if="showFlowOverviewPanel">'),
-      source.indexOf('<template v-else-if="showBackendSubflowPanel">'),
-    )
-    const subflowTemplate = source.slice(
-      source.indexOf('<template v-else-if="showBackendSubflowPanel">'),
-    )
-
-    expect(source).toContain("isFrontendProject.value ? 'Frontend Flow' : 'RTL2GDS'")
-    expect(source).toContain('await runAllFlow({ rerun: isRerun.value })')
-    expect(source).toContain('showOverviewPanel.value ||')
-    expect(source).toContain('isFrontendProject.value && showSubflowPanel.value')
-    expect(source).toContain('showSubflowPanel.value && !isFrontendProject.value')
-    expect(overviewTemplate).toContain('currentStage === stage.path')
-    expect(overviewTemplate).toContain('v-if="showOverviewRunControls"')
-    expect(subflowTemplate).toContain('v-if="!isFrontendProject"')
-  })
-
-  it('gives frontend source and waveform views the progress panel width', () => {
-    expect(source).toContain('v-if="showWorkspaceProgressPanel"')
-    expect(source).toContain("['src', 'wave'].includes(currentStage.value.toLowerCase())")
-    expect(source).toContain('showProgressPanel.value && !isFrontendExpandedView.value')
+  it('does not render the legacy flow overview or reserve its side panel', () => {
+    expect(source).not.toContain('Flow Overview')
+    expect(source).not.toContain('RTL to GDS Pipeline')
+    expect(source).not.toContain('w-[240px]')
   })
 })

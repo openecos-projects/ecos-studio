@@ -29,6 +29,8 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('keepReplacementBackup')
     expect(appSource).toContain('lockWorkspaceDirectory: true')
     expect(appSource).toContain('readOptionalProjectTextFile')
+    expect(appSource).toContain('registerProjectReadRoot')
+    expect(appSource).toContain('parentLocalPath(normalizedWorkspacePath)')
   })
 
   it('asks whether to keep the old workspace backup before running update workspace', () => {
@@ -39,6 +41,16 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('runWorkspaceUpdate(false)')
     expect(appSource).toContain('Backup Original')
     expect(appSource).toContain('Do Not Backup')
+  })
+
+  it('rebuilds the current workspace without a backup before a Home rerun', () => {
+    expect(appSource).toContain('registerHomeWorkspaceRerun')
+    expect(appSource).toContain('rebuildCurrentWorkspaceForHomeRerun')
+    expect(appSource).toContain('replaceExistingWorkspace: true')
+    expect(appSource).toContain('keepReplacementBackup: false')
+    expect(appSource).toContain(
+      'buildReconfigureWizardInitialConfig(targetWorkspacePath)',
+    )
   })
 
   it('prefers the current workspace origin files when building reconfigure defaults', () => {
