@@ -40,7 +40,6 @@ import {
   type DesktopAgentEvent,
   type DesktopAgentInterruptRequest,
   type DesktopAgentWorkspaceRerunContract,
-  type DesktopAgentWorkspaceOptimizationContract,
   type DesktopAgentSendMessageRequest,
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
@@ -79,7 +78,6 @@ import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
-import { readPlaceOptimizationEvidence } from '../services/eccRpc/workspaceOptimization'
 import {
   executeWorkspaceRerun,
   prepareWorkspaceRerun,
@@ -559,15 +557,6 @@ export function registerIpc(
     string,
     {
       contract: DesktopAgentWorkspaceRerunContract
-      optimization?: true
-      sender: IpcMainInvokeEvent['sender']
-    }
-  >()
-  const pendingWorkspaceOptimizations = new Map<
-    string,
-    {
-      contract: DesktopAgentWorkspaceOptimizationContract
-      nextCandidateIndex: number
       sender: IpcMainInvokeEvent['sender']
     }
   >()
@@ -681,19 +670,6 @@ export function registerIpc(
       agentSessionKey(payload.providerId, payload.sessionId),
     )
     if (!subscription) return
-    if (payload.type === 'workspace_optimization' && payload.workspaceOptimization) {
-      const token = randomUUID()
-      pendingWorkspaceOptimizations.set(token, {
-        contract: payload.workspaceOptimization,
-        nextCandidateIndex: 0,
-        sender: subscription.sender,
-      })
-      sendAgentEventToSender(subscription.sender, {
-        ...payload,
-        workspaceOptimizationToken: token,
-      })
-      return
-    }
     if (payload.type !== 'workspace_rerun' || !payload.workspaceRerun) {
       sendAgentEventToSender(subscription.sender, payload)
       return
@@ -955,48 +931,6 @@ export function registerIpc(
     return { ...prepared, executionToken }
   })
 
-  handle(
-    desktopApiIpcChannels.workspacePrepareFlowAgentOptimization,
-    async (event, request) => {
-      const token = readWorkspaceRerunToken(request)
-      const candidateIndex = readOptimizationCandidateIndex(request)
-      const pending = pendingWorkspaceOptimizations.get(token)
-      if (
-        !pending ||
-        pending.sender !== event.sender ||
-        candidateIndex !== pending.nextCandidateIndex
-      ) {
-        throw new Error('Workspace optimization authorization is invalid.')
-      }
-      const contract = pending.contract.rerun_contracts[candidateIndex]
-      if (!contract) throw new Error('Workspace optimization candidate is invalid.')
-      const caller = BrowserWindow.fromWebContents(event.sender)
-      if (!caller) throw new Error('Caller window is not available')
-      const sourceWorkspace = workspaceWindowRegistry.getPathForWindow(
-        caller as WorkspaceWindowLike,
-      )
-      if (
-        !sourceWorkspace ||
-        normalizeWorkspacePath(sourceWorkspace) !==
-          normalizeWorkspacePath(contract.source_workspace)
-      ) {
-        throw new Error('Workspace optimization source is not bound to this window.')
-      }
-      pending.nextCandidateIndex += 1
-      if (pending.nextCandidateIndex === pending.contract.rerun_contracts.length) {
-        pendingWorkspaceOptimizations.delete(token)
-      }
-      const prepared = await prepareWorkspaceRerun(contract)
-      const executionToken = randomUUID()
-      pendingWorkspaceRerunExecutions.set(executionToken, {
-        contract,
-        optimization: true,
-        sender: event.sender,
-      })
-      return { ...prepared, executionToken }
-    },
-  )
-
   handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
     const token = readWorkspaceRerunToken(request)
     const pending = pendingWorkspaceRerunExecutions.get(token)
@@ -1042,9 +976,6 @@ export function registerIpc(
       services.eccRuntimeService,
       workspaceHandle,
     )
-    return pending.optimization
-      ? await readPlaceOptimizationEvidence(pending.contract.target_workspace)
-      : undefined
   })
 
   handle(desktopApiIpcChannels.workspaceBindWindow, async (event, path) => {
@@ -1847,22 +1778,6 @@ function readWorkspaceRerunToken(value: unknown): string {
     throw new Error('Workspace rerun token is invalid.')
   }
   return value.token
-}
-
-function readOptimizationCandidateIndex(value: unknown): number {
-  if (!isRecord(value)) {
-    throw new Error('Workspace optimization candidate index is invalid.')
-  }
-  const candidateIndex = value.candidateIndex
-  if (
-    typeof candidateIndex !== 'number' ||
-    !Number.isInteger(candidateIndex) ||
-    candidateIndex < 0 ||
-    candidateIndex >= 5
-  ) {
-    throw new Error('Workspace optimization candidate index is invalid.')
-  }
-  return candidateIndex
 }
 
 function readAgentRecord(value: unknown): Record<string, unknown> {
