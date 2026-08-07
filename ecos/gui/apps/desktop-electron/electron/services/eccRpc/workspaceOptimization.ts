@@ -18,9 +18,7 @@ export interface PlaceOptimizationEvaluation {
 }
 
 export interface PlaceOptimizationExecutor {
-  prepare(
-    contract: DesktopAgentWorkspaceRerunContract,
-  ): Promise<{ directory: string }>
+  prepare(contract: DesktopAgentWorkspaceRerunContract): Promise<{ directory: string }>
   execute(contract: DesktopAgentWorkspaceRerunContract): Promise<void>
   readEvidence(directory: string): Promise<PlaceOptimizationEvidence>
 }
@@ -79,7 +77,9 @@ export async function executePlaceOptimization(
   const best = evaluations
     .filter(
       (item) =>
-        item.candidateId !== contracts[0]?.rerun_id && item.status === 'succeeded' && item.evidence,
+        item.candidateId !== contracts[0]?.rerun_id &&
+        item.status === 'succeeded' &&
+        item.evidence,
     )
     .sort((left, right) => left.evidence!.hpwl - right.evidence!.hpwl)[0]
   return { ...(best ? { bestCandidateId: best.candidateId } : {}), evaluations }
@@ -96,11 +96,14 @@ function validateContracts(contracts: DesktopAgentWorkspaceRerunContract[]): voi
       contract.end_step === 'place' &&
       contract.execution_scope === 'single_step' &&
       contract.parameter_patch.every((item) => item.knob_id === 'place.target_density')
-    if (!isPlaceOnly) throw new Error('optimization requires frozen place-only rerun contracts')
+    if (!isPlaceOnly)
+      throw new Error('optimization requires frozen place-only rerun contracts')
   }
 }
 
-export async function readPlaceOptimizationEvidence(directory: string): Promise<PlaceOptimizationEvidence> {
+export async function readPlaceOptimizationEvidence(
+  directory: string,
+): Promise<PlaceOptimizationEvidence> {
   const relativePath = 'place_dreamplace/analysis/qor_metrics.json'
   const payload = JSON.parse(await readFile(join(directory, relativePath), 'utf8')) as {
     metrics?: Array<{ id?: unknown; value?: unknown }>

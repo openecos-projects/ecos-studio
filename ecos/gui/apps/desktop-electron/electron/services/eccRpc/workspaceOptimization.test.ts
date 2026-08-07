@@ -40,9 +40,17 @@ describe('executePlaceOptimization', () => {
         prepare: async (item) => ({ directory: item.target_workspace }),
         readEvidence: async (directory) => ({
           artifactRefs: ['place_dreamplace/analysis/qor_metrics.json'],
-          hpwl: directory.endsWith('baseline') ? 1 : directory.endsWith('candidate_1') ? 10 : 12,
+          hpwl: directory.endsWith('baseline')
+            ? 1
+            : directory.endsWith('candidate_1')
+              ? 10
+              : 12,
           metrics: {
-            place_hpwl: directory.endsWith('baseline') ? 1 : directory.endsWith('candidate_1') ? 10 : 12,
+            place_hpwl: directory.endsWith('baseline')
+              ? 1
+              : directory.endsWith('candidate_1')
+                ? 10
+                : 12,
           },
         }),
       },

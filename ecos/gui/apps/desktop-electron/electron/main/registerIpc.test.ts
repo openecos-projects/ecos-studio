@@ -474,7 +474,10 @@ describe('registerIpc', () => {
       design_id: 'gcd',
       end_step: 'place' as const,
       execution_scope: 'single_step' as const,
-      parameter_patch: density === undefined ? [] : [{ knob_id: 'place.target_density', value: density }],
+      parameter_patch:
+        density === undefined
+          ? []
+          : [{ knob_id: 'place.target_density', value: density }],
       requires_gui_review: true as const,
       rerun_id: id,
       schema_version: 'flow-agent.workspace_rerun_contract.v1' as const,
@@ -495,7 +498,10 @@ describe('registerIpc', () => {
     fromWebContents.mockReturnValue(window)
     workspaceWindowRegistry.register('/runs/gcd', window)
     prepareWorkspaceRerunMock.mockResolvedValue({ directory: '/runs/scan_baseline' })
-    await handlers.get(desktopApiIpcChannels.agentStartSession)?.({ sender: owner }, session)
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: owner },
+      session,
+    )
     emitAgentEvent?.({
       ...session,
       type: 'workspace_optimization',
@@ -511,23 +517,61 @@ describe('registerIpc', () => {
         },
         rerun_contracts: contracts,
         run_spec: {
-          baseline_id: 'baseline', budget: 5, direction: 'decrease', knob_id: 'place.target_density',
-          lower: 0.4, objective: 'place_hpwl', requires_gui_review: true, run_id: 'scan',
-          schema_version: 'ecos-place-optimization-run.v1', seed: 0, source_workspace: '/runs/gcd', upper: 0.8,
+          baseline_id: 'baseline',
+          budget: 5,
+          direction: 'decrease',
+          knob_id: 'place.target_density',
+          lower: 0.4,
+          objective: 'place_hpwl',
+          requires_gui_review: true,
+          run_id: 'scan',
+          schema_version: 'ecos-place-optimization-run.v1',
+          seed: 0,
+          source_workspace: '/runs/gcd',
+          upper: 0.8,
         },
         schema_version: 'flow-agent.place_optimization_contract.v1',
       },
     })
-    const forwarded = owner.send.mock.calls[0]?.[1] as { workspaceOptimizationToken: string }
-    const prepare = handlers.get(desktopApiIpcChannels.workspacePrepareFlowAgentOptimization)
-    await expect(prepare?.({ sender: owner }, { candidateIndex: 1, token: forwarded.workspaceOptimizationToken }))
-      .resolves.toMatchObject({ error: { message: 'Workspace optimization authorization is invalid.' }, ok: false })
-    await expect(prepare?.({ sender: { id: 102 } }, { candidateIndex: 0, token: forwarded.workspaceOptimizationToken }))
-      .resolves.toMatchObject({ error: { message: 'Workspace optimization authorization is invalid.' }, ok: false })
-    await expect(prepare?.({ sender: owner }, { candidateIndex: 0, token: forwarded.workspaceOptimizationToken }))
-      .resolves.toMatchObject({ directory: '/runs/scan_baseline' })
-    await expect(prepare?.({ sender: owner }, { candidateIndex: 0, token: forwarded.workspaceOptimizationToken }))
-      .resolves.toMatchObject({ error: { message: 'Workspace optimization authorization is invalid.' }, ok: false })
+    const forwarded = owner.send.mock.calls[0]?.[1] as {
+      workspaceOptimizationToken: string
+    }
+    const prepare = handlers.get(
+      desktopApiIpcChannels.workspacePrepareFlowAgentOptimization,
+    )
+    await expect(
+      prepare?.(
+        { sender: owner },
+        { candidateIndex: 1, token: forwarded.workspaceOptimizationToken },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace optimization authorization is invalid.' },
+      ok: false,
+    })
+    await expect(
+      prepare?.(
+        { sender: { id: 102 } },
+        { candidateIndex: 0, token: forwarded.workspaceOptimizationToken },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace optimization authorization is invalid.' },
+      ok: false,
+    })
+    await expect(
+      prepare?.(
+        { sender: owner },
+        { candidateIndex: 0, token: forwarded.workspaceOptimizationToken },
+      ),
+    ).resolves.toMatchObject({ directory: '/runs/scan_baseline' })
+    await expect(
+      prepare?.(
+        { sender: owner },
+        { candidateIndex: 0, token: forwarded.workspaceOptimizationToken },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace optimization authorization is invalid.' },
+      ok: false,
+    })
     expect(prepareWorkspaceRerunMock).toHaveBeenCalledWith(contracts[0])
   })
 

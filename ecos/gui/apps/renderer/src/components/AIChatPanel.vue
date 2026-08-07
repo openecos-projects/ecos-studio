@@ -1570,7 +1570,13 @@ async function executeWorkspaceOptimization(
   const prepare = desktopApi?.workspace.prepareFlowAgentOptimization
   const execute = desktopApi?.workspace.executeFlowAgentRerun
   const agent = desktopApi?.agent
-  if (!desktopApi || !prepare || !execute || !agent || !isActiveGuiOwner(ownerSessionId)) {
+  if (
+    !desktopApi ||
+    !prepare ||
+    !execute ||
+    !agent ||
+    !isActiveGuiOwner(ownerSessionId)
+  ) {
     if (!isActiveGuiOwner(ownerSessionId)) {
       deferGuiAction(ownerSessionId, { type: 'optimization', contract, token })
     }
@@ -1665,10 +1671,12 @@ async function executeWorkspaceOptimization(
       }
     }
     await agent.sendMessage({
-      message: 'workspace_optimization_result:' + JSON.stringify({
-        evaluations,
-        run_id: contract.run_spec.run_id,
-      }),
+      message:
+        'workspace_optimization_result:' +
+        JSON.stringify({
+          evaluations,
+          run_id: contract.run_spec.run_id,
+        }),
       providerId: AGENT_PROVIDER_ID,
       sessionId: ownerSessionId,
     })

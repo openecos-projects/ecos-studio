@@ -506,7 +506,8 @@ function expandUserPath(pathValue: string, resolveHome: () => string): string {
 }
 
 function prependPath(directory: string, pathValue: string | undefined): string {
-  const entries = pathValue?.split(delimiter).filter((entry) => entry && entry !== directory) ?? []
+  const entries =
+    pathValue?.split(delimiter).filter((entry) => entry && entry !== directory) ?? []
   return [directory, ...entries].join(delimiter)
 }
 

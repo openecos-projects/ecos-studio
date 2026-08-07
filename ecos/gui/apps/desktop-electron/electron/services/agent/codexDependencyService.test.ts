@@ -216,19 +216,21 @@ describe('CodexDependencyService', () => {
     await writeFile(codexBin, '#!/usr/bin/env node\n')
     await chmod(codexBin, 0o755)
 
-    const spawn = vi.fn((_command: string, args: string[], _options: { env?: NodeJS.ProcessEnv }) => {
-      const child = new FakeChild()
-      queueMicrotask(() => {
-        if (args[0] === '--version') {
-          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+    const spawn = vi.fn(
+      (_command: string, args: string[], _options: { env?: NodeJS.ProcessEnv }) => {
+        const child = new FakeChild()
+        queueMicrotask(() => {
+          if (args[0] === '--version') {
+            child.stdout.emit('data', 'codex-cli 0.1.0\n')
+            child.emit('close', 0)
+            return
+          }
+          child.stdout.emit('data', 'Logged in\n')
           child.emit('close', 0)
-          return
-        }
-        child.stdout.emit('data', 'Logged in\n')
-        child.emit('close', 0)
-      })
-      return child as never
-    })
+        })
+        return child as never
+      },
+    )
     const service = new CodexDependencyService({
       env: { PATH: '/usr/bin:/bin', HOME: root },
       installRoot: join(root, 'managed'),

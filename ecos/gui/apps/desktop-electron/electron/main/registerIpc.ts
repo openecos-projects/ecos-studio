@@ -955,37 +955,47 @@ export function registerIpc(
     return { ...prepared, executionToken }
   })
 
-  handle(desktopApiIpcChannels.workspacePrepareFlowAgentOptimization, async (event, request) => {
-    const token = readWorkspaceRerunToken(request)
-    const candidateIndex = readOptimizationCandidateIndex(request)
-    const pending = pendingWorkspaceOptimizations.get(token)
-    if (!pending || pending.sender !== event.sender || candidateIndex !== pending.nextCandidateIndex) {
-      throw new Error('Workspace optimization authorization is invalid.')
-    }
-    const contract = pending.contract.rerun_contracts[candidateIndex]
-    if (!contract) throw new Error('Workspace optimization candidate is invalid.')
-    const caller = BrowserWindow.fromWebContents(event.sender)
-    if (!caller) throw new Error('Caller window is not available')
-    const sourceWorkspace = workspaceWindowRegistry.getPathForWindow(caller as WorkspaceWindowLike)
-    if (
-      !sourceWorkspace ||
-      normalizeWorkspacePath(sourceWorkspace) !== normalizeWorkspacePath(contract.source_workspace)
-    ) {
-      throw new Error('Workspace optimization source is not bound to this window.')
-    }
-    pending.nextCandidateIndex += 1
-    if (pending.nextCandidateIndex === pending.contract.rerun_contracts.length) {
-      pendingWorkspaceOptimizations.delete(token)
-    }
-    const prepared = await prepareWorkspaceRerun(contract)
-    const executionToken = randomUUID()
-    pendingWorkspaceRerunExecutions.set(executionToken, {
-      contract,
-      optimization: true,
-      sender: event.sender,
-    })
-    return { ...prepared, executionToken }
-  })
+  handle(
+    desktopApiIpcChannels.workspacePrepareFlowAgentOptimization,
+    async (event, request) => {
+      const token = readWorkspaceRerunToken(request)
+      const candidateIndex = readOptimizationCandidateIndex(request)
+      const pending = pendingWorkspaceOptimizations.get(token)
+      if (
+        !pending ||
+        pending.sender !== event.sender ||
+        candidateIndex !== pending.nextCandidateIndex
+      ) {
+        throw new Error('Workspace optimization authorization is invalid.')
+      }
+      const contract = pending.contract.rerun_contracts[candidateIndex]
+      if (!contract) throw new Error('Workspace optimization candidate is invalid.')
+      const caller = BrowserWindow.fromWebContents(event.sender)
+      if (!caller) throw new Error('Caller window is not available')
+      const sourceWorkspace = workspaceWindowRegistry.getPathForWindow(
+        caller as WorkspaceWindowLike,
+      )
+      if (
+        !sourceWorkspace ||
+        normalizeWorkspacePath(sourceWorkspace) !==
+          normalizeWorkspacePath(contract.source_workspace)
+      ) {
+        throw new Error('Workspace optimization source is not bound to this window.')
+      }
+      pending.nextCandidateIndex += 1
+      if (pending.nextCandidateIndex === pending.contract.rerun_contracts.length) {
+        pendingWorkspaceOptimizations.delete(token)
+      }
+      const prepared = await prepareWorkspaceRerun(contract)
+      const executionToken = randomUUID()
+      pendingWorkspaceRerunExecutions.set(executionToken, {
+        contract,
+        optimization: true,
+        sender: event.sender,
+      })
+      return { ...prepared, executionToken }
+    },
+  )
 
   handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
     const token = readWorkspaceRerunToken(request)
