@@ -1,40 +1,56 @@
 <a id="algorithm.place.execution"></a>
 ## algorithm.place.execution
 
-**调用链：** ecc_dreamplace.runner.run_placement() 获取 ECC module，构造 DreamplaceModule；DreamplaceModule._run() 构造 PlacementEngine，依次调用 setup_rawdb() 与 run()；后者建立 placement DB 并调用 NonLinearPlace。
+**Execution path:** The ECOS `place` runner obtains the ECC module, constructs `DreamplaceModule`, builds `PlacementEngine`, imports the ECC-backed raw database with `setup_rawdb()`, builds the Python placement database, and invokes `NonLinearPlace`.
 
-**默认阶段：** 当前默认配置开启 global placement 与 internal legalization，关闭 detailed placement。
+**Stage order inside one place invocation:** When the corresponding controls are enabled, the order is `global placement -> acceptance gate -> legalization -> detailed placement`. The acceptance gate runs after global placement; excessive overflow or a non-finite objective returns infinite HPWL and prevents later stages.
 
-**后续：** place 返回后 runner 请求 placement feature map、保存数据和分析；这些调用不等同于证明所有产物都已成功落盘。
+**Flow distinction:** ECOS also has a separate `legalization` flow step after CTS. That step invokes the same module with global placement disabled, so it legalizes its incoming placement rather than rerunning global placement.
 
-**源码证据：** **dreamplace.runner**, **dreamplace.module**, **dreamplace.placer**, **dreamplace.config**
+**Post-processing boundary:** The runner requests feature maps, saves data, and runs analysis after DreamPlace returns. Those calls are not independent proof that every requested artifact was produced.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **dreamplace.placer**, **dreamplace.nonlinear**
 
 <a id="algorithm.dreamplace.global_placement"></a>
 ## algorithm.dreamplace.global_placement
 
-NonLinearPlace 以平滑线长和 density penalty 的目标迭代。当前 global_place_stages 配置是 32x32 bins、1000 iterations、weighted_average wirelength 与 nesterov optimizer。
+**Idea:** Global placement relaxes cells to continuous coordinates and minimizes a differentiable objective. `PlaceObj` combines smoothed wirelength with a density penalty, and can add a macro-overlap penalty. The weighted-average wirelength model supplies gradients where exact HPWL is not differentiable, while density and overflow are evaluated over placement bins.
 
-如果最后一次度量的 overflow 大于 stop_overflow，或 objective 为 Inf 或 NaN，实现会跳过 legalizer 和 detailed placement，并返回无穷 HPWL 作为失败信号。
+**Optimization structure:** Each configured global stage runs **three nested optimization loops**: an outer gamma loop reduces wirelength smoothing, a middle loop updates density weight, and an inner loop performs optimizer descent. The selected optimizer can be Adam, SGD variants, or Nesterov; each descent step projects cells back into the placement boundary, evaluates HPWL and overflow, differentiates the objective, and preconditions gradients by density and node area.
 
-**源码证据：** **dreamplace.config**, **dreamplace.nonlinear**, **dreamplace.objective**
+**Convergence control:** The implementation tracks the best-overflow position, updates density weight and gamma as optimization progresses, stops on overflow/HPWL/density criteria, and can roll back after divergence detection. The final global-placement metric is the gate for later legalization and detailed refinement.
+
+**Source evidence:** **dreamplace.nonlinear**, **dreamplace.objective**
 
 <a id="algorithm.dreamplace.routability_optimization"></a>
 ## algorithm.dreamplace.routability_optimization
 
-routability_opt_flag 为 1 时，NonLinearPlace 进入可布线性优化路径。当前快照默认开启 EGR 面积调整，关闭 RUDY 和 pin 面积调整；具体是否发生调整仍取决于迭代中的阈值与数据。
+**Trigger:** When routability optimization is enabled, the global-placement loop considers area adjustment only after density overflow falls below its configured threshold and while adjustment rounds remain.
 
-**源码证据：** **dreamplace.config**, **dreamplace.nonlinear**, **dreamplace.objective**
+**Algorithm:** It obtains a routing-utilization map from EGR or the routing estimator, and optionally a pin-utilization map. `adjust_node_area_op` uses those maps to modify movable-cell area models so the following placement iterations can spread demand away from congested or pin-dense regions.
+
+**Restart after adjustment:** After an area change, DreamPlace resets density and overflow operators, reinitializes density weight and the optimizer state, estimates a new learning rate, and resumes the nested optimization loop. These are placement-time estimators, not evidence of detailed-routing completion.
+
+**Source evidence:** **dreamplace.nonlinear**, **dreamplace.objective**
 
 <a id="algorithm.dreamplace.legalization"></a>
 ## algorithm.dreamplace.legalization
 
-普通 place 的默认 legalize_flag 为 1，因此 global placement 收敛后会在同次布局中进行内部 legalization。CTS 后的独立 legalization 步调用同一模块，但强制 global_place_flag 为 0、legalize_flag 为 1、enable_fillers 为 0，所以它不是再次全局布局。
+**Purpose:** Legalization converts continuous placement coordinates into legal site and row locations while honoring die bounds, fixed objects, and fence-region constraints.
 
-**源码证据：** **dreamplace.config**, **dreamplace.module**, **dreamplace.nonlinear**
+**Internal sequence:** The standard legalization operator runs `MacroLegalize -> GreedyLegalize -> AbacusLegalize`. Macro legalization places movable macros first. Greedy legalization produces a fast overlap-free standard-cell placement. Abacus legalization then compacts rows to improve displacement while preserving legality. A legality check follows greedy legalization and another follows Abacus legalization; a failed check retains the earlier legal candidate.
+
+**Fence regions and flow use:** Designs with fence regions use a per-region legalization operator and validate the merged result. The standalone ECOS `legalization` flow step uses this same legalization path without a preceding global-placement run.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **dreamplace.nonlinear**, **dreamplace.placer**
 
 <a id="algorithm.dreamplace.detailed_placement"></a>
 ## algorithm.dreamplace.detailed_placement
 
-当前默认 detailed_place_flag 为 0，因此 detailed placement 不是默认 place 路径的一部分。PlacementEngine 仅在 detailed_place_engine 被设置且本地路径存在时调用外部 detailed placer；不存在时记录 warning。
+**Precondition:** Detailed refinement runs only when enabled and starts from the legalized placement. Every candidate sequence is checked for legality, and an illegal result stops refinement at the last legal position.
 
-**源码证据：** **dreamplace.config**, **dreamplace.placer**
+**In-process refinement:** DreamPlace constructs an ABCDPlace-style sequence: `K-Reorder -> IndependentSetMatching -> GlobalSwap -> K-Reorder`. K-Reorder searches local cell permutations, independent-set matching permits non-conflicting moves in parallel, and global swap evaluates broader exchanges. The final K-Reorder restores local ordering after swaps.
+
+**External refinement:** After the in-process placement engine reports finite HPWL, `PlacementEngine` can invoke a configured external detailed placer when its executable path exists. That external call is distinct from the internal ABCDPlace-style sequence.
+
+**Source evidence:** **dreamplace.nonlinear**, **dreamplace.placer**

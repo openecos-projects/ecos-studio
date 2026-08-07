@@ -48,6 +48,24 @@ def test_failure_chunks_are_english() -> None:
     assert not any("\u4e00" <= character <= "\u9fff" for character in failures)
 
 
+def test_algorithm_chunks_are_english_and_describe_place_stages() -> None:
+    knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
+    algorithms = (BUNDLE_ROOT / "knowledge" / "algorithms.md").read_text(encoding="utf-8")
+    expected_details = {
+        "algorithm.place.execution": "global placement -> acceptance gate -> legalization -> detailed placement",
+        "algorithm.dreamplace.global_placement": "three nested optimization loops",
+        "algorithm.dreamplace.routability_optimization": "adjust_node_area_op",
+        "algorithm.dreamplace.legalization": "MacroLegalize -> GreedyLegalize -> AbacusLegalize",
+        "algorithm.dreamplace.detailed_placement": "K-Reorder -> IndependentSetMatching -> GlobalSwap -> K-Reorder",
+    }
+
+    assert "**Source evidence:**" in algorithms
+    assert "default" not in algorithms.casefold()
+    assert not any("\u4e00" <= character <= "\u9fff" for character in algorithms)
+    for entity_id, required_text in expected_details.items():
+        assert required_text in knowledge.chunk_text(entity_id)
+
+
 def test_metrics_cover_gui_place_values_and_maps_with_english_calculations() -> None:
     gui_metrics = (
         ECOS_ROOT / "ecos/gui/apps/renderer/src/utils/projectManagement.ts"
@@ -87,6 +105,37 @@ def test_metrics_cover_gui_place_values_and_maps_with_english_calculations() -> 
         chunk = knowledge.chunk_text(entity_id)
         assert "**Meaning:**" in chunk
         assert "**Calculation:**" in chunk
+
+
+def test_artifact_chunks_are_english_and_describe_contents_and_generation() -> None:
+    knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
+    artifacts = (BUNDLE_ROOT / "knowledge" / "artifacts.md").read_text(encoding="utf-8")
+    expected_content = {
+        "artifact.place.outputs": "source artifacts",
+        "artifact.place.output_def": "standard-cell placement coordinates",
+        "artifact.place.output_verilog": "logical connectivity",
+        "artifact.place.output_gds": "physical geometry",
+        "artifact.place.output_db": "routing grids, cell masters",
+        "artifact.place.output_image": "placement plots",
+        "artifact.place.output_json": "reserved JSON-export path",
+        "artifact.place.geometry": "geometry.manifest",
+        "artifact.place.view_json": "view-JSON serialization",
+        "artifact.place.feature_db": "Design Information",
+        "artifact.place.feature_step": "not emitted",
+        "artifact.place.feature_map": "placement evaluation",
+        "artifact.place.qor_metrics": '"metrics"',
+        "artifact.place.qor_summary": '"gates"',
+        "artifact.place.qor_hotspots": "value > 0",
+        "artifact.place.log": "root logger",
+    }
+
+    assert "**Boundary:**" not in artifacts
+    assert not any("\u4e00" <= character <= "\u9fff" for character in artifacts)
+    for entity_id, required_text in expected_content.items():
+        chunk = knowledge.chunk_text(entity_id)
+        assert "**Meaning:**" in chunk
+        assert "**Calculation:**" in chunk
+        assert required_text in chunk
 
 
 def test_regression_questions_render_only_published_markdown_chunks() -> None:

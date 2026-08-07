@@ -26,6 +26,12 @@ SOURCE_PATHS = {
     "dreamplace.objective": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/PlaceObj.py",
     "ecc.congestion": "ecc/chipcompiler/thirdparty/ecc-tools/src/evaluation/src/module/congestion/congestion_eval.cpp",
     "ecc.metrics": "ecc/chipcompiler/tools/ecc/metrics.py",
+    "ecc.runner": "ecc/chipcompiler/tools/ecc/runner.py",
+    "ecc.module": "ecc/chipcompiler/tools/ecc/module.py",
+    "ecc.plot": "ecc/chipcompiler/tools/ecc/plot.py",
+    "ecc.feature_manager": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/feature_manager.cpp",
+    "ecc.feature_summary": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/parser/feature_parser.cpp",
+    "ecc.geometry": "ecc/chipcompiler/thirdparty/ecc-tools/src/database/manager/builder/geometry_builder/GeometrySnapshotWriter.cpp",
     "ecc.service": "ecc/chipcompiler/tools/ecc/service.py",
     "ecc.feature_union": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/builder/feature_eval_union.cpp",
     "ecc.feature_parser": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/parser/feature_parser_eval.cpp",
@@ -207,11 +213,40 @@ def _add_parameters(entries: list[dict[str, object]], documents: dict[str, list[
 
 
 def _add_algorithms(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
-    _add(entries, documents, entity_id="algorithm.place.execution", kind="algorithm", aliases=("place内部算法", "place算法", "布局算法", "布局流程", "place执行流程", "place如何执行", "place怎么执行", "place怎么运行", "place execution", "place flow", "how does place execute", "how does place work", "placement algorithm"), document="algorithms.md", body="**调用链：** ecc_dreamplace.runner.run_placement() 获取 ECC module，构造 DreamplaceModule；DreamplaceModule._run() 构造 PlacementEngine，依次调用 setup_rawdb() 与 run()；后者建立 placement DB 并调用 NonLinearPlace。\n\n**默认阶段：** 当前默认配置开启 global placement 与 internal legalization，关闭 detailed placement。\n\n**后续：** place 返回后 runner 请求 placement feature map、保存数据和分析；这些调用不等同于证明所有产物都已成功落盘。", evidence=("dreamplace.runner", "dreamplace.module", "dreamplace.placer", "dreamplace.config"))
-    _add(entries, documents, entity_id="algorithm.dreamplace.global_placement", kind="algorithm", aliases=("global placement", "全局布局", "nesterov", "非线性布局"), document="algorithms.md", body="NonLinearPlace 以平滑线长和 density penalty 的目标迭代。当前 global_place_stages 配置是 32x32 bins、1000 iterations、weighted_average wirelength 与 nesterov optimizer。\n\n如果最后一次度量的 overflow 大于 stop_overflow，或 objective 为 Inf 或 NaN，实现会跳过 legalizer 和 detailed placement，并返回无穷 HPWL 作为失败信号。", evidence=("dreamplace.config", "dreamplace.nonlinear", "dreamplace.objective"))
-    _add(entries, documents, entity_id="algorithm.dreamplace.routability_optimization", kind="algorithm", aliases=("routability optimization", "routability opt", "可布线优化", "拥塞驱动布局"), document="algorithms.md", body="routability_opt_flag 为 1 时，NonLinearPlace 进入可布线性优化路径。当前快照默认开启 EGR 面积调整，关闭 RUDY 和 pin 面积调整；具体是否发生调整仍取决于迭代中的阈值与数据。", evidence=("dreamplace.config", "dreamplace.nonlinear", "dreamplace.objective"))
-    _add(entries, documents, entity_id="algorithm.dreamplace.legalization", kind="algorithm", aliases=("legalization", "合法化", "布局合法化", "cts后合法化"), document="algorithms.md", body="普通 place 的默认 legalize_flag 为 1，因此 global placement 收敛后会在同次布局中进行内部 legalization。CTS 后的独立 legalization 步调用同一模块，但强制 global_place_flag 为 0、legalize_flag 为 1、enable_fillers 为 0，所以它不是再次全局布局。", evidence=("dreamplace.config", "dreamplace.module", "dreamplace.nonlinear"))
-    _add(entries, documents, entity_id="algorithm.dreamplace.detailed_placement", kind="algorithm", aliases=("detailed placement", "详细布局", "细节布局"), document="algorithms.md", body="当前默认 detailed_place_flag 为 0，因此 detailed placement 不是默认 place 路径的一部分。PlacementEngine 仅在 detailed_place_engine 被设置且本地路径存在时调用外部 detailed placer；不存在时记录 warning。", evidence=("dreamplace.config", "dreamplace.placer"))
+    records = (
+        (
+            "algorithm.place.execution",
+            ("place内部算法", "place算法", "布局算法", "布局流程", "place执行流程", "place如何执行", "place怎么执行", "place怎么运行", "place execution", "place flow", "how does place execute", "how does place work", "placement algorithm"),
+            "**Execution path:** The ECOS `place` runner obtains the ECC module, constructs `DreamplaceModule`, builds `PlacementEngine`, imports the ECC-backed raw database with `setup_rawdb()`, builds the Python placement database, and invokes `NonLinearPlace`.\n\n**Stage order inside one place invocation:** When the corresponding controls are enabled, the order is `global placement -> acceptance gate -> legalization -> detailed placement`. The acceptance gate runs after global placement; excessive overflow or a non-finite objective returns infinite HPWL and prevents later stages.\n\n**Flow distinction:** ECOS also has a separate `legalization` flow step after CTS. That step invokes the same module with global placement disabled, so it legalizes its incoming placement rather than rerunning global placement.\n\n**Post-processing boundary:** The runner requests feature maps, saves data, and runs analysis after DreamPlace returns. Those calls are not independent proof that every requested artifact was produced.",
+            ("dreamplace.runner", "dreamplace.module", "dreamplace.placer", "dreamplace.nonlinear"),
+        ),
+        (
+            "algorithm.dreamplace.global_placement",
+            ("global placement", "全局布局", "nesterov", "非线性布局"),
+            "**Idea:** Global placement relaxes cells to continuous coordinates and minimizes a differentiable objective. `PlaceObj` combines smoothed wirelength with a density penalty, and can add a macro-overlap penalty. The weighted-average wirelength model supplies gradients where exact HPWL is not differentiable, while density and overflow are evaluated over placement bins.\n\n**Optimization structure:** Each configured global stage runs **three nested optimization loops**: an outer gamma loop reduces wirelength smoothing, a middle loop updates density weight, and an inner loop performs optimizer descent. The selected optimizer can be Adam, SGD variants, or Nesterov; each descent step projects cells back into the placement boundary, evaluates HPWL and overflow, differentiates the objective, and preconditions gradients by density and node area.\n\n**Convergence control:** The implementation tracks the best-overflow position, updates density weight and gamma as optimization progresses, stops on overflow/HPWL/density criteria, and can roll back after divergence detection. The final global-placement metric is the gate for later legalization and detailed refinement.",
+            ("dreamplace.nonlinear", "dreamplace.objective"),
+        ),
+        (
+            "algorithm.dreamplace.routability_optimization",
+            ("routability optimization", "routability opt", "可布线优化", "拥塞驱动布局"),
+            "**Trigger:** When routability optimization is enabled, the global-placement loop considers area adjustment only after density overflow falls below its configured threshold and while adjustment rounds remain.\n\n**Algorithm:** It obtains a routing-utilization map from EGR or the routing estimator, and optionally a pin-utilization map. `adjust_node_area_op` uses those maps to modify movable-cell area models so the following placement iterations can spread demand away from congested or pin-dense regions.\n\n**Restart after adjustment:** After an area change, DreamPlace resets density and overflow operators, reinitializes density weight and the optimizer state, estimates a new learning rate, and resumes the nested optimization loop. These are placement-time estimators, not evidence of detailed-routing completion.",
+            ("dreamplace.nonlinear", "dreamplace.objective"),
+        ),
+        (
+            "algorithm.dreamplace.legalization",
+            ("legalization", "合法化", "布局合法化", "cts后合法化"),
+            "**Purpose:** Legalization converts continuous placement coordinates into legal site and row locations while honoring die bounds, fixed objects, and fence-region constraints.\n\n**Internal sequence:** The standard legalization operator runs `MacroLegalize -> GreedyLegalize -> AbacusLegalize`. Macro legalization places movable macros first. Greedy legalization produces a fast overlap-free standard-cell placement. Abacus legalization then compacts rows to improve displacement while preserving legality. A legality check follows greedy legalization and another follows Abacus legalization; a failed check retains the earlier legal candidate.\n\n**Fence regions and flow use:** Designs with fence regions use a per-region legalization operator and validate the merged result. The standalone ECOS `legalization` flow step uses this same legalization path without a preceding global-placement run.",
+            ("dreamplace.runner", "dreamplace.module", "dreamplace.nonlinear", "dreamplace.placer"),
+        ),
+        (
+            "algorithm.dreamplace.detailed_placement",
+            ("detailed placement", "详细布局", "细节布局"),
+            "**Precondition:** Detailed refinement runs only when enabled and starts from the legalized placement. Every candidate sequence is checked for legality, and an illegal result stops refinement at the last legal position.\n\n**In-process refinement:** DreamPlace constructs an ABCDPlace-style sequence: `K-Reorder -> IndependentSetMatching -> GlobalSwap -> K-Reorder`. K-Reorder searches local cell permutations, independent-set matching permits non-conflicting moves in parallel, and global swap evaluates broader exchanges. The final K-Reorder restores local ordering after swaps.\n\n**External refinement:** After the in-process placement engine reports finite HPWL, `PlacementEngine` can invoke a configured external detailed placer when its executable path exists. That external call is distinct from the internal ABCDPlace-style sequence.",
+            ("dreamplace.nonlinear", "dreamplace.placer"),
+        ),
+    )
+    for entity_id, aliases, body, evidence in records:
+        _add(entries, documents, entity_id=entity_id, kind="algorithm", aliases=aliases, document="algorithms.md", body=body, evidence=evidence, evidence_label="Source evidence:")
 
 
 def _metric_body(meaning: str, calculation: str, boundary: str) -> str:
@@ -268,26 +303,139 @@ def _add_metrics(entries: list[dict[str, object]], documents: dict[str, list[str
 
 
 def _add_artifacts(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
-    paths = {
-        "output_def": "output/{design}_place.def.gz",
-        "output_verilog": "output/{design}_place.v.gz",
-        "output_gds": "output/{design}_place.gds",
-        "output_db": "output/{design}_place_db",
-        "output_image": "output/{design}_place.png",
-        "output_json": "output/{design}_place.json",
-        "geometry": "output/geometry 和 geometry/geometry.manifest",
-        "view_json": "output/{design}_place_view",
-        "feature_db": "feature/place.db.json",
-        "feature_step": "feature/place.step.json",
-        "feature_map": "feature/place.map.json",
-        "qor_metrics": "analysis/qor_metrics.json",
-        "qor_summary": "analysis/qor_summary.json",
-        "qor_hotspots": "analysis/qor_hotspots.json",
-        "log": "log/place.log，DreamPlace module 默认日志名为 dreamplace_placement.log",
-    }
-    _add(entries, documents, entity_id="artifact.place.outputs", kind="artifact", aliases=("place产物", "布局产物", "place outputs", "place输出文件", "产物", "输出"), document="artifacts.md", body="ECOS builder 为 place 定义输出、feature、analysis、report、log 和 script 路径。下列实体描述预期路径；是否实际存在必须由 workspace artifact 检查确认。", evidence=("ecc.builder", "dreamplace.module"))
-    for name, path in paths.items():
-        _add(entries, documents, entity_id=f"artifact.place.{name}", kind="artifact", aliases=(name, name.replace("_", " "), path), document="artifacts.md", body=f"**预期路径：** {path}。\n\n**边界：** builder 的路径定义不是运行成功证明。", evidence=("ecc.builder", "dreamplace.module"))
+    records = (
+        (
+            "output_def",
+            "output/{design}_place.def.gz",
+            "The placed DEF is the physical-design interchange file exported from the current ECC database. Compared with the floorplan input DEF, its COMPONENTS section contains the standard-cell placement coordinates and row orientation written back by DreamPlace; it also carries the current die, rows, pins, blockages, macros, and net connectivity.",
+            "`NonLinearPlace` applies the optimized movable-cell positions to `macroPlaceDB`, which unscales the coordinates and writes them into ECC. The common place `save_data` path then invokes `def_save` on that updated database.",
+            ("dreamplace.nonlinear", "dreamplace.placer", "dreamplace.runner", "ecc.runner", "ecc.module"),
+        ),
+        (
+            "output_verilog",
+            "output/{design}_place.v.gz",
+            "The place Verilog is a gate-level logical-netlist export of the current ECC database: module structure, cell instances, ports, and logical net connectivity. It does not encode physical placement coordinates; those belong to the DEF, GDS, database checkpoint, and geometry snapshot.",
+            "After DreamPlace has updated the in-memory design, `save_data` calls `verilog_save`, which delegates to ECC's netlist exporter and writes the resulting logical connectivity to this path.",
+            ("dreamplace.runner", "ecc.runner", "ecc.module"),
+        ),
+        (
+            "output_gds",
+            "output/{design}_place.gds",
+            "The place GDS is a binary physical-layout export of the current ECC database. It represents the die-level physical geometry and current placed instance hierarchy, including the standard-cell locations produced by placement, in stream format suitable for physical-layout viewers.",
+            "The placement solution is written into ECC before the common persistence path calls `gds_save`; ECC serializes that current physical database as the GDS file.",
+            ("dreamplace.nonlinear", "dreamplace.runner", "ecc.runner", "ecc.module"),
+        ),
+        (
+            "output_db",
+            "output/{design}_place_db",
+            "The place database directory is an ECC checkpoint for subsequent flow stages. Its layout files include metadata, units, die, layers, sites, rows, routing grids, cell masters, via rules, and vias; its design files include metadata, instances, IO pins, nets, special nets, blockages, regions, slots, groups, and fills.",
+            "The common persistence path calls `save_data` after placement. The next stage can load this directory to reconstruct the same placed ECC database instead of reparsing the source design.",
+            ("dreamplace.runner", "ecc.runner", "ecc.module"),
+        ),
+        (
+            "output_image",
+            "output/{design}_place.png",
+            "This is the reserved direct PNG path exposed by the step-output schema. The placement visualizations are instead the placement plots generated from the QoR metrics and feature-map data, such as the metric chart and density or congestion heatmaps.",
+            "The builder allocates this path, while `run_analysis` invokes `ECCToolsPlot` to write plot files beside the analysis and feature inputs. The standard place runner has no writer that targets `output.image`, so this reserved path is not emitted as the placement result itself.",
+            ("ecc.builder", "ecc.runner", "ecc.plot"),
+        ),
+        (
+            "output_json",
+            "output/{design}_place.json",
+            "This is the reserved JSON-export path for a serialized current ECC design. It is distinct from the feature JSON files and from the GUI geometry snapshot; the standard place flow does not publish a design JSON at this path.",
+            "The builder allocates the path and `ECCToolsModule` exposes `json_save`, but the common place persistence path does not call it. It also intentionally skips view-JSON serialization because the GUI reads the geometry snapshot.",
+            ("ecc.builder", "ecc.runner", "ecc.module"),
+        ),
+        (
+            "geometry",
+            "output/geometry/geometry.manifest",
+            "The geometry directory is the GUI-rendering snapshot of the placed ECC database. `geometry.manifest` identifies the active epoch and the side files holding shape records, owners, packed geometry payload, names, shape-ID mapping, view tiles, layer, site, master, via, grid, connectivity, net, bus, and group metadata.",
+            "After saving the placed database, the common persistence path calls `geometry_snapshot_save` for the place step and requires `geometry.manifest` to exist. The snapshot writer emits epoch-local side files and publishes the manifest that references them.",
+            ("ecc.builder", "ecc.runner", "ecc.module", "ecc.geometry"),
+        ),
+        (
+            "view_json",
+            "output/{design}_place_view",
+            "This is the reserved directory for a view-JSON package, whose API would write a manifest and layout package files for the current ECC design. The standard place flow uses the geometry snapshot instead, so it does not emit this package.",
+            "The builder allocates the directory and `ECCToolsModule.view_json_save` can create the package, but `save_data` explicitly skips view-JSON serialization and directs the GUI to the geometry snapshot.",
+            ("ecc.builder", "ecc.runner", "ecc.module"),
+        ),
+        (
+            "feature_db",
+            "feature/place.db.json",
+            "This JSON is the source-derived summary of the placed ECC database. Its top-level content includes `Design Information`, `Design Layout`, `Design Statis`, `Instances`, `Macros Statis`, `Macros`, `Nets`, `Layers`, and `Pins`, which describe the design state from which placement metrics and plots are interpreted.",
+            "The common persistence path calls `feature_sammry`, which invokes ECC's feature-summary builder to extract those categories from the current database and serialize them to JSON.",
+            ("dreamplace.runner", "ecc.runner", "ecc.module", "ecc.feature_summary"),
+        ),
+        (
+            "feature_step",
+            "feature/place.step.json",
+            "This reserved file would contain the stage-specific `place` feature summary, including the placement-tool summary produced for a normal ECOS placement step. It is not emitted by the DreamPlace place runner.",
+            "`feature_step` can call ECC's `feature_tool` with `place`, but the DreamPlace runner invokes the common persistence function with `feature_step=False`; the call is skipped and no `place.step.json` is written.",
+            ("dreamplace.runner", "ecc.runner", "ecc.module", "ecc.feature_manager", "ecc.feature_summary"),
+        ),
+        (
+            "feature_map",
+            "feature/place.map.json",
+            "This JSON is the placement evaluation-map index. It records the generated density, pin-density, net-density, RUDY, LUT-RUDY, and EGR map resources that the GUI and plotting code use to render placement heatmaps.",
+            "Immediately after DreamPlace returns, the place runner calls `feature_placement_map`. ECC initializes the placement evaluator, builds the union placement-evaluation summary, and serializes the map-resource paths through `feature_pl_eval`.",
+            ("dreamplace.runner", "ecc.module", "ecc.feature_manager", "ecc.feature_union", "ecc.feature_parser"),
+        ),
+        (
+            "qor_metrics",
+            "analysis/qor_metrics.json",
+            "This JSON is the structured per-metric QoR record for the place step. Its top-level `\"metrics\"` array contains entries with an identifier, display name, value, unit, category, optimization direction, scope, rating, confidence, and source selector; the payload also records its schema, tool, step, design, detail records, source files, and integrity status.",
+            "ECC builds step metrics from the placed feature data, maps recognized values into QoR records, rejects records whose source escapes the current step feature directory, sorts the surviving records, and writes the resulting payload with `save_qor_metrics`.",
+            ("dreamplace.runner", "ecc.runner", "ecc.metrics"),
+        ),
+        (
+            "qor_summary",
+            "analysis/qor_summary.json",
+            "This JSON is the quality-status summary derived from the place QoR metrics. It contains the analysis and quality status, metric count, per-dimension counts, the top-level `\"gates\"` array, missing-metric diagnostics, and the name of the backing metrics file.",
+            "ECC rebuilds the QoR metric payload, groups records by category, determines valid or incomplete analysis status from metric availability and source integrity, evaluates the step quality gates, and writes the summary with `save_qor_summary`.",
+            ("dreamplace.runner", "ecc.runner", "ecc.metrics"),
+        ),
+        (
+            "qor_hotspots",
+            "analysis/qor_hotspots.json",
+            "This JSON is the actionable QoR-hotspot subset for the place step. A hotspot is a recognized congestion symptom, represented with its kind, warning severity, metric ID, display name, value, unit, category, source selector, and description rather than as every bin of a heatmap.",
+            "ECC first builds the QoR metric records, then retains only recognized place congestion metrics such as EGR total or peak overflow and RUDY or LUT-RUDY peak utilization when their numeric value > 0. Each retained record receives the fixed warning severity and its evidence source before `save_qor_hotspots` writes the list.",
+            ("dreamplace.runner", "ecc.runner", "ecc.metrics"),
+        ),
+        (
+            "log",
+            "log/place.log",
+            "The place log is the chronological DreamPlace execution record. It contains root logger messages for parameter setup, placement-database initialization, nonlinear placement progress and final PPA, congestion extraction, warnings, and failures; the default standalone filename is `dreamplace_placement.log` when no step log path is supplied.",
+            "`DreamplaceModule` chooses `step.log.file` when available, otherwise its default filename, opens it in write mode, and temporarily attaches it as a root logger handler around the whole placement run.",
+            ("dreamplace.module", "dreamplace.placer"),
+        ),
+    )
+    _add(
+        entries,
+        documents,
+        entity_id="artifact.place.outputs",
+        kind="artifact",
+        aliases=("place artifacts", "place outputs", "placement artifacts", "布局产物", "place输出文件", "产物", "输出"),
+        document="artifacts.md",
+        body="**Meaning:** The place artifact set is the collection of source artifacts, structured feature and QoR records, GUI geometry data, and execution logs produced around a DreamPlace placement run. Each file exposes a different view of the same placed design state or of the analysis performed on it.\n\n**Calculation:** The DreamPlace runner updates the ECC database, produces placement-map features, persists the physical outputs and checkpoint, then runs QoR analysis and plotting. The records below identify the actual content and generation chain for every published or reserved place artifact path.",
+        evidence=("ecc.builder", "dreamplace.runner", "ecc.runner"),
+        evidence_label="Source evidence:",
+    )
+    for name, path, meaning, calculation, evidence in records:
+        aliases = (name, name.replace("_", " "), path)
+        if name == "output_def":
+            aliases += ("place def", "placed def", "what does the placed def contain")
+        _add(
+            entries,
+            documents,
+            entity_id=f"artifact.place.{name}",
+            kind="artifact",
+            aliases=aliases,
+            document="artifacts.md",
+            body=f"**Meaning:** {meaning}\n\n**Calculation:** {calculation}",
+            evidence=evidence,
+            evidence_label="Source evidence:",
+        )
 
 
 def _add_failures(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
@@ -307,14 +455,16 @@ def _add_failures(entries: list[dict[str, object]], documents: dict[str, list[st
 def _write_regression(output: Path) -> None:
     cases = [
         {"id": "target-density", "question": "place阶段的target density这个参数的含义是什么？", "entity_id": "parameter.dreamplace.target_density", "required_text": "target placement density"},
-        {"id": "execution", "question": "place内部算法是如何执行的？", "entity_id": "algorithm.place.execution", "required_text": "NonLinearPlace"},
+        {"id": "execution", "question": "place内部算法是如何执行的？", "entity_id": "algorithm.place.execution", "required_text": "global placement -> acceptance gate -> legalization -> detailed placement"},
         {"id": "rudy", "question": "RUDY指标是如何计算的？", "entity_id": "metric.place_rudy_utilization_max", "required_text": "overlap_area"},
         {"id": "hpwl", "question": "place HPWL指标来自哪里？", "entity_id": "metric.place_hpwl", "required_text": "/Wirelength/HPWL"},
         {"id": "cell-density-map", "question": "How is the cell density map calculated?", "entity_id": "metric.place.map.cell_density", "required_text": "overlap_area"},
         {"id": "pin-density-map", "question": "How is the pin density map calculated?", "entity_id": "metric.place.map.pin_density", "required_text": "containing bin"},
         {"id": "net-density-map", "question": "How is the global net density map calculated?", "entity_id": "metric.place.map.global_net_density", "required_text": "bounding boxes"},
         {"id": "lutrudy", "question": "How is LUT-RUDY utilization calculated?", "entity_id": "metric.place_lutrudy_utilization_max", "required_text": "getLUT"},
-        {"id": "artifact", "question": "place阶段有哪些产物？", "entity_id": "artifact.place.outputs", "required_text": "预期路径"},
+        {"id": "artifact", "question": "place阶段有哪些产物？", "entity_id": "artifact.place.outputs", "required_text": "source artifacts"},
+        {"id": "place-def-artifact", "question": "What does the placed DEF contain?", "entity_id": "artifact.place.output_def", "required_text": "standard-cell placement coordinates"},
+        {"id": "qor-hotspots-artifact", "question": "How does qor_hotspots.json select place hotspots?", "entity_id": "artifact.place.qor_hotspots", "required_text": "value > 0"},
         {"id": "failure", "question": "dreamplace import failed 怎么理解？", "entity_id": "failure.place.dreamplace_import", "required_text": "dreamplace: import failed"},
     ]
     regression = output / "regression"
