@@ -8,10 +8,7 @@ import {
 
 describe('agentToolSteps', () => {
   it('turns newline progress into a running timeline', () => {
-    const steps = buildAgentToolSteps(
-      'Thinking…\nSearching workspace…\n',
-      'loading',
-    )
+    const steps = buildAgentToolSteps('Thinking…\nSearching workspace…\n', 'loading')
     expect(steps).toHaveLength(2)
     expect(steps[0]?.status).toBe('done')
     expect(steps[0]?.summary).toBe('Thinking…')

@@ -516,7 +516,8 @@ function readWorkspaceRerunContract(
   const executionScope = record.execution_scope
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
   const writes =
-    record.writes === undefined || (Array.isArray(record.writes) && record.writes.length === 0)
+    record.writes === undefined ||
+    (Array.isArray(record.writes) && record.writes.length === 0)
       ? []
       : readWorkspaceParameterWrites(record.writes)
   const sourceStageArtifact = readWorkspaceRerunArtifactReference(

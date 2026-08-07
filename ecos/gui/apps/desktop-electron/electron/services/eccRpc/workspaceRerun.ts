@@ -579,7 +579,10 @@ async function materializeWorkspaceRerunParameterWrites(
   }
 }
 
-function parseWorkspaceParameterDocument(raw: string, file: string): Record<string, unknown> {
+function parseWorkspaceParameterDocument(
+  raw: string,
+  file: string,
+): Record<string, unknown> {
   try {
     const document = JSON.parse(raw)
     if (typeof document !== 'object' || document === null || Array.isArray(document)) {
