@@ -256,6 +256,7 @@ const workspaceWizardTitle = computed(() => {
 async function createWorkspaceFromAgent(
   config: WorkspaceConfig,
   contract: DesktopAgentWorkspaceSetupContract,
+  ownerSessionId: string,
 ): Promise<import('@/composables/agentWorkspaceSetup').AgentWorkspaceCreationResult> {
   const agentShell = useAgentShellStore()
   agentShell.beginPreserveForAgentWorkspaceSwitch()
@@ -277,10 +278,10 @@ async function createWorkspaceFromAgent(
   agentShell.closeHomeAgent()
   agentShell.setPendingPostCreateFlow({
     setupId: contract.setup_id,
+    ownerSessionId,
     workspacePath,
   })
   agentShell.setMode('workspace')
-  agentShell.expandWorkspaceChat()
   await router.push('/workspace/home')
   await nextTick()
   return { created: true, workspacePath }

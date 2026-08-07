@@ -6,7 +6,9 @@ describe('agent workspace creation', () => {
     expect(source).toContain('workspace_setup_contract.v2.json')
     expect(source).toContain('api.workspace.writeProjectTextFile')
     expect(source).toContain('return { created: true, workspacePath }')
+    expect(source).toContain('ownerSessionId,')
     expect(source).not.toContain('void runAllFlow()')
+    expect(source).not.toContain('agentShell.expandWorkspaceChat()')
   })
 
   it('returns the workspace creation failure reason to the chat host', () => {

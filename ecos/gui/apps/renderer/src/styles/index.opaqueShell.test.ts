@@ -18,7 +18,7 @@ describe('opaque desktop shell chrome', () => {
   })
 
   it('uses higher-contrast border tokens for remote compositors', () => {
-    expect(indexCss).toContain('--border-color: #d1d5db')
+    expect(indexCss).toContain('--border-color: #d9e0e0')
     expect(indexCss).toContain('--border-color: #52525b')
   })
 

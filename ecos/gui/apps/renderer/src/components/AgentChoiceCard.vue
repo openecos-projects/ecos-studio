@@ -127,7 +127,7 @@ const stackOptions = computed(
   padding: 0.5rem 0.75rem;
   overflow: hidden;
   border: 0;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   background: transparent;
   background-color: transparent;
   color: var(--text-primary);
@@ -143,7 +143,7 @@ const stackOptions = computed(
   position: absolute;
   inset: 0;
   z-index: -1;
-  border: 1px solid var(--border-color);
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
   border-radius: inherit;
   background-color: var(--bg-secondary);
   pointer-events: none;
@@ -194,8 +194,8 @@ const stackOptions = computed(
 
 .choice-card__options--buttons .choice-card__option:first-child::before,
 .choice-card__options--list .choice-card__option:first-child::before {
-  border-color: color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
-  background-color: color-mix(in srgb, var(--accent-color) 9%, var(--bg-primary));
+  border-color: color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
+  background-color: color-mix(in srgb, var(--accent-color) 8%, var(--bg-primary));
 }
 
 .choice-card__options--list {

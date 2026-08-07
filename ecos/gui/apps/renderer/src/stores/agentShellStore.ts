@@ -11,6 +11,7 @@ export type AgentShellMode = 'home' | 'workspace'
 
 export interface AgentPostCreateFlowHandoff {
   setupId: string
+  ownerSessionId: string
   workspacePath: string
 }
 
@@ -29,13 +30,10 @@ export interface AgentChatTab {
 }
 
 /**
- * Cross-shell Agent UI state: home drawer vs workspace right rail,
- * shared chat tabs, and create→workspace handoff.
+ * Agent UI state shared by the home drawer and workspace workbench.
  */
 export const useAgentShellStore = defineStore('agentShell', () => {
   const homeAgentOpen = ref(false)
-  const workspaceChatExpanded = ref(false)
-  const chatFocusNonce = ref(0)
   const tabs = ref<AgentChatTab[]>([])
   const activeTabId = ref<string | null>(null)
   const mode = ref<AgentShellMode>('home')
@@ -60,23 +58,6 @@ export const useAgentShellStore = defineStore('agentShell', () => {
 
   function toggleHomeAgent(): void {
     homeAgentOpen.value = !homeAgentOpen.value
-  }
-
-  function expandWorkspaceChat(): void {
-    workspaceChatExpanded.value = true
-    chatFocusNonce.value += 1
-  }
-
-  function collapseWorkspaceChat(): void {
-    workspaceChatExpanded.value = false
-  }
-
-  function toggleWorkspaceChat(): void {
-    if (workspaceChatExpanded.value) {
-      collapseWorkspaceChat()
-      return
-    }
-    expandWorkspaceChat()
   }
 
   function setSessionId(id: string | null): void {
@@ -174,12 +155,11 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     return handoff
   }
 
-  /** Collapse chrome only — chat tabs are kept across workspace navigation. */
+  /** Keep chat tabs across workspace navigation. */
   function resetShell(options: { keepHomeOpen?: boolean } = {}): void {
     preserveMessagesOnWorkspaceSwitch.value = false
     preserveSessionOnWorkspaceSwitch.value = false
     pendingPostCreateFlow.value = null
-    workspaceChatExpanded.value = false
     if (!options.keepHomeOpen) {
       homeAgentOpen.value = false
     }
@@ -198,8 +178,6 @@ export const useAgentShellStore = defineStore('agentShell', () => {
 
   return {
     homeAgentOpen,
-    workspaceChatExpanded,
-    chatFocusNonce,
     tabs,
     activeTabId,
     activeTab,
@@ -213,9 +191,6 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     openHomeAgent,
     closeHomeAgent,
     toggleHomeAgent,
-    expandWorkspaceChat,
-    collapseWorkspaceChat,
-    toggleWorkspaceChat,
     setSessionId,
     setMode,
     setPanelWidthPx,

@@ -9,27 +9,27 @@
   font-weight: 400;
 
   /* Theme variables - Light (Default) */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f9fafb;
-  --bg-sidebar: #f3f4f6;
-  --border-color: #d1d5db;
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
-  --accent-color: #00bfa5;
-  --accent-text: #ffffff;
-  --topbar-bg: #ffffff;
-  --topbar-text: #374151;
+  --bg-primary: #fdfdfc;
+  --bg-secondary: #f4f6f6;
+  --bg-sidebar: #eef2f1;
+  --border-color: #d9e0e0;
+  --text-primary: #20292f;
+  --text-secondary: #5d6972;
+  --accent-color: #009c83;
+  --accent-text: #f8fffd;
+  --topbar-bg: #fdfdfc;
+  --topbar-text: #35424b;
   --status-bar-height: 24px;
 
   /* Semantic status color tokens */
-  --info-color: #2376d9;
-  --info-bg: #dbeafe;
-  --danger-color: #b42318;
-  --danger-bg: #fff1f1;
-  --success-color: #00a083;
-  --success-bg: rgba(0, 191, 165, 0.14);
-  --warn-color: #d97706;
-  --warn-bg: rgba(217, 119, 6, 0.12);
+  --info-color: #2679b9;
+  --info-bg: #e7f2fb;
+  --danger-color: #be3b36;
+  --danger-bg: #fdf0ef;
+  --success-color: #07866f;
+  --success-bg: rgba(7, 134, 111, 0.12);
+  --warn-color: #b76b08;
+  --warn-bg: rgba(183, 107, 8, 0.12);
 
   /* Match Flow Log overlay: ~4px thumb inside an 8px transparent gutter */
   --scrollbar-size: 8px;

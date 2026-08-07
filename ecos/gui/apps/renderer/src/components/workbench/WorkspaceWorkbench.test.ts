@@ -11,7 +11,6 @@ describe('WorkspaceWorkbench shared right panel', () => {
   })
 
   it('keeps flow status, log slot, and the existing inspector/chat panel once', () => {
-    expect(source).toContain('workspace-workbench-chat-toolbar')
     expect(source).toContain('workspace-workbench-flow-status')
     expect(source).toContain('FlowRunControl')
     expect(source).toContain('<template #actions>')
@@ -19,13 +18,15 @@ describe('WorkspaceWorkbench shared right panel', () => {
     expect(source).toContain('@select="selectedFlowNode = $event"')
     expect(source).not.toContain('FlowReportPanel')
     expect(source).toContain('<ChatInspectorPanel')
+    expect(source).not.toContain('chatToolbarTarget')
+    expect(source).not.toContain('toolbar-target')
   })
 
-  it('keeps status and flow information above the only flexible chat region', () => {
+  it('lets the chat region fill the space below the status and log bands', () => {
     expect(source).toContain('height: 100%')
-    expect(source).toContain(':toolbar-target="chatToolbarTarget"')
-    expect(source).toContain('flex: 0 0 clamp(184px, 30vh, 280px)')
-    expect(source).toContain('margin-top: auto')
+    expect(source).toContain('background: var(--bg-secondary)')
+    expect(source).toContain('flex: 1 1 auto')
+    expect(source).toContain('min-height: clamp(184px, 30vh, 280px)')
     expect(source).toContain('height: auto !important')
   })
 

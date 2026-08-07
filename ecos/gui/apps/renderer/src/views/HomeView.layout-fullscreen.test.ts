@@ -79,8 +79,12 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('const DATA_SNAPSHOT_COLUMNS = 5')
     expect(homeViewSource).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
     expect(homeViewSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
-    expect(homeViewSource).toContain('border-right: 1px dashed')
-    expect(homeViewSource).toContain('border-bottom: 1px dashed')
+    expect(homeViewSource).toContain(
+      'border-right: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent)',
+    )
+    expect(homeViewSource).toContain(
+      'border-bottom: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent)',
+    )
     expect(homeViewSource).toContain('object-fit: contain')
   })
 
@@ -165,7 +169,7 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('overflow-y: auto')
     expect(homeViewSource).toContain('min-height: min-content')
     expect(homeViewSource).toContain('overflow: hidden')
-    expect(homeViewSource).toContain('border-right: 1px solid var(--border-color)')
+    expect(homeViewSource).toContain('border-right: 1px solid var(--dashboard-border)')
   })
 
   it('shows the requested chip metadata and max fanout from Home parameters', () => {

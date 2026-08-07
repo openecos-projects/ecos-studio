@@ -135,6 +135,11 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('<StepConfigPanel />')
   })
 
+  it('uses STA terminology for Liberty corners and signoff matrices', () => {
+    expect(componentSource).toContain('`${current.length} Liberty corners`')
+    expect(componentSource).toContain("'matrix' : 'matrices'")
+  })
+
   it('shows the requested checklist empty state and every report file with its directory', () => {
     expect(componentSource).toContain('No Checklist Data')
     expect(componentSource).toContain('Check Passed')

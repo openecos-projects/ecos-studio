@@ -12,5 +12,6 @@ export const agentWorkspaceSetupKey: InjectionKey<
   (
     config: WorkspaceConfig,
     contract: DesktopAgentWorkspaceSetupContract,
+    ownerSessionId: string,
   ) => Promise<AgentWorkspaceCreationResult>
 > = Symbol('agentWorkspaceSetup')

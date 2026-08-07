@@ -143,17 +143,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { StepEnum } from '@/api/type'
 import AIChatPanel from './AIChatPanel.vue'
 import StepConfigPanel from './StepConfigPanel.vue'
 import StepQorAnalysisPanel from './StepQorAnalysisPanel.vue'
-import { useAgentShellStore } from '@/stores/agentShellStore'
 
 const route = useRoute()
-const agentShell = useAgentShellStore()
-const { chatFocusNonce } = storeToRefs(agentShell)
 const stepEnumValues = Object.values(StepEnum)
 
 function stepFromRoutePath(): StepEnum | undefined {
@@ -221,10 +217,6 @@ watch(
     }
   },
 )
-
-watch(chatFocusNonce, () => {
-  selectTab('chat')
-})
 
 function selectTab(tab: 'chat' | 'inspector' | 'analysis'): void {
   if (tab === 'inspector' && !showStepConfigInspector.value) return

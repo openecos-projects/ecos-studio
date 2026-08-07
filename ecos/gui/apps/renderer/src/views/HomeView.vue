@@ -1117,6 +1117,13 @@ async function openLayoutChipViewer(): Promise<void> {
 
 <style scoped>
 .home-dashboard {
+  --dashboard-surface: color-mix(in srgb, var(--bg-primary) 94%, var(--bg-secondary));
+  --dashboard-soft-surface: color-mix(
+    in srgb,
+    var(--bg-secondary) 74%,
+    var(--bg-primary)
+  );
+  --dashboard-border: color-mix(in srgb, var(--border-color) 88%, transparent);
   box-sizing: border-box;
   display: grid;
   gap: 8px;
@@ -1148,9 +1155,10 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .dashboard-section {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-border);
+  border-radius: 7px;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 7%, transparent);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1161,7 +1169,8 @@ async function openLayoutChipViewer(): Promise<void> {
 
 .dashboard-section-header {
   align-items: center;
-  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--accent-color) 3%, var(--dashboard-surface));
+  border-bottom: 1px solid var(--dashboard-border);
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
@@ -1179,8 +1188,8 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .dashboard-section-header h2 {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 720;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1239,8 +1248,9 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .dashboard-parameter-grid > div {
-  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  background: var(--dashboard-soft-surface);
+  border: 1px solid var(--dashboard-border);
+  border-radius: 4px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1346,7 +1356,7 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .layout-preview {
-  background: var(--bg-secondary);
+  background: var(--dashboard-soft-surface);
   border: 0;
   cursor: zoom-in;
   flex: 1;
@@ -1399,7 +1409,7 @@ async function openLayoutChipViewer(): Promise<void> {
 .status-card-content > .status-pie,
 .qor-visual-column {
   align-self: stretch;
-  border-right: 1px solid var(--border-color);
+  border-right: 1px solid var(--dashboard-border);
   height: 100%;
   min-height: 108px;
   min-width: 0;
@@ -1415,7 +1425,7 @@ async function openLayoutChipViewer(): Promise<void> {
 
 .qor-score-hero {
   align-items: center;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--dashboard-border);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -1617,7 +1627,7 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .qor-summary-content {
-  border-right: 1px solid var(--border-color);
+  border-right: 1px solid var(--dashboard-border);
 }
 
 .qor-step-list {
@@ -1633,7 +1643,9 @@ async function openLayoutChipViewer(): Promise<void> {
   padding: 7px 8px;
 }
 .qor-step-row {
-  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  background: var(--dashboard-soft-surface);
+  border: 1px solid var(--dashboard-border);
+  border-radius: 4px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1690,7 +1702,7 @@ async function openLayoutChipViewer(): Promise<void> {
 
 .qor-step-trend-bar {
   background: color-mix(in srgb, var(--border-color) 80%, transparent);
-  border-radius: 2px;
+  border-radius: 999px;
   display: flex;
   height: 6px;
   min-width: 0;
@@ -1739,8 +1751,8 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .snapshot-grid-cell {
-  border-bottom: 1px dashed color-mix(in srgb, var(--text-secondary) 45%, transparent);
-  border-right: 1px dashed color-mix(in srgb, var(--text-secondary) 45%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
   min-height: 0;
   min-width: 0;
 }
@@ -1777,8 +1789,8 @@ async function openLayoutChipViewer(): Promise<void> {
 
 .snapshot-grid-cell img {
   align-self: stretch;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  background: var(--dashboard-soft-surface);
+  border: 1px solid var(--dashboard-border);
   border-radius: 3px;
   display: block;
   height: 100%;

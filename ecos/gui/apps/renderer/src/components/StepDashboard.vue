@@ -150,6 +150,7 @@
           <div class="step-qor-overview">
             <div class="qor-visual-column">
               <StatusPieChart
+                :class="{ 'qor-pie-unavailable': data.qor.status === 'unavailable' }"
                 label="Step QoR gate status distribution"
                 :slices="data.qor.slices"
                 :center-primary="qorCenterPrimary(data.qor)"
@@ -1453,10 +1454,16 @@ function stepConfigPreview(value: unknown): StepConfigPreviewEntry[] {
   function visit(current: unknown, path: string[]): void {
     if (entries.length >= 9) return
     if (Array.isArray(current)) {
+      const key = path[path.length - 1]
       entries.push({
         id: path.join('.') || 'value',
-        label: path[path.length - 1] || 'Value',
-        value: `[${current.length} items]`,
+        label: key || 'Value',
+        value:
+          key === 'liberty'
+            ? `${current.length} Liberty corners`
+            : key === 'signoff'
+              ? `${current.length} signoff ${current.length === 1 ? 'matrix' : 'matrices'}`
+              : `[${current.length} items]`,
       })
       return
     }
@@ -1922,6 +1929,11 @@ function fileName(path: string): string {
 }
 .qor-visual-column :deep(.status-pie-chart-wrap) {
   min-height: 118px;
+}
+.qor-visual-column :deep(.qor-pie-unavailable .status-pie-center strong) {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
 }
 .qor-summary-content {
   border-right: 1px solid var(--border-color);
@@ -2413,7 +2425,15 @@ function fileName(path: string): string {
   color: var(--text-primary);
 }
 .rcx-corner-table tbody tr {
-  height: 18px;
+  height: 1.375rem;
+}
+.rcx-corner-table th,
+.rcx-corner-table td {
+  font-size: 0.625rem;
+  padding: 0.25rem 0.1875rem;
+}
+.rcx-corner-table thead th {
+  font-size: 0.5625rem;
 }
 .drc-statistics-table {
   padding: 6px;

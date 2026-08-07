@@ -38,6 +38,7 @@ export interface AgentSessionUiState {
   workspaceSetupChoice?: DesktopAgentChoice
   workspaceSetupAnsweredOptionId: string
   workspaceSetupAnchorTurnId?: string
+  workspaceSetupStartedId?: string
   workspaceCreateSetupId?: string
   workspaceRerunContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceRerunMessage: string

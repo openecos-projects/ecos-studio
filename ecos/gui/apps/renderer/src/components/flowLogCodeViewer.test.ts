@@ -740,7 +740,7 @@ describe('flowLogCodeViewer helpers', () => {
   })
 
   it('uses roomier typography for long log reading', () => {
-    expect(helperSource).toContain("fontSize: '11px'")
+    expect(helperSource).toContain("fontSize: '0.75rem'")
     expect(helperSource).toContain("lineHeight: '1.6'")
     expect(helperSource).toContain("padding: '0 16px'")
   })

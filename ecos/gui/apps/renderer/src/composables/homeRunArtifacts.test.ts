@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   clearAgentWorkspaceRerunHomePrepared,
+  consumePendingHomeRunArtifactReset,
   isAgentWorkspaceRerunHomePrepared,
   markAgentWorkspaceRerunHomePrepared,
   requestHomeRunArtifactReset,
-  consumePendingHomeRunArtifactReset,
 } from './homeRunArtifacts'
 
 describe('homeRunArtifacts agent rerun prepared mark', () => {

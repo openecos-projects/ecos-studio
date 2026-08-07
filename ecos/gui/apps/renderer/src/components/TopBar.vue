@@ -69,6 +69,7 @@
         aria-hidden="true"
       ></span>
       <button
+        v-if="!isWorkspaceRoute"
         type="button"
         class="window-btn"
         :class="{ active: chatButtonActive }"
@@ -238,11 +239,9 @@ const workspaceFocusId = computed(
 
 const themeStore = useThemeStore()
 const agentShell = useAgentShellStore()
-const { homeAgentOpen, workspaceChatExpanded } = storeToRefs(agentShell)
+const { homeAgentOpen } = storeToRefs(agentShell)
 const isDark = computed(() => themeStore.themeName === 'dark')
-const chatButtonActive = computed(() =>
-  isWorkspaceRoute.value ? workspaceChatExpanded.value : homeAgentOpen.value,
-)
+const chatButtonActive = computed(() => homeAgentOpen.value)
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const toggleTheme = () => {
   themeStore.toggleTheme()
@@ -251,10 +250,6 @@ const toggleTheme = () => {
 function handleAgentChatClick(): void {
   activeMenu.value = null
   quickMenuOpen.value = false
-  if (isWorkspaceRoute.value) {
-    agentShell.toggleWorkspaceChat()
-    return
-  }
   agentShell.toggleHomeAgent()
 }
 

@@ -221,7 +221,6 @@ import { useFlowRunner } from '@/composables/useFlowRunner'
 import {
   clearAgentWorkspaceRerunHomePrepared,
   markAgentWorkspaceRerunHomePrepared,
-  requestHomeRunArtifactReset,
 } from '@/composables/homeRunArtifacts'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
@@ -896,8 +895,9 @@ async function maybeRunPostCreateFlow(): Promise<void> {
   if (props.shell !== 'workspace' || postCreateFlowRunning) return
   const handoff = agentShell.takePendingPostCreateFlow()
   if (!handoff) return
+  const ownerUi = sessionUi(handoff.ownerSessionId)
   postCreateFlowRunning = true
-  isWorkspaceCreationPending.value = true
+  ownerUi.isWorkspaceCreationPending = true
   try {
     await agentFlowProgress.start(handoff.workspacePath)
     try {
@@ -905,7 +905,12 @@ async function maybeRunPostCreateFlow(): Promise<void> {
       if (flowResult === null) {
         throw new Error('Flow execution did not complete successfully.')
       }
-      await reportWorkspaceCreationResult(handoff.setupId, 'succeeded', '')
+      await reportWorkspaceCreationResult(
+        handoff.setupId,
+        'succeeded',
+        '',
+        handoff.ownerSessionId,
+      )
     } finally {
       agentFlowProgress.stop()
       messageStore.finishToolProgress()
@@ -913,12 +918,17 @@ async function maybeRunPostCreateFlow(): Promise<void> {
   } catch (error) {
     const reason = agentErrorMessage(error)
     try {
-      await reportWorkspaceCreationResult(handoff.setupId, 'failed', reason)
+      await reportWorkspaceCreationResult(
+        handoff.setupId,
+        'failed',
+        reason,
+        handoff.ownerSessionId,
+      )
     } catch {
       messageStore.addAssistantMessage(reason, 'error')
     }
   } finally {
-    isWorkspaceCreationPending.value = false
+    ownerUi.isWorkspaceCreationPending = false
     postCreateFlowRunning = false
   }
 }
@@ -978,6 +988,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     ui.workspaceSetupChoice = undefined
     ui.workspaceSetupAnsweredOptionId = ''
     ui.workspaceSetupAnchorTurnId = undefined
+    ui.workspaceSetupStartedId = undefined
     ui.lastContractSurface = 'setup'
     if (isActive) scrollWorkspaceSetupIntoView()
     return
@@ -1360,31 +1371,45 @@ async function createWorkspaceFromAgent(
     )
     return
   }
-  if (!createAgentWorkspace || isWorkspaceCreationPending.value) return
-  isWorkspaceCreationPending.value = true
+  const ui = sessionUi(ownerSessionId)
+  if (
+    !createAgentWorkspace ||
+    ui.isWorkspaceCreationPending ||
+    ui.workspaceSetupStartedId === contract.setup_id
+  ) {
+    return
+  }
+  ui.workspaceSetupStartedId = contract.setup_id
+  ui.isWorkspaceCreationPending = true
   try {
     // Create + navigate only; workspace shell runs runAllFlow after handoff.
-    const result = await createAgentWorkspace(config, contract)
+    const result = await createAgentWorkspace(config, contract, ownerSessionId)
     if (!result.created) {
-      workspaceCreateSetupId.value = undefined
+      ui.workspaceCreateSetupId = undefined
       agentShell.setPendingPostCreateFlow(null)
       await reportWorkspaceCreationResult(
         contract.setup_id,
         'failed',
         result.error || 'The workspace could not be created.',
+        ownerSessionId,
       )
     }
   } catch (error) {
-    workspaceCreateSetupId.value = undefined
+    ui.workspaceCreateSetupId = undefined
     agentShell.setPendingPostCreateFlow(null)
     const reason = agentErrorMessage(error)
     try {
-      await reportWorkspaceCreationResult(contract.setup_id, 'failed', reason)
+      await reportWorkspaceCreationResult(
+        contract.setup_id,
+        'failed',
+        reason,
+        ownerSessionId,
+      )
     } catch {
       messageStore.addAssistantMessage(reason, 'error')
     }
   } finally {
-    isWorkspaceCreationPending.value = false
+    ui.isWorkspaceCreationPending = false
   }
 }
 
@@ -1392,16 +1417,16 @@ async function reportWorkspaceCreationResult(
   setupId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
-  const sessionId = agentSessionId.value
-  if (!agent || !sessionId) throw new Error('ECOS Agent session is unavailable.')
+  if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_create_result:${JSON.stringify({ setup_id: setupId, status, error })}`,
     providerId: AGENT_PROVIDER_ID,
-    sessionId,
+    sessionId: ownerSessionId,
   })
-  messageStore.finishStreamingMessages(sessionId)
+  messageStore.finishStreamingMessages(ownerSessionId)
 }
 
 async function executeWorkspaceRerun(
@@ -1448,7 +1473,6 @@ async function executeWorkspaceRerun(
     messageStore.appendToolProgress('Opening isolated rerun workspace.', ownerSessionId)
     agentShell.beginPreserveForAgentWorkspaceSwitch()
     markAgentWorkspaceRerunHomePrepared(prepared.directory)
-    requestHomeRunArtifactReset(prepared.directory)
     const opened = await openProject({
       id: prepared.directory,
       lastOpened: new Date(),
@@ -1457,15 +1481,19 @@ async function executeWorkspaceRerun(
     })
     if (!opened) throw new Error('The rerun workspace could not be opened.')
     await desktopApi.workspace.bindWindow(prepared.directory)
-    await registerAgentRerunWorkspaceInProject(
+    const projectContext = await registerAgentRerunWorkspaceInProject(
       contract,
       prepared.directory,
       ownerSessionId,
     )
-    agentShell.collapseWorkspaceChat()
-    await router.push({ name: ':step', params: { step: contract.target_step } })
-    // Invalidate after navigation so Step views mounted on the target route reload
-    // (same-step push is a no-op for route watchers).
+    await router.push({
+      name: ':step',
+      params: { step: contract.target_step },
+      query: {
+        projectRoot: projectContext?.projectRoot,
+        projectName: projectContext?.projectName,
+      },
+    })
     await nextTick()
     invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
     await agentFlowProgress.start(prepared.directory)
@@ -1490,18 +1518,23 @@ async function executeWorkspaceRerun(
     } catch {
       messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
     }
-    // openProject already switched the GUI to the wiped rerun workspace; restore
-    // the source so the original project does not look "empty/lost".
     if (preparedDirectory) {
       try {
         agentShell.beginPreserveForAgentWorkspaceSwitch()
-        await openProject({
+        const restored = await openProject({
           id: contract.source_workspace,
           lastOpened: new Date(),
           name: baseName(contract.source_workspace) || 'workspace',
           path: contract.source_workspace,
         })
+        if (!restored) throw new Error('The source workspace could not be reopened.')
         await desktopApi.workspace.bindWindow(contract.source_workspace)
+        await router.push({
+          name: ':step',
+          params: { step: contract.target_step },
+          query: route.query,
+        })
+        await nextTick()
         invalidateWorkspaceResources([
           'home',
           'flow',
@@ -1511,7 +1544,7 @@ async function executeWorkspaceRerun(
           'parameters',
         ])
         messageStore.appendToolProgress(
-          'Restored the source workspace after the rerun failed to start.',
+          'Restored the source workspace after the rerun failed.',
           ownerSessionId,
         )
       } catch (restoreError) {
@@ -1536,7 +1569,7 @@ async function registerAgentRerunWorkspaceInProject(
   contract: NonNullable<DesktopAgentEvent['workspaceRerun']>,
   workspacePath: string,
   ownerSessionId: string,
-): Promise<void> {
+): Promise<Awaited<ReturnType<typeof resolveManagedProjectContext>>> {
   const ownerTab = agentShell.tabs.find((tab) => tab.id === ownerSessionId)
   const projectContext = await resolveManagedProjectContext({
     preferred: {
@@ -1549,7 +1582,7 @@ async function registerAgentRerunWorkspaceInProject(
     },
     workspacePath: contract.source_workspace,
   })
-  if (!projectContext) return
+  if (!projectContext) return null
 
   await registerProjectManagedWorkspace({
     workspacePath,
@@ -1565,6 +1598,7 @@ async function registerAgentRerunWorkspaceInProject(
       messageStore.addAssistantMessage(`${summary}: ${detail}`, 'done', ownerSessionId)
     },
   })
+  return projectContext
 }
 
 async function reportWorkspaceRerunResult(
@@ -2004,6 +2038,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 .agent-chat {
   min-height: 0;
+  background: var(--bg-primary);
 }
 
 .agent-chat__scroll {
@@ -2016,7 +2051,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
   margin-top: auto;
   padding: 0.75rem 0.875rem 0.875rem;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-  background: var(--bg-primary);
+  background: color-mix(in srgb, var(--bg-primary) 94%, var(--bg-secondary));
 }
 
 .composer-sr-status {
@@ -2034,9 +2069,9 @@ const handleKeyDown = (e: KeyboardEvent) => {
 .composer-shell {
   position: relative;
   border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
-  border-radius: 0.875rem;
-  background: var(--bg-primary);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--bg-primary) 94%, var(--bg-secondary));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 6%, transparent);
   transition:
     border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1);

@@ -126,6 +126,10 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("event.type === 'workspace_create'")
     expect(source).toContain('isWorkspaceCreationPending')
     expect(source).toContain('workspace_create_result:')
+    expect(source).toContain('createAgentWorkspace(config, contract, ownerSessionId)')
+    expect(source).toContain('ui.workspaceSetupStartedId === contract.setup_id')
+    expect(source).toContain('ui.workspaceSetupStartedId = contract.setup_id')
+    expect(source).toContain('handoff.ownerSessionId')
     expect(source).not.toContain('Workspace creation was not completed.')
     expect(source).toContain('ui.workspaceSetupMessage = event.text')
     expect(source).toContain('scrollWorkspaceSetupIntoView()')
@@ -139,7 +143,7 @@ describe('AIChatPanel flow contracts', () => {
       "throw new Error('Flow execution did not complete successfully.')",
     )
     expect(source).toMatch(
-      /const flowResult = await runAllFlow\(\{ rerun: false \}\)[\s\S]*await reportWorkspaceCreationResult\(handoff\.setupId, 'succeeded', ''\)/,
+      /const flowResult = await runAllFlow\(\{ rerun: false \}\)[\s\S]*await reportWorkspaceCreationResult\([\s\S]*handoff\.setupId,[\s\S]*'succeeded',[\s\S]*handoff\.ownerSessionId/,
     )
   })
 
@@ -180,7 +184,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("raw.endsWith('\\n') ? `${serialized}\\n` : serialized")
   })
 
-  it('prepares a validated workspace rerun without replacing the visible source workspace', () => {
+  it('opens the rerun workspace and restores the source workspace on failure', () => {
     expect(source).toContain("event.type === 'workspace_rerun'")
     expect(source).toContain('void executeWorkspaceRerun(')
     expect(source).toContain(
@@ -191,23 +195,30 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain(
       'await desktopApi.workspace.bindWindow(contract.source_workspace)',
     )
-    expect(source).toContain(
-      'Restored the source workspace after the rerun failed to start.',
-    )
+    expect(source).toContain('Restored the source workspace after the rerun failed.')
     expect(source).toContain('path: contract.source_workspace')
+    expect(source).toContain('const restored = await openProject({')
+    expect(source).toContain(
+      "throw new Error('The source workspace could not be reopened.')",
+    )
     expect(source).not.toContain('const sourceOpened =')
     expect(source).toContain('prepareRerun({ token })')
     expect(source).toContain('workspace_rerun_result:')
     expect(source).toContain('await desktopApi.workspace.bindWindow(prepared.directory)')
     expect(source).toMatch(
-      /await router\.push\(\{ name: ':step', params: \{ step: contract\.target_step \} \}\)[\s\S]*await nextTick\(\)[\s\S]*invalidateWorkspaceResources\(\['home', 'flow', 'step', 'maps', 'logs', 'parameters'\]\)[\s\S]*await agentFlowProgress\.start\(prepared\.directory\)[\s\S]*await executeRerun/,
+      /const opened = await openProject\([\s\S]*const projectContext = await registerAgentRerunWorkspaceInProject\([\s\S]*await router\.push\(\{[\s\S]*projectRoot: projectContext\?\.projectRoot[\s\S]*await nextTick\(\)[\s\S]*invalidateWorkspaceResources\(\['home', 'flow', 'step', 'maps', 'logs', 'parameters'\]\)[\s\S]*await agentFlowProgress\.start\(prepared\.directory\)[\s\S]*await executeRerun/,
     )
     expect(source).toContain('executeRerun({ token: prepared.executionToken })')
     expect(source).toContain('markAgentWorkspaceRerunHomePrepared(prepared.directory)')
-    expect(source).toContain('requestHomeRunArtifactReset(prepared.directory)')
+    expect(source).not.toContain('requestHomeRunArtifactReset(prepared.directory)')
     expect(source).toContain('registerAgentRerunWorkspaceInProject(')
     expect(source).toContain('registerProjectManagedWorkspace({')
     expect(source).toContain('resolveManagedProjectContext({')
+    expect(source).toContain(
+      'const projectContext = await registerAgentRerunWorkspaceInProject(',
+    )
+    expect(source).toContain('projectRoot: projectContext?.projectRoot')
+    expect(source).toContain('projectName: projectContext?.projectName')
     expect(source).toContain(
       "invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])",
     )
@@ -225,11 +236,6 @@ describe('AIChatPanel flow contracts', () => {
     )
     expect(source).toContain('finishToolProgress(ownerSessionId)')
     expect(source).toContain('`Rerun failed: ${reason}`')
-  })
-
-  it('keeps the workspace chat rail closed while a rerun owns the main work area', () => {
-    expect(source).toContain('agentShell.collapseWorkspaceChat()')
-    expect(source).not.toContain('agentShell.expandWorkspaceChat()')
   })
 
   it('routes live flow progress into the tool timeline instead of plain assistant text', () => {

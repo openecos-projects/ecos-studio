@@ -184,6 +184,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .flow-log-panel {
   border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
   display: flex;
   flex: 0 1 min(28vh, 220px);
   flex-direction: column;
@@ -204,16 +205,17 @@ onBeforeUnmount(() => {
 }
 
 .flow-log-panel header {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
   gap: 8px;
   justify-content: space-between;
   min-height: 33px;
-  padding: 5px 10px;
+  padding: 0.3125rem 0.625rem;
+  background: color-mix(in srgb, var(--bg-secondary) 62%, var(--bg-primary));
 }
 
 .flow-log-title {
   color: var(--text-primary);
-  font-size: 10px;
+  font-size: 0.6875rem;
   gap: 5px;
   min-width: 0;
 }
@@ -235,16 +237,21 @@ onBeforeUnmount(() => {
   align-items: center;
   background: transparent;
   border: 0;
+  border-radius: 0.25rem;
   color: var(--text-secondary);
   cursor: pointer;
   display: inline-flex;
-  height: 22px;
+  height: 1.5rem;
   justify-content: center;
   padding: 0;
-  width: 22px;
+  width: 1.5rem;
+  transition:
+    background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .flow-log-actions button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-primary));
   color: var(--accent-color);
 }
 

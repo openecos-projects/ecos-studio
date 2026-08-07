@@ -8,15 +8,10 @@ describe('agentShellStore', () => {
     setActivePinia(createPinia())
   })
 
-  it('toggles home drawer and workspace chat independently', () => {
+  it('toggles the home drawer', () => {
     const store = useAgentShellStore()
     store.toggleHomeAgent()
     expect(store.homeAgentOpen).toBe(true)
-    store.expandWorkspaceChat()
-    expect(store.workspaceChatExpanded).toBe(true)
-    expect(store.chatFocusNonce).toBe(1)
-    store.toggleWorkspaceChat()
-    expect(store.workspaceChatExpanded).toBe(false)
   })
 
   it('preserves tabs across agent-driven workspace switches', () => {
@@ -49,13 +44,11 @@ describe('agentShellStore', () => {
     expect(store.activeTabId).toBe(second.id)
   })
 
-  it('resetShell only collapses chrome and keeps tabs', () => {
+  it('resetShell closes the home drawer and keeps tabs', () => {
     const store = useAgentShellStore()
     store.createTab({ mode: 'home', projectName: 'gcd' })
-    store.expandWorkspaceChat()
     store.openHomeAgent()
     store.resetShell()
-    expect(store.workspaceChatExpanded).toBe(false)
     expect(store.homeAgentOpen).toBe(false)
     expect(store.tabs).toHaveLength(1)
     expect(store.sessionId).toBeTruthy()
@@ -64,10 +57,12 @@ describe('agentShellStore', () => {
   it('stores post-create flow handoff for the workspace shell', () => {
     const store = useAgentShellStore()
     store.setPendingPostCreateFlow({
+      ownerSessionId: 'session-1',
       setupId: 'setup-1',
       workspacePath: '/tmp/demo',
     })
     expect(store.takePendingPostCreateFlow()).toEqual({
+      ownerSessionId: 'session-1',
       setupId: 'setup-1',
       workspacePath: '/tmp/demo',
     })
