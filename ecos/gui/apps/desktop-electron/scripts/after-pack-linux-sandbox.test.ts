@@ -42,7 +42,7 @@ async function writePackagedAgent(appOutDir: string): Promise<void> {
   await mkdir(agentDir, { recursive: true })
   await writeFile(
     agentPath,
-    '#!/bin/sh\ncase "$1" in\n  --version) printf "ecos-agent 0.1.0\\n" ;;\n  --knowledge-status) printf "ecos-place-knowledge\\n" ;;\n  *) exit 64 ;;\nesac\n',
+    '#!/bin/sh\n[ "$1" = --version ] || exit 64\nprintf "ecos-agent 0.1.0\\n"\n',
   )
   await writeFile(
     join(agentDir, 'agent-provider.json'),

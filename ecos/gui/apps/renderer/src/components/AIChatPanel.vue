@@ -884,10 +884,6 @@ async function flushPendingGuiActionForActiveTab(): Promise<void> {
     await executeWorkspaceRerun(pending.contract, pending.token, sessionId)
     return
   }
-  if (pending.type === 'optimization') {
-    await executeWorkspaceOptimization(pending.contract, pending.token, sessionId)
-    return
-  }
   if (pending.type === 'continue') {
     await executeWorkspaceContinue(pending.payload, sessionId)
     return
@@ -1043,31 +1039,6 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     void executeWorkspaceRerun(
       event.workspaceRerun,
       event.workspaceRerunToken,
-      event.sessionId,
-    )
-    return
-  }
-  if (
-    event.type === 'workspace_optimization' &&
-    event.workspaceOptimization &&
-    event.workspaceOptimizationToken
-  ) {
-    messageStore.addAssistantMessage(
-      event.text ?? 'Starting the confirmed place-only scan.',
-      'done',
-      event.sessionId,
-    )
-    if (!isActive) {
-      deferGuiAction(event.sessionId, {
-        type: 'optimization',
-        contract: event.workspaceOptimization,
-        token: event.workspaceOptimizationToken,
-      })
-      return
-    }
-    void executeWorkspaceOptimization(
-      event.workspaceOptimization,
-      event.workspaceOptimizationToken,
       event.sessionId,
     )
     return
@@ -1557,132 +1528,6 @@ async function executeWorkspaceRerun(
     agentFlowProgress.stop()
     messageStore.finishToolProgress(ownerSessionId)
     ui.isWorkspaceRerunPending = false
-  }
-}
-
-async function executeWorkspaceOptimization(
-  contract: NonNullable<DesktopAgentEvent['workspaceOptimization']>,
-  token: string,
-  ownerSessionId = agentSessionId.value ?? '',
-): Promise<void> {
-  const ui = sessionUi(ownerSessionId)
-  const desktopApi = getOptionalDesktopApi()
-  const prepare = desktopApi?.workspace.prepareFlowAgentOptimization
-  const execute = desktopApi?.workspace.executeFlowAgentRerun
-  const agent = desktopApi?.agent
-  if (
-    !desktopApi ||
-    !prepare ||
-    !execute ||
-    !agent ||
-    !isActiveGuiOwner(ownerSessionId)
-  ) {
-    if (!isActiveGuiOwner(ownerSessionId)) {
-      deferGuiAction(ownerSessionId, { type: 'optimization', contract, token })
-    }
-    return
-  }
-  if (ui.isWorkspaceOptimizationPending) return
-  ui.isWorkspaceOptimizationPending = true
-  messageStore.setActiveSessionId(ownerSessionId)
-  const evaluations: Array<{
-    artifact_refs: string[]
-    candidate_id: string
-    metrics: Record<string, number>
-    reason?: 'execution_failed' | 'workspace_restore_failed' | 'blocked'
-    status: 'succeeded' | 'failed' | 'blocked'
-  }> = []
-  try {
-    for (const [candidateIndex, rerun] of contract.rerun_contracts.entries()) {
-      let restoreFailed = false
-      try {
-        await desktopApi.workspace.bindWindow(rerun.source_workspace)
-        const prepared = await prepare({ candidateIndex, token })
-        agentShell.beginPreserveForAgentWorkspaceSwitch()
-        const opened = await openProject({
-          id: prepared.directory,
-          lastOpened: new Date(),
-          name: rerun.rerun_id,
-          path: prepared.directory,
-        })
-        if (!opened) throw new Error('The optimization workspace could not be opened.')
-        await desktopApi.workspace.bindWindow(prepared.directory)
-        await agentFlowProgress.start(prepared.directory)
-        const execution = await execute({ token: prepared.executionToken })
-        if (!execution || !Number.isFinite(execution.hpwl) || execution.hpwl <= 0) {
-          throw new Error('The fixed RPC returned invalid place HPWL evidence.')
-        }
-        evaluations.push({
-          artifact_refs: execution.artifactRefs,
-          candidate_id: rerun.rerun_id,
-          metrics: execution.metrics,
-          status: 'succeeded',
-        })
-        messageStore.appendToolProgress(`Completed ${rerun.rerun_id}.`, ownerSessionId)
-      } catch (error) {
-        evaluations.push({
-          artifact_refs: [],
-          candidate_id: rerun.rerun_id,
-          metrics: {},
-          reason: 'execution_failed',
-          status: 'failed',
-        })
-        messageStore.appendToolProgress(
-          `${rerun.rerun_id} failed: ${agentErrorMessage(error)}`,
-          ownerSessionId,
-        )
-      } finally {
-        agentFlowProgress.stop()
-        try {
-          agentShell.beginPreserveForAgentWorkspaceSwitch()
-          await openProject({
-            id: rerun.source_workspace,
-            lastOpened: new Date(),
-            name: baseName(rerun.source_workspace) || 'workspace',
-            path: rerun.source_workspace,
-          })
-          await desktopApi.workspace.bindWindow(rerun.source_workspace)
-        } catch (error) {
-          restoreFailed = true
-          const evaluation = evaluations[evaluations.length - 1]
-          if (evaluation?.candidate_id === rerun.rerun_id) {
-            evaluation.artifact_refs = []
-            evaluation.metrics = {}
-            evaluation.reason = 'workspace_restore_failed'
-            evaluation.status = 'failed'
-          }
-          messageStore.appendToolProgress(
-            `Could not restore the source workspace: ${agentErrorMessage(error)}`,
-            ownerSessionId,
-          )
-        }
-      }
-      if (restoreFailed) break
-    }
-    for (const rerun of contract.rerun_contracts) {
-      if (!evaluations.some((item) => item.candidate_id === rerun.rerun_id)) {
-        evaluations.push({
-          artifact_refs: [],
-          candidate_id: rerun.rerun_id,
-          metrics: {},
-          reason: 'blocked',
-          status: 'blocked',
-        })
-      }
-    }
-    await agent.sendMessage({
-      message:
-        'workspace_optimization_result:' +
-        JSON.stringify({
-          evaluations,
-          run_id: contract.run_spec.run_id,
-        }),
-      providerId: AGENT_PROVIDER_ID,
-      sessionId: ownerSessionId,
-    })
-  } finally {
-    messageStore.finishToolProgress(ownerSessionId)
-    ui.isWorkspaceOptimizationPending = false
   }
 }
 

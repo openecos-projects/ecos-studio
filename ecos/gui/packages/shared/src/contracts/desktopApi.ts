@@ -37,7 +37,6 @@ import type {
 import type {
   DesktopAgentEvent,
   DesktopAgentInterruptRequest,
-  DesktopAgentPlaceOptimizationEvidence,
   DesktopAgentWorkspaceOptimizationPrepareRequest,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
@@ -238,7 +237,7 @@ export interface DesktopApi {
     ): Promise<DesktopAgentWorkspaceRerunPrepareResult>
     executeFlowAgentRerun?(
       request: DesktopAgentWorkspaceRerunExecuteRequest,
-    ): Promise<DesktopAgentPlaceOptimizationEvidence | undefined>
+    ): Promise<void>
     bindWindow(path: string): Promise<string>
     unbindWindow(path?: string): Promise<void>
     getBoundPath(): Promise<string | null>
