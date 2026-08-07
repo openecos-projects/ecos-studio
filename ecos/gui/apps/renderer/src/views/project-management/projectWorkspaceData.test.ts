@@ -12,6 +12,7 @@ import {
   readBackendProjectWorkspaceAnalysisInputs,
   readBackendProjectWorkspaceFlowStates,
 } from './projectWorkspaceAnalysisData'
+import { readFrontendProjectWorkspaceFlowStates } from './frontendProjectWorkspaceData'
 
 vi.mock('./projectWorkspaceAnalysisData', () => ({
   readBackendProjectWorkspaceAnalysisInputs: vi.fn(async () => ({
@@ -22,8 +23,15 @@ vi.mock('./projectWorkspaceAnalysisData', () => ({
   })),
 }))
 
+vi.mock('./frontendProjectWorkspaceData', () => ({
+  readFrontendProjectWorkspaceFlowStates: vi.fn(async () => ({
+    ws_frontend: { prepare: 'success' },
+  })),
+}))
+
 const readBackendAnalysisMock = vi.mocked(readBackendProjectWorkspaceAnalysisInputs)
 const readBackendFlowMock = vi.mocked(readBackendProjectWorkspaceFlowStates)
+const readFrontendFlowMock = vi.mocked(readFrontendProjectWorkspaceFlowStates)
 
 function manifest(projectType: 'backend' | 'frontend') {
   return registerWorkspaceInManifest(
@@ -43,6 +51,7 @@ describe('project workspace data readers', () => {
   beforeEach(() => {
     readBackendAnalysisMock.mockClear()
     readBackendFlowMock.mockClear()
+    readFrontendFlowMock.mockClear()
   })
 
   it('delegates backend workspace data to the physical-design reader', async () => {
@@ -62,13 +71,14 @@ describe('project workspace data readers', () => {
     const frontendManifest = manifest('frontend')
 
     await expect(readProjectWorkspaceFlowStates(frontendManifest)).resolves.toEqual({
-      ws_0001: {},
+      ws_frontend: { prepare: 'success' },
     })
     await expect(readProjectWorkspaceAnalysisInputs(frontendManifest)).resolves.toEqual({
       ws_0001: {},
     })
     expect(readBackendFlowMock).not.toHaveBeenCalled()
     expect(readBackendAnalysisMock).not.toHaveBeenCalled()
+    expect(readFrontendFlowMock).toHaveBeenCalledWith(frontendManifest)
     expect(projectWorkspaceDataReaderFor('frontend')).not.toBe(
       projectWorkspaceDataReaderFor('backend'),
     )

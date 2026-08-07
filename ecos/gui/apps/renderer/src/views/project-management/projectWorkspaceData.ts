@@ -7,6 +7,7 @@ import {
   readBackendProjectWorkspaceAnalysisInputs,
   readBackendProjectWorkspaceFlowStates,
 } from './projectWorkspaceAnalysisData'
+import { readFrontendProjectWorkspaceFlowStates } from './frontendProjectWorkspaceData'
 
 export interface ProjectWorkspaceDataReader {
   readAnalysisInputs(
@@ -22,7 +23,7 @@ const backendProjectWorkspaceDataReader: ProjectWorkspaceDataReader = {
 
 const frontendProjectWorkspaceDataReader: ProjectWorkspaceDataReader = {
   readAnalysisInputs: emptyWorkspaceEntries,
-  readFlowStates: emptyWorkspaceEntries,
+  readFlowStates: readFrontendProjectWorkspaceFlowStates,
 }
 
 const projectWorkspaceDataReaders: Record<

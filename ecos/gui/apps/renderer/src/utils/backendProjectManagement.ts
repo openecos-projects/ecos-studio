@@ -62,7 +62,7 @@ export type ProjectMetricId =
   | 'die_area'
   | 'core_util'
   | 'frequency'
-export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
+export type ProjectWorkspaceFlowStateMap = Partial<Record<string, ProjectStepStatus>>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
 export interface ProjectWorkspaceAnalysisInput {
   stepMetricTexts?: Partial<Record<FlowStep, string | null>>
