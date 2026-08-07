@@ -142,8 +142,6 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceOpenOrFocus, path),
     prepareFlowAgentRerun: (request) =>
       invokeDesktop(desktopApiIpcChannels.workspacePrepareFlowAgentRerun, request),
-    prepareFlowAgentOptimization: (request) =>
-      invokeDesktop(desktopApiIpcChannels.workspacePrepareFlowAgentOptimization, request),
     executeFlowAgentRerun: (request) =>
       invokeDesktop(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, request),
     bindWindow: (path) => invokeDesktop(desktopApiIpcChannels.workspaceBindWindow, path),

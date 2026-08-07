@@ -70,14 +70,6 @@ build_chip_viewer() {
     -p chip-viewer-native
 }
 
-validate_agent_knowledge() {
-  PLACE_KNOWLEDGE_DIR="${ECOS_PLACE_KNOWLEDGE_DIR:-$REPO_ROOT/../ecos-place-knowledge/dist/place-knowledge}"
-  if [[ ! -f "$PLACE_KNOWLEDGE_DIR/catalog.json" || ! -f "$PLACE_KNOWLEDGE_DIR/sources.json" ]]; then
-    printf 'required reviewed ECOS Placement bundle is missing: %s\n' "$PLACE_KNOWLEDGE_DIR" >&2
-    return 1
-  fi
-}
-
 build_agent_provider() {
   cd "$REPO_ROOT/ecos/agent"
 
@@ -85,7 +77,6 @@ build_agent_provider() {
     --clean \
     --noconfirm \
     --onefile \
-    --add-data "$PLACE_KNOWLEDGE_DIR:place-knowledge" \
     --name ecos-agent \
     --distpath dist \
     --specpath build \
@@ -120,11 +111,6 @@ validate_packaged_binaries() {
     missing=1
   fi
 
-  if ! "$agent_dir/ecos-agent" --knowledge-status >/dev/null; then
-    printf 'required packaged ECOS Placement bundle is unavailable: %s\n' "$agent_dir/ecos-agent" >&2
-    missing=1
-  fi
-
   if [[ ! -f "$agent_dir/agent-provider.json" ]]; then
     printf 'required packaged agent manifest is missing: %s\n' "$agent_dir/agent-provider.json" >&2
     missing=1
@@ -135,7 +121,6 @@ validate_packaged_binaries() {
   fi
 }
 
-validate_agent_knowledge
 build_ecc
 build_chip_viewer
 build_agent_provider

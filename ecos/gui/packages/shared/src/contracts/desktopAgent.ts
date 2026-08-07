@@ -92,11 +92,7 @@ export interface DesktopAgentContractField {
 
 export interface DesktopAgentExecutionContract {
   fields: DesktopAgentContractField[]
-  presentation?:
-    | 'workspace_rerun'
-    | 'workspace_optimization'
-    | 'workspace_continue'
-    | 'workspace_parameter_update'
+  presentation?: 'workspace_rerun' | 'workspace_continue' | 'workspace_parameter_update'
   schema_version: 'flow-agent.resolved_execution_contract.v1'
   title: string
 }
@@ -205,43 +201,6 @@ export interface DesktopAgentWorkspaceRerunExecuteRequest {
   token: string
 }
 
-export interface DesktopAgentWorkspaceOptimizationPrepareRequest {
-  candidateIndex: number
-  token: string
-}
-
-export interface DesktopAgentWorkspaceOptimizationRequest {
-  direction: 'increase' | 'decrease'
-  knob_id: 'place.target_density'
-  objective: 'place_hpwl'
-  protected_metrics: string[]
-  requires_gui_review: true
-  schema_version: 'ecos-place-optimization-request.v1'
-  strategy_id: string
-}
-
-export interface DesktopAgentWorkspaceOptimizationRunSpec {
-  baseline_id: string
-  budget: 5
-  direction: 'increase' | 'decrease'
-  knob_id: 'place.target_density'
-  lower: number
-  objective: 'place_hpwl'
-  requires_gui_review: true
-  run_id: string
-  schema_version: 'ecos-place-optimization-run.v1'
-  seed: number
-  source_workspace: string
-  upper: number
-}
-
-export interface DesktopAgentWorkspaceOptimizationContract {
-  request: DesktopAgentWorkspaceOptimizationRequest
-  rerun_contracts: DesktopAgentWorkspaceRerunContract[]
-  run_spec: DesktopAgentWorkspaceOptimizationRunSpec
-  schema_version: 'flow-agent.place_optimization_contract.v1'
-}
-
 export type DesktopAgentEventType =
   | 'status'
   | 'session'
@@ -252,7 +211,6 @@ export type DesktopAgentEventType =
   | 'workspace_setup'
   | 'workspace_create'
   | 'workspace_rerun'
-  | 'workspace_optimization'
   | 'workspace_continue'
   | 'workspace_parameter_update'
   | 'error'
@@ -293,7 +251,5 @@ export interface DesktopAgentEvent {
   workspaceParameterUpdate?: DesktopAgentWorkspaceParameterUpdateContract
   workspaceRerun?: DesktopAgentWorkspaceRerunContract
   workspaceRerunToken?: string
-  workspaceOptimization?: DesktopAgentWorkspaceOptimizationContract
-  workspaceOptimizationToken?: string
   workspaceSetup?: DesktopAgentWorkspaceSetupContract
 }

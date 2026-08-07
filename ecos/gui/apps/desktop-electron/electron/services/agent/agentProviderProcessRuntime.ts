@@ -7,7 +7,6 @@ import type {
   DesktopAgentExecutionContract,
   DesktopAgentWorkspaceContinueContract,
   DesktopAgentWorkspaceParameterUpdateContract,
-  DesktopAgentWorkspaceOptimizationContract,
   DesktopAgentWorkspaceRerunContract,
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
@@ -386,7 +385,6 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'workspace_setup',
   'workspace_create',
   'workspace_rerun',
-  'workspace_optimization',
   'workspace_continue',
   'workspace_parameter_update',
   'error',
@@ -403,9 +401,6 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
   const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
   const workspaceRerun = readWorkspaceRerunContract(record.workspaceRerun)
-  const workspaceOptimization = readWorkspaceOptimizationContract(
-    record.workspaceOptimization,
-  )
   const workspaceContinue = readWorkspaceContinueContract(record.workspaceContinue)
   const workspaceParameterUpdate = readWorkspaceParameterUpdateContract(
     record.workspaceParameterUpdate,
@@ -419,7 +414,6 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   if (type === 'workspace_setup' && !workspaceSetup) return null
   if (type === 'workspace_create' && !workspaceCreateSetupId) return null
   if (type === 'workspace_rerun' && !workspaceRerun) return null
-  if (type === 'workspace_optimization' && !workspaceOptimization) return null
   if (type === 'workspace_continue' && !workspaceContinue) return null
   if (type === 'workspace_parameter_update' && !workspaceParameterUpdate) return null
   const providerId = readEventText(record.providerId)
@@ -438,110 +432,10 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(workspaceSetup ? { workspaceSetup } : {}),
     ...(workspaceCreateSetupId ? { workspaceCreateSetupId } : {}),
     ...(workspaceRerun ? { workspaceRerun } : {}),
-    ...(workspaceOptimization ? { workspaceOptimization } : {}),
     ...(workspaceContinue ? { workspaceContinue } : {}),
     ...(workspaceParameterUpdate ? { workspaceParameterUpdate } : {}),
     type: type as DesktopAgentEventType,
   }
-}
-
-function readWorkspaceOptimizationContract(
-  value: unknown,
-): DesktopAgentWorkspaceOptimizationContract | null {
-  const record = readRecord(value)
-  const request = readRecord(record.request)
-  const runSpec = readRecord(record.run_spec)
-  const rerunContracts = Array.isArray(record.rerun_contracts)
-    ? record.rerun_contracts.map(readWorkspaceRerunContract)
-    : []
-  const validRerunContracts = rerunContracts.filter(
-    (contract): contract is DesktopAgentWorkspaceRerunContract => contract !== null,
-  )
-  const strategyId = readOptionalIdentifier(request.strategy_id)
-  const protectedMetrics = readMetricIds(request.protected_metrics)
-  const runId = readOptionalIdentifier(runSpec.run_id)
-  const baselineId = readOptionalIdentifier(runSpec.baseline_id)
-  const sourceWorkspace = readWorkspaceRerunPath(runSpec.source_workspace)
-  const lower = readFiniteNumber(runSpec.lower, 0.1, 0.95)
-  const upper = readFiniteNumber(runSpec.upper, 0.1, 0.95)
-  const seed = readFiniteNumber(runSpec.seed, 0, 2 ** 31 - 1)
-  const direction =
-    runSpec.direction === 'increase' || runSpec.direction === 'decrease'
-      ? runSpec.direction
-      : null
-  if (
-    record.schema_version !== 'flow-agent.place_optimization_contract.v1' ||
-    request.schema_version !== 'ecos-place-optimization-request.v1' ||
-    !strategyId ||
-    !protectedMetrics ||
-    request.objective !== 'place_hpwl' ||
-    request.knob_id !== 'place.target_density' ||
-    request.requires_gui_review !== true ||
-    (request.direction !== 'increase' && request.direction !== 'decrease') ||
-    runSpec.schema_version !== 'ecos-place-optimization-run.v1' ||
-    !runId ||
-    !baselineId ||
-    !sourceWorkspace ||
-    lower === null ||
-    upper === null ||
-    lower >= upper ||
-    seed === null ||
-    !Number.isInteger(seed) ||
-    runSpec.objective !== request.objective ||
-    runSpec.knob_id !== request.knob_id ||
-    request.direction !== direction ||
-    !direction ||
-    runSpec.direction !== direction ||
-    runSpec.requires_gui_review !== true ||
-    runSpec.budget !== 5 ||
-    rerunContracts.length !== 5 ||
-    validRerunContracts.length !== 5 ||
-    validRerunContracts.some(
-      (contract) =>
-        contract.source_workspace !== sourceWorkspace ||
-        contract.target_step !== 'place' ||
-        contract.end_step !== 'place' ||
-        contract.execution_scope !== 'single_step' ||
-        contract.parameter_patch.some((item) => item.knob_id !== 'place.target_density'),
-    )
-  ) {
-    return null
-  }
-  return {
-    request: {
-      direction,
-      knob_id: 'place.target_density',
-      objective: 'place_hpwl',
-      protected_metrics: protectedMetrics,
-      requires_gui_review: true,
-      schema_version: 'ecos-place-optimization-request.v1',
-      strategy_id: strategyId,
-    },
-    rerun_contracts: validRerunContracts,
-    run_spec: {
-      baseline_id: baselineId,
-      budget: 5,
-      direction,
-      knob_id: 'place.target_density',
-      lower,
-      objective: 'place_hpwl',
-      requires_gui_review: true,
-      run_id: runId,
-      schema_version: 'ecos-place-optimization-run.v1',
-      seed,
-      source_workspace: sourceWorkspace,
-      upper,
-    },
-    schema_version: 'flow-agent.place_optimization_contract.v1',
-  }
-}
-
-function readMetricIds(value: unknown): string[] | null {
-  if (!Array.isArray(value) || value.length > 16) return null
-  const metrics = value.map((item) =>
-    typeof item === 'string' && /^[a-z][a-z0-9_]{0,127}$/.test(item) ? item : null,
-  )
-  return metrics.some((item) => item === null) ? null : (metrics as string[])
 }
 
 function readAgentChoice(value: unknown): DesktopAgentChoice | null {

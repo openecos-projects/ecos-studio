@@ -9,7 +9,6 @@ export const desktopApiIpcChannels = {
   windowCreate: 'window:create',
   workspaceOpenOrFocus: 'workspace:open-or-focus',
   workspacePrepareFlowAgentRerun: 'workspace:prepare-flow-agent-rerun',
-  workspacePrepareFlowAgentOptimization: 'workspace:prepare-flow-agent-optimization',
   workspaceExecuteFlowAgentRerun: 'workspace:execute-flow-agent-rerun',
   workspaceBindWindow: 'workspace:bind-window',
   workspaceUnbindWindow: 'workspace:unbind-window',
