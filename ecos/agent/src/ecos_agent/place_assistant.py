@@ -18,12 +18,19 @@ from ecos_agent.place_contracts import (
     PlaceQuery,
     PlaceStrategy,
 )
+from ecos_agent.place_explanations import explanation_for
 from ecos_agent.place_strategy import select_applicable_strategies
 
 
-_APPLY_RE = re.compile(r"\b(apply|optimi[sz]e|scan|execute)\b|应用|优化|扫描|执行", re.IGNORECASE)
+_APPLY_RE = re.compile(r"\b(apply|optimi[sz]e|scan)\b|应用|优化|扫描", re.IGNORECASE)
 _ANALYZE_RE = re.compile(r"\b(analy[sz]e|diagnos[ei]|recommend)\b|分析|诊断|建议", re.IGNORECASE)
 _AMBIGUOUS_RE = re.compile(r"\b(utili[sz]ation|density)\b|利用率|密度", re.IGNORECASE)
+_PLACE_EXECUTION_RE = re.compile(
+    r"(?:place(?:ment)?|布局).*(?:算法|流程|如何执行|怎么执行|怎么运行|algorithm|how.*(?:work|run))"
+    r"|(?:算法|流程|如何执行|怎么执行|怎么运行|algorithm|how.*(?:work|run)).*(?:place(?:ment)?|布局)",
+    re.IGNORECASE,
+)
+_GLOBAL_PLACEMENT_ID = "algorithm.dreamplace.global_placement"
 
 
 class PlaceAssistant:
@@ -98,6 +105,12 @@ class PlaceAssistant:
     def _query(self, message: str, language: str) -> PlaceQuery | None:
         normalized = message.casefold()
         entity_ids = [entity["id"] for entity in self.entities if _matches(entity, normalized)]
+        if not entity_ids and _PLACE_EXECUTION_RE.search(message):
+            entity_ids = [
+                entity["id"]
+                for entity in self.entities
+                if entity.get("id") == _GLOBAL_PLACEMENT_ID
+            ]
         if _AMBIGUOUS_RE.search(message) and not entity_ids:
             return PlaceQuery(intent="clarify", language=language)
         if not entity_ids:
@@ -117,6 +130,15 @@ class PlaceAssistant:
 
     def _explain(self, query: PlaceQuery) -> PlaceAnswer:
         entity = next(item for item in self.entities if item["id"] == query.entity_ids[0])
+        explanation = explanation_for(entity["id"], query.language)
+        if explanation is not None:
+            text = explanation + " " + _read_only_text(query.language)
+            return PlaceAnswer(
+                intent="explain",
+                text=text,
+                evidence_ids=query.entity_ids,
+                hits=self._hits(query.entity_ids),
+            )
         status = entity["status"]
         default = entity.get("default")
         if query.language == "zh":
@@ -216,6 +238,12 @@ def _clarification_text(language: str) -> str:
     if language == "zh":
         return "请先澄清你指的是 floorplan 利用率还是 DREAMPlace `target_density`，以及希望比较的指标。"
     return "Please clarify whether you mean floorplan utilization or DREAMPlace `target_density`, and which metric you want to protect."
+
+
+def _read_only_text(language: str) -> str:
+    if language == "zh":
+        return "这是只读解释，不会执行 ECC 或修改 workspace。"
+    return "This is a read-only explanation; it does not execute ECC or modify a workspace."
 
 
 def _apply_text(language: str) -> str:
