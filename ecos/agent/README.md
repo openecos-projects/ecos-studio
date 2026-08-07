@@ -63,12 +63,15 @@ Workspace 目录名。
 
 按上下文分流：
 
-- **未打开 workspace（首页）**：Topbar Chat 打开右侧 Agent 抽屉。先选择或新建
+- **未打开 workspace（首页）**：Topbar Chat 打开右侧 Agent 抽屉。开场给出主 CTA
+  「开始创建 Workspace」，也可直接用自然语言说明意图（例如已有 Project 路径、
+  Workspace 名、设计名）；寒暄或无关输入会失败关闭并留在开场。随后选择或新建
   Project，再创建其下的 Workspace 并运行完整流程。
 - **已打开 workspace**：Topbar Chat 展开右侧聊天栏（Home / 步骤页共用）。欢迎语
   同时展示 Project 与 Workspace。操作是「修改参数（只保存）」「从指定阶段重跑」
   「继续未完成 flow」「在当前 Project 下新建 Workspace」。Standalone workspace
-  （无 `project.json` 父目录）不提供第 4 项。
+  （无 `project.json` 父目录）不提供第 4 项。自然语言仅在能明确映射到上述操作时
+  前进，否则失败关闭并重新展示选项。
 
 Agent 会将操作、重跑源、阶段、执行范围和最终确认显示为结构化选项；合同确认前
 不会执行流程。运行时状态条显示 Agent 状态，工具活动合并在可展开的 Tool 卡中。
@@ -78,8 +81,9 @@ Agent 会将操作、重跑源、阶段、执行范围和最终确认显示为�
 
 此功能用于在 Project 下创建 Workspace，并从 RTL 执行完整 ECC 流程。
 
-1. 在首页打开 Topbar Chat，点击“在 Project 下创建 Workspace 并运行完整 RTL 到
-   GDS 流程”。
+1. 在首页打开 Topbar Chat，点击「开始创建 Workspace 并运行完整 RTL 到 GDS
+   流程」，或直接描述创建意图（可同时带上已有 Project 路径、Workspace 名、设计名，
+   明确字段会被跳过）。
 2. 选择「使用已有 Project」或「新建 Project」；已有 Project 可从 Project
    Management 历史列表选择，或输入含 `project.json` 的根目录。
 3. 填写 Workspace Name（自动建议下一个 `ws_NNNN`，也可点“使用默认值”或自行输入）、
@@ -87,7 +91,7 @@ Agent 会将操作、重跑源、阶段、执行范围和最终确认显示为�
    PDK/默认参数可点“使用推荐/默认值”，也可继续手动输入。Workspace 路径为
    `<project_root>/<workspace_name>`。
 4. 检查 Agent 展示的设置合同（Project Root / Workspace / Design Name 分栏）。
-   需要修改时，可以用自然语言说明需要调整的字段。
+   需要修改时，可以用自然语言说明需要调整的字段（可一次改多个明确字段）。
 5. 点击“确认并开始运行”。ECOS Studio 创建 workspace，写入 `project.json`，进入
    工程并展开侧栏 Agent，再通过固定 ECC RPC 启动完整流程；点击“取消”不会创建
    workspace 或执行 ECC。
@@ -144,6 +148,32 @@ Codex CLI 仅用于生成**只读、带类型约束的建议**，不会取得流
 
 项目根目录和重跑 source workspace 是 Codex 可读取建议的边界。Codex 不可用、
 超时或返回不符合合同的内容时，当前操作会失败关闭，ECC 不会被调用。
+
+### 边界靠什么保证
+
+真正的边界是**类型化提案链路**：Codex 只能返回受 schema 约束的 JSON 提案，
+写入动作全部由 ECOS 校验后执行，Codex 自身没有任何写入通道。
+
+传给 app-server 的 `sandboxPolicy`、`runtimeWorkspaceRoots`、`permissions`
+只是纵深防御，不能当作依据：Codex 的 Linux 沙箱依赖 bubblewrap user namespace，
+在很多主机（含开启 AppArmor 限制的 Ubuntu）上无法生效；而 app-server 对**任何
+未知字段都静默接受**，因此无法从外部确认某个字段是否真的被采纳。
+
+### 联网
+
+Codex 托管的 web search 默认关闭，需显式开启：
+
+```bash
+ECOS_AGENT_CODEX_WEB_SEARCH=1
+```
+
+开启后 Codex 可查询公开资料（例如工具选项含义、报错信息）来辅助生成提案，
+其检索动作会作为活动进度显示在聊天中。关闭时 Agent 全部功能仍可用，只是
+少了外部资料这一信息来源。
+
+需要注意：这一开关控制的是 Codex 的联网检索工具，**不是**数据外发的总开关——
+模型调用本身就要联网。密态设计应结合企业侧网络策略评估，Codex 侧目前没有可
+验证的域名白名单机制。
 
 ## TODO
 
