@@ -40,8 +40,7 @@ export const desktopApiIpcChannels = {
   workspaceWriteProjectTextFile: 'workspace:write-project-text-file',
   workspaceListProjectDirectory: 'workspace:list-project-directory',
   workspacePathExists: 'workspace:path-exists',
-  workspaceDiscardFailedWorkspaceCreate:
-    'workspace:discard-failed-workspace-create',
+  workspaceDiscardFailedWorkspaceCreate: 'workspace:discard-failed-workspace-create',
   workspacePrepareProjectDirectoryReplacement:
     'workspace:prepare-project-directory-replacement',
   workspaceRestoreProjectDirectoryReplacement:

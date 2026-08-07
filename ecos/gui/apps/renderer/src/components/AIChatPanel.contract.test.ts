@@ -57,7 +57,9 @@ describe('AIChatPanel flow contracts', () => {
   })
 
   it('keeps the composer open during choices while retaining stop and one-message queue controls', () => {
-    expect(source).toContain('() => isInterruptPending.value || !agentSessionId.value,')
+    expect(source).toContain(
+      'const composerLocked = computed(() => isInterruptPending.value || !agentSessionId.value)',
+    )
     expect(source).not.toContain(
       'activeChoice.value && !activeChoice.value.allowFreeText',
     )

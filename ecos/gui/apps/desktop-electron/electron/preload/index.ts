@@ -211,8 +211,7 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceWriteProjectTextFile, path, content),
     listProjectDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceListProjectDirectory, path),
-    pathExists: (path) =>
-      invokeDesktop(desktopApiIpcChannels.workspacePathExists, path),
+    pathExists: (path) => invokeDesktop(desktopApiIpcChannels.workspacePathExists, path),
     discardFailedWorkspaceCreate: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate, path),
     prepareProjectDirectoryReplacement: (path) =>

@@ -498,9 +498,7 @@ const activeChoice = computed(
       : undefined) ??
     pendingMessageChoice.value,
 )
-const composerLocked = computed(
-  () => isInterruptPending.value || !agentSessionId.value,
-)
+const composerLocked = computed(() => isInterruptPending.value || !agentSessionId.value)
 const canSubmit = computed(
   () =>
     Boolean(agentSessionId.value) &&
