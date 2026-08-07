@@ -40,17 +40,17 @@
                   </div>
                   <div class="info-item">
                     <span class="info-label">Top Module</span>
-                    <span class="info-value mono">{{ config.topModule || '--' }}</span>
+                    <span class="info-value">{{ config.topModule || '--' }}</span>
                   </div>
                   <div class="info-item">
                     <span class="info-label">Die Size</span>
-                    <span class="info-value mono">{{
+                    <span class="info-value">{{
                       config.die?.Size.join(' x ') || '--'
                     }}</span>
                   </div>
                   <div class="info-item">
                     <span class="info-label">Core Size</span>
-                    <span class="info-value mono">{{
+                    <span class="info-value">{{
                       config.core?.Size.join(' x ') || '--'
                     }}</span>
                   </div>
@@ -2171,11 +2171,12 @@ function closeChartPreview() {
 }
 
 .info-value {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: inherit;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--text-primary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 html.dark .info-value {
@@ -2189,11 +2190,6 @@ html.dark .info-value {
 
 html.dark .info-value.highlight {
   text-shadow: 0 0 12px rgba(var(--accent-rgb, 59, 130, 246), 0.8);
-}
-
-.info-value.mono {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
 }
 
 .info-value small {

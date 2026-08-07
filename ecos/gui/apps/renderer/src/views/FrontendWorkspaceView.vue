@@ -127,8 +127,9 @@
                   >
                     <span>{{ item.label }}</span>
                     <strong
+                      class="frontend-config-value"
                       :title="item.value"
-                      :class="{ mono: item.mono, highlight: item.highlight }"
+                      :class="{ highlight: item.highlight }"
                     >
                       {{ item.value }}
                     </strong>
@@ -2270,7 +2271,6 @@ interface FrontendSourceSelection {
 interface FrontendConfigItem {
   label: string
   value: string
-  mono?: boolean
   highlight?: boolean
   wide?: boolean
 }
@@ -2886,7 +2886,7 @@ const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
     value: config.design || currentProject.value?.name || '--',
     highlight: true,
   },
-  { label: 'Top Module', value: config.topModule || '--', mono: true },
+  { label: 'Top Module', value: config.topModule || '--' },
   {
     label: 'CPU Source',
     value: displayCatalogId(
@@ -2898,12 +2898,10 @@ const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
     value: displayCatalogId(
       config.frontend.cpuWrapperTop || config.frontend.cpuWrapperContract || '',
     ),
-    mono: true,
   },
   {
     label: 'CPU Socket',
     value: displayCatalogId(config.frontend.cpuSocketContract || ''),
-    mono: true,
   },
   {
     label: 'SoC Harness',
@@ -2921,7 +2919,6 @@ const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
   {
     label: 'CPU Filelist',
     value: config.frontend.cpuFilelist || config.frontend.inputFilelist || '--',
-    mono: true,
     wide: true,
   },
   {
@@ -2931,7 +2928,6 @@ const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
       : config.frontend.simProgramNames.length
         ? config.frontend.simProgramNames.join(', ')
         : '--',
-    mono: true,
     wide: true,
   },
 ])
@@ -6025,7 +6021,7 @@ button:disabled {
 }
 
 .frontend-config-item span,
-.frontend-config-item strong {
+.frontend-config-value {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -6040,16 +6036,14 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.frontend-config-item strong {
+.frontend-config-value {
+  font-family: inherit;
   font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
-.frontend-config-item strong.mono {
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 12px;
-}
-
-.frontend-config-item strong.highlight {
+.frontend-config-value.highlight {
   color: var(--accent-color);
 }
 
