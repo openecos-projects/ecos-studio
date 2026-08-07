@@ -227,6 +227,11 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('`Rerun failed: ${reason}`')
   })
 
+  it('keeps the workspace chat rail closed while a rerun owns the main work area', () => {
+    expect(source).toContain('agentShell.collapseWorkspaceChat()')
+    expect(source).not.toContain('agentShell.expandWorkspaceChat()')
+  })
+
   it('routes live flow progress into the tool timeline instead of plain assistant text', () => {
     expect(source).toContain('messageStore.appendToolProgress(message')
     expect(source).toContain('messageStore.finishToolProgress()')

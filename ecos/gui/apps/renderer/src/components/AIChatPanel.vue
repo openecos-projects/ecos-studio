@@ -1462,7 +1462,7 @@ async function executeWorkspaceRerun(
       prepared.directory,
       ownerSessionId,
     )
-    agentShell.expandWorkspaceChat()
+    agentShell.collapseWorkspaceChat()
     await router.push({ name: ':step', params: { step: contract.target_step } })
     // Invalidate after navigation so Step views mounted on the target route reload
     // (same-step push is a no-op for route watchers).
