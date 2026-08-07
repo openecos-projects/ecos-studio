@@ -45,6 +45,16 @@ def _proposal(**overrides: object) -> GuiWorkspaceSetupProposal:
     return GuiWorkspaceSetupProposal.model_validate(payload)
 
 
+def _chat_response(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "schema_version": "flow-agent.gui_chat_response.v1",
+        "operation": None,
+        "answer": "I can help with ECOS design-flow questions.",
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:
     provider.send_message({"sessionId": session_id, "message": message})
 
@@ -306,7 +316,10 @@ def test_rerun_skips_empty_parameter_table_for_fixfanout(tmp_path: Path) -> None
 
 def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
     events: list[dict[str, object]] = []
-    provider = EcosAgentProvider(emit=events.append)
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=lambda _context: _chat_response(answer="Please describe your ECOS question."),
+    )
     session_id = provider.start_session({"mode": "home"})["sessionId"]
 
     assert provider.sessions[session_id].phase == "home_ready"
@@ -320,39 +333,77 @@ def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
     assert "Start below" in str(welcome)
     assert "Choose an operation below" not in str(welcome)
 
+    choice_count = len([event for event in events if event["type"] == "choice"])
     _send(provider, session_id, "2")
     assert provider.sessions[session_id].phase == "home_ready"
-    assert any(
-        event["type"] == "message" and "does not match an available operation" in str(event["text"])
-        for event in events
-    )
+    assert _last_event(events, "message")["text"] == "Please describe your ECOS question."
+    assert len([event for event in events if event["type"] == "choice"]) == choice_count
 
 
-def test_home_greeting_fails_closed_without_advancing(tmp_path: Path) -> None:
+def test_home_greeting_uses_codex_chat_fallback_without_advancing() -> None:
     events: list[dict[str, object]] = []
 
-    def parse_operation(context: dict[str, object]) -> dict[str, object]:
+    def answer_chat(context: dict[str, object]) -> dict[str, object]:
         assert context["natural_language_request"] == "你好"
-        return {
-            "schema_version": "flow-agent.gui_operation_choice_proposal.v2",
-            "operation": None,
-            "summary": "Greeting is not an actionable create request.",
-        }
+        assert context["mode"] == "home"
+        return _chat_response(answer="你好，我可以回答 ECOS 物理设计流程相关问题。")
 
-    provider = EcosAgentProvider(
-        emit=events.append,
-        operation_choice_parser=parse_operation,
-    )
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=answer_chat)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
+    choice_count = len([event for event in events if event["type"] == "choice"])
     _send(provider, session_id, "你好")
 
     assert provider.sessions[session_id].phase == "home_ready"
-    assert _last_event(events, "choice")["choice"]["title"] == "开始"
-    assert any(
-        event["type"] == "message" and "未能识别为可执行操作" in str(event["text"])
-        for event in events
-    )
+    assert _last_event(events, "message")["text"] == "你好，我可以回答 ECOS 物理设计流程相关问题。"
+    assert _last_event(events, "message")["contract"]["schema_version"] == "flow-agent.gui_chat_response.v1"
+    assert len([event for event in events if event["type"] == "choice"]) == choice_count
     assert not any(event["type"] == "error" for event in events)
+
+
+def test_wizard_greeting_answers_without_losing_the_pending_input(tmp_path: Path) -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=lambda context: _chat_response(
+            answer=f"I can help while waiting for {context['phase']}."
+        ),
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    session.phase = "workspace_design"
+    session.workspace_inputs.project_root = str(tmp_path)
+    choice_count = len([event for event in events if event["type"] == "choice"])
+
+    _send(provider, session_id, "hello")
+
+    assert session.phase == "workspace_design"
+    assert _last_event(events, "message")["text"] == "I can help while waiting for workspace_design."
+    assert len([event for event in events if event["type"] == "choice"]) == choice_count
+
+    _send(provider, session_id, "gcd")
+
+    assert session.phase == "workspace_flow_end"
+
+
+def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, monkeypatch) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    captured: dict[str, object] = {}
+
+    def capture_proposal(
+        _context: dict[str, object], system: str, schema: dict[str, object], model: object
+    ) -> dict[str, object]:
+        captured.update(system=system, schema=schema, model=model)
+        return _chat_response(answer="Hello.")
+
+    monkeypatch.setattr(provider, "_proposal", capture_proposal)
+    response = provider.respond_to_gui_chat({"allowed_operations": []})
+
+    assert response["answer"] == "Hello."
+    assert "Do not invent flow state" in str(captured["system"])
+    assert captured["schema"]["required"] == ["schema_version", "operation", "answer"]
 
 
 def test_home_nl_bootstrap_skips_fields_that_are_already_clear(tmp_path: Path) -> None:
@@ -363,14 +414,14 @@ def test_home_nl_bootstrap_skips_fields_that_are_already_clear(tmp_path: Path) -
 
     def parse_operation(context: dict[str, object]) -> dict[str, object]:
         return {
-            "schema_version": "flow-agent.gui_operation_choice_proposal.v2",
+            "schema_version": "flow-agent.gui_chat_response.v1",
             "operation": "1",
-            "summary": "User asked to create a workspace under an existing project.",
+            "answer": None,
         }
 
     provider = EcosAgentProvider(
         emit=events.append,
-        operation_choice_parser=parse_operation,
+        chat_response_parser=parse_operation,
     )
     session_id = provider.start_session({"mode": "home"})["sessionId"]
     _send(
@@ -1277,7 +1328,7 @@ def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> 
     provider = EcosAgentProvider(
         emit=events.append,
         rerun_parameter_parser=parse_parameter,
-        operation_choice_parser=parse_operation,
+        chat_response_parser=parse_operation,
     )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
@@ -1300,19 +1351,19 @@ def test_operation_codex_fallback_maps_nl_to_rerun(tmp_path: Path) -> None:
     def parse_operation(context: dict[str, object]) -> dict[str, object]:
         operation_contexts.append(context)
         return {
-            "schema_version": "flow-agent.gui_operation_choice_proposal.v2",
+            "schema_version": "flow-agent.gui_chat_response.v1",
             "operation": "2",
-            "summary": "User asked to rerun from a completed stage.",
+            "answer": None,
         }
 
     provider = EcosAgentProvider(
         emit=events.append,
-        operation_choice_parser=parse_operation,
+        chat_response_parser=parse_operation,
     )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace", "projectRoot": str(tmp_path)}
     )["sessionId"]
-    _send(provider, session_id, "please restart the place stage in isolation")
+    _send(provider, session_id, "please perform the isolated stage again")
 
     assert provider.sessions[session_id].phase in {
         "rerun_source_run",
@@ -1320,7 +1371,7 @@ def test_operation_codex_fallback_maps_nl_to_rerun(tmp_path: Path) -> None:
         "rerun_stage",
     }
     assert operation_contexts[0]["natural_language_request"] == (
-        "please restart the place stage in isolation"
+        "please perform the isolated stage again"
     )
     assert [item["id"] for item in operation_contexts[0]["allowed_operations"]] == [
         "1",
@@ -1340,7 +1391,7 @@ def test_operation_codex_fallback_fails_closed(tmp_path: Path) -> None:
 
     provider = EcosAgentProvider(
         emit=events.append,
-        operation_choice_parser=parse_operation,
+        chat_response_parser=parse_operation,
     )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
@@ -1349,27 +1400,23 @@ def test_operation_codex_fallback_fails_closed(tmp_path: Path) -> None:
 
     assert provider.sessions[session_id].phase == "operation"
     assert any(
-        event["type"] == "error" and "Unable to interpret the request" in str(event["text"])
+        event["type"] == "error" and "Unable to answer the request" in str(event["text"])
         for event in events
     )
-    assert _last_event(events, "choice")["choice"]["title"] == "Choose an operation"
+    assert len([event for event in events if event["type"] == "choice"]) == 1
 
 
-def test_operation_codex_unmatched_nl_fails_closed_without_error(tmp_path: Path) -> None:
+def test_operation_codex_fallback_answers_unmatched_nl_without_error(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
     events: list[dict[str, object]] = []
 
     def parse_operation(_context: dict[str, object]) -> dict[str, object]:
-        return {
-            "schema_version": "flow-agent.gui_operation_choice_proposal.v2",
-            "operation": None,
-            "summary": "Greeting is not an actionable workspace operation.",
-        }
+        return _chat_response(answer="Hello. What would you like to know about this workspace?")
 
     provider = EcosAgentProvider(
         emit=events.append,
-        operation_choice_parser=parse_operation,
+        chat_response_parser=parse_operation,
     )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
@@ -1378,11 +1425,11 @@ def test_operation_codex_unmatched_nl_fails_closed_without_error(tmp_path: Path)
 
     assert provider.sessions[session_id].phase == "operation"
     assert any(
-        event["type"] == "message" and "does not match an available operation" in str(event["text"])
+        event["type"] == "message" and "What would you like to know" in str(event["text"])
         for event in events
     )
     assert not any(event["type"] == "error" for event in events)
-    assert _last_event(events, "choice")["choice"]["title"] == "Choose an operation"
+    assert len([event for event in events if event["type"] == "choice"]) == 1
 
 
 def test_bare_operation_number_skips_codex(tmp_path: Path) -> None:
@@ -1396,7 +1443,7 @@ def test_bare_operation_number_skips_codex(tmp_path: Path) -> None:
 
     provider = EcosAgentProvider(
         emit=lambda _event: None,
-        operation_choice_parser=parse_operation,
+        chat_response_parser=parse_operation,
     )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}

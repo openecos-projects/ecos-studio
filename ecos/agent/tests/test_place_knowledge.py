@@ -184,7 +184,7 @@ def test_provider_answers_place_questions_without_changing_operation_state() -> 
     answer = next(event for event in reversed(events) if event["type"] == "message")
     assert "overlap_area" in str(answer["text"])
     assert answer["contract"]["schema_version"] == "ecos-place-answer.v1"
-    assert provider.sessions[session_id].phase == "operation"
+    assert provider.sessions[session_id].phase == "home_ready"
     assert not any(event["type"] in {"workspace_rerun", "workspace_create"} for event in events)
 
 

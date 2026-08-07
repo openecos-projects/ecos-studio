@@ -11,7 +11,7 @@ from typing import Any, Callable, Mapping
 from ecos_agent.codex_provider import CodexProviderError, create_required_codex_provider
 from ecos_agent.contracts import (
     GUI_WORKSPACE_FLOW_STEPS,
-    GuiOperationChoiceProposal,
+    GuiChatResponseProposal,
     GuiWorkspaceSetupProposal,
 )
 from ecos_agent.messages import (
@@ -840,7 +840,7 @@ def _allowed_operation_options(
     ]
 
 
-def _propose_gui_operation_choice(context: dict[str, Any]) -> GuiOperationChoiceProposal:
+def _propose_gui_chat_response(context: dict[str, Any]) -> GuiChatResponseProposal:
     progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
     cwd_value = request_context.get("workspace") or request_context.get("project_root")
     cwd = Path(cwd_value).expanduser().resolve() if isinstance(cwd_value, str) and cwd_value else Path.cwd()
@@ -853,8 +853,8 @@ def _propose_gui_operation_choice(context: dict[str, Any]) -> GuiOperationChoice
     )
     register_interrupt(provider.interrupt)
     try:
-        return GuiOperationChoiceProposal.model_validate(
-            provider.propose_gui_operation_choice(request_context)
+        return GuiChatResponseProposal.model_validate(
+            provider.respond_to_gui_chat(request_context)
         )
     finally:
         register_interrupt(None)

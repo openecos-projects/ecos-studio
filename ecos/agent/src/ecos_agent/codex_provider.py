@@ -12,7 +12,7 @@ from typing import Any, Callable, Iterable, Mapping
 from ecos_agent.codex_rpc import CodexProviderError, _JsonLineRpcProcessClient, _read_nested_string
 from ecos_agent.contracts import (
     GUI_WORKSPACE_FLOW_STEPS,
-    GuiOperationChoiceProposal,
+    GuiChatResponseProposal,
     GuiWorkspaceSetupProposal,
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
@@ -119,50 +119,24 @@ class CodexAppServerProposalProvider:
             GuiWorkspaceRerunParameterProposal,
         )
 
-    def propose_gui_operation_choice(self, context: dict[str, Any]) -> dict[str, Any]:
-        allowed_operations = context.get("allowed_operations")
-        if not isinstance(allowed_operations, list) or not allowed_operations:
-            raise CodexProviderError(
-                "GUI operation request has no allowed operations",
-                failure_class="missing_input",
+    def respond_to_gui_chat(self, context: dict[str, Any]) -> dict[str, Any]:
+        allowed_ids = _allowed_operation_ids(context.get("allowed_operations"))
+        if allowed_ids:
+            route_instruction = (
+                "If the request clearly intends exactly one allowed operation, return that operation and null answer. "
             )
-        allowed_ids: list[str] = []
-        for item in allowed_operations:
-            if not isinstance(item, Mapping):
-                raise CodexProviderError(
-                    "GUI operation request has invalid allowed operations",
-                    failure_class="missing_input",
-                )
-            operation_id = item.get("id")
-            label = item.get("label")
-            if not isinstance(operation_id, str) or operation_id not in {"1", "2", "3", "4"}:
-                raise CodexProviderError(
-                    "GUI operation request has invalid operation id",
-                    failure_class="missing_input",
-                )
-            if not isinstance(label, str) or not label.strip():
-                raise CodexProviderError(
-                    "GUI operation request has invalid operation label",
-                    failure_class="missing_input",
-                )
-            allowed_ids.append(operation_id)
-        if len(set(allowed_ids)) != len(allowed_ids):
-            raise CodexProviderError(
-                "GUI operation request has duplicate operation ids",
-                failure_class="missing_input",
-            )
+        else:
+            route_instruction = "No operation is allowed in the current state; return null operation. "
         return self._proposal(
             context,
             (
-                "Return one JSON object matching flow-agent.gui_operation_choice_proposal.v2. "
-                "Map natural_language_request onto exactly one allowed operation id from "
-                "allowed_operations only when the request clearly intends that operation. "
-                "Greetings, chit-chat, vague, or unrelated requests must set operation to null. "
-                "Do not prefer a closest match and do not invent ids outside that list. "
-                "Never modify files, return shell commands, or grant execution authority."
+                "Return one JSON object matching flow-agent.gui_chat_response.v1. "
+                + route_instruction
+                + "Otherwise return null operation and a concise, helpful answer in the user's language. "
+                "Do not invent flow state, modify files, return shell or ECC commands, call tools, or grant execution authority."
             ),
-            _gui_operation_choice_output_schema(allowed_ids),
-            GuiOperationChoiceProposal,
+            _gui_chat_response_output_schema(allowed_ids),
+            GuiChatResponseProposal,
         )
 
     def _proposal(
@@ -172,7 +146,7 @@ class CodexAppServerProposalProvider:
         output_schema: dict[str, Any],
         model: type[GuiWorkspaceSetupProposal]
         | type[GuiWorkspaceRerunParameterProposal]
-        | type[GuiOperationChoiceProposal],
+        | type[GuiChatResponseProposal],
     ) -> dict[str, Any]:
         try:
             return model.model_validate(
@@ -322,6 +296,35 @@ class CodexAppServerProposalProvider:
             self.progress_callback(text)
 
 
+def _allowed_operation_ids(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise CodexProviderError(
+            "GUI chat request has invalid allowed operations", failure_class="missing_input"
+        )
+    allowed_ids: list[str] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise CodexProviderError(
+                "GUI chat request has invalid allowed operations", failure_class="missing_input"
+            )
+        operation_id = item.get("id")
+        label = item.get("label")
+        if not isinstance(operation_id, str) or operation_id not in {"1", "2", "3", "4"}:
+            raise CodexProviderError(
+                "GUI chat request has invalid operation id", failure_class="missing_input"
+            )
+        if not isinstance(label, str) or not label.strip():
+            raise CodexProviderError(
+                "GUI chat request has invalid operation label", failure_class="missing_input"
+            )
+        allowed_ids.append(operation_id)
+    if len(set(allowed_ids)) != len(allowed_ids):
+        raise CodexProviderError(
+            "GUI chat request has duplicate operation ids", failure_class="missing_input"
+        )
+    return allowed_ids
+
+
 def create_required_codex_provider(
     *,
     cwd: Path | None = None,
@@ -467,17 +470,17 @@ def _gui_workspace_rerun_patch_output_schema(allowed_knobs: list[str]) -> dict[s
     }
 
 
-def _gui_operation_choice_output_schema(allowed_ids: list[str]) -> dict[str, Any]:
+def _gui_chat_response_output_schema(allowed_ids: list[str]) -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "operation", "summary"],
+        "required": ["schema_version", "operation", "answer"],
         "properties": {
             "schema_version": {
                 "type": "string",
-                "const": "flow-agent.gui_operation_choice_proposal.v2",
+                "const": "flow-agent.gui_chat_response.v1",
             },
             "operation": {"type": ["string", "null"], "enum": [*allowed_ids, None]},
-            "summary": {"type": "string", "minLength": 1, "maxLength": 512},
+            "answer": {"type": ["string", "null"], "maxLength": 4096},
         },
     }

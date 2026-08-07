@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from ecos_agent.codex_provider import CodexProviderError, validate_required_codex_cli
-from ecos_agent.contracts import GuiOperationChoiceProposal, GuiWorkspaceSetupProposal
+from ecos_agent.contracts import GuiChatResponseProposal, GuiWorkspaceSetupProposal
 from ecos_agent.step_knowledge import StepKnowledge, load_default_step_knowledge
 from ecos_agent.messages import (
     cancellation_message,
@@ -104,7 +104,7 @@ from ecos_agent.provider_support import (
     _optional_text,
     _path_was_explicitly_provided,
     _prompt_for_phase,
-    _propose_gui_operation_choice,
+    _propose_gui_chat_response,
     _propose_gui_workspace_path_discovery,
     _propose_gui_workspace_rerun_patch,
     _propose_gui_workspace_setup,
@@ -125,7 +125,21 @@ PROVIDER_ID = "ecos_agent"
 _WorkspaceSetupParser = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _WorkspacePathRecommender = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]]
-_OperationChoiceParser = Callable[[dict[str, Any]], GuiOperationChoiceProposal | dict[str, Any]]
+_ChatResponseParser = Callable[[dict[str, Any]], GuiChatResponseProposal | dict[str, Any]]
+_CHAT_GREETING_PREFIXES = ("hello", "hi", "hey", "你好", "您好", "嗨")
+_CHAT_QUESTION_PREFIXES = (
+    "what ",
+    "why ",
+    "how ",
+    "can you ",
+    "could you ",
+    "tell me ",
+    "请问",
+    "什么",
+    "为什么",
+    "如何",
+    "怎么",
+)
 
 
 def _project_root_for_workspace(workspace: str) -> str | None:
@@ -133,6 +147,15 @@ def _project_root_for_workspace(workspace: str) -> str | None:
     if (parent / "project.json").is_file():
         return str(parent)
     return None
+
+
+def _is_conversational_input(message: str) -> bool:
+    normalized = " ".join(message.casefold().split())
+    return (
+        normalized.startswith(_CHAT_GREETING_PREFIXES)
+        or normalized.startswith(_CHAT_QUESTION_PREFIXES)
+        or normalized.endswith(("?", "？"))
+    )
 
 
 def _known_projects(value: object) -> list[tuple[str, str]]:
@@ -228,14 +251,14 @@ class EcosAgentProvider:
         workspace_path_recommender: _WorkspacePathRecommender | None = None,
         rerun_parameter_parser: _RerunParameterParser | None = None,
         knowledge: tuple[StepKnowledge, ...] | None = None,
-        operation_choice_parser: _OperationChoiceParser | None = None,
+        chat_response_parser: _ChatResponseParser | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.knowledge = knowledge or load_default_step_knowledge()
-        self.operation_choice_parser = operation_choice_parser or _propose_gui_operation_choice
+        self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
 
@@ -354,12 +377,6 @@ class EcosAgentProvider:
         self.stopped = True
 
     def _handle_input(self, session: _Session, message: str) -> None:
-        if session.phase == "operation":
-            answer = self._knowledge_answer(message)
-            if answer is not None:
-                self._emit(session, "message", answer.text, contract=answer.contract)
-                self._emit_phase_choice(session)
-                return
         handlers = {
             "home_ready": self._select_home_ready,
             "operation": self._select_operation,
@@ -399,7 +416,30 @@ class EcosAgentProvider:
         if handler is None:
             self._emit(session, "error", "The current ECOS Agent session is not actionable.")
             return
+        if session.phase in {"home_ready", "operation"}:
+            self._handle_idle_input(session, message)
+            return
+        if _is_conversational_input(message):
+            self._answer_non_state_input(session, message)
+            return
         handler(session, message)
+
+    def _handle_idle_input(self, session: _Session, message: str) -> None:
+        choice = self._resolve_operation_choice(session, message)
+        if choice is not None:
+            if session.phase == "home_ready":
+                self._select_home_ready(session, message, choice)
+            else:
+                self._select_operation(session, message, choice)
+            return
+        self._answer_non_state_input(session, message)
+
+    def _answer_non_state_input(self, session: _Session, message: str) -> None:
+        answer = self._knowledge_answer(message)
+        if answer is not None:
+            self._emit(session, "message", answer.text, contract=answer.contract)
+            return
+        self._answer_with_codex(session, message)
 
     def _knowledge_answer(self, message: str):
         for knowledge in self.knowledge:
@@ -408,20 +448,12 @@ class EcosAgentProvider:
                 return answer
         return None
 
-    def _select_home_ready(self, session: _Session, message: str) -> None:
-        if message.strip() == "1":
-            self._begin_home_workspace_create(session, "")
-            return
-        choice = self._resolve_operation_choice(session, message)
+    def _select_home_ready(self, session: _Session, message: str, choice: str) -> None:
         if choice == "1":
-            self._begin_home_workspace_create(session, message)
+            self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
             return
-        self._emit(session, "message", unmatched_operation_prompt(session.language))
-        self._emit(session, "message", home_ready_prompt(session.language))
-        self._emit_phase_choice(session)
 
-    def _select_operation(self, session: _Session, message: str) -> None:
-        choice = self._resolve_operation_choice(session, message)
+    def _select_operation(self, session: _Session, message: str, choice: str) -> None:
         if session.mode == "workspace":
             if choice == "1":
                 self._begin_workspace_parameter_update(session)
@@ -449,10 +481,6 @@ class EcosAgentProvider:
         elif choice == "1":
             self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
             return
-        self._emit(session, "message", unmatched_operation_prompt(session.language))
-        self._emit(session, "message", operation_prompt(session.language))
-        self._emit_phase_choice(session)
-
     def _resolve_operation_choice(self, session: _Session, message: str) -> str | None:
         resolve_mode = "home" if session.phase == "home_ready" else session.mode
         allowed_options = _allowed_operation_options(
@@ -469,13 +497,56 @@ class EcosAgentProvider:
         )
         if keyword is not None:
             return keyword
+        return None
+
+    def _answer_with_codex(self, session: _Session, message: str) -> None:
+        allowed_options = self._chat_allowed_operations(session)
+        response = self._parse_chat_response(session, message, allowed_options)
+        if response is None:
+            return
+        if response.operation is None:
+            self._emit(
+                session,
+                "message",
+                response.answer or "",
+                contract={
+                    "schema_version": "flow-agent.gui_chat_response.v1",
+                    "intent": "answer",
+                    "read_only": True,
+                    "backend": "local_codex_cli",
+                },
+            )
+            return
+        allowed_ids = {option["id"] for option in allowed_options}
+        if response.operation not in allowed_ids:
+            self._emit(session, "error", "The interpreted operation is not available in the current session.")
+            return
+        if session.phase == "home_ready":
+            self._select_home_ready(session, message, response.operation)
+        else:
+            self._select_operation(session, message, response.operation)
+
+    @staticmethod
+    def _chat_allowed_operations(session: _Session) -> list[dict[str, str]]:
+        if session.phase not in {"home_ready", "operation"}:
+            return []
+        return _allowed_operation_options(
+            session.language,
+            mode="home" if session.phase == "home_ready" else session.mode,
+            allow_create_workspace_in_project=bool(session.project_root),
+        )
+
+    def _parse_chat_response(
+        self, session: _Session, message: str, allowed_options: list[dict[str, str]]
+    ) -> GuiChatResponseProposal | None:
         try:
-            proposal = GuiOperationChoiceProposal.model_validate(
-                self.operation_choice_parser(
+            response = GuiChatResponseProposal.model_validate(
+                self.chat_response_parser(
                     {
-                        "schema_version": "flow-agent.gui_operation_choice_context.v1",
+                        "schema_version": "flow-agent.gui_chat_request_context.v1",
                         "natural_language_request": message,
-                        "mode": resolve_mode,
+                        "mode": session.mode,
+                        "phase": session.phase,
                         "allowed_operations": allowed_options,
                         "workspace": session.rerun_workspace_path or "",
                         "project_root": session.project_root or "",
@@ -490,18 +561,9 @@ class EcosAgentProvider:
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
             self._raise_if_interrupted(exc)
-            self._emit(session, "error", f"Unable to interpret the request: {exc}")
+            self._emit(session, "error", f"Unable to answer the request: {exc}")
             return None
-        if proposal.operation is None:
-            return None
-        if proposal.operation not in allowed_ids:
-            self._emit(
-                session,
-                "error",
-                "The interpreted operation is not available in the current session.",
-            )
-            return None
-        return proposal.operation
+        return response
 
     def _begin_home_workspace_create(self, session: _Session, message: str) -> None:
         self._reset_workspace_setup(session)

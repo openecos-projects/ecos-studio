@@ -140,28 +140,34 @@ class GuiWorkspaceSetupProposal(BaseModel):
         return self
 
 
-class GuiOperationChoiceProposal(BaseModel):
-    """Untrusted Codex mapping from free text onto one allowed GUI operation id.
+class GuiChatResponseProposal(BaseModel):
+    """Untrusted local-Codex response for one GUI chat turn.
 
-    ``operation`` is null when the request does not clearly match any allowed
-    operation — callers must fail closed and stay on the current choice.
+    The response can either select a currently allowed operation or provide a
+    read-only answer. The provider retains ownership of all state transitions.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["flow-agent.gui_operation_choice_proposal.v2"] = (
-        "flow-agent.gui_operation_choice_proposal.v2"
-    )
+    schema_version: Literal["flow-agent.gui_chat_response.v1"] = "flow-agent.gui_chat_response.v1"
     operation: Literal["1", "2", "3", "4"] | None = None
-    summary: str
+    answer: str | None = None
 
-    @field_validator("summary")
+    @field_validator("answer")
     @classmethod
-    def validate_summary(cls, value: str) -> str:
+    def validate_answer(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         value = value.strip()
-        if not value or len(value) > 512:
-            raise ValueError("operation choice summary is invalid")
+        if not value or len(value) > 4096:
+            raise ValueError("chat answer is invalid")
         return value
+
+    @model_validator(mode="after")
+    def validate_route(self) -> "GuiChatResponseProposal":
+        if (self.operation is None) == (self.answer is None):
+            raise ValueError("chat response must contain exactly one route")
+        return self
 
 
 def recommended_gui_workspace_setup() -> GuiWorkspaceSetupProposal:
