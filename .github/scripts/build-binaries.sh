@@ -81,6 +81,7 @@ build_agent_provider() {
     --distpath dist \
     --specpath build \
     --workpath build \
+    --add-data "$PWD/knowledge:knowledge" \
     packaging/run_ecos_agent.py
 }
 

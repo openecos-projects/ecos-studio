@@ -5,17 +5,22 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.place_knowledge import PlaceKnowledge, PlaceKnowledgeError
 from ecos_agent.provider import EcosAgentProvider
+from ecos_agent.step_knowledge import STEP_KNOWLEDGE_SPECS, StepKnowledge, StepKnowledgeError
 
 
 AGENT_ROOT = Path(__file__).parents[1]
-BUNDLE_ROOT = AGENT_ROOT / "src" / "ecos_agent" / "place_knowledge"
+BUNDLE_ROOT = AGENT_ROOT / "knowledge" / "place"
 ECOS_ROOT = AGENT_ROOT.parents[1]
+PLACE_SPEC = next(spec for spec in STEP_KNOWLEDGE_SPECS if spec.slug == "place")
+
+
+def _load_place_knowledge(root: Path = BUNDLE_ROOT) -> StepKnowledge:
+    return StepKnowledge.from_directory(root, PLACE_SPEC)
 
 
 def test_published_bundle_covers_every_default_dreamplace_parameter() -> None:
-    knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
+    knowledge = _load_place_knowledge()
     config = json.loads(
         (ECOS_ROOT / "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace.json").read_text(
             encoding="utf-8"
@@ -49,7 +54,7 @@ def test_failure_chunks_are_english() -> None:
 
 
 def test_algorithm_chunks_are_english_and_describe_place_stages() -> None:
-    knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
+    knowledge = _load_place_knowledge()
     algorithms = (BUNDLE_ROOT / "knowledge" / "algorithms.md").read_text(encoding="utf-8")
     expected_details = {
         "algorithm.place.execution": "global placement -> acceptance gate -> legalization -> detailed placement",
@@ -94,7 +99,7 @@ def test_metrics_cover_gui_place_values_and_maps_with_english_calculations() -> 
         "metric.place.map.lutrudy_vertical",
         "metric.place.map.lutrudy_union",
     }
-    knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
+    knowledge = _load_place_knowledge()
     metrics = (BUNDLE_ROOT / "knowledge" / "metrics.md").read_text(encoding="utf-8")
 
     expected_entities = {f"metric.{metric}" for metric in visible_numeric_metrics}
@@ -108,7 +113,7 @@ def test_metrics_cover_gui_place_values_and_maps_with_english_calculations() -> 
 
 
 def test_artifact_chunks_are_english_and_describe_contents_and_generation() -> None:
-    knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
+    knowledge = _load_place_knowledge()
     artifacts = (BUNDLE_ROOT / "knowledge" / "artifacts.md").read_text(encoding="utf-8")
     expected_content = {
         "artifact.place.outputs": "source artifacts",
@@ -139,7 +144,7 @@ def test_artifact_chunks_are_english_and_describe_contents_and_generation() -> N
 
 
 def test_regression_questions_render_only_published_markdown_chunks() -> None:
-    knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
+    knowledge = _load_place_knowledge()
     cases = [
         json.loads(line)
         for line in (BUNDLE_ROOT / "regression" / "place_questions.jsonl").read_text(
@@ -165,8 +170,8 @@ def test_bundle_rejects_a_markdown_chunk_with_a_changed_hash(tmp_path: Path) -> 
     parameters = copied_bundle / "knowledge" / "parameters.md"
     parameters.write_text(parameters.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
 
-    with pytest.raises(PlaceKnowledgeError, match="hash"):
-        PlaceKnowledge.from_directory(copied_bundle)
+    with pytest.raises(StepKnowledgeError, match="hash"):
+        _load_place_knowledge(copied_bundle)
 
 
 def test_provider_answers_place_questions_without_changing_operation_state() -> None:
@@ -183,8 +188,9 @@ def test_provider_answers_place_questions_without_changing_operation_state() -> 
     assert not any(event["type"] in {"workspace_rerun", "workspace_create"} for event in events)
 
 
-def test_packaged_agent_spec_uses_the_built_in_knowledge_bundle() -> None:
-    spec = (AGENT_ROOT / "packaging" / "ecos-agent.spec").read_text(encoding="utf-8")
+def test_packaged_agent_build_includes_the_external_knowledge_bundle() -> None:
+    build_script = (ECOS_ROOT / ".github" / "scripts" / "build-binaries.sh").read_text(
+        encoding="utf-8"
+    )
 
-    assert "*_knowledge" in spec
-    assert "ecos-place-knowledge" not in spec
+    assert '--add-data "$PWD/knowledge:knowledge"' in build_script
