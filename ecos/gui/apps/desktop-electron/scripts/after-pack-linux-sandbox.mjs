@@ -33,13 +33,13 @@ export async function validatePackagedEcc(appOutDir) {
       throw new Error('not an executable file')
     }
     await execFileAsync(eccPath, ['rpc', 'serve', '--help'], { timeout: 10_000 })
-    const agentRuntime = execFileAsync(
+    const rpcRuntime = execFileAsync(
       eccPath,
-      ['rpc', 'serve', '--stdio', '--persistent-db', '--agent'],
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
       { timeout: 10_000 },
     )
-    agentRuntime.child.stdin?.end()
-    await agentRuntime
+    rpcRuntime.child.stdin?.end()
+    await rpcRuntime
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     throw new Error(`Packaged ECC RPC sidecar validation failed at ${eccPath}: ${reason}`)

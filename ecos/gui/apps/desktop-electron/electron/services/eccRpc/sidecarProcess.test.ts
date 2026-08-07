@@ -52,7 +52,7 @@ describe('EccRpcSidecarProcess', () => {
 
     expect(spawn).toHaveBeenCalledWith(
       'ecc',
-      ['rpc', 'serve', '--stdio', '--persistent-db', '--agent'],
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
       {
         env: { PATH: '/bin' },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -105,7 +105,7 @@ describe('EccRpcSidecarProcess', () => {
     expect(spawn).toHaveBeenCalledTimes(2)
     expect(spawn).toHaveBeenLastCalledWith(
       'ecc',
-      ['rpc', 'serve', '--stdio', '--persistent-db', '--agent'],
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
       {
         env: { PATH: '/tools/v2/bin' },
         stdio: ['pipe', 'pipe', 'pipe'],

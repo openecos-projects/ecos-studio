@@ -12,7 +12,7 @@ async function writeRpcCapableEcc(appOutDir: string): Promise<void> {
   await mkdir(binariesDir, { recursive: true })
   await writeFile(
     eccPath,
-    '#!/bin/sh\nif [ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --help ]; then exit 0; fi\n[ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --stdio ] && [ "$4" = --persistent-db ] && [ "$5" = --agent ] || exit 64\n',
+    '#!/bin/sh\nif [ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --help ]; then exit 0; fi\n[ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --stdio ] && [ "$4" = --persistent-db ] || exit 64\n',
   )
   await chmod(eccPath, 0o755)
 }
@@ -134,7 +134,7 @@ describe('afterPackLinuxSandbox', () => {
     ).rejects.toThrow('Packaged ECC RPC sidecar validation failed')
   })
 
-  it('rejects Linux packaging when the ECC binary lacks the Agent RPC runtime', async () => {
+  it('rejects Linux packaging when the ECC binary lacks the RPC runtime', async () => {
     const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
     tempDirs.push(appOutDir)
     await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')

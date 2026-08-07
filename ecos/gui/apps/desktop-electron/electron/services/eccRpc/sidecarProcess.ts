@@ -122,7 +122,7 @@ export class EccRpcSidecarProcess {
 
     const child = this.spawnImpl(
       this.command,
-      ['rpc', 'serve', '--stdio', '--persistent-db', '--agent'],
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
       {
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
