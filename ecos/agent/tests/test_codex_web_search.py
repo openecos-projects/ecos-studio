@@ -78,18 +78,18 @@ def test_web_search_activity_is_reported_to_the_user() -> None:
     started = _JsonLineRpcProcessClient._readonly_activity(
         "item/started", {"item": {"type": "web_search", "query": "dreamplace target density"}}
     )
-    assert started == "Codex is searching the web for “dreamplace target density”."
+    assert started == "Searching the web for “dreamplace target density”…"
     assert (
         _JsonLineRpcProcessClient._readonly_activity(
             "item/started", {"item": {"type": "webSearch"}}
         )
-        == "Codex is searching the web."
+        == "Searching the web…"
     )
     assert (
         _JsonLineRpcProcessClient._readonly_activity(
             "item/completed", {"item": {"type": "web_search"}}
         )
-        == "Codex finished a web search."
+        == "Finished web search."
     )
 
 
@@ -98,7 +98,7 @@ def test_command_activity_reporting_is_unchanged() -> None:
         _JsonLineRpcProcessClient._readonly_activity(
             "item/started", {"item": {"type": "command_execution", "command": "rg foo"}}
         )
-        == "Codex is searching the authorized workspace roots."
+        == "Searching workspace…"
     )
     assert (
         _JsonLineRpcProcessClient._readonly_activity(

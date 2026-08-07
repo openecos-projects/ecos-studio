@@ -134,19 +134,19 @@ describe('messageStore', () => {
     const store = useMessageStore()
 
     store.upsertAgentEvent({
-      delta: 'Inspecting inputs.\n',
+      delta: 'Thinking…\n',
       messageId: 'turn-1-tool',
       type: 'tool',
     })
     store.upsertAgentEvent({
-      delta: 'Validating proposal.\n',
+      delta: 'Searching workspace…\n',
       messageId: 'turn-1-tool',
       type: 'tool',
     })
 
     expect(store.messages).toMatchObject([
       {
-        content: 'Inspecting inputs.\nValidating proposal.\n',
+        content: 'Thinking…\nSearching workspace…\n',
         id: 'turn-1-tool',
         status: 'loading',
         type: 'tool',
@@ -154,10 +154,10 @@ describe('messageStore', () => {
     ])
 
     store.finishStreamingMessages()
-    expect(store.messages[0]?.status).toBe('done')
+    expect(store.messages).toEqual([])
   })
 
-  it('appends local flow progress into one loading tool timeline', () => {
+  it('keeps flow execution timelines after the turn finishes', () => {
     const store = useMessageStore()
 
     store.appendToolProgress('Running place.')
@@ -174,6 +174,9 @@ describe('messageStore', () => {
     expect(store.messages[0]?.content).toContain('Completed place.')
 
     store.finishToolProgress()
+    store.finishStreamingMessages()
+    expect(store.messages).toHaveLength(1)
     expect(store.messages[0]?.status).toBe('done')
+    expect(store.messages[0]?.content).toContain('Running place.')
   })
 })

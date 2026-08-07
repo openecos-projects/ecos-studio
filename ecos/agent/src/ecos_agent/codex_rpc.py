@@ -216,7 +216,7 @@ class _JsonLineRpcProcessClient:
                 )
                 if will_retry:
                     self._report_progress(
-                        activity_callback, "Codex received a transient error and is retrying."
+                        activity_callback, "Retrying…"
                     )
                     continue
                 error_message = self._error_message(params)
@@ -388,20 +388,16 @@ class _JsonLineRpcProcessClient:
         if item_type == "websearch":
             if method == "item/started":
                 query = str(item.get("query", "")).strip()
-                return (
-                    f"Codex is searching the web for “{query}”."
-                    if query
-                    else "Codex is searching the web."
-                )
-            return "Codex finished a web search."
+                return f"Searching the web for “{query}”…" if query else "Searching the web…"
+            return "Finished web search."
         if item_type != "commandexecution":
             return None
         command = str(item.get("command", "")).casefold()
         if method == "item/started":
             if any(token in command for token in ("rg", "find", "fd ", "ls ")):
-                return "Codex is searching the authorized workspace roots."
-            return "Codex is reading authorized workspace files."
-        return "Codex completed a read-only workspace inspection."
+                return "Searching workspace…"
+            return "Reading workspace files…"
+        return "Finished workspace inspection."
 
     @staticmethod
     def _error_code(params: Mapping[str, Any]) -> str | None:

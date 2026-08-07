@@ -7,6 +7,7 @@ import type {
   DesktopAgentExecutionContract,
 } from '@ecos-studio/shared'
 import type { Message, Thumbnail, InfoData, MapData } from '../types'
+import { isEphemeralToolContent } from '../components/agentToolSteps'
 
 // 生成唯一 ID
 const generateId = (): string => {
@@ -268,11 +269,27 @@ export const useMessageStore = defineStore('messages', () => {
   }
 
   const finishStreamingMessages = (sessionId?: string): void => {
+    const resolvedId = sessionId ?? activeSessionId.value
     const bucket = sessionId ? sessionMessages(sessionId) : tryActiveMessages()
-    if (!bucket) return
+    if (!bucket || !resolvedId) return
     for (const message of bucket) {
       if (message.role === 'assistant' && message.status === 'loading') {
         message.status = 'done'
+      }
+    }
+    // Drop Thinking / search chatter once the turn answer is in; keep flow timelines.
+    const next = bucket.filter(
+      (message) =>
+        !(
+          message.type === 'tool' &&
+          message.status === 'done' &&
+          isEphemeralToolContent(message.content)
+        ),
+    )
+    if (next.length !== bucket.length) {
+      messagesBySessionId.value = {
+        ...messagesBySessionId.value,
+        [resolvedId]: next,
       }
     }
   }

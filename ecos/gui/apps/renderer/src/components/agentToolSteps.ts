@@ -44,6 +44,20 @@ export function parseToolContentLines(content: string): string[] {
     .filter(Boolean)
 }
 
+/** True when the card is only transient Codex/prep chatter, not flow execution. */
+export function isEphemeralToolContent(content: string): boolean {
+  const lines = parseToolContentLines(content)
+  if (lines.length === 0) return true
+  return lines.every(
+    (line) =>
+      !RUNNING_RE.test(line) &&
+      !FAILED_RE.test(line) &&
+      !COMPLETED_SAVED_RE.test(line) &&
+      !COMPLETED_RE.test(line) &&
+      !SUBFLOW_RE.test(line),
+  )
+}
+
 function upsertDetail(step: { detailLines?: string[] }, detail: string): void {
   const lines = step.detailLines ? [...step.detailLines] : []
   const key = subflowDetailKey(detail)

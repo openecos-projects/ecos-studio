@@ -2,19 +2,27 @@ import { describe, expect, it } from 'vitest'
 import {
   EARLIER_COLLAPSE_THRESHOLD,
   buildAgentToolSteps,
+  isEphemeralToolContent,
   splitToolSteps,
 } from './agentToolSteps'
 
 describe('agentToolSteps', () => {
   it('turns newline progress into a running timeline', () => {
     const steps = buildAgentToolSteps(
-      'Codex is analyzing the bounded request.\nCodex request accepted; waiting for read-only activity.\n',
+      'Thinking…\nSearching workspace…\n',
       'loading',
     )
     expect(steps).toHaveLength(2)
     expect(steps[0]?.status).toBe('done')
+    expect(steps[0]?.summary).toBe('Thinking…')
     expect(steps[1]?.status).toBe('running')
-    expect(steps[1]?.summary).toContain('Codex request accepted')
+    expect(steps[1]?.summary).toBe('Searching workspace…')
+  })
+
+  it('treats Thinking/search chatter as ephemeral and flow lines as durable', () => {
+    expect(isEphemeralToolContent('Thinking…\nSearching workspace…\n')).toBe(true)
+    expect(isEphemeralToolContent('Running place.\nCompleted place.\n')).toBe(false)
+    expect(isEphemeralToolContent('place › load data\n')).toBe(false)
   })
 
   it('collapses Running/Completed flow lines and demotes artifact paths', () => {

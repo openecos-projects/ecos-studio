@@ -177,7 +177,9 @@ class CodexAppServerProposalProvider:
         with self._state_lock:
             if self._interrupted:
                 raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
-        self._report_progress("Codex is analyzing the bounded request.")
+        # One lifecycle line only; observable Codex actions still stream via
+        # activity_callback (web search, workspace reads, retries).
+        self._report_progress("Thinking…")
         client = self._ensure_client()
         thread_id = self._ensure_thread(client)
         response = client.request(
@@ -216,7 +218,6 @@ class CodexAppServerProposalProvider:
             raise CodexProviderError("Codex turn/start response missing turn id", failure_class="tool_error")
         with self._state_lock:
             self._active_turn_id = turn_id
-        self._report_progress("Codex request accepted; waiting for read-only activity.")
         try:
             text, _ = client.wait_for_turn_details(
                 turn_id, thread_id=thread_id, activity_callback=self._report_progress
@@ -230,7 +231,6 @@ class CodexAppServerProposalProvider:
                 self._active_turn_id = None
         if self._interrupted:
             raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
-        self._report_progress("Codex returned a structured proposal for local validation.")
         return text
 
     def _ensure_client(self) -> _JsonLineRpcProcessClient:
