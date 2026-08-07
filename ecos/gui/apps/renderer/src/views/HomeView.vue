@@ -13,43 +13,57 @@
             <dl class="dashboard-parameter-grid chip-info-grid">
               <div>
                 <dt>Project</dt>
-                <dd>{{ valueOrNA(qorComparisonState.projectName) }}</dd>
+                <dd :title="valueOrNA(qorComparisonState.projectName)">
+                  {{ valueOrNA(qorComparisonState.projectName) }}
+                </dd>
               </div>
               <div>
                 <dt>SoC Template</dt>
-                <dd>{{ valueOrNA(mpcDisplayName) }}</dd>
+                <dd :title="valueOrNA(mpcDisplayName)">
+                  {{ valueOrNA(mpcDisplayName) }}
+                </dd>
               </div>
               <div>
                 <dt>Baseline workspace</dt>
-                <dd>{{ valueOrNA(qorComparisonState.baselineWorkspaceName) }}</dd>
+                <dd :title="valueOrNA(qorComparisonState.baselineWorkspaceName)">
+                  {{ valueOrNA(qorComparisonState.baselineWorkspaceName) }}
+                </dd>
               </div>
               <div>
                 <dt>Workspace</dt>
-                <dd>{{ valueOrNA(currentProject?.name) }}</dd>
+                <dd :title="valueOrNA(currentProject?.name)">
+                  {{ valueOrNA(currentProject?.name) }}
+                </dd>
               </div>
               <div>
                 <dt>PDK</dt>
-                <dd>{{ valueOrNA(config.pdk) }}</dd>
+                <dd :title="valueOrNA(config.pdk)">{{ valueOrNA(config.pdk) }}</dd>
               </div>
               <div>
                 <dt>Design</dt>
-                <dd>{{ valueOrNA(config.design) }}</dd>
+                <dd :title="valueOrNA(config.design)">{{ valueOrNA(config.design) }}</dd>
               </div>
               <div>
                 <dt>Top Module</dt>
-                <dd>{{ valueOrNA(config.topModule) }}</dd>
+                <dd :title="valueOrNA(config.topModule)">
+                  {{ valueOrNA(config.topModule) }}
+                </dd>
               </div>
               <div>
                 <dt>Target Die Area</dt>
-                <dd>{{ positiveNumberOrNA(config.die.area) }}</dd>
+                <dd :title="positiveNumberOrNA(config.die.area)">
+                  {{ positiveNumberOrNA(config.die.area) }}
+                </dd>
               </div>
               <div>
                 <dt>Target Frequency</dt>
-                <dd>{{ frequencyOrNA(config.frequencyMax) }}</dd>
+                <dd :title="frequencyOrNA(config.frequencyMax)">
+                  {{ frequencyOrNA(config.frequencyMax) }}
+                </dd>
               </div>
               <div>
                 <dt>Clock</dt>
-                <dd>{{ valueOrNA(config.clock) }}</dd>
+                <dd :title="valueOrNA(config.clock)">{{ valueOrNA(config.clock) }}</dd>
               </div>
             </dl>
           </section>
@@ -1145,64 +1159,6 @@ async function openLayoutChipViewer(): Promise<void> {
   position: relative;
 }
 
-.dashboard-section::before {
-  background:
-    linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      top left / 23px 2px no-repeat,
-    linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      top left / 2px 23px no-repeat,
-    linear-gradient(
-        270deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      top right / 23px 2px no-repeat,
-    linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      top right / 2px 23px no-repeat,
-    linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      bottom left / 23px 2px no-repeat,
-    linear-gradient(
-        0deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      bottom left / 2px 23px no-repeat,
-    linear-gradient(
-        270deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      bottom right / 23px 2px no-repeat,
-    linear-gradient(
-        0deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      bottom right / 2px 23px no-repeat;
-  content: '';
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--success-color) 48%, transparent));
-  inset: -1px;
-  pointer-events: none;
-  position: absolute;
-  z-index: 2;
-}
-
 .dashboard-section-header {
   align-items: center;
   border-bottom: 1px solid var(--border-color);
@@ -1287,10 +1243,11 @@ async function openLayoutChipViewer(): Promise<void> {
   border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  min-height: 43px;
+  gap: 4px;
+  justify-content: flex-start;
+  min-height: min-content;
   min-width: 0;
-  padding: 7px 9px;
+  padding: 8px 9px;
 }
 
 .chip-info-grid,
@@ -1299,14 +1256,23 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .chip-info-grid {
+  align-content: start;
   flex: 1 1 auto;
+  grid-auto-rows: minmax(min-content, auto);
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
+.chip-info-grid > div {
+  justify-content: flex-start;
+}
+
 .key-metrics-grid {
-  grid-auto-rows: minmax(0, 1fr);
+  align-content: start;
+  grid-auto-rows: minmax(min-content, 1fr);
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .constraint-list {
@@ -1317,20 +1283,33 @@ async function openLayoutChipViewer(): Promise<void> {
 .key-metrics-grid dt,
 .constraint-list dt {
   color: var(--text-secondary);
+  flex: 0 0 auto;
   font-size: 10px;
   line-height: 1.2;
-  margin: 0 0 3px;
+  margin: 0;
 }
 
 .chip-info-grid dd,
 .key-metrics-grid dd,
 .constraint-list dd {
   color: var(--text-primary);
+  flex: 0 0 auto;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.3;
   margin: 0;
+  min-width: 0;
+}
+
+.chip-info-grid dd {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.key-metrics-grid dd,
+.constraint-list dd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1342,7 +1321,8 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .key-metrics-grid > div {
-  min-height: 0;
+  gap: 3px;
+  min-height: min-content;
   padding: 5px 7px;
 }
 
@@ -1503,17 +1483,17 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .qor-comparison-pie {
-  align-content: center;
-  display: grid;
+  display: flex;
   flex: 1 1 auto;
-  min-height: 140px;
+  flex-direction: column;
+  min-height: 148px;
   min-width: 0;
   overflow: hidden;
   padding: 2px 0;
 }
 
 .qor-comparison-pie :deep(.status-pie-chart-wrap) {
-  min-height: 140px;
+  min-height: 104px;
 }
 
 .status-summary-content,
@@ -1641,21 +1621,24 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .qor-step-list {
+  align-content: start;
   display: grid;
   flex: 1;
   gap: 4px 6px;
-  grid-auto-rows: minmax(0, 1fr);
+  grid-auto-rows: minmax(min-content, 1fr);
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   min-width: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 7px 8px;
 }
 .qor-step-row {
   border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
   display: flex;
   flex-direction: column;
+  gap: 4px;
   justify-content: center;
-  min-height: 0;
+  min-height: min-content;
   min-width: 0;
   padding: 4px 6px;
 }
@@ -1666,10 +1649,11 @@ async function openLayoutChipViewer(): Promise<void> {
   color: var(--text-primary);
   cursor: pointer;
   display: grid;
+  flex: 0 0 auto;
   gap: 4px;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 0;
   min-width: 0;
+  overflow: hidden;
   padding: 0;
   text-align: left;
 }
@@ -1698,9 +1682,9 @@ async function openLayoutChipViewer(): Promise<void> {
 .qor-step-trend {
   align-items: center;
   display: grid;
+  flex: 0 0 auto;
   gap: 6px;
   grid-template-columns: minmax(0, 1fr) auto;
-  margin: 6px 0 0;
   min-width: 0;
 }
 
@@ -1914,8 +1898,6 @@ async function openLayoutChipViewer(): Promise<void> {
   overflow-x: hidden;
   overflow-y: auto;
   padding: 0 5px 8px 0;
-  scrollbar-color: color-mix(in srgb, var(--text-secondary) 52%, transparent) transparent;
-  scrollbar-width: thin;
 }
 
 :deep(.qor-detail-dialog.p-dialog-maximized .p-dialog-content) {
@@ -2340,13 +2322,19 @@ async function openLayoutChipViewer(): Promise<void> {
     padding-right: 8px;
   }
   .qor-step-row {
-    gap: 3px;
+    align-items: center;
+    display: grid;
+    gap: 6px;
+    grid-template-columns: minmax(0, 1fr) minmax(52px, 0.9fr);
+    min-height: min-content;
+    padding: 4px 6px;
   }
   .qor-step-list {
-    grid-template-columns: repeat(auto-fit, minmax(114px, 1fr));
+    grid-auto-rows: minmax(min-content, auto);
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
   }
   .qor-step-total {
-    font-size: 7px;
+    font-size: 9px;
   }
 }
 </style>

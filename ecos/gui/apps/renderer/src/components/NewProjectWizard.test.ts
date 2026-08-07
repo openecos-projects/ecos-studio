@@ -342,8 +342,9 @@ describe('NewProjectWizard workspace wizard redesign', () => {
   })
 
   it('keeps selected PDK resource files in an internal scroll list', () => {
+    expect(source).toContain('pdk-resource-selected-list custom-scrollbar')
     const styleStart = source.indexOf('.pdk-resource-selected-list')
-    const styleEnd = source.indexOf('.custom-scrollbar::-webkit-scrollbar', styleStart)
+    const styleEnd = source.indexOf('.flow-step-connector', styleStart)
     const styleSource = source.slice(styleStart, styleEnd)
 
     expect(styleStart).toBeGreaterThan(-1)

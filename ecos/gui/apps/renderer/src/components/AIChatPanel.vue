@@ -247,28 +247,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
 </script>
 
 <style scoped>
-.custom-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-color) transparent;
-}
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
-}
-
 /* 消息容器约束 - 防止内容撑开父容器 */
 .messages-container {
   contain: layout style;

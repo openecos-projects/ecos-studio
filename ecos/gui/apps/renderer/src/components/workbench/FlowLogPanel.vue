@@ -64,6 +64,7 @@
 
   <Dialog
     v-model:visible="dialogVisible"
+    class="flow-log-dialog"
     modal
     maximizable
     :header="logTitle"
@@ -294,10 +295,36 @@ onBeforeUnmount(() => {
   line-height: 1.5;
   margin: 0;
   max-height: min(70vh, 760px);
+  min-height: 0;
   overflow: auto;
   padding: 12px;
   user-select: text;
   white-space: pre-wrap;
   word-break: break-word;
+}
+</style>
+
+<!-- Dialog teleports to body; keep maximize layout rules unscoped. -->
+<style>
+.flow-log-dialog.p-dialog-maximized {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-height: 100vh;
+  width: 100vw;
+}
+
+.flow-log-dialog.p-dialog-maximized .p-dialog-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.flow-log-dialog.p-dialog-maximized .flow-log-dialog-content {
+  flex: 1 1 auto;
+  height: 100%;
+  max-height: none;
 }
 </style>

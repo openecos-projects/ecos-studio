@@ -7,7 +7,7 @@
       v-for="stage in flowStages"
       :key="stage.path"
       :to="workspaceStageLink(stage.path)"
-      class="group relative mb-1 flex flex-col items-center justify-center py-4 transition-all"
+      class="group relative mb-1 flex w-full min-w-0 flex-col items-center justify-center px-1 py-4 transition-all"
       :class="[
         currentStage === stage.path ? 'text-(--accent-color)' : 'text-(--text-secondary)',
       ]"
@@ -22,32 +22,34 @@
         <i :class="stage.icon" class="mb-1.5 inline-block text-xl" aria-hidden="true" />
         <i
           v-if="stage.state === 'Success'"
-          class="ri-checkbox-circle-fill absolute -top-1 -right-1 rounded-full bg-(--bg-sidebar) text-[10px] text-green-500"
+          class="ri-checkbox-circle-fill absolute -top-0.5 right-0 rounded-full bg-(--bg-sidebar) text-[10px] text-green-500"
           aria-label="Completed"
         />
         <i
           v-else-if="stage.state === 'Ongoing'"
-          class="ri-loader-4-line absolute -top-1 -right-1 animate-spin rounded-full bg-(--bg-sidebar) text-[10px] text-blue-400"
+          class="ri-loader-4-line absolute -top-0.5 right-0 animate-spin rounded-full bg-(--bg-sidebar) text-[10px] text-blue-400"
           aria-label="Running"
         />
         <i
           v-else-if="stage.state === 'Pending'"
-          class="ri-time-line absolute -top-1 -right-1 rounded-full bg-(--bg-sidebar) text-[10px] text-(--text-secondary)"
+          class="ri-time-line absolute -top-0.5 right-0 rounded-full bg-(--bg-sidebar) text-[10px] text-(--text-secondary)"
           aria-label="Pending"
         />
         <i
           v-else-if="stage.state === 'Invalid'"
-          class="ri-error-warning-fill absolute -top-1 -right-1 rounded-full bg-(--bg-sidebar) text-[10px] text-red-500"
+          class="ri-error-warning-fill absolute -top-0.5 right-0 rounded-full bg-(--bg-sidebar) text-[10px] text-red-500"
           aria-label="Failed"
         />
         <i
           v-else-if="stage.state === 'Incomplete'"
-          class="ri-indeterminate-circle-fill absolute -top-1 -right-1 rounded-full bg-(--bg-sidebar) text-[10px] text-amber-500"
+          class="ri-indeterminate-circle-fill absolute -top-0.5 right-0 rounded-full bg-(--bg-sidebar) text-[10px] text-amber-500"
           aria-label="Incomplete"
         />
       </span>
 
-      <span class="scale-90 text-center text-[9px] leading-tight font-bold uppercase">
+      <span
+        class="w-full max-w-full text-center text-[8px] leading-tight font-bold break-words uppercase"
+      >
         {{ stage.label }}
       </span>
     </router-link>

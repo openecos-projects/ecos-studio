@@ -1,6 +1,8 @@
 import type { WorkspaceConfig } from '@/types'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
+import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { parseProjectManifest } from '@/utils/projectManagement'
 
 export interface ProjectRouteContext {
   projectRoot: string
@@ -33,6 +35,47 @@ export function projectContextFromWorkspaceConfig(
       typeof projectContext.project_name === 'string'
         ? projectContext.project_name
         : undefined,
+  }
+}
+
+/**
+ * Infers the parent project for a workspace opened outside Project Management
+ * (for example Backend Design recent workspaces) when the parent directory has a
+ * project.json that already lists that workspace.
+ */
+export async function resolveProjectRouteContextForWorkspace(
+  workspacePath: string,
+): Promise<ProjectRouteContext | null> {
+  const normalizedWorkspace = normalizePath(workspacePath)
+  if (!normalizedWorkspace) return null
+
+  const projectRoot = parentPath(normalizedWorkspace)
+  if (!projectRoot || projectRoot === normalizedWorkspace) return null
+
+  try {
+    const registeredProjectRoot = await registerLocalProjectRoot(projectRoot)
+    if (!registeredProjectRoot) return null
+
+    const manifestText = await readOptionalProjectTextFile('project.json', {
+      projectPath: registeredProjectRoot,
+    })
+    if (!manifestText) return null
+
+    const manifest = parseProjectManifest(manifestText)
+    const listed = manifest.workspaces.some(
+      (workspace) => normalizePath(workspace.workspace_path) === normalizedWorkspace,
+    )
+    if (!listed) return null
+
+    return {
+      projectRoot: registeredProjectRoot,
+      projectName: manifest.name || basenamePath(registeredProjectRoot) || undefined,
+    }
+  } catch (error) {
+    console.warn('Failed to resolve project context for workspace.', error)
+    return null
+  } finally {
+    await registerLocalProjectRoot(normalizedWorkspace)
   }
 }
 
@@ -121,4 +164,12 @@ function normalizePath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
   if (normalized.endsWith('/') && normalized.length > 1) return normalized.slice(0, -1)
   return normalized
+}
+
+function parentPath(path: string): string {
+  const normalized = normalizePath(path)
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
+  const parent = parts.slice(0, -1).join('/')
+  return normalized.startsWith('/') ? `/${parent}` : parent
 }

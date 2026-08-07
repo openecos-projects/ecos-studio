@@ -213,6 +213,7 @@ import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
+  resolveProjectRouteContextForWorkspace,
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
 
@@ -254,27 +255,33 @@ const handleOpenProject = async () => {
   const success = await openProject()
   if (!success || !currentProject.value?.path) return
 
+  const projectContext = await resolveOpenProjectContext(currentProject.value.path)
   await registerProjectManagedWorkspace({
     workspacePath: currentProject.value.path,
+    projectContext,
     routeQuery: route.query,
   })
   router.push({
     path: '/workspace/home',
-    query: workspaceRouteQuery(currentProject.value.path),
+    query: workspaceRouteQuery(currentProject.value.path, projectContext),
   })
 }
 
 const handleOpenRecent = async (project: Project) => {
   const success = await openProject(project)
-  if (success) {
-    await registerProjectManagedWorkspace({
-      workspacePath: currentProject.value?.path ?? project.path,
-    })
-    router.push({
-      path: '/workspace/home',
-      query: workspaceRouteQuery(currentProject.value?.path ?? project.path),
-    })
-  }
+  if (!success) return
+
+  const workspacePath = currentProject.value?.path ?? project.path
+  const projectContext = await resolveOpenProjectContext(workspacePath)
+  await registerProjectManagedWorkspace({
+    workspacePath,
+    projectContext,
+    routeQuery: route.query,
+  })
+  router.push({
+    path: '/workspace/home',
+    query: workspaceRouteQuery(workspacePath, projectContext),
+  })
 }
 
 const handleRemoveRecent = async (projectId: string) => {
@@ -584,6 +591,21 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     path: '/workspace/home',
     query: workspaceRouteQuery(workspacePath, projectContext),
   })
+}
+
+async function resolveOpenProjectContext(
+  workspacePath: string,
+): Promise<ProjectRouteContext | null> {
+  const resolved = await resolveProjectRouteContextForWorkspace(workspacePath)
+  if (resolved) return resolved
+
+  const projectRoot = queryString(route.query.projectRoot)
+  if (!projectRoot) return null
+
+  return {
+    projectRoot,
+    projectName: queryString(route.query.projectName) || undefined,
+  }
 }
 
 function workspaceRouteQuery(

@@ -93,16 +93,20 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('class="home-snapshot-detail"')
   })
 
-  it('uses the legacy green bracket corners around each dashboard card', () => {
-    expect(homeViewSource).toContain('.dashboard-section::before')
-    expect(homeViewSource).toContain('top left / 23px 2px no-repeat')
-    expect(homeViewSource).toContain('bottom right / 2px 23px no-repeat')
-    expect(homeViewSource).toContain('filter: drop-shadow')
-    expect(homeViewSource).not.toContain('radial-gradient(\n        circle at 0 0')
+  it('keeps dashboard cards free of decorative corner brackets', () => {
+    expect(homeViewSource).not.toContain('.dashboard-section::before')
+    expect(homeViewSource).not.toContain('top left / 23px 2px no-repeat')
+    expect(homeViewSource).not.toContain('bottom right / 2px 23px no-repeat')
   })
 
   it('uses grid cells for dashboard parameters and compact QoR comparison entry points', () => {
     expect(homeViewSource).toContain('class="dashboard-parameter-grid chip-info-grid"')
+    expect(homeViewSource).toContain(
+      '.chip-info-grid {\n  align-content: start;\n  flex: 1 1 auto;\n  grid-auto-rows: minmax(min-content, auto);',
+    )
+    expect(homeViewSource).toContain(
+      '.chip-info-grid dd {\n  overflow-wrap: anywhere;\n  white-space: normal;',
+    )
     expect(homeViewSource).toContain('class="dashboard-parameter-grid constraint-list"')
     expect(homeViewSource).toContain('class="dashboard-parameter-grid key-metrics-grid"')
     expect(homeViewSource).toContain('.dashboard-parameter-grid > div')
@@ -157,6 +161,9 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain(':style="{ flexGrow: step.improvedCount }"')
     expect(homeViewSource).toContain(':style="{ flexGrow: step.regressedCount }"')
     expect(homeViewSource).toContain(':style="{ flexGrow: step.unchangedCount }"')
+    expect(homeViewSource).toContain('grid-auto-rows: minmax(min-content, 1fr)')
+    expect(homeViewSource).toContain('overflow-y: auto')
+    expect(homeViewSource).toContain('min-height: min-content')
     expect(homeViewSource).toContain('overflow: hidden')
     expect(homeViewSource).toContain('border-right: 1px solid var(--border-color)')
   })
@@ -256,11 +263,11 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('.qor-step-trend-bar > .is-improved')
     expect(homeViewSource).toContain('.qor-step-trend-bar > .is-regressed')
     expect(homeViewSource).toContain('.qor-step-trend-bar > .is-neutral')
-    expect(homeViewSource).toContain(
-      '.key-metrics-grid {\n  grid-auto-rows: minmax(0, 1fr);',
-    )
+    expect(homeViewSource).toContain('grid-auto-rows: minmax(min-content, 1fr)')
     expect(homeViewSource).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))')
-    expect(homeViewSource).toContain('.key-metrics-grid > div {\n  min-height: 0;')
+    expect(homeViewSource).toContain(
+      '.key-metrics-grid > div {\n  gap: 3px;\n  min-height: min-content;',
+    )
   })
 
   it('preserves fixed-size checklist, QoR, and snapshot pie chart regions', () => {

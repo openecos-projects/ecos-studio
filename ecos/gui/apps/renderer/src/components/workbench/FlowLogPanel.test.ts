@@ -26,4 +26,14 @@ describe('FlowLogPanel embedded controls', () => {
   it('keeps the embedded viewer constrained so its log text can scroll', () => {
     expect(source).toContain('.flow-log-viewer {\n  display: flex;')
   })
+
+  it('lets the open-log dialog fill the viewport when maximized', () => {
+    expect(source).toContain('class="flow-log-dialog"')
+    expect(source).toContain('maximizable')
+    expect(source).toContain(
+      '.flow-log-dialog.p-dialog-maximized .flow-log-dialog-content',
+    )
+    expect(source).toContain('max-height: none')
+    expect(source).toContain('height: 100vh')
+  })
 })

@@ -488,9 +488,8 @@ onUnmounted(() => {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 20px;
-  border-left: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  width: 8px;
+  background: transparent;
   cursor: grab;
   pointer-events: auto;
   touch-action: none;
@@ -504,18 +503,29 @@ onUnmounted(() => {
 .flow-log-vertical-scrollbar-thumb {
   position: absolute;
   top: 0;
-  right: 4px;
-  left: 4px;
-  min-height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(166, 166, 176, 0.66);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.36);
+  right: 2px;
+  left: 2px;
+  min-height: 24px;
+  border: 0 solid transparent;
+  border-radius: var(--scrollbar-radius);
+  background-color: transparent;
+  background-clip: padding-box;
 }
 
-.flow-log-vertical-scrollbar:hover .flow-log-vertical-scrollbar-thumb,
+.flow-log-viewer-editor-wrap:hover .flow-log-vertical-scrollbar-thumb,
+.flow-log-viewer-editor-wrap:has(.is-scrolling) .flow-log-vertical-scrollbar-thumb,
 .flow-log-vertical-scrollbar.is-dragging .flow-log-vertical-scrollbar-thumb {
-  background: rgba(196, 196, 208, 0.88);
+  background-color: var(--scrollbar-thumb);
+}
+
+.flow-log-viewer-editor-wrap:hover
+  .flow-log-vertical-scrollbar:hover
+  .flow-log-vertical-scrollbar-thumb,
+.flow-log-viewer-editor-wrap:has(.is-scrolling)
+  .flow-log-vertical-scrollbar:hover
+  .flow-log-vertical-scrollbar-thumb,
+.flow-log-vertical-scrollbar.is-dragging .flow-log-vertical-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 :deep(.cm-scroller) {
@@ -524,10 +534,8 @@ onUnmounted(() => {
   overflow-x: hidden;
   overflow-y: scroll;
   overscroll-behavior: contain;
-  /* Keep the log position discoverable even when Chromium uses overlay scrollbars. */
-  scrollbar-color: rgba(190, 196, 207, 0.86) var(--bg-secondary);
-  scrollbar-gutter: stable;
-  scrollbar-width: auto;
+  /* Custom overlay scrollbar matches the app-wide tokens; hide the native bar. */
+  scrollbar-width: none;
 }
 
 :deep(.cm-editor) {
@@ -536,28 +544,8 @@ onUnmounted(() => {
 }
 
 :deep(.cm-scroller::-webkit-scrollbar) {
-  width: 12px;
-}
-
-:deep(.cm-scroller::-webkit-scrollbar-track) {
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-color);
-}
-
-:deep(.cm-scroller::-webkit-scrollbar-thumb) {
-  min-height: 32px;
-  background-color: rgba(190, 196, 207, 0.86);
-  border: 2px solid var(--bg-secondary);
-  border-radius: 6px;
-  background-clip: padding-box;
-}
-
-:deep(.cm-scroller::-webkit-scrollbar-thumb:hover) {
-  background-color: var(--accent-color);
-}
-
-:deep(.cm-scroller::-webkit-scrollbar-corner) {
-  background: var(--bg-secondary);
+  width: 0;
+  height: 0;
 }
 
 .flow-log-context-menu {

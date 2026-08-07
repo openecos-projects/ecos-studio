@@ -215,7 +215,10 @@
                     :class="flowStatusHintClass(workspace.flowStatusHint.state)"
                     :style="workspaceDepthStyle(workspace)"
                   >
-                    <div class="workspace-tree-row-shell">
+                    <div
+                      class="workspace-tree-row-shell"
+                      :data-workspace-id="workspace.id"
+                    >
                       <button
                         type="button"
                         class="workspace-tree-row"
@@ -753,12 +756,13 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
 import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
+import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
 import {
   readProjectWorkspaceAnalysisInputs,
   readProjectWorkspaceFlowStates,
@@ -807,6 +811,7 @@ type ProjectCard = { source: Project; model: ProjectManagementProject }
 const PROJECT_PREVIEW_LIMIT = 20
 const WORKSPACE_PREVIEW_LIMIT = 20
 
+const route = useRoute()
 const router = useRouter()
 const { openProject, showToast } = useWorkspace()
 
@@ -860,14 +865,23 @@ onMounted(async () => {
   document.addEventListener('keydown', handleWorkspacePopoverKeydown)
   projectHistory.value = await loadProjectHistory()
   await refreshProjectManifests()
-  if (!selectedProjectId.value)
+  const focused = await applyRouteProjectFocus()
+  if (!focused && !selectedProjectId.value) {
     selectedProjectId.value = projectCards.value[0]?.model.id ?? selectedProject.value.id
+  }
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleWorkspacePopoverPointerDown)
   document.removeEventListener('keydown', handleWorkspacePopoverKeydown)
 })
+
+watch(
+  () => [route.query.projectRoot, route.query.workspaceId] as const,
+  () => {
+    void applyRouteProjectFocus()
+  },
+)
 
 const projectSources = computed<Project[]>(() => projectHistory.value)
 
@@ -1142,6 +1156,43 @@ function selectWorkspace(workspaceId: string) {
   selectedIssueMetric.value = null
   branchDraft.value = null
   closeRowActionMenus()
+}
+
+async function applyRouteProjectFocus(): Promise<boolean> {
+  const focus = resolveProjectManagementRouteFocus({
+    projectRoot: queryString(route.query.projectRoot),
+    workspaceId: queryString(route.query.workspaceId),
+    projects: projectCards.value.map((project) => ({
+      id: project.model.id,
+      path: project.model.path,
+      workspaces: project.model.workspaces.map((workspace) => ({ id: workspace.id })),
+    })),
+  })
+  if (!focus) return false
+
+  selectProject(focus.projectId)
+  if (focus.workspaceId) {
+    selectWorkspace(focus.workspaceId)
+  }
+  await nextTick()
+  if (focus.workspaceId) {
+    document
+      .querySelector(`[data-workspace-id="${cssEscape(focus.workspaceId)}"]`)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+  return true
+}
+
+function queryString(value: unknown): string {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
+  return typeof value === 'string' ? value : ''
+}
+
+function cssEscape(value: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value)
+  }
+  return value.replace(/["\\]/g, '\\$&')
 }
 
 function selectStep(step: FlowStep) {

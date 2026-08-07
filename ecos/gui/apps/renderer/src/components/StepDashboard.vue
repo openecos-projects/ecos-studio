@@ -1525,64 +1525,6 @@ function fileName(path: string): string {
   position: relative;
 }
 
-.step-dashboard-card::before {
-  background:
-    linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      top left / 23px 2px no-repeat,
-    linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      top left / 2px 23px no-repeat,
-    linear-gradient(
-        270deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      top right / 23px 2px no-repeat,
-    linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      top right / 2px 23px no-repeat,
-    linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      bottom left / 23px 2px no-repeat,
-    linear-gradient(
-        0deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      bottom left / 2px 23px no-repeat,
-    linear-gradient(
-        270deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      bottom right / 23px 2px no-repeat,
-    linear-gradient(
-        0deg,
-        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
-        transparent 16px
-      )
-      bottom right / 2px 23px no-repeat;
-  content: '';
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--success-color) 48%, transparent));
-  inset: -1px;
-  pointer-events: none;
-  position: absolute;
-  z-index: 2;
-}
-
 .step-dashboard-header {
   align-items: center;
   border-bottom: 1px solid var(--border-color);
@@ -1734,14 +1676,16 @@ function fileName(path: string): string {
 }
 
 .basic-info-list {
+  align-content: start;
   display: grid;
   flex: 1;
   gap: 4px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(min-content, 1fr));
   margin: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 6px;
 }
 
@@ -1752,6 +1696,7 @@ function fileName(path: string): string {
   flex-direction: column;
   gap: 3px;
   justify-content: center;
+  min-height: min-content;
   min-width: 0;
   padding: 5px 7px;
 }
@@ -1798,14 +1743,16 @@ function fileName(path: string): string {
 }
 
 .config-preview-grid {
+  align-content: start;
   display: grid;
   flex: 1;
   gap: 4px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(min-content, 1fr));
   margin: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 6px;
 }
 
@@ -1814,13 +1761,14 @@ function fileName(path: string): string {
   border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
   display: flex;
   flex-direction: column;
+  gap: 3px;
   justify-content: center;
+  min-height: min-content;
   min-width: 0;
   padding: 5px 7px;
 }
 
 .config-preview-grid dd {
-  margin-top: 3px;
   text-align: left;
 }
 
@@ -1979,21 +1927,24 @@ function fileName(path: string): string {
   border-right: 1px solid var(--border-color);
 }
 .qor-step-list {
+  align-content: start;
   display: grid;
   gap: 4px 6px;
-  grid-auto-rows: minmax(0, 1fr);
+  grid-auto-rows: minmax(min-content, 1fr);
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(6, minmax(min-content, 1fr));
   min-width: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 5px 6px;
 }
 .qor-step-row {
   border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
   display: flex;
   flex-direction: column;
+  gap: 4px;
   justify-content: center;
-  min-height: 0;
+  min-height: min-content;
   min-width: 0;
   overflow: hidden;
   padding: 2px 4px;
@@ -2001,10 +1952,11 @@ function fileName(path: string): string {
 .qor-step-link {
   align-items: center;
   display: grid;
+  flex: 0 0 auto;
   gap: 4px;
   grid-template-columns: auto minmax(0, 1fr);
-  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 .qor-step-link strong {
   color: var(--text-primary);
@@ -2060,9 +2012,9 @@ function fileName(path: string): string {
 .qor-step-trend {
   align-items: center;
   display: grid;
+  flex: 0 0 auto;
   gap: 6px;
   grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
-  margin: 6px 0 0;
   min-width: 0;
 }
 .qor-step-trend-bar {
@@ -2211,12 +2163,15 @@ function fileName(path: string): string {
   margin: 0;
 }
 .synthesis-value-grid {
+  align-content: start;
   display: grid;
   flex: 1;
   gap: 4px;
-  grid-auto-rows: minmax(0, 1fr);
+  grid-auto-rows: minmax(min-content, 1fr);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 6px;
 }
 .synthesis-value-grid > div,
@@ -2232,6 +2187,7 @@ function fileName(path: string): string {
   flex-direction: column;
   gap: 3px;
   justify-content: center;
+  min-height: min-content;
   padding: 5px 7px;
 }
 .synthesis-value-grid dt,
@@ -2309,12 +2265,13 @@ function fileName(path: string): string {
   padding-top: 5px;
 }
 .floorplan-metrics-grid {
-  grid-auto-rows: minmax(0, 1fr);
+  grid-auto-rows: minmax(min-content, 1fr);
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .floorplan-metrics-grid > div {
   gap: 4px;
   justify-content: flex-start;
+  min-height: min-content;
   padding: 6px 7px;
 }
 .floorplan-metric-label {
@@ -2415,7 +2372,7 @@ function fileName(path: string): string {
   flex: 1;
   min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow: auto;
   padding: 5px 6px 6px;
 }
 .insight-table-wrap table {
@@ -2475,21 +2432,33 @@ function fileName(path: string): string {
 }
 .harden-output-table th:first-child,
 .harden-output-table td:first-child {
-  width: 52px;
+  width: 56px;
 }
 .harden-output-table {
-  padding: 0;
+  overflow: auto;
+  padding: 6px;
   width: 100%;
 }
 .harden-output-table table {
   width: 100%;
 }
+.harden-output-table th,
+.harden-output-table td {
+  font-size: 11px;
+  line-height: 1.35;
+  padding: 7px 8px;
+}
+.harden-output-table thead th {
+  font-size: 10px;
+}
 .harden-output-table th:last-child,
 .harden-output-table td:last-child {
-  width: 92px;
+  width: 104px;
 }
 .harden-output-table td:nth-child(2) {
-  line-height: 1.35;
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.4;
   overflow-wrap: anywhere;
   text-align: left;
   text-overflow: clip;
@@ -2498,9 +2467,13 @@ function fileName(path: string): string {
 .harden-output-state {
   align-items: center;
   display: inline-flex;
-  gap: 3px;
+  font-size: 11px;
+  gap: 4px;
   justify-content: flex-end;
   white-space: nowrap;
+}
+.harden-output-state > i {
+  font-size: 12px;
 }
 .harden-output-table tr.is-available .harden-output-state {
   color: var(--success-color);

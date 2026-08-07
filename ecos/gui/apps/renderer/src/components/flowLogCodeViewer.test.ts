@@ -715,18 +715,22 @@ describe('flowLogCodeViewer helpers', () => {
     expect(flowLogCodeViewerSource).toContain(
       "window.removeEventListener?.('pointermove', onFlowLogScrollbarPointerMove)",
     )
-    expect(flowLogCodeViewerSource).toContain('width: 20px')
-    expect(flowLogCodeViewerSource).toContain('background: rgba(166, 166, 176, 0.66)')
+    expect(flowLogCodeViewerSource).toContain('width: 8px')
+    expect(flowLogCodeViewerSource).toContain('background-color: var(--scrollbar-thumb)')
+    expect(flowLogCodeViewerSource).toContain(
+      'background-color: var(--scrollbar-thumb-hover)',
+    )
+    expect(flowLogCodeViewerSource).toContain(
+      '.flow-log-viewer-editor-wrap:hover .flow-log-vertical-scrollbar-thumb',
+    )
+    expect(flowLogCodeViewerSource).toContain(
+      '.flow-log-viewer-editor-wrap:has(.is-scrolling)',
+    )
+    expect(flowLogCodeViewerSource).toContain('border-radius: var(--scrollbar-radius)')
     expect(flowLogCodeViewerSource).toContain(':deep(.cm-scroller)')
     expect(flowLogCodeViewerSource).toContain('overflow-y: scroll')
-    expect(flowLogCodeViewerSource).toContain('scrollbar-gutter: stable')
-    expect(flowLogCodeViewerSource).toContain('scrollbar-width: auto')
+    expect(flowLogCodeViewerSource).toContain('scrollbar-width: none')
     expect(flowLogCodeViewerSource).toContain('overscroll-behavior: contain')
-    expect(flowLogCodeViewerSource).toContain('width: 12px')
-    expect(flowLogCodeViewerSource).toContain('background: var(--bg-secondary)')
-    expect(flowLogCodeViewerSource).toContain(
-      'background-color: rgba(190, 196, 207, 0.86)',
-    )
   })
 
   it('renders a blinking terminal cursor while live log content is visible', () => {

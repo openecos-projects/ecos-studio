@@ -11,7 +11,10 @@ import '@fontsource/noto-sans-sc/500.css'
 import '@fontsource/noto-sans-sc/600.css'
 import '@fontsource/noto-sans-sc/700.css'
 import './styles/index.css'
+import { installScrollbarReveal } from './styles/scrollbarReveal'
 import 'remixicon/fonts/remixicon.css'
+
+installScrollbarReveal()
 
 const app = createApp(App)
 const pinia = createPinia()

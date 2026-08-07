@@ -218,6 +218,11 @@ const emit = defineEmits<{
   (e: 'menu-action', action: AppMenuAction): void
 }>()
 
+const workspaceFocusId = computed(
+  () =>
+    queryString(route.query.workspaceId) || workspaceIdFromProjectName(props.projectName),
+)
+
 const themeStore = useThemeStore()
 const isDark = computed(() => themeStore.themeName === 'dark')
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
@@ -296,6 +301,11 @@ function queryString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+function workspaceIdFromProjectName(projectName?: string | null): string {
+  if (!projectName) return ''
+  return projectName.split(/[/\\]/).filter(Boolean).pop() ?? ''
+}
+
 /** 切换菜单展开/收起 */
 const toggleMenu = (action: string) => {
   quickMenuOpen.value = false
@@ -338,12 +348,12 @@ const toggleQuickMenu = async () => {
 
 const goToProjectManagement = () => {
   quickMenuOpen.value = false
-  const query = workspaceProjectRoot.value
-    ? {
-        projectRoot: workspaceProjectRoot.value,
-        projectName: workspaceProjectName.value || undefined,
-      }
-    : {}
+  const query: Record<string, string> = {}
+  if (workspaceProjectRoot.value) {
+    query.projectRoot = workspaceProjectRoot.value
+    if (workspaceProjectName.value) query.projectName = workspaceProjectName.value
+  }
+  if (workspaceFocusId.value) query.workspaceId = workspaceFocusId.value
   router.push({
     path: '/projects',
     query,
