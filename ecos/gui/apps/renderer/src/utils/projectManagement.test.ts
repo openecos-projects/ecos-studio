@@ -372,9 +372,20 @@ describe('project management V3 model', () => {
 
   it('builds an empty model without manufacturing metric rows', () => {
     const model = buildProjectManagementProject(project, null)
+    expect(model.projectType).toBe('backend')
     expect(model.workspaces).toEqual([])
     expect(model.metricsRows).toEqual([])
     expect(createSelectionState(model).selectedWorkspaceId).toBe('')
+  })
+
+  it('preserves the manifest project type in the project management model', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/frontend',
+      name: 'frontend',
+      projectType: 'frontend',
+    })
+
+    expect(buildProjectManagementProject(project, manifest).projectType).toBe('frontend')
   })
 
   it('derives dashboard keys and step-specific Step Analysis metrics from schema v3 ids', () => {

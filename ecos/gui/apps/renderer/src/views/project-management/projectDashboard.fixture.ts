@@ -231,5 +231,6 @@ export function projectFixture(
       metricDiffs: [],
     },
     ...overrides,
+    projectType: overrides.projectType ?? 'backend',
   }
 }

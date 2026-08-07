@@ -28,6 +28,7 @@ function project(input: Partial<Project> & Pick<Project, 'name' | 'path'>): Proj
     path: input.path,
     lastOpened: input.lastOpened ?? new Date('2026-07-02T08:00:00.000Z'),
     status: input.status ?? 'not_started',
+    projectType: input.projectType ?? 'backend',
     pdk: input.pdk,
     topModule: input.topModule,
   }
@@ -57,6 +58,7 @@ describe('project history', () => {
         lastOpened: '2026-07-02T08:00:00.000Z',
         pdk: 'ics55',
         topModule: 'gcd',
+        projectType: 'frontend',
       },
     ])
 
@@ -72,6 +74,7 @@ describe('project history', () => {
         lastOpened: new Date('2026-07-02T08:00:00.000Z'),
         pdk: 'ics55',
         topModule: 'gcd',
+        projectType: 'frontend',
       }),
     ])
   })
@@ -90,6 +93,7 @@ describe('project history', () => {
         path: '/projects/gcd',
         lastOpened: new Date('2026-07-02T09:00:00.000Z'),
         pdk: 'ics55',
+        projectType: 'backend',
       }),
     )
 
@@ -100,10 +104,26 @@ describe('project history', () => {
         path: '/projects/gcd',
         lastOpened: '2026-07-02T09:00:00.000Z',
         pdk: 'ics55',
+        projectType: 'backend',
       }),
     ])
     expect(settings.has('recent_projects')).toBe(false)
     expect(await loadProjectHistory()).toHaveLength(1)
+  })
+
+  it('defaults legacy history entries without a project type to backend', async () => {
+    settings.set('project_history', [
+      {
+        id: '/projects/legacy',
+        name: 'legacy',
+        path: '/projects/legacy',
+        lastOpened: '2026-07-02T08:00:00.000Z',
+      },
+    ])
+
+    await expect(loadProjectHistory()).resolves.toEqual([
+      expect.objectContaining({ projectType: 'backend' }),
+    ])
   })
 
   it('removes a project root from project_history only', async () => {

@@ -942,6 +942,7 @@ function projectCardMatchesSearch(project: ProjectCard, query: string): boolean 
     project.source.pdk,
     project.model.name,
     project.model.path,
+    project.model.projectType,
   ]
   return (
     projectFields.some((value) => textMatchesSearch(value, query)) ||
@@ -1968,6 +1969,7 @@ function projectFromManifest(manifest: ProjectManifest, fallbackRoot: string): P
     name: manifest.name || basenamePath(path) || 'project',
     path,
     lastOpened: new Date(),
+    projectType: manifest.project_type,
     pdk: manifest.base_design.pdk,
     topModule: manifest.base_design.top_module,
     status: projectStatusFromManifest(manifest),
