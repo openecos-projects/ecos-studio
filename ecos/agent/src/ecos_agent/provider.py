@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from ecos_agent.codex_provider import CodexProviderError, validate_required_codex_cli
-from ecos_agent.contracts import GuiWorkspaceSetupProposal
+from ecos_agent.contracts import GuiOperationChoiceProposal, GuiWorkspaceSetupProposal
 from ecos_agent.step_knowledge import StepKnowledge, load_default_step_knowledge
 from ecos_agent.messages import (
     cancellation_message,
@@ -20,6 +20,8 @@ from ecos_agent.messages import (
     default_value_prompt,
     flow_end_choice,
     flow_end_prompt,
+    home_ready_choice,
+    home_ready_prompt,
     invalid_choice,
     invalid_value,
     keep_parameters_choice,
@@ -37,6 +39,7 @@ from ecos_agent.messages import (
     project_mode_prompt,
     project_root_prompt,
     recommended_path_choice,
+    unmatched_operation_prompt,
     rerun_no_parameters_prompt,
     rerun_parameter_prompt,
     rerun_scope_prompt,
@@ -76,6 +79,7 @@ from ecos_agent.workspace_setup import (
     workspace_search_roots,
     workspace_setup_contract,
 )
+from ecos_agent.knob_registry import resolve_write
 from ecos_agent.workspace_rerun import (
     BOOLEAN_RERUN_KNOBS,
     GuiWorkspaceRerunContract,
@@ -85,16 +89,22 @@ from ecos_agent.workspace_rerun import (
     catalog_end_step,
 )
 from ecos_agent.provider_support import (
+    CreateBootstrap,
+    _allowed_operation_options,
     _confirm_workspace_execution,
+    _deterministic_operation_choice,
+    _extract_create_bootstrap,
     _flow_steps,
     _gui_workspace_codex_provider,
     _gui_workspace_request_context,
     _handle_workspace_rerun_result,
+    _keyword_operation_choice,
     _number_default,
     _operation_choice,
     _optional_text,
     _path_was_explicitly_provided,
     _prompt_for_phase,
+    _propose_gui_operation_choice,
     _propose_gui_workspace_path_discovery,
     _propose_gui_workspace_rerun_patch,
     _propose_gui_workspace_setup,
@@ -115,6 +125,7 @@ PROVIDER_ID = "ecos_agent"
 _WorkspaceSetupParser = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _WorkspacePathRecommender = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]]
+_OperationChoiceParser = Callable[[dict[str, Any]], GuiOperationChoiceProposal | dict[str, Any]]
 
 
 def _project_root_for_workspace(workspace: str) -> str | None:
@@ -177,7 +188,7 @@ _NUMERIC_FIELDS = {
 @dataclass
 class _Session:
     session_id: str
-    phase: str = "operation"
+    phase: str = "home_ready"
     mode: str = "home"
     language: str = "en"
     language_locked: bool = False
@@ -217,12 +228,14 @@ class EcosAgentProvider:
         workspace_path_recommender: _WorkspacePathRecommender | None = None,
         rerun_parameter_parser: _RerunParameterParser | None = None,
         knowledge: tuple[StepKnowledge, ...] | None = None,
+        operation_choice_parser: _OperationChoiceParser | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.knowledge = knowledge or load_default_step_knowledge()
+        self.operation_choice_parser = operation_choice_parser or _propose_gui_operation_choice
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
 
@@ -248,6 +261,7 @@ class EcosAgentProvider:
         if directory:
             session.inherited_design_name = _design_id_for_workspace(directory)
         # Directory alone is only a rerun default; GUI must pass mode explicitly.
+        session.phase = "operation" if session.mode == "workspace" else "home_ready"
         self._emit_status(session, "idle")
         self._emit(
             session,
@@ -258,6 +272,8 @@ class EcosAgentProvider:
                 project=session.project_root or "",
             ),
         )
+        if session.mode == "home":
+            self._emit(session, "message", home_ready_prompt(session.language))
         self._emit_phase_choice(session)
         return {"sessionId": session_id}
 
@@ -345,6 +361,7 @@ class EcosAgentProvider:
                 self._emit_phase_choice(session)
                 return
         handlers = {
+            "home_ready": self._select_home_ready,
             "operation": self._select_operation,
             "rerun_design": self._select_rerun_design,
             "rerun_source_run": self._select_rerun_source_run,
@@ -391,11 +408,25 @@ class EcosAgentProvider:
                 return answer
         return None
 
+    def _select_home_ready(self, session: _Session, message: str) -> None:
+        if message.strip() == "1":
+            self._begin_home_workspace_create(session, "")
+            return
+        choice = self._resolve_operation_choice(session, message)
+        if choice == "1":
+            self._begin_home_workspace_create(session, message)
+            return
+        self._emit(session, "message", unmatched_operation_prompt(session.language))
+        self._emit(session, "message", home_ready_prompt(session.language))
+        self._emit_phase_choice(session)
+
     def _select_operation(self, session: _Session, message: str) -> None:
-        choice = _operation_choice(message)
+        choice = self._resolve_operation_choice(session, message)
         if session.mode == "workspace":
             if choice == "1":
                 self._begin_workspace_parameter_update(session)
+                if message.strip() != "1":
+                    self._select_workspace_parameter_request(session, message)
                 return
             if choice == "2":
                 self._begin_workspace_scoped_rerun(session)
@@ -415,16 +446,170 @@ class EcosAgentProvider:
                     return
                 self._begin_create_workspace_in_project(session)
                 return
-        else:
-            if choice == "1":
-                self._reset_workspace_setup(session)
-                session.creating_project = False
+        elif choice == "1":
+            self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
+            return
+        self._emit(session, "message", unmatched_operation_prompt(session.language))
+        self._emit(session, "message", operation_prompt(session.language))
+        self._emit_phase_choice(session)
+
+    def _resolve_operation_choice(self, session: _Session, message: str) -> str | None:
+        resolve_mode = "home" if session.phase == "home_ready" else session.mode
+        allowed_options = _allowed_operation_options(
+            session.language,
+            mode=resolve_mode,
+            allow_create_workspace_in_project=bool(session.project_root),
+        )
+        allowed_ids = {option["id"] for option in allowed_options}
+        deterministic = _deterministic_operation_choice(message)
+        if deterministic in allowed_ids:
+            return deterministic
+        keyword = _keyword_operation_choice(
+            message, mode=resolve_mode, allowed_ids=allowed_ids
+        )
+        if keyword is not None:
+            return keyword
+        try:
+            proposal = GuiOperationChoiceProposal.model_validate(
+                self.operation_choice_parser(
+                    {
+                        "schema_version": "flow-agent.gui_operation_choice_context.v1",
+                        "natural_language_request": message,
+                        "mode": resolve_mode,
+                        "allowed_operations": allowed_options,
+                        "workspace": session.rerun_workspace_path or "",
+                        "project_root": session.project_root or "",
+                        "_progress_callback": lambda text: self._progress(session, text),
+                        "_register_interrupt": lambda callback: self._register_interrupt(
+                            session, callback
+                        ),
+                    }
+                )
+            )
+            self._check_interrupted(session)
+        except (CodexProviderError, ValueError) as exc:
+            self._check_interrupted(session)
+            self._raise_if_interrupted(exc)
+            self._emit(session, "error", f"Unable to interpret the request: {exc}")
+            return None
+        if proposal.operation is None:
+            return None
+        if proposal.operation not in allowed_ids:
+            self._emit(
+                session,
+                "error",
+                "The interpreted operation is not available in the current session.",
+            )
+            return None
+        return proposal.operation
+
+    def _begin_home_workspace_create(self, session: _Session, message: str) -> None:
+        self._reset_workspace_setup(session)
+        session.creating_project = False
+        bootstrap = _extract_create_bootstrap(message) if message.strip() else CreateBootstrap()
+        mode_explicit = bootstrap.creating_project is not None
+        if bootstrap.creating_project is True:
+            session.creating_project = True
+        elif bootstrap.creating_project is False:
+            session.creating_project = False
+        if bootstrap.project_root:
+            try:
+                root = normalize_path(
+                    bootstrap.project_root, label="Project Root", require_directory=True
+                )
+                if not session.creating_project and not (Path(root) / "project.json").is_file():
+                    raise ValueError("Existing Project Root must contain project.json")
+                session.workspace_inputs.project_root = root
+                session.workspace_inputs.project_name = derive_project_name(root)
+                session.project_root = root
+                pdk_paths = discover_ecos_pdk_paths(root)
+                session.path_recommendations = {"pdk": pdk_paths[0]} if pdk_paths else {}
+            except ValueError:
+                session.workspace_inputs.project_root = ""
+                session.workspace_inputs.project_name = ""
+        if bootstrap.workspace_name:
+            try:
+                self._update_workspace_setup(
+                    session,
+                    workspace_name=normalize_identifier(
+                        bootstrap.workspace_name, label="Workspace Name"
+                    ),
+                )
+            except ValueError:
+                pass
+        if bootstrap.design_name:
+            try:
+                self._update_workspace_setup(
+                    session,
+                    design_name=normalize_identifier(bootstrap.design_name, label="Design Name"),
+                )
+            except ValueError:
+                pass
+        flow_end_explicit = False
+        if bootstrap.flow_end:
+            self._update_workspace_setup(
+                session, flow_start="Synthesis", flow_end=bootstrap.flow_end
+            )
+            flow_end_explicit = True
+        self._enter_create_flow_phase(
+            session,
+            mode_explicit=mode_explicit,
+            flow_end_explicit=flow_end_explicit,
+        )
+
+    def _enter_create_flow_phase(
+        self,
+        session: _Session,
+        *,
+        mode_explicit: bool = False,
+        flow_end_explicit: bool = False,
+    ) -> None:
+        if not session.workspace_inputs.project_root:
+            if mode_explicit:
+                session.phase = "workspace_project_root"
+                self._emit(
+                    session,
+                    "message",
+                    project_root_prompt(session.language, creating=session.creating_project),
+                )
+            else:
                 session.phase = "workspace_project_mode"
                 self._emit(session, "message", project_mode_prompt(session.language))
-                self._emit_phase_choice(session)
-                return
-        self._emit(session, "message", invalid_choice(session.language))
-        self._emit(session, "message", operation_prompt(session.language))
+            self._emit_phase_choice(session)
+            return
+        if not session.workspace_setup.workspace_name:
+            session.phase = "workspace_name"
+            recommendation = recommended_workspace_name(session.workspace_inputs.project_root)
+            self._emit(
+                session,
+                "message",
+                workspace_name_prompt(session.language, recommendation),
+            )
+            self._emit_phase_choice(session)
+            return
+        if not session.workspace_setup.design_name:
+            session.phase = "workspace_design"
+            recommendation = (
+                session.inherited_design_name or session.workspace_inputs.project_name or ""
+            )
+            self._emit(
+                session,
+                "message",
+                design_name_prompt(session.language, recommendation),
+            )
+            self._emit_phase_choice(session)
+            return
+        if not flow_end_explicit:
+            session.phase = "workspace_flow_end"
+            self._emit(session, "message", flow_end_prompt(session.language))
+            self._emit_phase_choice(session)
+            return
+        session.phase = "workspace_rtl"
+        self._emit(
+            session,
+            "message",
+            rtl_prompt(session.language, _recommended_path(session, "rtl")),
+        )
         self._emit_phase_choice(session)
 
     def _begin_create_workspace_in_project(self, session: _Session) -> None:
@@ -450,6 +635,18 @@ class EcosAgentProvider:
 
     def _select_project_mode(self, session: _Session, message: str) -> None:
         choice = _operation_choice(message)
+        if choice is None:
+            text = message.casefold()
+            if any(
+                key in text
+                for key in ("已有 project", "existing project", "使用已有", "已有项目")
+            ):
+                choice = "1"
+            elif any(
+                key in text
+                for key in ("新建 project", "create project", "new project", "创建项目", "新建项目")
+            ):
+                choice = "2"
         if choice == "1":
             session.creating_project = False
             session.phase = "workspace_project_root"
@@ -462,7 +659,7 @@ class EcosAgentProvider:
             self._emit(session, "message", project_root_prompt(session.language, creating=True))
             self._emit_phase_choice(session)
             return
-        self._emit(session, "message", invalid_choice(session.language))
+        self._emit(session, "message", unmatched_operation_prompt(session.language))
         self._emit(session, "message", project_mode_prompt(session.language))
         self._emit_phase_choice(session)
 
@@ -586,29 +783,19 @@ class EcosAgentProvider:
             return
         try:
             source = Path(normalize_path(workspace, label="Workspace", require_directory=True))
-            resolver = GuiWorkspaceRerunResolver(source.parent)
-            discovery = resolver.discover_workspace(source, design)
-            if not discovery.allowed_stages:
-                raise ValueError("No completed stages are available to authorize parameter knobs")
-            parameter_values = _tunable_workspace_parameters(resolver, discovery)
+            parameter_values = _tunable_workspace_parameters(source)
             if not parameter_values:
                 raise ValueError("No tunable parameters are available in this workspace yet")
             allowed_knobs = [knob_id for knob_id, _ in parameter_values]
             current_values = {knob_id: value for knob_id, value in parameter_values}
-            target_step = (
-                "place"
-                if "place" in discovery.allowed_stages
-                else discovery.allowed_stages[0]
-            )
             proposal = GuiWorkspaceRerunParameterProposal.model_validate(
                 self.rerun_parameter_parser(
                     {
                         "schema_version": "flow-agent.gui_workspace_rerun_parameter_context.v1",
                         "natural_language_request": message,
-                        "target_step": target_step,
                         "allowed_knobs": allowed_knobs,
                         "boolean_knobs": sorted(set(allowed_knobs) & BOOLEAN_RERUN_KNOBS),
-                        "workspace": str(discovery.source.workspace_path),
+                        "workspace": str(source),
                         "_progress_callback": lambda text: self._progress(session, text),
                         "_register_interrupt": lambda callback: self._register_interrupt(
                             session, callback
@@ -618,7 +805,8 @@ class EcosAgentProvider:
             )
             self._check_interrupted(session)
             patch = [item.model_dump(mode="json") for item in proposal.parameter_patch]
-            _validate_workspace_parameter_patch(resolver, discovery, patch)
+            _validate_workspace_parameter_patch(patch, current_values)
+            writes = [resolve_write(item) for item in proposal.parameter_patch]
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
             self._raise_if_interrupted(exc)
@@ -631,10 +819,11 @@ class EcosAgentProvider:
             return
         update_id = uuid.uuid4().hex
         session.workspace_parameter_update = {
-            "schema_version": "flow-agent.workspace_parameter_update_contract.v1",
+            "schema_version": "flow-agent.workspace_parameter_update_contract.v2",
             "update_id": update_id,
             "workspace": workspace,
             "parameter_patch": patch,
+            "writes": writes,
         }
         session.phase = "workspace_parameter_confirmation"
         fields = [
@@ -734,7 +923,10 @@ class EcosAgentProvider:
             if session.workspace_inputs.project_root
             else ""
         )
+        bootstrap = _extract_create_bootstrap(message)
         answer = resolve_emptyable_answer(message) or recommendation
+        if bootstrap.workspace_name:
+            answer = bootstrap.workspace_name
         try:
             workspace_name = normalize_identifier(answer, label="Workspace Name")
         except ValueError as exc:
@@ -746,6 +938,25 @@ class EcosAgentProvider:
             )
             return
         self._update_workspace_setup(session, workspace_name=workspace_name)
+        flow_end_explicit = False
+        if bootstrap.design_name:
+            try:
+                self._update_workspace_setup(
+                    session,
+                    design_name=normalize_identifier(bootstrap.design_name, label="Design Name"),
+                )
+            except ValueError:
+                pass
+        if bootstrap.flow_end:
+            self._update_workspace_setup(
+                session, flow_start="Synthesis", flow_end=bootstrap.flow_end
+            )
+            flow_end_explicit = True
+        if session.workspace_setup.design_name:
+            self._enter_create_flow_phase(
+                session, mode_explicit=True, flow_end_explicit=flow_end_explicit
+            )
+            return
         design_recommendation = (
             session.inherited_design_name or session.workspace_inputs.project_name or ""
         )
@@ -1483,7 +1694,9 @@ class EcosAgentProvider:
     def _emit_phase_choice(self, session: _Session) -> None:
         prompt_id = uuid.uuid4().hex
         choice = None
-        if session.phase == "operation":
+        if session.phase == "home_ready":
+            choice = home_ready_choice(session.language, prompt_id)
+        elif session.phase == "operation":
             choice = operation_choice(
                 session.language,
                 prompt_id,
@@ -1686,6 +1899,7 @@ class EcosAgentProvider:
             "awaiting_choice"
             if session.phase
             in {
+                "home_ready",
                 "operation",
                 "workspace_project_mode",
                 "rerun_source_run",
@@ -1721,7 +1935,7 @@ class EcosAgentProvider:
         project_root = session.project_root
         known_projects = session.known_projects
         inherited_design_name = session.inherited_design_name
-        session.phase = "operation"
+        session.phase = "home_ready" if mode == "home" else "operation"
         session.language = language
         session.language_locked = language_locked
         session.mode = mode

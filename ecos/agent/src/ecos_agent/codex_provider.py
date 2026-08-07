@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from ecos_agent.codex_rpc import CodexProviderError, _JsonLineRpcProcessClient, _read_nested_string
-from ecos_agent.contracts import GUI_WORKSPACE_FLOW_STEPS, GuiWorkspaceSetupProposal
+from ecos_agent.contracts import (
+    GUI_WORKSPACE_FLOW_STEPS,
+    GuiOperationChoiceProposal,
+    GuiWorkspaceSetupProposal,
+)
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal
 
@@ -27,12 +31,17 @@ class CodexAppServerProposalProvider:
         timeout_seconds: int | None = None,
         runtime_workspace_roots: Iterable[str | Path] | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        web_search_enabled: bool | None = None,
     ) -> None:
         self.cwd = Path(cwd or Path.cwd())
         self.env = dict(env or os.environ)
         self.timeout_seconds = timeout_seconds or _timeout_from_env(self.env)
         self.codex_bin = _resolve_codex_bin(codex_bin or self.env.get("ECOS_AGENT_CODEX_BIN"), self.env)
         self.runtime_workspace_roots = _runtime_workspace_roots(runtime_workspace_roots or (self.cwd,))
+        self.web_search_enabled = (
+            _web_search_from_env(self.env) if web_search_enabled is None else web_search_enabled
+        )
+        self.diagnostics_path = _diagnostics_path_from_env(self.env)
         self.progress_callback = progress_callback
         self._client: _JsonLineRpcProcessClient | None = None
         self._thread_id: str | None = None
@@ -65,7 +74,9 @@ class CodexAppServerProposalProvider:
                 "Interpret only a correction to the supplied GUI workspace specification. "
                 "When numeric_field is supplied, interpret only that field and return null for every other "
                 "optional field. "
-                "Use read-only search and file reading only inside filesystem_roots. "
+                "Use read-only search and file reading only inside filesystem_roots, except path fields may "
+                "use absolute paths that the user explicitly provided in natural_language_choice or "
+                "explicit_paths (PDK roots are commonly outside the Project). "
                 "Never modify files, return shell commands, select an ECC command, or grant execution authority."
             ),
             _gui_workspace_setup_output_schema(),
@@ -108,12 +119,60 @@ class CodexAppServerProposalProvider:
             GuiWorkspaceRerunParameterProposal,
         )
 
+    def propose_gui_operation_choice(self, context: dict[str, Any]) -> dict[str, Any]:
+        allowed_operations = context.get("allowed_operations")
+        if not isinstance(allowed_operations, list) or not allowed_operations:
+            raise CodexProviderError(
+                "GUI operation request has no allowed operations",
+                failure_class="missing_input",
+            )
+        allowed_ids: list[str] = []
+        for item in allowed_operations:
+            if not isinstance(item, Mapping):
+                raise CodexProviderError(
+                    "GUI operation request has invalid allowed operations",
+                    failure_class="missing_input",
+                )
+            operation_id = item.get("id")
+            label = item.get("label")
+            if not isinstance(operation_id, str) or operation_id not in {"1", "2", "3", "4"}:
+                raise CodexProviderError(
+                    "GUI operation request has invalid operation id",
+                    failure_class="missing_input",
+                )
+            if not isinstance(label, str) or not label.strip():
+                raise CodexProviderError(
+                    "GUI operation request has invalid operation label",
+                    failure_class="missing_input",
+                )
+            allowed_ids.append(operation_id)
+        if len(set(allowed_ids)) != len(allowed_ids):
+            raise CodexProviderError(
+                "GUI operation request has duplicate operation ids",
+                failure_class="missing_input",
+            )
+        return self._proposal(
+            context,
+            (
+                "Return one JSON object matching flow-agent.gui_operation_choice_proposal.v2. "
+                "Map natural_language_request onto exactly one allowed operation id from "
+                "allowed_operations only when the request clearly intends that operation. "
+                "Greetings, chit-chat, vague, or unrelated requests must set operation to null. "
+                "Do not prefer a closest match and do not invent ids outside that list. "
+                "Never modify files, return shell commands, or grant execution authority."
+            ),
+            _gui_operation_choice_output_schema(allowed_ids),
+            GuiOperationChoiceProposal,
+        )
+
     def _proposal(
         self,
         context: dict[str, Any],
         system: str,
         output_schema: dict[str, Any],
-        model: type[GuiWorkspaceSetupProposal] | type[GuiWorkspaceRerunParameterProposal],
+        model: type[GuiWorkspaceSetupProposal]
+        | type[GuiWorkspaceRerunParameterProposal]
+        | type[GuiOperationChoiceProposal],
     ) -> dict[str, Any]:
         try:
             return model.model_validate(
@@ -153,7 +212,16 @@ class CodexAppServerProposalProvider:
                 "responsesapiClientMetadata": None,
                 "environments": [],
                 "cwd": str(self.cwd),
+                # Defence in depth only. Codex's Linux sandbox needs bubblewrap
+                # user namespaces, which many hosts deny, and the app-server
+                # accepts unknown fields silently -- so none of these can be
+                # relied on. The enforced boundary is that Codex only ever
+                # returns typed proposals which ECOS validates and executes.
                 "runtimeWorkspaceRoots": list(self.runtime_workspace_roots),
+                # Must stay "never": this client has no approval handler, so any
+                # policy that can raise an approval request would hang the turn
+                # until it times out. The user approves the resulting contract
+                # in the ECOS UI instead.
                 "approvalPolicy": "never",
                 "approvalsReviewer": None,
                 "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
@@ -193,10 +261,19 @@ class CodexAppServerProposalProvider:
         if self._client is None:
             self._client = _JsonLineRpcProcessClient(
                 command=self.codex_bin,
-                args=["app-server", "-c", "mcp_servers={}", "--listen", "stdio://"],
+                args=[
+                    "app-server",
+                    "-c",
+                    "mcp_servers={}",
+                    "-c",
+                    f"tools.web_search={'true' if self.web_search_enabled else 'false'}",
+                    "--listen",
+                    "stdio://",
+                ],
                 cwd=self.cwd,
                 env=self.env,
                 timeout_seconds=self.timeout_seconds,
+                diagnostics_path=self.diagnostics_path,
             )
             self._client.start()
             self._client.request(
@@ -232,9 +309,7 @@ class CodexAppServerProposalProvider:
                     "threadSource": None,
                     "environments": [],
                     "dynamicTools": None,
-                    "mockExperimentalField": None,
                     "experimentalRawEvents": False,
-                    "persistExtendedHistory": False,
                 },
             )
             self._thread_id = _read_nested_string(response, (("thread", "id"), ("threadId",), ("id",)))
@@ -252,11 +327,13 @@ def create_required_codex_provider(
     cwd: Path | None = None,
     runtime_workspace_roots: Iterable[str | Path] | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    web_search_enabled: bool | None = None,
 ) -> CodexAppServerProposalProvider:
     return CodexAppServerProposalProvider(
         cwd=cwd,
         runtime_workspace_roots=runtime_workspace_roots,
         progress_callback=progress_callback,
+        web_search_enabled=web_search_enabled,
     )
 
 
@@ -288,6 +365,25 @@ def _timeout_from_env(env: Mapping[str, str]) -> int:
     if timeout <= 0:
         raise CodexProviderError("ECOS_AGENT_CODEX_TIMEOUT_SECONDS must be positive", failure_class="missing_input")
     return timeout
+
+
+def _web_search_from_env(env: Mapping[str, str]) -> bool:
+    """Codex's hosted web search, off unless the deployment opts in.
+
+    Fabs run ECOS on air-gapped or egress-filtered networks, and a PDK-bound
+    session should not reach the public web without someone deciding it should.
+    """
+    return env.get("ECOS_AGENT_CODEX_WEB_SEARCH", "").strip().casefold() in {"1", "true", "on"}
+
+
+def _diagnostics_path_from_env(env: Mapping[str, str]) -> Path | None:
+    """Opt-in JSONL transcript of every Codex RPC exchange.
+
+    Off by default because the transcript contains design names and workspace
+    paths, which a fab may not want written to disk unprompted.
+    """
+    configured = env.get("ECOS_AGENT_CODEX_DIAGNOSTICS_PATH", "").strip()
+    return Path(configured).expanduser() if configured else None
 
 
 def _runtime_workspace_roots(roots: Iterable[str | Path]) -> tuple[str, ...]:
@@ -366,6 +462,22 @@ def _gui_workspace_rerun_patch_output_schema(allowed_knobs: list[str]) -> dict[s
                     },
                 },
             },
+            "summary": {"type": "string", "minLength": 1, "maxLength": 512},
+        },
+    }
+
+
+def _gui_operation_choice_output_schema(allowed_ids: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "operation", "summary"],
+        "properties": {
+            "schema_version": {
+                "type": "string",
+                "const": "flow-agent.gui_operation_choice_proposal.v2",
+            },
+            "operation": {"type": ["string", "null"], "enum": [*allowed_ids, None]},
             "summary": {"type": "string", "minLength": 1, "maxLength": 512},
         },
     }

@@ -1,0 +1,108 @@
+import pytest
+
+from ecos_agent.codex_provider import CodexAppServerProposalProvider
+from ecos_agent.codex_rpc import _JsonLineRpcProcessClient
+
+
+def _provider(tmp_path, **env_overrides) -> CodexAppServerProposalProvider:
+    codex_bin = tmp_path / "codex"
+    codex_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    codex_bin.chmod(0o755)
+    return CodexAppServerProposalProvider(
+        codex_bin=str(codex_bin),
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin", **env_overrides},
+    )
+
+
+def test_web_search_is_off_unless_the_deployment_opts_in(tmp_path) -> None:
+    assert _provider(tmp_path).web_search_enabled is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "on"])
+def test_web_search_opt_in_values(tmp_path, value: str) -> None:
+    provider = _provider(tmp_path, ECOS_AGENT_CODEX_WEB_SEARCH=value)
+    assert provider.web_search_enabled is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "", "  "])
+def test_web_search_stays_off_for_other_values(tmp_path, value: str) -> None:
+    provider = _provider(tmp_path, ECOS_AGENT_CODEX_WEB_SEARCH=value)
+    assert provider.web_search_enabled is False
+
+
+@pytest.mark.parametrize(
+    ("enabled", "expected"),
+    [(True, "tools.web_search=true"), (False, "tools.web_search=false")],
+)
+def test_app_server_is_launched_with_an_explicit_web_search_setting(
+    tmp_path, monkeypatch, enabled: bool, expected: str
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_init(self, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(_JsonLineRpcProcessClient, "__init__", fake_init)
+    monkeypatch.setattr(_JsonLineRpcProcessClient, "start", lambda self: None)
+    monkeypatch.setattr(_JsonLineRpcProcessClient, "request", lambda self, *a, **k: {})
+
+    provider = _provider(tmp_path)
+    provider.web_search_enabled = enabled
+    provider._ensure_client()
+
+    assert expected in captured["args"]
+
+
+def test_rpc_diagnostics_are_opt_in(tmp_path) -> None:
+    assert _provider(tmp_path).diagnostics_path is None
+    transcript = tmp_path / "audit" / "codex.jsonl"
+    provider = _provider(tmp_path, ECOS_AGENT_CODEX_DIAGNOSTICS_PATH=str(transcript))
+    assert provider.diagnostics_path == transcript
+
+
+def test_approval_policy_stays_never_because_no_handler_exists(tmp_path) -> None:
+    # A policy that can raise an approval request would hang every turn: this
+    # client answers no approval requests.
+    source = (
+        __import__("pathlib")
+        .Path(__file__)
+        .parent.parent.joinpath("src/ecos_agent/codex_provider.py")
+        .read_text(encoding="utf-8")
+    )
+    assert '"approvalPolicy": "granular"' not in source
+    assert source.count('"approvalPolicy": "never"') == 2
+
+
+def test_web_search_activity_is_reported_to_the_user() -> None:
+    started = _JsonLineRpcProcessClient._readonly_activity(
+        "item/started", {"item": {"type": "web_search", "query": "dreamplace target density"}}
+    )
+    assert started == "Codex is searching the web for “dreamplace target density”."
+    assert (
+        _JsonLineRpcProcessClient._readonly_activity(
+            "item/started", {"item": {"type": "webSearch"}}
+        )
+        == "Codex is searching the web."
+    )
+    assert (
+        _JsonLineRpcProcessClient._readonly_activity(
+            "item/completed", {"item": {"type": "web_search"}}
+        )
+        == "Codex finished a web search."
+    )
+
+
+def test_command_activity_reporting_is_unchanged() -> None:
+    assert (
+        _JsonLineRpcProcessClient._readonly_activity(
+            "item/started", {"item": {"type": "command_execution", "command": "rg foo"}}
+        )
+        == "Codex is searching the authorized workspace roots."
+    )
+    assert (
+        _JsonLineRpcProcessClient._readonly_activity(
+            "item/started", {"item": {"type": "reasoning"}}
+        )
+        is None
+    )

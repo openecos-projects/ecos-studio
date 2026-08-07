@@ -140,6 +140,30 @@ class GuiWorkspaceSetupProposal(BaseModel):
         return self
 
 
+class GuiOperationChoiceProposal(BaseModel):
+    """Untrusted Codex mapping from free text onto one allowed GUI operation id.
+
+    ``operation`` is null when the request does not clearly match any allowed
+    operation — callers must fail closed and stay on the current choice.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flow-agent.gui_operation_choice_proposal.v2"] = (
+        "flow-agent.gui_operation_choice_proposal.v2"
+    )
+    operation: Literal["1", "2", "3", "4"] | None = None
+    summary: str
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 512:
+            raise ValueError("operation choice summary is invalid")
+        return value
+
+
 def recommended_gui_workspace_setup() -> GuiWorkspaceSetupProposal:
     return GuiWorkspaceSetupProposal(
         schema_version="flow-agent.gui_workspace_setup_proposal.v1",

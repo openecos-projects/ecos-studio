@@ -140,7 +140,7 @@
           v-model="inputValue"
           :disabled="composerLocked"
           :placeholder="composerPlaceholder"
-          aria-label="Message ECOS Agent"
+          aria-label="Message"
           class="composer-input"
           @keydown="handleKeyDown"
         ></textarea>
@@ -192,6 +192,7 @@ import type {
   DesktopAgentChoice,
   DesktopAgentChoiceOption,
   DesktopAgentEvent,
+  DesktopAgentWorkspaceParameterWrite,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
@@ -223,6 +224,9 @@ import {
   requestHomeRunArtifactReset,
 } from '@/composables/homeRunArtifacts'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
+import { refreshConfigApi, syncConfigApi } from '@/api/flow'
+import { CMDEnum, ResponseEnum } from '@/api/type'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import {
   registerProjectManagedWorkspace,
@@ -249,6 +253,7 @@ const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 const router = useRouter()
 const route = useRoute()
 const { openProject, invalidateWorkspaceResources, currentProject } = useWorkspace()
+const workspaceLifecycle = useWorkspaceLifecycle()
 const { runAllFlow } = useFlowRunner()
 const agentFlowProgress = useAgentFlowProgress(
   (message) => {
@@ -494,11 +499,7 @@ const activeChoice = computed(
     pendingMessageChoice.value,
 )
 const composerLocked = computed(
-  () =>
-    isInterruptPending.value ||
-    !agentSessionId.value ||
-    (!isRunning.value &&
-      Boolean(activeChoice.value && !activeChoice.value.allowFreeText)),
+  () => isInterruptPending.value || !agentSessionId.value,
 )
 const canSubmit = computed(
   () =>
@@ -509,12 +510,14 @@ const canSubmit = computed(
       (!isRunning.value && Boolean(activeChoice.value?.allowFreeText))),
 )
 const composerPlaceholder = computed(() => {
-  if (isAgentConnecting.value) return 'Connecting to ECOS Agent'
-  if (!agentSessionId.value) return 'ECOS Agent unavailable'
+  if (isAgentConnecting.value) return 'Connecting…'
+  if (!agentSessionId.value) return 'Unavailable'
   if (isRunning.value) return 'Add a follow-up…'
-  if (composerLocked.value) return 'Choose an option above'
-  if (activeChoice.value?.allowFreeText) return 'Enter a value, or choose an option above'
-  return 'Message ECOS Agent'
+  if (activeChoice.value?.allowFreeText && activeChoice.value.variant === 'buttons') {
+    return 'Enter a value, or choose above'
+  }
+  if (activeChoice.value) return 'Ask anything, or choose above'
+  return 'Ask anything…'
 })
 const statusLabel = computed(() => {
   if (isAgentConnecting.value) return 'Connecting'
@@ -538,7 +541,7 @@ const emptyStateSuggestions = computed(() => {
   if (tabMode === 'home') {
     return [
       {
-        label: 'Create a Workspace under a Project and run full RTL-to-GDS flow',
+        label: 'Start creating a Workspace and run a full RTL-to-GDS flow',
         value: '1',
       },
     ]
@@ -1659,16 +1662,12 @@ async function executeWorkspaceParameterUpdate(
   ui.isWorkspaceParameterPending = true
   messageStore.setActiveSessionId(ownerSessionId)
   try {
-    const desktopApi = getOptionalDesktopApi()
-    if (!desktopApi) throw new Error('Desktop API is unavailable.')
-    const parametersPath = `${contract.workspace.replace(/\\/g, '/')}/home/parameters.json`
-    const raw = await desktopApi.workspace.readProjectTextFile(parametersPath)
-    const parameters = JSON.parse(raw || '{}') as Record<string, unknown>
-    applyParameterPatchToParametersJson(parameters, contract.parameter_patch)
-    await desktopApi.workspace.writeProjectTextFile(
-      parametersPath,
-      `${JSON.stringify(parameters, null, 2)}\n`,
-    )
+    const workspaceRoot = normalizeWorkspaceRoot(contract.workspace)
+    if (normalizeWorkspaceRoot(currentProject.value?.path ?? '') !== workspaceRoot) {
+      throw new Error('The parameter update targets a workspace that is not open.')
+    }
+    await applyWorkspaceParameterWrites(workspaceRoot, contract.writes)
+    await syncWorkspaceParameterWrites(workspaceRoot, contract.writes)
     await reportWorkspaceParameterUpdateResult(
       contract.update_id,
       'succeeded',
@@ -1714,28 +1713,111 @@ async function reportWorkspaceParameterUpdateResult(
   messageStore.finishStreamingMessages(ownerSessionId)
 }
 
-function applyParameterPatchToParametersJson(
-  parameters: Record<string, unknown>,
-  patch: NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>['parameter_patch'],
-): void {
-  const knobs: Record<string, string> = {
-    'place.target_density': 'Target density',
-    'place.target_overflow': 'Target overflow',
-    'place.cell_padding_x': 'Cell padding x',
-    'place.routability_opt': 'Routability opt flag',
-    'cts.max_fanout': 'Max fanout',
-    'route.bottom_layer': 'Bottom layer',
-    'route.top_layer': 'Top layer',
+function normalizeWorkspaceRoot(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+/**
+ * Applies the Agent's resolved write instructions. The knob-to-location mapping
+ * lives in the Agent registry, so an unsupported knob fails loudly here instead
+ * of being dropped by a second, out-of-date table.
+ */
+async function applyWorkspaceParameterWrites(
+  workspaceRoot: string,
+  writes: DesktopAgentWorkspaceParameterWrite[],
+): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  if (!desktopApi) throw new Error('Desktop API is unavailable.')
+  const byFile = new Map<string, DesktopAgentWorkspaceParameterWrite[]>()
+  for (const write of writes) {
+    const group = byFile.get(write.file)
+    if (group) group.push(write)
+    else byFile.set(write.file, [write])
   }
-  for (const item of patch) {
-    const key = knobs[item.knob_id]
-    if (!key) continue
-    if (item.knob_id === 'place.routability_opt') {
-      parameters[key] = item.value === true || item.value === 1 ? 1 : 0
-      continue
+  for (const [file, fileWrites] of byFile) {
+    const path = `${workspaceRoot}/${file}`
+    const raw = await desktopApi.workspace.readProjectTextFile(path)
+    if (!raw.trim()) throw new Error(`${file} is missing or empty in this workspace.`)
+    const document = JSON.parse(raw) as Record<string, unknown>
+    for (const write of fileWrites) {
+      setJsonPathValue(document, write)
     }
-    parameters[key] = item.value
+    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
+    await desktopApi.workspace.writeProjectTextFile(
+      path,
+      raw.endsWith('\n') ? `${serialized}\n` : serialized,
+    )
   }
+}
+
+/** Keeps the Agent's formatting identical to whatever already wrote the file. */
+function detectJsonIndent(raw: string): number {
+  return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 4
+}
+
+function setJsonPathValue(
+  document: Record<string, unknown>,
+  write: DesktopAgentWorkspaceParameterWrite,
+): void {
+  const missing = (): never => {
+    throw new Error(`Parameter ${write.knob_id} does not exist in ${write.file}.`)
+  }
+  let node: unknown = document
+  for (const key of write.json_path.slice(0, -1)) {
+    node = readJsonPathSegment(node, key) ?? missing()
+  }
+  const last = write.json_path[write.json_path.length - 1]
+  if (readJsonPathSegment(node, last) === undefined) missing()
+  if (typeof last === 'number') (node as unknown[])[last] = write.value
+  else (node as Record<string, unknown>)[last] = write.value
+}
+
+function readJsonPathSegment(node: unknown, key: string | number): unknown {
+  if (typeof key === 'number') {
+    return Array.isArray(node) && key < node.length ? node[key] : undefined
+  }
+  return typeof node === 'object' && node !== null && !Array.isArray(node)
+    ? (node as Record<string, unknown>)[key]
+    : undefined
+}
+
+/**
+ * Pushes the edited files back through ECC. Without this the two parameter
+ * surfaces drift apart and the change never reaches the next run: a step-config
+ * edit must be synced into `parameters.json` before that file is re-expanded.
+ */
+async function syncWorkspaceParameterWrites(
+  workspaceRoot: string,
+  writes: DesktopAgentWorkspaceParameterWrite[],
+): Promise<void> {
+  const workspaceHandle = workspaceLifecycle.session.value.workspaceId
+  const stepConfigFiles = [
+    ...new Set(
+      writes
+        .filter((write) => write.surface === 'step_config')
+        .map((write) => write.file),
+    ),
+  ]
+  for (const configPath of stepConfigFiles) {
+    assertEccSuccess(
+      await syncConfigApi({
+        cmd: CMDEnum.sync_config,
+        data: { config_path: configPath, directory: workspaceRoot, workspaceHandle },
+      }),
+      `Failed to sync ${configPath}`,
+    )
+  }
+  assertEccSuccess(
+    await refreshConfigApi({
+      cmd: CMDEnum.refresh_config,
+      data: { directory: workspaceRoot, workspaceHandle },
+    }),
+    'Failed to refresh the workspace configuration',
+  )
+}
+
+function assertEccSuccess(result: { response?: string } | null, message: string): void {
+  if (result?.response !== ResponseEnum.success) throw new Error(`${message}.`)
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {

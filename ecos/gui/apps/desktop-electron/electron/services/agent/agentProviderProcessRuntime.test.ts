@@ -478,6 +478,93 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  const parameterUpdateEvent = (writes: unknown): string =>
+    `${JSON.stringify({
+      event: {
+        type: 'workspace_parameter_update',
+        workspaceParameterUpdate: {
+          parameter_patch: [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
+          schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
+          update_id: 'update_1',
+          workspace: '/runs/gcd',
+          writes,
+        },
+      },
+      type: 'event',
+    })}\n`
+
+  const emitParameterUpdate = (writes: unknown) => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit('data', parameterUpdateEvent(writes))
+    return listener
+  }
+
+  it('forwards resolved parameter write targets from provider stdout', () => {
+    const listener = emitParameterUpdate([
+      {
+        file: 'home/parameters.json',
+        json_path: ['Core', 'Utilitization'],
+        knob_id: 'floorplan.utilitization',
+        surface: 'parameters',
+        value: 0.7,
+      },
+    ])
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'workspace_parameter_update',
+        workspaceParameterUpdate: expect.objectContaining({
+          schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
+          writes: [
+            {
+              file: 'home/parameters.json',
+              json_path: ['Core', 'Utilitization'],
+              knob_id: 'floorplan.utilitization',
+              surface: 'parameters',
+              value: 0.7,
+            },
+          ],
+        }),
+      }),
+    )
+  })
+
+  it.each([
+    ['a file outside the parameter allowlist', 'home/../../etc/passwd'],
+    ['an arbitrary project source file', 'rtl/gcd.v'],
+    ['a flow definition', 'home/flow.json'],
+  ])('drops parameter updates that target %s', (_label, file) => {
+    const listener = emitParameterUpdate([
+      {
+        file,
+        json_path: ['Core', 'Utilitization'],
+        knob_id: 'floorplan.utilitization',
+        surface: 'parameters',
+        value: 0.7,
+      },
+    ])
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('drops parameter updates whose writes do not cover every patch entry', () => {
+    expect(emitParameterUpdate([])).not.toHaveBeenCalled()
+    expect(emitParameterUpdate(undefined)).not.toHaveBeenCalled()
+  })
+
   it('rejects pending requests when the provider process exits', async () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

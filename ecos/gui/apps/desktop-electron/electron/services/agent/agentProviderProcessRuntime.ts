@@ -7,6 +7,7 @@ import type {
   DesktopAgentExecutionContract,
   DesktopAgentWorkspaceContinueContract,
   DesktopAgentWorkspaceParameterUpdateContract,
+  DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunContract,
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
@@ -22,6 +23,7 @@ import type {
   DesktopAgentStartSessionResponse,
   DesktopAgentStatus,
 } from '@ecos-studio/shared'
+import { desktopAgentParameterWriteFiles } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from './agentProviderContract'
 import type { ResolvedAgentProviderManifest } from './agentProviderPlugin'
 import { RuntimeEventFanout } from '../runtime/runtimeEvents'
@@ -866,20 +868,72 @@ function readWorkspaceParameterUpdateContract(
   const workspace = readEventText(record.workspace)
   const updateId = readOptionalIdentifier(record.update_id)
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
+  const writes = readWorkspaceParameterWrites(record.writes)
   if (
-    record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v1' ||
+    record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v2' ||
     !workspace ||
     !updateId ||
-    !patch
+    !patch ||
+    !writes ||
+    writes.length !== patch.length
   ) {
     return null
   }
   return {
     parameter_patch: patch,
-    schema_version: 'flow-agent.workspace_parameter_update_contract.v1',
+    schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
     update_id: updateId,
     workspace,
+    writes,
   }
+}
+
+/**
+ * Confines Agent-proposed writes to known parameter files. The Agent resolves
+ * the target, but the main process decides which targets are legal at all, so a
+ * malformed or hostile proposal cannot reach arbitrary project files.
+ */
+function readWorkspaceParameterWrites(
+  value: unknown,
+): DesktopAgentWorkspaceParameterWrite[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 16) return null
+  const writes = value.map((item) => {
+    const record = readRecord(item)
+    const knobId = record.knob_id
+    const file = record.file
+    const surface = record.surface
+    const jsonPath = record.json_path
+    if (
+      typeof knobId !== 'string' ||
+      !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(knobId) ||
+      typeof file !== 'string' ||
+      !(desktopAgentParameterWriteFiles as readonly string[]).includes(file) ||
+      (surface !== 'parameters' && surface !== 'step_config') ||
+      !isWorkspaceRerunParameterValue(record.value) ||
+      !Array.isArray(jsonPath) ||
+      jsonPath.length === 0 ||
+      jsonPath.length > 8 ||
+      !jsonPath.every(
+        (segment) =>
+          (typeof segment === 'string' && segment.length > 0 && segment.length <= 128) ||
+          (typeof segment === 'number' && Number.isInteger(segment) && segment >= 0),
+      )
+    ) {
+      return null
+    }
+    return {
+      file: file as DesktopAgentWorkspaceParameterWrite['file'],
+      json_path: jsonPath as (string | number)[],
+      knob_id: knobId,
+      surface,
+      value: record.value,
+    }
+  })
+  if (writes.some((item) => item === null)) return null
+  const normalized = writes as DesktopAgentWorkspaceParameterWrite[]
+  return new Set(normalized.map((item) => item.knob_id)).size === normalized.length
+    ? normalized
+    : null
 }
 
 function readExecutionContract(value: unknown): DesktopAgentExecutionContract | null {

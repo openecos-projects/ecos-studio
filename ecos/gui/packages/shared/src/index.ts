@@ -101,8 +101,11 @@ export type {
   DesktopAgentChoiceOption,
   DesktopAgentContractField,
   DesktopAgentExecutionContract,
+  DesktopAgentParameterWriteFile,
+  DesktopAgentParameterWriteSurface,
   DesktopAgentWorkspaceContinueContract,
   DesktopAgentWorkspaceParameterUpdateContract,
+  DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunContract,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunParameterPatch,
@@ -131,6 +134,7 @@ export type {
   DesktopAgentStatus,
   DesktopAgentStatusState,
 } from './contracts/desktopAgent.ts'
+export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
 export {
   appMenuActionIds,
   desktopMenuEventIds,

@@ -363,12 +363,27 @@ class _JsonLineRpcProcessClient:
 
     @staticmethod
     def _readonly_activity(method: object, params: Mapping[str, Any]) -> str | None:
+        """Turn Codex item events into user-visible progress.
+
+        Every externally observable action must surface here. A silent web
+        search is the same transparency failure as a silent file read: the user
+        cannot audit what they never saw.
+        """
         if method not in {"item/started", "item/completed"}:
             return None
         item = params.get("item")
         if not isinstance(item, Mapping):
             return None
         item_type = str(item.get("type", "")).replace("_", "").casefold()
+        if item_type == "websearch":
+            if method == "item/started":
+                query = str(item.get("query", "")).strip()
+                return (
+                    f"Codex is searching the web for “{query}”."
+                    if query
+                    else "Codex is searching the web."
+                )
+            return "Codex finished a web search."
         if item_type != "commandexecution":
             return None
         command = str(item.get("command", "")).casefold()

@@ -104,11 +104,40 @@ export interface DesktopAgentWorkspaceContinueContract {
   workspace: string
 }
 
+/**
+ * Workspace files the Agent may write a parameter into. `home/parameters.json`
+ * is authoritative; ECC regenerates the `config/*.json` step configs from it.
+ */
+export const desktopAgentParameterWriteFiles = [
+  'home/parameters.json',
+  'config/dreamplace.json',
+  'config/cts_default_config.json',
+  'config/rt_default_config.json',
+] as const
+
+export type DesktopAgentParameterWriteFile =
+  (typeof desktopAgentParameterWriteFiles)[number]
+
+export type DesktopAgentParameterWriteSurface = 'parameters' | 'step_config'
+
+/**
+ * A resolved write instruction. The Agent owns the knob-to-location mapping and
+ * emits it with the contract, so the GUI executes rather than re-deriving it.
+ */
+export interface DesktopAgentWorkspaceParameterWrite {
+  file: DesktopAgentParameterWriteFile
+  json_path: (string | number)[]
+  knob_id: string
+  surface: DesktopAgentParameterWriteSurface
+  value: DesktopAgentWorkspaceRerunParameterValue
+}
+
 export interface DesktopAgentWorkspaceParameterUpdateContract {
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
-  schema_version: 'flow-agent.workspace_parameter_update_contract.v1'
+  schema_version: 'flow-agent.workspace_parameter_update_contract.v2'
   update_id: string
   workspace: string
+  writes: DesktopAgentWorkspaceParameterWrite[]
 }
 
 export interface DesktopAgentWorkspaceSetupParameters {

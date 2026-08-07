@@ -53,15 +53,31 @@ def welcome_message(
         )
     return (
         "ECOS Agent is a state-controlled, PPA-oriented design-flow agent. "
-        "From the home screen it first selects or creates a Project "
+        "From the home screen it selects or creates a Project "
         "(directory with project.json), then creates a Workspace under that Project "
         "and runs a full ECC physical-design flow.\n\n"
-        "Choose an operation below."
+        "Start below, or describe what you want to set up."
     )
 
 
 def operation_prompt(language: str) -> str:
     return _prompt(language, "请在下方选择操作。", "Choose an operation below.")
+
+
+def home_ready_prompt(language: str) -> str:
+    return _prompt(
+        language,
+        "点击下方开始创建 Workspace，或直接说明意图（例如使用已有 Project、设计名、Workspace 名称）。",
+        "Start creating a Workspace below, or describe your intent (for example an existing Project, design name, or Workspace name).",
+    )
+
+
+def unmatched_operation_prompt(language: str) -> str:
+    return _prompt(
+        language,
+        "未能识别为可执行操作。请点击下方选项，或说明要创建 Workspace、重跑、改参数等明确意图。",
+        "That does not match an available operation. Use an option below, or clearly say you want to create a Workspace, rerun, or update parameters.",
+    )
 
 
 def project_mode_prompt(language: str) -> str:
@@ -380,6 +396,26 @@ def workspace_continue_title(language: str) -> str:
     return _prompt(language, "继续未完成的 flow", "Continue unfinished flow")
 
 
+def home_ready_choice(language: str, prompt_id: str) -> dict[str, Any]:
+    return _choice(
+        prompt_id,
+        _prompt(language, "开始", "Get started"),
+        (),
+        variant="buttons",
+        allow_free_text=True,
+        labeled_values=(
+            (
+                _prompt(
+                    language,
+                    "开始创建 Workspace 并运行完整 RTL 到 GDS 流程",
+                    "Start creating a Workspace and run a full RTL-to-GDS flow",
+                ),
+                "1",
+            ),
+        ),
+    )
+
+
 def operation_choice(
     language: str,
     prompt_id: str,
@@ -403,6 +439,7 @@ def operation_choice(
             )
         options_tuple = tuple(options)
     else:
+        # Home sessions use home_ready_choice; keep a single create option for NL mapping.
         options_tuple = (
             _prompt(
                 language,
@@ -415,6 +452,7 @@ def operation_choice(
         _prompt(language, "选择操作", "Choose an operation"),
         options_tuple,
         variant="list",
+        allow_free_text=True,
     )
 
 

@@ -56,8 +56,11 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('scrollToBottomIfNeeded(force, false)')
   })
 
-  it('locks choice-only input while retaining stop and one-message queue controls', () => {
-    expect(source).toContain('activeChoice.value && !activeChoice.value.allowFreeText')
+  it('keeps the composer open during choices while retaining stop and one-message queue controls', () => {
+    expect(source).toContain('() => isInterruptPending.value || !agentSessionId.value,')
+    expect(source).not.toContain(
+      'activeChoice.value && !activeChoice.value.allowFreeText',
+    )
     expect(source).toContain('if (isRunning.value) {')
     expect(source).toContain('queuedMessage.value = message')
     expect(source).toContain('watch(isRunning')
@@ -76,9 +79,17 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('run-status-dot')
     expect(source).toContain('@click="cancelQueuedMessage"')
     expect(source).toContain("return 'Add a follow-up…'")
+    expect(source).toContain('Enter a value, or choose above')
+    expect(source).toContain("activeChoice.value.variant === 'buttons'")
     expect(source).toContain(
-      "activeChoice.value?.allowFreeText) return 'Enter a value, or choose an option above'",
+      "if (activeChoice.value) return 'Ask anything, or choose above'",
     )
+    expect(source).toContain("return 'Ask anything…'")
+    expect(source).toContain("return 'Connecting…'")
+    expect(source).toContain("return 'Unavailable'")
+    expect(source).not.toContain('Connecting to ECOS Agent')
+    expect(source).not.toContain('ECOS Agent unavailable')
+    expect(source).not.toContain('Message ECOS Agent')
   })
 
   it('does not submit while an IME composition is active', () => {
@@ -128,6 +139,43 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toMatch(
       /const flowResult = await runAllFlow\(\{ rerun: false \}\)[\s\S]*await reportWorkspaceCreationResult\(handoff\.setupId, 'succeeded', ''\)/,
     )
+  })
+
+  it('applies parameter updates from the contract instead of a local knob table', () => {
+    // A second mapping here silently dropped every knob it did not know about.
+    expect(source).not.toContain('applyParameterPatchToParametersJson')
+    expect(source).not.toContain("'place.target_density': 'Target density'")
+    expect(source).toContain(
+      'applyWorkspaceParameterWrites(workspaceRoot, contract.writes)',
+    )
+    expect(source).toContain('for (const write of fileWrites)')
+    expect(source).toContain('setJsonPathValue(document, write)')
+    expect(source).toContain(
+      'throw new Error(`Parameter ${write.knob_id} does not exist in ${write.file}.`)',
+    )
+  })
+
+  it('pushes parameter writes back through ECC so the next run sees them', () => {
+    expect(source).toContain(
+      'syncWorkspaceParameterWrites(workspaceRoot, contract.writes)',
+    )
+    expect(source).toContain('cmd: CMDEnum.sync_config')
+    expect(source).toContain('cmd: CMDEnum.refresh_config')
+    // sync_config must run first: refresh_config re-expands parameters.json over
+    // the step configs and would discard an unsynced step-config edit.
+    expect(source.indexOf('cmd: CMDEnum.sync_config')).toBeLessThan(
+      source.indexOf('cmd: CMDEnum.refresh_config'),
+    )
+    expect(source).toContain('assertEccSuccess(')
+    expect(source).toContain(
+      "throw new Error('The parameter update targets a workspace that is not open.')",
+    )
+  })
+
+  it('writes parameter files with the indentation they already use', () => {
+    expect(source).not.toContain('JSON.stringify(parameters, null, 2)')
+    expect(source).toContain('JSON.stringify(document, null, detectJsonIndent(raw))')
+    expect(source).toContain("raw.endsWith('\\n') ? `${serialized}\\n` : serialized")
   })
 
   it('prepares a validated workspace rerun without replacing the visible source workspace', () => {

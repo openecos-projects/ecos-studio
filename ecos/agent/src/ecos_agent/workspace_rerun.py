@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ecos_agent.ecc_contracts import ECCParameterPatch, ECCParameterPatchItem, ECCStepName
 from ecos_agent.hashing import file_sha256
+from ecos_agent.knob_registry import BOOLEAN_KNOBS, KnobTarget, knob_spec, validate_value
 from ecos_agent.parameter_authorization import assert_authorized_parameter_patch
 
 
@@ -23,43 +23,7 @@ _RERUN_SCOPES = ("single_step", "full_flow")
 _CATALOG_END_STEP = list(ECCStepName)[-1]
 _STAGE_OUTPUT_SUFFIXES = (".def.gz", ".v.gz", ".gds")
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_-]+$")
-_INTEGER_KNOBS = frozenset(
-    {
-        "place.num_threads",
-        "cts.wirelength_iterations",
-        "cts.slew_steps",
-        "cts.cap_steps",
-        "cts.max_fanout",
-        "cts.htree_depth_explore_window",
-        "legalization.bndry_padding_x",
-        "legalization.bndry_padding_y",
-        "legalization.num_threads",
-        "route.thread_number",
-    }
-)
-_ZERO_BASED_INTEGER_KNOBS = frozenset(
-    {
-        "place.cell_padding_x",
-        "legalization.cell_padding_x",
-    }
-)
-BOOLEAN_RERUN_KNOBS = frozenset(
-    {
-        "place.routability_opt",
-        "cts.force_branch_buffer",
-        "cts.enable_analytical_htree",
-        "cts.enable_sink_clustering",
-        "legalization.detailed_place_flag",
-        "legalization.deterministic",
-        "route.enable_timing",
-    }
-)
-_RANGED_KNOBS = {
-    "place.target_density": (0.1, 0.95),
-    "place.target_overflow": (0.0, 1.0),
-    "place.gp_noise_ratio": (0.0, 1.0),
-    "cts.skew_bound": (0.0, 1.0),
-}
+BOOLEAN_RERUN_KNOBS = BOOLEAN_KNOBS
 
 
 @dataclass(frozen=True)
@@ -246,12 +210,24 @@ class GuiWorkspaceRerunResolver:
     def parameter_values(
         self, source: GuiWorkspaceRerunSource, target_step: str
     ) -> tuple[tuple[str, object], ...]:
+        if target_step not in source.allowed_stages:
+            raise ValueError("rerun stage is invalid")
+        return self.stage_parameter_values(source.workspace_path, target_step)
+
+    @staticmethod
+    def stage_parameter_values(
+        workspace_path: Path, target_step: str
+    ) -> tuple[tuple[str, object], ...]:
+        """Readable knobs for a step, independent of whether that step has run.
+
+        Rerun requires completed-stage evidence; changing a parameter does not.
+        """
         step = _STEP_NAMES.get(target_step)
-        if step is None or target_step not in source.allowed_stages:
+        if step is None:
             raise ValueError("rerun stage is invalid")
         values = []
         for knob_id in _authorized_knobs_for_step(step):
-            value = _current_parameter_value(source.workspace_path, knob_id)
+            value = _current_parameter_value(workspace_path, knob_id)
             if value is not _MISSING:
                 values.append((knob_id, value))
         return tuple(values)
@@ -343,9 +319,22 @@ def _authorized_knobs_for_step(step: ECCStepName) -> tuple[str, ...]:
 
 
 def _current_parameter_value(workspace: Path, knob_id: str) -> object:
-    # Mirrors the ECC candidate registry's config_key and json_path fields.
-    config_name, json_path = _parameter_config_location(knob_id)
-    config_path = workspace / "config" / config_name
+    """Read a knob so contracts can show a real old value.
+
+    Prefers the ECC-canonical step config, falling back to parameters.json: step
+    configs are only generated once a flow has run, but a knob is tunable before
+    that.
+    """
+    spec = knob_spec(knob_id)
+    for target in (spec.read_target, spec.write_target):
+        value = _read_target_value(workspace, target)
+        if value is not _MISSING:
+            return value
+    return _MISSING
+
+
+def _read_target_value(workspace: Path, target: KnobTarget) -> object:
+    config_path = workspace / target.file
     try:
         config_path.resolve().relative_to(workspace)
         if config_path.is_symlink() or not config_path.is_file():
@@ -354,69 +343,15 @@ def _current_parameter_value(workspace: Path, knob_id: str) -> object:
     except (OSError, ValueError):
         return _MISSING
     current: object = config
-    for key in json_path:
-        if not isinstance(current, dict) or key not in current:
+    for key in target.json_path:
+        if isinstance(key, int):
+            if not isinstance(current, list) or not 0 <= key < len(current):
+                return _MISSING
+        elif not isinstance(current, dict) or key not in current:
             return _MISSING
         current = current[key]
     return current
 
 
-def _parameter_config_location(knob_id: str) -> tuple[str, tuple[str, ...]]:
-    prefix, name = knob_id.split(".", 1)
-    if prefix in {"place", "legalization"}:
-        aliases = {
-            "target_overflow": "stop_overflow",
-            "routability_opt": "routability_opt_flag",
-            "detailed_place_flag": "detailed_place_flag",
-            "deterministic": "deterministic_flag",
-        }
-        return "dreamplace.json", (aliases.get(name, name),)
-    if prefix == "cts":
-        return "cts_default_config.json", (name,)
-    if prefix == "route":
-        aliases = {
-            "bottom_layer": "-bottom_routing_layer",
-            "top_layer": "-top_routing_layer",
-            "thread_number": "-thread_number",
-            "enable_timing": "-enable_timing",
-        }
-        return "rt_default_config.json", ("RT", aliases[name])
-    raise ValueError(f"unsupported rerun parameter: {knob_id}")
-
-
 def _validate_value(item: ECCParameterPatchItem) -> None:
-    value = item.value
-    if item.knob_id in _RANGED_KNOBS:
-        lower, upper = _RANGED_KNOBS[item.knob_id]
-        if type(value) not in {int, float} or not lower <= value <= upper:
-            raise ValueError(f"{item.knob_id} is outside {lower:g}..{upper:g}")
-    elif item.knob_id in _ZERO_BASED_INTEGER_KNOBS:
-        if type(value) is not int or value < 0:
-            raise ValueError(f"{item.knob_id} must be an integer >= 0")
-    elif item.knob_id in _INTEGER_KNOBS:
-        if type(value) is not int or value < 1:
-            raise ValueError(f"{item.knob_id} must be an integer >= 1")
-    elif item.knob_id in BOOLEAN_RERUN_KNOBS:
-        if type(value) is not bool:
-            raise ValueError(f"{item.knob_id} must be a boolean")
-    elif item.knob_id == "cts.routing_layer":
-        if (
-            not isinstance(value, list)
-            or not value
-            or len(value) != len(set(value))
-            or any(type(layer) is not int or layer < 1 for layer in value)
-        ):
-            raise ValueError("cts.routing_layer must be a non-empty unique integer list >= 1")
-    elif item.knob_id == "cts.buffer_type":
-        if (
-            not isinstance(value, list)
-            or not value
-            or len(value) != len(set(value))
-            or any(type(buffer) is not str or not buffer.strip() for buffer in value)
-        ):
-            raise ValueError("cts.buffer_type must be a non-empty unique PDK buffer list")
-    elif item.knob_id in {"route.bottom_layer", "route.top_layer"}:
-        if type(value) is not str or not value.strip():
-            raise ValueError(f"{item.knob_id} must be a non-empty PDK routing-layer name")
-    elif type(value) not in {int, float} or not math.isfinite(value) or value < 0:
-        raise ValueError(f"{item.knob_id} must be a finite number >= 0")
+    validate_value(item)
