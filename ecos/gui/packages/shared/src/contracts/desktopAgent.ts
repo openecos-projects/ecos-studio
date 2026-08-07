@@ -206,6 +206,8 @@ export interface DesktopAgentWorkspaceRerunContract {
   end_step: string
   execution_scope: 'single_step' | 'full_flow'
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
+  /** Optional only for pre-write-contract Agent providers; nonempty patches fail closed. */
+  writes?: DesktopAgentWorkspaceParameterWrite[]
   requires_gui_review: true
   rerun_id: string
   schema_version: 'flow-agent.workspace_rerun_contract.v1'

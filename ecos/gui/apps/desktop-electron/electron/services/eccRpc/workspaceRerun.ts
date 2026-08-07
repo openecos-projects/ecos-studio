@@ -12,17 +12,20 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
-import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
+import {
+  desktopAgentParameterWriteFiles,
+  type DesktopAgentWorkspaceParameterWrite,
+  type DesktopAgentWorkspaceRerunContract,
+} from '@ecos-studio/shared'
 
 interface WorkspaceRerunRuntime {
-  runCandidateRerun(request: {
-    candidateId: string
-    endStep: string
-    executionScope: 'single_step' | 'full_flow'
-    patch: Array<{ knob_id: string; value: unknown }>
-    targetStep: string
+  refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
+  runStep(request: {
+    rerun: boolean
+    step: string
     workspaceHandle: string
   }): Promise<unknown>
+  syncConfig(request: { configPath: string; workspaceHandle: string }): Promise<unknown>
 }
 
 const FLOW_STEP_SEQUENCE = [
@@ -164,6 +167,7 @@ export async function prepareWorkspaceRerun(
       targetStep: contract.target_step,
       targetWorkspace: verified.targetWorkspace,
     })
+    await materializeWorkspaceRerunParameterWrites(stagedWorkspace, verified.writes)
     const stagedHome = await resolvePathWithinWorkspace(
       stagedWorkspace,
       join(stagedWorkspace, 'home'),
@@ -192,19 +196,32 @@ export async function executeWorkspaceRerun(
   runtime: WorkspaceRerunRuntime,
   workspaceHandle: string,
 ): Promise<void> {
-  await runtime.runCandidateRerun({
-    candidateId: contract.rerun_id,
-    endStep: contract.end_step,
-    executionScope: contract.execution_scope,
-    patch: contract.parameter_patch,
-    targetStep: contract.target_step,
-    workspaceHandle,
-  })
+  const writes = contract.writes ?? []
+  if (!hasValidParameterWrites(contract.parameter_patch, writes)) {
+    throw new Error('Workspace rerun contract is invalid.')
+  }
+  for (const file of new Set(
+    writes.filter((write) => write.surface === 'step_config').map((write) => write.file),
+  )) {
+    await runtime.syncConfig({
+      configPath: join(contract.target_workspace, file),
+      workspaceHandle,
+    })
+  }
+  if (writes.length > 0) await runtime.refreshConfig({ workspaceHandle })
+  for (const step of workspaceRerunExecutionSteps(contract)) {
+    await runtime.runStep({ rerun: false, step, workspaceHandle })
+  }
 }
 
 async function verifyWorkspaceRerunContract(
   contract: DesktopAgentWorkspaceRerunContract,
-): Promise<{ sourceWorkspace: string; targetWorkspace: string }> {
+): Promise<{
+  sourceWorkspace: string
+  targetWorkspace: string
+  writes: DesktopAgentWorkspaceParameterWrite[]
+}> {
+  const writes = contract.writes ?? []
   if (
     contract.schema_version !== 'flow-agent.workspace_rerun_contract.v1' ||
     contract.requires_gui_review !== true ||
@@ -218,6 +235,7 @@ async function verifyWorkspaceRerunContract(
     !isAbsolute(contract.source_workspace) ||
     !isAbsolute(contract.target_workspace) ||
     !hasValidParameterPatch(contract.parameter_patch) ||
+    !hasValidParameterWrites(contract.parameter_patch, writes) ||
     !hasAuthorizedParameterPatch(contract.target_step, contract.parameter_patch) ||
     (contract.execution_scope !== 'single_step' &&
       contract.execution_scope !== 'full_flow') ||
@@ -292,7 +310,7 @@ async function verifyWorkspaceRerunContract(
   if (sha256(await readFile(artifact)) !== contract.source_stage_artifact_sha256) {
     throw new Error('Workspace rerun source artifact evidence is stale.')
   }
-  return { sourceWorkspace, targetWorkspace }
+  return { sourceWorkspace, targetWorkspace, writes }
 }
 
 function isValidRerunRange(
@@ -393,6 +411,59 @@ function hasValidParameterPatch(
   })
 }
 
+function hasValidParameterWrites(
+  patch: DesktopAgentWorkspaceRerunContract['parameter_patch'],
+  writes: DesktopAgentWorkspaceParameterWrite[],
+): boolean {
+  if (!Array.isArray(writes) || writes.length !== patch.length) return false
+  const patchesByKnob = new Map(patch.map((item) => [item.knob_id, item]))
+  const writeKnobs = new Set<string>()
+  const writePaths = new Set<string>()
+  return writes.every((write) => {
+    const pathKey = `${write.file}:${JSON.stringify(write.json_path)}`
+    const patchItem = patchesByKnob.get(write.knob_id)
+    if (
+      !patchItem ||
+      writeKnobs.has(write.knob_id) ||
+      writePaths.has(pathKey) ||
+      !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
+      (write.surface === 'parameters' && write.file !== 'home/parameters.json') ||
+      (write.surface === 'step_config' && write.file === 'home/parameters.json') ||
+      !hasValidJsonPath(write.json_path) ||
+      !isValidParameterValue(write.value) ||
+      !writeValueMatchesPatch(write, patchItem)
+    ) {
+      return false
+    }
+    writeKnobs.add(write.knob_id)
+    writePaths.add(pathKey)
+    return true
+  })
+}
+
+function writeValueMatchesPatch(
+  write: DesktopAgentWorkspaceParameterWrite,
+  patch: DesktopAgentWorkspaceRerunContract['parameter_patch'][number],
+): boolean {
+  const expected =
+    patch.knob_id === 'place.routability_opt' && typeof patch.value === 'boolean'
+      ? Number(patch.value)
+      : patch.value
+  return JSON.stringify(write.value) === JSON.stringify(expected)
+}
+
+function hasValidJsonPath(path: (string | number)[]): boolean {
+  return (
+    path.length > 0 &&
+    path.length <= 8 &&
+    path.every(
+      (segment) =>
+        (typeof segment === 'string' && segment.length > 0 && segment.length <= 128) ||
+        (typeof segment === 'number' && Number.isInteger(segment) && segment >= 0),
+    )
+  )
+}
+
 function isValidParameterValue(
   value: DesktopAgentWorkspaceRerunContract['parameter_patch'][number]['value'],
 ): boolean {
@@ -466,6 +537,89 @@ function isSafeParameterString(value: string): boolean {
     !value.split('').some((character) => character.charCodeAt(0) < 32) &&
     !/[;&|]|\$\(/.test(value)
   )
+}
+
+function workspaceRerunExecutionSteps(
+  contract: DesktopAgentWorkspaceRerunContract,
+): string[] {
+  if (contract.execution_scope === 'single_step') return [contract.target_step]
+  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
+    contract.target_step as (typeof FLOW_STEP_SEQUENCE)[number],
+  )
+  const endIndex = FLOW_STEP_SEQUENCE.indexOf(
+    contract.end_step as (typeof FLOW_STEP_SEQUENCE)[number],
+  )
+  if (targetIndex < 0 || endIndex < targetIndex) {
+    throw new Error('Workspace rerun flow range is invalid.')
+  }
+  return [...FLOW_STEP_SEQUENCE.slice(targetIndex, endIndex + 1)]
+}
+
+async function materializeWorkspaceRerunParameterWrites(
+  workspace: string,
+  writes: DesktopAgentWorkspaceParameterWrite[],
+): Promise<void> {
+  const writesByFile = new Map<string, DesktopAgentWorkspaceParameterWrite[]>()
+  for (const write of writes) {
+    const fileWrites = writesByFile.get(write.file) ?? []
+    fileWrites.push(write)
+    writesByFile.set(write.file, fileWrites)
+  }
+  for (const [file, fileWrites] of writesByFile) {
+    const path = await resolvePathWithinWorkspace(
+      workspace,
+      join(workspace, file),
+      `parameter file ${file}`,
+    )
+    const raw = await readFile(path, 'utf8')
+    const document = parseWorkspaceParameterDocument(raw, file)
+    for (const write of fileWrites) setWorkspaceParameterValue(document, write)
+    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
+    await writeFile(path, raw.endsWith('\n') ? `${serialized}\n` : serialized, 'utf8')
+  }
+}
+
+function parseWorkspaceParameterDocument(raw: string, file: string): Record<string, unknown> {
+  try {
+    const document = JSON.parse(raw)
+    if (typeof document !== 'object' || document === null || Array.isArray(document)) {
+      throw new Error('not an object')
+    }
+    return document as Record<string, unknown>
+  } catch {
+    throw new Error(`Workspace rerun parameter file is invalid: ${file}`)
+  }
+}
+
+function setWorkspaceParameterValue(
+  document: Record<string, unknown>,
+  write: DesktopAgentWorkspaceParameterWrite,
+): void {
+  let node: unknown = document
+  for (const segment of write.json_path.slice(0, -1)) {
+    node = workspaceParameterPathValue(node, segment)
+    if (node === undefined) throw new Error(`Parameter ${write.knob_id} does not exist.`)
+  }
+  const last = write.json_path.at(-1)!
+  if (workspaceParameterPathValue(node, last) === undefined) {
+    throw new Error(`Parameter ${write.knob_id} does not exist.`)
+  }
+  if (typeof last === 'number' && Array.isArray(node)) node[last] = write.value
+  else if (typeof last === 'string' && isRecord(node)) node[last] = write.value
+  else throw new Error(`Parameter ${write.knob_id} has an invalid write path.`)
+}
+
+function workspaceParameterPathValue(node: unknown, segment: string | number): unknown {
+  if (typeof segment === 'number') return Array.isArray(node) ? node[segment] : undefined
+  return isRecord(node) ? node[segment] : undefined
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function detectJsonIndent(raw: string): number {
+  return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 2
 }
 
 function completedStepTool(flowText: string, targetStep: string): string | null {

@@ -43,11 +43,14 @@ async function writeSourceWorkspace(): Promise<{
   })
   const artifact = Buffer.from('place-def')
   await mkdir(join(source, 'home'), { recursive: true })
+  await mkdir(join(source, 'config'), { recursive: true })
   await mkdir(join(source, 'fixFanout_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
   await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'legalization_dreamplace', 'output'), { recursive: true })
   await writeFile(join(source, 'home', 'flow.json'), flow)
+  await writeFile(join(source, 'home', 'parameters.json'), '{"Target density":0.45}\n')
+  await writeFile(join(source, 'config', 'dreamplace.json'), '{"density_weight":0.01}\n')
   await writeFile(
     join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'),
     'checkpoint',
@@ -90,6 +93,15 @@ function contractFor(
     source_workspace: source,
     target_step: 'place',
     target_workspace: `${source}_rerun_place`,
+    writes: [
+      {
+        file: 'home/parameters.json',
+        json_path: ['Target density'],
+        knob_id: 'place.target_density',
+        surface: 'parameters',
+        value: 0.55,
+      },
+    ],
   }
 }
 
@@ -111,6 +123,9 @@ describe('prepareWorkspaceRerun', () => {
         'utf8',
       ),
     ).resolves.toContain(contract.rerun_id)
+    await expect(
+      readFile(`${contract.target_workspace}/home/parameters.json`, 'utf8'),
+    ).resolves.toContain('0.55')
   })
 
   it('accepts a numbered isolated rerun target', async () => {
@@ -272,23 +287,107 @@ describe('prepareWorkspaceRerun', () => {
     )
   })
 
-  it('executes the frozen contract through the target GUI workspace handle', async () => {
+  it('executes the frozen contract through standard ECC step RPCs', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
     const runtime = {
-      runCandidateRerun: vi.fn().mockResolvedValue({}),
+      refreshConfig: vi.fn().mockResolvedValue({}),
+      runStep: vi.fn().mockResolvedValue({ state: 'Success' }),
+      syncConfig: vi.fn().mockResolvedValue({}),
     }
 
     await executeWorkspaceRerun(contract, runtime, 'target-gui-handle')
 
-    expect(runtime.runCandidateRerun).toHaveBeenCalledWith({
-      candidateId: contract.rerun_id,
-      executionScope: contract.execution_scope,
-      endStep: contract.end_step,
-      patch: contract.parameter_patch,
-      targetStep: contract.target_step,
+    expect(runtime.syncConfig).not.toHaveBeenCalled()
+    expect(runtime.refreshConfig).toHaveBeenCalledWith({
       workspaceHandle: 'target-gui-handle',
     })
+    expect(runtime.runStep).toHaveBeenCalledWith({
+      rerun: false,
+      step: 'place',
+      workspaceHandle: 'target-gui-handle',
+    })
+  })
+
+  it('materializes resolved step-config writes in the isolated workspace', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
+    contract.writes = [
+      {
+        file: 'config/dreamplace.json',
+        json_path: ['density_weight'],
+        knob_id: 'place.density_weight',
+        surface: 'step_config',
+        value: 0.1,
+      },
+    ]
+
+    await prepareWorkspaceRerun(contract)
+
+    await expect(
+      readFile(`${contract.target_workspace}/config/dreamplace.json`, 'utf8'),
+    ).resolves.toContain('0.1')
+  })
+
+  it('syncs step-config writes and executes every full-flow step in order', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    contract.end_step = 'Harden'
+    contract.execution_scope = 'full_flow'
+    contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
+    contract.writes = [
+      {
+        file: 'config/dreamplace.json',
+        json_path: ['density_weight'],
+        knob_id: 'place.density_weight',
+        surface: 'step_config',
+        value: 0.1,
+      },
+    ]
+    const runtime = {
+      refreshConfig: vi.fn().mockResolvedValue({}),
+      runStep: vi.fn().mockResolvedValue({ state: 'Success' }),
+      syncConfig: vi.fn().mockResolvedValue({}),
+    }
+
+    await executeWorkspaceRerun(contract, runtime, 'target-gui-handle')
+
+    expect(runtime.syncConfig).toHaveBeenCalledWith({
+      configPath: `${contract.target_workspace}/config/dreamplace.json`,
+      workspaceHandle: 'target-gui-handle',
+    })
+    expect(runtime.runStep.mock.calls.map(([request]) => request.step)).toEqual([
+      'place',
+      'CTS',
+      'legalization',
+      'route',
+      'drc',
+      'filler',
+      'RCX',
+      'sta',
+      'Harden',
+    ])
+  })
+
+  it('rejects a nonempty patch without resolved workspace writes', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    contract.writes = []
+
+    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
+      'Workspace rerun contract is invalid',
+    )
+  })
+
+  it('rejects a resolved write that differs from the confirmed patch', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    contract.writes![0]!.value = 0.45
+
+    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
+      'Workspace rerun contract is invalid',
+    )
   })
 
   it('fails closed before copying when the frozen source evidence is stale', async () => {

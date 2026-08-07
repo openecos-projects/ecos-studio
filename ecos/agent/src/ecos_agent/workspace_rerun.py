@@ -12,7 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ecos_agent.ecc_contracts import ECCParameterPatch, ECCParameterPatchItem, ECCStepName
 from ecos_agent.hashing import file_sha256
-from ecos_agent.knob_registry import BOOLEAN_KNOBS, KnobTarget, knob_spec, validate_value
+from ecos_agent.knob_registry import (
+    BOOLEAN_KNOBS,
+    KnobTarget,
+    knob_spec,
+    resolve_write,
+    validate_value,
+)
 from ecos_agent.parameter_authorization import assert_authorized_parameter_patch
 
 
@@ -65,6 +71,7 @@ class GuiWorkspaceRerunContract(BaseModel):
     source_stage_artifact: str
     source_stage_artifact_sha256: str
     parameter_patch: list[ECCParameterPatchItem] = Field(default_factory=list, max_length=16)
+    writes: list[dict[str, object]] = Field(default_factory=list, max_length=16)
     requires_gui_review: Literal[True] = True
 
     @field_validator("source_workspace", "target_workspace")
@@ -194,6 +201,7 @@ class GuiWorkspaceRerunResolver:
             source_stage_artifact=source.stage_artifact_ref[target_step],
             source_stage_artifact_sha256=source.stage_artifact_sha256[target_step],
             parameter_patch=[] if patch is None else patch.items,
+            writes=[] if patch is None else [resolve_write(item) for item in patch.items],
         )
 
     @staticmethod

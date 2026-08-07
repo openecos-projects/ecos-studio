@@ -497,6 +497,22 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
         {"knob_id": "place.routability_opt", "value": False},
         {"knob_id": "place.target_overflow", "value": 0.1},
     ]
+    assert rerun["writes"] == [
+        {
+            "file": "home/parameters.json",
+            "json_path": ["Routability opt flag"],
+            "knob_id": "place.routability_opt",
+            "surface": "parameters",
+            "value": 0,
+        },
+        {
+            "file": "home/parameters.json",
+            "json_path": ["Target overflow"],
+            "knob_id": "place.target_overflow",
+            "surface": "parameters",
+            "value": 0.1,
+        },
+    ]
 
     _send(
         provider,

@@ -451,6 +451,15 @@ describe('AgentProviderProcessRuntime', () => {
             end_step: 'place',
             execution_scope: 'single_step',
             parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+            writes: [
+              {
+                file: 'home/parameters.json',
+                json_path: ['Target density'],
+                knob_id: 'place.target_density',
+                surface: 'parameters',
+                value: 0.55,
+              },
+            ],
             requires_gui_review: true,
             rerun_id: 'gcd_rerun_place',
             schema_version: 'flow-agent.workspace_rerun_contract.v1',
@@ -474,6 +483,12 @@ describe('AgentProviderProcessRuntime', () => {
         end_step: 'place',
         source_flow_json_sha256: 'a'.repeat(64),
         source_stage_artifact_sha256: 'b'.repeat(64),
+        writes: [
+          expect.objectContaining({
+            file: 'home/parameters.json',
+            knob_id: 'place.target_density',
+          }),
+        ],
       }),
     })
   })

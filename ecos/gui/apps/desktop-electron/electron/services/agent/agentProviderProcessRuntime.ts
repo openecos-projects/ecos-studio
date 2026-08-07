@@ -515,6 +515,10 @@ function readWorkspaceRerunContract(
   const endStep = record.end_step
   const executionScope = record.execution_scope
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
+  const writes =
+    record.writes === undefined || (Array.isArray(record.writes) && record.writes.length === 0)
+      ? []
+      : readWorkspaceParameterWrites(record.writes)
   const sourceStageArtifact = readWorkspaceRerunArtifactReference(
     record.source_stage_artifact,
   )
@@ -536,6 +540,7 @@ function readWorkspaceRerunContract(
     workspaceSetupFlowSteps.indexOf(endStep) <
       workspaceSetupFlowSteps.indexOf(targetStep) ||
     !patch ||
+    !writes ||
     !sourceStageArtifact ||
     !sourceFlowJsonSha256 ||
     !sourceStageArtifactSha256
@@ -547,6 +552,7 @@ function readWorkspaceRerunContract(
     end_step: endStep,
     execution_scope: executionScope,
     parameter_patch: patch,
+    writes,
     requires_gui_review: true,
     rerun_id: rerunId,
     schema_version: 'flow-agent.workspace_rerun_contract.v1',

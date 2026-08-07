@@ -169,7 +169,6 @@ function registerHandlers(
       rpcHello: vi.fn(),
       rpcPing: vi.fn(),
       rpcShutdown: vi.fn(),
-      runCandidateRerun: vi.fn(),
       runFlow: vi.fn(),
       runStep: vi.fn(),
       syncConfig: vi.fn(),

@@ -226,14 +226,6 @@ export interface DesktopBridgeServices {
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
-    runCandidateRerun(request: {
-      candidateId: string
-      endStep: string
-      executionScope: 'single_step' | 'full_flow'
-      patch: Array<{ knob_id: string; value: unknown }>
-      targetStep: string
-      workspaceHandle: string
-    }): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
     openWorkspace(
       request: EccWorkspaceOpenRequest,
