@@ -26,6 +26,13 @@ SOURCE_PATHS = {
     "dreamplace.objective": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/PlaceObj.py",
     "ecc.congestion": "ecc/chipcompiler/thirdparty/ecc-tools/src/evaluation/src/module/congestion/congestion_eval.cpp",
     "ecc.metrics": "ecc/chipcompiler/tools/ecc/metrics.py",
+    "ecc.service": "ecc/chipcompiler/tools/ecc/service.py",
+    "ecc.feature_union": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/builder/feature_eval_union.cpp",
+    "ecc.feature_parser": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/parser/feature_parser_eval.cpp",
+    "ecc.density": "ecc/chipcompiler/thirdparty/ecc-tools/src/evaluation/src/module/density/density_eval.cpp",
+    "ecc.wirelength": "ecc/chipcompiler/thirdparty/ecc-tools/src/evaluation/src/module/wirelength/wirelength_eval.cpp",
+    "gui.place_metrics": "ecos/gui/apps/renderer/src/utils/projectManagement.ts",
+    "gui.map_gallery": "ecos/gui/apps/desktop-electron/electron/services/workspaceResourceService.ts",
     "ecc.builder": "ecc/chipcompiler/tools/ecc/builder.py",
     "dreamplace.utility": "ecc/chipcompiler/tools/ecc_dreamplace/utility.py",
 }
@@ -67,14 +74,14 @@ def _source_inventory() -> dict[str, object]:
     }
 
 
-def _section(entity_id: str, body: str, evidence: tuple[str, ...], *, include_evidence: bool) -> str:
+def _section(entity_id: str, body: str, evidence: tuple[str, ...], *, include_evidence: bool, evidence_label: str) -> str:
     references = ", ".join(f"**{source_id}**" for source_id in evidence)
-    suffix = f"\n\n**源码证据：** {references}" if include_evidence else ""
+    suffix = f"\n\n**{evidence_label}** {references}" if include_evidence else ""
     return f'<a id="{entity_id}"></a>\n## {entity_id}\n\n{body.strip()}{suffix}\n'
 
 
-def _add(entries: list[dict[str, object]], documents: dict[str, list[str]], *, entity_id: str, kind: str, aliases: tuple[str, ...], document: str, body: str, evidence: tuple[str, ...], include_evidence: bool = True) -> None:
-    chunk = _section(entity_id, body, evidence, include_evidence=include_evidence)
+def _add(entries: list[dict[str, object]], documents: dict[str, list[str]], *, entity_id: str, kind: str, aliases: tuple[str, ...], document: str, body: str, evidence: tuple[str, ...], include_evidence: bool = True, evidence_label: str = "源码证据：") -> None:
+    chunk = _section(entity_id, body, evidence, include_evidence=include_evidence, evidence_label=evidence_label)
     documents.setdefault(document, []).append(chunk)
     entries.append({
         "id": entity_id,
@@ -207,18 +214,57 @@ def _add_algorithms(entries: list[dict[str, object]], documents: dict[str, list[
     _add(entries, documents, entity_id="algorithm.dreamplace.detailed_placement", kind="algorithm", aliases=("detailed placement", "详细布局", "细节布局"), document="algorithms.md", body="当前默认 detailed_place_flag 为 0，因此 detailed placement 不是默认 place 路径的一部分。PlacementEngine 仅在 detailed_place_engine 被设置且本地路径存在时调用外部 detailed placer；不存在时记录 warning。", evidence=("dreamplace.config", "dreamplace.placer"))
 
 
+def _metric_body(meaning: str, calculation: str, boundary: str) -> str:
+    return f"**Meaning:** {meaning}\n\n**Calculation:** {calculation}\n\n**Boundary:** {boundary}"
+
+
+def _add_metric(entries: list[dict[str, object]], documents: dict[str, list[str]], *, name: str, aliases: tuple[str, ...], meaning: str, calculation: str, boundary: str, evidence: tuple[str, ...]) -> None:
+    _add(entries, documents, entity_id=f"metric.{name}", kind="metric", aliases=aliases, document="metrics.md", body=_metric_body(meaning, calculation, boundary), evidence=evidence, evidence_label="Source evidence:")
+
+
+def _add_numeric_metrics(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
+    records = (
+        ("place_hpwl", ("place hpwl", "HPWL", "half perimeter wirelength"), "The total half-perimeter wirelength of the placed netlist in micrometres; lower is better.", "For every net, the evaluator finds its pin-coordinate extrema and adds `(max_x - min_x) + (max_y - min_y)`; it sums that value over all nets, writes `/Wirelength/HPWL` to `place.map.json`, and ECOS reads that selector.", "This is a bounding-box estimate, not routed wire length or timing delay.", ("gui.place_metrics", "ecc.metrics", "ecc.feature_union", "ecc.wirelength")),
+        ("place_grwl", ("place grwl", "GRWL", "global routing wirelength"), "The total global-routing guide wirelength in micrometres; lower is better.", "The wirelength evaluator parses the early router's `route.guide`, sums its EGR guide wirelength, stores it as `/Wirelength/GRWL`, and ECOS extracts that value from `place.map.json`.", "It reflects the early-routing guide, not detailed-routing geometry.", ("gui.place_metrics", "ecc.metrics", "ecc.feature_union", "ecc.wirelength")),
+        ("place_flute_wirelength", ("place flute wirelength", "FLUTE", "flute wirelength"), "The total FLUTE rectilinear Steiner-tree wirelength in micrometres; lower is better.", "For a two-pin net, the evaluator uses Manhattan distance. For a net with more than two pins, it invokes `flute(pin_count, x, y, 8)` and uses the returned tree length; it then sums all nets and publishes `/Wirelength/FLUTE`.", "It is a Steiner-tree estimate and does not include detailed-routing detours or vias.", ("gui.place_metrics", "ecc.metrics", "ecc.feature_union", "ecc.wirelength")),
+        ("place_congestion_egr_overflow_total", ("place egr overflow total", "EGR overflow total", "total overflow"), "The total union-direction early-global-routing overflow count; lower is better.", "The congestion evaluator reads the selected `overflow_map_*` CSV values, selects all routing directions for `union`, and sums every bin value. The feature parser publishes that aggregate at `/Congestion/overflow/total/union`, which ECOS exposes as this metric.", "It is an early-routing capacity-demand excess, not a post-route DRC count.", ("gui.place_metrics", "ecc.metrics", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion")),
+        ("place_congestion_egr_overflow_max", ("place egr overflow max", "EGR overflow max", "maximum overflow"), "The largest union-direction early-global-routing overflow observed in one grid bin; lower is better.", "The congestion evaluator scans the union overflow CSV and retains the greatest bin value. The feature parser writes `/Congestion/overflow/max/union`, and ECOS extracts it as this metric.", "A small total can still coexist with a severe local peak, so this metric complements total overflow.", ("gui.place_metrics", "ecc.metrics", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion")),
+        ("place_rudy_utilization_max", ("RUDY", "RUDY metric", "rudy utilization", "rudy utilization max", "how is rudy calculated", "how to calculate rudy"), "The maximum union-direction RUDY routing-demand estimate over placement bins; lower is better.", "For each net, ECC forms the pin bounding box and accumulates `overlap_area / bbox_height / grid_area` horizontally and `overlap_area / bbox_width / grid_area` vertically in every overlapping bin; union adds both. A zero bbox dimension uses reciprocal `1.0`. The metric is the maximum union-bin value at `/Congestion/utilization/rudy/max/union`.", "This is a placement-time demand estimate, not detailed-routing overflow and not DreamPlace's internal Torch RUDY operator.", ("gui.place_metrics", "ecc.metrics", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion")),
+        ("place_lutrudy_utilization_max", ("LUT-RUDY", "lutrudy", "lutrudy utilization", "lutrudy utilization max"), "The maximum union-direction LUT-RUDY routing-demand estimate over placement bins; lower is better.", "LUT-RUDY uses the same bounding-box overlap accumulation as RUDY, but multiplies each non-degenerate horizontal or vertical contribution by `getLUT(pin_count, aspect_ratio, l_ness)`. ECOS reports the largest union-bin value at `/Congestion/utilization/lutrudy/max/union`.", "The lookup factor is an estimator based on pin count, bbox aspect ratio, and L-ness; it is not a routed utilization measurement.", ("gui.place_metrics", "ecc.metrics", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion")),
+    )
+    for name, aliases, meaning, calculation, boundary, evidence in records:
+        _add_metric(entries, documents, name=name, aliases=aliases, meaning=meaning, calculation=calculation, boundary=boundary, evidence=evidence)
+
+
+def _add_density_map_metrics(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
+    boundary = "The desktop map gallery displays only PNG files present in `feature/density_map`; the feature map records the source paths, so a declared map is not proof that its image exists in a workspace."
+    records = (
+        ("cell_density", ("cell density", "cell density map", "all cell density"), "A per-bin map of total movable-cell area fraction.", "For each cell and every overlapping bin, ECC adds `overlap_area / grid_area`; the all-cell variant includes both macros and standard cells."),
+        ("macro_density", ("macro density", "macro density map"), "A per-bin map of macro area fraction.", "ECC runs the same overlap-area accumulation as cell density but filters input cells to `macro` before adding `overlap_area / grid_area`."),
+        ("stdcell_density", ("stdcell density", "standard cell density", "stdcell density map"), "A per-bin map of standard-cell area fraction.", "ECC runs the same overlap-area accumulation as cell density but filters input cells to `stdcell` before adding `overlap_area / grid_area`."),
+        ("pin_density", ("pin density", "pin density map", "all cell pin density"), "A per-bin map of placed-pin count.", "ECC assigns each selected pin to its containing bin and increments that bin. When the evaluator is invoked with neighbor mode, it replaces each bin with the sum of its 3-by-3 neighborhood; the published all-cell map includes macro and standard-cell pins."),
+        ("macro_pin_density", ("macro pin density", "macro pin density map"), "A per-bin map of macro-pin count.", "ECC assigns only pins belonging to macros to their containing bins and increments the corresponding bin; neighbor mode, when requested, replaces each bin with its 3-by-3 neighborhood sum."),
+        ("stdcell_pin_density", ("stdcell pin density", "standard cell pin density", "stdcell pin density map"), "A per-bin map of standard-cell-pin count.", "ECC assigns only pins belonging to standard cells to their containing bins and increments the corresponding bin; neighbor mode, when requested, replaces each bin with its 3-by-3 neighborhood sum."),
+        ("net_density", ("net density", "net density map", "all net density"), "A per-bin map of all net coverage counts.", "ECC classifies a net as local when its bounding box fits one bin and increments that bin; otherwise it increments every bin crossed by the bounding box. The all-net map combines both cases."),
+        ("global_net_density", ("global net density", "global net density map"), "A per-bin map of multi-bin net coverage counts.", "ECC selects nets whose bounding boxes span more than one bin and increments every bin covered by each selected bounding box."),
+        ("local_net_density", ("local net density", "local net density map"), "A per-bin map of single-bin net counts.", "ECC selects nets whose bounding boxes remain inside one bin and increments only that bin."),
+    )
+    for name, aliases, meaning, calculation in records:
+        _add_metric(entries, documents, name=f"place.map.{name}", aliases=aliases, meaning=meaning, calculation=calculation, boundary=boundary, evidence=("gui.map_gallery", "ecc.service", "ecc.feature_union", "ecc.feature_parser", "ecc.density"))
+
+
+def _add_congestion_map_metrics(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
+    boundary = "The map is a placement-time estimator. It is visible only when its PNG is emitted for the workspace; it does not establish detailed-routing success."
+    for direction, layer_scope in (("horizontal", "horizontal-preferred routing layers"), ("vertical", "vertical-preferred routing layers"), ("union", "all routing layers")):
+        _add_metric(entries, documents, name=f"place.map.egr_{direction}", aliases=(f"egr {direction}", f"egr {direction} map", f"{direction} egr map"), meaning=f"An early-global-routing overflow map summed over {layer_scope}.", calculation=f"ECC reads `overflow_map_*` CSV files from the early router, selects {layer_scope}, and sums matching matrices cell by cell. The resulting path is stored under `/Congestion/map/egr/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.service", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
+        _add_metric(entries, documents, name=f"place.map.rudy_{direction}", aliases=(f"rudy {direction}", f"rudy {direction} map", f"{direction} rudy map"), meaning=f"A {direction}-direction RUDY routing-demand map.", calculation=f"For each net bounding box and overlapping bin, ECC accumulates `overlap_area / grid_area` times the reciprocal bbox height for horizontal demand, the reciprocal bbox width for vertical demand, or their sum for union. A zero dimension uses reciprocal `1.0`; the path is `/Congestion/map/rudy/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.service", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
+        _add_metric(entries, documents, name=f"place.map.lutrudy_{direction}", aliases=(f"lutrudy {direction}", f"lut rudy {direction}", f"lutrudy {direction} map"), meaning=f"A {direction}-direction LUT-RUDY routing-demand map.", calculation=f"ECC applies the RUDY overlap accumulation, then scales each non-degenerate directional reciprocal by `getLUT(pin_count, aspect_ratio, l_ness)` before writing `/Congestion/map/lutrudy/{direction}`.", boundary=boundary, evidence=("gui.map_gallery", "ecc.service", "ecc.feature_union", "ecc.feature_parser", "ecc.congestion"))
+
+
 def _add_metrics(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
-    descriptions = {
-        "place_hpwl": "从 placement map 的 /Wirelength/HPWL 提取，单位为 um，极性为 lower-is-better。",
-        "place_grwl": "从 placement map 的 /Wirelength/GRWL 提取，单位为 um，极性为 lower-is-better。",
-        "place_flute_wirelength": "从 placement map 的 /Wirelength/FLUTE 提取，单位为 um，极性为 lower-is-better。",
-        "place_congestion_egr_overflow_total": "从 placement map 的 EGR overflow.total.union 提取，单位为 count，极性为 lower-is-better。",
-        "place_congestion_egr_overflow_max": "从 placement map 的 EGR overflow.max.union 提取，单位为 count，极性为 lower-is-better。",
-        "place_lutrudy_utilization_max": "从 placement map 的 /Congestion/utilization/lutrudy/max/union 提取，单位为 ratio。此快照未在本块推断 LUT-RUDY 的内部公式。",
-    }
-    for metric, body in descriptions.items():
-        _add(entries, documents, entity_id=f"metric.{metric}", kind="metric", aliases=(metric, metric.replace("_", " "), metric.removeprefix("place_")), document="metrics.md", body=body, evidence=("ecc.metrics",))
-    _add(entries, documents, entity_id="metric.place_rudy_utilization_max", kind="metric", aliases=("RUDY", "RUDY指标", "RUDY如何计算", "rudy utilization", "how is rudy calculated", "how to calculate rudy"), document="metrics.md", body="**ECOS 对外指标：** place_rudy_utilization_max 从 placement map 的 /Congestion/utilization/rudy/max/union 读取。\n\n**计算：** ECC congestion evaluator 对每条 net 取 pins 的 bounding box，对每个相交 grid 计算 overlap_area。horizontal 贡献为 overlap_area / bbox_height / grid_area，vertical 贡献为 overlap_area / bbox_width / grid_area，union 为两者相加；退化 bbox 的对应倒数设为 1.0。evaluator 写出该 density grid；ECOS feature map 暴露 union 的 max，再由 metrics 提取。\n\n**边界：** 这是布局期、feature-map 的 RUDY 估计，不是详细布线完成后的真实 overflow；也不要把它与 DreamPlace 内部 torch RUDY operator 混为同一对外指标。", evidence=("ecc.congestion", "ecc.metrics", "dreamplace.placer"))
+    _add_numeric_metrics(entries, documents)
+    _add_density_map_metrics(entries, documents)
+    _add_congestion_map_metrics(entries, documents)
 
 
 def _add_artifacts(entries: list[dict[str, object]], documents: dict[str, list[str]]) -> None:
@@ -264,6 +310,10 @@ def _write_regression(output: Path) -> None:
         {"id": "execution", "question": "place内部算法是如何执行的？", "entity_id": "algorithm.place.execution", "required_text": "NonLinearPlace"},
         {"id": "rudy", "question": "RUDY指标是如何计算的？", "entity_id": "metric.place_rudy_utilization_max", "required_text": "overlap_area"},
         {"id": "hpwl", "question": "place HPWL指标来自哪里？", "entity_id": "metric.place_hpwl", "required_text": "/Wirelength/HPWL"},
+        {"id": "cell-density-map", "question": "How is the cell density map calculated?", "entity_id": "metric.place.map.cell_density", "required_text": "overlap_area"},
+        {"id": "pin-density-map", "question": "How is the pin density map calculated?", "entity_id": "metric.place.map.pin_density", "required_text": "containing bin"},
+        {"id": "net-density-map", "question": "How is the global net density map calculated?", "entity_id": "metric.place.map.global_net_density", "required_text": "bounding boxes"},
+        {"id": "lutrudy", "question": "How is LUT-RUDY utilization calculated?", "entity_id": "metric.place_lutrudy_utilization_max", "required_text": "getLUT"},
         {"id": "artifact", "question": "place阶段有哪些产物？", "entity_id": "artifact.place.outputs", "required_text": "预期路径"},
         {"id": "failure", "question": "dreamplace import failed 怎么理解？", "entity_id": "failure.place.dreamplace_import", "required_text": "dreamplace: import failed"},
     ]

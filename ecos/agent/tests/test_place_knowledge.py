@@ -41,6 +41,47 @@ def test_parameter_chunks_are_english_meaning_and_role_only() -> None:
     }
 
 
+def test_metrics_cover_gui_place_values_and_maps_with_english_calculations() -> None:
+    gui_metrics = (
+        ECOS_ROOT / "ecos/gui/apps/renderer/src/utils/projectManagement.ts"
+    ).read_text(encoding="utf-8")
+    place_metrics = re.search(r"Place: \[(?P<metrics>.*?)\],", gui_metrics, re.DOTALL)
+
+    assert place_metrics is not None
+    visible_numeric_metrics = set(re.findall(r"'(place_[^']+)'", place_metrics.group("metrics")))
+    expected_map_entities = {
+        "metric.place.map.cell_density",
+        "metric.place.map.macro_density",
+        "metric.place.map.stdcell_density",
+        "metric.place.map.pin_density",
+        "metric.place.map.macro_pin_density",
+        "metric.place.map.stdcell_pin_density",
+        "metric.place.map.net_density",
+        "metric.place.map.global_net_density",
+        "metric.place.map.local_net_density",
+        "metric.place.map.egr_horizontal",
+        "metric.place.map.egr_vertical",
+        "metric.place.map.egr_union",
+        "metric.place.map.rudy_horizontal",
+        "metric.place.map.rudy_vertical",
+        "metric.place.map.rudy_union",
+        "metric.place.map.lutrudy_horizontal",
+        "metric.place.map.lutrudy_vertical",
+        "metric.place.map.lutrudy_union",
+    }
+    knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
+    metrics = (BUNDLE_ROOT / "knowledge" / "metrics.md").read_text(encoding="utf-8")
+
+    expected_entities = {f"metric.{metric}" for metric in visible_numeric_metrics}
+    assert expected_entities <= set(knowledge.entity_ids)
+    assert expected_map_entities <= set(knowledge.entity_ids)
+    assert not any("\u4e00" <= character <= "\u9fff" for character in metrics)
+    for entity_id in expected_entities | expected_map_entities:
+        chunk = knowledge.chunk_text(entity_id)
+        assert "**Meaning:**" in chunk
+        assert "**Calculation:**" in chunk
+
+
 def test_regression_questions_render_only_published_markdown_chunks() -> None:
     knowledge = PlaceKnowledge.from_directory(BUNDLE_ROOT)
     cases = [
