@@ -5,6 +5,7 @@ import {
   compactResourceMessage,
   formatResourceSize,
   formatResourceSizeMb,
+  formatResourceVersion,
   managedInstallLocation,
   isEdaToolRow,
   primaryActionForRow,
@@ -67,6 +68,25 @@ describe('pluginToolsRows', () => {
       isFrontendTool: true,
     })
     expect(isEdaToolRow(row)).toBe(true)
+  })
+
+  it('does not prefix the latest resource version with v', () => {
+    expect(formatResourceVersion('latest')).toBe('latest')
+    expect(formatResourceVersion('vlatest')).toBe('latest')
+    expect(formatResourceVersion('5.050')).toBe('v5.050')
+
+    const row = resourceToRow(
+      resource({
+        id: 'tool:surfer',
+        type: 'tool',
+        name: 'surfer',
+        display_name: 'Surfer',
+        available_versions: ['latest'],
+      }),
+      undefined,
+    )
+
+    expect(row.version).toBe('latest')
   })
 
   it('maps an available registry PDK to an installable row', () => {

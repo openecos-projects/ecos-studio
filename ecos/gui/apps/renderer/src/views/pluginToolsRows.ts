@@ -79,6 +79,12 @@ export function formatResourceSizeMb(sizeMb: number): string {
   return `${sizeMb.toFixed(2)} MB`
 }
 
+export function formatResourceVersion(version: string): string {
+  const normalized = String(version).trim().replace(/^v/i, '')
+  if (!normalized) return '-'
+  return normalized.toLowerCase() === 'latest' ? 'latest' : `v${normalized}`
+}
+
 function versionLabel(resource: ResourceItem): string {
   const version =
     resource.active_version ||
@@ -87,7 +93,7 @@ function versionLabel(resource: ResourceItem): string {
   if (!version) {
     return resource.source === 'local' ? 'Local' : '-'
   }
-  return `v${String(version).replace(/^v/i, '')}`
+  return formatResourceVersion(version)
 }
 
 function iconFor(resource: ResourceItem): string {
@@ -442,7 +448,7 @@ export function selectedResourceMetaText(row: ResourceRow): string {
   if (primaryActionForRow(row) === 'replace') {
     const version = row.resource.available_versions[0]
     return version
-      ? `Replace with managed v${String(version).replace(/^v/i, '')}`
+      ? `Replace with managed ${formatResourceVersion(version)}`
       : 'Replace with managed version'
   }
   if (row.statusKind === 'update') {
