@@ -52,9 +52,12 @@ def test_step_bundles_have_entity_level_algorithm_artifact_metric_and_failure_kn
             if line
         ]
 
-        assert len(anchors["algorithms.md"]) >= 3
+        assert len(anchors["algorithms.md"]) >= 5
         assert len(anchors["failures.md"]) >= 3
         assert len(cases) >= 5
+        assert len(
+            [case for case in cases if case["entity_id"].startswith(f"algorithm.{spec.slug}.")]
+        ) >= 5
         assert "**Meaning:**" in documents["parameters.md"]
         assert "**Role:**" in documents["parameters.md"]
         assert "is the normalized" not in documents["metrics.md"]

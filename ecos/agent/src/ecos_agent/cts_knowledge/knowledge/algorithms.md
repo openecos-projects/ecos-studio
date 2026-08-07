@@ -5,16 +5,46 @@
 
 **Source evidence:** **ecc.runner**, **ecc.module**
 
-<a id="algorithm.cts.subflow"></a>
-## algorithm.cts.subflow
+<a id="algorithm.cts.flow_pipeline"></a>
+## algorithm.cts.flow_pipeline
 
-**Subflow order:** `load data -> run CTS -> save data -> analysis`. Inside the CTS runner, `run_cts`, `report_cts`, and `feature_cts_map` execute before persistence; timing feature facts are saved after the database has been saved.
+**Input and state:** `CTSAPI::runCTS()` initializes a CTS data manager, design, clock layout, and QoR summary from the CTS configuration and work directory.
 
-**Source evidence:** **ecc.runner**, **ecc.module**
+**Algorithm:** It executes the native pipeline `Synthesis -> Optimization -> Instantiation -> Evaluation` on shared clock-layout state. A not-initialized flow, an internal-stage failure, or an all-clock no-op produces an explicit native status.
 
-<a id="algorithm.cts.timing_quality"></a>
-## algorithm.cts.timing_quality
+**Output boundary:** Key results include buffer count/area, clock-path buffer range, wirelength, and clock-tree level; they are facts of the constructed clock implementation, not final post-route signoff.
 
-**Clock-quality boundary:** Buffer and wirelength facts come from the `CTS` feature record. Skew, insertion latency and target-unmet counts are emitted only when `timing_quality.availability` is `available`; missing timing facts must not be represented as zero.
+**Source evidence:** **ecc.runner**, **ecc.module**, **icts.api**
 
-**Source evidence:** **ecc.runner**, **ecc.module**
+<a id="algorithm.cts.clock_domain_synthesis"></a>
+## algorithm.cts.clock_domain_synthesis
+
+**Input and state:** `Synthesis::run()` iterates design clocks and separates each clock's hard-macro sinks from regular sinks into domain contexts with shared characterization data.
+
+**Algorithm:** Every usable clock source, source net, and sink domain is prepared before `Topology::formClock()` commits a clock topology. Missing clock/source/net/sink/DBU data causes that clock to be skipped or failed; if all clocks are skipped, synthesis is a no-op.
+
+**Output:** The CTS database records inserted buffers/nets, selected H-tree depth/levels, and per-domain status.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **icts.synthesis**
+
+<a id="algorithm.cts.htree_topology_search"></a>
+## algorithm.cts.htree_topology_search
+
+**Input and state:** H-tree synthesis receives root-net loads, buffer characterization, boundary constraints, fanout/cap/slew limits, and candidate level plans.
+
+**Algorithm:** It generates a topology, characterizes it, builds level plans, enumerates allowable depths, and evaluates the candidate frontier. Per sink domain, a direct connection is used for fewer than two sinks; otherwise the selected tree is committed before a source-to-root trunk is built.
+
+**Stop:** A feasible candidate is finalized; absent feasible characterization or a failed domain/trunk resets that clock topology rather than claiming a clock tree.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **icts.topology**, **icts.htree**
+
+<a id="algorithm.cts.rc_tree_sizing_optimization"></a>
+## algorithm.cts.rc_tree_sizing_optimization
+
+**Input and state:** The router constructs route trees and RC trees for clock DAG nets, then FastSTA supplies resizable-buffer and timing context.
+
+**Algorithm:** Optimization chooses scalable or ordinary sizing solvers, evaluates batch trial master-cell edits, and accepts edits that improve the target objective over skew, capacitance/slew violations, area, and power.
+
+**Stop and output:** No resizable buffer or no accepted candidate is a no-op. Accepted sizing edits are committed into the clock layout and design database.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **icts.router**, **icts.optimization**

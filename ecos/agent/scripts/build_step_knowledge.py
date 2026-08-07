@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from build_place_knowledge import PARAMETER_SEMANTICS as DREAMPLACE_PARAMETER_SEMANTICS
+from step_algorithm_details import ALGORITHM_DETAILS, SOURCE_PATHS as ALGORITHM_SOURCE_PATHS
 
 AGENT_ROOT = Path(__file__).parents[1]
 ECOS_ROOT = AGENT_ROOT.parents[1]
@@ -158,53 +159,7 @@ SOURCE_PATHS = {
     "yosys.metrics": "ecc/chipcompiler/tools/yosys/metrics.py",
     "dreamplace.runner": "ecc/chipcompiler/tools/ecc_dreamplace/runner.py",
     "dreamplace.module": "ecc/chipcompiler/tools/ecc_dreamplace/module.py",
-}
-
-ALGORITHM_DETAILS = {
-    "synthesis": (
-        ("input_gate", ("synthesis inputs", "yosys input validation"), "**Input gate:** The runner accepts either an existing RTL file or an existing filelist. It obtains the Yosys runtime before invoking the Tcl script and, when required by the step data, verifies the Slang plugin before synthesis starts."),
-        ("completion", ("synthesis completion", "yosys output netlist"), "**Completion gate:** Yosys process exit alone is insufficient. The runner accepts synthesis only after `step.output.verilog` exists, then records `run yosys` success and publishes statistics and checklist evidence."),
-    ),
-    "floorplan": (
-        ("subflow", ("floorplan subflow", "floorplan stage order"), "**Subflow order:** `load data -> init floorplan -> create tracks -> place IO pins -> tap cell -> PDN -> set clock net -> save data -> analysis`. These are recorded progress checkpoints around one `init_fp`/`run_fp` invocation."),
-        ("physical_setup", ("floorplan die core pdn", "floorplan tracks pins taps"), "**Physical setup:** The Floorplan configuration drives die/core construction, routing tracks, IO placement, well taps and endcaps, then PDN global-connect, rail, stripe and layer-connect generation. The saved result is the baseline physical database for downstream stages."),
-    ),
-    "fixfanout": (
-        ("subflow", ("fixfanout subflow", "fanout stage order"), "**Subflow order:** `load data -> set clock net -> run net optimization -> save data -> analysis`. Clock tagging is conditional on the workspace Clock parameter being non-empty; it is not inferred from a net name."),
-        ("fanout_source", ("fixfanout max fanout", "fanout metric source"), "**Result boundary:** Net optimization mutates the ECC database through `run_net_opt`. The reported maximum fanout is read from `Pins.max_fanout` in the saved feature database, falling back to the workspace parameter only when that fact is absent."),
-    ),
-    "cts": (
-        ("subflow", ("cts subflow", "clock tree stage order"), "**Subflow order:** `load data -> run CTS -> save data -> analysis`. Inside the CTS runner, `run_cts`, `report_cts`, and `feature_cts_map` execute before persistence; timing feature facts are saved after the database has been saved."),
-        ("timing_quality", ("cts timing quality", "cts skew calculation"), "**Clock-quality boundary:** Buffer and wirelength facts come from the `CTS` feature record. Skew, insertion latency and target-unmet counts are emitted only when `timing_quality.availability` is `available`; missing timing facts must not be represented as zero."),
-    ),
-    "legalization": (
-        ("parameter_overrides", ("legalization overrides", "dreamplace legalize only"), "**Forced mode:** `DreamplaceModule._build_params()` overrides global placement, filler insertion and random-center initialization to off; it forces `legalize_flag=1` and enables automatic bin adjustment. These runtime assignments take precedence over the serialized DreamPlace defaults."),
-        ("subflow", ("legalization subflow", "legalization completion"), "**Subflow order:** `load data -> run legalization -> save data -> analysis`. `PlacementEngine.run()` is the tool boundary. A finite PPA HPWL is required from `DreamplaceModule` before it returns success, but the runner must still save valid terminal artifacts for the stage claim to be auditable."),
-    ),
-    "route": (
-        ("timing_setup", ("route timing setup", "routing timing enable"), "**Conditional timing setup:** Before routing, the runner calls `is_rt_timing_enable(config)`. Only a true result releases any prior STA state and initializes STA with the workspace top module, Liberty files and SDC; otherwise routing proceeds without that timing initialization."),
-        ("subflow", ("route subflow", "routing stage order"), "**Subflow order:** `load data -> run routing -> save data -> analysis`. Route analysis publishes database wirelength/via facts and detailed-routing or layer-assignment feature facts only when their source records are available."),
-    ),
-    "drc": (
-        ("engine_lifecycle", ("drc engine lifecycle", "drc report generation"), "**Engine lifecycle:** The runner initializes DRC in the step data directory, executes `run_drc` with the workspace configuration and step report path, then saves both the common design artifacts and DRC-specific feature data."),
-        ("subflow", ("drc subflow", "drc stage order"), "**Subflow order:** `load data -> run DRC -> save data -> analysis`. A numerical `drc.number` is a count from the persisted feature record; it cannot distinguish an empty rule report from an analysis file that was never generated without the artifact evidence."),
-    ),
-    "filler": (
-        ("subflow", ("filler subflow", "filler stage order"), "**Subflow order:** `load data -> run filler -> save data -> analysis`. Filler insertion is delegated to `ECCToolsModule.run_filler` with the workspace Filler configuration, then the changed ECC database is serialized for downstream signoff stages."),
-        ("result_boundary", ("filler result evidence", "filler completion"), "**Result boundary:** This flow version does not publish a filler-specific GUI comparison metric. A filler-success claim therefore requires the saved post-filler database/geometry and the step checklist, not an assumed change in instance count."),
-    ),
-    "rcx": (
-        ("extraction_lifecycle", ("rcx extraction lifecycle", "rcx spef generation"), "**Extraction lifecycle:** The runner initializes RCX with the workspace PDK, runs extraction, destroys the RCX engine, then copies SPEFs from the RCX writer directory to the declared step outputs. The copied outputs, rather than the transient writer files, are the downstream STA inputs."),
-        ("feature_facts", ("rcx corner coverage", "rcx electrical facts"), "**Feature facts:** `save_rcx_spef_feature_facts` records expected SPEF corners, output existence, parse failures and per-corner electrical totals after copy. The stage returns false if that fact publication fails."),
-    ),
-    "sta": (
-        ("signoff_matrix", ("sta signoff matrix", "sta corners"), "**Signoff matrix:** `collect_sta_signoff_items` expands each configured Liberty corner and its listed RCX corners into one timing run. STA iterates that complete matrix; it does not select a single worst corner before analysis."),
-        ("aggregate", ("sta worst corner", "sta multi corner aggregation"), "**Aggregation:** The metric builder reads available corner QoR summaries, selects the minimum setup/hold WNS and TNS and minimum frequency, sums setup/hold violation counts, and retains loaded/missing-corner coverage in the structured STA facts."),
-    ),
-    "harden": (
-        ("package_generation", ("harden package generation", "abstract lef timing lib"), "**Package generation:** Harden takes the first resolved STA signoff item, writes an abstract LEF, derives a timing-model LIB from that item's Liberty/SDC/SPEF inputs, and exports GDS with `is_harden=True`. It does not call the common `save_data` path."),
-        ("completion", ("harden completion", "harden delivery artifacts"), "**Completion gate:** Final analysis checks the existence of the generated GDS, LEF and LIB and publishes their missing-count. A completed harden subflow without this three-artifact package is not delivery completion."),
-    ),
+    **ALGORITHM_SOURCE_PATHS,
 }
 
 FAILURE_DETAILS = {
@@ -700,7 +655,7 @@ def _add_stage(stage: Stage, entries: list[dict[str, object]], documents: dict[s
         body=f"**Execution path:** {stage.execution}",
         evidence=stage.tool_source_ids,
     )
-    for name, aliases, body in ALGORITHM_DETAILS[stage.slug]:
+    for name, aliases, body, source_ids in ALGORITHM_DETAILS[stage.slug]:
         _add(
             entries,
             documents,
@@ -709,7 +664,7 @@ def _add_stage(stage: Stage, entries: list[dict[str, object]], documents: dict[s
             aliases=aliases,
             document="algorithms.md",
             body=body,
-            evidence=stage.tool_source_ids,
+            evidence=tuple(dict.fromkeys((*stage.tool_source_ids, *source_ids))),
         )
     _add_parameters(stage, entries, documents)
     _add_metrics(stage, entries, documents)
@@ -718,17 +673,26 @@ def _add_stage(stage: Stage, entries: list[dict[str, object]], documents: dict[s
 
 
 def _write_regression(stage: Stage, output: Path, entries: list[dict[str, object]]) -> None:
-    detail_name, detail_aliases, _detail_body = ALGORITHM_DETAILS[stage.slug][0]
     metric_id = f"metric.{METRICS[stage.slug][0]}" if METRICS[stage.slug] else f"metric.{stage.slug}.database_summary"
     parameter_id = next(entry["id"] for entry in entries if str(entry["id"]).startswith(f"parameter.{stage.slug}."))
-    cases = (
+    cases = [
         {"id": f"{stage.slug}-execution", "question": f"How does the {stage.step_name} stage execute?", "entity_id": f"algorithm.{stage.slug}.execution", "required_text": "Execution path:"},
-        {"id": f"{stage.slug}-{detail_name}", "question": max(detail_aliases, key=len), "entity_id": f"algorithm.{stage.slug}.{detail_name}", "required_text": "Source evidence:"},
+    ]
+    cases.extend(
+        {
+            "id": f"{stage.slug}-{name}",
+            "question": max(aliases, key=len),
+            "entity_id": f"algorithm.{stage.slug}.{name}",
+            "required_text": "Source evidence:",
+        }
+        for name, aliases, _body, _source_ids in ALGORITHM_DETAILS[stage.slug]
+    )
+    cases.extend((
         {"id": f"{stage.slug}-parameter", "question": str(parameter_id).replace("parameter.", "").replace(".", " "), "entity_id": parameter_id, "required_text": "**Role:**"},
         {"id": f"{stage.slug}-metric", "question": metric_id.removeprefix("metric.").replace("_", " "), "entity_id": metric_id, "required_text": "**Calculation:**"},
         {"id": f"{stage.slug}-artifact", "question": f"{stage.slug} artifacts", "entity_id": f"artifact.{stage.slug}.outputs", "required_text": "**Meaning:**"},
         {"id": f"{stage.slug}-failure", "question": f"{stage.slug} failed", "entity_id": f"failure.{stage.slug}.preconditions", "required_text": "**Failure mode:**"},
-    )
+    ))
     regression = output / "regression"
     regression.mkdir(exist_ok=True)
     regression.joinpath(f"{stage.slug}_questions.jsonl").write_text(

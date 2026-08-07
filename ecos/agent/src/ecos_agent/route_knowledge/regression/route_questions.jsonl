@@ -1,5 +1,9 @@
 {"entity_id": "algorithm.route.execution", "id": "route-execution", "question": "How does the route stage execute?", "required_text": "Execution path:"}
-{"entity_id": "algorithm.route.timing_setup", "id": "route-timing_setup", "question": "routing timing enable", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.route.routing_pipeline", "id": "route-routing_pipeline", "question": "irt pin access planar layer track detailed", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.route.planar_global_routing", "id": "route-planar_global_routing", "question": "irt planar router astar congestion", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.route.layer_assignment", "id": "route-layer_assignment", "question": "irt tree dynamic programming", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.route.track_assignment", "id": "route-track_assignment", "question": "irt panel astar track router", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.route.detailed_routing_and_patch", "id": "route-detailed_routing_and_patch", "question": "irt detailed router drc repair", "required_text": "Source evidence:"}
 {"entity_id": "parameter.route.rt__bottom_routing_layer", "id": "route-parameter", "question": "route rt__bottom_routing_layer", "required_text": "**Role:**"}
 {"entity_id": "metric.route_dr_total_patch_count", "id": "route-metric", "question": "route dr total patch count", "required_text": "**Calculation:**"}
 {"entity_id": "artifact.route.outputs", "id": "route-artifact", "question": "route artifacts", "required_text": "**Meaning:**"}

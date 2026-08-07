@@ -1,5 +1,9 @@
 {"entity_id": "algorithm.rcx.execution", "id": "rcx-execution", "question": "How does the RCX stage execute?", "required_text": "Execution path:"}
-{"entity_id": "algorithm.rcx.extraction_lifecycle", "id": "rcx-extraction_lifecycle", "question": "rcx extraction lifecycle", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.topology_construction", "id": "rcx-topology_construction", "question": "ircx topo pool nodes edges", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.environment_overlap_model", "id": "rcx-environment_overlap_model", "question": "rcx environment overlap model", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.corner_effective_geometry", "id": "rcx-corner_effective_geometry", "question": "rcx corner effective geometry", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.resistance_extraction", "id": "rcx-resistance_extraction", "question": "rcx resistance extraction", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.rcx.capacitance_and_spef", "id": "rcx-capacitance_and_spef", "question": "ircx coupling ground capacitance", "required_text": "Source evidence:"}
 {"entity_id": "parameter.rcx.output", "id": "rcx-parameter", "question": "rcx output", "required_text": "**Role:**"}
 {"entity_id": "metric.rcx_missing_corner_count", "id": "rcx-metric", "question": "rcx missing corner count", "required_text": "**Calculation:**"}
 {"entity_id": "artifact.rcx.outputs", "id": "rcx-artifact", "question": "rcx artifacts", "required_text": "**Meaning:**"}
