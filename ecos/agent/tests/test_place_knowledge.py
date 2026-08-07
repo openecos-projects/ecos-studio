@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -23,6 +24,21 @@ def test_published_bundle_covers_every_default_dreamplace_parameter() -> None:
 
     assert len(knowledge.entities) >= len(config) + 18
     assert {f"parameter.dreamplace.{name}" for name in config} <= set(knowledge.entity_ids)
+    assert "parameter.place.global_right_padding" not in knowledge.entity_ids
+
+
+def test_parameter_chunks_are_english_meaning_and_role_only() -> None:
+    parameters = (BUNDLE_ROOT / "knowledge" / "parameters.md").read_text(encoding="utf-8")
+
+    assert "**Meaning:**" in parameters
+    assert "**Role:**" in parameters
+    assert "**Role in the algorithm:**" not in parameters
+    assert "global_right_padding" not in parameters
+    assert not any("\u4e00" <= character <= "\u9fff" for character in parameters)
+    assert set(re.findall(r"^\*\*([^:]+):\*\*", parameters, flags=re.MULTILINE)) == {
+        "Meaning",
+        "Role",
+    }
 
 
 def test_regression_questions_render_only_published_markdown_chunks() -> None:

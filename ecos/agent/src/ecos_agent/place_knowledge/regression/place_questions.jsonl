@@ -1,4 +1,4 @@
-{"entity_id": "parameter.dreamplace.target_density", "id": "target-density", "question": "place阶段的target density这个参数的含义是什么？", "required_text": "目标放置密度"}
+{"entity_id": "parameter.dreamplace.target_density", "id": "target-density", "question": "place阶段的target density这个参数的含义是什么？", "required_text": "target placement density"}
 {"entity_id": "algorithm.place.execution", "id": "execution", "question": "place内部算法是如何执行的？", "required_text": "NonLinearPlace"}
 {"entity_id": "metric.place_rudy_utilization_max", "id": "rudy", "question": "RUDY指标是如何计算的？", "required_text": "overlap_area"}
 {"entity_id": "metric.place_hpwl", "id": "hpwl", "question": "place HPWL指标来自哪里？", "required_text": "/Wirelength/HPWL"}
