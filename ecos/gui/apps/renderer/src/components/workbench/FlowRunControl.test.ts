@@ -14,6 +14,7 @@ describe('FlowRunControl', () => {
     expect(source).toContain('canRerunCurrentStep')
     expect(source).toContain('chipViewer.isOpen')
     expect(source).toContain('Close Chip Viewer First')
+    expect(source).toContain('prepareFlowLogSegmentForRerun(currentStage.value)')
   })
 
   it('captures each successful run step output for the information panel', () => {

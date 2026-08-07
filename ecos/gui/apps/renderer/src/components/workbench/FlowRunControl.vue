@@ -53,6 +53,7 @@ import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useFlowStages } from '@/composables/useFlowStages'
+import { prepareFlowLogSegmentForRerun } from '@/composables/useHomeData'
 import { rerunHomeWorkspace } from '@/composables/homeFlowRerun'
 import { useSubflow } from '@/composables/useSubflow'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -131,6 +132,8 @@ async function executeRun(rerun: boolean): Promise<void> {
         await refreshFlowStages()
       } else if (!(await canRerunCurrentStep())) {
         return
+      } else {
+        prepareFlowLogSegmentForRerun(currentStage.value)
       }
     } catch (error) {
       showToast({
