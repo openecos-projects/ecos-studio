@@ -90,7 +90,7 @@ const WORKSPACE_STEP_ANALYSIS_SPECS: Array<{
 
 const STA_TIMING_ISSUES_PATH = 'sta_ecc/analysis/sta_timing_issues.json'
 
-export async function readProjectWorkspaceFlowStates(
+export async function readBackendProjectWorkspaceFlowStates(
   manifest: ProjectManifest,
 ): Promise<ProjectWorkspaceFlowStatesById> {
   const entries = await Promise.all(
@@ -116,7 +116,7 @@ export async function readProjectWorkspaceFlowStates(
   return Object.fromEntries(entries)
 }
 
-export async function readProjectWorkspaceAnalysisInputs(
+export async function readBackendProjectWorkspaceAnalysisInputs(
   manifest: ProjectManifest,
 ): Promise<ProjectWorkspaceAnalysisInputsById> {
   const entries = await Promise.all(

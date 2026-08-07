@@ -763,7 +763,7 @@ import { previewList } from './project-management/projectListPreview'
 import {
   readProjectWorkspaceAnalysisInputs,
   readProjectWorkspaceFlowStates,
-} from './project-management/projectWorkspaceAnalysisData'
+} from './project-management/projectWorkspaceData'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
