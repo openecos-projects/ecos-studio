@@ -240,13 +240,12 @@ def _load_cases(split: str) -> list[dict[str, object]]:
     return [json.loads(line) for line in BENCHMARK.read_text(encoding="utf-8").splitlines() if marker in line]
 
 
-def _selection_key(result: dict[str, object], config: FrozenRetrievalConfig) -> tuple[float, float, float, float, str]:
+def _selection_key(result: dict[str, object], config: FrozenRetrievalConfig) -> tuple[float, float, float, str]:
     overall = result["overall"]
     quality = overall["quality"]
     return (
         -float(quality["required_evidence_all_recall"]),
         -float(overall["recall_at_3"]),
-        float(overall["no_answer_false_positive_rate"]),
         -float(overall["mrr"]),
         json.dumps(config.contract(), sort_keys=True, separators=(",", ":")),
     )
@@ -268,22 +267,30 @@ def _select_dev_config(paths: list[Path], args: argparse.Namespace) -> dict[str,
         seen.add(frozen_json)
         result = _result_for_split(dev_cases, config)
         evaluated.append((config, result, frozen_json))
-    selected = min(evaluated, key=lambda item: _selection_key(item[1], item[0]))
+    fpr_limit = 0.05
+    eligible = [
+        item
+        for item in evaluated
+        if float(item[1]["overall"]["no_answer_false_positive_rate"]) <= fpr_limit
+    ]
+    selected = min(eligible, key=lambda item: _selection_key(item[1], item[0])) if eligible else None
     candidates = [
         {
             "config_sha256": _sha256(config.contract()),
             "frozen_config": config.contract(),
             "metrics": result["overall"],
+            "eligible": (float(result["overall"]["no_answer_false_positive_rate"]) <= fpr_limit),
             "required_evidence_failures": result["failures"]["total"],
         }
         for config, result, _frozen_json in evaluated
     ]
     return {
         "evaluation_split": "dev",
-        "selection_rule": "max required evidence recall, recall@3, min false positives, max MRR, canonical config",
+        "selection_rule": "no-answer FPR <= 0.05, then max required evidence recall, recall@3, MRR, canonical config",
+        "no_answer_fpr_limit": fpr_limit,
         "test_cases_evaluated": 0,
         "candidates": candidates,
-        "selected": {
+        "selected": None if selected is None else {
             "config_sha256": _sha256(selected[0].contract()),
             "frozen_config": selected[0].contract(),
             "frozen_config_json": selected[2],
@@ -291,7 +298,7 @@ def _select_dev_config(paths: list[Path], args: argparse.Namespace) -> dict[str,
     }
 
 
-def _protocol_lines(process: subprocess.Popen[str], request_id: str, records: list[dict[str, object]]) -> dict[str, object]:
+def _protocol_lines(process: subprocess.Popen[bytes], request_id: str, records: list[dict[str, object]]) -> dict[str, object]:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         if process.stdout is None:
@@ -301,7 +308,7 @@ def _protocol_lines(process: subprocess.Popen[str], request_id: str, records: li
             if process.poll() is not None:
                 break
             continue
-        line = process.stdout.readline()
+        line = process.stdout.readline().decode("utf-8")
         if not line:
             break
         payload = json.loads(line)
@@ -311,10 +318,10 @@ def _protocol_lines(process: subprocess.Popen[str], request_id: str, records: li
     raise RuntimeError(f"provider did not respond to {request_id}")
 
 
-def _write_request(process: subprocess.Popen[str], payload: dict[str, object]) -> None:
+def _write_request(process: subprocess.Popen[bytes], payload: dict[str, object]) -> None:
     if process.stdin is None:
         raise RuntimeError("provider stdin is unavailable")
-    process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    process.stdin.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
     process.stdin.flush()
 
 
@@ -331,15 +338,20 @@ def _run_protocol(binary: Path) -> tuple[dict[str, object], float, int]:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=False,
+            bufsize=0,
             env=environment,
         )
         records: list[dict[str, object]] = []
         started = time.perf_counter()
-        _write_request(process, {"id": "start-1", "method": "startSession", "params": {"mode": "home", "sessionId": "headless-audit"}})
-        _protocol_lines(process, "start-1", records)
+        _write_request(process, {"id": "start-1", "method": "startSession", "params": {"mode": "home"}})
+        started_session = _protocol_lines(process, "start-1", records)
+        result = started_session.get("result")
+        session_id = result.get("sessionId") if isinstance(result, dict) else None
+        if not isinstance(session_id, str) or not session_id:
+            raise RuntimeError("provider did not return a session ID")
         startup_ms = (time.perf_counter() - started) * 1000
-        _write_request(process, {"id": "message-1", "method": "sendMessage", "params": {"sessionId": "headless-audit", "message": _PROTOCOL_QUERY}})
+        _write_request(process, {"id": "message-1", "method": "sendMessage", "params": {"sessionId": session_id, "message": _PROTOCOL_QUERY}})
         _protocol_lines(process, "message-1", records)
         if process.stdin is not None:
             process.stdin.close()

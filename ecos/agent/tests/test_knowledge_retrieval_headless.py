@@ -97,14 +97,15 @@ def test_headless_evaluation_rejects_invalid_frozen_config_types(tmp_path: Path)
 
 def test_dev_config_selection_never_evaluates_test_cases(tmp_path: Path) -> None:
     configs = []
-    for top_k in (3, 5):
-        path = tmp_path / f"top-{top_k}.json"
+    for min_token_overlap in (2, 3):
+        path = tmp_path / f"overlap-{min_token_overlap}.json"
         path.write_text(
             json.dumps(
                 {
                     "schema_version": "ecos-frozen-knowledge-retrieval-config.v1",
-                    "include_aliases": True,
-                    "top_k": top_k,
+                    "include_aliases": False,
+                    "field_weights": [6.0, 12.0, 0.0, 6.0],
+                    "min_token_overlap": min_token_overlap,
                 }
             ),
             encoding="utf-8",
@@ -134,4 +135,7 @@ def test_dev_config_selection_never_evaluates_test_cases(tmp_path: Path) -> None
     assert selection["evaluation_split"] == "dev"
     assert len(selection["candidates"]) == 2
     assert selection["test_cases_evaluated"] == 0
-    assert json.loads(selection["selected"]["frozen_config_json"])["top_k"] in {3, 5}
+    assert selection["no_answer_fpr_limit"] == 0.05
+    assert any(candidate["eligible"] for candidate in selection["candidates"])
+    assert selection["selected"] is not None
+    assert json.loads(selection["selected"]["frozen_config_json"])["min_token_overlap"] == 3

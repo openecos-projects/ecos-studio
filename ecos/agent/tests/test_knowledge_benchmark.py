@@ -50,6 +50,21 @@ def test_semantic_cases_do_not_contain_a_complete_target_alias() -> None:
             )
 
 
+def test_semantic_cases_share_target_chunk_vocabulary() -> None:
+    bundles = {
+        spec.slug: StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / spec.slug, spec)
+        for spec in STEP_KNOWLEDGE_SPECS
+    }
+    cases = [json.loads(line) for line in (BENCHMARK_ROOT / "benchmark.v1.jsonl").read_text(encoding="utf-8").splitlines()]
+
+    for case in cases:
+        if case["category"] != "semantic_paraphrase":
+            continue
+        target = case["target_entity_ids"][0]
+        chunk_tokens = set(tokenize(bundles[case["stage"]].chunk_text(target)))
+        assert len(set(tokenize(case["query"])) & chunk_tokens) >= 2
+
+
 def test_alias_leak_check_ignores_aliases_without_tokens() -> None:
     aliases_leak = runpy.run_path(AGENT_ROOT / "scripts" / "build_knowledge_benchmark.py")["_aliases_leak"]
     assert not aliases_leak("Which phase prepares a cell netlist?", ("the",))
@@ -115,13 +130,26 @@ def test_frozen_benchmark_has_isolated_unique_coverage_and_manifest_dimensions()
 def test_frozen_test_split_meets_the_lexical_retrieval_quality_gate(tmp_path: Path) -> None:
     output = tmp_path / "evaluation.json"
     subprocess.run(
-        ["uv", "run", "python", "scripts/evaluate_knowledge_retrieval.py", "--output", str(output)],
+        [
+            "uv",
+            "run",
+            "python",
+            "scripts/evaluate_knowledge_retrieval.py",
+            "--aliases",
+            "off",
+            "--top-k",
+            "3",
+            "--output",
+            str(output),
+        ],
         cwd=AGENT_ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
-    test = json.loads(output.read_text(encoding="utf-8"))["results"]["test"]["3"]
+    evaluation = json.loads(output.read_text(encoding="utf-8"))
+    assert evaluation["frozen_config"]["include_aliases"] is False
+    test = evaluation["results"]["test"]["3"]
 
     assert test["overall"]["recall_at_3"] >= 0.95
     assert test["subsets"]["semantic_en"]["recall_at_3"] >= 0.90

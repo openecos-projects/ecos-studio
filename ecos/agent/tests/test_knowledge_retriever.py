@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
-from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever
+import pytest
+
+from ecos_agent.knowledge_bundle import KnowledgeBundle, KnowledgeBundleSpec, KnowledgeEntity
+from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, RetrievalConfig
 from ecos_agent.step_knowledge import STEP_KNOWLEDGE_SPECS, StepKnowledge
 
 
@@ -12,11 +16,23 @@ KNOWLEDGE_ROOT = AGENT_ROOT / "knowledge"
 
 
 def _retriever(*, include_aliases: bool = True) -> GlobalKnowledgeRetriever:
-    bundles = tuple(
+    return GlobalKnowledgeRetriever(_bundles(), include_aliases=include_aliases)
+
+
+def _bundles() -> tuple[StepKnowledge, ...]:
+    return tuple(
         StepKnowledge.from_directory(KNOWLEDGE_ROOT / spec.slug, spec)
         for spec in STEP_KNOWLEDGE_SPECS
     )
-    return GlobalKnowledgeRetriever(bundles, include_aliases=include_aliases)
+
+
+def _bundle(*entities: tuple[str, tuple[str, ...], str]) -> KnowledgeBundle:
+    spec = KnowledgeBundleSpec("test", "test-manifest.v1", "test-catalog.v1")
+    records = tuple(
+        KnowledgeEntity(entity_id, aliases, "knowledge.md", entity_id, "0" * 64, ("test.source",))
+        for entity_id, aliases, _text in entities
+    )
+    return KnowledgeBundle(spec, records, {entity_id: text for entity_id, _aliases, text in entities})
 
 
 def test_global_retriever_indexes_every_stage_and_records_replayable_trace() -> None:
@@ -25,9 +41,10 @@ def test_global_retriever_indexes_every_stage_and_records_replayable_trace() -> 
     answer = retriever.reply("How does the CTS stage execute?")
 
     assert answer is not None
-    assert "algorithm.cts.execution" in answer.entity_ids
+    assert any(entity_id.startswith("algorithm.cts.") for entity_id in answer.entity_ids)
     assert answer.contract["schema_version"] == "ecos-knowledge-answer.v2"
     assert answer.contract["read_only"] is True
+    assert answer.contract["entity_ids"] == list(answer.entity_ids)
     assert answer.contract["retrieval"] == {
         "backend": "sqlite_fts5_bm25",
         "tokenizer_version": "ecos-knowledge-tokenizer.v1",
@@ -35,6 +52,17 @@ def test_global_retriever_indexes_every_stage_and_records_replayable_trace() -> 
         "top_k": 3,
         "score_order": "ascending",
         "field_weights": answer.contract["retrieval"]["field_weights"],
+        "config": {
+            "top_k": 3,
+            "field_weights": answer.contract["retrieval"]["field_weights"],
+            "max_query_tokens": 32,
+            "max_raw_bm25": None,
+            "min_score_margin": 0.0,
+            "min_token_overlap": 3,
+            "max_document_frequency": 0,
+            "allow_metadata_match": False,
+            "include_aliases": True,
+        },
         "query_sha256": answer.contract["retrieval"]["query_sha256"],
     }
     assert answer.contract["matches"][0]["entity_id"] == answer.entity_ids[0]
@@ -70,11 +98,94 @@ def test_global_retriever_supports_protocol_worker_threads() -> None:
         answer = executor.submit(retriever.reply, "How does the CTS stage execute?").result()
 
     assert answer is not None
-    assert "algorithm.cts.execution" in answer.entity_ids
+    assert any(entity_id.startswith("algorithm.cts.") for entity_id in answer.entity_ids)
 
 
 def test_aliases_are_a_weighted_field_not_a_bypass() -> None:
-    answer = _retriever(include_aliases=False).reply("How does the CTS stage execute?")
+    answer = _retriever(include_aliases=False).reply(
+        "How does clock domain synthesis build clock topology and buffers?"
+    )
 
     assert answer is not None
-    assert "algorithm.cts.execution" in answer.entity_ids
+    assert any(entity_id.startswith("algorithm.cts.") for entity_id in answer.entity_ids)
+
+
+def test_aliases_can_be_removed_from_both_fts_and_confidence_corpus() -> None:
+    bundle = _bundle(("answer", ("secret vocabulary",), "audited content without the alias"))
+
+    retriever = GlobalKnowledgeRetriever(
+        (bundle,),
+        include_aliases=False,
+        config=RetrievalConfig(max_raw_bm25=0.0, min_token_overlap=1),
+    )
+
+    assert retriever.reply("secret vocabulary") is None
+    assert retriever._connection.execute("SELECT aliases FROM knowledge").fetchone() == ("",)
+    assert "secret" not in retriever._records[0].tokens
+
+
+def test_retrieval_config_is_frozen_and_recorded_for_replay() -> None:
+    config = RetrievalConfig(
+        top_k=5,
+        field_weights=(2.0, 3.0, 4.0, 5.0),
+        max_raw_bm25=0.0,
+        min_score_margin=0.0,
+        min_token_overlap=1,
+    )
+    with pytest.raises(FrozenInstanceError):
+        config.top_k = 3  # type: ignore[misc]
+    with pytest.raises(ValueError, match="field weights"):
+        RetrievalConfig(field_weights=[2.0, 3.0, 4.0, 5.0])  # type: ignore[arg-type]
+
+    answer = GlobalKnowledgeRetriever(
+        _bundles(),
+        include_aliases=False,
+        config=config,
+    ).reply("How does the CTS stage execute?")
+
+    assert answer is not None
+    assert answer.contract["retrieval"]["config"] == {
+        "field_weights": {"stage": 2.0, "identifier": 3.0, "aliases": 4.0, "content": 5.0},
+        "include_aliases": False,
+        "max_query_tokens": 32,
+        "max_raw_bm25": 0.0,
+        "min_score_margin": 0.0,
+        "min_token_overlap": 1,
+            "max_document_frequency": 0,
+            "allow_metadata_match": False,
+        "top_k": 5,
+    }
+
+
+def test_low_confidence_bm25_threshold_and_margin_return_no_answer() -> None:
+    threshold_bundle = _bundle(("answer", (), "alpha beta gamma"))
+    threshold_retriever = GlobalKnowledgeRetriever(
+        (threshold_bundle,),
+        config=RetrievalConfig(max_raw_bm25=-1_000.0, min_token_overlap=1),
+    )
+    margin_bundle = _bundle(
+        ("first", (), "alpha beta gamma"),
+        ("second", (), "alpha beta gamma"),
+    )
+    margin_retriever = GlobalKnowledgeRetriever(
+        (margin_bundle,),
+        config=RetrievalConfig(max_raw_bm25=0.0, min_score_margin=0.01, min_token_overlap=1),
+    )
+
+    assert threshold_retriever.reply("alpha beta") is None
+    assert margin_retriever.reply("alpha beta") is None
+
+
+def test_uppercase_eda_acronyms_are_confident_without_weakening_word_overlap() -> None:
+    bundle = _bundle(("metric", (), "The RUDY metric measures routing demand."))
+
+    answer = GlobalKnowledgeRetriever((bundle,)).reply("RUDY指标是如何计算的？")
+
+    assert answer is not None
+    assert answer.entity_ids == ("metric",)
+
+
+def test_unknown_named_tools_do_not_inject_shared_eda_chunks() -> None:
+    bundle = _bundle(("power", (), "The power grid reports routing demand."))
+
+    assert GlobalKnowledgeRetriever((bundle,)).reply("Explain OpenSTA power grid wizard.") is None

@@ -14,7 +14,7 @@
 <a id="algorithm.dreamplace.global_placement"></a>
 ## algorithm.dreamplace.global_placement
 
-**Idea:** Global placement relaxes cells to continuous coordinates and minimizes a differentiable objective. `PlaceObj` combines smoothed wirelength with a density penalty, and can add a macro-overlap penalty. The weighted-average wirelength model supplies gradients where exact HPWL is not differentiable, while density and overflow are evaluated over placement bins.
+**Idea:** Global placement relaxes cells to continuous coordinates and minimizes a differentiable objective. It is the density-aware continuous-cell-movement phase before legalization. `PlaceObj` combines smoothed wirelength with a density penalty, and can add a macro-overlap penalty. The weighted-average wirelength model supplies gradients where exact HPWL is not differentiable, while density and overflow are evaluated over placement bins.
 
 **Optimization structure:** Each configured global stage runs **three nested optimization loops**: an outer gamma loop reduces wirelength smoothing, a middle loop updates density weight, and an inner loop performs optimizer descent. The selected optimizer can be Adam, SGD variants, or Nesterov; each descent step projects cells back into the placement boundary, evaluates HPWL and overflow, differentiates the objective, and preconditions gradients by density and node area.
 

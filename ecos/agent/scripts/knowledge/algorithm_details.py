@@ -176,8 +176,8 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
         ),
         (
             "legalization_pipeline",
-            ("dreamplace legalization pipeline", "macro greedy abacus legalization"),
-            "**Input and state:** The legalization operators consume the continuous `pos` tensor, node dimensions/weights, fixed objects, placement bounds, site/row geometry, and optional fence regions.\n\n**Algorithm:** For ordinary regions, `NonLinearPlace` composes `MacroLegalize -> GreedyLegalize -> AbacusLegalize`; it checks legality after greedy placement and after Abacus refinement. Fence-region designs use per-region operators before merging.\n\n**Failure boundary:** A failed legality check returns the earlier candidate designated by the implementation; it does not silently mark an illegal result as legalized.",
+            ("dreamplace legalization pipeline", "site-legal cell movement", "macro greedy abacus legalization"),
+            "**Input and state:** The legalization operators consume the continuous `pos` tensor, node dimensions/weights, fixed objects, placement bounds, site/row geometry, and optional fence regions.\n\n**Algorithm:** This is the site-legal cell-movement phase after continuous placement. For ordinary regions, `NonLinearPlace` composes `MacroLegalize -> GreedyLegalize -> AbacusLegalize`; it checks legality after greedy placement and after Abacus refinement. Fence-region designs use per-region operators before merging.\n\n**Failure boundary:** A failed legality check returns the earlier candidate designated by the implementation; it does not silently mark an illegal result as legalized.",
             ("dreamplace.basic_place", "dreamplace.nonlinear"),
         ),
         (

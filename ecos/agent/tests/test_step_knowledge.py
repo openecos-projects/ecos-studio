@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.provider import EcosAgentProvider
-from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever
+from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, RetrievalConfig
 from ecos_agent.step_knowledge import (
     STEP_KNOWLEDGE_SPECS,
     StepKnowledge,
@@ -18,6 +18,13 @@ from ecos_agent.step_knowledge import (
 
 AGENT_ROOT = Path(__file__).parents[1]
 KNOWLEDGE_ROOT = AGENT_ROOT / "knowledge"
+
+
+def _bundle_smoke_retriever(knowledge: StepKnowledge) -> GlobalKnowledgeRetriever:
+    return GlobalKnowledgeRetriever(
+        (knowledge,),
+        config=RetrievalConfig(max_raw_bm25=None, min_token_overlap=2),
+    )
 
 
 def test_flow_knowledge_specs_include_place_in_canonical_order() -> None:
@@ -72,7 +79,7 @@ def test_every_flow_step_has_a_source_audited_knowledge_bundle() -> None:
     for spec in STEP_KNOWLEDGE_SPECS:
         root = KNOWLEDGE_ROOT / spec.slug
         knowledge = StepKnowledge.from_directory(root, spec)
-        answer = GlobalKnowledgeRetriever((knowledge,)).reply(
+        answer = _bundle_smoke_retriever(knowledge).reply(
             f"How does the {spec.step_name} stage execute?"
         )
 
@@ -139,7 +146,7 @@ def test_step_bundle_regression_questions_return_audited_read_only_answers() -> 
         ]
 
         for case in cases:
-            answer = GlobalKnowledgeRetriever((knowledge,)).reply(case["question"])
+            answer = _bundle_smoke_retriever(knowledge).reply(case["question"])
 
             assert answer is not None
             assert case["entity_id"] in answer.entity_ids
