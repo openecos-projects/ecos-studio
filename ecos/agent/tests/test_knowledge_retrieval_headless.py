@@ -38,7 +38,6 @@ def test_headless_evaluation_audits_frozen_retrieval_and_packaged_fallback(tmp_p
         tmp_path,
         {
             "schema_version": "ecos-frozen-knowledge-retrieval-config.v1",
-            "include_aliases": False,
             "top_k": 3,
             "field_weights": [10.0, 20.0, 10.0, 1.0],
         },
@@ -46,12 +45,11 @@ def test_headless_evaluation_audits_frozen_retrieval_and_packaged_fallback(tmp_p
 
     assert payload["schema_version"] == "ecos-knowledge-retrieval-evaluation.v2"
     frozen = payload["frozen_config"]
-    assert frozen["include_aliases"] is False
     assert frozen["top_k"] == 3
     assert frozen["field_weights"] == {
         "stage": 10.0,
         "identifier": 20.0,
-        "aliases": 10.0,
+        "reserved": 10.0,
         "content": 1.0,
     }
     test = payload["results"]["test"]["3"]
@@ -103,7 +101,6 @@ def test_dev_config_selection_never_evaluates_test_cases(tmp_path: Path) -> None
             json.dumps(
                 {
                     "schema_version": "ecos-frozen-knowledge-retrieval-config.v1",
-                    "include_aliases": False,
                     "field_weights": [6.0, 12.0, 0.0, 6.0],
                     "min_token_overlap": min_token_overlap,
                 }

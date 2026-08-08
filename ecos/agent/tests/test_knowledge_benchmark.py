@@ -31,21 +31,17 @@ def test_frozen_benchmark_is_current_and_meets_test_minimums() -> None:
 
 
 def test_semantic_cases_do_not_contain_a_complete_target_alias() -> None:
-    aliases = {
-        entity.entity_id: entity.aliases
-        for spec in STEP_KNOWLEDGE_SPECS
-        for entity in StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / spec.slug, spec).entities
-    }
+    aliases = json.loads((BENCHMARK_ROOT / "legacy-alias-terms.v1.json").read_text(encoding="utf-8"))["terms"]
     cases = [json.loads(line) for line in (BENCHMARK_ROOT / "benchmark.v1.jsonl").read_text(encoding="utf-8").splitlines()]
 
     for case in cases:
         if not case["forbidden_alias_overlap"]:
             continue
         query_tokens = set(tokenize(case["query"]))
-        for entity_id in case["target_entity_ids"]:
+        for stage_entity_id in case["target_stage_entity_ids"]:
             assert all(
                 not (alias_tokens and alias_tokens <= query_tokens)
-                for alias in aliases[entity_id]
+                for alias in aliases[stage_entity_id]
                 for alias_tokens in (set(tokenize(alias)),)
             )
 
@@ -135,8 +131,6 @@ def test_frozen_test_split_meets_the_lexical_retrieval_quality_gate(tmp_path: Pa
             "run",
             "python",
             "scripts/evaluate_knowledge_retrieval.py",
-            "--aliases",
-            "off",
             "--top-k",
             "3",
             "--output",
@@ -148,7 +142,6 @@ def test_frozen_test_split_meets_the_lexical_retrieval_quality_gate(tmp_path: Pa
         text=True,
     )
     evaluation = json.loads(output.read_text(encoding="utf-8"))
-    assert evaluation["frozen_config"]["include_aliases"] is False
     test = evaluation["results"]["test"]["3"]
 
     assert test["overall"]["recall_at_3"] >= 0.95

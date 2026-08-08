@@ -18,24 +18,23 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ecos_agent.knowledge_retriever import DEFAULT_RETRIEVAL_CONFIG, GlobalKnowledgeRetriever, RetrievalConfig
+from ecos_agent.knowledge_retriever import DEFAULT_RETRIEVAL_CONFIG, GlobalKnowledgeRetriever, RetrievalConfig, load_production_retrieval_config
 from ecos_agent.step_knowledge import load_default_step_knowledge
 
 
 AGENT_ROOT = Path(__file__).parents[1]
 BENCHMARK = AGENT_ROOT / "tests" / "data" / "knowledge_retrieval" / "benchmark.v1.jsonl"
 _CONFIG_SCHEMA = "ecos-frozen-knowledge-retrieval-config.v1"
-_WEIGHT_NAMES = ("stage", "identifier", "aliases", "content")
+_WEIGHT_NAMES = ("stage", "identifier", "reserved", "content")
 _PROTOCOL_QUERY = "RUDY指标是如何计算的？"
 
 
 @dataclass(frozen=True)
 class FrozenRetrievalConfig:
-    include_aliases: bool
     retrieval: RetrievalConfig
 
     def contract(self) -> dict[str, object]:
-        return self.retrieval.contract(include_aliases=self.include_aliases)
+        return self.retrieval.contract()
 
 
 @dataclass(frozen=True)
@@ -103,7 +102,6 @@ def _answer_checks(answer: object) -> tuple[tuple[str, ...], bool, bool]:
 def _evaluate_cases(cases: list[dict[str, object]], frozen: FrozenRetrievalConfig) -> list[CaseOutcome]:
     retriever = GlobalKnowledgeRetriever(
         load_default_step_knowledge(),
-        include_aliases=frozen.include_aliases,
         config=frozen.retrieval,
     )
     outcomes: list[CaseOutcome] = []
@@ -214,23 +212,18 @@ def _read_config(path: Path | None, args: argparse.Namespace) -> FrozenRetrieval
             raise ValueError(f"invalid frozen retrieval config: {path}") from exc
         if not isinstance(raw, dict) or raw.get("schema_version") != _CONFIG_SCHEMA:
             raise ValueError(f"frozen retrieval config must use {_CONFIG_SCHEMA}")
-    unknown = set(raw) - {"schema_version", "include_aliases", *RetrievalConfig.__dataclass_fields__}
+    unknown = set(raw) - {"schema_version", *RetrievalConfig.__dataclass_fields__}
     if unknown:
         raise ValueError(f"unknown frozen retrieval config fields: {', '.join(sorted(unknown))}")
-    include_aliases = raw.get("include_aliases", True)
-    if not isinstance(include_aliases, bool):
-        raise ValueError("frozen retrieval include_aliases must be boolean")
     values = {name: raw.get(name, getattr(DEFAULT_RETRIEVAL_CONFIG, name)) for name in RetrievalConfig.__dataclass_fields__}
     if isinstance(values["field_weights"], list):
         values["field_weights"] = tuple(values["field_weights"])
-    if args.aliases:
-        include_aliases = args.aliases == "on"
     if args.top_k:
         values["top_k"] = args.top_k
     if args.field_weights:
         values["field_weights"] = tuple(args.field_weights)
     try:
-        return FrozenRetrievalConfig(include_aliases, RetrievalConfig(**values))
+        return FrozenRetrievalConfig(RetrievalConfig(**values))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid frozen retrieval config: {exc}") from exc
 
@@ -254,7 +247,7 @@ def _selection_key(result: dict[str, object], config: FrozenRetrievalConfig) -> 
 def _select_dev_config(paths: list[Path], args: argparse.Namespace) -> dict[str, object]:
     if not paths:
         raise ValueError("--select-dev-config requires one or more --config files")
-    if args.aliases or args.top_k or args.field_weights:
+    if args.top_k or args.field_weights:
         raise ValueError("--select-dev-config accepts only explicit frozen --config files")
     dev_cases = _load_cases("dev")
     evaluated = []
@@ -368,15 +361,18 @@ def _run_protocol(binary: Path) -> tuple[dict[str, object], float, int]:
     return answer, startup_ms, connect_calls
 
 
-def _headless_runtime(binary: Path) -> dict[str, object]:
+def _headless_runtime(binary: Path, expected: RetrievalConfig) -> dict[str, object]:
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise ValueError(f"provider binary is not executable: {binary}")
     first, startup_ms, connect_calls = _run_protocol(binary)
     second, _second_startup_ms, second_connect_calls = _run_protocol(binary)
     retrieval = first.get("retrieval")
     fts5 = isinstance(retrieval, dict) and retrieval.get("backend") == "sqlite_fts5_bm25"
+    if not fts5 or retrieval.get("config") != expected.contract():
+        raise RuntimeError("packaged provider retrieval config differs from production config")
     return {
         "provider_startup_ms": startup_ms,
+        "exit_code": 0,
         "binary": {"path": str(binary), "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "size_bytes": binary.stat().st_size},
         "network": {"method": "strace-network", "connect_calls": connect_calls + second_connect_calls, "web_search_enabled": False},
         "protocol": {"transport": "jsonl-stdio", "fts5": fts5, "codex_fallback": first.get("schema_version") == "ecos-knowledge-answer.v2" and fts5},
@@ -389,7 +385,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--config", type=Path, action="extend", nargs="+", help="frozen retrieval config JSON")
     parser.add_argument("--select-dev-config", action="store_true")
-    parser.add_argument("--aliases", choices=("on", "off"))
     parser.add_argument("--top-k", type=int, choices=(3, 5, 8))
     parser.add_argument("--field-weights", type=float, nargs=4, metavar=_WEIGHT_NAMES)
     parser.add_argument("--provider-binary", type=Path, help="headless PyInstaller provider binary")
@@ -408,7 +403,7 @@ def main() -> int:
         if args.config and len(args.config) != 1:
             raise ValueError("evaluation accepts exactly one --config; use --select-dev-config for a grid")
         frozen = _read_config(args.config[0] if args.config else None, args)
-        sweep = (frozen,) if args.config or args.aliases or args.top_k or args.field_weights else tuple(FrozenRetrievalConfig(True, replace(DEFAULT_RETRIEVAL_CONFIG, top_k=top_k)) for top_k in (3, 5, 8))
+        sweep = (frozen,) if args.config or args.top_k or args.field_weights else tuple(FrozenRetrievalConfig(replace(load_production_retrieval_config(), top_k=top_k)) for top_k in (3, 5, 8))
         splits = ("test",) if args.config else ("dev", "test")
         results = {split: {str(config.retrieval.top_k): _result_for_split(_load_cases(split), config) for config in sweep} for split in splits}
         payload = {
@@ -422,7 +417,7 @@ def main() -> int:
     tracemalloc.stop()
     payload["peak_bytes"] = peak
     if args.provider_binary:
-        runtime = _headless_runtime(args.provider_binary)
+        runtime = _headless_runtime(args.provider_binary, frozen.retrieval)
         runtime["peak_bytes"] = peak
         payload["headless_runtime"] = runtime
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"

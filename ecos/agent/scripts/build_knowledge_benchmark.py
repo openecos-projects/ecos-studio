@@ -15,6 +15,7 @@ from ecos_agent.step_knowledge import STEP_KNOWLEDGE_SPECS, StepKnowledge
 
 AGENT_ROOT = Path(__file__).parents[1]
 OUTPUT_ROOT = AGENT_ROOT / "tests" / "data" / "knowledge_retrieval"
+LEGACY_ALIAS_TERMS = OUTPUT_ROOT / "legacy-alias-terms.v1.json"
 SEED = 20260808
 DATA_VERSION = "ecos-knowledge-retrieval-benchmark.v1"
 GENERATOR_VERSION = "ecos-knowledge-benchmark.v2"
@@ -198,10 +199,17 @@ def _no_answer_cases() -> list[dict[str, object]]:
 
 
 def _aliases_by_target() -> dict[str, tuple[str, ...]]:
-    aliases: dict[str, tuple[str, ...]] = {}
+    payload = json.loads(LEGACY_ALIAS_TERMS.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != "ecos-knowledge-legacy-alias-terms.v1":
+        raise ValueError("legacy alias audit terms are invalid")
+    terms = payload.get("terms")
+    if not isinstance(terms, dict):
+        raise ValueError("legacy alias audit terms are invalid")
+    aliases = {str(key): tuple(str(value) for value in values) for key, values in terms.items() if isinstance(values, list)}
     for spec in STEP_KNOWLEDGE_SPECS:
         bundle = StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / spec.slug, spec)
-        aliases.update({f"{spec.slug}:{entity.entity_id}": entity.aliases for entity in bundle.entities})
+        if any(f"{spec.slug}:{entity.entity_id}" not in aliases for entity in bundle.entities):
+            raise ValueError("legacy alias audit terms are incomplete")
     return aliases
 
 

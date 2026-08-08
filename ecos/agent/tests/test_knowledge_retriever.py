@@ -15,8 +15,8 @@ AGENT_ROOT = Path(__file__).parents[1]
 KNOWLEDGE_ROOT = AGENT_ROOT / "knowledge"
 
 
-def _retriever(*, include_aliases: bool = True) -> GlobalKnowledgeRetriever:
-    return GlobalKnowledgeRetriever(_bundles(), include_aliases=include_aliases)
+def _retriever() -> GlobalKnowledgeRetriever:
+    return GlobalKnowledgeRetriever(_bundles())
 
 
 def _bundles() -> tuple[StepKnowledge, ...]:
@@ -29,7 +29,7 @@ def _bundles() -> tuple[StepKnowledge, ...]:
 def _bundle(*entities: tuple[str, tuple[str, ...], str]) -> KnowledgeBundle:
     spec = KnowledgeBundleSpec("test", "test-manifest.v1", "test-catalog.v1")
     records = tuple(
-        KnowledgeEntity(entity_id, aliases, "knowledge.md", entity_id, "0" * 64, ("test.source",))
+        KnowledgeEntity(entity_id, "knowledge.md", entity_id, "0" * 64, ("test.source",))
         for entity_id, aliases, _text in entities
     )
     return KnowledgeBundle(spec, records, {entity_id: text for entity_id, _aliases, text in entities})
@@ -61,7 +61,6 @@ def test_global_retriever_indexes_every_stage_and_records_replayable_trace() -> 
             "min_token_overlap": 3,
             "max_document_frequency": 0,
             "allow_metadata_match": False,
-            "include_aliases": True,
         },
         "query_sha256": answer.contract["retrieval"]["query_sha256"],
     }
@@ -78,7 +77,7 @@ def test_global_retriever_does_not_return_the_first_stage_hit() -> None:
 
 
 def test_global_retriever_can_return_multiple_stages() -> None:
-    answer = _retriever().reply("How are RCX extraction corners consumed by STA timing analysis?")
+    answer = _retriever().reply("How do extracted wire resistance and required-time slack analysis connect at signoff? Explain the boundary for scenario 9.")
 
     assert answer is not None
     assert {match["stage"] for match in answer.contract["matches"]} >= {"rcx", "sta"}
@@ -101,8 +100,8 @@ def test_global_retriever_supports_protocol_worker_threads() -> None:
     assert any(entity_id.startswith("algorithm.cts.") for entity_id in answer.entity_ids)
 
 
-def test_aliases_are_a_weighted_field_not_a_bypass() -> None:
-    answer = _retriever(include_aliases=False).reply(
+def test_production_retriever_uses_only_audited_catalog_fields() -> None:
+    answer = _retriever().reply(
         "How does clock domain synthesis build clock topology and buffers?"
     )
 
@@ -110,17 +109,16 @@ def test_aliases_are_a_weighted_field_not_a_bypass() -> None:
     assert any(entity_id.startswith("algorithm.cts.") for entity_id in answer.entity_ids)
 
 
-def test_aliases_can_be_removed_from_both_fts_and_confidence_corpus() -> None:
+def test_aliases_are_absent_from_fts_and_confidence_corpus() -> None:
     bundle = _bundle(("answer", ("secret vocabulary",), "audited content without the alias"))
 
     retriever = GlobalKnowledgeRetriever(
         (bundle,),
-        include_aliases=False,
         config=RetrievalConfig(max_raw_bm25=0.0, min_token_overlap=1),
     )
 
     assert retriever.reply("secret vocabulary") is None
-    assert retriever._connection.execute("SELECT aliases FROM knowledge").fetchone() == ("",)
+    assert [row[1] for row in retriever._connection.execute("PRAGMA table_info(knowledge)")] == ["entity_id", "stage", "identifier", "reserved", "content"]
     assert "secret" not in retriever._records[0].tokens
 
 
@@ -139,14 +137,12 @@ def test_retrieval_config_is_frozen_and_recorded_for_replay() -> None:
 
     answer = GlobalKnowledgeRetriever(
         _bundles(),
-        include_aliases=False,
         config=config,
     ).reply("How does the CTS stage execute?")
 
     assert answer is not None
     assert answer.contract["retrieval"]["config"] == {
-        "field_weights": {"stage": 2.0, "identifier": 3.0, "aliases": 4.0, "content": 5.0},
-        "include_aliases": False,
+        "field_weights": {"stage": 2.0, "identifier": 3.0, "reserved": 4.0, "content": 5.0},
         "max_query_tokens": 32,
         "max_raw_bm25": 0.0,
         "min_score_margin": 0.0,

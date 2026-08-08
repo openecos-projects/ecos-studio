@@ -7,9 +7,11 @@ import json
 import math
 import re
 import sqlite3
+import sys
 import threading
 from collections import Counter
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Iterable
 
 from ecos_agent.knowledge_bundle import KnowledgeAnswer, KnowledgeBundle, KnowledgeEntity
@@ -20,7 +22,7 @@ BACKEND = "sqlite_fts5_bm25"
 TOP_K = 3
 MAX_QUERY_TOKENS = 32
 FIELD_WEIGHTS = (10.0, 20.0, 10.0, 1.0)
-_FIELD_NAMES = ("stage", "identifier", "aliases", "content")
+_FIELD_NAMES = ("stage", "identifier", "reserved", "content")
 _STOP_TOKENS = frozenset({"a", "an", "and", "are", "by", "does", "for", "how", "in", "is", "of", "on", "or", "the", "to", "what", "with", "了", "何", "如", "是", "的", "算", "计", "指", "标", "如何", "计算", "指标"})
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:[_-][a-z0-9]+)*|[\u4e00-\u9fff]+", re.IGNORECASE)
 _ACRONYM_PATTERN = re.compile(r"(?<![A-Z0-9_])[A-Z][A-Z0-9_]{1,}(?![A-Z0-9_])")
@@ -78,7 +80,7 @@ class RetrievalConfig:
         if type(self.allow_metadata_match) is not bool:
             raise ValueError("knowledge retrieval allow_metadata_match must be a boolean")
 
-    def contract(self, *, include_aliases: bool) -> dict[str, object]:
+    def contract(self) -> dict[str, object]:
         return {
             "top_k": self.top_k,
             "field_weights": dict(zip(_FIELD_NAMES, self.field_weights)),
@@ -88,11 +90,36 @@ class RetrievalConfig:
             "min_token_overlap": self.min_token_overlap,
             "max_document_frequency": self.max_document_frequency,
             "allow_metadata_match": self.allow_metadata_match,
-            "include_aliases": include_aliases,
         }
 
 
 DEFAULT_RETRIEVAL_CONFIG = RetrievalConfig()
+_CONFIG_SCHEMA = "ecos-frozen-knowledge-retrieval-config.v1"
+_CONFIG_NAME = "retrieval-config.v1.json"
+
+
+def load_production_retrieval_config() -> RetrievalConfig:
+    root = Path(getattr(sys, "_MEIPASS", "")) / "knowledge" if getattr(sys, "_MEIPASS", None) else _knowledge_root()
+    try:
+        raw = json.loads((root / _CONFIG_NAME).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise KnowledgeRetrievalError("production retrieval config is unavailable") from exc
+    if not isinstance(raw, dict) or raw.get("schema_version") != _CONFIG_SCHEMA:
+        raise KnowledgeRetrievalError("production retrieval config is invalid")
+    values = {name: raw.get(name, getattr(DEFAULT_RETRIEVAL_CONFIG, name)) for name in RetrievalConfig.__dataclass_fields__}
+    if set(raw) != {"schema_version", *RetrievalConfig.__dataclass_fields__}:
+        raise KnowledgeRetrievalError("production retrieval config has invalid fields")
+    if isinstance(values["field_weights"], list):
+        values["field_weights"] = tuple(values["field_weights"])
+    try:
+        return RetrievalConfig(**values)
+    except (TypeError, ValueError) as exc:
+        raise KnowledgeRetrievalError("production retrieval config is invalid") from exc
+
+
+def _knowledge_root() -> Path:
+    source_root = Path(__file__).parents[2] / "knowledge"
+    return source_root if source_root.is_dir() else Path(__file__).with_name("knowledge")
 
 
 @dataclass(frozen=True)
@@ -113,21 +140,19 @@ class GlobalKnowledgeRetriever:
         self,
         bundles: Iterable[KnowledgeBundle],
         *,
-        include_aliases: bool = True,
         top_k: int | None = None,
         config: RetrievalConfig | None = None,
     ) -> None:
         if top_k is not None and config is not None:
             raise ValueError("knowledge retrieval accepts either top_k or config")
         self._config = replace(DEFAULT_RETRIEVAL_CONFIG, top_k=top_k) if top_k is not None else config or DEFAULT_RETRIEVAL_CONFIG
-        self._include_aliases = include_aliases
-        self._records = _records_from_bundles(tuple(bundles), include_aliases=include_aliases)
+        self._records = _records_from_bundles(tuple(bundles))
         self._corpus_sha256 = _corpus_sha256(self._records)
         self._document_frequency = Counter(
             token for record in self._records for token in _normalized_tokens(record.tokens)
         )
         self._corpus_tokens = frozenset(token for record in self._records for token in record.tokens)
-        self._connection = _create_index(self._records, include_aliases=include_aliases)
+        self._connection = _create_index(self._records)
         self._search_lock = threading.Lock()
 
     def reply(self, question: str) -> KnowledgeAnswer | None:
@@ -137,7 +162,7 @@ class GlobalKnowledgeRetriever:
         matches = self._search(query_tokens, _acronym_tokens(question), _phrase_tokens(question))
         if not matches:
             return None
-        return _answer(question, matches, self._corpus_sha256, self._config, self._include_aliases)
+        return _answer(question, matches, self._corpus_sha256, self._config)
 
     def _search(
         self,
@@ -225,9 +250,7 @@ def _stem(token: str) -> str:
     return token
 
 
-def _records_from_bundles(
-    bundles: tuple[KnowledgeBundle, ...], *, include_aliases: bool
-) -> tuple[_Record, ...]:
+def _records_from_bundles(bundles: tuple[KnowledgeBundle, ...]) -> tuple[_Record, ...]:
     records: list[_Record] = []
     seen_keys: set[str] = set()
     for bundle in bundles:
@@ -242,7 +265,6 @@ def _records_from_bundles(
             )
             fields = (
                 *metadata_fields,
-                " ".join(entity.aliases) if include_aliases else "",
                 bundle.chunk_text(entity.entity_id),
             )
             records.append(
@@ -259,27 +281,27 @@ def _records_from_bundles(
     return tuple(records)
 
 
-def _create_index(records: tuple[_Record, ...], *, include_aliases: bool) -> sqlite3.Connection:
+def _create_index(records: tuple[_Record, ...]) -> sqlite3.Connection:
     connection = sqlite3.connect(":memory:", check_same_thread=False)
     try:
-        connection.execute("CREATE VIRTUAL TABLE knowledge USING fts5(entity_id UNINDEXED, stage, identifier, aliases, content)")
+        connection.execute("CREATE VIRTUAL TABLE knowledge USING fts5(entity_id UNINDEXED, stage, identifier, reserved, content)")
     except sqlite3.OperationalError as exc:
         connection.close()
         raise KnowledgeRetrievalError("SQLite FTS5 is unavailable") from exc
     connection.executemany(
-        "INSERT INTO knowledge(entity_id, stage, identifier, aliases, content) VALUES (?, ?, ?, ?, ?)",
-        (_index_row(record, include_aliases=include_aliases) for record in records),
+        "INSERT INTO knowledge(entity_id, stage, identifier, reserved, content) VALUES (?, ?, ?, ?, ?)",
+        (_index_row(record) for record in records),
     )
     return connection
 
 
-def _index_row(record: _Record, *, include_aliases: bool) -> tuple[str, str, str, str, str]:
+def _index_row(record: _Record) -> tuple[str, str, str, str, str]:
     entity = record.entity
     return (
         record.key,
         " ".join(tokenize(record.stage)),
         " ".join(tokenize(entity.entity_id)),
-        " ".join(token for alias in entity.aliases for token in tokenize(alias)) if include_aliases else "",
+        "",
         " ".join(tokenize(record.text)),
     )
 
@@ -323,7 +345,6 @@ def _answer(
     matches: tuple[tuple[_Record, float], ...],
     corpus_sha256: str,
     config: RetrievalConfig,
-    include_aliases: bool,
 ) -> KnowledgeAnswer:
     entity_ids = tuple(record.entity.entity_id for record, _score in matches)
     source_ids = tuple(dict.fromkeys(source for record, _score in matches for source in record.entity.source_ids))
@@ -354,7 +375,7 @@ def _answer(
                 "top_k": config.top_k,
                 "score_order": "ascending",
                 "field_weights": dict(zip(_FIELD_NAMES, config.field_weights)),
-                "config": config.contract(include_aliases=include_aliases),
+                "config": config.contract(),
                 "query_sha256": _sha256(question.encode("utf-8")),
             },
             "matches": contract_matches,

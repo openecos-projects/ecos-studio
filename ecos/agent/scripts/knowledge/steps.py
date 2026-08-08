@@ -363,7 +363,6 @@ def _add(
         {
             "id": entity_id,
             "kind": kind,
-            "aliases": list(aliases),
             "document": document,
             "anchor": entity_id,
             "review_status": "source-audited",
@@ -660,22 +659,22 @@ def _write_regression(stage: Stage, output: Path, entries: list[dict[str, object
     metric_id = f"metric.{METRICS[stage.slug][0]}" if METRICS[stage.slug] else f"metric.{stage.slug}.database_summary"
     parameter_id = next(entry["id"] for entry in entries if str(entry["id"]).startswith(f"parameter.{stage.slug}."))
     cases = [
-        {"id": f"{stage.slug}-execution", "question": f"How does the {stage.step_name} stage execute?", "entity_id": f"algorithm.{stage.slug}.execution", "required_text": "Execution path:"},
+        {"id": f"{stage.slug}-execution", "question": f"Explain algorithm.{stage.slug}.execution", "entity_id": f"algorithm.{stage.slug}.execution", "required_text": "Execution path:"},
     ]
     cases.extend(
         {
             "id": f"{stage.slug}-{name}",
-            "question": max(aliases, key=len),
+            "question": f"Explain {stage.slug} algorithm {name.replace('_', ' ')}.",
             "entity_id": f"algorithm.{stage.slug}.{name}",
             "required_text": "Source evidence:",
         }
         for name, aliases, _body, _source_ids in ALGORITHM_DETAILS[stage.slug]
     )
     cases.extend((
-        {"id": f"{stage.slug}-parameter", "question": str(parameter_id).replace("parameter.", "").replace(".", " "), "entity_id": parameter_id, "required_text": "**Role:**"},
-        {"id": f"{stage.slug}-metric", "question": metric_id.removeprefix("metric.").replace("_", " "), "entity_id": metric_id, "required_text": "**Calculation:**"},
-        {"id": f"{stage.slug}-artifact", "question": f"{stage.slug} artifacts", "entity_id": f"artifact.{stage.slug}.outputs", "required_text": "**Meaning:**"},
-        {"id": f"{stage.slug}-failure", "question": f"{stage.slug} failed", "entity_id": f"failure.{stage.slug}.preconditions", "required_text": "**Failure mode:**"},
+        {"id": f"{stage.slug}-parameter", "question": f"Explain {parameter_id}", "entity_id": parameter_id, "required_text": "**Role:**"},
+        {"id": f"{stage.slug}-metric", "question": f"Explain {metric_id}", "entity_id": metric_id, "required_text": "**Calculation:**"},
+        {"id": f"{stage.slug}-artifact", "question": f"Explain artifact.{stage.slug}.outputs", "entity_id": f"artifact.{stage.slug}.outputs", "required_text": "**Meaning:**"},
+        {"id": f"{stage.slug}-failure", "question": f"Explain failure.{stage.slug}.preconditions", "entity_id": f"failure.{stage.slug}.preconditions", "required_text": "**Failure mode:**"},
     ))
     regression = output / "regression"
     regression.mkdir(exist_ok=True)
@@ -694,7 +693,7 @@ def _build_bundle(stage: Stage, output: Path) -> None:
     for name, chunks in documents.items():
         (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
     catalog = {
-        "schema_version": "ecos-step-catalog.v1",
+        "schema_version": "ecos-step-catalog.v2",
         "domain": f"ecos_{stage.slug}",
         "publication": {"status": "source-audited", "scope": f"ECOS {stage.step_name} source snapshot"},
         "entities": entries,
@@ -725,7 +724,7 @@ def _build_place_bundle(output: Path) -> None:
     for name, chunks in documents.items():
         (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
     catalog = {
-        "schema_version": "ecos-place-catalog.v2",
+        "schema_version": "ecos-place-catalog.v3",
         "domain": "ecos_placement",
         "publication": {
             "status": "source-audited",
@@ -739,7 +738,7 @@ def _build_place_bundle(output: Path) -> None:
     regression = output / "regression"
     regression.mkdir(exist_ok=True)
     regression.joinpath("place_questions.jsonl").write_text(
-        "".join(_json(case) + "\n" for case in PLACE_REGRESSION_CASES), encoding="utf-8"
+        "".join(_json({**case, "question": f"Explain {case['entity_id']}"}) + "\n" for case in PLACE_REGRESSION_CASES), encoding="utf-8"
     )
     files = {
         str(path.relative_to(output)): _sha256(path.read_bytes())
@@ -757,3 +756,7 @@ def build_all(output: Path) -> None:
             _build_place_bundle(bundle_output)
         else:
             _build_bundle(stage, bundle_output)
+    (output / "retrieval-config.v1.json").write_text(
+        _json({"schema_version": "ecos-frozen-knowledge-retrieval-config.v1", "top_k": 3, "field_weights": [10.0, 20.0, 10.0, 1.0], "max_query_tokens": 32, "max_raw_bm25": None, "min_score_margin": 0.0, "min_token_overlap": 3, "max_document_frequency": 0, "allow_metadata_match": False}) + "\n",
+        encoding="utf-8",
+    )

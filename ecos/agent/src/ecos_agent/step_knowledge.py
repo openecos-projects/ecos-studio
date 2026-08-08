@@ -17,7 +17,7 @@ class StepKnowledgeSpec:
     slug: str
     step_name: str
     manifest_schema: str = "ecos-step-manifest.v1"
-    catalog_schema: str = "ecos-step-catalog.v1"
+    catalog_schema: str = "ecos-step-catalog.v2"
 
     @property
     def bundle_spec(self) -> KnowledgeBundleSpec:
@@ -28,7 +28,7 @@ STEP_KNOWLEDGE_SPECS = (
     StepKnowledgeSpec("synthesis", "Synthesis"),
     StepKnowledgeSpec("floorplan", "Floorplan"),
     StepKnowledgeSpec("fixfanout", "fixFanout"),
-    StepKnowledgeSpec("place", "place", "ecos-place-manifest.v1", "ecos-place-catalog.v2"),
+    StepKnowledgeSpec("place", "place", "ecos-place-manifest.v1", "ecos-place-catalog.v3"),
     StepKnowledgeSpec("cts", "CTS"),
     StepKnowledgeSpec("legalization", "legalization"),
     StepKnowledgeSpec("route", "route"),

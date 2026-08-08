@@ -1,0 +1,1 @@
+{"allow_metadata_match": false, "field_weights": [10.0, 20.0, 10.0, 1.0], "max_document_frequency": 0, "max_query_tokens": 32, "max_raw_bm25": null, "min_score_margin": 0.0, "min_token_overlap": 3, "schema_version": "ecos-frozen-knowledge-retrieval-config.v1", "top_k": 3}

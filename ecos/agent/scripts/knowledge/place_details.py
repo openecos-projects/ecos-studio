@@ -57,7 +57,6 @@ def _add(entries: list[dict[str, object]], documents: dict[str, list[str]], *, e
     entries.append({
         "id": entity_id,
         "kind": kind,
-        "aliases": list(aliases),
         "document": document,
         "anchor": entity_id,
         "review_status": "source-audited",

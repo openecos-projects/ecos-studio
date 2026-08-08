@@ -35,7 +35,6 @@ class KnowledgeBundleSpec:
 @dataclass(frozen=True)
 class KnowledgeEntity:
     entity_id: str
-    aliases: tuple[str, ...]
     document: str
     anchor: str
     chunk_sha256: str
@@ -134,9 +133,8 @@ def _load_entity(
     if not isinstance(raw, dict) or raw.get("review_status") != "source-audited":
         raise KnowledgeBundleError("knowledge bundle has an unreviewed entity")
     entity_id, document, anchor = (str(raw.get(key, "")) for key in ("id", "document", "anchor"))
-    aliases = raw.get("aliases")
     evidence = raw.get("evidence")
-    if not entity_id or not document or anchor != entity_id or not isinstance(aliases, list) or not isinstance(evidence, list):
+    if not entity_id or not document or anchor != entity_id or "aliases" in raw or not isinstance(evidence, list):
         raise KnowledgeBundleError("knowledge bundle entity is malformed")
     source_ids = tuple(str(item.get("source_id", "")) for item in evidence if isinstance(item, dict))
     if not source_ids or any(source_id not in known_source_ids for source_id in source_ids):
@@ -146,7 +144,6 @@ def _load_entity(
         raise KnowledgeBundleError(f"knowledge bundle chunk hash mismatch: {entity_id}")
     return KnowledgeEntity(
         entity_id,
-        tuple(str(alias) for alias in aliases),
         document,
         anchor,
         str(raw["chunk_sha256"]),
