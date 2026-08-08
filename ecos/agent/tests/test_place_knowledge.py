@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.provider import EcosAgentProvider
+from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever
 from ecos_agent.step_knowledge import STEP_KNOWLEDGE_SPECS, StepKnowledge, StepKnowledgeError
 
 
@@ -154,13 +155,13 @@ def test_regression_questions_render_only_published_markdown_chunks() -> None:
     ]
 
     for case in cases:
-        answer = knowledge.reply(case["question"])
+        answer = GlobalKnowledgeRetriever((knowledge,)).reply(case["question"])
 
         assert answer is not None, case["id"]
         assert case["entity_id"] in answer.entity_ids
         assert case["required_text"] in answer.text
         assert answer.text in "\n\n".join(knowledge.chunk_text(entity_id) for entity_id in answer.entity_ids)
-        assert answer.contract["schema_version"] == "ecos-place-answer.v1"
+        assert answer.contract["schema_version"] == "ecos-knowledge-answer.v2"
         assert answer.contract["read_only"] is True
 
 
@@ -196,7 +197,7 @@ def test_provider_answers_place_questions_without_changing_operation_state() -> 
     answer = next(event for event in reversed(events) if event["type"] == "message")
     assert "overlap_area" in str(answer["text"])
     assert contexts[0]["allowed_operations"] == []
-    assert answer["contract"]["knowledge"]["schema_version"] == "ecos-place-answer.v1"
+    assert answer["contract"]["knowledge"]["schema_version"] == "ecos-knowledge-answer.v2"
     assert provider.sessions[session_id].phase == "home_ready"
     assert not any(event["type"] in {"workspace_rerun", "workspace_create"} for event in events)
 

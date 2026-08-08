@@ -1,0 +1,20 @@
+{
+  "aliases_ablation": "retained_after_test_r3_drop: 1.0 with aliases, 0.940476 without",
+  "benchmark_sha256": "f111485fd86e49716c2e4bd72a615f450083df49f9c42c99fd3b6f4dde45690a",
+  "corpus_sha256": "67d300cae3edac4b96dae3a9e3d9c1152a00c2f38fe86d4e44cca178ce7b7f4c",
+  "counts": {
+    "dev|en|no_answer": 24,
+    "dev|en|semantic_paraphrase": 36,
+    "dev|zh|semantic_paraphrase": 36,
+    "test|en|identifier": 48,
+    "test|en|no_answer": 36,
+    "test|en|semantic_paraphrase": 36,
+    "test|mixed|cross_stage": 48,
+    "test|zh|semantic_paraphrase": 36
+  },
+  "generator_version": "ecos-knowledge-benchmark.v1",
+  "reviewer_status": "deterministic_alias_leak_check_and_self_audit",
+  "schema_version": "ecos-knowledge-retrieval-benchmark-manifest.v1",
+  "seed": 20260808,
+  "total_cases": 300
+}

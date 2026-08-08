@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping
 from ecos_agent.codex_provider import CodexProviderError, validate_required_codex_cli
 from ecos_agent.contracts import GuiChatResponseProposal, GuiWorkspaceSetupProposal
 from ecos_agent.knowledge_bundle import KnowledgeAnswer
+from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever
 from ecos_agent.step_knowledge import StepKnowledge, load_default_step_knowledge
 from ecos_agent.messages import (
     cancellation_message,
@@ -259,6 +260,7 @@ class EcosAgentProvider:
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.knowledge = knowledge or load_default_step_knowledge()
+        self.knowledge_retriever = GlobalKnowledgeRetriever(self.knowledge)
         self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
@@ -447,11 +449,7 @@ class EcosAgentProvider:
         )
 
     def _knowledge_answer(self, message: str) -> KnowledgeAnswer | None:
-        for knowledge in self.knowledge:
-            answer = knowledge.reply(message)
-            if answer is not None:
-                return answer
-        return None
+        return self.knowledge_retriever.reply(message)
 
     def _select_home_ready(self, session: _Session, message: str, choice: str) -> None:
         if choice == "1":

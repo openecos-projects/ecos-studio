@@ -401,7 +401,7 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
         {
             "allowed_operations": [],
             "retrieved_knowledge": {
-                "schema_version": "ecos-place-answer.v1",
+                "schema_version": "ecos-knowledge-answer.v2",
                 "read_only": True,
                 "entity_ids": ["parameter.dreamplace.stop_overflow"],
                 "source_ids": ["dreamplace.config"],
@@ -1401,7 +1401,7 @@ def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp
 
     answer = _last_event(events, "message")
     assert "acceptable global-placement overflow threshold" in str(answer["text"])
-    assert answer["contract"]["schema_version"] == "ecos-place-answer.v1"
+    assert answer["contract"]["schema_version"] == "ecos-knowledge-answer.v2"
     assert not any(event["type"] == "error" for event in events)
 
 

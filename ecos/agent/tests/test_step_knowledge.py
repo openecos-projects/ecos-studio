@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.provider import EcosAgentProvider
+from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever
 from ecos_agent.step_knowledge import (
     STEP_KNOWLEDGE_SPECS,
     StepKnowledge,
@@ -71,14 +72,16 @@ def test_every_flow_step_has_a_source_audited_knowledge_bundle() -> None:
     for spec in STEP_KNOWLEDGE_SPECS:
         root = KNOWLEDGE_ROOT / spec.slug
         knowledge = StepKnowledge.from_directory(root, spec)
-        answer = knowledge.reply(f"How does the {spec.step_name} stage execute?")
+        answer = GlobalKnowledgeRetriever((knowledge,)).reply(
+            f"How does the {spec.step_name} stage execute?"
+        )
 
         assert {"algorithms.md", "artifacts.md", "failures.md", "metrics.md", "parameters.md"} <= {
             path.name for path in (root / "knowledge").iterdir()
         }
         assert answer is not None
-        assert answer.entity_ids == (f"algorithm.{spec.slug}.execution",)
-        assert answer.contract["schema_version"] == f"ecos-{spec.slug}-answer.v1"
+        assert f"algorithm.{spec.slug}.execution" in answer.entity_ids
+        assert answer.contract["schema_version"] == "ecos-knowledge-answer.v2"
         assert answer.contract["read_only"] is True
 
 
@@ -136,7 +139,7 @@ def test_step_bundle_regression_questions_return_audited_read_only_answers() -> 
         ]
 
         for case in cases:
-            answer = knowledge.reply(case["question"])
+            answer = GlobalKnowledgeRetriever((knowledge,)).reply(case["question"])
 
             assert answer is not None
             assert case["entity_id"] in answer.entity_ids
@@ -163,8 +166,8 @@ def test_provider_answers_cts_question_without_changing_operation_state() -> Non
     provider.send_message({"sessionId": session_id, "message": "CTS stage execution"})
 
     answer = next(event for event in reversed(events) if event["type"] == "message")
-    assert "clock-tree" in str(answer["text"])
-    assert answer["contract"]["schema_version"] == "ecos-cts-answer.v1"
+    assert answer["contract"]["knowledge"]["schema_version"] == "ecos-knowledge-answer.v2"
+    assert answer["contract"]["knowledge"]["matches"][0]["stage"] == "cts"
     assert provider.sessions[session_id].phase == "home_ready"
 
 

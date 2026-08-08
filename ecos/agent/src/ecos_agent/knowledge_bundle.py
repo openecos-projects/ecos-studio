@@ -1,4 +1,4 @@
-"""Read-only retrieval for hash-locked ECOS knowledge bundles."""
+"""Read-only loading for hash-locked ECOS knowledge bundles."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class KnowledgeBundleSpec:
 
 
 @dataclass(frozen=True)
-class _Entity:
+class KnowledgeEntity:
     entity_id: str
     aliases: tuple[str, ...]
     document: str
@@ -48,7 +48,7 @@ class KnowledgeBundle:
     def __init__(
         self,
         spec: KnowledgeBundleSpec,
-        entities: tuple[_Entity, ...],
+        entities: tuple[KnowledgeEntity, ...],
         chunks: dict[str, str],
     ) -> None:
         self.spec = spec
@@ -56,7 +56,7 @@ class KnowledgeBundle:
         self._chunks = chunks
 
     @property
-    def entities(self) -> tuple[_Entity, ...]:
+    def entities(self) -> tuple[KnowledgeEntity, ...]:
         return self._entities
 
     @property
@@ -71,24 +71,6 @@ class KnowledgeBundle:
         _validate_manifest(root, spec, manifest, catalog, sources)
         entities, chunks = _load_entities(root, catalog, sources)
         return cls(spec, entities, chunks)
-
-    def reply(self, question: str) -> KnowledgeAnswer | None:
-        matches = _rank_matches(question, self._entities)
-        if not matches:
-            return None
-        entity_ids = tuple(entity.entity_id for entity in matches)
-        source_ids = tuple(dict.fromkeys(source for entity in matches for source in entity.source_ids))
-        return KnowledgeAnswer(
-            text="\n\n".join(self._chunks[entity_id] for entity_id in entity_ids),
-            entity_ids=entity_ids,
-            contract={
-                "schema_version": self.spec.answer_schema,
-                "intent": "explain",
-                "read_only": True,
-                "entity_ids": list(entity_ids),
-                "source_ids": list(source_ids),
-            },
-        )
 
     def chunk_text(self, entity_id: str) -> str:
         return self._chunks[entity_id]
@@ -130,12 +112,12 @@ def _validate_manifest(
 
 def _load_entities(
     root: Path, catalog: dict[str, Any], sources: dict[str, Any]
-) -> tuple[tuple[_Entity, ...], dict[str, str]]:
+) -> tuple[tuple[KnowledgeEntity, ...], dict[str, str]]:
     source_ids = {item.get("id") for item in sources["sources"] if isinstance(item, dict)}
     raw_entities = catalog.get("entities")
     if not isinstance(raw_entities, list):
         raise KnowledgeBundleError("knowledge bundle has no entity catalog")
-    entities: list[_Entity] = []
+    entities: list[KnowledgeEntity] = []
     chunks: dict[str, str] = {}
     for raw_entity in raw_entities:
         entity, chunk = _load_entity(root, raw_entity, source_ids)
@@ -148,7 +130,7 @@ def _load_entities(
 
 def _load_entity(
     root: Path, raw: object, known_source_ids: set[object]
-) -> tuple[_Entity, str]:
+) -> tuple[KnowledgeEntity, str]:
     if not isinstance(raw, dict) or raw.get("review_status") != "source-audited":
         raise KnowledgeBundleError("knowledge bundle has an unreviewed entity")
     entity_id, document, anchor = (str(raw.get(key, "")) for key in ("id", "document", "anchor"))
@@ -162,7 +144,14 @@ def _load_entity(
     chunk = _markdown_chunk(root / "knowledge" / document, anchor)
     if _sha256(chunk.encode("utf-8")) != str(raw.get("chunk_sha256", "")):
         raise KnowledgeBundleError(f"knowledge bundle chunk hash mismatch: {entity_id}")
-    return _Entity(entity_id, tuple(str(alias) for alias in aliases), document, anchor, "", source_ids), chunk
+    return KnowledgeEntity(
+        entity_id,
+        tuple(str(alias) for alias in aliases),
+        document,
+        anchor,
+        str(raw["chunk_sha256"]),
+        source_ids,
+    ), chunk
 
 
 def _markdown_chunk(path: Path, anchor: str) -> str:
@@ -176,44 +165,6 @@ def _markdown_chunk(path: Path, anchor: str) -> str:
             end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
             return text[match.start():end].strip()
     raise KnowledgeBundleError(f"knowledge anchor is unavailable: {anchor}")
-
-
-def _rank_matches(question: str, entities: tuple[_Entity, ...]) -> tuple[_Entity, ...]:
-    normalized_question = _normalize(question)
-    hits = [
-        (entity, _match_score(question.casefold(), normalized_question, entity))
-        for entity in entities
-    ]
-    hits = [(entity, score) for entity, score in hits if score]
-    hits.sort(key=lambda item: (-item[1], item[0].entity_id))
-    return tuple(entity for entity, _score in hits[:3])
-
-
-def _match_score(question: str, normalized_question: str, entity: _Entity) -> int:
-    scores = [
-        len(normalized_alias)
-        for alias in entity.aliases
-        if (normalized_alias := _normalize(alias))
-        and _alias_matches(question, normalized_question, alias, normalized_alias)
-    ]
-    return max(scores, default=0)
-
-
-def _alias_matches(
-    question: str, normalized_question: str, alias: str, normalized_alias: str
-) -> bool:
-    if alias.isascii() and alias.isalnum() and len(alias) <= 4:
-        return bool(
-            re.search(
-                rf"(?<![a-z0-9]){re.escape(alias.casefold())}(?![a-z0-9])",
-                question,
-            )
-        )
-    return len(normalized_alias) > 1 and normalized_alias in normalized_question
-
-
-def _normalize(text: str) -> str:
-    return re.sub(r"[\s\W_]+", "", text.casefold())
 
 
 def _sha256(data: bytes) -> str:
