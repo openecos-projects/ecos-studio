@@ -148,6 +148,12 @@ export interface DesktopProjectDirectoryEntry {
   type: 'file' | 'directory'
 }
 
+export interface DesktopProjectManagementWorkspaceTextsRequest {
+  projectRoot: string
+  workspacePath: string
+  paths: string[]
+}
+
 export interface ChipViewerOpenRequest {
   projectPath: string
   step: string
@@ -216,6 +222,13 @@ export interface DesktopApi {
     mutate(
       request: ProjectManifestMutationRequest,
     ): Promise<ProjectManifestMutationResult>
+  }
+  projectManagement?: {
+    readManifest(projectRoot: string): Promise<string | null>
+    listProjectEntries(projectRoot: string): Promise<string[]>
+    readWorkspaceTexts(
+      request: DesktopProjectManagementWorkspaceTextsRequest,
+    ): Promise<Record<string, string | null>>
   }
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>

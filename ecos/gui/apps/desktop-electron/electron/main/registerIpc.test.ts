@@ -101,6 +101,11 @@ function registerHandlers(
     projectManifestService: {
       mutate: vi.fn(),
     },
+    projectManagementReadService: {
+      readManifest: vi.fn(),
+      listProjectEntries: vi.fn(),
+      readWorkspaceTexts: vi.fn(),
+    },
     workspaceService: {
       clearProjectRoot: vi.fn(),
       isProjectDirectory: vi.fn(),
@@ -1080,6 +1085,14 @@ describe('registerIpc', () => {
     )
     services.workspaceService.registerProjectRoot.mockResolvedValue('/tmp/project')
     services.workspaceService.registerProjectReadRoot.mockResolvedValue('/tmp/project')
+    services.projectManagementReadService.readManifest.mockResolvedValue('{"name":"gcd"}')
+    services.projectManagementReadService.listProjectEntries.mockResolvedValue([
+      'project.json',
+      'ws_0001',
+    ])
+    services.projectManagementReadService.readWorkspaceTexts.mockResolvedValue({
+      'home/flow.json': '{"steps":[]}',
+    })
     services.workspaceService.requestProjectPathAccess.mockResolvedValue(
       '/tmp/project/home.json',
     )
@@ -1152,6 +1165,25 @@ describe('registerIpc', () => {
         '/tmp/project',
       ),
     ).resolves.toBe('/tmp/project')
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementReadManifest)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toBe('{"name":"gcd"}')
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementListEntries)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toEqual(['project.json', 'ws_0001'])
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementReadWorkspaceTexts)?.(event, {
+        projectRoot: '/tmp/project',
+        workspacePath: '/tmp/project/ws_0001',
+        paths: ['home/flow.json'],
+      }),
+    ).resolves.toEqual({ 'home/flow.json': '{"steps":[]}' })
     await handlers.get(desktopApiIpcChannels.workspaceClearProjectRoot)?.(event)
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceRequestProjectPathAccess)?.(

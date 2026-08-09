@@ -11,6 +11,16 @@
 - 日志、metric、progress 和原始事件均有背压与内存上限；终态 step 使用幂等 ACK。
 - layout edit 使用受锁保护的 `LayoutEditWorker` 和本地命令桥；非 flow 的配置、reset、签核使用 SnapshotLoader 或一次性 UtilityWorker。
 
+## Project Management 历史项目读取修正（2026-08-09）
+
+Project Management 不再使用活动 workspace 的 read scope 读取 history 中的
+Project。Electron 通过独立、路径受限且尺寸有界的 `ProjectManagementReadService`
+提供 manifest、一级目录和允许的 Workspace 摘要读取；renderer 先渲染所有有效
+manifest 的 Project/Workspace 列表，再以有限并发加载摘要。该读取路径不修改
+active workspace root，且 Project mutation 保持由 `ProjectManifestService` 的显式
+root 解析与原子写入负责。完整可执行契约见
+`.trellis/spec/gui-electron/backend/conventions.md`。
+
 ## 实施前门槛
 
 任何实现开始前，必须完成 `implement.md` 的阶段拆分，阅读 ECC、Electron main、renderer 三个包的 Trellis 规范，并确认 shared contracts 的兼容策略。
@@ -42,15 +52,19 @@ Synthesis 在缺少物理实现输入时本来就不能构造 ECC native DB。�
 `sta` 没有专用绘图支持属于能力缺失提示，不在本修复中补图片生成；它不应
 改变 step 成功语义或 layout snapshot 选择。
 
-### Project/Home 只读 scope
+### Project Management 跨 Project 只读数据
 
-当前 workspace 打开时，项目概览只能通过已经注册的父项目只读 scope 读取
-同一 manifest 声明的 workspace。读取 flow 与 QoR 输入前必须先注册该
-scope，且不得调用 `registerProjectRoot()` 覆盖活跃 workspace root。
+Project Management 使用独立的 `ProjectManagementReadService` 读取 history 中的
+全部有效 Project，不依赖 active workspace 的 read scope。它验证 Project manifest
+与 root 的 canonical 一致性、manifest 声明的 Workspace 归属和工件的真实路径边界；
+不会调用 `registerProjectRoot()` 或 `registerProjectReadRoot()`，因此不会因路由离开
+清理 active scope 而遗漏 Project 卡片，也不会改写当前 workspace root。
 
-对于不属于当前 workspace 父项目的 Project 卡片，延迟其跨 workspace 的
-分析数据读取，直到用户切换到该项目或有对应的受限 scope。这样保留路径
-安全边界，并防止 Home/Project 管理界面在 NFS 上发起无效并发读。
+renderer 首先按 history 串行读取小型 manifest 并渲染 Project/Workspace 树，随后以
+两个 Workspace 的并发上限填充 flow/QoR 摘要。main 的每个请求最多并发读取四个
+允许且尺寸有界的文件，且禁止 watcher、轮询、递归资源索引、全量日志和报告读取。
+共享包的 `projectManagementWorkspaceSummaryPaths` 是 renderer 请求与 main allowlist
+的唯一来源；Workspace 摘要失败时保留列表项并显示空摘要。
 
 ### Project design 与 baseline 同步
 

@@ -1,4 +1,8 @@
 import { readFileSync } from 'node:fs'
+import {
+  projectManagementStaTimingIssuesPath,
+  projectManagementWorkspaceStepAnalysisSpecs,
+} from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import source from './ProjectsView.vue?raw'
 import analysisSource from './project-management/ProjectAnalysisPanel.vue?raw'
@@ -443,14 +447,23 @@ describe('ProjectsView project management surface', () => {
     expect(analysisDataSource).toContain("readOptionalProjectTextFile('home/flow.json'")
     expect(analysisDataSource).toContain('parseWorkspaceFlowStateMap')
     expect(source).toContain('workspaceAnalysisInputs')
-    expect(source).toContain('readProjectWorkspaceAnalysisInputs')
+    expect(source).toContain('readProjectManagementWorkspaceData')
     expect(source).toContain('ProjectWorkspaceAnalysisInputsById')
+    expect(analysisDataSource).toContain('projectManagementWorkspaceStepAnalysisSpecs')
     expect(analysisDataSource).toContain('WORKSPACE_STEP_ANALYSIS_SPECS')
-    expect(analysisDataSource).toContain('Synthesis_yosys/analysis/qor_metrics.json')
-    expect(analysisDataSource).toContain('Synthesis_yosys/analysis/qor_summary.json')
-    expect(analysisDataSource).toContain('Synthesis_yosys/analysis/qor_hotspots.json')
-    expect(analysisDataSource).toContain('route_ecc/analysis/qor_metrics.json')
-    expect(analysisDataSource).toContain('sta_ecc/analysis/sta_timing_issues.json')
+    expect(projectManagementWorkspaceStepAnalysisSpecs).toContainEqual(
+      expect.objectContaining({
+        metricsPath: 'Synthesis_yosys/analysis/qor_metrics.json',
+        summaryPath: 'Synthesis_yosys/analysis/qor_summary.json',
+        hotspotsPath: 'Synthesis_yosys/analysis/qor_hotspots.json',
+      }),
+    )
+    expect(projectManagementWorkspaceStepAnalysisSpecs).toContainEqual(
+      expect.objectContaining({ metricsPath: 'route_ecc/analysis/qor_metrics.json' }),
+    )
+    expect(projectManagementStaTimingIssuesPath).toBe(
+      'sta_ecc/analysis/sta_timing_issues.json',
+    )
     expect(analysisDataSource).toContain('stepMetricTexts')
     expect(analysisDataSource).toContain('stepSummaryTexts')
     expect(analysisDataSource).toContain('stepHotspotTexts')
@@ -530,50 +543,44 @@ describe('ProjectsView project management surface', () => {
     expect(source).not.toContain('localProjectDrafts')
   })
 
-  it('uses a read-only project scope for background manifest refreshes', () => {
-    expect(source).toContain('registerProjectRootForProjectManagement')
-    expect(source).toContain('desktopApi.workspace.registerProjectRoot')
-    expect(source).toContain('registerProjectReadRootForProjectManagement')
-    expect(source).toContain('desktopApi.workspace.registerProjectReadRoot')
+  it('uses the dedicated read-only Project Management API for historical projects', () => {
+    expect(source).toContain('readProjectManagementManifest')
+    expect(source).toContain('readProjectManagementWorkspaceData')
+    expect(source).toContain('listProjectManagementEntries')
+    expect(source).not.toContain('registerProjectRootForProjectManagement')
+    expect(source).not.toContain('registerProjectReadRootForProjectManagement')
+    expect(source).not.toContain('desktopApi.workspace.registerProjectRoot')
 
     const createStart = source.indexOf('async function createProjectFolderDraft')
-    const createRegister = source.indexOf(
-      'await registerProjectRootForProjectManagement(directory)',
-      createStart,
-    )
     const createMutation = source.indexOf(
-      'await mutateProjectManifest(projectRoot,',
+      'await mutateProjectManifest(directory,',
       createStart,
     )
-    expect(createRegister).toBeGreaterThan(createStart)
-    expect(createMutation).toBeGreaterThan(createRegister)
+    expect(createMutation).toBeGreaterThan(createStart)
 
     const importStart = source.indexOf('async function importProject')
-    const importRegister = source.indexOf(
-      'await registerProjectRootForProjectManagement(directory)',
-      importStart,
-    )
     const importRead = source.indexOf(
-      'await loadProjectFromRoot(projectRoot)',
+      'await loadProjectFromRoot(directory)',
       importStart,
     )
-    expect(importRegister).toBeGreaterThan(importStart)
-    expect(importRead).toBeGreaterThan(importRegister)
+    expect(importRead).toBeGreaterThan(importStart)
 
     const refreshStart = source.indexOf('async function refreshProjectManifests')
-    const refreshRegister = source.indexOf(
-      'await registerProjectReadRootForProjectManagement(project.path)',
-      refreshStart,
-    )
     const refreshRead = source.indexOf(
-      "await readOptionalProjectTextFile('project.json'",
+      'await readProjectManagementManifest(project.path)',
       refreshStart,
     )
-    expect(refreshRegister).toBeGreaterThan(refreshStart)
-    expect(refreshRead).toBeGreaterThan(refreshRegister)
+    expect(refreshRead).toBeGreaterThan(refreshStart)
+
+    const nextWorkspaceStart = source.indexOf('async function nextAvailableWorkspaceId')
+    const nextWorkspaceRead = source.indexOf(
+      'await listProjectManagementEntries(project.path)',
+      nextWorkspaceStart,
+    )
+    expect(nextWorkspaceRead).toBeGreaterThan(nextWorkspaceStart)
   })
 
-  it('serializes project manifest refreshes without replacing the active workspace root', () => {
+  it('serializes historical project refreshes without replacing the active workspace root', () => {
     expect(source).toContain('let projectManifestRefreshQueue = Promise.resolve()')
 
     const refreshStart = source.indexOf('async function refreshProjectManifestsNow')
@@ -583,10 +590,9 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('function refreshProjectManifests(): Promise<void>')
     expect(refreshSource).toContain('for (const project of projectSources.value)')
     expect(refreshSource).not.toContain('projectSources.value.map(async (project) =>')
-    expect(refreshSource).toContain('registerProjectReadRootForProjectManagement')
-    expect(refreshSource).not.toContain(
-      'registerProjectRootForProjectManagement(project.path)',
-    )
+    expect(refreshSource).toContain('readProjectManagementManifest(project.path)')
+    expect(refreshSource).toContain('readProjectManagementWorkspaceData(path, manifest)')
+    expect(refreshSource).not.toContain('registerProjectRootForProjectManagement')
   })
 
   it('persists project history when project.json is updated', () => {

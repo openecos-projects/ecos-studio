@@ -28,6 +28,7 @@ import {
 } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectManifestService } from '../services/projectManifestService'
+import { ProjectManagementReadService } from '../services/projectManagementReadService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
@@ -55,6 +56,7 @@ let services: {
   appInfoService: AppInfoService
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
+  projectManagementReadService: ProjectManagementReadService
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
@@ -190,6 +192,7 @@ function getDesktopServices() {
     projectScopeService,
     workspaceService,
   )
+  const projectManagementReadService = new ProjectManagementReadService()
   const shellService = new ShellPtyService({
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
@@ -219,6 +222,7 @@ function getDesktopServices() {
     chipViewerService,
     codexDependencyService,
     eccRuntimeService,
+    projectManagementReadService,
     projectManifestService,
     resourceManagerService,
     settingsStore,
@@ -260,6 +264,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
         })
       },
       eccRuntimeService: desktopServices.eccRuntimeService,
+      projectManagementReadService: desktopServices.projectManagementReadService,
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
       chipViewerService: desktopServices.chipViewerService,

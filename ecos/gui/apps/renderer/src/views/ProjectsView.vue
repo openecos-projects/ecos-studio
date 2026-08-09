@@ -768,10 +768,7 @@ import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
-import {
-  readProjectWorkspaceAnalysisInputs,
-  readProjectWorkspaceFlowStates,
-} from './project-management/projectWorkspaceAnalysisData'
+import { readProjectManagementWorkspaceData } from './project-management/projectWorkspaceAnalysisData'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
@@ -800,7 +797,10 @@ import {
   parseMpcSpecDesigns,
   type MpcSpecDesign,
 } from '@/utils/mpcSpec'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import {
+  listProjectManagementEntries,
+  readProjectManagementManifest,
+} from '@/utils/projectManagementRead'
 import {
   loadProjectHistory,
   rememberProjectHistoryEntry,
@@ -1468,11 +1468,7 @@ async function refreshProjectManifestsNow() {
 
   for (const project of projectSources.value) {
     try {
-      const projectRoot = await registerProjectReadRootForProjectManagement(project.path)
-      if (!projectRoot) continue
-      const manifestText = await readOptionalProjectTextFile('project.json', {
-        projectPath: projectRoot,
-      })
+      const manifestText = await readProjectManagementManifest(project.path)
       if (!manifestText) continue
       const manifest = parseProjectManifest(manifestText)
       entries.push([project.path, manifest])
@@ -1493,18 +1489,15 @@ async function refreshProjectManifestsNow() {
   void (async () => {
     for (const [path, manifest] of entries) {
       try {
-        const flowStates = await readProjectWorkspaceFlowStates(manifest)
+        const summary = await readProjectManagementWorkspaceData(path, manifest)
         if (projectManifests.value[path] === manifest) {
           workspaceFlowStates.value = {
             ...workspaceFlowStates.value,
-            [path]: flowStates,
+            [path]: summary.flowStates,
           }
-        }
-        const analysisInputs = await readProjectWorkspaceAnalysisInputs(manifest)
-        if (projectManifests.value[path] === manifest) {
           workspaceAnalysisInputs.value = {
             ...workspaceAnalysisInputs.value,
-            [path]: analysisInputs,
+            [path]: summary.analysisInputs,
           }
         }
       } catch (error) {
@@ -1522,18 +1515,7 @@ async function importProject() {
     })
     if (!directory) return
 
-    const projectRoot = await registerProjectRootForProjectManagement(directory)
-    if (!projectRoot) {
-      showToast({
-        severity: 'warn',
-        summary: 'Project not imported',
-        detail:
-          'The selected project folder could not be registered for local file access.',
-      })
-      return
-    }
-
-    const project = await loadProjectFromRoot(projectRoot)
+    const project = await loadProjectFromRoot(directory)
     const manifest = await readProjectManifest(project.path)
     projectHistory.value = await rememberProjectHistoryEntry(project)
     projectManifests.value = {
@@ -1542,18 +1524,22 @@ async function importProject() {
     }
     workspaceFlowStates.value = {
       ...workspaceFlowStates.value,
-      [project.path]: await readProjectWorkspaceFlowStates(manifest),
+      [project.path]: {},
     }
     workspaceAnalysisInputs.value = {
       ...workspaceAnalysisInputs.value,
       [project.path]: {},
     }
-    void readProjectWorkspaceAnalysisInputs(manifest)
-      .then((analysisInputs) => {
+    void readProjectManagementWorkspaceData(project.path, manifest)
+      .then((summary) => {
         if (projectManifests.value[project.path] !== manifest) return
+        workspaceFlowStates.value = {
+          ...workspaceFlowStates.value,
+          [project.path]: summary.flowStates,
+        }
         workspaceAnalysisInputs.value = {
           ...workspaceAnalysisInputs.value,
-          [project.path]: analysisInputs,
+          [project.path]: summary.analysisInputs,
         }
       })
       .catch((error) => {
@@ -1580,15 +1566,7 @@ async function importWorkspaceIntoProject(project: ProjectManagementProject) {
     })
     if (!directory) return
 
-    const projectRoot = await registerProjectRootForProjectManagement(project.path)
-    if (!projectRoot) {
-      showToast({
-        severity: 'warn',
-        summary: 'Workspace not imported',
-        detail: 'The project root could not be registered for local file access.',
-      })
-      return
-    }
+    const projectRoot = project.path
 
     const updated = await mutateProjectManifest(projectRoot, {
       type: 'register-workspace',
@@ -1711,11 +1689,7 @@ async function nextAvailableWorkspaceId(
   project: ProjectManagementProject,
 ): Promise<string | null> {
   try {
-    const projectRoot = await registerProjectRootForProjectManagement(project.path)
-    if (!projectRoot) throw new Error('Project root could not be registered.')
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const entries = await desktopApi.workspace.listProjectDirectory(projectRoot)
-    const occupiedWorkspaceIds = entries.map((entry) => entry.name)
+    const occupiedWorkspaceIds = await listProjectManagementEntries(project.path)
     return nextWorkspaceId(project, occupiedWorkspaceIds)
   } catch (error) {
     console.warn('Failed to inspect existing workspace directories.', error)
@@ -1868,28 +1842,17 @@ async function createProjectFolderDraft() {
     return
   }
 
-  const projectRoot = await registerProjectRootForProjectManagement(directory)
-  if (!projectRoot) {
-    projectRootError.value = 'Project Storage Location could not be registered.'
-    showToast({
-      severity: 'warn',
-      summary: 'Project not created',
-      detail: 'The selected project root could not be registered for local file access.',
-    })
-    return
-  }
-
   const name =
-    projectRootDraft.value.name.trim() || basenamePath(projectRoot) || 'project'
+    projectRootDraft.value.name.trim() || basenamePath(directory) || 'project'
   const designName = projectRootDraft.value.designName.trim() || name
-  const manifest = await mutateProjectManifest(projectRoot, {
+  const manifest = await mutateProjectManifest(directory, {
     type: 'create',
     name,
     designName,
     mpc: selectedProjectMpc.value,
   })
-  await applyProjectManifestForProject(manifest, projectRoot)
-  selectedProjectId.value = projectRoot
+  await applyProjectManifestForProject(manifest, manifest.root_path)
+  selectedProjectId.value = manifest.root_path
   closeNewProjectDialog()
 }
 
@@ -1937,39 +1900,8 @@ async function loadProjectFromRoot(projectRoot: string): Promise<Project> {
   return projectFromManifest(manifest, root)
 }
 
-async function registerProjectRootForProjectManagement(
-  projectRoot: string,
-): Promise<string | null> {
-  try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const registeredRoot = await desktopApi.workspace.registerProjectRoot(projectRoot)
-    return normalizePath(registeredRoot || projectRoot)
-  } catch (error) {
-    console.warn('Failed to register project root for Project Management.', error)
-    return null
-  }
-}
-
-async function registerProjectReadRootForProjectManagement(
-  projectRoot: string,
-): Promise<string | null> {
-  try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const registeredRoot = await desktopApi.workspace.registerProjectReadRoot(projectRoot)
-    return normalizePath(registeredRoot || projectRoot)
-  } catch (error) {
-    // Project history can contain projects unrelated to the active workspace.
-    // Their NFS-backed workspace summaries are loaded only after an explicit
-    // project/workspace switch establishes the matching read scope.
-    console.debug('Deferred project workspace summary read.', error)
-    return null
-  }
-}
-
 async function readProjectManifest(projectRoot: string): Promise<ProjectManifest> {
-  const manifestText = await readOptionalProjectTextFile('project.json', {
-    projectPath: projectRoot,
-  })
+  const manifestText = await readProjectManagementManifest(projectRoot)
   if (!manifestText) throw new Error('Project manifest does not exist.')
   return parseProjectManifest(manifestText)
 }
@@ -1978,10 +1910,7 @@ async function applyProjectManifestForProject(
   manifest: ProjectManifest,
   projectRoot: string,
 ) {
-  const registeredProjectRoot = await registerProjectRootForProjectManagement(projectRoot)
-  if (!registeredProjectRoot) throw new Error('Project root could not be registered.')
-  const normalizedRoot = normalizePath(registeredProjectRoot)
-  const flowStates = await readProjectWorkspaceFlowStates(manifest)
+  const normalizedRoot = normalizePath(manifest.root_path || projectRoot)
   projectManifests.value = {
     ...projectManifests.value,
     [projectRoot]: manifest,
@@ -1989,21 +1918,26 @@ async function applyProjectManifestForProject(
   }
   workspaceFlowStates.value = {
     ...workspaceFlowStates.value,
-    [projectRoot]: flowStates,
-    [normalizedRoot]: flowStates,
+    [projectRoot]: {},
+    [normalizedRoot]: {},
   }
   workspaceAnalysisInputs.value = {
     ...workspaceAnalysisInputs.value,
     [projectRoot]: {},
     [normalizedRoot]: {},
   }
-  void readProjectWorkspaceAnalysisInputs(manifest)
-    .then((analysisInputs) => {
+  void readProjectManagementWorkspaceData(normalizedRoot, manifest)
+    .then((summary) => {
       if (projectManifests.value[normalizedRoot] !== manifest) return
+      workspaceFlowStates.value = {
+        ...workspaceFlowStates.value,
+        [projectRoot]: summary.flowStates,
+        [normalizedRoot]: summary.flowStates,
+      }
       workspaceAnalysisInputs.value = {
         ...workspaceAnalysisInputs.value,
-        [projectRoot]: analysisInputs,
-        [normalizedRoot]: analysisInputs,
+        [projectRoot]: summary.analysisInputs,
+        [normalizedRoot]: summary.analysisInputs,
       }
     })
     .catch((error) => {

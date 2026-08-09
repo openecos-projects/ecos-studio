@@ -14,6 +14,7 @@ export type {
   PickedRtlSources,
   DesktopProjectLogTailSubscriptionOptions,
   DesktopProjectDirectoryEntry,
+  DesktopProjectManagementWorkspaceTextsRequest,
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,
@@ -195,6 +196,11 @@ export {
   resolveProjectFileAbsolutePath,
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
+export {
+  projectManagementStaTimingIssuesPath,
+  projectManagementWorkspaceStepAnalysisSpecs,
+  projectManagementWorkspaceSummaryPaths,
+} from './utils/projectManagementSummary.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'
 export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'
 export {

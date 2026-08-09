@@ -126,6 +126,14 @@ const desktopApi: DesktopApi = {
     mutate: (request: ProjectManifestMutationRequest) =>
       invokeDesktop(desktopApiIpcChannels.projectManifestMutate, request),
   },
+  projectManagement: {
+    readManifest: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementReadManifest, projectRoot),
+    listProjectEntries: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementListEntries, projectRoot),
+    readWorkspaceTexts: (request) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementReadWorkspaceTexts, request),
+  },
   dialog: {
     pickDirectory: (options?: DesktopDirectoryDialogOptions) =>
       invokeDesktop(desktopApiIpcChannels.dialogPickDirectory, options),

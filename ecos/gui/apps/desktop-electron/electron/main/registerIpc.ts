@@ -15,6 +15,7 @@ import {
   type DesktopProjectFileChangedEvent,
   type DesktopProjectLogTailEvent,
   type DesktopProjectDirectoryEntry,
+  type DesktopProjectManagementWorkspaceTextsRequest,
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
   type EccFlowRunStepRequest,
@@ -138,6 +139,13 @@ export interface DesktopBridgeServices {
     mutate(
       request: ProjectManifestMutationRequest,
     ): Promise<ProjectManifestMutationResult>
+  }
+  projectManagementReadService?: {
+    readManifest(projectRoot: string): Promise<string | null>
+    listProjectEntries(projectRoot: string): Promise<string[]>
+    readWorkspaceTexts(
+      request: DesktopProjectManagementWorkspaceTextsRequest,
+    ): Promise<Record<string, string | null>>
   }
   workspaceService: {
     clearProjectRoot(): Promise<void>
@@ -1056,6 +1064,47 @@ export function registerIpc(
       request as unknown as ProjectManifestMutationRequest,
     )
   })
+
+  handle(desktopApiIpcChannels.projectManagementReadManifest, async (_event, projectRoot) => {
+    if (!services.projectManagementReadService) {
+      throw new Error('Project management reads are unavailable.')
+    }
+    if (typeof projectRoot !== 'string') {
+      throw new Error('Project management projectRoot must be a string.')
+    }
+    return await services.projectManagementReadService.readManifest(projectRoot)
+  })
+
+  handle(desktopApiIpcChannels.projectManagementListEntries, async (_event, projectRoot) => {
+    if (!services.projectManagementReadService) {
+      throw new Error('Project management reads are unavailable.')
+    }
+    if (typeof projectRoot !== 'string') {
+      throw new Error('Project management projectRoot must be a string.')
+    }
+    return await services.projectManagementReadService.listProjectEntries(projectRoot)
+  })
+
+  handle(
+    desktopApiIpcChannels.projectManagementReadWorkspaceTexts,
+    async (_event, request) => {
+      if (!services.projectManagementReadService) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (
+        !isRecord(request) ||
+        typeof request.projectRoot !== 'string' ||
+        typeof request.workspacePath !== 'string' ||
+        !Array.isArray(request.paths) ||
+        !request.paths.every((path) => typeof path === 'string')
+      ) {
+        throw new Error('Project management workspace read request is invalid.')
+      }
+      return await services.projectManagementReadService.readWorkspaceTexts(
+        request as unknown as DesktopProjectManagementWorkspaceTextsRequest,
+      )
+    },
+  )
 
   handle(desktopApiIpcChannels.dialogPickDirectory, async (_event, options) => {
     return await pickDirectory(options as DesktopDirectoryDialogOptions | undefined)
