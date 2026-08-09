@@ -80,7 +80,7 @@ function createService(
   directory = '/work/demo',
   options: Pick<
     ConstructorParameters<typeof EccWorkspaceRuntime>[0],
-    'lazyWorkspaceOpen' | 'snapshotLoader'
+    'diagnosticIdleTimeoutMs' | 'lazyWorkspaceOpen' | 'snapshotLoader'
   > = {},
 ) {
   const client = new FakeRpcClient()
@@ -137,6 +137,43 @@ describe('EccWorkspaceRuntime', () => {
 
     expect(loaderCalls).toBe(1)
     expect(sidecar.startCount).toBe(0)
+  })
+
+  it('shares one idle snapshot read across concurrent renderer requests', async () => {
+    const pending = deferred<{
+      directory: string
+      flow: { steps: [] }
+      home: Record<string, never>
+      lastEventId: string
+      operations: []
+      parameters: Record<string, never>
+    }>()
+    let loaderCalls = 0
+    const { service } = createService('/nfs/demo', {
+      lazyWorkspaceOpen: true,
+      snapshotLoader: async () => {
+        loaderCalls += 1
+        return await pending.promise
+      },
+    })
+    const workspace = await service.openWorkspace({ directory: '/nfs/demo' })
+
+    const first = service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
+    const second = service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
+    expect(loaderCalls).toBe(1)
+
+    pending.resolve({
+      directory: '/nfs/demo',
+      flow: { steps: [] },
+      home: {},
+      lastEventId: 'disk:1',
+      operations: [],
+      parameters: {},
+    })
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ lastEventId: 'disk:1' }),
+      expect.objectContaining({ lastEventId: 'disk:1' }),
+    ])
   })
 
   it('maps protocol notifications to the matching GUI workspace handle', async () => {
@@ -289,6 +326,37 @@ describe('EccWorkspaceRuntime', () => {
     })
     expect(client.calls.filter((call) => call.method === 'workspace.snapshot')).toHaveLength(1)
   })
+
+  it('releases a failed operation sidecar after the diagnostic idle timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const { sidecar, sidecarNotification } = createService('/work/demo', {
+        diagnosticIdleTimeoutMs: 25,
+      })
+
+      sidecarNotification({
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: {
+          eventId: 'workspace-1:2',
+          kind: 'flow',
+          operationId: 'operation-1',
+          origin: 'gui',
+          payload: { error: { code: 'command_failed', message: 'failed' } },
+          sequence: 2,
+          timestamp: 2,
+          type: 'operation.failed',
+          workspaceId: 'workspace-1',
+        },
+      })
+
+      await vi.advanceTimersByTimeAsync(25)
+      expect(sidecar.shutdownCount).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('forwards the wizard flow range when creating a workspace', async () => {
     const { client, service } = createService()
     client.responses.push(

@@ -580,7 +580,7 @@ describe('ProjectsView project management surface', () => {
     expect(nextWorkspaceRead).toBeGreaterThan(nextWorkspaceStart)
   })
 
-  it('serializes historical project refreshes without replacing the active workspace root', () => {
+  it('bounds historical project manifest reads without replacing the active workspace root', () => {
     expect(source).toContain('let projectManifestRefreshQueue = Promise.resolve()')
 
     const refreshStart = source.indexOf('async function refreshProjectManifestsNow')
@@ -588,8 +588,10 @@ describe('ProjectsView project management surface', () => {
     const refreshSource = source.slice(refreshStart, refreshEnd)
 
     expect(source).toContain('function refreshProjectManifests(): Promise<void>')
-    expect(refreshSource).toContain('for (const project of projectSources.value)')
-    expect(refreshSource).not.toContain('projectSources.value.map(async (project) =>')
+    expect(source).toContain("import { mapWithConcurrency } from './project-management/asyncConcurrency'")
+    expect(source).toContain('const PROJECT_MANIFEST_READ_CONCURRENCY = 2')
+    expect(refreshSource).toContain('mapWithConcurrency(')
+    expect(refreshSource).toContain('PROJECT_MANIFEST_READ_CONCURRENCY')
     expect(refreshSource).toContain('readProjectManagementManifest(project.path)')
     expect(refreshSource).toContain('readProjectManagementWorkspaceData(path, manifest)')
     expect(refreshSource).not.toContain('registerProjectRootForProjectManagement')

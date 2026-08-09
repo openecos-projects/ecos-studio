@@ -60,7 +60,7 @@ Project Management 使用独立的 `ProjectManagementReadService` 读取 history
 不会调用 `registerProjectRoot()` 或 `registerProjectReadRoot()`，因此不会因路由离开
 清理 active scope 而遗漏 Project 卡片，也不会改写当前 workspace root。
 
-renderer 首先按 history 串行读取小型 manifest 并渲染 Project/Workspace 树，随后以
+renderer 首先以两个 Project 的并发上限读取小型 manifest 并渲染 Project/Workspace 树，随后以
 两个 Workspace 的并发上限填充 flow/QoR 摘要。main 的每个请求最多并发读取四个
 允许且尺寸有界的文件，且禁止 watcher、轮询、递归资源索引、全量日志和报告读取。
 共享包的 `projectManagementWorkspaceSummaryPaths` 是 renderer 请求与 main allowlist

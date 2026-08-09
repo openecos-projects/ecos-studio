@@ -5,6 +5,7 @@ import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
+import { installRuntimeQuitGuard } from './runtimeQuitGuard'
 import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
@@ -46,9 +47,6 @@ if (!gotSingleInstanceLock) {
 }
 
 let ipcRegistered = false
-let appQuitApproved = false
-let appQuitPending = false
-let appQuitShutdownInFlight = false
 let workspaceReplacementRecoveryComplete = false
 let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
@@ -65,40 +63,6 @@ let services: {
   workspaceResourceService: WorkspaceResourceService
   workspaceService: WorkspaceService
 } | null = null
-
-function installRuntimeQuitGuard(eccRuntimeService: EccRpcRuntimeService): void {
-  const requestShutdown = (): void => {
-    if (!appQuitPending || appQuitShutdownInFlight) return
-    appQuitShutdownInFlight = true
-    void eccRuntimeService
-      .rpcShutdown()
-      .then((result) => {
-        appQuitShutdownInFlight = false
-        if (result.deferred) {
-          return
-        }
-        appQuitApproved = true
-        app.quit()
-      })
-      .catch((error) => {
-        appQuitShutdownInFlight = false
-        electronLogger.error('[runtime] Failed to shut down ECC sidecars', error)
-      })
-  }
-
-  eccRuntimeService.onEvent(() => {
-    if (appQuitPending && !eccRuntimeService.hasPendingRuntimeWork()) {
-      requestShutdown()
-    }
-  })
-
-  app.on('before-quit', (event) => {
-    if (appQuitApproved) return
-    event.preventDefault()
-    appQuitPending = true
-    requestShutdown()
-  })
-}
 
 function readHostInfo(path: string): string {
   try {
@@ -182,7 +146,13 @@ function getDesktopServices() {
     lazyWorkspaceOpen: true,
     snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
   })
-  installRuntimeQuitGuard(eccRuntimeService)
+  installRuntimeQuitGuard({
+    app,
+    onShutdownError: (error) => {
+      electronLogger.error('[runtime] Failed to shut down ECC sidecars', error)
+    },
+    runtime: eccRuntimeService,
+  })
   const workspaceService = new WorkspaceService({
     projectScopeProvider: projectScopeService,
     replacementJournalDirectory: join(app.getPath('userData'), 'workspace-replacements'),

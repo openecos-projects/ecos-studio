@@ -12,32 +12,12 @@ import {
 import { parseWorkspaceFlowStateMap } from '@/utils/projectManagement'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { readProjectManagementWorkspaceTexts } from '@/utils/projectManagementRead'
+import { mapWithConcurrency } from './asyncConcurrency'
 
 const WORKSPACE_STEP_ANALYSIS_SPECS = projectManagementWorkspaceStepAnalysisSpecs
 const STA_TIMING_ISSUES_PATH = projectManagementStaTimingIssuesPath
 const PROJECT_READ_CONCURRENCY = 2
 const WORKSPACE_ANALYSIS_READ_CONCURRENCY = 4
-
-async function mapWithConcurrency<T, R>(
-  values: readonly T[],
-  concurrency: number,
-  mapper: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(values.length)
-  let nextIndex = 0
-  const workers = Array.from(
-    { length: Math.min(Math.max(concurrency, 1), values.length) },
-    async () => {
-      while (nextIndex < values.length) {
-        const index = nextIndex
-        nextIndex += 1
-        results[index] = await mapper(values[index]!)
-      }
-    },
-  )
-  await Promise.all(workers)
-  return results
-}
 
 export async function readProjectWorkspaceFlowStates(
   manifest: ProjectManifest,

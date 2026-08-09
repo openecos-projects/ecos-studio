@@ -108,10 +108,19 @@ export class EccRpcRuntimeService {
     const runtimes = this.uniqueRuntimes()
     const blockingRuntime = runtimes.find((runtime) => runtime.hasPendingRuntimeWork())
     if (blockingRuntime) {
-      return {
-        ok: false,
-        deferred: true,
-        shutdownBarrier: blockingRuntime.shutdownBarrier() ?? undefined,
+      if (blockingRuntime.isActive()) {
+        const result = await blockingRuntime.shutdown()
+        if (result.deferred && result.shutdownBarrier?.safeToStop) {
+          await blockingRuntime.cancelAtSafeShutdownBoundary(result.shutdownBarrier)
+        }
+        if (result.deferred) return result
+      }
+      if (blockingRuntime.hasPendingRuntimeWork()) {
+        return {
+          ok: false,
+          deferred: true,
+          shutdownBarrier: blockingRuntime.shutdownBarrier() ?? undefined,
+        }
       }
     }
     await Promise.all(runtimes.map((runtime) => runtime.shutdown()))

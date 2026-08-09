@@ -769,6 +769,7 @@ import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
 import { readProjectManagementWorkspaceData } from './project-management/projectWorkspaceAnalysisData'
+import { mapWithConcurrency } from './project-management/asyncConcurrency'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
@@ -813,6 +814,7 @@ type ProjectCard = { source: Project; model: ProjectManagementProject }
 
 const PROJECT_PREVIEW_LIMIT = 20
 const WORKSPACE_PREVIEW_LIMIT = 20
+const PROJECT_MANIFEST_READ_CONCURRENCY = 2
 
 const route = useRoute()
 const router = useRouter()
@@ -1464,18 +1466,20 @@ function refreshProjectManifests(): Promise<void> {
 }
 
 async function refreshProjectManifestsNow() {
-  const entries: Array<[string, ProjectManifest]> = []
-
-  for (const project of projectSources.value) {
-    try {
-      const manifestText = await readProjectManagementManifest(project.path)
-      if (!manifestText) continue
-      const manifest = parseProjectManifest(manifestText)
-      entries.push([project.path, manifest])
-    } catch (error) {
-      console.warn(`Failed to load project manifest: ${project.path}`, error)
-    }
-  }
+  const loadedEntries = await mapWithConcurrency(
+    projectSources.value,
+    PROJECT_MANIFEST_READ_CONCURRENCY,
+    async (project): Promise<readonly [string, ProjectManifest] | null> => {
+      try {
+        const manifestText = await readProjectManagementManifest(project.path)
+        return manifestText ? [project.path, parseProjectManifest(manifestText)] : null
+      } catch (error) {
+        console.warn(`Failed to load project manifest: ${project.path}`, error)
+        return null
+      }
+    },
+  )
+  const entries = loadedEntries.flatMap((entry) => (entry ? [entry] : []))
 
   projectManifests.value = Object.fromEntries(
     entries.map(([path, manifest]) => [path, manifest]),

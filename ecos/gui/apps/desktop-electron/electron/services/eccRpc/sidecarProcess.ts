@@ -211,24 +211,10 @@ export class EccRpcSidecarProcess {
 
   async shutdown(): Promise<void> {
     const child = this.child
-    const client = this.client
-    if (!child || !client) {
+    if (!child) {
       return
     }
-
-    const result = await this.requestShutdown(client)
-    if (result.kind === 'deferred') {
-      this.shuttingDown = false
-      throw new EccRpcShutdownDeferredError(result.shutdownBarrier)
-    }
-    if (result.kind === 'failed') {
-      child.kill('SIGTERM')
-      this.forceKillTimer = setTimeout(() => {
-        if (this.child === child) {
-          child.kill('SIGKILL')
-        }
-      }, this.forceKillTimeoutMs)
-    }
+    await this.stopForRestart(child)
   }
 
   /**

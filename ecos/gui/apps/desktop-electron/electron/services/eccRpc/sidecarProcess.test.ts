@@ -246,6 +246,28 @@ describe('EccRpcSidecarProcess', () => {
     expect(child.signals).toEqual([])
   })
 
+  it('waits for the sidecar process to exit after rpc.shutdown is acknowledged', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    await sidecar.start()
+
+    let settled = false
+    const shutdown = sidecar.shutdown().then(() => {
+      settled = true
+    })
+    await vi.waitFor(() => {
+      expect(child.stdin.chunks).toHaveLength(1)
+    })
+    child.stdout.write(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(settled).toBe(false)
+    child.emit('close', 0, null)
+    await expect(shutdown).resolves.toBeUndefined()
+  })
+
   it('forwards sidecar JSON-RPC notifications to the runtime owner', async () => {
     const child = new FakeChild()
     const notifications: unknown[] = []
@@ -363,7 +385,7 @@ describe('EccRpcSidecarProcess', () => {
     )
   })
 
-  it('sends SIGTERM and then SIGKILL when rpc.shutdown times out', async () => {
+  it('fails shutdown after bounded signal escalation when rpc.shutdown times out', async () => {
     vi.useFakeTimers()
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
@@ -372,13 +394,16 @@ describe('EccRpcSidecarProcess', () => {
     })
 
     await sidecar.start()
-    const shutdown = sidecar.shutdown()
+    const shutdown = sidecar.shutdown().catch((error: unknown) => error)
 
     await vi.advanceTimersByTimeAsync(25)
-    await shutdown
     expect(child.signals).toEqual(['SIGTERM'])
 
     await vi.advanceTimersByTimeAsync(1000)
     expect(child.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    await vi.advanceTimersByTimeAsync(25)
+    await expect(shutdown).resolves.toMatchObject({
+      message: 'ECC RPC sidecar did not exit after SIGKILL.',
+    })
   })
 })
