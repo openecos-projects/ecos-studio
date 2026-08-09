@@ -52,6 +52,39 @@ scope，且不得调用 `registerProjectRoot()` 覆盖活跃 workspace root。
 分析数据读取，直到用户切换到该项目或有对应的受限 scope。这样保留路径
 安全边界，并防止 Home/Project 管理界面在 NFS 上发起无效并发读。
 
+### Project design 与 baseline 同步
+
+Project manifest 顶层保存显式的 `design_name`。它是 Project 所有的设计
+标识：新建 Project 时由用户配置；新建普通 workspace 和分支 workspace 时
+写入 workspace 的 `design` 参数、manifest 参数补丁与新产物命名。旧 manifest
+不在本次改造的支持范围内；`design_name` 缺失即为无效 Project 文档，不提供
+读取回退、自动迁移或兼容分支。
+
+baseline workspace 可以被修改，也可以在 manifest workspace 间切换。选择新的
+baseline 或保存当前 baseline 的配置后，Project 必须从该 workspace 的受限快照
+同步 `base_design` 的 PDK、RTL/DEF 输入、top module、clock 和其他基础参数。
+同步不允许覆盖 Project 的 `design_name`；同步后的
+`base_design.parameters.design` 必须重写为 Project `design_name`。源 workspace
+产物仍使用源 workspace 自己的 design 名解析，避免分支时找不到既有文件。
+
+`qor_baseline` 更新与 `base_design` 同步必须是同一次原子 manifest mutation：先
+验证 workspace 属于该 Project、没有冲突中的 flow 写入，并在 main process 取得
+受限、尺寸有界的 workspace snapshot；只有 snapshot 完整有效时才写入二者。
+若读取、校验或写入失败，保留旧 Project 数据和旧 baseline 指针，并向界面返回
+可重试错误。不得通过 renderer watcher、轮询或直接 NFS 扫描来补偿同步。
+
+### Baseline 验收与测试
+
+- Project `design_name` 为 `gcd_core`、baseline workspace 的旧 `design` 为
+  `gcd_legacy` 时，切换 baseline 后 Project 基础 PDK/RTL/时钟数据更新，
+  `design_name` 和后续 workspace 的 `design` 仍为 `gcd_core`。
+- 缺少顶层 `design_name` 的 manifest 被拒绝，不生成推断值、迁移文件或兼容路径。
+- baseline workspace 配置保存成功时，Project 基础数据随同一次 manifest mutation
+  更新；保存失败或 snapshot 无效时，manifest 不出现半更新。
+- 分支读取源产物继续使用源 workspace 的 artifact design 名，目标 workspace 使用
+  Project `design_name`。
+- baseline 同步不引入 renderer 直接文件读取、NFS watcher 或运行态轮询。
+
 ### 验收与测试
 
 - `..ws_*` 子目录被允许恢复，`../outside` 和符号链接越界继续被拒绝。
