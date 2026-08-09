@@ -23,7 +23,10 @@ describe('WorkspaceSnapshotLoader', () => {
 
   it('loads only lightweight workspace JSON summaries', async () => {
     const directory = createWorkspace()
-    writeFileSync(join(directory, 'home', 'home.json'), JSON.stringify({ flow: 'home/flow.json' }))
+    writeFileSync(
+      join(directory, 'home', 'home.json'),
+      JSON.stringify({ flow: 'home/flow.json' }),
+    )
     writeFileSync(
       join(directory, 'home', 'flow.json'),
       JSON.stringify({
@@ -37,7 +40,10 @@ describe('WorkspaceSnapshotLoader', () => {
         ],
       }),
     )
-    writeFileSync(join(directory, 'home', 'parameters.json'), JSON.stringify({ PDK: 'ics55' }))
+    writeFileSync(
+      join(directory, 'home', 'parameters.json'),
+      JSON.stringify({ PDK: 'ics55' }),
+    )
 
     await expect(new WorkspaceSnapshotLoader().load(directory)).resolves.toMatchObject({
       directory,
@@ -57,5 +63,30 @@ describe('WorkspaceSnapshotLoader', () => {
     await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
       'Workspace snapshot resource exceeds',
     )
+  })
+
+  it('loads the bounded configuration snapshot used for project baseline sync', async () => {
+    const directory = createWorkspace()
+    mkdirSync(join(directory, 'config'))
+    writeFileSync(
+      join(directory, 'home', 'parameters.json'),
+      JSON.stringify({ Design: 'gcd', PDK: 'ics55' }),
+    )
+    writeFileSync(
+      join(directory, 'home', 'pdk.json'),
+      JSON.stringify({ tech_lef: ['/pdks/ics55/tech.lef'] }),
+    )
+    writeFileSync(
+      join(directory, 'config', 'db_default_config.json'),
+      JSON.stringify({ INPUT: { rtl_list: ['/sources/gcd.sv'] } }),
+    )
+
+    await expect(
+      new WorkspaceSnapshotLoader().loadBaselineSnapshot(directory),
+    ).resolves.toEqual({
+      parameters: { Design: 'gcd', PDK: 'ics55' },
+      pdk: { tech_lef: ['/pdks/ics55/tech.lef'] },
+      db: { INPUT: { rtl_list: ['/sources/gcd.sv'] } },
+    })
   })
 })

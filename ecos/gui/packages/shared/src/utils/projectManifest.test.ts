@@ -5,6 +5,7 @@ import {
   deleteWorkspaceFromManifest,
   parseProjectManifest,
   registerWorkspaceInManifest,
+  synchronizeProjectBaseline,
 } from './projectManifest'
 
 describe('project manifest parsing', () => {
@@ -12,6 +13,7 @@ describe('project manifest parsing', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/work/gcd',
       name: 'gcd',
+      designName: 'gcd_core',
       mpc: {
         resource_id: 'mpc:mpc-frame',
         display_name: 'MPC Frame',
@@ -34,7 +36,7 @@ describe('project manifest parsing', () => {
     })
   })
 
-  it('uses null for a legacy manifest without an MPC and rejects a mismatched spec path', () => {
+  it('requires design_name and rejects a mismatched MPC spec path', () => {
     const legacyManifest = {
       schema_version: 1,
       project_id: 'proj_gcd',
@@ -48,11 +50,14 @@ describe('project manifest parsing', () => {
       best_workspace: null,
     }
 
-    expect(parseProjectManifest(JSON.stringify(legacyManifest)).mpc).toBeNull()
+    expect(() => parseProjectManifest(JSON.stringify(legacyManifest))).toThrow(
+      'design_name is required',
+    )
     expect(() =>
       parseProjectManifest(
         JSON.stringify({
           ...legacyManifest,
+          design_name: 'gcd',
           mpc: {
             resource_id: 'mpc:mpc-frame',
             display_name: 'MPC Frame',
@@ -74,6 +79,7 @@ describe('project manifest parsing', () => {
           schema_version: 1,
           project_id: 'proj_gcd',
           name: 'gcd',
+          design_name: 'gcd',
           root_path: '/work/gcd',
           created_at: '2026-07-01T00:00:00.000Z',
           updated_at: '2026-07-01T00:00:00.000Z',
@@ -99,6 +105,7 @@ describe('project manifest parsing', () => {
         schema_version: 1,
         project_id: 'proj_gcd',
         name: 'gcd',
+        design_name: 'gcd',
         root_path: '/work/gcd',
         created_at: '2026-07-01T00:00:00.000Z',
         updated_at: '2026-07-01T00:00:00.000Z',
@@ -149,6 +156,7 @@ describe('project manifest parsing', () => {
         schema_version: 1,
         project_id: 'proj_gcd',
         name: 'gcd',
+        design_name: 'gcd',
         root_path: '/work/gcd',
         created_at: '2026-07-01T00:00:00.000Z',
         updated_at: '2026-07-01T00:00:00.000Z',
@@ -181,7 +189,11 @@ describe('project manifest parsing', () => {
 
   it('persists the first available workspace as the default QoR baseline', () => {
     const first = registerWorkspaceInManifest(
-      createProjectManifestDraft({ rootPath: '/work/gcd', name: 'gcd' }),
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        designName: 'gcd',
+      }),
       {
         projectRoot: '/work/gcd',
         workspacePath: '/work/gcd/ws_0001',
@@ -203,7 +215,11 @@ describe('project manifest parsing', () => {
 
   it('moves the QoR baseline when its workspace is archived or deleted', () => {
     const first = registerWorkspaceInManifest(
-      createProjectManifestDraft({ rootPath: '/work/gcd', name: 'gcd' }),
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        designName: 'gcd',
+      }),
       {
         projectRoot: '/work/gcd',
         workspacePath: '/work/gcd/ws_0001',
@@ -223,6 +239,38 @@ describe('project manifest parsing', () => {
     expect(deleteWorkspaceFromManifest(second, 'ws_0001').qor_baseline).toEqual({
       workspace_id: 'ws_0002',
       reason: 'Default project QoR baseline',
+    })
+  })
+
+  it('keeps project design_name authoritative for workspace registration and baseline sync', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/work/gcd',
+      name: 'Dashboard label',
+      designName: 'gcd_project',
+      now: '2026-08-04T00:00:00.000Z',
+    })
+    const registered = registerWorkspaceInManifest(manifest, {
+      projectRoot: '/work/gcd',
+      workspacePath: '/work/gcd/ws_0001',
+      config: {
+        parameters: { design: 'workspace_override', top_module: 'core' },
+      },
+    })
+    const synchronized = synchronizeProjectBaseline(registered, {
+      workspaceId: 'ws_0001',
+      baseDesign: {
+        parameters: { design: 'baseline_override', top_module: 'baseline_core' },
+        rtl_list: ['/work/gcd/ws_0001/origin/gcd_project.sv'],
+      },
+      now: '2026-08-05T00:00:00.000Z',
+    })
+
+    expect(registered.workspaces[0]).toMatchObject({ name: 'gcd_project' })
+    expect(registered.base_design.parameters?.design).toBe('gcd_project')
+    expect(synchronized.design_name).toBe('gcd_project')
+    expect(synchronized.base_design.parameters).toMatchObject({
+      design: 'gcd_project',
+      top_module: 'baseline_core',
     })
   })
 })

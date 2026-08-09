@@ -65,6 +65,7 @@ function projectManifest(includeBaseline = true) {
   const draft = createProjectManifestDraft({
     rootPath: '/projects/gcd',
     name: 'gcd',
+    designName: 'gcd',
     now: '2026-08-04T00:00:00.000Z',
   })
   const baseline = registerWorkspaceInManifest(draft, {
@@ -86,6 +87,7 @@ function singleWorkspaceManifest() {
     createProjectManifestDraft({
       rootPath: '/projects/gcd',
       name: 'gcd',
+      designName: 'gcd',
       now: '2026-08-04T00:00:00.000Z',
     }),
     {

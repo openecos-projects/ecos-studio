@@ -530,9 +530,11 @@ describe('ProjectsView project management surface', () => {
     expect(source).not.toContain('localProjectDrafts')
   })
 
-  it('registers project roots before reading or mutating project.json', () => {
+  it('uses a read-only project scope for background manifest refreshes', () => {
     expect(source).toContain('registerProjectRootForProjectManagement')
     expect(source).toContain('desktopApi.workspace.registerProjectRoot')
+    expect(source).toContain('registerProjectReadRootForProjectManagement')
+    expect(source).toContain('desktopApi.workspace.registerProjectReadRoot')
 
     const createStart = source.indexOf('async function createProjectFolderDraft')
     const createRegister = source.indexOf(
@@ -560,7 +562,7 @@ describe('ProjectsView project management surface', () => {
 
     const refreshStart = source.indexOf('async function refreshProjectManifests')
     const refreshRegister = source.indexOf(
-      'await registerProjectRootForProjectManagement(project.path)',
+      'await registerProjectReadRootForProjectManagement(project.path)',
       refreshStart,
     )
     const refreshRead = source.indexOf(
@@ -571,7 +573,7 @@ describe('ProjectsView project management surface', () => {
     expect(refreshRead).toBeGreaterThan(refreshRegister)
   })
 
-  it('serializes project manifest refreshes because the desktop file scope has one active root', () => {
+  it('serializes project manifest refreshes without replacing the active workspace root', () => {
     expect(source).toContain('let projectManifestRefreshQueue = Promise.resolve()')
 
     const refreshStart = source.indexOf('async function refreshProjectManifestsNow')
@@ -581,6 +583,10 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('function refreshProjectManifests(): Promise<void>')
     expect(refreshSource).toContain('for (const project of projectSources.value)')
     expect(refreshSource).not.toContain('projectSources.value.map(async (project) =>')
+    expect(refreshSource).toContain('registerProjectReadRootForProjectManagement')
+    expect(refreshSource).not.toContain(
+      'registerProjectRootForProjectManagement(project.path)',
+    )
   })
 
   it('persists project history when project.json is updated', () => {

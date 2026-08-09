@@ -84,6 +84,7 @@ export interface ProjectManifest {
   schema_version: 1
   project_id: string
   name: string
+  design_name: string
   description: string
   root_path: string
   created_at: string
@@ -108,6 +109,7 @@ export interface ProjectManifest {
 export interface ProjectManifestDraftInput {
   rootPath: string
   name: string
+  designName: string
   mpc?: ProjectManifestMpc | null
   now?: string
 }
@@ -146,8 +148,20 @@ export interface ProjectManifestResolvedReplacementBackupInput {
   targetPath: string
 }
 
+export interface ProjectManifestBaselineSyncInput {
+  workspaceId: string
+  baseDesign: ProjectManifestBaseDesign
+  reason?: string
+  now?: string
+}
+
 export type ProjectManifestMutation =
-  | { type: 'create'; name: string; mpc?: ProjectManifestMpc | null }
+  | {
+      type: 'create'
+      name: string
+      designName: string
+      mpc?: ProjectManifestMpc | null
+    }
   | { input: ProjectManifestWorkspaceRegistrationInput; type: 'register-workspace' }
   | { type: 'archive-workspace'; workspaceId: string }
   | {
@@ -156,6 +170,11 @@ export type ProjectManifestMutation =
       workspaceId: string
     }
   | { input: ProjectManifestReplacementBackupInput; type: 'record-replacement-backup' }
+  | {
+      type: 'select-qor-baseline'
+      workspaceId: string
+      reason?: string
+    }
 
 export interface ProjectManifestMutationRequest {
   mutation: ProjectManifestMutation
@@ -206,16 +225,19 @@ export function createProjectManifestDraft(
   const rootPath = normalizeProjectManifestPath(input.rootPath)
   const name =
     optionalString(input.name) || basenameProjectManifestPath(rootPath) || 'project'
+  const designName = optionalString(input.designName)
+  if (!designName) throw new Error('Project manifest design_name is required.')
   return {
     schema_version: 1,
     project_id: `proj_${slugify(name)}`,
     name,
+    design_name: designName,
     description: '',
     root_path: rootPath,
     created_at: now,
     updated_at: now,
     base_design: {
-      parameters: {},
+      parameters: { design: designName },
       rtl_list: [],
     },
     objectives: {
@@ -258,6 +280,8 @@ export function parseProjectManifest(content: string): ProjectManifest {
 
   const rootPath = optionalString(source.root_path)
   if (!rootPath) throw new Error('Invalid project manifest: root_path is required.')
+  const designName = optionalString(source.design_name)
+  if (!designName) throw new Error('Invalid project manifest: design_name is required.')
 
   const name =
     optionalString(source.name) || basenameProjectManifestPath(rootPath) || 'project'
@@ -271,11 +295,12 @@ export function parseProjectManifest(content: string): ProjectManifest {
     schema_version: 1,
     project_id: optionalString(source.project_id) || `proj_${slugify(name)}`,
     name,
+    design_name: designName,
     description: optionalString(source.description),
     root_path: normalizeProjectManifestPath(rootPath),
     created_at: createdAt,
     updated_at: updatedAt,
-    base_design: baseDesign,
+    base_design: withProjectDesignName(baseDesign, designName),
     objectives,
     workspaces: source.workspaces.map((workspace, index) =>
       normalizeWorkspace(workspace, index, createdAt),
@@ -295,16 +320,12 @@ export function applyProjectManifestMutation(
     case 'create':
       return createProjectManifestDraft({
         name: mutation.name,
+        designName: mutation.designName,
         rootPath: projectRoot,
         mpc: mutation.mpc,
       })
     case 'register-workspace': {
-      const manifest =
-        currentManifest ??
-        createProjectManifestDraft({
-          name: mutation.input.projectName || basenameProjectManifestPath(projectRoot),
-          rootPath: projectRoot,
-        })
+      const manifest = requireManifest(currentManifest)
       return registerWorkspaceInManifest(manifest, {
         ...mutation.input,
         projectRoot,
@@ -323,6 +344,10 @@ export function applyProjectManifestMutation(
     case 'record-replacement-backup':
       throw new Error(
         'Replacement backup mutations must be resolved by the desktop manifest service.',
+      )
+    case 'select-qor-baseline':
+      throw new Error(
+        'QoR baseline mutations must be resolved by the desktop manifest service.',
       )
   }
 }
@@ -366,16 +391,17 @@ export function registerWorkspaceInManifest(
   const endStep = input.endStep
     ? normalizeProjectManifestFlowStep(input.endStep)
     : normalizeProjectManifestFlowStep(existingWorkspace?.end_step ?? 'Harden')
-  const workspaceName =
-    optionalString(input.config?.parameters?.design) ||
-    existingWorkspace?.name ||
-    workspaceId
-  const parameterPatch = input.config?.parameters
+  const workspaceName = manifest.design_name
+  const workspaceParameters = {
+    ...(input.config?.parameters ?? {}),
+    design: manifest.design_name,
+  }
+  const parameterPatch = input.config
     ? {
         ...existingWorkspace?.parameter_patch,
         ...buildParameterPatch(
           manifest.base_design.parameters ?? {},
-          input.config.parameters,
+          workspaceParameters,
         ),
       }
     : (existingWorkspace?.parameter_patch ?? {})
@@ -401,17 +427,50 @@ export function registerWorkspaceInManifest(
       )
     : [...manifest.workspaces, workspace]
   const qorBaseline = ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
+  const shouldSyncBaseDesign =
+    manifest.qor_baseline === null || manifest.qor_baseline.workspace_id === workspaceId
 
   return {
     ...manifest,
     name: input.projectName || manifest.name,
     root_path: normalizeProjectManifestPath(input.projectRoot || manifest.root_path),
     updated_at: now,
-    base_design: mergeBaseDesignConfig(manifest.base_design, input.config, {
-      includeDesignParameter: !sourceWorkspaceId && !branchFrom,
-    }),
+    base_design: shouldSyncBaseDesign
+      ? withProjectDesignName(
+          mergeBaseDesignConfig(manifest.base_design, {
+            ...input.config,
+            parameters: workspaceParameters,
+          }),
+          manifest.design_name,
+        )
+      : withProjectDesignName(manifest.base_design, manifest.design_name),
     workspaces,
     qor_baseline: qorBaseline,
+  }
+}
+
+export function synchronizeProjectBaseline(
+  manifest: ProjectManifest,
+  input: ProjectManifestBaselineSyncInput,
+): ProjectManifest {
+  const workspace = manifest.workspaces.find(
+    (candidate) =>
+      candidate.workspace_id === input.workspaceId && candidate.status !== 'archived',
+  )
+  if (!workspace) {
+    throw new Error(
+      `Workspace ${input.workspaceId} is not available for the project QoR baseline.`,
+    )
+  }
+
+  return {
+    ...manifest,
+    updated_at: input.now ?? new Date().toISOString(),
+    base_design: withProjectDesignName(input.baseDesign, manifest.design_name),
+    qor_baseline: {
+      workspace_id: workspace.workspace_id,
+      reason: input.reason || 'Selected from Project QoR Trend',
+    },
   }
 }
 
@@ -771,7 +830,6 @@ function nextManifestWorkspaceId(manifest: ProjectManifest): string {
 function mergeBaseDesignConfig(
   baseDesign: ProjectManifestBaseDesign,
   config: ProjectManifestWorkspaceRegistrationInput['config'],
-  options: { includeDesignParameter?: boolean } = {},
 ): ProjectManifestBaseDesign {
   if (!config) return baseDesign
   const parameters = config.parameters ?? {}
@@ -779,11 +837,7 @@ function mergeBaseDesignConfig(
     ...baseDesign,
     parameters: {
       ...baseDesign.parameters,
-      ...Object.fromEntries(
-        Object.entries(parameters).filter(
-          ([key]) => options.includeDesignParameter !== false || key !== 'design',
-        ),
-      ),
+      ...parameters,
     },
   }
   const pdk = optionalString(config.pdk)
@@ -800,6 +854,19 @@ function mergeBaseDesignConfig(
   if (originDef) next.origin_def = originDef
   if (config.rtl_list && config.rtl_list.length > 0) next.rtl_list = [...config.rtl_list]
   return next
+}
+
+function withProjectDesignName(
+  baseDesign: ProjectManifestBaseDesign,
+  designName: string,
+): ProjectManifestBaseDesign {
+  return {
+    ...baseDesign,
+    parameters: {
+      ...baseDesign.parameters,
+      design: designName,
+    },
+  }
 }
 
 function buildParameterPatch(

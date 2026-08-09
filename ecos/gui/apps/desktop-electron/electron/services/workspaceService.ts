@@ -22,6 +22,7 @@ import type {
   WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
 import { LogTailService } from './logTailService'
+import { isPathWithinRoot, isSameOrAncestorPath } from './pathScope'
 import { scanRtlDirectory as scanRtlDirectoryFiles } from './rtlDirectoryScanner'
 import {
   addWorkspaceDesignFiles,
@@ -117,22 +118,8 @@ function isNodeErrorWithCode(error: unknown, code: string): boolean {
   )
 }
 
-function isWithinRoot(candidatePath: string, rootPath: string): boolean {
-  const relativePath = relative(rootPath, candidatePath)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
-}
-
 function isSamePath(path: string, otherPath: string): boolean {
   return relative(path, otherPath) === ''
-}
-
-function isSameOrAncestorPath(path: string, descendantPath: string): boolean {
-  const relativePath = relative(path, descendantPath)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
 }
 
 function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
@@ -205,7 +192,7 @@ async function findProjectFileWatchDirectory(
 ): Promise<string> {
   let candidate = dirname(path)
 
-  while (candidate && isWithinRoot(candidate, rootPath)) {
+  while (candidate && isPathWithinRoot(candidate, rootPath)) {
     try {
       const candidateStats = await stat(candidate)
       if (candidateStats.isDirectory()) return candidate
@@ -568,7 +555,7 @@ export class WorkspaceService {
     }
     const expectedTargetPath = join(canonicalProjectRoot, workspaceId)
     if (
-      !isWithinRoot(targetPath, canonicalProjectRoot) ||
+      !isPathWithinRoot(targetPath, canonicalProjectRoot) ||
       !isSamePath(targetPath, expectedTargetPath)
     ) {
       throw new Error('Workspace manifest path is not a direct child of the project root')
@@ -764,8 +751,8 @@ export class WorkspaceService {
     }
 
     if (
-      !isWithinRoot(replacement.targetPath, replacement.projectRoot) ||
-      !isWithinRoot(replacement.backupPath, replacement.projectRoot)
+      !isPathWithinRoot(replacement.targetPath, replacement.projectRoot) ||
+      !isPathWithinRoot(replacement.backupPath, replacement.projectRoot)
     ) {
       this.directoryReplacements.delete(replacementId)
       throw new Error(
@@ -866,8 +853,8 @@ export class WorkspaceService {
       !isAbsolute(journal.targetPath) ||
       !isAbsolute(journal.backupPath) ||
       isSamePath(journal.targetPath, journal.projectRoot) ||
-      !isWithinRoot(journal.targetPath, journal.projectRoot) ||
-      !isWithinRoot(journal.backupPath, journal.projectRoot)
+      !isPathWithinRoot(journal.targetPath, journal.projectRoot) ||
+      !isPathWithinRoot(journal.backupPath, journal.projectRoot)
     ) {
       throw new Error('Workspace replacement journal paths are outside the project root')
     }

@@ -17,6 +17,7 @@ import {
   type DesktopAgentWorkspaceParameterWrite,
   type DesktopAgentWorkspaceRerunContract,
 } from '@ecos-studio/shared'
+import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
@@ -271,7 +272,7 @@ async function verifyWorkspaceRerunContract(
     !targetWorkspace.startsWith(expectedTarget) ||
     (targetSuffix && !/^_\d{4}$/.test(targetSuffix)) ||
     contract.rerun_id !== basename(targetWorkspace) ||
-    relative(dirname(sourceWorkspace), targetWorkspace).startsWith('..')
+    isRelativePathOutsideRoot(relative(dirname(sourceWorkspace), targetWorkspace))
   ) {
     throw new Error('Workspace rerun target is outside the source workspace parent.')
   }
@@ -396,10 +397,7 @@ async function resolvePathWithinWorkspace(
 }
 
 function isWithinWorkspace(workspace: string, path: string): boolean {
-  const relativePath = relative(workspace, path)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
+  return isPathWithinRoot(path, workspace)
 }
 
 async function assertMissing(path: string): Promise<void> {

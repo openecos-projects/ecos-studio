@@ -509,6 +509,11 @@
         </label>
 
         <label class="form-field">
+          <span>Design Name</span>
+          <input v-model="projectRootDraft.designName" type="text" placeholder="gcd" />
+        </label>
+
+        <label class="form-field">
           <span>Project Storage Location</span>
           <div class="path-picker">
             <input
@@ -779,8 +784,6 @@ import {
   resolveProjectSelectionUpdate,
   nextWorkspaceId,
   parseProjectManifest,
-  serializeProjectManifest,
-  setQorBaselineInManifest,
   type FlowStep,
   type ProjectFlowStatusHint,
   type ProjectManifest,
@@ -797,7 +800,7 @@ import {
   parseMpcSpecDesigns,
   type MpcSpecDesign,
 } from '@/utils/mpcSpec'
-import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
+import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
   loadProjectHistory,
   rememberProjectHistoryEntry,
@@ -844,6 +847,7 @@ const showNewProjectDialog = ref(false)
 const projectRootError = ref('')
 const projectRootDraft = ref({
   name: '',
+  designName: '',
   directory: '',
   mpcId: '',
 })
@@ -1228,20 +1232,10 @@ async function setQorBaseline(payload: { workspaceId: string }) {
   if (!project.path) return
 
   try {
-    const manifest =
-      projectManifests.value[project.path] ?? (await readProjectManifest(project.path))
-    const updated = setQorBaselineInManifest(
-      manifest,
-      payload.workspaceId,
-      'Selected from Dashboard QoR Overview',
-    )
-    if (updated === manifest) {
-      throw new Error(
-        `Workspace ${payload.workspaceId} is not registered in project.json.`,
-      )
-    }
-    await writeProjectTextFile('project.json', serializeProjectManifest(updated), {
-      projectPath: project.path,
+    const updated = await mutateProjectManifest(project.path, {
+      type: 'select-qor-baseline',
+      workspaceId: payload.workspaceId,
+      reason: 'Selected from Dashboard QoR Overview',
     })
     await applyProjectManifestForProject(updated, project.path)
     selectedWorkspaceId.value = payload.workspaceId
@@ -1419,6 +1413,7 @@ async function continueWorkspaceDraft() {
       workspacePath: branchDraft.value.targetWorkspacePath,
       projectRoot: selectedProject.value.path,
       projectName: selectedProject.value.name,
+      designName: selectedProject.value.designName,
       sourceWorkspace: branchDraft.value.sourceWorkspaceId,
       sourceWorkspacePath: branchDraft.value.sourceWorkspacePath,
       sourceStep: branchDraft.value.step,
@@ -1469,16 +1464,11 @@ function refreshProjectManifests(): Promise<void> {
 }
 
 async function refreshProjectManifestsNow() {
-  const entries: Array<
-    [
-      string,
-      ProjectManifest,
-    ]
-  > = []
+  const entries: Array<[string, ProjectManifest]> = []
 
   for (const project of projectSources.value) {
     try {
-      const projectRoot = await registerProjectRootForProjectManagement(project.path)
+      const projectRoot = await registerProjectReadRootForProjectManagement(project.path)
       if (!projectRoot) continue
       const manifestText = await readOptionalProjectTextFile('project.json', {
         projectPath: projectRoot,
@@ -1494,12 +1484,8 @@ async function refreshProjectManifestsNow() {
   projectManifests.value = Object.fromEntries(
     entries.map(([path, manifest]) => [path, manifest]),
   )
-  workspaceFlowStates.value = Object.fromEntries(
-    entries.map(([path]) => [path, {}]),
-  )
-  workspaceAnalysisInputs.value = Object.fromEntries(
-    entries.map(([path]) => [path, {}]),
-  )
+  workspaceFlowStates.value = Object.fromEntries(entries.map(([path]) => [path, {}]))
+  workspaceAnalysisInputs.value = Object.fromEntries(entries.map(([path]) => [path, {}]))
 
   // A project tree must not wait for NFS-backed flow/QoR scans. Load one
   // project at a time after first paint; each reader applies its own bounded
@@ -1558,21 +1544,21 @@ async function importProject() {
       ...workspaceFlowStates.value,
       [project.path]: await readProjectWorkspaceFlowStates(manifest),
     }
-  workspaceAnalysisInputs.value = {
-    ...workspaceAnalysisInputs.value,
-    [project.path]: {},
-  }
-  void readProjectWorkspaceAnalysisInputs(manifest)
-    .then((analysisInputs) => {
-      if (projectManifests.value[project.path] !== manifest) return
-      workspaceAnalysisInputs.value = {
-        ...workspaceAnalysisInputs.value,
-        [project.path]: analysisInputs,
-      }
-    })
-    .catch((error) => {
-      console.warn('Failed to load imported project analysis inputs.', error)
-    })
+    workspaceAnalysisInputs.value = {
+      ...workspaceAnalysisInputs.value,
+      [project.path]: {},
+    }
+    void readProjectWorkspaceAnalysisInputs(manifest)
+      .then((analysisInputs) => {
+        if (projectManifests.value[project.path] !== manifest) return
+        workspaceAnalysisInputs.value = {
+          ...workspaceAnalysisInputs.value,
+          [project.path]: analysisInputs,
+        }
+      })
+      .catch((error) => {
+        console.warn('Failed to load imported project analysis inputs.', error)
+      })
     selectedProjectId.value = project.id
   } catch (error) {
     console.warn('Failed to import project root.', error)
@@ -1634,6 +1620,7 @@ async function createWorkspaceForProject(project: ProjectManagementProject) {
     query: {
       projectRoot: project.path,
       projectName: project.name,
+      designName: project.designName,
       workspacePath: joinProjectPath(project.path, workspaceId),
       workspaceId,
     },
@@ -1762,6 +1749,7 @@ function openNewProjectDialog() {
   projectRootError.value = ''
   projectRootDraft.value = {
     name: '',
+    designName: '',
     directory: '',
     mpcId: '',
   }
@@ -1893,9 +1881,11 @@ async function createProjectFolderDraft() {
 
   const name =
     projectRootDraft.value.name.trim() || basenamePath(projectRoot) || 'project'
+  const designName = projectRootDraft.value.designName.trim() || name
   const manifest = await mutateProjectManifest(projectRoot, {
     type: 'create',
     name,
+    designName,
     mpc: selectedProjectMpc.value,
   })
   await applyProjectManifestForProject(manifest, projectRoot)
@@ -1956,6 +1946,22 @@ async function registerProjectRootForProjectManagement(
     return normalizePath(registeredRoot || projectRoot)
   } catch (error) {
     console.warn('Failed to register project root for Project Management.', error)
+    return null
+  }
+}
+
+async function registerProjectReadRootForProjectManagement(
+  projectRoot: string,
+): Promise<string | null> {
+  try {
+    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const registeredRoot = await desktopApi.workspace.registerProjectReadRoot(projectRoot)
+    return normalizePath(registeredRoot || projectRoot)
+  } catch (error) {
+    // Project history can contain projects unrelated to the active workspace.
+    // Their NFS-backed workspace summaries are loaded only after an explicit
+    // project/workspace switch establishes the matching read scope.
+    console.debug('Deferred project workspace summary read.', error)
     return null
   }
 }

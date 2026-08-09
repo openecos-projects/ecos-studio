@@ -1153,8 +1153,9 @@
                         v-model="config.parameters.design"
                         type="text"
                         placeholder="gcd"
+                        :readonly="projectDesignName !== ''"
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
-                        @input="designNameTouched = true"
+                        @input="!projectDesignName && (designNameTouched = true)"
                       />
                     </div>
                     <div>
@@ -1666,6 +1667,9 @@ const projectContext = ref<ProjectContext>(
 )
 
 const config = ref<WorkspaceConfig>(createInitialConfig(props.initialConfig))
+const projectDesignName = ref(
+  String(props.initialConfig?.parameters?.design ?? '').trim(),
+)
 const projectMpc = ref<ProjectManifestMpc | null>(null)
 const projectManifestError = ref('')
 const isLoadingProjectManifest = ref(false)
@@ -2338,6 +2342,9 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
 }
 
 function applyProjectManifestDefaults(manifest: ProjectManifest) {
+  projectDesignName.value = manifest.design_name
+  config.value.parameters.design = manifest.design_name
+  designNameTouched.value = true
   const baseDesign = manifest.base_design
   const baseDesignRecord = baseDesign as ProjectManifest['base_design'] &
     Record<string, unknown>
@@ -2456,10 +2463,7 @@ function applyProjectParameterDefaults(
     'clock',
     firstString(parameters.clock, parameters.Clock, manifest.base_design.clock),
   )
-  setStringParameterDefault(
-    'design',
-    firstString(parameters.design, parameters.Design, manifest.name),
-  )
+  setStringParameterDefault('design', manifest.design_name)
 
   setNumberParameterDefault(
     'frequency_max',
@@ -3085,6 +3089,9 @@ function syncWorkspaceConfig() {
   config.value.sdc = sdcPath.value
   config.value.pdk_config_mode = pdkConfigMode.value
   config.value.parameters.die_area_mode = dieAreaMode.value
+  if (projectDesignName.value) {
+    config.value.parameters.design = projectDesignName.value
+  }
   config.value.flow_config = {
     start_step: flowStartStep.value,
     end_step: flowEndStep.value,

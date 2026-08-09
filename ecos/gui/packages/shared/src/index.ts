@@ -208,10 +208,12 @@ export {
   recordReplacementBackupInManifest,
   registerWorkspaceInManifest,
   serializeProjectManifest,
+  synchronizeProjectBaseline,
 } from './utils/projectManifest.ts'
 export type {
   ProjectManifest,
   ProjectManifestBaseDesign,
+  ProjectManifestBaselineSyncInput,
   ProjectManifestDraftInput,
   ProjectManifestFlowStep,
   ProjectManifestMetricSummary,

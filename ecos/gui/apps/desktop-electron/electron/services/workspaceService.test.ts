@@ -525,6 +525,26 @@ describe('WorkspaceService', () => {
     )
   })
 
+  it('recovers a journal whose backup child begins with two dots', async () => {
+    const directory = await createTempDir('ecos-workspace-service-recovery-dot-child-')
+    const targetPath = join(directory, '.ws_0001')
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, 'marker.txt'), 'original', 'utf8')
+    const { service } = createWorkspaceService(directory, targetPath)
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/.ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
+
+    expect(replacement.backupPath).toMatch(/\/\.\.ws_0001\.replace-backup-/)
+
+    const { service: restartedService } = createWorkspaceService(directory, targetPath)
+    await restartedService.recoverProjectDirectoryReplacements()
+
+    await expect(readFile(join(targetPath, 'marker.txt'), 'utf8')).resolves.toBe(
+      'original',
+    )
+  })
+
   it('restores a prepared replacement by replacing a partial target with the backup', async () => {
     const directory = await createTempDir('ecos-workspace-service-restore-dir-')
     const targetPath = join(directory, 'ws_0001')

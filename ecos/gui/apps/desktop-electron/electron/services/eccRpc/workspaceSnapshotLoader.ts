@@ -9,11 +9,19 @@ const MAX_SNAPSHOT_FILE_BYTES = 512 * 1024
 
 type DetachedWorkspaceSnapshot = Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
 
+export interface WorkspaceBaselineSnapshot {
+  db: Record<string, unknown>
+  parameters: Record<string, unknown>
+  pdk: Record<string, unknown>
+}
+
 async function readJsonObject(path: string): Promise<Record<string, unknown>> {
   try {
     const metadata = await stat(path)
     if (metadata.size > MAX_SNAPSHOT_FILE_BYTES) {
-      throw new Error(`Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${path}`)
+      throw new Error(
+        `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${path}`,
+      )
     }
     const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
@@ -31,14 +39,16 @@ function flowStepsFrom(flow: Record<string, unknown>): EccRuntimeStepSnapshot[] 
     if (!rawStep || typeof rawStep !== 'object' || Array.isArray(rawStep)) return []
     const step = rawStep as Record<string, unknown>
     if (typeof step.name !== 'string' || typeof step.tool !== 'string') return []
-    return [{
-      name: step.name,
-      peakMemory:
-        typeof step['peak memory (mb)'] === 'number' ? step['peak memory (mb)'] : 0,
-      runtime: typeof step.runtime === 'string' ? step.runtime : '',
-      state: typeof step.state === 'string' ? step.state : 'Unstart',
-      tool: step.tool,
-    }]
+    return [
+      {
+        name: step.name,
+        peakMemory:
+          typeof step['peak memory (mb)'] === 'number' ? step['peak memory (mb)'] : 0,
+        runtime: typeof step.runtime === 'string' ? step.runtime : '',
+        state: typeof step.state === 'string' ? step.state : 'Unstart',
+        tool: step.tool,
+      },
+    ]
   })
 }
 
@@ -63,5 +73,18 @@ export class WorkspaceSnapshotLoader {
       operations: [],
       parameters,
     }
+  }
+
+  /**
+   * Reads only the persisted configuration needed to refresh a project
+   * baseline. The same per-file size limit as idle runtime recovery applies.
+   */
+  async loadBaselineSnapshot(directory: string): Promise<WorkspaceBaselineSnapshot> {
+    const [parameters, pdk, db] = await Promise.all([
+      readJsonObject(join(directory, 'home', 'parameters.json')),
+      readJsonObject(join(directory, 'home', 'pdk.json')),
+      readJsonObject(join(directory, 'config', 'db_default_config.json')),
+    ])
+    return { db, parameters, pdk }
   }
 }

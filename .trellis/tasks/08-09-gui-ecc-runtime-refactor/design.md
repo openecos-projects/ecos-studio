@@ -73,6 +73,12 @@ baseline 或保存当前 baseline 的配置后，Project 必须从该 workspace 
 若读取、校验或写入失败，保留旧 Project 数据和旧 baseline 指针，并向界面返回
 可重试错误。不得通过 renderer watcher、轮询或直接 NFS 扫描来补偿同步。
 
+实现约束：baseline snapshot 仅读取 `home/parameters.json`、`home/pdk.json` 和
+`config/db_default_config.json`，且沿用每个 JSON 的 512 KiB 上限。PDK、top
+module、clock 缺任一项即为无效 snapshot，拒绝整次 mutation；不会只更新
+`qor_baseline`。`register-workspace` 不会隐式创建缺失的 Project manifest，必须
+先由显式 `create` mutation 写入含 `designName` 的 Project。
+
 ### Baseline 验收与测试
 
 - Project `design_name` 为 `gcd_core`、baseline workspace 的旧 `design` 为
