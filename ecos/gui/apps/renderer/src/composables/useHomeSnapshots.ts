@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { onScopeDispose, ref, watch } from 'vue'
 import type { WorkspaceResourceIndex, WorkspaceStepResource } from '@ecos-studio/shared'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import type { DashboardPieSlice } from '@/components/home/dashboardData'
@@ -12,6 +12,7 @@ import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
+import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
 
 export interface HomeSnapshotImage {
   id: string
@@ -280,7 +281,7 @@ export function useHomeSnapshots() {
   const error = ref<string | null>(null)
   let requestVersion = 0
 
-  async function refresh(): Promise<void> {
+  async function refresh(resourceIndex?: WorkspaceResourceIndex): Promise<void> {
     const projectPath = currentProject.value?.path
     const version = ++requestVersion
     if (!projectPath || !isDesktopRuntimeAvailable) {
@@ -295,7 +296,7 @@ export function useHomeSnapshots() {
     loading.value = true
     error.value = null
     try {
-      const index = await getWorkspaceResourceIndexApi()
+      const index = resourceIndex ?? (await getWorkspaceResourceIndexApi())
       if (version !== requestVersion || currentProject.value?.path !== projectPath) return
       const signature = homeSnapshotSignature(index)
       if (cachedData?.signature === signature) return
@@ -316,6 +317,11 @@ export function useHomeSnapshots() {
       if (version === requestVersion) loading.value = false
     }
   }
+
+  const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
+    await refresh(await commit.resourceIndex())
+  })
+  onScopeDispose(unregisterStepRenderTask)
 
   watch(
     () => [

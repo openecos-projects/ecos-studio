@@ -165,6 +165,7 @@ function registerHandlers(
     },
     createWindow: vi.fn(),
     eccRuntimeService: {
+      acknowledgeDetachedStepRendered: vi.fn(),
       acknowledgeStepRendered: vi.fn(),
       cancelOperation: vi.fn(),
       closeWorkspace: vi.fn(),
@@ -2085,6 +2086,61 @@ describe('registerIpc', () => {
 
     expect(services.eccRuntimeService.closeWorkspace).not.toHaveBeenCalled()
     expect(sender.listenerCount('destroyed')).toBe(0)
+  })
+
+  it('acknowledges a committed GUI step from main after its renderer detaches', async () => {
+    const { handlers, services } = registerHandlers()
+    const sender = Object.assign(new EventEmitter(), {
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    const event = { sender }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    services.eccRuntimeService.acknowledgeDetachedStepRendered.mockResolvedValue({
+      accepted: true,
+    })
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+      directory: '/work/demo',
+    })
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
+    listener?.({
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+      event: {
+        eventId: 'workspace-1:3',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: {
+          state: 'Success',
+          stepCommitId: 'operation-1:step:1',
+          workspaceRevision: 1,
+        },
+        sequence: 3,
+        timestamp: 1,
+        type: 'step.completed',
+        workspaceId: 'workspace-1',
+      },
+    })
+    await Promise.resolve()
+
+    expect(
+      services.eccRuntimeService.acknowledgeDetachedStepRendered,
+    ).toHaveBeenCalledWith({
+      eventId: 'workspace-1:3',
+      operationId: 'operation-1',
+      stepCommitId: 'operation-1:step:1',
+      workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 1,
+    })
+    expect(sender.send).not.toHaveBeenCalled()
   })
 
   it('tracks a workspace handle again after a successful explicit close', async () => {

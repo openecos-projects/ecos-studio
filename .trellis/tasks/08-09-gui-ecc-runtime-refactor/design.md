@@ -9,6 +9,7 @@
 - GUI flow 使用 `FlowObserver`、`GuiFlowEventSink` 和 `StepRenderGate`；CLI 使用 `CliFlowEventSink`。
 - NFS 数据通过本地缓存、`WorkspaceSnapshotLoader`、`ProjectSnapshotLoader` 和按需预览隔离；资源索引只允许在后台 Loader/Worker 内构建。
 - 日志、metric、progress 和原始事件均有背压与内存上限；终态 step 使用幂等 ACK。
+- 每个 GUI 成功 step 生成稳定的 `stepCommitId/workspaceRevision`；Dashboard、右侧有界报告和布局预览完成渲染后才 ACK。页面 detach 时 Electron 先缓存 sidecar snapshot 后代为 ACK；ACK 重放、暂停恢复和有界超时不影响 CLI。
 - layout edit 使用受锁保护的 `LayoutEditWorker` 和本地命令桥；非 flow 的配置、reset、签核使用 SnapshotLoader 或一次性 UtilityWorker。
 
 ## Project Management 历史项目读取修正（2026-08-09）

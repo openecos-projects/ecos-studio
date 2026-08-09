@@ -86,7 +86,8 @@ function createService(
   const client = new FakeRpcClient()
   const events: EccRuntimeEvent[] = []
   let sidecarEvent: ((event: EccRuntimeEvent) => void) | null = null
-  let sidecarNotification: ((notification: JsonRpcNotificationPayload) => void) | null = null
+  let sidecarNotification: ((notification: JsonRpcNotificationPayload) => void) | null =
+    null
   const sidecar = new FakeSidecar(client)
   const service = new EccWorkspaceRuntime({
     createSidecar: (onEvent, onNotification) => {
@@ -104,7 +105,8 @@ function createService(
     service,
     sidecar,
     sidecarEvent: (event: EccRuntimeEvent) => sidecarEvent?.(event),
-    sidecarNotification: (notification: JsonRpcNotificationPayload) => sidecarNotification?.(notification),
+    sidecarNotification: (notification: JsonRpcNotificationPayload) =>
+      sidecarNotification?.(notification),
   }
 }
 
@@ -158,8 +160,12 @@ describe('EccWorkspaceRuntime', () => {
     })
     const workspace = await service.openWorkspace({ directory: '/nfs/demo' })
 
-    const first = service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
-    const second = service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
+    const first = service.workspaceSnapshot({
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    const second = service.workspaceSnapshot({
+      workspaceHandle: workspace.workspaceHandle,
+    })
     expect(loaderCalls).toBe(1)
 
     pending.resolve({
@@ -324,7 +330,55 @@ describe('EccWorkspaceRuntime', () => {
       lastEventId: 'workspace-1:2',
       workspaceHandle: workspace.workspaceHandle,
     })
-    expect(client.calls.filter((call) => call.method === 'workspace.snapshot')).toHaveLength(1)
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.snapshot'),
+    ).toHaveLength(1)
+  })
+
+  it('persists a detached step snapshot before releasing its GUI ACK gate', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        directory: '/work/demo',
+        flow: { steps: [] },
+        home: {},
+        lastEventId: 'workspace-1:3',
+        operations: [],
+        parameters: {},
+      },
+      {
+        accepted: true,
+        duplicate: false,
+        eventId: 'workspace-1:3',
+        operationId: 'operation-1',
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(
+      service.acknowledgeDetachedStepRendered({
+        eventId: 'workspace-1:3',
+        operationId: 'operation-1',
+        stepCommitId: 'operation-1:step:1',
+        workspaceHandle: workspace.workspaceHandle,
+        workspaceRevision: 1,
+      }),
+    ).resolves.toMatchObject({ accepted: true })
+
+    expect(client.calls.slice(-2)).toEqual([
+      { method: 'workspace.snapshot', params: { workspaceId: 'workspace-1' } },
+      {
+        method: 'operation.ack_step_rendered',
+        params: {
+          eventId: 'workspace-1:3',
+          operationId: 'operation-1',
+          stepCommitId: 'operation-1:step:1',
+          workspaceRevision: 1,
+        },
+      },
+    ])
   })
 
   it('releases a failed operation sidecar after the diagnostic idle timeout', async () => {

@@ -253,13 +253,29 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).cancelOperation(request)
   }
 
-  acknowledgeStepRendered(
-    request: EccRuntimeStepRenderedAckRequest,
-  ): Promise<{ accepted: boolean; duplicate: boolean; eventId: string; operationId: string }> {
+  acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
+    accepted: boolean
+    duplicate: boolean
+    eventId: string
+    operationId: string
+  }> {
     return this.runtimeForHandle(request.workspaceHandle).acknowledgeStepRendered(request)
   }
 
-  workspaceSnapshot(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRuntimeSnapshot> {
+  acknowledgeDetachedStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
+    accepted: boolean
+    duplicate: boolean
+    eventId: string
+    operationId: string
+  }> {
+    return this.runtimeForHandle(request.workspaceHandle).acknowledgeDetachedStepRendered(
+      request,
+    )
+  }
+
+  workspaceSnapshot(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceRuntimeSnapshot> {
     return this.runtimeForHandle(request.workspaceHandle).workspaceSnapshot(request)
   }
 

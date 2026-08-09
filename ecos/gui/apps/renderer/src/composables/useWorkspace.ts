@@ -1,4 +1,4 @@
-import { ref, getCurrentInstance, nextTick } from 'vue'
+import { ref, getCurrentInstance } from 'vue'
 import type {
   DesktopSettingsValue,
   WorkspaceDirectoryReplacement,
@@ -16,6 +16,7 @@ import {
 import * as runtimeEventApi from '../api/runtimeEvents'
 import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
 import { clearFlowExecutionActiveForWorkspace } from './flowExecutionState'
+import { finishRuntimeStepRender } from './runtimeStepRenderSync'
 import { setDesktopWindowTitle } from './windowTitle'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import {
@@ -106,9 +107,29 @@ function scheduleStepRenderedAck(options: {
   eventId: string
   operationId: string
   workspaceHandle: string
+  step: string
+  stepCommitId?: string
+  workspaceRevision?: number
 }): void {
-  const ackKey = `${options.workspaceHandle}\u001f${options.operationId}\u001f${options.eventId}`
+  const ackKey = `${options.workspaceHandle}\u001f${options.operationId}\u001f${options.stepCommitId ?? options.eventId}`
   if (pendingStepRenderedAcks.has(ackKey)) return
+  const acknowledge = async () => {
+    await getOptionalDesktopApi()?.ecc.runtime?.acknowledgeStepRendered({
+      eventId: options.eventId,
+      operationId: options.operationId,
+      workspaceHandle: options.workspaceHandle,
+      ...(options.stepCommitId ? { stepCommitId: options.stepCommitId } : {}),
+      ...(typeof options.workspaceRevision === 'number'
+        ? { workspaceRevision: options.workspaceRevision }
+        : {}),
+    })
+  }
+  if (acknowledgedStepRenderedAcks.has(ackKey)) {
+    void acknowledge().catch((error) => {
+      console.warn('Failed to repeat an ECC step render acknowledgement:', error)
+    })
+    return
+  }
   const nextFrame = () =>
     new Promise<void>((resolve) => {
       if (typeof requestAnimationFrame === 'function') {
@@ -118,14 +139,22 @@ function scheduleStepRenderedAck(options: {
       setTimeout(resolve, 0)
     })
 
-  const acknowledgement = nextTick()
+  const acknowledgement = finishRuntimeStepRender({
+    eventId: options.eventId,
+    operationId: options.operationId,
+    step: options.step,
+    stepCommitId: options.stepCommitId ?? options.eventId,
+    workspaceRevision: options.workspaceRevision,
+  })
     .then(nextFrame)
     .then(async () => {
-      await getOptionalDesktopApi()?.ecc.runtime?.acknowledgeStepRendered({
-        eventId: options.eventId,
-        operationId: options.operationId,
-        workspaceHandle: options.workspaceHandle,
-      })
+      await acknowledge()
+      acknowledgedStepRenderedAcks.add(ackKey)
+      if (acknowledgedStepRenderedAcks.size > 512) {
+        acknowledgedStepRenderedAcks.delete(
+          acknowledgedStepRenderedAcks.values().next().value!,
+        )
+      }
     })
     .catch((error) => {
       console.warn('Failed to acknowledge rendered ECC step:', error)
@@ -142,6 +171,7 @@ const runtimeEvents = ref<RuntimeEventResponse[]>([])
 const handledRefreshRuntimeEvents = new Set<string>()
 const handledRuntimeProtocolEvents = new Set<string>()
 const pendingStepRenderedAcks = new Map<string, Promise<void>>()
+const acknowledgedStepRenderedAcks = new Set<string>()
 let unregisterRuntimeEventCleanup: (() => void) | null = null
 
 const workspaceLifecycle = useWorkspaceLifecycle()
@@ -1418,6 +1448,9 @@ export function useWorkspace() {
         const operationId = asString(response.data?.jobId)
         const eventType = asString(response.data?.runtimeProtocolType)
         const workspaceHandle = asString(response.data?.workspaceId)
+        const step = asString(response.data?.step) ?? ''
+        const stepCommitId = asString(response.data?.stepCommitId)
+        const workspaceRevision = asNumber(response.data?.workspaceRevision)
         const duplicate = Boolean(
           runtimeEventId && handledRuntimeProtocolEvents.has(runtimeEventId),
         )
@@ -1439,6 +1472,9 @@ export function useWorkspace() {
             scheduleStepRenderedAck({
               eventId: runtimeEventId,
               operationId,
+              step,
+              stepCommitId,
+              workspaceRevision,
               workspaceHandle,
             })
           }
@@ -1468,6 +1504,9 @@ export function useWorkspace() {
           scheduleStepRenderedAck({
             eventId: runtimeEventId,
             operationId,
+            step,
+            stepCommitId,
+            workspaceRevision,
             workspaceHandle,
           })
         }

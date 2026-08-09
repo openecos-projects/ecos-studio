@@ -20,6 +20,7 @@ import { requestProjectPathAccess, resolveProjectPathAccess } from '@/utils/proj
 import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { mergePlannedFlowLogSegments } from './flowLogSegmentPlan'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
 import {
   clearAgentWorkspaceRerunHomePrepared,
   consumePendingHomeRunArtifactReset,
@@ -29,6 +30,16 @@ import {
 } from './homeRunArtifacts'
 
 export { convertRemoteToLocalPath } from '@/utils/projectPaths'
+
+const homeStepRenderRefreshers = new Set<() => Promise<void>>()
+
+// WorkspaceView and HomeView both consume this shared composable. Keep exactly
+// one NFS-backed Home refresh in the render gate even when both are mounted.
+registerRuntimeStepRenderTask(async () => {
+  const refreshers = Array.from(homeStepRenderRefreshers)
+  const refresh = refreshers[refreshers.length - 1]
+  if (refresh) await refresh()
+})
 
 // ============ 类型定义 ============
 
@@ -1514,6 +1525,12 @@ export function useHomeData() {
     await loadHomeData()
   }
 
+  const refreshForStepRender = async () => {
+    if (!currentProject.value?.path || !isDesktopRuntimeAvailable) return
+    await refreshHomeData()
+  }
+  homeStepRenderRefreshers.add(refreshForStepRender)
+
   /**
    * 清空所有数据
    */
@@ -1677,6 +1694,7 @@ export function useHomeData() {
   // 在 onUnmounted 里 revoke 会导致下一次 mount 的 <img :src> 拿到已失效的 URL。
   // 数据新鲜度由 runtime events（markHomeAssetSignaturesStale）+ 项目切换里的 reset 负责。
   onUnmounted(() => {
+    homeStepRenderRefreshers.delete(refreshForStepRender)
     unregisterHomeRunArtifactReset?.()
     unregisterHomeRunArtifactReset = null
   })

@@ -2563,6 +2563,7 @@ describe('useWorkspace openProject', () => {
         schema_version: 1,
         project_id: 'proj_work',
         name: 'work',
+        design_name: 'demo',
         description: '',
         root_path: '/work',
         created_at: '2026-07-08T00:00:00.000Z',

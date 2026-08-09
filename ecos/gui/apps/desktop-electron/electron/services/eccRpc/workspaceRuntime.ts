@@ -42,7 +42,10 @@ import type {
 
 import { normalizeRuntimeError } from './errors'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
-import { RuntimeOperationTracker, isRuntimeProtocolPayload } from './runtimeOperationTracker'
+import {
+  RuntimeOperationTracker,
+  isRuntimeProtocolPayload,
+} from './runtimeOperationTracker'
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 import { RuntimeSidecarLifecycle } from './runtimeSidecarLifecycle'
 import {
@@ -107,10 +110,9 @@ export class EccWorkspaceRuntime {
       captureFinalSnapshot: async (workspaceId) => {
         const client = this.client
         if (!client) return
-        const snapshot = await client.call<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>(
-          'workspace.snapshot',
-          { workspaceId },
-        )
+        const snapshot = await client.call<
+          Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
+        >('workspace.snapshot', { workspaceId })
         this.snapshotCache.set(snapshot)
       },
       closeSidecar: async () => {
@@ -138,7 +140,8 @@ export class EccWorkspaceRuntime {
         this.enqueue(method, workspaceHandle, operation, metadata),
       ensureStarted: () => this.ensureStarted(),
       lazyWorkspaceOpen: Boolean(options.lazyWorkspaceOpen),
-      resolveEccWorkspaceId: (workspaceHandle) => this.resolveEccWorkspaceId(workspaceHandle),
+      resolveEccWorkspaceId: (workspaceHandle) =>
+        this.resolveEccWorkspaceId(workspaceHandle),
       sessions: this.sessions,
       sidecar: this.sidecar,
     })
@@ -168,19 +171,18 @@ export class EccWorkspaceRuntime {
     return this.isActive() || this.sidecarLifecycle.hasFinalSnapshotTask()
   }
 
-  shutdownBarrier():
-    | {
-        cancelRequested: boolean
-        interruptibility: 'deferred'
-        operationId: string
-        safeToStop: boolean
-        state: string
-        step: string
-        workspaceId: string
-      }
-    | null {
+  shutdownBarrier(): {
+    cancelRequested: boolean
+    interruptibility: 'deferred'
+    operationId: string
+    safeToStop: boolean
+    state: string
+    step: string
+    workspaceId: string
+  } | null {
     const operationId =
-      this.inFlightOperation?.operationId ?? this.operationTracker.firstActiveOperationId()
+      this.inFlightOperation?.operationId ??
+      this.operationTracker.firstActiveOperationId()
     if (!operationId && !this.sidecarLifecycle.hasFinalSnapshotTask()) return null
     return {
       cancelRequested: false,
@@ -299,7 +301,9 @@ export class EccWorkspaceRuntime {
     return this.commands.runStep(request)
   }
 
-  async startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation> {
+  async startFlowOperation(
+    request: EccRuntimeStartFlowRequest,
+  ): Promise<EccRuntimeOperation> {
     const client = await this.ensureStarted()
     if (request.rerun) {
       this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
@@ -313,7 +317,9 @@ export class EccWorkspaceRuntime {
     })
   }
 
-  async startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation> {
+  async startStepOperation(
+    request: EccRuntimeStartStepRequest,
+  ): Promise<EccRuntimeOperation> {
     const client = await this.ensureStarted()
     if (request.rerun) {
       this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
@@ -328,7 +334,9 @@ export class EccWorkspaceRuntime {
     })
   }
 
-  async operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
+  async operationStatus(
+    request: EccRuntimeOperationRequest,
+  ): Promise<EccRuntimeOperation> {
     const client = await this.ensureStarted()
     await this.resolveEccWorkspaceId(request.workspaceHandle)
     return await client.call<EccRuntimeOperation>('operation.status', {
@@ -348,15 +356,44 @@ export class EccWorkspaceRuntime {
     return await client.call('operation.cancel', { operationId: request.operationId })
   }
 
-  async acknowledgeStepRendered(
-    request: EccRuntimeStepRenderedAckRequest,
-  ): Promise<{ accepted: boolean; duplicate: boolean; eventId: string; operationId: string }> {
+  async acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
+    accepted: boolean
+    duplicate: boolean
+    eventId: string
+    operationId: string
+  }> {
     const client = await this.ensureStarted()
     await this.resolveEccWorkspaceId(request.workspaceHandle)
     return await client.call('operation.ack_step_rendered', {
       eventId: request.eventId,
       operationId: request.operationId,
+      ...(request.stepCommitId ? { stepCommitId: request.stepCommitId } : {}),
+      ...(typeof request.workspaceRevision === 'number'
+        ? { workspaceRevision: request.workspaceRevision }
+        : {}),
     })
+  }
+
+  /**
+   * A workspace page may detach while a GUI flow is stopped at a step boundary.
+   * Main first captures the authoritative in-memory snapshot, then sends the
+   * same idempotent ACK that a renderer would have sent after painting it.
+   */
+  async acknowledgeDetachedStepRendered(
+    request: EccRuntimeStepRenderedAckRequest,
+  ): Promise<{
+    accepted: boolean
+    duplicate: boolean
+    eventId: string
+    operationId: string
+  }> {
+    const client = await this.ensureStarted()
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const snapshot = await client.call<
+      Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
+    >('workspace.snapshot', { workspaceId })
+    this.snapshotCache.set(snapshot)
+    return await this.acknowledgeStepRendered(request)
   }
 
   async workspaceSnapshot(
@@ -376,10 +413,9 @@ export class EccWorkspaceRuntime {
     }
     const client = await this.ensureStarted()
     const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-    const snapshot = await client.call<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>(
-      'workspace.snapshot',
-      { workspaceId },
-    )
+    const snapshot = await client.call<
+      Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
+    >('workspace.snapshot', { workspaceId })
     this.snapshotCache.set(snapshot)
     return { ...snapshot, workspaceHandle: request.workspaceHandle }
   }
@@ -399,7 +435,9 @@ export class EccWorkspaceRuntime {
     this.ready = false
     this.helloResult = null
     this.sessions.clearEccWorkspaceIds()
-    this.operationTracker.rejectAll(new Error('ECC sidecar shut down before the operation completed.'))
+    this.operationTracker.rejectAll(
+      new Error('ECC sidecar shut down before the operation completed.'),
+    )
     return { ok: true }
   }
 
@@ -565,7 +603,10 @@ export class EccWorkspaceRuntime {
   }
 
   private handleNotification(notification: JsonRpcNotificationPayload): void {
-    if (notification.method !== 'runtime.event' || !isRuntimeProtocolPayload(notification.params)) {
+    if (
+      notification.method !== 'runtime.event' ||
+      !isRuntimeProtocolPayload(notification.params)
+    ) {
       return
     }
     const protocolEvent = notification.params
@@ -575,15 +616,23 @@ export class EccWorkspaceRuntime {
       this.sidecarLifecycle.releaseAfterSuccessfulOperation(protocolEvent.workspaceId)
     } else if (
       isTerminal &&
-      (protocolEvent.type === 'operation.failed' || protocolEvent.type === 'operation.cancelled')
+      (protocolEvent.type === 'operation.failed' ||
+        protocolEvent.type === 'operation.cancelled')
     ) {
       this.sidecarLifecycle.retainFailedOperationForDiagnostics()
     }
     this.emit({
       event: protocolEvent,
       type: 'runtime.protocol',
-      ...(session ? { workspaceDirectory: session.directory, workspaceHandle: session.workspaceHandle } : {}),
-      ...(this.boundDirectory && !session ? { workspaceDirectory: this.boundDirectory } : {}),
+      ...(session
+        ? {
+            workspaceDirectory: session.directory,
+            workspaceHandle: session.workspaceHandle,
+          }
+        : {}),
+      ...(this.boundDirectory && !session
+        ? { workspaceDirectory: this.boundDirectory }
+        : {}),
     })
   }
 
@@ -611,14 +660,13 @@ function shutdownBarrierFrom(
 ): NonNullable<EccRpcShutdownResult['shutdownBarrier']> | null {
   if (!(error instanceof Error) || !('shutdownBarrier' in error)) return null
   const barrier = (error as Error & { shutdownBarrier?: unknown }).shutdownBarrier
-  if (typeof barrier !== 'object' || barrier === null || Array.isArray(barrier)) return null
+  if (typeof barrier !== 'object' || barrier === null || Array.isArray(barrier))
+    return null
   const value = barrier as Record<string, unknown>
-  return (
-    typeof value.operationId === 'string' &&
+  return typeof value.operationId === 'string' &&
     typeof value.state === 'string' &&
     typeof value.step === 'string' &&
     typeof value.workspaceId === 'string'
-  )
     ? (value as NonNullable<EccRpcShutdownResult['shutdownBarrier']>)
     : null
 }

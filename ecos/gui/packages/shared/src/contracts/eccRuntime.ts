@@ -231,6 +231,8 @@ export type EccRuntimeOperationKind = 'flow' | 'step'
 export type EccRuntimeOperationState =
   | 'queued'
   | 'running'
+  | 'waiting_for_gui_sync'
+  | 'paused_for_gui_recovery'
   | 'succeeded'
   | 'failed'
   | 'cancelled'
@@ -238,6 +240,7 @@ export type EccRuntimeInterruptibility = 'safe' | 'deferred' | 'forbidden'
 
 export interface EccRuntimeOperation {
   awaitingEventId: string | null
+  awaitingStepCommitId?: string | null
   cancelRequested?: boolean
   createdAt: number
   currentStep: string
@@ -252,6 +255,14 @@ export interface EccRuntimeOperation {
   state: EccRuntimeOperationState
   step: string
   safeToStop?: boolean
+  workspaceRevision?: number
+  renderSyncState?:
+    | 'idle'
+    | 'waiting_for_gui_sync'
+    | 'paused_for_gui_recovery'
+    | 'timed_out'
+  renderRetryCount?: number
+  lastRenderAckAt?: number | null
   shutdownBarrier?: boolean
   updatedAt: number
   workspaceId: string
@@ -273,6 +284,8 @@ export interface EccRuntimeOperationRequest extends EccWorkspaceHandleRequest {
 
 export interface EccRuntimeStepRenderedAckRequest extends EccRuntimeOperationRequest {
   eventId: string
+  stepCommitId?: string
+  workspaceRevision?: number
 }
 
 export interface EccRuntimeStepSnapshot {
@@ -307,6 +320,7 @@ export interface EccRuntimeProtocolPayload {
     | 'operation.failed'
     | 'operation.cancelled'
     | 'operation.cancel_requested'
+    | 'operation.gui_sync_paused'
     | 'step.started'
     | 'step.log'
     | 'step.completed'

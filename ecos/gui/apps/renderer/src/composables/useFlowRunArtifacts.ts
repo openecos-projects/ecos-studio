@@ -1,16 +1,20 @@
 import { getCurrentInstance, onBeforeUnmount, watch } from 'vue'
-import type { WorkspaceStepResource } from '@ecos-studio/shared'
+import type { WorkspaceResourceIndex, WorkspaceStepResource } from '@ecos-studio/shared'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { useMessageStore } from '@/stores/messageStore'
-import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
+import { readOptionalProjectTextFileTail, readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import {
   flowStepKey,
   flowStepRunArtifacts,
   isSuccessfulFlowStep,
 } from './flowRunArtifacts'
+import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
+
+const MAX_STEP_REPORTS = 8
+const MAX_LAYOUT_PREVIEW_BYTES = 8 * 1024 * 1024
 
 export interface FlowRunArtifactCaptureOptions {
   stepNames?: readonly string[]
@@ -30,9 +34,9 @@ function filename(path: string): string {
 }
 
 /**
- * Records completed steps from ECC events, then captures artifacts once after
- * the operation reaches a terminal state. This keeps large report/image reads
- * off the NFS critical path between the step-complete event and its GUI ACK.
+ * Captures the bounded report/layout view for every successful GUI step. The
+ * capture runs through Electron IPC and is awaited by the workspace render
+ * gate, so the next ECC step cannot overlap this NFS work with a stale UI.
  */
 export function useFlowRunArtifacts() {
   const messageStore = useMessageStore()
@@ -58,12 +62,12 @@ export function useFlowRunArtifacts() {
     async function publishStepArtifacts(step: WorkspaceStepResource): Promise<void> {
       const artifacts = flowStepRunArtifacts(step)
 
-      for (const report of artifacts.reports) {
+      for (const report of artifacts.reports.slice(0, MAX_STEP_REPORTS)) {
         try {
           const authorizedPath = await resolveProjectPathAccess(report.path)
           if (!authorizedPath) continue
-          const content = await readOptionalProjectTextFile(authorizedPath)
-          if (content === null) continue
+          const tail = await readOptionalProjectTextFileTail(authorizedPath, 64 * 1024)
+          if (tail === null) continue
 
           messageStore.addInfoMessage({
             title: filename(report.path),
@@ -72,7 +76,7 @@ export function useFlowRunArtifacts() {
             items: [
               {
                 label: filename(report.path),
-                content,
+                content: tail.content,
                 format: 'text',
               },
             ],
@@ -82,7 +86,12 @@ export function useFlowRunArtifacts() {
         }
       }
 
-      if (!artifacts.layout) return
+      if (
+        !artifacts.layout ||
+        (artifacts.layout.sizeBytes ?? 0) > MAX_LAYOUT_PREVIEW_BYTES
+      ) {
+        return
+      }
       try {
         const authorizedPath = await resolveProjectPathAccess(artifacts.layout.path)
         if (!authorizedPath) return
@@ -105,12 +114,17 @@ export function useFlowRunArtifacts() {
       }
     }
 
-    async function inspectCompletedSteps(): Promise<void> {
+    async function inspectCompletedSteps(
+      stepNames?: Iterable<string>,
+      resourceIndex?: WorkspaceResourceIndex,
+    ): Promise<void> {
       if (stopped) return
       try {
-        const index = await getWorkspaceResourceIndexApi()
+        const index = resourceIndex ?? (await getWorkspaceResourceIndexApi())
         if (stopped) return
-        for (const stepName of new Set([...completedSteps, ...forcedSteps])) {
+        for (const stepName of new Set(
+          stepNames ?? [...completedSteps, ...forcedSteps],
+        )) {
           if (!matchesTarget(stepName)) continue
           const key = flowStepKey(stepName)
           if (publishedSteps.has(key) && !forcedSteps.has(key)) continue
@@ -126,8 +140,18 @@ export function useFlowRunArtifacts() {
       }
     }
 
+    function enqueueInspection(
+      stepNames?: Iterable<string>,
+      resourceIndex?: WorkspaceResourceIndex,
+    ): Promise<void> {
+      inspectionQueue = inspectionQueue.then(() =>
+        inspectCompletedSteps(stepNames, resourceIndex),
+      )
+      return inspectionQueue
+    }
+
     function enqueueFinalInspection(): void {
-      inspectionQueue = inspectionQueue.then(() => inspectCompletedSteps())
+      void enqueueInspection()
     }
 
     let stopWatchingRuntimeEvents: (() => void) | null = null
@@ -136,8 +160,7 @@ export function useFlowRunArtifacts() {
         for (const stepName of settleOptions.forceStepNames ?? []) {
           forcedSteps.add(flowStepKey(stepName))
         }
-        enqueueFinalInspection()
-        await inspectionQueue
+        await enqueueInspection()
         capture.stop()
       },
       stop(): void {
@@ -145,9 +168,16 @@ export function useFlowRunArtifacts() {
         stopped = true
         stopWatchingRuntimeEvents?.()
         stopWatchingRuntimeEvents = null
+        unregisterStepRenderTask()
         activeCaptures.delete(capture)
       },
     }
+
+    const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
+      if (stopped || !commit.step || !matchesTarget(commit.step)) return
+      completedSteps.add(flowStepKey(commit.step))
+      await enqueueInspection([flowStepKey(commit.step)], await commit.resourceIndex())
+    })
 
     stopWatchingRuntimeEvents = watch(
       () => runtimeEvents.value[runtimeEvents.value.length - 1],

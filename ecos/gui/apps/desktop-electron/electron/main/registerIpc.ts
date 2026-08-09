@@ -237,6 +237,9 @@ export interface DesktopBridgeServices {
     refreshRegistry(): Promise<unknown>
   }
   eccRuntimeService: {
+    acknowledgeDetachedStepRendered(
+      request: EccRuntimeStepRenderedAckRequest,
+    ): Promise<unknown>
     acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<unknown>
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -633,14 +636,14 @@ export function registerIpc(
     }
   }
 
-  const deliverDirectoryScopedEvent = (payload: EccRuntimeEvent): void => {
+  const deliverDirectoryScopedEvent = (payload: EccRuntimeEvent): number => {
     const workspaceDirectory = readWorkspaceDirectoryFromEvent(payload)
     if (!workspaceDirectory) {
-      return
+      return 0
     }
     const normalizedDirectory = normalizeWorkspacePath(workspaceDirectory)
     if (!normalizedDirectory) {
-      return
+      return 0
     }
 
     if (payload.type === 'runtime.ready') {
@@ -662,14 +665,43 @@ export function registerIpc(
         workspaceDirectory: normalizedDirectory,
       })
     }
+    return deliveredSenders.size
+  }
+
+  const isSuccessfulDetachedStepCommit = (
+    payload: EccRuntimeEvent,
+  ): payload is Extract<EccRuntimeEvent, { type: 'runtime.protocol' }> => {
+    if (payload.type !== 'runtime.protocol') return false
+    if (payload.event.type !== 'step.completed') return false
+    return String(payload.event.payload.state).toLowerCase() === 'success'
+  }
+
+  const acknowledgeDetachedStepCommit = (payload: EccRuntimeEvent): void => {
+    if (!isSuccessfulDetachedStepCommit(payload) || !payload.workspaceHandle) return
+    const stepCommitId = payload.event.payload.stepCommitId
+    const workspaceRevision = payload.event.payload.workspaceRevision
+    void services.eccRuntimeService
+      .acknowledgeDetachedStepRendered({
+        eventId: payload.event.eventId,
+        operationId: payload.event.operationId,
+        workspaceHandle: payload.workspaceHandle,
+        ...(typeof stepCommitId === 'string' ? { stepCommitId } : {}),
+        ...(typeof workspaceRevision === 'number' ? { workspaceRevision } : {}),
+      })
+      .catch((error: unknown) => {
+        console.warn('Failed to persist a detached GUI step commit:', error)
+      })
   }
 
   services.eccRuntimeService.onEvent((payload) => {
     const workspaceHandle = readWorkspaceHandleFromEvent(payload)
     if (workspaceHandle) {
       const subscription = workspaceHandleSubscriptions.get(workspaceHandle)
-      if (!subscription) return
-      sendEccEventToSender(subscription.sender, payload)
+      if (subscription) {
+        sendEccEventToSender(subscription.sender, payload)
+      } else {
+        acknowledgeDetachedStepCommit(payload)
+      }
       return
     }
 
@@ -677,7 +709,8 @@ export function registerIpc(
       return
     }
 
-    deliverDirectoryScopedEvent(payload)
+    const delivered = deliverDirectoryScopedEvent(payload)
+    if (delivered === 0) acknowledgeDetachedStepCommit(payload)
   })
 
   services.agentRuntimeService?.onEvent((payload) => {
@@ -1065,25 +1098,31 @@ export function registerIpc(
     )
   })
 
-  handle(desktopApiIpcChannels.projectManagementReadManifest, async (_event, projectRoot) => {
-    if (!services.projectManagementReadService) {
-      throw new Error('Project management reads are unavailable.')
-    }
-    if (typeof projectRoot !== 'string') {
-      throw new Error('Project management projectRoot must be a string.')
-    }
-    return await services.projectManagementReadService.readManifest(projectRoot)
-  })
+  handle(
+    desktopApiIpcChannels.projectManagementReadManifest,
+    async (_event, projectRoot) => {
+      if (!services.projectManagementReadService) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (typeof projectRoot !== 'string') {
+        throw new Error('Project management projectRoot must be a string.')
+      }
+      return await services.projectManagementReadService.readManifest(projectRoot)
+    },
+  )
 
-  handle(desktopApiIpcChannels.projectManagementListEntries, async (_event, projectRoot) => {
-    if (!services.projectManagementReadService) {
-      throw new Error('Project management reads are unavailable.')
-    }
-    if (typeof projectRoot !== 'string') {
-      throw new Error('Project management projectRoot must be a string.')
-    }
-    return await services.projectManagementReadService.listProjectEntries(projectRoot)
-  })
+  handle(
+    desktopApiIpcChannels.projectManagementListEntries,
+    async (_event, projectRoot) => {
+      if (!services.projectManagementReadService) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (typeof projectRoot !== 'string') {
+        throw new Error('Project management projectRoot must be a string.')
+      }
+      return await services.projectManagementReadService.listProjectEntries(projectRoot)
+    },
+  )
 
   handle(
     desktopApiIpcChannels.projectManagementReadWorkspaceTexts,
@@ -1623,18 +1662,25 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.eccRuntimeOperationStatus, async (_event, request) => {
-    return await services.eccRuntimeService.operationStatus(request as EccRuntimeOperationRequest)
+    return await services.eccRuntimeService.operationStatus(
+      request as EccRuntimeOperationRequest,
+    )
   })
 
   handle(desktopApiIpcChannels.eccRuntimeOperationCancel, async (_event, request) => {
-    return await services.eccRuntimeService.cancelOperation(request as EccRuntimeOperationRequest)
-  })
-
-  handle(desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered, async (_event, request) => {
-    return await services.eccRuntimeService.acknowledgeStepRendered(
-      request as EccRuntimeStepRenderedAckRequest,
+    return await services.eccRuntimeService.cancelOperation(
+      request as EccRuntimeOperationRequest,
     )
   })
+
+  handle(
+    desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered,
+    async (_event, request) => {
+      return await services.eccRuntimeService.acknowledgeStepRendered(
+        request as EccRuntimeStepRenderedAckRequest,
+      )
+    },
+  )
 
   handle(desktopApiIpcChannels.eccRuntimeSnapshot, async (_event, request) => {
     return await services.eccRuntimeService.workspaceSnapshot(
