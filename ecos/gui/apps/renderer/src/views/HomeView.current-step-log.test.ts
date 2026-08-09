@@ -15,6 +15,8 @@ describe('FlowLogPanel current-step viewer', () => {
     )
     expect(flowLogPanelSource).toContain('selectSegmentForNode')
     expect(flowLogPanelSource).toContain('props.selectedNode')
+    expect(flowLogPanelSource).toContain('currentRuntimeSegment')
+    expect(flowLogPanelSource).toContain('activeStepName: string')
     expect(flowLogPanelSource).not.toContain('aria-label="Select a flow step log"')
   })
 })

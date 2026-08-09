@@ -9,6 +9,7 @@ export type RuntimeNotifyType =
   | 'error'
   | 'cancelled'
   | 'heartbeat'
+  | 'log'
   | 'message'
 
 export type RuntimeResponseType = 'success' | 'failed' | 'error' | 'warning' | 'cancelled'
@@ -111,6 +112,9 @@ function responseFromEvent(event: EccRuntimeEvent): RuntimeResponseType {
 }
 
 function responseFromEccEvent(event: EccRuntimeEvent): RuntimeEventResponse | null {
+  if (event.type === 'runtime.protocol') {
+    return responseFromProtocolEvent(event)
+  }
   const notifyType = notifyTypeFromEvent(event)
   if (!notifyType) return null
 
@@ -137,6 +141,59 @@ function responseFromEccEvent(event: EccRuntimeEvent): RuntimeEventResponse | nu
     data,
     message,
     response: responseFromEvent(event),
+  }
+}
+
+function responseFromProtocolEvent(
+  event: Extract<EccRuntimeEvent, { type: 'runtime.protocol' }>,
+): RuntimeEventResponse | null {
+  const protocol = event.event
+  const payload = protocol.payload
+  const command = protocol.kind === 'flow' ? 'rtl2gds' : 'run_step'
+  const step = typeof payload.step === 'string' ? payload.step : undefined
+  const state = typeof payload.state === 'string' ? payload.state : undefined
+  const tool = typeof payload.tool === 'string' ? payload.tool : undefined
+  const logChunk = typeof payload.chunk === 'string' ? payload.chunk : undefined
+  const logCursor = typeof payload.cursor === 'number' ? payload.cursor : undefined
+  const error = payload.error
+  const message =
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+      ? [error.message]
+      : []
+  const typeByProtocol: Record<string, RuntimeNotifyType> = {
+    'operation.cancelled': 'cancelled',
+    'operation.completed': protocol.kind === 'flow' ? 'task_complete' : 'step_complete',
+    'operation.failed': 'error',
+    'operation.started': 'message',
+    'step.log': 'log',
+    'step.completed': 'step_complete',
+    'step.started': 'step_start',
+  }
+  const notifyType = typeByProtocol[protocol.type]
+  if (!notifyType) return null
+  return {
+    cmd: 'notify',
+    data: {
+      cmd: command,
+      directory: event.workspaceDirectory,
+      finalLog: payload.finalLog,
+      jobId: protocol.operationId,
+      logChunk,
+      logCursor,
+      runtimeEventId: protocol.eventId,
+      runtimeProtocolType: protocol.type,
+      state,
+      step,
+      tool,
+      timestamp: protocol.timestamp,
+      type: notifyType,
+      workspaceId: event.workspaceHandle,
+    },
+    message,
+    response: notifyType === 'error' ? 'error' : 'success',
   }
 }
 

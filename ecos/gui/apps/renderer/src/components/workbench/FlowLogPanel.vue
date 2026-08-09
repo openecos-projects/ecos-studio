@@ -87,6 +87,7 @@ import type { FlowStatusNode } from './flowStatus'
 import type { FlowLogSegment } from '@/composables/useHomeData'
 
 const props = defineProps<{
+  activeStepName: string
   contentByKey: Record<string, string>
   ensureContent: (segment: FlowLogSegment) => Promise<boolean>
   error: string | null
@@ -101,6 +102,18 @@ const expanded = ref(true)
 const dialogVisible = ref(false)
 const copied = ref(false)
 const visible = computed(() => props.executionActive || props.segments.length > 0)
+const currentRuntimeSegment = computed(() => {
+  const activeStepName = props.activeStepName.trim().toLowerCase()
+  if (activeStepName) {
+    const matching = props.segments.filter(
+      (segment) => segment.stepName.trim().toLowerCase() === activeStepName,
+    )
+    const active =
+      matching.find((segment) => segment.live) ?? matching[matching.length - 1]
+    if (active) return active
+  }
+  return props.segments.find((segment) => segment.live) ?? null
+})
 const selectedSegment = computed(
   () => props.segments.find((segment) => keyFor(segment) === selectedKey.value) ?? null,
 )
@@ -130,6 +143,10 @@ async function copyLog(): Promise<void> {
 }
 
 function selectSegmentForNode(): void {
+  if (props.executionActive && currentRuntimeSegment.value) {
+    selectedKey.value = keyFor(currentRuntimeSegment.value)
+    return
+  }
   const node = props.selectedNode
   if (node) {
     const matchingSegments = props.segments.filter(
@@ -152,9 +169,12 @@ watch(
 )
 
 watch(
-  () => props.segments,
-  (segments) => {
-    if (!segments.some((segment) => keyFor(segment) === selectedKey.value)) {
+  () => [props.segments, props.executionActive, props.activeStepName] as const,
+  ([segments, executionActive]) => {
+    if (
+      executionActive ||
+      !segments.some((segment) => keyFor(segment) === selectedKey.value)
+    ) {
       selectSegmentForNode()
     }
   },

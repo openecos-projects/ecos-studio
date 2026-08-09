@@ -2,24 +2,19 @@ import { computed, ref, shallowRef, watch, onUnmounted } from 'vue'
 import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import {
-  clearFlowExecutionActiveForWorkspace,
   isFlowExecutionActiveForWorkspace,
   markFlowExecutionActiveForWorkspace,
 } from './useFlowRunner'
-import { isSuccessfulFlowState } from './flowRunArtifacts'
 import {
   getWorkspaceResourceIndexApi,
+  getWorkspaceRuntimeSnapshotApi,
   readWorkspaceHomeResourceApi,
 } from '@/api/workspaceResources'
-import type { DesktopProjectLogTailEvent } from '@ecos-studio/shared'
 import {
   readOptionalProjectTextFile,
   readOptionalProjectTextFileTail,
-  readOptionalProjectTextFileUpdate,
   readProjectBlobUrl,
   readProjectTextFile,
-  subscribeProjectLogTail,
-  watchProjectFile,
 } from '@/utils/projectFiles'
 import { requestProjectPathAccess, resolveProjectPathAccess } from '@/utils/projectFs'
 import { convertRemoteToLocalPath } from '@/utils/projectPaths'
@@ -158,6 +153,10 @@ const flowLogLoadingState = ref(false)
 /** 递增的 load 会话号：新一次 loadAllFlowStepLogsFromFlowPath 发起后旧回调自动放弃 */
 let flowLogLoadSession = 0
 const flowLogContentGenerations = new Map<string, number>()
+/** Runtime log cursors make at-least-once ECC delivery safe for the visible tail. */
+const flowLogLiveCursorByKey = new Map<string, number>()
+const MAX_RUNTIME_FLOW_LOG_CHARS = 128 * 1024
+const MAX_RUNTIME_FLOW_LOG_SEGMENTS = 32
 
 function resetFlowLogState(): void {
   flowLogSegmentsState.value = []
@@ -166,6 +165,7 @@ function resetFlowLogState(): void {
   flowLogErrorState.value = null
   flowLogLoadingState.value = false
   flowLogContentGenerations.clear()
+  flowLogLiveCursorByKey.clear()
   // 下发新的会话号，让进行中的 hydrate 早返回
   flowLogLoadSession++
 }
@@ -223,10 +223,6 @@ const resolvedPathCache = new Map<string, string>()
  * 常规查看只从桌面桥接读取尾部；只有用户显式点击 Show full log 才会读取完整文件。
  */
 const MAX_LOG_READ_CHARS = 512 * 1024
-const LIVE_LOG_READ_CHARS = 192 * 1024
-const LIVE_LOG_UPDATE_DEBOUNCE_MS = 400
-const LIVE_LOG_INITIAL_RETRY_MS = 1200
-const LIVE_LOG_POLL_MS = 1200
 
 function flowLogSegmentKey(seg: Pick<FlowLogSegment, 'stepName' | 'tool'>): string {
   return `${seg.stepName}\u001f${seg.tool}`
@@ -244,9 +240,66 @@ function setFlowLogContent(key: string, content: string): void {
   }
 }
 
-function appendFlowLogContent(key: string, content: string): void {
-  if (!content) return
-  setFlowLogContent(key, `${flowLogContentState.value[key] ?? ''}${content}`)
+function appendRuntimeFlowLogContent(key: string, chunk: string): void {
+  if (!chunk) return
+  const previous = flowLogContentState.value[key] ?? ''
+  const next = `${previous}${chunk}`
+  setFlowLogContent(
+    key,
+    next.length > MAX_RUNTIME_FLOW_LOG_CHARS
+      ? next.slice(next.length - MAX_RUNTIME_FLOW_LOG_CHARS)
+      : next,
+  )
+}
+
+function sameRuntimeFlowLogSegment(
+  segment: FlowLogSegment,
+  stepName: string,
+  tool: string,
+): boolean {
+  if (segment.stepName.trim().toLowerCase() !== stepName.trim().toLowerCase()) {
+    return false
+  }
+  return (
+    !tool ||
+    !segment.tool ||
+    segment.tool.trim().toLowerCase() === tool.trim().toLowerCase()
+  )
+}
+
+function upsertRuntimeFlowLogSegment(options: {
+  failed?: boolean
+  live: boolean
+  state: string
+  stepName: string
+  tool: string
+}): FlowLogSegment {
+  const existingIndex = flowLogSegmentsState.value.findIndex((segment) =>
+    sameRuntimeFlowLogSegment(segment, options.stepName, options.tool),
+  )
+  const existing =
+    existingIndex >= 0 ? flowLogSegmentsState.value[existingIndex] : undefined
+  const nextSegment: FlowLogSegment = {
+    ...(existing ?? {
+      failed: false,
+      missing: false,
+      stepName: options.stepName,
+      tool: options.tool,
+    }),
+    failed: options.failed ?? false,
+    live: options.live,
+    missing: false,
+    state: options.state,
+    stepName: options.stepName,
+    tool: options.tool || existing?.tool || '',
+  }
+  const nextSegments = flowLogSegmentsState.value.map((segment, index) => {
+    if (index === existingIndex) return nextSegment
+    return options.live && segment.live ? { ...segment, live: false } : segment
+  })
+  if (existingIndex < 0) nextSegments.push(nextSegment)
+  flowLogSegmentsState.value = nextSegments.slice(-MAX_RUNTIME_FLOW_LOG_SEGMENTS)
+  return nextSegment
 }
 
 function clearFlowLogContent(key: string): void {
@@ -449,10 +502,8 @@ let _loadedChecklistPath = ''
 let _loadedLayoutPath = ''
 let _loadedMetricsSignature = ''
 let _loadedHomeResourceVersionSignature = ''
-let _rerunStartupWatchHandledForWorkspace = ''
 let _pendingRerunResetConfirmationWorkspace = ''
 let _pendingRerunStaleHomeSignature = ''
-let _pendingRerunFlowStartWorkspace = ''
 
 function homeResourceVersionSignature(
   versions: Record<(typeof HOME_DATA_RESOURCE_VERSION_KEYS)[number], number>,
@@ -479,16 +530,6 @@ function homeMonitorSignature(monitor: MonitorData | null | undefined): string {
       .map(([key, value]) => [key, value])
       .sort(([a], [b]) => String(a).localeCompare(String(b))),
   )
-}
-
-function homeAssetSourceSignature(data: HomeData | null): string {
-  if (!data) return '__none__'
-  const metrics = homeMetricSourceEntries(data.metrics)
-  return JSON.stringify({
-    checklist: data.checklist ?? '',
-    layout: data.layout ?? '',
-    metrics,
-  })
 }
 
 function homeRerunContentSignature(data: HomeData | null): string {
@@ -568,6 +609,7 @@ function markHomeAssetSignaturesStale(): void {
 export async function fetchSharedHomeData(
   projectPath: string,
   isDesktopRuntimeAvailable: boolean,
+  workspaceHandle = '',
 ): Promise<HomeData | null> {
   // 项目切换时使缓存失效
   if (projectPath !== _cachedForProject) {
@@ -597,12 +639,17 @@ export async function fetchSharedHomeData(
     try {
       if (!isDesktopRuntimeAvailable || !projectPath) return null
 
-      // 请求文件系统权限
-      if (!(await requestProjectPathAccess(projectPath))) return null
-
-      if (isStale()) return null
-
-      const data = (await readWorkspaceHomeResourceApi()) as HomeData | null
+      let data: HomeData | null = null
+      if (workspaceHandle) {
+        const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
+        data = snapshot.home as unknown as HomeData
+      } else {
+        // Compatibility path for an older desktop bridge. New GUI sessions always
+        // provide a workspace handle and therefore keep this NFS read in ECC.
+        if (!(await requestProjectPathAccess(projectPath))) return null
+        if (isStale()) return null
+        data = (await readWorkspaceHomeResourceApi()) as HomeData | null
+      }
       if (!data) return null
 
       if (isStale()) return null
@@ -659,8 +706,6 @@ function clearHomeRunArtifactsForRerun(projectPath: string): void {
   const workspaceKey = normalizeWorkspaceEventPath(projectPath)
   if (!workspaceKey) return
 
-  _rerunStartupWatchHandledForWorkspace = workspaceKey
-  _pendingRerunFlowStartWorkspace = workspaceKey
   if (_pendingRerunResetConfirmationWorkspace !== workspaceKey) {
     _pendingRerunStaleHomeSignature = currentDisplayedHomeRerunContentSignature()
   }
@@ -723,31 +768,6 @@ function shouldDeferHomeDataUntilBackendRerunStart(
   )
 }
 
-function isWaitingForRerunFlowStart(projectPath: string): boolean {
-  const key = normalizeWorkspaceEventPath(projectPath)
-  return Boolean(key) && _pendingRerunFlowStartWorkspace === key
-}
-
-function updateRerunFlowStartState(
-  projectPath: string,
-  plan: {
-    hasOngoingStep: boolean
-    hasPendingStep: boolean
-  },
-): void {
-  if (!isWaitingForRerunFlowStart(projectPath)) return
-  if (plan.hasOngoingStep || plan.hasPendingStep) {
-    _pendingRerunFlowStartWorkspace = ''
-  }
-}
-
-function consumeRerunStartupWatchHandledFor(projectPath: unknown): boolean {
-  const key = normalizeWorkspaceEventPath(projectPath)
-  if (!key || _rerunStartupWatchHandledForWorkspace !== key) return false
-  _rerunStartupWatchHandledForWorkspace = ''
-  return true
-}
-
 function isCurrentWorkspaceRerunStartEvent(event: unknown, projectPath: string): boolean {
   if (!event || typeof event !== 'object') return false
   const payload = event as Record<string, unknown>
@@ -795,10 +815,8 @@ export function resetSharedHomeDataProjectState() {
   _fetchPromise = null
   _cachedForProject = ''
   _fetchGeneration += 1
-  _rerunStartupWatchHandledForWorkspace = ''
   _pendingRerunResetConfirmationWorkspace = ''
   _pendingRerunStaleHomeSignature = ''
-  _pendingRerunFlowStartWorkspace = ''
   // 项目切换时，所有跨组件的模块级缓存一并失效
   logFileCache.clear()
   resolvedPathCache.clear()
@@ -814,7 +832,8 @@ export function resetSharedHomeDataProjectState() {
  */
 export function useHomeData() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, runtimeEvents, resourceVersions } = useWorkspace()
+  const { currentProject, runtimeEvents, resourceVersions, workspaceSession } =
+    useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
 
   // 响应式数据全部走模块级——HomeView remount 时直接复用上一次加载结果，
@@ -835,23 +854,7 @@ export function useHomeData() {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
-  /** flow log 渐进刷新会话：递增后旧异步回调全部失效 */
-  let liveSession = 0
-  let pollFlowJsonTimer: ReturnType<typeof setInterval> | null = null
-  let pollHomeJsonTimer: ReturnType<typeof setInterval> | null = null
-  let pollLogFallbackTimer: ReturnType<typeof setInterval> | null = null
-  let unwatchFlowJsonFile: (() => void) | null = null
-  let unwatchHomeJsonFile: (() => void) | null = null
-  let unwatchParametersJsonFile: (() => void) | null = null
-  let unwatchLogFile: (() => void) | null = null
-  let liveLogPatchTimer: ReturnType<typeof setTimeout> | null = null
-  let liveLogPatchInFlight = false
-  let liveLogPatchQueued = false
-  let liveProjectPath: string | null = null
-  let liveHomeDataRefreshSession = 0
   let homeDataLoadSession = 0
-  let lastOngoingKey: string | null = null
-  let unregisterLiveLifecycleCleanup: (() => void) | null = null
   let unregisterHomeRunArtifactReset: (() => void) | null = null
 
   /**
@@ -1127,355 +1130,6 @@ export function useHomeData() {
     return { hasFailedStep, hasOngoingStep, hasPendingStep, tasks }
   }
 
-  function cleanupLogWatchOnly(): void {
-    unwatchLogFile?.()
-    unwatchLogFile = null
-    if (liveLogPatchTimer != null) {
-      clearTimeout(liveLogPatchTimer)
-      liveLogPatchTimer = null
-    }
-    liveLogPatchInFlight = false
-    liveLogPatchQueued = false
-    if (pollLogFallbackTimer != null) {
-      clearInterval(pollLogFallbackTimer)
-      pollLogFallbackTimer = null
-    }
-  }
-
-  function cleanupFlowLogLiveWatch(): void {
-    unregisterLiveLifecycleCleanup?.()
-    unregisterLiveLifecycleCleanup = null
-    liveHomeDataRefreshSession++
-    cleanupLogWatchOnly()
-    unwatchFlowJsonFile?.()
-    unwatchFlowJsonFile = null
-    unwatchHomeJsonFile?.()
-    unwatchHomeJsonFile = null
-    unwatchParametersJsonFile?.()
-    unwatchParametersJsonFile = null
-    if (pollFlowJsonTimer != null) {
-      clearInterval(pollFlowJsonTimer)
-      pollFlowJsonTimer = null
-    }
-    if (pollHomeJsonTimer != null) {
-      clearInterval(pollHomeJsonTimer)
-      pollHomeJsonTimer = null
-    }
-    liveProjectPath = null
-    lastOngoingKey = null
-  }
-
-  function getLiveFlowLogSegment(
-    expectedLogPath?: string,
-  ): { index: number; segment: FlowLogSegment; key: string } | null {
-    const index = flowLogSegments.value.findIndex((segment) => segment.live)
-    if (index < 0) return null
-    const segment = flowLogSegments.value[index]
-    if (!segment) return null
-    if (expectedLogPath && segment.logPath && segment.logPath !== expectedLogPath) {
-      return null
-    }
-    return {
-      index,
-      segment,
-      key: flowLogSegmentKey(segment),
-    }
-  }
-
-  function applyLiveTailEvent(
-    event: DesktopProjectLogTailEvent,
-    resolvedLogPath: string,
-  ): void {
-    const live = getLiveFlowLogSegment(resolvedLogPath)
-    if (!live) return
-
-    const { index, segment, key } = live
-
-    if (event.eventType === 'waiting') {
-      invalidateLogFileCache(resolvedLogPath)
-      clearFlowLogContent(key)
-      flowLogSegments.value[index] = {
-        ...segment,
-        missing: false,
-        truncated: false,
-        totalSize: 0,
-        lastReadOffsetBytes: 0,
-        logPath: resolvedLogPath,
-      }
-      flowLogError.value = null
-      return
-    }
-
-    if (event.eventType === 'error') {
-      flowLogError.value = event.reason ?? 'Failed to tail live log'
-      return
-    }
-
-    if (event.eventType === 'closed') {
-      return
-    }
-
-    const nextContent = event.content ?? ''
-    const shouldPrefixBanner =
-      event.truncated && (event.eventType === 'snapshot' || event.eventType === 'reset')
-    const content = shouldPrefixBanner
-      ? `[… live tail — showing latest log output. Full log is available after the step finishes. …]\n${nextContent}`
-      : nextContent
-
-    invalidateLogFileCache(resolvedLogPath)
-    if (event.eventType === 'append') {
-      appendFlowLogContent(key, content)
-    } else {
-      setFlowLogContent(key, content)
-    }
-
-    flowLogSegments.value[index] = {
-      ...segment,
-      missing: false,
-      truncated: Boolean(event.truncated),
-      totalSize: event.sizeBytes ?? segment.totalSize,
-      lastReadOffsetBytes: event.nextOffsetBytes ?? segment.lastReadOffsetBytes,
-      logPath: resolvedLogPath,
-    }
-    flowLogError.value = null
-  }
-
-  async function startProjectFileWatcher(
-    sid: number,
-    path: string,
-    onChange: () => void | Promise<void>,
-  ): Promise<(() => void) | null> {
-    if (sid !== liveSession || !path) return null
-    try {
-      const unwatch = await watchProjectFile(path, () => {
-        if (sid !== liveSession) return
-        void onChange()
-      })
-      if (sid !== liveSession) {
-        unwatch?.()
-        return null
-      }
-      return unwatch
-    } catch (err) {
-      console.warn('Failed to watch project file:', path, err)
-      return null
-    }
-  }
-
-  async function bindLogFileWatch(sid: number, logPath: string): Promise<void> {
-    cleanupLogWatchOnly()
-
-    const resolvedLogPath = await resolvedPathMemo(logPath)
-    if (!resolvedLogPath || sid !== liveSession) return
-
-    try {
-      const unwatch = await subscribeProjectLogTail(
-        resolvedLogPath,
-        (event) => {
-          if (sid !== liveSession) return
-          if (event.path !== resolvedLogPath) return
-          applyLiveTailEvent(event, resolvedLogPath)
-        },
-        {
-          maxInitialChars: LIVE_LOG_READ_CHARS,
-          maxChunkChars: LIVE_LOG_READ_CHARS,
-          pollIntervalMs: LIVE_LOG_INITIAL_RETRY_MS,
-        },
-      )
-
-      if (sid !== liveSession) {
-        unwatch?.()
-        return
-      }
-
-      if (unwatch) {
-        unwatchLogFile = unwatch
-        return
-      }
-    } catch (err) {
-      console.warn('Failed to subscribe to live log tail:', resolvedLogPath, err)
-    }
-
-    const ensureLogFileWatcher = async (resolvedPath: string): Promise<void> => {
-      if (unwatchLogFile || sid !== liveSession) return
-      unwatchLogFile = await startProjectFileWatcher(sid, resolvedPath, patchLive)
-    }
-
-    const patchLiveNow = async (): Promise<void> => {
-      if (sid !== liveSession) return
-      if (liveLogPatchInFlight) {
-        liveLogPatchQueued = true
-        return
-      }
-      liveLogPatchInFlight = true
-      try {
-        await ensureLogFileWatcher(resolvedLogPath)
-        const i = flowLogSegments.value.findIndex((s) => s.live)
-        const cur = i >= 0 ? flowLogSegments.value[i]! : null
-        const key = cur ? flowLogSegmentKey(cur) : null
-        const update = await readOptionalProjectTextFileUpdate(
-          resolvedLogPath,
-          cur?.lastReadOffsetBytes ?? 0,
-          LIVE_LOG_READ_CHARS,
-        )
-        if (sid !== liveSession) return
-        if (update === null) {
-          invalidateLogFileCache(resolvedLogPath)
-          if (i >= 0) {
-            const cur = flowLogSegments.value[i]!
-            const key = flowLogSegmentKey(cur)
-            if (cur.missing || flowLogContentState.value[key]) {
-              clearFlowLogContent(key)
-              flowLogSegments.value[i] = {
-                ...cur,
-                missing: false,
-                truncated: false,
-                totalSize: 0,
-                lastReadOffsetBytes: 0,
-                logPath: resolvedLogPath,
-              }
-            }
-          }
-          return
-        }
-        if (i >= 0 && cur && key) {
-          if (
-            !update.content &&
-            cur.lastReadOffsetBytes === update.nextOffsetBytes &&
-            cur.totalSize === update.sizeBytes &&
-            Boolean(cur.truncated) === update.truncated &&
-            !cur.missing
-          ) {
-            return
-          }
-
-          invalidateLogFileCache(resolvedLogPath)
-          const content =
-            update.truncated && update.reset
-              ? `[… live tail — showing latest log output. Full log is available after the step finishes. …]\n${update.content}`
-              : update.content
-          if (update.reset) {
-            setFlowLogContent(key, content)
-          } else {
-            appendFlowLogContent(key, content)
-          }
-          flowLogSegments.value[i] = {
-            ...cur,
-            missing: false,
-            truncated: update.truncated,
-            totalSize: update.sizeBytes,
-            lastReadOffsetBytes: update.nextOffsetBytes,
-            logPath: resolvedLogPath,
-          }
-        }
-      } catch {
-        /* 尚未写入或短暂不可读 */
-      } finally {
-        liveLogPatchInFlight = false
-        if (liveLogPatchQueued && sid === liveSession) {
-          liveLogPatchQueued = false
-          schedulePatchLive()
-        }
-      }
-    }
-
-    const schedulePatchLive = (delay = LIVE_LOG_UPDATE_DEBOUNCE_MS): void => {
-      if (sid !== liveSession || liveLogPatchTimer != null) return
-      liveLogPatchTimer = setTimeout(() => {
-        liveLogPatchTimer = null
-        void patchLiveNow()
-      }, delay)
-    }
-
-    const patchLive = (): void => {
-      schedulePatchLive()
-    }
-
-    await patchLiveNow()
-    if (sid !== liveSession) return
-
-    pollLogFallbackTimer = setInterval(
-      () => {
-        patchLive()
-      },
-      unwatchLogFile ? LIVE_LOG_POLL_MS : LIVE_LOG_INITIAL_RETRY_MS,
-    )
-  }
-
-  async function refreshFlowLogLivePanel(sid: number): Promise<void> {
-    if (sid !== liveSession) return
-    const projectPath = liveProjectPath
-    if (!projectPath || currentProject.value?.path !== projectPath) return
-    let flowRemote = sharedHomeData.value?.flow
-    if (!flowRemote) {
-      const h = await fetchSharedHomeData(projectPath, isDesktopRuntimeAvailable)
-      if (sid !== liveSession || currentProject.value?.path !== projectPath) return
-      flowRemote = h?.flow ?? ''
-    }
-    if (!flowRemote) return
-
-    const flowLocal = convertRemoteToLocalPath(flowRemote, projectPath)
-    if (!workspaceRootFromFlowPath(flowLocal)) return
-
-    flowLogError.value = null
-    try {
-      const plan = await planFlowLogSegments(flowLocal, true)
-      if (!plan || sid !== liveSession || currentProject.value?.path !== projectPath)
-        return
-      const waitingForRerunFlowStart = isWaitingForRerunFlowStart(projectPath)
-      if (waitingForRerunFlowStart && !plan.hasOngoingStep && !plan.hasPendingStep) {
-        return
-      }
-      updateRerunFlowStartState(projectPath, plan)
-
-      if (
-        isFlowExecutionActiveForWorkspace(projectPath) &&
-        !waitingForRerunFlowStart &&
-        !plan.hasOngoingStep &&
-        !plan.hasPendingStep
-      ) {
-        clearFlowExecutionActiveForWorkspace(projectPath)
-        workspaceLifecycle.invalidate('all')
-      }
-
-      const logPaths = plan.tasks.map((t) => t.logPath)
-      const logKeys = plan.tasks.map((t) => flowLogSegmentKey(t.seg))
-      pruneLogCacheKeepOnly(logPaths)
-      pruneFlowLogContentKeepOnly(logKeys)
-      const segments = mergePlannedFlowLogSegments(plan.tasks, flowLogSegments.value)
-      if (sid !== liveSession || currentProject.value?.path !== projectPath) return
-      const priorOngoingKey = lastOngoingKey
-      flowLogSegments.value = segments
-      const ongoing = segments.find((s) => s.live)
-      flowLogStepName.value = ongoing?.stepName ?? ''
-      const key = ongoing ? flowLogSegmentKey(ongoing) : null
-
-      // Full-flow execution arrives as one RPC operation. Its flow.json does still
-      // record each step transition, so use the previous live step to detect a
-      // newly successful completion and refresh the Home panel immediately.
-      if (
-        priorOngoingKey &&
-        priorOngoingKey !== key &&
-        plan.tasks.some(
-          ({ seg }) =>
-            flowLogSegmentKey(seg) === priorOngoingKey &&
-            isSuccessfulFlowState(seg.state),
-        )
-      ) {
-        workspaceLifecycle.invalidate('all')
-      }
-      if (key !== lastOngoingKey) {
-        lastOngoingKey = key
-        cleanupLogWatchOnly()
-        if (ongoing?.logPath) {
-          await bindLogFileWatch(sid, ongoing.logPath)
-        }
-      }
-    } catch (err) {
-      console.error('refreshFlowLogLivePanel:', err)
-    }
-  }
-
   async function ensureFlowLogSegmentContentLoaded(
     segment: FlowLogSegment,
   ): Promise<boolean> {
@@ -1486,7 +1140,7 @@ export function useHomeData() {
     if (!isDesktopRuntimeAvailable) return false
 
     const key = flowLogSegmentKey(segment)
-    if (flowLogContentState.value[key]) return true
+    if (Object.prototype.hasOwnProperty.call(flowLogContentState.value, key)) return true
     const contentGeneration = flowLogContentGeneration(key)
 
     const logPath = segment.logPath
@@ -1623,7 +1277,11 @@ export function useHomeData() {
       const sessionId = workspaceLifecycle.currentSessionId.value
       const projectPath = currentProject.value.path
       const homeData = await workspaceLifecycle.runForSession(sessionId, () =>
-        fetchSharedHomeData(projectPath, isDesktopRuntimeAvailable),
+        fetchSharedHomeData(
+          projectPath,
+          isDesktopRuntimeAvailable,
+          workspaceSession?.value?.workspaceId ?? '',
+        ),
       )
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return
       flowPath = homeData?.flow ?? ''
@@ -1693,7 +1351,7 @@ export function useHomeData() {
       loadLayoutImage(homeData.layout, isCurrent),
       loadMetricsImages(homeData.metrics, isCurrent),
     ]
-    if (options.includeFlowLogs ?? true) {
+    if (options.includeFlowLogs ?? false) {
       loaders.push(loadAllFlowStepLogsFromFlowPath(homeData.flow))
     }
 
@@ -1738,7 +1396,11 @@ export function useHomeData() {
       }
 
       const homeData = await workspaceLifecycle.runForSession(sessionId, () =>
-        fetchSharedHomeData(projectPath, isDesktopRuntimeAvailable),
+        fetchSharedHomeData(
+          projectPath,
+          isDesktopRuntimeAvailable,
+          workspaceSession?.value?.workspaceId ?? '',
+        ),
       )
       if (!isCurrent()) return
       if (!homeData) {
@@ -1755,7 +1417,7 @@ export function useHomeData() {
 
       console.log('Loaded home data:', homeData)
 
-      await loadHomeAssetsFromData(homeData, { includeFlowLogs: true, isCurrent })
+      await loadHomeAssetsFromData(homeData, { includeFlowLogs: false, isCurrent })
       if (!isCurrent()) return
       _loadedHomeResourceVersionSignature = resourceVersionSignature
 
@@ -1816,7 +1478,7 @@ export function useHomeData() {
 
       console.log('Loaded home data from runtime event path:', homeData)
 
-      await loadHomeAssetsFromData(homeData, { includeFlowLogs: true, isCurrent })
+      await loadHomeAssetsFromData(homeData, { includeFlowLogs: false, isCurrent })
       if (!isCurrent()) return
 
       console.log('Home data from runtime event path fully loaded')
@@ -1856,8 +1518,6 @@ export function useHomeData() {
    * 清空所有数据
    */
   function clearHomeData(resetProjectState = false): void {
-    liveSession++
-    cleanupFlowLogLiveWatch()
     error.value = null
     if (resetProjectState) {
       // 项目真的切了：所有模块级缓存 + blob 全部失效
@@ -1870,167 +1530,6 @@ export function useHomeData() {
     }
   }
 
-  async function refreshHomeAssetsFromCurrentHomeFile(sid: number): Promise<boolean> {
-    if (sid !== liveSession) return false
-    const projectPath = liveProjectPath
-    if (!projectPath || currentProject.value?.path !== projectPath) return false
-
-    const sessionId = workspaceLifecycle.currentSessionId.value
-    const loadSession = ++homeDataLoadSession
-    const refreshSid = ++liveHomeDataRefreshSession
-    const isCurrent = (): boolean =>
-      sid === liveSession &&
-      refreshSid === liveHomeDataRefreshSession &&
-      loadSession === homeDataLoadSession &&
-      workspaceLifecycle.isCurrentSession(sessionId) &&
-      currentProject.value?.path === projectPath
-
-    const resolvedHomePath = await resolvedPathMemo(`${projectPath}/home/home.json`)
-    if (!resolvedHomePath || !isCurrent()) return false
-
-    try {
-      const fileContent = await readProjectTextFile(resolvedHomePath)
-      const homeData: HomeData = JSON.parse(fileContent)
-      if (!isCurrent()) return false
-      if (shouldDeferHomeDataUntilBackendRerunStart(projectPath, homeData)) {
-        return false
-      }
-      if (shouldDeferHomeDataUntilRerunReset(projectPath, homeData)) {
-        return false
-      }
-
-      updateSharedHomeData(homeData, {
-        markAssetsStale:
-          homeAssetSourceSignature(sharedHomeData.value) !==
-          homeAssetSourceSignature(homeData),
-      })
-      await loadHomeAssetsFromData(homeData, { includeFlowLogs: false, isCurrent })
-      return isCurrent()
-    } catch (err) {
-      console.error('refreshHomeAssetsFromCurrentHomeFile:', err)
-      return false
-    }
-  }
-
-  async function refreshHomeDataFromCurrentHomeFile(sid: number): Promise<void> {
-    const loaded = await refreshHomeAssetsFromCurrentHomeFile(sid)
-    if (!loaded) return
-
-    try {
-      await refreshFlowLogLivePanel(sid)
-    } catch (err) {
-      console.error('refreshHomeDataFromCurrentHomeFile:', err)
-    }
-  }
-
-  async function startFlowLogLiveWatchForCurrentProject(
-    options: { force?: boolean; initialRefresh?: boolean } = {},
-  ): Promise<void> {
-    if (!isDesktopRuntimeAvailable) return
-    if (!options.force && !currentWorkspaceFlowExecutionActive.value) return
-    const projectPath = currentProject.value?.path
-    if (!projectPath) return
-
-    liveSession++
-    const sid = liveSession
-    cleanupFlowLogLiveWatch()
-    liveProjectPath = projectPath
-    unregisterLiveLifecycleCleanup = workspaceLifecycle.registerCleanup(
-      () => {
-        if (sid !== liveSession) return
-        liveSession++
-        cleanupFlowLogLiveWatch()
-      },
-      {
-        sessionId: workspaceLifecycle.currentSessionId.value,
-        label: 'home live file watchers',
-      },
-    )
-
-    const resolvedFlowPath = await resolvedPathMemo(`${projectPath}/home/flow.json`)
-    if (sid !== liveSession || currentProject.value?.path !== projectPath) return
-    if (!resolvedFlowPath) return
-
-    const flowJsonUnwatch = await startProjectFileWatcher(sid, resolvedFlowPath, () => {
-      void refreshFlowLogLivePanel(sid)
-    })
-    if (sid !== liveSession || currentProject.value?.path !== projectPath) {
-      flowJsonUnwatch?.()
-      return
-    }
-    unwatchFlowJsonFile = flowJsonUnwatch
-
-    const resolvedHomePath = await resolvedPathMemo(`${projectPath}/home/home.json`)
-    if (sid !== liveSession || currentProject.value?.path !== projectPath) return
-    if (resolvedHomePath) {
-      const homeJsonUnwatch = await startProjectFileWatcher(sid, resolvedHomePath, () => {
-        void refreshHomeDataFromCurrentHomeFile(sid)
-      })
-      if (sid !== liveSession || currentProject.value?.path !== projectPath) {
-        homeJsonUnwatch?.()
-        return
-      }
-      unwatchHomeJsonFile = homeJsonUnwatch
-    }
-
-    const resolvedParametersPath = await resolvedPathMemo(
-      `${projectPath}/home/parameters.json`,
-    )
-    if (sid !== liveSession || currentProject.value?.path !== projectPath) return
-    if (resolvedParametersPath) {
-      const parametersJsonUnwatch = await startProjectFileWatcher(
-        sid,
-        resolvedParametersPath,
-        () => {
-          workspaceLifecycle.invalidate('parameters')
-        },
-      )
-      if (sid !== liveSession || currentProject.value?.path !== projectPath) {
-        parametersJsonUnwatch?.()
-        return
-      }
-      unwatchParametersJsonFile = parametersJsonUnwatch
-    }
-
-    pollFlowJsonTimer = setInterval(() => {
-      void refreshFlowLogLivePanel(sid)
-    }, 1600)
-    pollHomeJsonTimer = setInterval(() => {
-      void refreshHomeAssetsFromCurrentHomeFile(sid)
-    }, 1600)
-
-    if (options.initialRefresh ?? true) {
-      await refreshFlowLogLivePanel(sid)
-    }
-  }
-
-  // run_step / rtl2gds 期间：监听 flow.json 与当前步日志文件，渐进更新 Flow step log
-  watch(
-    currentWorkspaceFlowExecutionActive,
-    async (active) => {
-      if (!isDesktopRuntimeAvailable) return
-      if (!active) {
-        liveSession++
-        cleanupFlowLogLiveWatch()
-        try {
-          await ensureFlowLogsLoaded()
-        } catch (e) {
-          console.error('ensureFlowLogsLoaded after flow:', e)
-        }
-        return
-      }
-
-      if (consumeRerunStartupWatchHandledFor(currentProject.value?.path)) {
-        return
-      }
-
-      await startFlowLogLiveWatchForCurrentProject({
-        initialRefresh: true,
-      })
-    },
-    { immediate: true },
-  )
-
   // 监听当前项目变化，自动重新加载
   watch(
     () => currentProject.value?.path,
@@ -2038,26 +1537,16 @@ export function useHomeData() {
       if (newPath) {
         const projectChanged = Boolean(oldPath && oldPath !== newPath)
         if (projectChanged) {
-          liveSession++
-          cleanupFlowLogLiveWatch()
+          // Project changes invalidate view state; no filesystem watcher is attached.
         }
         if (consumePendingHomeRunArtifactReset(newPath)) {
           clearHomeRunArtifactsForRerun(newPath)
           markFlowExecutionActiveForWorkspace(newPath)
-          await startFlowLogLiveWatchForCurrentProject({
-            force: true,
-            initialRefresh: false,
-          })
+          // GUI flow progression is driven by ECC notifications. In particular,
+          // do not turn an NFS rerun into a new watcher/polling session here.
           return
         }
         await loadHomeData()
-        if (
-          projectChanged &&
-          currentWorkspaceFlowExecutionActive.value &&
-          currentProject.value?.path === newPath
-        ) {
-          await startFlowLogLiveWatchForCurrentProject()
-        }
       } else {
         clearHomeData(true)
       }
@@ -2068,7 +1557,6 @@ export function useHomeData() {
   watch(
     () => [
       resourceVersions.value.home,
-      resourceVersions.value.flow,
       resourceVersions.value.logs,
       resourceVersions.value.all,
     ],
@@ -2084,25 +1572,80 @@ export function useHomeData() {
     (event) => {
       const projectPath = currentProject.value?.path
       if (!projectPath) return
+      const eventData = event?.data as Record<string, unknown> | undefined
+      if (
+        eventData?.runtimeProtocolType === 'step.started' &&
+        typeof eventData.step === 'string'
+      ) {
+        const segment = upsertRuntimeFlowLogSegment({
+          live: true,
+          state: typeof eventData.state === 'string' ? eventData.state : 'Ongoing',
+          stepName: eventData.step,
+          tool: typeof eventData.tool === 'string' ? eventData.tool : '',
+        })
+        const key = flowLogSegmentKey(segment)
+        invalidateFlowLogContent(key)
+        flowLogLiveCursorByKey.delete(key)
+        flowLogStepName.value = segment.stepName
+        flowLogError.value = null
+      }
+      if (
+        eventData?.runtimeProtocolType === 'step.log' &&
+        typeof eventData.step === 'string' &&
+        typeof eventData.logChunk === 'string'
+      ) {
+        const segment = upsertRuntimeFlowLogSegment({
+          live: true,
+          state: typeof eventData.state === 'string' ? eventData.state : 'Ongoing',
+          stepName: eventData.step,
+          tool: typeof eventData.tool === 'string' ? eventData.tool : '',
+        })
+        const key = flowLogSegmentKey(segment)
+        const cursor =
+          typeof eventData.logCursor === 'number' && Number.isFinite(eventData.logCursor)
+            ? eventData.logCursor
+            : undefined
+        if (cursor === undefined || cursor > (flowLogLiveCursorByKey.get(key) ?? -1)) {
+          appendRuntimeFlowLogContent(key, eventData.logChunk)
+          if (cursor !== undefined) flowLogLiveCursorByKey.set(key, cursor)
+        }
+        flowLogStepName.value = segment.stepName
+        flowLogError.value = null
+      }
+      if (
+        eventData?.runtimeProtocolType === 'step.completed' &&
+        typeof eventData.step === 'string'
+      ) {
+        const state = typeof eventData.state === 'string' ? eventData.state : 'Success'
+        const segment = upsertRuntimeFlowLogSegment({
+          failed: ['Incomplete', 'Invalid', 'Failed'].includes(state),
+          live: false,
+          state,
+          stepName: eventData.step,
+          tool: typeof eventData.tool === 'string' ? eventData.tool : '',
+        })
+        const key = flowLogSegmentKey(segment)
+        const finalLog = typeof eventData.finalLog === 'string' ? eventData.finalLog : ''
+        setFlowLogContent(key, finalLog)
+        flowLogLiveCursorByKey.delete(key)
+        const index = flowLogSegments.value.findIndex(
+          (candidate) => flowLogSegmentKey(candidate) === key,
+        )
+        if (index >= 0) {
+          flowLogSegments.value[index] = {
+            ...flowLogSegments.value[index]!,
+            totalSize: new TextEncoder().encode(finalLog).byteLength,
+            truncated: finalLog.length >= 64 * 1024,
+          }
+        }
+        flowLogStepName.value = segment.stepName
+        flowLogError.value = null
+      }
       if (isCurrentWorkspaceRerunStartEvent(event, projectPath)) {
-        const hasLiveWatchForProject =
-          liveProjectPath === projectPath &&
-          Boolean(
-            unwatchFlowJsonFile ||
-            unwatchHomeJsonFile ||
-            pollFlowJsonTimer ||
-            pollHomeJsonTimer,
-          )
         if (!isAgentWorkspaceRerunHomePrepared(projectPath)) {
           clearHomeRunArtifactsForRerun(projectPath)
         }
         markFlowExecutionActiveForWorkspace(projectPath)
-        if (!hasLiveWatchForProject) {
-          void startFlowLogLiveWatchForCurrentProject({
-            force: true,
-            initialRefresh: false,
-          })
-        }
         return
       }
       if (isCurrentWorkspaceRerunTerminalEvent(event, projectPath)) {
@@ -2123,19 +1666,8 @@ export function useHomeData() {
       return
     }
 
-    const hasLiveWatchForProject =
-      liveProjectPath === currentProjectPath &&
-      Boolean(
-        unwatchFlowJsonFile ||
-        unwatchHomeJsonFile ||
-        pollFlowJsonTimer ||
-        pollHomeJsonTimer,
-      )
     consumePendingHomeRunArtifactReset(currentProjectPath)
     clearHomeRunArtifactsForRerun(currentProjectPath)
-    if (!hasLiveWatchForProject) {
-      void startFlowLogLiveWatchForCurrentProject({ force: true, initialRefresh: false })
-    }
   })
 
   // 组件卸载：只停掉本实例挂载的 live watcher / 定时器；
@@ -2147,8 +1679,6 @@ export function useHomeData() {
   onUnmounted(() => {
     unregisterHomeRunArtifactReset?.()
     unregisterHomeRunArtifactReset = null
-    liveSession++
-    cleanupFlowLogLiveWatch()
   })
 
   return {

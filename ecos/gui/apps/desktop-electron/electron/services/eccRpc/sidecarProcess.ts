@@ -14,7 +14,7 @@ import type { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
 
-import { EccJsonRpcClient } from './jsonRpcClient'
+import { EccJsonRpcClient, type JsonRpcNotificationPayload } from './jsonRpcClient'
 
 export interface SpawnedEccRpcSidecar extends EventEmitter {
   kill(signal?: NodeJS.Signals): boolean
@@ -38,10 +38,26 @@ export interface EccRpcSidecarProcessOptions {
   envProvider?: () => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>
   logDirectoryProvider?: () => string | null
   onEvent?: (event: EccRuntimeEvent) => void
+  onNotification?: (notification: JsonRpcNotificationPayload) => void
   shutdownTimeoutMs?: number
   spawn?: EccRpcSidecarSpawn
   tempDir?: string
 }
+
+export class EccRpcShutdownDeferredError extends Error {
+  readonly shutdownBarrier: unknown
+
+  constructor(shutdownBarrier: unknown) {
+    super('ECC RPC sidecar shutdown is deferred by an active operation.')
+    this.name = 'EccRpcShutdownDeferredError'
+    this.shutdownBarrier = shutdownBarrier
+  }
+}
+
+type ShutdownRequestResult =
+  | { kind: 'acknowledged' }
+  | { kind: 'deferred'; shutdownBarrier?: unknown }
+  | { kind: 'failed' }
 
 function timestampForFile(date = new Date()): string {
   const pad = (value: number): string => String(value).padStart(2, '0')
@@ -132,6 +148,7 @@ export class EccRpcSidecarProcess {
     this.spawnEnv = { ...env }
 
     const client = new EccJsonRpcClient({
+      onNotification: (notification) => this.options.onNotification?.(notification),
       writeFrame: (frame) => {
         if (!child.stdin?.writable) {
           throw new Error('ECC RPC sidecar stdin is not writable.')
@@ -199,7 +216,12 @@ export class EccRpcSidecarProcess {
       return
     }
 
-    if (!(await this.requestShutdown(client))) {
+    const result = await this.requestShutdown(client)
+    if (result.kind === 'deferred') {
+      this.shuttingDown = false
+      throw new EccRpcShutdownDeferredError(result.shutdownBarrier)
+    }
+    if (result.kind === 'failed') {
       child.kill('SIGTERM')
       this.forceKillTimer = setTimeout(() => {
         if (this.child === child) {
@@ -257,7 +279,14 @@ export class EccRpcSidecarProcess {
     try {
       this.clearForceKillTimer()
       const client = this.client
-      const shutdownAcknowledged = client ? await this.requestShutdown(client) : false
+      const shutdownResult = client
+        ? await this.requestShutdown(client)
+        : { kind: 'failed' as const }
+      if (shutdownResult.kind === 'deferred') {
+        this.shuttingDown = false
+        throw new EccRpcShutdownDeferredError(shutdownResult.shutdownBarrier)
+      }
+      const shutdownAcknowledged = shutdownResult.kind === 'acknowledged'
       if (didExit || this.child !== child) {
         return
       }
@@ -283,15 +312,22 @@ export class EccRpcSidecarProcess {
     }
   }
 
-  private async requestShutdown(client: EccJsonRpcClient): Promise<boolean> {
+  private async requestShutdown(client: EccJsonRpcClient): Promise<ShutdownRequestResult> {
     this.shuttingDown = true
     try {
-      await client.call('rpc.shutdown', undefined, {
+      const result = await client.call<{
+        deferred?: boolean
+        ok?: boolean
+        shutdownBarrier?: unknown
+      }>('rpc.shutdown', undefined, {
         timeoutMs: this.shutdownTimeoutMs,
       })
-      return true
+      if (result?.deferred || result?.ok === false) {
+        return { kind: 'deferred', shutdownBarrier: result.shutdownBarrier }
+      }
+      return { kind: 'acknowledged' }
     } catch {
-      return false
+      return { kind: 'failed' }
     }
   }
 

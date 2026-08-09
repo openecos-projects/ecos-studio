@@ -161,6 +161,15 @@ function createPool() {
 }
 
 describe('EccRpcRuntimeService pool', () => {
+  it('releases the one-shot workspace creation sidecar after the session is registered', async () => {
+    const pool = createPool()
+
+    const workspace = await pool.service.createWorkspace({ directory: '/work/new' })
+
+    expect(workspace.directory).toBe('/work/new')
+    expect(pool.sidecarFor('/work/new').shutdownCount).toBe(1)
+  })
+
   it('runs flow operations for different directories in parallel', async () => {
     const pool = createPool()
     const workspaceA = await pool.service.openWorkspace({ directory: '/work/a' })

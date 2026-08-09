@@ -8,8 +8,8 @@ const {
   invalidateWorkspaceResources,
   resourceVersions,
   workspaceSession,
-  runStepApi,
-  rtl2gdsApi,
+  startFlowOperationApi,
+  startStepOperationApi,
   currentProject,
   requestHomeRunArtifactReset,
   markHomeRunArtifactResetAwaitingBackendStart,
@@ -37,8 +37,8 @@ const {
       workspaceId: 'workspace-demo',
     },
   },
-  runStepApi: vi.fn(),
-  rtl2gdsApi: vi.fn(),
+  startFlowOperationApi: vi.fn(),
+  startStepOperationApi: vi.fn(),
   currentProject: { value: null as { path: string } | null },
   requestHomeRunArtifactReset: vi.fn(),
   markHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
@@ -72,8 +72,8 @@ vi.mock('./useWorkspace', () => ({
 }))
 
 vi.mock('@/api/flow', () => ({
-  runStepApi,
-  rtl2gdsApi,
+  startFlowOperationApi,
+  startStepOperationApi,
 }))
 
 vi.mock('./homeRunArtifacts', () => ({
@@ -86,6 +86,7 @@ import {
   clearFlowExecutionActiveForWorkspace,
   flowExecutionActive,
   markFlowExecutionActiveForWorkspace,
+  resetFlowExecutionState,
   useFlowRunner,
 } from './useFlowRunner'
 
@@ -111,12 +112,12 @@ describe('useFlowRunner desktop-only guard', () => {
       sessionId: 'session-1',
       workspaceId: 'workspace-demo',
     }
-    runStepApi.mockReset()
-    rtl2gdsApi.mockReset()
+    startFlowOperationApi.mockReset()
+    startStepOperationApi.mockReset()
     requestHomeRunArtifactReset.mockReset()
     markHomeRunArtifactResetAwaitingBackendStart.mockReset()
     clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
-    flowExecutionActive.value = false
+    resetFlowExecutionState()
     currentProject.value = null
   })
 
@@ -132,7 +133,7 @@ describe('useFlowRunner desktop-only guard', () => {
       detail: 'Flow execution is only available in the desktop app.',
       life: 5000,
     })
-    expect(runStepApi).not.toHaveBeenCalled()
+    expect(startStepOperationApi).not.toHaveBeenCalled()
     expect(ensureApiReady).not.toHaveBeenCalled()
     expect(result).toEqual({
       step: StepEnum.FLOORPLAN,
@@ -152,58 +153,40 @@ describe('useFlowRunner desktop-only guard', () => {
       detail: 'Flow execution is only available in the desktop app.',
       life: 5000,
     })
-    expect(rtl2gdsApi).not.toHaveBeenCalled()
+    expect(startFlowOperationApi).not.toHaveBeenCalled()
     expect(ensureApiReady).not.toHaveBeenCalled()
     expect(result).toBeNull()
   })
 
-  it('refreshes all Home resources after the full flow API completes', async () => {
+  it('starts a full flow as an asynchronous runtime operation', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
-    rtl2gdsApi.mockResolvedValue({
-      response: 'success',
-      data: { rerun: false },
-      message: ['done'],
-    })
+    startFlowOperationApi.mockResolvedValue({ operationId: 'operation-1', state: 'queued' })
 
-    const { runAllFlow } = useFlowRunner()
+    const { runAllFlow, isRunning } = useFlowRunner()
 
-    await expect(runAllFlow()).resolves.toEqual({ rerun: false })
-    expect(rtl2gdsApi).toHaveBeenCalledWith({
-      cmd: 'rtl2gds',
-      data: {
-        directory: '/work/demo',
-        rerun: false,
-        workspaceHandle: 'workspace-demo',
-      },
+    await expect(runAllFlow()).resolves.toMatchObject({ operationId: 'operation-1' })
+    expect(startFlowOperationApi).toHaveBeenCalledWith({
+      idempotencyKey: expect.any(String),
+      rerun: false,
+      workspaceHandle: 'workspace-demo',
     })
-    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['all'], {
-      sessionId: 'session-1',
-    })
+    expect(isRunning.value).toBe(true)
+    expect(invalidateWorkspaceResources).not.toHaveBeenCalled()
   })
 
-  it('passes rerun=true to the full flow API when requested', async () => {
+  it('passes rerun=true when starting a full flow operation', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
-    rtl2gdsApi.mockResolvedValue({
-      response: 'success',
-      data: { rerun: true },
-      message: ['done'],
-    })
+    startFlowOperationApi.mockResolvedValue({ operationId: 'operation-1', state: 'queued' })
 
     const { runAllFlow } = useFlowRunner()
 
-    await expect(runAllFlow({ rerun: true })).resolves.toEqual({ rerun: true })
-    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
-    expect(rtl2gdsApi).toHaveBeenCalledWith({
-      cmd: 'rtl2gds',
-      data: {
-        directory: '/work/demo',
-        rerun: true,
-        workspaceHandle: 'workspace-demo',
-      },
-    })
+    await runAllFlow({ rerun: true })
+    expect(markHomeRunArtifactResetAwaitingBackendStart).toHaveBeenCalledWith('/work/demo')
+    expect(startFlowOperationApi).toHaveBeenCalledWith(
+      expect.objectContaining({ rerun: true }),
+    )
   })
 
   it('does not mark the full flow running when the runtime bridge is unavailable', async () => {
@@ -215,166 +198,41 @@ describe('useFlowRunner desktop-only guard', () => {
     await expect(runAllFlow()).resolves.toBeNull()
 
     expect(ensureApiReady).toHaveBeenCalledTimes(1)
-    expect(rtl2gdsApi).not.toHaveBeenCalled()
+    expect(startFlowOperationApi).not.toHaveBeenCalled()
     expect(isRunning.value).toBe(false)
   })
 
-  it('sends the active project directory when running a single step', async () => {
+  it('starts the active step through the asynchronous runtime operation API', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
-    runStepApi.mockResolvedValue({
-      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
-      message: ['done'],
-      response: 'success',
-    })
+    startStepOperationApi.mockResolvedValue({ operationId: 'operation-1', state: 'queued' })
 
     const { runFlow } = useFlowRunner()
 
     await runFlow()
 
-    expect(runStepApi).toHaveBeenCalledWith({
-      cmd: 'run_step',
-      data: {
-        directory: '/work/demo',
-        rerun: false,
-        step: StepEnum.FLOORPLAN,
-        workspaceHandle: 'workspace-demo',
-      },
+    expect(startStepOperationApi).toHaveBeenCalledWith({
+      idempotencyKey: expect.any(String),
+      rerun: false,
+      step: StepEnum.FLOORPLAN,
+      workspaceHandle: 'workspace-demo',
     })
   })
 
   it('passes rerun=true to the single step API when requested', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
-    runStepApi.mockResolvedValue({
-      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
-      message: ['done'],
-      response: 'success',
-    })
+    startStepOperationApi.mockResolvedValue({ operationId: 'operation-1', state: 'queued' })
 
     const { runFlow } = useFlowRunner()
 
     await runFlow({ rerun: true })
 
-    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
-    expect(runStepApi).toHaveBeenCalledWith({
-      cmd: 'run_step',
-      data: {
-        directory: '/work/demo',
-        rerun: true,
-        step: StepEnum.FLOORPLAN,
-        workspaceHandle: 'workspace-demo',
-      },
-    })
-  })
-
-  it('refreshes all Home resources after a single step completes without runtime events', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
-    currentProject.value = { path: '/work/demo' }
-    runStepApi.mockResolvedValue({
-      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
-      message: ['done'],
-      response: 'success',
-    })
-
-    const { runFlow } = useFlowRunner()
-
-    await runFlow()
-
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['all'], {
-      sessionId: 'session-1',
-    })
-  })
-
-  it('still refreshes all Home resources when runtime events only updated flow resources', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
-    currentProject.value = { path: '/work/demo' }
-    runStepApi.mockImplementation(async () => {
-      resourceVersions.value = {
-        ...resourceVersions.value,
-        flow: resourceVersions.value.flow + 1,
-      }
-      return {
-        data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
-        message: ['done'],
-        response: 'success',
-      }
-    })
-
-    const { runFlow } = useFlowRunner()
-
-    await runFlow()
-
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['all'], {
-      sessionId: 'session-1',
-    })
-  })
-
-  it('does not duplicate fallback invalidations when runtime events already refreshed all resources', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
-    currentProject.value = { path: '/work/demo' }
-    runStepApi.mockImplementation(async () => {
-      resourceVersions.value = {
-        ...resourceVersions.value,
-        all: resourceVersions.value.all + 1,
-      }
-      return {
-        data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
-        message: ['done'],
-        response: 'success',
-      }
-    })
-
-    const { runFlow } = useFlowRunner()
-
-    await runFlow()
-
-    expect(invalidateWorkspaceResources).not.toHaveBeenCalled()
-  })
-
-  it('binds fallback invalidation to the workspace session active when the step started', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
-    workspaceSession.value = {
-      sessionId: 'session-a',
-      workspaceId: 'workspace-a',
-    }
-    currentProject.value = { path: '/work/a' }
-    let resolveRunStep:
-      | ((value: {
-          data: { state: StateEnum; step: StepEnum }
-          message: string[]
-          response: string
-        }) => void)
-      | undefined
-    runStepApi.mockReturnValue(
-      new Promise((resolve) => {
-        resolveRunStep = resolve
-      }),
+    expect(startStepOperationApi).toHaveBeenCalledWith(
+      expect.objectContaining({ rerun: true, step: StepEnum.FLOORPLAN }),
     )
-
-    const { runFlow } = useFlowRunner()
-    const runPromise = runFlow()
-    await vi.waitFor(() => {
-      expect(runStepApi).toHaveBeenCalled()
-    })
-
-    workspaceSession.value = {
-      sessionId: 'session-b',
-      workspaceId: 'workspace-b',
-    }
-    currentProject.value = { path: '/work/b' }
-    resolveRunStep?.({
-      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
-      message: ['done'],
-      response: 'success',
-    })
-
-    await runPromise
-
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['all'], {
-      sessionId: 'session-a',
-    })
   })
+
 
   it('tracks running flow state per workspace', () => {
     currentProject.value = { path: '/work/a' }

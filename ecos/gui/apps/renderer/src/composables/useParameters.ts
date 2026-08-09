@@ -2,6 +2,7 @@ import { ref, reactive, watch, computed, getCurrentScope, onScopeDispose } from 
 import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { fetchSharedHomeData, convertRemoteToLocalPath } from './useHomeData'
+import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { readProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
@@ -77,7 +78,6 @@ const FIXED_TOP_LAYER = 'MET5'
 const ROUTING_LAYER_ORDER = [FIXED_BOTTOM_LAYER, 'MET3', 'MET4', FIXED_TOP_LAYER]
 const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
   'Flow is running. Configuration is read-only until the current run finishes.'
-const RUNNING_FLOW_PARAMETERS_POLL_MS = 1600
 
 function getDefaultConfig(): ConfigData {
   return {
@@ -247,7 +247,7 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
  */
 export function useParameters() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, resourceVersions, invalidateWorkspaceResources } =
+  const { currentProject, resourceVersions, invalidateWorkspaceResources, workspaceSession } =
     useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
 
@@ -267,8 +267,6 @@ export function useParameters() {
   let activeSaveRequestId = 0
   let parametersResourceToken = 0
   let saveWriteQueue: Promise<void> = Promise.resolve()
-  let runningFlowParametersPollTimer: ReturnType<typeof setInterval> | null = null
-  let runningFlowParametersPollInFlight = false
 
   function fallbackParametersPath(projectPath: string): string {
     return `${projectPath}/home/parameters.json`
@@ -329,7 +327,10 @@ export function useParameters() {
   }
 
   function applyParametersFileContent(fileContent: string): void {
-    const parametersData = parseParametersData(fileContent)
+    applyParametersData(parseParametersData(fileContent))
+  }
+
+  function applyParametersData(parametersData: ParametersData): void {
 
     console.log('Loaded parameters data:', parametersData)
 
@@ -353,12 +354,37 @@ export function useParameters() {
     if (!projectPath || !isFlowExecutionActiveForWorkspace(projectPath)) return false
 
     const sessionId = workspaceLifecycle.currentSessionId.value
-    const knownPath = resolvedParametersPath || fallbackParametersPath(projectPath)
     isLoading.value = true
     error.value = null
     const loadResourceToken = advanceParametersResourceToken()
 
     try {
+      const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
+      if (workspaceHandle) {
+        const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
+          getWorkspaceRuntimeSnapshotApi(workspaceHandle),
+        )
+        if (snapshot === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) {
+          return true
+        }
+        if (
+          snapshot &&
+          snapshot.parameters &&
+          typeof snapshot.parameters === 'object' &&
+          !Array.isArray(snapshot.parameters) &&
+          loadResourceToken === parametersResourceToken
+        ) {
+          applyParametersData(snapshot.parameters as unknown as ParametersData)
+          return true
+        }
+      }
+
+      // Do not fall back to NFS while a GUI-originated flow is running. A
+      // missing snapshot keeps the last stable parameters until the next ECC
+      // event rather than adding foreground file I/O to the render path.
+      if (keepLastParametersDuringFlowReload()) return true
+
+      const knownPath = resolvedParametersPath || fallbackParametersPath(projectPath)
       const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
         resolveProjectPathAccess(knownPath),
       )
@@ -397,21 +423,12 @@ export function useParameters() {
   }
 
   function stopRunningFlowParametersPoll(): void {
-    if (runningFlowParametersPollTimer == null) return
-    clearInterval(runningFlowParametersPollTimer)
-    runningFlowParametersPollTimer = null
-    runningFlowParametersPollInFlight = false
+    // Compatibility hook: GUI runtime updates are event driven.
   }
 
   function startRunningFlowParametersPoll(): void {
-    if (runningFlowParametersPollTimer != null) return
-    runningFlowParametersPollTimer = setInterval(() => {
-      if (runningFlowParametersPollInFlight || hasChanges.value) return
-      runningFlowParametersPollInFlight = true
-      void reloadParametersFromKnownPathIfRunning().finally(() => {
-        runningFlowParametersPollInFlight = false
-      })
-    }, RUNNING_FLOW_PARAMETERS_POLL_MS)
+    // GUI-originated flow changes arrive as runtime snapshots/events. Keeping a
+    // timer here would turn NFS latency into periodic renderer work.
   }
 
   async function loadParameters(): Promise<void> {
@@ -436,7 +453,11 @@ export function useParameters() {
     try {
       const projectPath = currentProject.value.path
       const homeData = await workspaceLifecycle.runForSession(sessionId, () =>
-        fetchSharedHomeData(projectPath, isDesktopRuntimeAvailable),
+        fetchSharedHomeData(
+          projectPath,
+          isDesktopRuntimeAvailable,
+          workspaceSession?.value?.workspaceId ?? '',
+        ),
       )
       if (homeData === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
         return
@@ -455,6 +476,32 @@ export function useParameters() {
       }
 
       const parametersPath = convertToLocalPath(homeData.parameters)
+      const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
+      if (workspaceHandle) {
+        const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
+          getWorkspaceRuntimeSnapshotApi(workspaceHandle),
+        )
+        if (snapshot === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) {
+          return
+        }
+        if (
+          snapshot &&
+          snapshot.parameters &&
+          typeof snapshot.parameters === 'object' &&
+          !Array.isArray(snapshot.parameters)
+        ) {
+          const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+            resolveProjectPathAccess(parametersPath),
+          )
+          if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) {
+            return
+          }
+          if (loadResourceToken !== parametersResourceToken) return
+          resolvedParametersPath = resolvedPath ?? parametersPath
+          applyParametersData(snapshot.parameters as unknown as ParametersData)
+          return
+        }
+      }
       const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
         resolveProjectPathAccess(parametersPath),
       )

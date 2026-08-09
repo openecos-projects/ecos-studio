@@ -3,11 +3,11 @@ import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime, isDesktopRuntime } from './useDesktopRuntime'
 import { convertRemoteToLocalPath } from './useHomeData'
 import { STEP_METADATA, getStepMetadata } from '@/api/type'
-import { readProjectTextFile, watchProjectFile } from '@/utils/projectFiles'
+import { readProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import {
+  getWorkspaceRuntimeSnapshotApi,
   readWorkspaceFlowResourceApi,
-  readWorkspaceHomeResourceApi,
 } from '@/api/workspaceResources'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
@@ -130,7 +130,8 @@ function flowDataHasStartedRun(flowData: FlowData): boolean {
  */
 export function useFlowStages() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, resourceVersions } = useWorkspace()
+  const { currentProject, resourceVersions, runtimeEvents, workspaceSession } =
+    useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
 
   // 动态加载的流程步骤
@@ -142,6 +143,52 @@ export function useFlowStages() {
   let unregisterHomeRunArtifactReset: (() => void) | null = null
   let pendingRerunFlowStartProjectPath = ''
   let watchSession = 0
+
+  function stageMatchesRuntimeStep(stage: FlowStage, stepName: string): boolean {
+    const key = stepName.trim().toLowerCase()
+    return (
+      stage.label.trim().toLowerCase() === key || stage.path.trim().toLowerCase() === key
+    )
+  }
+
+  function applyRuntimeStepState(
+    stepName: string,
+    tool: string,
+    state: string,
+    isStarted: boolean,
+  ): void {
+    const matchingIndex = dynamicFlowStages.value.findIndex((stage) =>
+      stageMatchesRuntimeStep(stage, stepName),
+    )
+    const metadata = getStepMetadata(stepName)
+    const runtimeStage: FlowStage =
+      matchingIndex >= 0
+        ? dynamicFlowStages.value[matchingIndex]!
+        : {
+            'peak memory (mb)': 0,
+            group: 'run',
+            icon: metadata?.icon ?? 'ri-checkbox-blank-circle-line',
+            label: metadata?.label ?? stepName,
+            path: metadata?.path ?? stepName,
+            runtime: '',
+            state,
+            tool,
+          }
+
+    dynamicFlowStages.value = dynamicFlowStages.value.map((stage, index) => {
+      if (index === matchingIndex) {
+        return { ...runtimeStage, state, tool: tool || runtimeStage.tool }
+      }
+      // A flow has one active step. Keep a stale delayed start event from
+      // rendering two Ongoing states at the same time.
+      return isStarted && stage.state === 'Ongoing'
+        ? { ...stage, state: 'Unstart' }
+        : stage
+    })
+    if (matchingIndex < 0) {
+      dynamicFlowStages.value = [...dynamicFlowStages.value, { ...runtimeStage, state }]
+    }
+  }
 
   // 合并后的完整流程步骤
   const flowStages = computed<FlowStage[]>(() => {
@@ -226,10 +273,23 @@ export function useFlowStages() {
     error.value = null
 
     try {
-      const flowData = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => readWorkspaceFlowResourceApi() as Promise<FlowData | null>,
-      )
+      const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
+      const flowData = await workspaceLifecycle.runForSession(sessionId, async () => {
+        if (!workspaceHandle) {
+          return (await readWorkspaceFlowResourceApi()) as FlowData | null
+        }
+        const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
+        return {
+          steps: snapshot.flow.steps.map((step) => ({
+            'peak memory (mb)': step.peakMemory,
+            info: {},
+            name: step.name,
+            runtime: step.runtime,
+            state: step.state,
+            tool: step.tool,
+          })),
+        } satisfies FlowData
+      })
       if (!isCurrent()) return
       if (!flowData) {
         console.warn('Failed to read flow data')
@@ -294,46 +354,8 @@ export function useFlowStages() {
 
   async function startFlowJsonWatchForCurrentProject(): Promise<void> {
     cleanupFlowJsonWatch()
-    const projectPath = currentProject.value?.path
-    if (!isDesktopRuntimeAvailable || !projectPath) return
-
-    const sid = ++watchSession
-    try {
-      const homeData = (await readWorkspaceHomeResourceApi()) as { flow?: string } | null
-      if (sid !== watchSession || currentProject.value?.path !== projectPath) return
-      const flowJsonPath = homeData?.flow
-      if (!flowJsonPath) return
-
-      const localFlowPath = convertRemoteToLocalPath(flowJsonPath, projectPath)
-      const resolvedFlowPath = await resolveProjectPathAccess(localFlowPath)
-      if (sid !== watchSession || currentProject.value?.path !== projectPath) return
-      if (!resolvedFlowPath) return
-
-      const unwatch = await watchProjectFile(resolvedFlowPath, () => {
-        if (sid !== watchSession || currentProject.value?.path !== projectPath) return
-        void loadFlowStagesFromPath(resolvedFlowPath)
-      })
-      if (sid !== watchSession || currentProject.value?.path !== projectPath) {
-        unwatch?.()
-        return
-      }
-      if (!unwatch) return
-      unwatchFlowJsonFile = unwatch
-      unregisterFlowJsonLifecycleCleanup = workspaceLifecycle.registerCleanup(
-        () => {
-          if (unwatchFlowJsonFile === unwatch) {
-            unwatchFlowJsonFile = null
-          }
-          unwatch()
-        },
-        {
-          sessionId: workspaceLifecycle.currentSessionId.value,
-          label: 'flow.json watcher',
-        },
-      )
-    } catch (err) {
-      console.warn('Failed to watch flow.json for stage updates:', err)
-    }
+    // Runtime event invalidation calls loadFlowStages(); no renderer watcher is
+    // allowed to poll or watch flow.json on a potentially slow NFS mount.
   }
 
   /**
@@ -398,10 +420,32 @@ export function useFlowStages() {
   )
 
   watch(
-    () => [resourceVersions.value.flow, resourceVersions.value.all],
+    () => resourceVersions.value.all,
     async () => {
       if (!currentProject.value?.path) return
       await refreshFlowStages()
+    },
+  )
+
+  watch(
+    () => runtimeEvents.value[runtimeEvents.value.length - 1],
+    (event) => {
+      const data = event?.data
+      const protocolType =
+        typeof data?.runtimeProtocolType === 'string' ? data.runtimeProtocolType : ''
+      if (!['step.started', 'step.completed'].includes(protocolType)) return
+      const stepName = typeof data?.step === 'string' ? data.step : ''
+      if (!stepName) return
+      applyRuntimeStepState(
+        stepName,
+        typeof data?.tool === 'string' ? data.tool : '',
+        typeof data?.state === 'string'
+          ? data.state
+          : protocolType === 'step.started'
+            ? 'Ongoing'
+            : 'Success',
+        protocolType === 'step.started',
+      )
     },
   )
 

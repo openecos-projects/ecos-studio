@@ -20,12 +20,17 @@ import {
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
-  runStep(request: {
+  startStepOperation(request: {
+    idempotencyKey: string
     rerun: boolean
     step: string
     workspaceHandle: string
-  }): Promise<unknown>
+  }): Promise<{ operationId: string }>
   syncConfig(request: { configPath: string; workspaceHandle: string }): Promise<unknown>
+  waitForOperation(request: {
+    operationId: string
+    workspaceHandle: string
+  }): Promise<{ error: { message: string } | null; state: string }>
 }
 
 const FLOW_STEP_SEQUENCE = [
@@ -210,7 +215,19 @@ export async function executeWorkspaceRerun(
   }
   if (writes.length > 0) await runtime.refreshConfig({ workspaceHandle })
   for (const step of workspaceRerunExecutionSteps(contract)) {
-    await runtime.runStep({ rerun: false, step, workspaceHandle })
+    const operation = await runtime.startStepOperation({
+      idempotencyKey: randomUUID(),
+      rerun: false,
+      step,
+      workspaceHandle,
+    })
+    const completed = await runtime.waitForOperation({
+      operationId: operation.operationId,
+      workspaceHandle,
+    })
+    if (completed.state !== 'succeeded') {
+      throw new Error(completed.error?.message || `Rerun step failed: ${step}`)
+    }
   }
 }
 

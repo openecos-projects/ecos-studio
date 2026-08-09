@@ -16,6 +16,12 @@ import type {
   EccRpcPingResult,
   EccRpcShutdownResult,
   EccRuntimeEvent,
+  EccRuntimeOperation,
+  EccRuntimeOperationRequest,
+  EccRuntimeProtocolPayload,
+  EccRuntimeStartFlowRequest,
+  EccRuntimeStartStepRequest,
+  EccRuntimeStepRenderedAckRequest,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
@@ -30,12 +36,14 @@ import type {
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
+  EccWorkspaceRuntimeSnapshot,
   EccWorkspaceSyncConfigRequest,
   EccWorkspaceSyncConfigResult,
 } from '@ecos-studio/shared'
 
 import { normalizeRuntimeError } from './errors'
 import { EccJsonRpcError } from './jsonRpcClient'
+import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
 
 export interface EccRpcRuntimeClient {
@@ -59,9 +67,16 @@ export interface EccWorkspaceRuntimeOptions {
    * control runtime (rpc.hello / rpc.ping only).
    */
   directory: string | null
-  createSidecar(onEvent: (event: EccRuntimeEvent) => void): EccRpcRuntimeSidecar
+  createSidecar(
+    onEvent: (event: EccRuntimeEvent) => void,
+    onNotification: (notification: JsonRpcNotificationPayload) => void,
+  ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
+  lazyWorkspaceOpen?: boolean
   sessions?: WorkspaceSessionRegistry
+  snapshotLoader?: (
+    directory: string,
+  ) => Promise<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>
 }
 
 interface EccWorkspaceSessionResult {
@@ -134,6 +149,17 @@ export class EccWorkspaceRuntime {
   private helloResult: EccRpcHelloResult | null = null
   private inFlightOperation: InFlightOperation | null = null
   private inFlightCount = 0
+  private finalSnapshotTask: Promise<void> | null = null
+  private latestSnapshot: Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'> | null = null
+  private readonly protocolOperationIds = new Set<string>()
+  private readonly terminalOperations = new Map<string, EccRuntimeOperation>()
+  private readonly operationWaiters = new Map<
+    string,
+    Array<{
+      reject: (reason: unknown) => void
+      resolve: (operation: EccRuntimeOperation) => void
+    }>
+  >()
   private queue = Promise.resolve()
   private ready = false
   private boundDirectory: string | null
@@ -141,7 +167,10 @@ export class EccWorkspaceRuntime {
   constructor(private readonly options: EccWorkspaceRuntimeOptions) {
     this.boundDirectory = options.directory
     this.sessions = options.sessions ?? new WorkspaceSessionRegistry()
-    this.sidecar = options.createSidecar((event) => this.handleSidecarEvent(event))
+    this.sidecar = options.createSidecar(
+      (event) => this.handleSidecarEvent(event),
+      (notification) => this.handleNotification(notification),
+    )
   }
 
   get directory(): string | null {
@@ -161,7 +190,39 @@ export class EccWorkspaceRuntime {
   }
 
   isActive(): boolean {
-    return this.inFlightCount > 0
+    return this.inFlightCount > 0 || this.protocolOperationIds.size > 0
+  }
+
+  hasPendingRuntimeWork(): boolean {
+    return this.isActive() || this.finalSnapshotTask !== null
+  }
+
+  shutdownBarrier():
+    | {
+        cancelRequested: boolean
+        interruptibility: 'deferred'
+        operationId: string
+        safeToStop: boolean
+        state: string
+        step: string
+        workspaceId: string
+      }
+    | null {
+    const operationId = this.inFlightOperation?.operationId ?? this.protocolOperationIds.values().next().value
+    if (!operationId && !this.finalSnapshotTask) return null
+    return {
+      cancelRequested: false,
+      interruptibility: 'deferred',
+      operationId: operationId ?? 'final-snapshot',
+      safeToStop: false,
+      state: operationId
+        ? this.inFlightOperation
+          ? 'request_in_flight'
+          : 'running'
+        : 'finalizing',
+      step: '',
+      workspaceId: this.boundDirectory ?? '',
+    }
   }
 
   onEvent(listener: (event: EccRuntimeEvent) => void): () => void {
@@ -231,6 +292,14 @@ export class EccWorkspaceRuntime {
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     return this.enqueue('workspace.open', undefined, async () => {
+      if (this.options.lazyWorkspaceOpen) {
+        const existing = this.sessions.findByDirectory(request.directory)
+        const session = existing ?? this.sessions.activate(request.directory, null)
+        return {
+          directory: session.directory,
+          workspaceHandle: session.workspaceHandle,
+        }
+      }
       const client = await this.ensureStarted()
       const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {
         directory: request.directory,
@@ -472,6 +541,99 @@ export class EccWorkspaceRuntime {
     )
   }
 
+  async startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation> {
+    const client = await this.ensureStarted()
+    if (request.rerun) {
+      this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+    }
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call<EccRuntimeOperation>('operation.start_flow', {
+      idempotencyKey: request.idempotencyKey,
+      origin: 'gui',
+      rerun: Boolean(request.rerun),
+      workspaceId,
+    })
+  }
+
+  async startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation> {
+    const client = await this.ensureStarted()
+    if (request.rerun) {
+      this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+    }
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call<EccRuntimeOperation>('operation.start_step', {
+      idempotencyKey: request.idempotencyKey,
+      origin: 'gui',
+      rerun: Boolean(request.rerun),
+      step: request.step,
+      workspaceId,
+    })
+  }
+
+  async operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
+    const client = await this.ensureStarted()
+    await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call<EccRuntimeOperation>('operation.status', {
+      operationId: request.operationId,
+    })
+  }
+
+  waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
+    const completed = this.terminalOperations.get(request.operationId)
+    if (completed) return Promise.resolve(completed)
+
+    return new Promise<EccRuntimeOperation>((resolve, reject) => {
+      const waiters = this.operationWaiters.get(request.operationId) ?? []
+      waiters.push({ reject, resolve })
+      this.operationWaiters.set(request.operationId, waiters)
+
+      // A notification can arrive between the cache lookup and waiter registration.
+      const terminal = this.terminalOperations.get(request.operationId)
+      if (terminal) this.resolveOperationWaiters(request.operationId, terminal)
+    })
+  }
+
+  async cancelOperation(
+    request: EccRuntimeOperationRequest,
+  ): Promise<{ accepted: boolean; operationId: string; state: string }> {
+    const client = await this.ensureStarted()
+    await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call('operation.cancel', { operationId: request.operationId })
+  }
+
+  async acknowledgeStepRendered(
+    request: EccRuntimeStepRenderedAckRequest,
+  ): Promise<{ accepted: boolean; duplicate: boolean; eventId: string; operationId: string }> {
+    const client = await this.ensureStarted()
+    await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call('operation.ack_step_rendered', {
+      eventId: request.eventId,
+      operationId: request.operationId,
+    })
+  }
+
+  async workspaceSnapshot(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceRuntimeSnapshot> {
+    if (!this.isActive() && this.latestSnapshot) {
+      return { ...this.latestSnapshot, workspaceHandle: request.workspaceHandle }
+    }
+    const session = this.sessions.require(request.workspaceHandle)
+    if (!this.isActive() && this.options.snapshotLoader) {
+      const snapshot = await this.options.snapshotLoader(session.directory)
+      this.latestSnapshot = snapshot
+      return { ...snapshot, workspaceHandle: request.workspaceHandle }
+    }
+    const client = await this.ensureStarted()
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    const snapshot = await client.call<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>(
+      'workspace.snapshot',
+      { workspaceId },
+    )
+    this.latestSnapshot = snapshot
+    return { ...snapshot, workspaceHandle: request.workspaceHandle }
+  }
+
   async shutdown(): Promise<EccRpcShutdownResult> {
     await this.sidecar.shutdown()
     this.client = null
@@ -479,6 +641,11 @@ export class EccWorkspaceRuntime {
     this.helloResult = null
     this.sessions.clearEccWorkspaceIds()
     return { ok: true }
+  }
+
+  async releaseIdleSidecar(): Promise<void> {
+    if (this.hasPendingRuntimeWork()) return
+    await this.shutdown()
   }
 
   private async ensureStarted(): Promise<EccRpcRuntimeClient> {
@@ -594,6 +761,9 @@ export class EccWorkspaceRuntime {
       this.ready = false
       this.helloResult = null
       this.sessions.clearEccWorkspaceIds()
+      this.rejectAllOperationWaiters(
+        new Error('ECC sidecar exited before the operation completed.'),
+      )
       const inFlight = this.inFlightOperation
       this.emit(
         inFlight
@@ -623,6 +793,120 @@ export class EccWorkspaceRuntime {
     this.emit(event)
   }
 
+  private handleNotification(notification: JsonRpcNotificationPayload): void {
+    if (notification.method !== 'runtime.event' || !isRuntimeProtocolPayload(notification.params)) {
+      return
+    }
+    const protocolEvent = notification.params
+    const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
+    const isTerminal = [
+      'operation.completed',
+      'operation.failed',
+      'operation.cancelled',
+    ].includes(protocolEvent.type)
+    if (isTerminal) {
+      this.protocolOperationIds.delete(protocolEvent.operationId)
+      this.recordTerminalOperation(protocolEvent)
+    } else {
+      this.protocolOperationIds.add(protocolEvent.operationId)
+    }
+    if (protocolEvent.type === 'operation.completed') {
+      this.captureFinalSnapshotAndRelease(protocolEvent.workspaceId)
+    }
+    this.emit({
+      event: protocolEvent,
+      type: 'runtime.protocol',
+      ...(session ? { workspaceDirectory: session.directory, workspaceHandle: session.workspaceHandle } : {}),
+      ...(this.boundDirectory && !session ? { workspaceDirectory: this.boundDirectory } : {}),
+    })
+  }
+
+  private captureFinalSnapshotAndRelease(workspaceId: string): void {
+    if (this.finalSnapshotTask || this.protocolOperationIds.size > 0) return
+    this.finalSnapshotTask = (async () => {
+      const client = this.client
+      if (!client) return
+      try {
+        const snapshot = await client.call<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>(
+          'workspace.snapshot',
+          { workspaceId },
+        )
+        this.latestSnapshot = snapshot
+        await this.sidecar.shutdown()
+      } catch (error) {
+        this.emit({
+          text:
+            error instanceof Error
+              ? `Failed to persist final ECC snapshot: ${error.message}`
+              : 'Failed to persist final ECC snapshot.',
+          type: 'runtime.stderr',
+          ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
+        })
+      } finally {
+        this.finalSnapshotTask = null
+      }
+    })()
+    void this.finalSnapshotTask.finally(() => {
+      this.emit({
+        type: 'runtime.idle',
+        ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
+      })
+    })
+  }
+
+  private recordTerminalOperation(protocolEvent: EccRuntimeProtocolPayload): void {
+    const payload = protocolEvent.payload
+    const error = isRuntimeErrorPayload(payload.error)
+      ? payload.error
+      : protocolEvent.type === 'operation.cancelled'
+        ? { code: 'cancelled', message: 'ECC operation cancelled.' }
+        : null
+    const operation: EccRuntimeOperation = {
+      awaitingEventId: null,
+      cancelRequested: protocolEvent.type === 'operation.cancelled',
+      createdAt: protocolEvent.timestamp,
+      currentStep: stringPayloadValue(payload, 'step'),
+      currentTool: stringPayloadValue(payload, 'tool'),
+      error,
+      kind: protocolEvent.kind ?? 'step',
+      operationId: protocolEvent.operationId,
+      origin: protocolEvent.origin,
+      rerun: Boolean(protocolEvent.rerun),
+      result: recordPayloadValue(payload, 'result'),
+      state:
+        protocolEvent.type === 'operation.completed'
+          ? 'succeeded'
+          : protocolEvent.type === 'operation.cancelled'
+            ? 'cancelled'
+            : 'failed',
+      step: stringPayloadValue(payload, 'step'),
+      updatedAt: protocolEvent.timestamp,
+      workspaceId: protocolEvent.workspaceId,
+    }
+    this.terminalOperations.set(operation.operationId, operation)
+    if (this.terminalOperations.size > 512) {
+      this.terminalOperations.delete(this.terminalOperations.keys().next().value!)
+    }
+    this.resolveOperationWaiters(operation.operationId, operation)
+  }
+
+  private resolveOperationWaiters(
+    operationId: string,
+    operation: EccRuntimeOperation,
+  ): void {
+    const waiters = this.operationWaiters.get(operationId)
+    if (!waiters) return
+    this.operationWaiters.delete(operationId)
+    for (const waiter of waiters) waiter.resolve(operation)
+  }
+
+  private rejectAllOperationWaiters(reason: Error): void {
+    for (const waiters of this.operationWaiters.values()) {
+      for (const waiter of waiters) waiter.reject(reason)
+    }
+    this.operationWaiters.clear()
+  }
+
   private runtimeDirectoryForHandle(workspaceHandle: string | undefined): string | null {
     if (!workspaceHandle) {
       return this.boundDirectory
@@ -640,4 +924,45 @@ export class EccWorkspaceRuntime {
       listener(event)
     }
   }
+}
+
+function stringPayloadValue(payload: Record<string, unknown>, key: string): string {
+  return typeof payload[key] === 'string' ? payload[key] : ''
+}
+
+function recordPayloadValue(
+  payload: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const value = payload[key]
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function isRuntimeErrorPayload(
+  value: unknown,
+): value is { code: string; message: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).code === 'string' &&
+    typeof (value as Record<string, unknown>).message === 'string'
+  )
+}
+
+function isRuntimeProtocolPayload(value: unknown): value is EccRuntimeProtocolPayload {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const event = value as Record<string, unknown>
+  return (
+    typeof event.eventId === 'string' &&
+    typeof event.operationId === 'string' &&
+    typeof event.workspaceId === 'string' &&
+    typeof event.sequence === 'number' &&
+    typeof event.type === 'string' &&
+    typeof event.payload === 'object' &&
+    event.payload !== null &&
+    !Array.isArray(event.payload)
+  )
 }

@@ -89,12 +89,37 @@ const WORKSPACE_STEP_ANALYSIS_SPECS: Array<{
 ]
 
 const STA_TIMING_ISSUES_PATH = 'sta_ecc/analysis/sta_timing_issues.json'
+const PROJECT_READ_CONCURRENCY = 2
+const WORKSPACE_ANALYSIS_READ_CONCURRENCY = 4
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length)
+  let nextIndex = 0
+  const workers = Array.from(
+    { length: Math.min(Math.max(concurrency, 1), values.length) },
+    async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex
+        nextIndex += 1
+        results[index] = await mapper(values[index]!)
+      }
+    },
+  )
+  await Promise.all(workers)
+  return results
+}
 
 export async function readProjectWorkspaceFlowStates(
   manifest: ProjectManifest,
 ): Promise<ProjectWorkspaceFlowStatesById> {
-  const entries = await Promise.all(
-    manifest.workspaces.map(async (workspace) => {
+  const entries = await mapWithConcurrency(
+    manifest.workspaces,
+    PROJECT_READ_CONCURRENCY,
+    async (workspace) => {
       try {
         const flowText = await readOptionalProjectTextFile('home/flow.json', {
           projectPath: workspace.workspace_path,
@@ -110,7 +135,7 @@ export async function readProjectWorkspaceFlowStates(
         )
         return [workspace.workspace_id, {}] as const
       }
-    }),
+    },
   )
 
   return Object.fromEntries(entries)
@@ -119,8 +144,10 @@ export async function readProjectWorkspaceFlowStates(
 export async function readProjectWorkspaceAnalysisInputs(
   manifest: ProjectManifest,
 ): Promise<ProjectWorkspaceAnalysisInputsById> {
-  const entries = await Promise.all(
-    manifest.workspaces.map(async (workspace) => {
+  const entries = await mapWithConcurrency(
+    manifest.workspaces,
+    PROJECT_READ_CONCURRENCY,
+    async (workspace) => {
       try {
         return [
           workspace.workspace_id,
@@ -133,7 +160,7 @@ export async function readProjectWorkspaceAnalysisInputs(
         )
         return [workspace.workspace_id, {}] as const
       }
-    }),
+    },
   )
 
   return Object.fromEntries(entries)
@@ -142,46 +169,47 @@ export async function readProjectWorkspaceAnalysisInputs(
 async function readWorkspaceAnalysisInput(
   workspacePath: string,
 ): Promise<ProjectWorkspaceAnalysisInput> {
-  const [
-    stepMetricEntries,
-    stepSummaryEntries,
-    stepHotspotEntries,
-    staTimingIssuesText,
-    flowText,
-  ] = await Promise.all([
-    Promise.all(
-      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
-        const content = await readOptionalProjectTextFile(spec.metricsPath, {
-          projectPath: workspacePath,
-        })
-        return [spec.step, content] as const
-      }),
-    ),
-    Promise.all(
-      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
-        const content = await readOptionalProjectTextFile(spec.summaryPath, {
-          projectPath: workspacePath,
-        })
-        return [spec.step, content] as const
-      }),
-    ),
-    Promise.all(
-      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
-        const content = await readOptionalProjectTextFile(spec.hotspotsPath, {
-          projectPath: workspacePath,
-        })
-        return [spec.step, content] as const
-      }),
-    ),
-    readOptionalProjectTextFile(STA_TIMING_ISSUES_PATH, { projectPath: workspacePath }),
-    readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
-  ])
+  const requests = [
+    ...WORKSPACE_STEP_ANALYSIS_SPECS.map((spec) => ({
+      key: `metrics:${spec.step}`,
+      path: spec.metricsPath,
+    })),
+    ...WORKSPACE_STEP_ANALYSIS_SPECS.map((spec) => ({
+      key: `summary:${spec.step}`,
+      path: spec.summaryPath,
+    })),
+    ...WORKSPACE_STEP_ANALYSIS_SPECS.map((spec) => ({
+      key: `hotspots:${spec.step}`,
+      path: spec.hotspotsPath,
+    })),
+    { key: 'staTimingIssues', path: STA_TIMING_ISSUES_PATH },
+    { key: 'flow', path: 'home/flow.json' },
+  ] as const
+  const loaded = await mapWithConcurrency(
+    requests,
+    WORKSPACE_ANALYSIS_READ_CONCURRENCY,
+    async (request) =>
+      [
+        request.key,
+        await readOptionalProjectTextFile(request.path, { projectPath: workspacePath }),
+      ] as const,
+  )
+  const values = Object.fromEntries(loaded)
+  const stepMetricEntries = WORKSPACE_STEP_ANALYSIS_SPECS.map(
+    (spec) => [spec.step, values[`metrics:${spec.step}`] ?? null] as const,
+  )
+  const stepSummaryEntries = WORKSPACE_STEP_ANALYSIS_SPECS.map(
+    (spec) => [spec.step, values[`summary:${spec.step}`] ?? null] as const,
+  )
+  const stepHotspotEntries = WORKSPACE_STEP_ANALYSIS_SPECS.map(
+    (spec) => [spec.step, values[`hotspots:${spec.step}`] ?? null] as const,
+  )
 
   return {
     stepMetricTexts: Object.fromEntries(stepMetricEntries),
     stepSummaryTexts: Object.fromEntries(stepSummaryEntries),
     stepHotspotTexts: Object.fromEntries(stepHotspotEntries),
-    staTimingIssuesText,
-    flowText,
+    staTimingIssuesText: values.staTimingIssues ?? null,
+    flowText: values.flow ?? null,
   }
 }

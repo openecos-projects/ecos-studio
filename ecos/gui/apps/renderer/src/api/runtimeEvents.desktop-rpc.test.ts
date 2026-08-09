@@ -82,6 +82,62 @@ describe('createRuntimeEventClient desktop ECC events', () => {
     expect(client.getState()).toBe('disconnected')
   })
 
+  it('maps bounded step log chunks from the runtime protocol', async () => {
+    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    setWindow({
+      ecosDesktop: {
+        ecc: {
+          events: {
+            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+              listeners.push(listener)
+              return () => undefined
+            },
+          },
+        },
+      },
+    })
+
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const logHandler = vi.fn()
+    client.on('log', logHandler)
+    client.connect()
+
+    listeners[0]({
+      event: {
+        eventId: 'workspace-1:4',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: {
+          chunk: 'live synthesis log\\n',
+          cursor: 19,
+          step: 'Synthesis',
+          tool: 'yosys',
+        },
+        sequence: 4,
+        timestamp: 1,
+        type: 'step.log',
+        workspaceId: 'workspace-1',
+      },
+      type: 'runtime.protocol',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(logHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          logChunk: 'live synthesis log\\n',
+          logCursor: 19,
+          runtimeEventId: 'workspace-1:4',
+          runtimeProtocolType: 'step.log',
+          step: 'Synthesis',
+          type: 'log',
+        }),
+      }),
+    )
+  })
+
   it('maps single-step candidate.rerun completion onto run_step step_complete', async () => {
     const listeners: Array<(event: EccRuntimeEvent) => void> = []
     setWindow({

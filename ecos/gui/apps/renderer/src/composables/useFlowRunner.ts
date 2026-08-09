@@ -1,57 +1,35 @@
-import { computed, ref, shallowReactive } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
-import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
-import { runStepApi, rtl2gdsApi, type RunStepResponse } from '@/api/flow'
-import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
+import { StateEnum, StepEnum } from '@/api/type'
 import {
-  clearHomeRunArtifactResetAwaitingBackendStart,
-  markHomeRunArtifactResetAwaitingBackendStart,
-} from './homeRunArtifacts'
+  startFlowOperationApi,
+  startStepOperationApi,
+  type RunStepResponse,
+} from '@/api/flow'
+import { markHomeRunArtifactResetAwaitingBackendStart } from './homeRunArtifacts'
+import {
+  clearFlowExecutionActiveForWorkspace,
+  flowExecutionActive,
+  isFlowExecutionActiveForWorkspace,
+  markFlowExecutionActiveForWorkspace,
+  resetFlowExecutionState,
+} from './flowExecutionState'
 
 // ============ 模块级运行标志（run_step / rtl2gds 共用）============
 
 /** 任意流程命令执行中为 true，供 Home flow log 等订阅，避免多实例 composable 状态不一致 */
-export const flowExecutionActive = ref(false)
-const activeFlowWorkspaces = shallowReactive(new Set<string>())
-// A completed step can change every data source rendered on the Home left panel:
-// flow state, QoR/checklist assets, configuration-derived values, and step metrics.
-const FLOW_COMPLETION_FALLBACK_SCOPES: WorkspaceInvalidationScope[] = ['all']
-
 export interface FlowRunOptions {
   rerun?: boolean
 }
 
-function normalizeWorkspacePath(path: string): string {
-  const normalized = path.trim().replace(/\\/g, '/')
-  return normalized.length > 1 && normalized.endsWith('/')
-    ? normalized.slice(0, -1)
-    : normalized
-}
-
-function refreshGlobalFlowExecutionActive() {
-  flowExecutionActive.value = activeFlowWorkspaces.size > 0
-}
-
-export function markFlowExecutionActiveForWorkspace(path: string): void {
-  const workspacePath = normalizeWorkspacePath(path)
-  if (!workspacePath) return
-  activeFlowWorkspaces.add(workspacePath)
-  refreshGlobalFlowExecutionActive()
-}
-
-export function clearFlowExecutionActiveForWorkspace(path: string): void {
-  const workspacePath = normalizeWorkspacePath(path)
-  if (!workspacePath) return
-  activeFlowWorkspaces.delete(workspacePath)
-  refreshGlobalFlowExecutionActive()
-}
-
-export function isFlowExecutionActiveForWorkspace(
-  path: string | undefined | null,
-): boolean {
-  return Boolean(path && activeFlowWorkspaces.has(normalizeWorkspacePath(path)))
+export {
+  clearFlowExecutionActiveForWorkspace,
+  flowExecutionActive,
+  markFlowExecutionActiveForWorkspace,
+  isFlowExecutionActiveForWorkspace,
+  resetFlowExecutionState,
 }
 
 /**
@@ -83,8 +61,6 @@ export function useFlowRunner() {
     currentProject,
     ensureApiReady,
     showToast,
-    invalidateWorkspaceResources,
-    resourceVersions,
     workspaceSession,
   } = useWorkspace()
   const route = useRoute()
@@ -119,7 +95,11 @@ export function useFlowRunner() {
 
   function getCurrentWorkspacePath(): string | null {
     const path = currentProject.value?.path
-    return path ? normalizeWorkspacePath(path) : null
+    if (!path) return null
+    const normalized = path.trim().replace(/\\/g, '/')
+    return normalized.length > 1 && normalized.endsWith('/')
+      ? normalized.slice(0, -1)
+      : normalized
   }
 
   function getCurrentWorkspaceHandle(): string | null {
@@ -173,48 +153,24 @@ export function useFlowRunner() {
     error.value = null
     try {
       console.log('handleRunFlow', step)
-      const versionsBeforeRunStep = { ...resourceVersions.value }
-      const runSessionId = workspaceSession.value.sessionId
-
-      const result = await runStepApi({
-        cmd: CMDEnum.run_step,
-        data: {
-          directory,
-          step: step as StepEnum,
-          rerun: Boolean(options.rerun),
-          workspaceHandle,
-        },
+      const operation = await startStepOperationApi({
+        idempotencyKey: crypto.randomUUID(),
+        rerun: Boolean(options.rerun),
+        step,
+        workspaceHandle,
       })
-      console.log('run step result', result)
-
-      const allResourcesAlreadyInvalidated = FLOW_COMPLETION_FALLBACK_SCOPES.every(
-        (key) => resourceVersions.value[key] !== versionsBeforeRunStep[key],
-      )
-      if (!allResourcesAlreadyInvalidated) {
-        invalidateWorkspaceResources(FLOW_COMPLETION_FALLBACK_SCOPES, {
-          sessionId: runSessionId,
-        })
-      }
-
-      if (result.data?.state === StateEnum.Success) {
-        showToast({
-          severity: 'success',
-          summary: 'Step Completed',
-          detail: `${step} finished successfully`,
-          life: 4000,
-        })
-      } else {
-        showToast({
-          severity: 'error',
-          summary: 'Step Failed',
-          detail: `${step} did not complete successfully`,
-          life: 6000,
-        })
-      }
-
-      return result.data
+      lastRunResult.value = { step: step as StepEnum, state: StateEnum.Ongoing }
+      showToast({
+        severity: 'info',
+        summary: 'Step Started',
+        detail: `${step} is running`,
+        life: 3000,
+      })
+      void operation
+      return lastRunResult.value
     } catch (err) {
       console.error('Single-step run failed:', err)
+      clearFlowExecutionActiveForWorkspace(directory)
       showToast({
         severity: 'error',
         summary: 'Step Error',
@@ -223,7 +179,6 @@ export function useFlowRunner() {
       })
     } finally {
       clearTransientInteractionLocks()
-      clearFlowExecutionActiveForWorkspace(directory)
     }
     return null
   }
@@ -275,47 +230,21 @@ export function useFlowRunner() {
 
     try {
       console.log('Starting rtl2gds flow...')
-      const runSessionId = workspaceSession.value.sessionId
-
-      const result = await rtl2gdsApi({
-        cmd: CMDEnum.rtl2gds,
-        data: {
-          directory,
-          rerun: Boolean(options.rerun),
-          workspaceHandle,
-        },
+      const operation = await startFlowOperationApi({
+        idempotencyKey: crypto.randomUUID(),
+        rerun: Boolean(options.rerun),
+        workspaceHandle,
       })
-      console.log('rtl2gds result:', result)
-
-      // The runtime emits a final lifecycle event in normal desktop operation.
-      // Keep an RPC-return fallback so Home is still refreshed when that event is
-      // delayed or unavailable.
-      invalidateWorkspaceResources(FLOW_COMPLETION_FALLBACK_SCOPES, {
-        sessionId: runSessionId,
+      showToast({
+        severity: 'info',
+        summary: 'RTL2GDS Started',
+        detail: 'Flow is running in ECC.',
+        life: 3000,
       })
-
-      if (result.response === 'success') {
-        state.value = StateEnum.Success
-        showToast({
-          severity: 'success',
-          summary: 'RTL2GDS Completed',
-          detail: 'All flow steps finished successfully',
-          life: 5000,
-        })
-      } else {
-        state.value = StateEnum.Imcomplete
-        error.value = result.message?.[0] || 'rtl2gds failed'
-        showToast({
-          severity: 'error',
-          summary: 'RTL2GDS Failed',
-          detail: error.value ?? 'Unknown error',
-          life: 8000,
-        })
-      }
-
-      return result.data
+      return operation
     } catch (err) {
       console.error('Run-all flow failed:', err)
+      clearFlowExecutionActiveForWorkspace(directory)
       error.value = err instanceof Error ? err.message : String(err)
       state.value = StateEnum.Imcomplete
       showToast({
@@ -326,8 +255,6 @@ export function useFlowRunner() {
       })
     } finally {
       clearTransientInteractionLocks()
-      clearHomeRunArtifactResetAwaitingBackendStart(directory)
-      clearFlowExecutionActiveForWorkspace(directory)
     }
     return null
   }

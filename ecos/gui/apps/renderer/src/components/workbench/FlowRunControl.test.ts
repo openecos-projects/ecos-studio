@@ -17,10 +17,10 @@ describe('FlowRunControl', () => {
     expect(source).toContain('prepareFlowLogSegmentForRerun(currentStage.value)')
   })
 
-  it('captures each successful run step output for the information panel', () => {
+  it('starts event-driven artifact capture without polling or blocking the operation start', () => {
     expect(source).toContain('useFlowRunArtifacts')
     expect(source).toContain('startFlowRunArtifactCapture')
-    expect(source).toContain('capture.settle')
+    expect(source).not.toContain('capture.settle')
   })
 
   it('asks before rerunning a completed flow or step instead of showing a run-mode menu', () => {

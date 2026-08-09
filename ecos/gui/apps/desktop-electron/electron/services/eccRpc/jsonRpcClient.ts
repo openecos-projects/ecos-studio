@@ -28,6 +28,7 @@ export class EccJsonRpcProtocolError extends Error {
 
 interface EccJsonRpcClientOptions {
   defaultTimeoutMs?: number
+  onNotification?: (notification: JsonRpcNotificationPayload) => void
   writeFrame(frame: Buffer): void
 }
 
@@ -42,6 +43,12 @@ interface JsonRpcResponsePayload {
   id?: unknown
   jsonrpc?: unknown
   result?: unknown
+}
+
+export interface JsonRpcNotificationPayload {
+  jsonrpc: '2.0'
+  method: string
+  params?: unknown
 }
 
 interface PendingRequest {
@@ -105,7 +112,7 @@ export class EccJsonRpcClient {
 
   feedStdout(chunk: Buffer | Uint8Array | string): void {
     for (const message of this.decoder.feed(chunk)) {
-      this.handleResponse(message)
+      this.handleMessage(message)
     }
   }
 
@@ -117,8 +124,16 @@ export class EccJsonRpcClient {
     }
   }
 
-  private handleResponse(message: string): void {
-    const payload = this.parseResponse(message)
+  private handleMessage(message: string): void {
+    const payload = this.parsePayload(message)
+    if (this.isNotification(payload)) {
+      this.options.onNotification?.(payload)
+      return
+    }
+    this.handleResponse(payload)
+  }
+
+  private handleResponse(payload: JsonRpcResponsePayload): void {
     if (payload.id === undefined || payload.id === null) {
       return
     }
@@ -164,7 +179,15 @@ export class EccJsonRpcClient {
     }
   }
 
-  private parseResponse(message: string): JsonRpcResponsePayload {
+  private isNotification(payload: JsonRpcResponsePayload): payload is JsonRpcNotificationPayload {
+    return (
+      payload.jsonrpc === '2.0' &&
+      typeof (payload as { method?: unknown }).method === 'string' &&
+      !Object.prototype.hasOwnProperty.call(payload, 'id')
+    )
+  }
+
+  private parsePayload(message: string): JsonRpcResponsePayload {
     try {
       const parsed = JSON.parse(message)
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

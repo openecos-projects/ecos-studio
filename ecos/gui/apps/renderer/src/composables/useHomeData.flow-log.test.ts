@@ -9,10 +9,10 @@ describe('useHomeData flow log loading strategy', () => {
     )
   })
 
-  it('subscribes to project file changes while keeping interval polling as a fallback', () => {
-    expect(useHomeDataSource).toContain('watchProjectFile')
-    expect(useHomeDataSource).toContain('startProjectFileWatcher')
-    expect(useHomeDataSource).toContain('setInterval')
+  it('does not attach filesystem watchers or polling to live GUI flow logs', () => {
+    expect(useHomeDataSource).not.toContain('watchProjectFile')
+    expect(useHomeDataSource).not.toContain('subscribeProjectLogTail')
+    expect(useHomeDataSource).not.toContain('setInterval')
   })
 
   it('uses workspace resource metadata for step log paths instead of rebuilding them locally', () => {

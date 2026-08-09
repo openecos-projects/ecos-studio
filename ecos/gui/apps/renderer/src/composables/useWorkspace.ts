@@ -1,4 +1,4 @@
-import { ref, getCurrentInstance } from 'vue'
+import { ref, getCurrentInstance, nextTick } from 'vue'
 import type {
   DesktopSettingsValue,
   WorkspaceDirectoryReplacement,
@@ -6,7 +6,7 @@ import type {
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
   closeWorkspaceApi,
   loadWorkspaceApi,
@@ -15,6 +15,7 @@ import {
 } from '../api'
 import * as runtimeEventApi from '../api/runtimeEvents'
 import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
+import { clearFlowExecutionActiveForWorkspace } from './flowExecutionState'
 import { setDesktopWindowTitle } from './windowTitle'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import {
@@ -101,10 +102,46 @@ function workspaceHandleFromResponseData(
   return data.workspaceHandle || data.workspace_handle || data.directory || fallback || ''
 }
 
+function scheduleStepRenderedAck(options: {
+  eventId: string
+  operationId: string
+  workspaceHandle: string
+}): void {
+  const ackKey = `${options.workspaceHandle}\u001f${options.operationId}\u001f${options.eventId}`
+  if (pendingStepRenderedAcks.has(ackKey)) return
+  const nextFrame = () =>
+    new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => resolve())
+        return
+      }
+      setTimeout(resolve, 0)
+    })
+
+  const acknowledgement = nextTick()
+    .then(nextFrame)
+    .then(async () => {
+      await getOptionalDesktopApi()?.ecc.runtime?.acknowledgeStepRendered({
+        eventId: options.eventId,
+        operationId: options.operationId,
+        workspaceHandle: options.workspaceHandle,
+      })
+    })
+    .catch((error) => {
+      console.warn('Failed to acknowledge rendered ECC step:', error)
+    })
+    .finally(() => {
+      pendingStepRenderedAcks.delete(ackKey)
+    })
+  pendingStepRenderedAcks.set(ackKey, acknowledgement)
+}
+
 // Runtime event connection（workspace 级别，跟随 workspace 生命周期）
 const runtimeEventClient = ref<RuntimeEventClient | null>(null)
 const runtimeEvents = ref<RuntimeEventResponse[]>([])
 const handledRefreshRuntimeEvents = new Set<string>()
+const handledRuntimeProtocolEvents = new Set<string>()
+const pendingStepRenderedAcks = new Map<string, Promise<void>>()
 let unregisterRuntimeEventCleanup: (() => void) | null = null
 
 const workspaceLifecycle = useWorkspaceLifecycle()
@@ -1368,6 +1405,7 @@ export function useWorkspace() {
   ) {
     // 如果已有连接，先关闭
     disconnectRuntimeEvents()
+    handledRuntimeProtocolEvents.clear()
 
     const client = runtimeEventApi.createRuntimeEventClient(workspaceId)
 
@@ -1376,7 +1414,40 @@ export function useWorkspace() {
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return
       // 过滤心跳消息，不记录到 messages
       if (response.data?.type !== 'heartbeat') {
+        const runtimeEventId = asString(response.data?.runtimeEventId)
+        const operationId = asString(response.data?.jobId)
+        const eventType = asString(response.data?.runtimeProtocolType)
+        const workspaceHandle = asString(response.data?.workspaceId)
+        const duplicate = Boolean(
+          runtimeEventId && handledRuntimeProtocolEvents.has(runtimeEventId),
+        )
+        if (runtimeEventId && !duplicate) {
+          handledRuntimeProtocolEvents.add(runtimeEventId)
+          if (handledRuntimeProtocolEvents.size > 512) {
+            handledRuntimeProtocolEvents.delete(
+              handledRuntimeProtocolEvents.values().next().value!,
+            )
+          }
+        }
+        if (duplicate) {
+          if (
+            eventType === 'step.completed' &&
+            runtimeEventId &&
+            operationId &&
+            workspaceHandle
+          ) {
+            scheduleStepRenderedAck({
+              eventId: runtimeEventId,
+              operationId,
+              workspaceHandle,
+            })
+          }
+          return
+        }
         runtimeEvents.value.push(response)
+        if (runtimeEvents.value.length > 200) {
+          runtimeEvents.value.splice(0, runtimeEvents.value.length - 200)
+        }
         if (isRtl2gdsRerunStartEvent(response)) {
           const resetProjectPath =
             asString(response.data.directory) ??
@@ -1388,6 +1459,25 @@ export function useWorkspace() {
           }
         }
         invalidateResourcesForRuntimeEvent(response, sessionId)
+        if (
+          eventType === 'step.completed' &&
+          runtimeEventId &&
+          operationId &&
+          workspaceHandle
+        ) {
+          scheduleStepRenderedAck({
+            eventId: runtimeEventId,
+            operationId,
+            workspaceHandle,
+          })
+        }
+        if (
+          ['task_complete', 'error', 'cancelled'].includes(String(response.data?.type))
+        ) {
+          const directory =
+            asString(response.data?.directory) ?? currentProject.value?.path
+          if (directory) clearFlowExecutionActiveForWorkspace(directory)
+        }
       }
     })
 
@@ -1420,6 +1510,7 @@ export function useWorkspace() {
     }
     runtimeEvents.value = []
     handledRefreshRuntimeEvents.clear()
+    handledRuntimeProtocolEvents.clear()
   }
 
   function runtimeEventInvalidationScopes(
@@ -1427,6 +1518,12 @@ export function useWorkspace() {
   ): WorkspaceInvalidationScope[] | null {
     const event = response.data
     const eventType = event?.type as string | undefined
+    const protocolType = asString(event?.runtimeProtocolType)
+    // GUI flow steps already update their visible state and log from the runtime
+    // event. Reading Home, snapshots, reports, and maps here would start several
+    // independent NFS scans before the renderer can acknowledge the step.
+    if (protocolType === 'step.started' || protocolType === 'step.log') return null
+    if (protocolType === 'step.completed') return null
     if (
       !eventType ||
       !['step_complete', 'task_complete', 'error', 'cancelled'].includes(eventType)
@@ -1513,6 +1610,67 @@ export function useWorkspace() {
     })
   }
 
+  function waitForRuntimeOperation(operationId: string): Promise<void> {
+    const isTerminalEvent = (response: RuntimeEventResponse): boolean => {
+      if (asString(response.data?.jobId) !== operationId) return false
+      return ['operation.completed', 'operation.failed', 'operation.cancelled'].includes(
+        asString(response.data?.runtimeProtocolType) ?? '',
+      )
+    }
+    const finishFromEvent = (
+      response: RuntimeEventResponse,
+      resolve: () => void,
+      reject: (reason: Error) => void,
+    ): void => {
+      const terminalType = asString(response.data?.runtimeProtocolType)
+      if (terminalType === 'operation.completed') {
+        resolve()
+        return
+      }
+      reject(
+        new Error(response.message[0] || `ECC operation ${terminalType ?? 'failed'}.`),
+      )
+    }
+
+    const completed = [...runtimeEvents.value].reverse().find(isTerminalEvent)
+    if (completed) {
+      return new Promise((resolve, reject) => finishFromEvent(completed, resolve, reject))
+    }
+
+    const client = runtimeEventClient.value
+    if (!client) {
+      return Promise.reject(new Error('ECC runtime event stream is unavailable.'))
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      let unregisterCleanup: (() => void) | null = null
+      const handler = (response: RuntimeEventResponse) => {
+        if (!isTerminalEvent(response)) return
+        cleanup()
+        finishFromEvent(response, resolve, reject)
+      }
+      const cleanup = () => {
+        client.offAll(handler)
+        unregisterCleanup?.()
+        unregisterCleanup = null
+      }
+      client.onAll(handler)
+      unregisterCleanup = workspaceLifecycle.registerCleanup(
+        () => {
+          cleanup()
+          reject(new Error('Workspace closed before the ECC operation completed.'))
+        },
+        { label: `runtime operation ${operationId}` },
+      )
+
+      const terminal = [...runtimeEvents.value].reverse().find(isTerminalEvent)
+      if (terminal) {
+        cleanup()
+        finishFromEvent(terminal, resolve, reject)
+      }
+    })
+  }
+
   return {
     loadRecentProjects,
     removeRecentProject,
@@ -1528,6 +1686,7 @@ export function useWorkspace() {
     resourceVersions: workspaceLifecycle.resourceVersions,
     workspaceSession: workspaceLifecycle.session,
     invalidateWorkspaceResources,
+    waitForRuntimeOperation,
     // 准备工作区时的全屏遮罩（见 App.vue）
     runtimeBackendConnecting,
     runtimeBackendTitle,

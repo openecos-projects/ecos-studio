@@ -19,6 +19,11 @@ import {
   type EccFlowRunRequest,
   type EccFlowRunStepRequest,
   type EccRuntimeEvent,
+  type EccRuntimeOperation,
+  type EccRuntimeOperationRequest,
+  type EccRuntimeStartFlowRequest,
+  type EccRuntimeStartStepRequest,
+  type EccRuntimeStepRenderedAckRequest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceExportSignoffRequest,
   type EccWorkspaceHandleRequest,
@@ -224,11 +229,15 @@ export interface DesktopBridgeServices {
     refreshRegistry(): Promise<unknown>
   }
   eccRuntimeService: {
+    acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<unknown>
+    cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
+    operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
+    waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     openWorkspace(
       request: EccWorkspaceOpenRequest,
     ): Promise<{ directory: string; workspaceHandle: string }>
@@ -239,9 +248,12 @@ export interface DesktopBridgeServices {
     rpcShutdown(): Promise<unknown>
     runFlow(request: EccFlowRunRequest): Promise<unknown>
     runStep(request: EccFlowRunStepRequest): Promise<unknown>
+    startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
+    startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
     syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
     workspaceInfo(request: EccWorkspaceInfoRequest): Promise<unknown>
+    workspaceSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
   }
   shellService: {
     createSession(
@@ -723,7 +735,7 @@ export function registerIpc(
     await services.shellService.kill(sessionId)
   }
 
-  const closeTrackedWorkspaceHandle = async (
+  const detachTrackedWorkspaceHandle = async (
     workspaceHandle: string,
   ): Promise<unknown> => {
     const existingClose = workspaceHandleClosePromises.get(workspaceHandle)
@@ -739,9 +751,9 @@ export function registerIpc(
       }
     }
 
-    const closePromise = Promise.resolve().then(() =>
-      services.eccRuntimeService.closeWorkspace({ workspaceHandle }),
-    )
+    // A renderer/page only owns a subscription lease. Releasing that lease
+    // must not close a running ECC operation or its sidecar.
+    const closePromise = Promise.resolve({ ok: true })
     const trackedClosePromise = closePromise.finally(() => {
       workspaceHandleClosePromises.delete(workspaceHandle)
     })
@@ -773,7 +785,7 @@ export function registerIpc(
     }
 
     const onDestroyed = (): void => {
-      void closeTrackedWorkspaceHandle(workspaceHandle)
+      void detachTrackedWorkspaceHandle(workspaceHandle)
     }
     const directories = previous?.directories ?? new Set<string>()
     directories.add(normalizedDirectory)
@@ -1496,7 +1508,7 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccWorkspaceClose, async (_event, request) => {
     const closeRequest = request as EccWorkspaceHandleRequest
-    return await closeTrackedWorkspaceHandle(closeRequest.workspaceHandle)
+    return await detachTrackedWorkspaceHandle(closeRequest.workspaceHandle)
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceHome, async (_event, request) => {
@@ -1547,6 +1559,38 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccFlowRunStep, async (_event, request) => {
     return await services.eccRuntimeService.runStep(request as EccFlowRunStepRequest)
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeStartFlow, async (_event, request) => {
+    return await services.eccRuntimeService.startFlowOperation(
+      request as EccRuntimeStartFlowRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeStartStep, async (_event, request) => {
+    return await services.eccRuntimeService.startStepOperation(
+      request as EccRuntimeStartStepRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeOperationStatus, async (_event, request) => {
+    return await services.eccRuntimeService.operationStatus(request as EccRuntimeOperationRequest)
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeOperationCancel, async (_event, request) => {
+    return await services.eccRuntimeService.cancelOperation(request as EccRuntimeOperationRequest)
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered, async (_event, request) => {
+    return await services.eccRuntimeService.acknowledgeStepRendered(
+      request as EccRuntimeStepRenderedAckRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeSnapshot, async (_event, request) => {
+    return await services.eccRuntimeService.workspaceSnapshot(
+      request as EccWorkspaceHandleRequest,
+    )
   })
 
   handle(desktopApiIpcChannels.agentStart, async (_event, request) => {

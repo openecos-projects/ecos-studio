@@ -381,6 +381,7 @@
 
     <template #right-log="{ selectedNode }">
       <FlowLogPanel
+        :active-step-name="flowLogStepName"
         :content-by-key="flowLogContentByKey"
         :ensure-content="ensureFlowLogSegmentContentLoaded"
         :error="flowLogError"
@@ -653,6 +654,7 @@ const {
   flowLogError,
   flowLogLoading,
   flowLogSegments,
+  flowLogStepName,
   layoutBlobUrl,
 } = useHomeData()
 const { items: homeSnapshots } = useHomeSnapshots()

@@ -427,7 +427,7 @@ describe('useParameters desktop bridge integration', () => {
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
-  it('reloads parameters directly from the cached file path while a flow is running', async () => {
+  it('keeps the last parameters snapshot while a flow is running', async () => {
     fetchSharedHomeData.mockResolvedValue({
       parameters: '/workspace/demo/home/parameters.json',
     })
@@ -456,17 +456,13 @@ describe('useParameters desktop bridge integration', () => {
     markFlowExecutionActiveForWorkspace('/workspace/demo')
     await parameters.refreshParameters()
 
-    await vi.waitFor(() => {
-      expect(parameters.config.die.Size).toEqual([])
-    })
-
     expect(parameters.config.design).toBe('demo')
     expect(parameters.config.topModule).toBe('chip_top')
     expect(parameters.config.clock).toBe('clk')
+    expect(parameters.config.die.Size).toEqual([100, 100])
+    expect(parameters.config.core.Size).toEqual([80, 80])
     expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
-    expect(readProjectTextFile).toHaveBeenLastCalledWith(
-      '/workspace/demo/home/parameters.json',
-    )
+    expect(readProjectTextFile).toHaveBeenCalledTimes(1)
 
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
@@ -496,7 +492,7 @@ describe('useParameters desktop bridge integration', () => {
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
-  it('polls the known parameters file while a flow is running without touching shared home data', async () => {
+  it('does not poll the parameters file while a flow is running', async () => {
     vi.useFakeTimers()
     fetchSharedHomeData.mockResolvedValue({
       parameters: '/workspace/demo/home/parameters.json',
@@ -527,15 +523,14 @@ describe('useParameters desktop bridge integration', () => {
       markFlowExecutionActiveForWorkspace('/workspace/demo')
       await vi.advanceTimersByTimeAsync(1600)
 
-      await vi.waitFor(() => {
-        expect(parameters.config.die.Size).toEqual([])
-      })
+      expect(parameters.config.die.Size).toEqual([100, 100])
+      expect(parameters.config.core.Size).toEqual([80, 80])
       expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
 
       clearFlowExecutionActiveForWorkspace('/workspace/demo')
       await vi.advanceTimersByTimeAsync(1600)
 
-      expect(readProjectTextFile).toHaveBeenCalledTimes(2)
+      expect(readProjectTextFile).toHaveBeenCalledTimes(1)
       expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
     } finally {
       scope.stop()

@@ -1,139 +1,75 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-const testState = {
-  readError: null as Error | null,
-  files: new Map<string, string>(),
-  listeners: new Map<string, Array<() => void>>(),
-  unwatch: vi.fn(),
-}
-
-vi.mock('@/platform/desktop', () => ({
-  getOptionalDesktopApi: () => ({
-    workspace: {
-      readOptionalProjectTextFile: vi.fn(async (path: string) => {
-        if (testState.readError) throw testState.readError
-        return testState.files.get(path) ?? null
-      }),
-      watchProjectFile: vi.fn(async (path: string, listener: () => void) => {
-        const bucket = testState.listeners.get(path) ?? []
-        bucket.push(listener)
-        testState.listeners.set(path, bucket)
-        return testState.unwatch
-      }),
-    },
-  }),
-}))
-
+import { describe, expect, it } from 'vitest'
+import { nextTick, ref } from 'vue'
+import type { RuntimeEventResponse } from '@/api/runtimeEvents'
 import { useAgentFlowProgress } from './useAgentFlowProgress'
 
-const FLOW_PATH = '/runs/gcd/home/flow.json'
-const SUBFLOW_PATH = '/runs/gcd/place_dreamplace/subflow.json'
-
-function flow(state: string): string {
-  return JSON.stringify({
-    steps: [
-      { name: 'FixFanout', state: 'Success', tool: 'ecc' },
-      { name: 'place', state, tool: 'dreamplace' },
-    ],
-  })
-}
-
-function subflow(
-  steps: Array<{ name: string; state: string; runtime?: string; memory?: number }>,
-): string {
-  return JSON.stringify({
-    steps: steps.map((step) => ({
-      name: step.name,
-      state: step.state,
-      runtime: step.runtime ?? '0:0:0',
-      'peak memory (mb)': step.memory ?? 0,
-    })),
-  })
-}
-
-function emit(path: string): void {
-  for (const listener of testState.listeners.get(path) ?? []) listener()
+function runtimeEvent(
+  type: string,
+  options: { eventId: string; state?: string; step?: string } = {
+    eventId: 'event-1',
+  },
+): RuntimeEventResponse {
+  return {
+    cmd: 'notify',
+    data: {
+      directory: '/runs/gcd',
+      runtimeEventId: options.eventId,
+      runtimeProtocolType: type,
+      state: options.state,
+      step: options.step,
+      type: type === 'step.started' ? 'step_start' : 'step_complete',
+    },
+    message: [],
+    response: 'success',
+  }
 }
 
 describe('useAgentFlowProgress', () => {
-  beforeEach(() => {
-    testState.readError = null
-    testState.files = new Map([[FLOW_PATH, flow('Unstart')]])
-    testState.listeners = new Map()
-    testState.unwatch.mockReset()
-  })
-
-  it('reports stage progress with live subflow steps instead of artifact paths', async () => {
+  it('reports ordered ECC step events without reading or watching NFS files', async () => {
     const messages: string[] = []
-    const flowChanges: number[] = []
+    const changes: number[] = []
+    const events = ref<RuntimeEventResponse[]>([])
     const progress = useAgentFlowProgress(
       (message) => messages.push(message),
-      () => flowChanges.push(flowChanges.length + 1),
+      () => changes.push(changes.length + 1),
+      events,
     )
 
-    await progress.start('/runs/gcd')
-    expect(flowChanges).toEqual([])
+    progress.start('/runs/gcd')
+    events.value.push(runtimeEvent('step.started', { eventId: 'event-1', step: 'place' }))
+    await nextTick()
+    events.value.push(
+      runtimeEvent('step.completed', {
+        eventId: 'event-2',
+        state: 'Success',
+        step: 'place',
+      }),
+    )
+    await nextTick()
 
-    testState.files.set(FLOW_PATH, flow('Ongoing'))
-    testState.files.set(SUBFLOW_PATH, subflow([{ name: 'load data', state: 'Ongoing' }]))
-    emit(FLOW_PATH)
-    await vi.waitFor(() =>
-      expect(messages).toEqual(['Running place.', 'place › load data']),
-    )
-    await vi.waitFor(() => expect(flowChanges).toEqual([1]))
-
-    testState.files.set(
-      SUBFLOW_PATH,
-      subflow([
-        { name: 'load data', state: 'Success' },
-        { name: 'run placement', state: 'Ongoing', memory: 29.883, runtime: '0:1:10' },
-      ]),
-    )
-    emit(SUBFLOW_PATH)
-    await vi.waitFor(() =>
-      expect(messages).toEqual([
-        'Running place.',
-        'place › load data',
-        'place › run placement',
-      ]),
-    )
-
-    testState.files.set(
-      SUBFLOW_PATH,
-      subflow([
-        { name: 'load data', state: 'Success' },
-        { name: 'run placement', state: 'Success', memory: 29.883, runtime: '0:1:10' },
-        { name: 'save data', state: 'Success', memory: 29.887 },
-        { name: 'analysis', state: 'Success', memory: 0.004 },
-      ]),
-    )
-    testState.files.set(FLOW_PATH, flow('Success'))
-    emit(FLOW_PATH)
-    await vi.waitFor(() =>
-      expect(messages).toEqual([
-        'Running place.',
-        'place › load data',
-        'place › run placement',
-        'place › save data',
-        'place › analysis',
-        'Completed place.',
-      ]),
-    )
-    await vi.waitFor(() => expect(flowChanges).toEqual([1, 2]))
-    expect(messages.some((message) => message.includes('Saved:'))).toBe(false)
-
-    progress.stop()
-    expect(testState.unwatch).toHaveBeenCalled()
+    expect(messages).toEqual(['Running place.', 'Completed place.'])
+    expect(changes).toEqual([1])
   })
 
-  it('does not block execution when progress tracking is unavailable', async () => {
+  it('ignores duplicate and unrelated workspace protocol events', async () => {
     const messages: string[] = []
-    const progress = useAgentFlowProgress((message) => messages.push(message))
-    testState.readError = new Error('unavailable')
+    const events = ref<RuntimeEventResponse[]>([])
+    const progress = useAgentFlowProgress((message) => messages.push(message), undefined, events)
+    progress.start('/runs/gcd')
 
-    await expect(progress.start('/runs/gcd')).resolves.toBeUndefined()
-    expect(messages).toEqual([
-      'Live flow progress is unavailable. Execution will continue.',
-    ])
+    events.value.push(runtimeEvent('step.started', { eventId: 'event-1', step: 'place' }))
+    await nextTick()
+    events.value.push(runtimeEvent('step.started', { eventId: 'event-1', step: 'place' }))
+    await nextTick()
+    events.value.push({
+      ...runtimeEvent('step.started', { eventId: 'event-2', step: 'route' }),
+      data: {
+        ...runtimeEvent('step.started', { eventId: 'event-2', step: 'route' }).data,
+        directory: '/runs/other',
+      },
+    })
+    await nextTick()
+
+    expect(messages).toEqual(['Running place.'])
   })
 })

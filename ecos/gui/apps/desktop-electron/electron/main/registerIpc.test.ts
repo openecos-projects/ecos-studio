@@ -160,11 +160,15 @@ function registerHandlers(
     },
     createWindow: vi.fn(),
     eccRuntimeService: {
+      acknowledgeStepRendered: vi.fn(),
+      cancelOperation: vi.fn(),
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
       exportSignoff: vi.fn(),
       inspectSignoff: vi.fn(),
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
+      operationStatus: vi.fn(),
+      waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
       refreshConfig: vi.fn(),
       resetFlow: vi.fn(),
@@ -173,9 +177,12 @@ function registerHandlers(
       rpcShutdown: vi.fn(),
       runFlow: vi.fn(),
       runStep: vi.fn(),
+      startFlowOperation: vi.fn(),
+      startStepOperation: vi.fn(),
       syncConfig: vi.fn(),
       workspaceHome: vi.fn(),
       workspaceInfo: vi.fn(),
+      workspaceSnapshot: vi.fn(),
     },
     shellService: {
       createSession: vi.fn(),
@@ -2016,7 +2023,7 @@ describe('registerIpc', () => {
     expect(services.createWindow).toHaveBeenCalledWith({ initialRoute: '/' })
   })
 
-  it('closes ECC workspace handles when the requesting renderer is destroyed', async () => {
+  it('detaches a renderer without closing its ECC workspace runtime', async () => {
     const { handlers, services } = registerHandlers()
     const sender = Object.assign(new EventEmitter(), {
       isDestroyed: vi.fn(() => false),
@@ -2042,14 +2049,9 @@ describe('registerIpc', () => {
       workspaceHandle: 'workspace-handle-1',
     })
 
-    await vi.waitFor(() => {
-      expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledWith({
-        workspaceHandle: 'workspace-handle-1',
-      })
-    })
     await explicitClose
 
-    expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledTimes(1)
+    expect(services.eccRuntimeService.closeWorkspace).not.toHaveBeenCalled()
     expect(sender.listenerCount('destroyed')).toBe(0)
   })
 

@@ -335,6 +335,19 @@ const desktopApi: DesktopApi = {
       ping: () => invokeDesktop(desktopApiIpcChannels.eccRpcPing),
       shutdown: () => invokeDesktop(desktopApiIpcChannels.eccRpcShutdown),
     },
+    runtime: {
+      acknowledgeStepRendered: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered, request),
+      cancel: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationCancel, request),
+      snapshot: (request) => invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
+      startFlow: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeStartFlow, request),
+      startStep: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeStartStep, request),
+      status: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationStatus, request),
+    },
     workspace: {
       close: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceClose, request),
       create: (request) =>

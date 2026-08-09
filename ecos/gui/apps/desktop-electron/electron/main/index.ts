@@ -16,6 +16,7 @@ import {
 } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
+import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
 import { ChipViewerService } from '../services/chipViewerService'
@@ -44,6 +45,9 @@ if (!gotSingleInstanceLock) {
 }
 
 let ipcRegistered = false
+let appQuitApproved = false
+let appQuitPending = false
+let appQuitShutdownInFlight = false
 let workspaceReplacementRecoveryComplete = false
 let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
@@ -59,6 +63,40 @@ let services: {
   workspaceResourceService: WorkspaceResourceService
   workspaceService: WorkspaceService
 } | null = null
+
+function installRuntimeQuitGuard(eccRuntimeService: EccRpcRuntimeService): void {
+  const requestShutdown = (): void => {
+    if (!appQuitPending || appQuitShutdownInFlight) return
+    appQuitShutdownInFlight = true
+    void eccRuntimeService
+      .rpcShutdown()
+      .then((result) => {
+        appQuitShutdownInFlight = false
+        if (result.deferred) {
+          return
+        }
+        appQuitApproved = true
+        app.quit()
+      })
+      .catch((error) => {
+        appQuitShutdownInFlight = false
+        electronLogger.error('[runtime] Failed to shut down ECC sidecars', error)
+      })
+  }
+
+  eccRuntimeService.onEvent(() => {
+    if (appQuitPending && !eccRuntimeService.hasPendingRuntimeWork()) {
+      requestShutdown()
+    }
+  })
+
+  app.on('before-quit', (event) => {
+    if (appQuitApproved) return
+    event.preventDefault()
+    appQuitPending = true
+    requestShutdown()
+  })
+}
 
 function readHostInfo(path: string): string {
   try {
@@ -130,15 +168,19 @@ function getDesktopServices() {
       platform: process.platform,
     })
   const eccRuntimeService = new EccRpcRuntimeService({
-    createSidecar: (_directory, onEvent) =>
+    createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () =>
           resolveEccSidecarLogDirectory(getLogSessionDirectory()),
         onEvent,
+        onNotification,
       }),
+    lazyWorkspaceOpen: true,
+    snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
   })
+  installRuntimeQuitGuard(eccRuntimeService)
   const workspaceService = new WorkspaceService({
     projectScopeProvider: projectScopeService,
     replacementJournalDirectory: join(app.getPath('userData'), 'workspace-replacements'),

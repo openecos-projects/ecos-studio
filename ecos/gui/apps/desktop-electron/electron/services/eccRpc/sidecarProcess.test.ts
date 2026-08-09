@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import { PassThrough, Writable } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { EccRpcSidecarProcess, type SpawnedEccRpcSidecar } from './sidecarProcess'
+import {
+  EccRpcShutdownDeferredError,
+  EccRpcSidecarProcess,
+  type SpawnedEccRpcSidecar,
+} from './sidecarProcess'
 import { encodeContentLengthFrame } from './transport'
 
 class FakeWritable extends Writable {
@@ -221,6 +225,49 @@ describe('EccRpcSidecarProcess', () => {
     )
 
     await expect(promise).resolves.toEqual({ ok: true })
+  })
+
+  it('does not signal a sidecar when ECC defers shutdown for an active operation', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    await sidecar.start()
+
+    const shutdown = sidecar.shutdown()
+    await vi.waitFor(() => {
+      expect(child.stdin.chunks).toHaveLength(1)
+    })
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","id":1,"result":{"ok":false,"deferred":true,"shutdownBarrier":{"operationId":"operation-1"}}}',
+      ),
+    )
+
+    await expect(shutdown).rejects.toBeInstanceOf(EccRpcShutdownDeferredError)
+    expect(child.signals).toEqual([])
+  })
+
+  it('forwards sidecar JSON-RPC notifications to the runtime owner', async () => {
+    const child = new FakeChild()
+    const notifications: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      onNotification: (notification) => notifications.push(notification),
+      spawn: () => child,
+    })
+
+    await sidecar.start()
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","method":"runtime.event","params":{"eventId":"workspace-1:1"}}',
+      ),
+    )
+
+    expect(notifications).toEqual([
+      {
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: { eventId: 'workspace-1:1' },
+      },
+    ])
   })
 
   it('writes stderr to a runtime log file and emits stderr events', async () => {
