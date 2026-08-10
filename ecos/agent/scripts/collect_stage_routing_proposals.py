@@ -47,6 +47,7 @@ def _collect(
     stage_catalog: list[dict[str, str]],
     *,
     max_failures: int,
+    attempts_per_case: int = 1,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     records: list[dict[str, object]] = []
     attempts: list[dict[str, object]] = []
@@ -55,18 +56,25 @@ def _collect(
     for case in cases:
         query = str(case["query"])
         query_sha256 = _query_sha256(query)
-        try:
-            provider.new_ephemeral_thread()
-            proposal = StageRoutingProposal.model_validate(
-                provider.propose_stage_routing(
-                    {"natural_language_request": query, "stage_catalog": stage_catalog}
+        retry_failure_classes: list[str] = []
+        proposal = None
+        for attempt_count in range(1, attempts_per_case + 1):
+            try:
+                proposal = _proposal_for_case(provider, query, stage_catalog, stage_ids)
+            except (CodexProviderError, ValueError) as exc:
+                retry_failure_classes.append(_failure_class(exc))
+                continue
+            break
+        if proposal is None:
+            consecutive_failures += 1
+            attempts.append(
+                _failed_attempt(
+                    case,
+                    query_sha256,
+                    attempt_count=attempts_per_case,
+                    retry_failure_classes=retry_failure_classes,
                 )
             )
-            if any(stage not in stage_ids for stage in proposal.candidate_stages):
-                raise ValueError("proposal contains an unpublished stage")
-        except (CodexProviderError, ValueError) as exc:
-            consecutive_failures += 1
-            attempts.append(_failed_attempt(case, query_sha256, exc))
             if consecutive_failures >= max_failures:
                 break
             continue
@@ -84,20 +92,48 @@ def _collect(
                 "query_sha256": query_sha256,
                 "status": "accepted" if proposal.candidate_stages else "abstained",
                 "candidate_stages": list(proposal.candidate_stages),
+                "attempt_count": attempt_count,
+                "retry_failure_classes": retry_failure_classes,
             }
         )
     return records, attempts
 
 
+def _proposal_for_case(
+    provider: CodexAppServerProposalProvider,
+    query: str,
+    stage_catalog: list[dict[str, str]],
+    stage_ids: set[str],
+) -> StageRoutingProposal:
+    provider.new_ephemeral_thread()
+    proposal = StageRoutingProposal.model_validate(
+        provider.propose_stage_routing(
+            {"natural_language_request": query, "stage_catalog": stage_catalog}
+        )
+    )
+    if any(stage not in stage_ids for stage in proposal.candidate_stages):
+        raise ValueError("proposal contains an unpublished stage")
+    return proposal
+
+
+def _failure_class(exc: Exception) -> str:
+    return exc.failure_class if isinstance(exc, CodexProviderError) else "validation_error"
+
+
 def _failed_attempt(
-    case: dict[str, object], query_sha256: str, exc: Exception
+    case: dict[str, object],
+    query_sha256: str,
+    *,
+    attempt_count: int,
+    retry_failure_classes: list[str],
 ) -> dict[str, object]:
-    failure_class = exc.failure_class if isinstance(exc, CodexProviderError) else "validation_error"
     return {
         "case_id": case["id"],
         "query_sha256": query_sha256,
         "status": "failed",
-        "failure_class": failure_class,
+        "failure_class": retry_failure_classes[-1],
+        "attempt_count": attempt_count,
+        "retry_failure_classes": retry_failure_classes,
     }
 
 
@@ -133,6 +169,7 @@ def _audit(
             "split": args.split,
             "max_cases": args.max_cases,
             "max_failures": args.max_failures,
+            "attempts_per_case": args.attempts_per_case,
             "timeout_seconds": args.timeout_seconds,
             "fresh_thread_per_case": True,
             "web_search_enabled": False,
@@ -165,13 +202,19 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--split", choices=("dev", "test", "all"), default="dev")
     parser.add_argument("--max-cases", type=int, default=20)
     parser.add_argument("--max-failures", type=int, default=3)
+    parser.add_argument("--attempts-per-case", type=int, default=3)
     parser.add_argument("--timeout-seconds", type=int, default=30)
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
-    if not 1 <= args.max_cases <= 300 or args.max_failures <= 0 or not 1 <= args.timeout_seconds <= 60:
+    if (
+        not 1 <= args.max_cases <= 300
+        or args.max_failures <= 0
+        or not 1 <= args.attempts_per_case <= 3
+        or not 1 <= args.timeout_seconds <= 60
+    ):
         raise ValueError("collection limits are invalid")
     replay_path = args.output.resolve()
     audit_path = (args.audit_output or replay_path.with_suffix(".audit.v1.json")).resolve()
@@ -189,7 +232,11 @@ def main() -> int:
     )
     try:
         records, attempts = _collect(
-            provider, cases, list(retriever.stage_catalog), max_failures=args.max_failures
+            provider,
+            cases,
+            list(retriever.stage_catalog),
+            max_failures=args.max_failures,
+            attempts_per_case=args.attempts_per_case,
         )
     finally:
         provider.close()

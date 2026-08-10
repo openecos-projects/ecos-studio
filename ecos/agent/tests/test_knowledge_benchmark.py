@@ -179,6 +179,8 @@ def test_ablation_suite_replays_hash_locked_stage_proposals(tmp_path: Path) -> N
             "python",
             "scripts/evaluate_knowledge_retrieval.py",
             "--ablation-suite",
+            "--ablation-split",
+            "test",
             "--routing-proposals",
             str(replay),
             "--top-k",
@@ -193,6 +195,7 @@ def test_ablation_suite_replays_hash_locked_stage_proposals(tmp_path: Path) -> N
     )
     payload = json.loads(output.read_text(encoding="utf-8"))
 
+    assert set(payload["ablation"]) == {"test"}
     test = payload["ablation"]["test"]
     assert set(test["strategies"]) == {
         "global_bm25",
@@ -246,7 +249,9 @@ def test_stage_routing_collector_audit_rejects_failed_or_partial_collection(tmp_
     replay = tmp_path / "routing-proposals.v1.jsonl"
     replay.write_text("", encoding="utf-8")
     audit = collector["_audit"](
-        SimpleNamespace(split="dev", max_cases=2, max_failures=1, timeout_seconds=30),
+        SimpleNamespace(
+            split="dev", max_cases=2, max_failures=1, attempts_per_case=2, timeout_seconds=30
+        ),
         b"benchmark",
         SimpleNamespace(corpus_sha256="a" * 64),
         [],
@@ -295,3 +300,50 @@ def test_stage_routing_collector_counts_only_consecutive_failures() -> None:
 
     assert len(records) == 2
     assert [attempt["status"] for attempt in attempts] == ["failed", "abstained", "failed", "abstained"]
+
+
+def test_stage_routing_collector_retries_a_transient_case_failure() -> None:
+    collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
+    responses: list[object] = [
+        ValueError("transient failure"),
+        {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "candidate_stages": ["place"],
+            "rationale": "placement question",
+        },
+    ]
+
+    class FakeProvider:
+        def __init__(self) -> None:
+            self.thread_starts = 0
+
+        def new_ephemeral_thread(self) -> None:
+            self.thread_starts += 1
+
+        def propose_stage_routing(self, _context: dict[str, object]) -> dict[str, object]:
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+    provider = FakeProvider()
+    records, attempts = collector["_collect"](
+        provider,
+        [{"id": "case-1", "query": "query-1"}],
+        [{"stage": "place", "summary": "Audited placement stage.", "chunk_sha256": "a" * 64}],
+        max_failures=1,
+        attempts_per_case=2,
+    )
+
+    assert records[0]["candidate_stages"] == ["place"]
+    assert provider.thread_starts == 2
+    assert attempts == [
+        {
+            "case_id": "case-1",
+            "query_sha256": hashlib.sha256(b"query-1").hexdigest(),
+            "status": "accepted",
+            "candidate_stages": ["place"],
+            "attempt_count": 2,
+            "retry_failure_classes": ["validation_error"],
+        }
+    ]

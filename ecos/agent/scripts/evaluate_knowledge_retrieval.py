@@ -605,6 +605,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--field-weights", type=float, nargs=4, metavar=_WEIGHT_NAMES)
     parser.add_argument("--provider-binary", type=Path, help="headless PyInstaller provider binary")
     parser.add_argument("--ablation-suite", action="store_true")
+    parser.add_argument(
+        "--ablation-split",
+        action="append",
+        choices=("dev", "test"),
+        help="split to include in the routing-replay ablation; repeat to include both",
+    )
     parser.add_argument("--routing-proposals", type=Path, help="hash-locked stage routing replay JSONL")
     return parser.parse_args()
 
@@ -617,6 +623,8 @@ def main() -> int:
         raise ValueError("--ablation-suite cannot be combined with --select-dev-config")
     if args.ablation_suite and not args.routing_proposals:
         raise ValueError("--ablation-suite requires --routing-proposals")
+    if args.ablation_split and not args.ablation_suite:
+        raise ValueError("--ablation-split requires --ablation-suite")
     tracemalloc.start()
     if args.select_dev_config:
         payload: dict[str, object] = {
@@ -657,7 +665,7 @@ def main() -> int:
                     },
                     "corpus_sha256": catalog.corpus_sha256,
                 }
-                for split in splits
+                for split in (args.ablation_split or splits)
             }
     _current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()

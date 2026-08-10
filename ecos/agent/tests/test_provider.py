@@ -112,6 +112,41 @@ def test_new_ephemeral_thread_discards_prior_case_context(tmp_path: Path) -> Non
         provider.new_ephemeral_thread()
 
 
+def test_timeout_closes_the_app_server_before_the_next_proposal(tmp_path: Path) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.closed = 0
+
+        def request(self, method: str, _params: dict[str, object]) -> dict[str, object]:
+            assert method == "turn/start"
+            return {"turn": {"id": "turn-1"}}
+
+        def wait_for_turn_details(
+            self, _turn_id: str, *, thread_id: str, activity_callback: object
+        ) -> tuple[str, None]:
+            assert thread_id == "thread-1"
+            raise CodexProviderError("timeout", failure_class="timeout")
+
+        def close(self) -> None:
+            self.closed += 1
+
+    client = FakeClient()
+    provider._client = client
+    provider._thread_id = "thread-1"
+
+    with pytest.raises(CodexProviderError, match="timeout"):
+        provider._run_turn("prompt", {})
+
+    assert client.closed == 1
+    assert provider._client is None
+    assert provider._thread_id is None
+
+
 def test_start_fails_closed_when_codex_cli_is_unavailable(monkeypatch) -> None:
     monkeypatch.delenv("ECOS_AGENT_CODEX_BIN", raising=False)
     monkeypatch.setenv("PATH", "")
@@ -446,8 +481,10 @@ def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypat
         captured.update(prompt=prompt, schema=schema)
         return json.dumps(
             {
-                "schema_version": "flow-agent.stage_routing_proposal.v1",
-                "candidate_stages": ["place"],
+                "schema_version": "flow-agent.stage_routing_slots.v1",
+                "primary_stage": "place",
+                "secondary_stage": None,
+                "tertiary_stage": None,
                 "rationale": "The question concerns placement.",
             }
         )
@@ -465,8 +502,15 @@ def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypat
 
     assert response["candidate_stages"] == ["place"]
     assert "Return stage candidates only" in str(captured["prompt"])
-    assert captured["schema"]["properties"]["candidate_stages"]["maxItems"] == 3
-    assert captured["schema"]["properties"]["candidate_stages"]["items"]["enum"] == ["place", "route"]
+    assert captured["schema"]["required"] == [
+        "schema_version",
+        "primary_stage",
+        "secondary_stage",
+        "tertiary_stage",
+        "rationale",
+    ]
+    assert "candidate_stages" not in captured["schema"]["properties"]
+    assert captured["schema"]["properties"]["primary_stage"]["enum"] == ["place", "route", None]
 
 
 def test_stage_routing_contract_rejects_too_many_or_duplicate_candidates() -> None:

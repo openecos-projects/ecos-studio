@@ -7,7 +7,9 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Literal, Mapping
+
+from pydantic import BaseModel, ConfigDict
 
 from ecos_agent.codex_rpc import CodexProviderError, _JsonLineRpcProcessClient, _read_nested_string
 from ecos_agent.contracts import (
@@ -18,6 +20,18 @@ from ecos_agent.contracts import (
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal
+
+
+class _StageRoutingSlotsProposal(BaseModel):
+    """Scalar wire format converted to the public tuple contract locally."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flow-agent.stage_routing_slots.v1"]
+    primary_stage: str | None
+    secondary_stage: str | None
+    tertiary_stage: str | None
+    rationale: str
 
 
 class CodexAppServerProposalProvider:
@@ -153,30 +167,54 @@ class CodexAppServerProposalProvider:
 
     def propose_stage_routing(self, context: dict[str, Any]) -> dict[str, Any]:
         stage_catalog = _stage_catalog(context.get("stage_catalog"))
-        return self._proposal(
-            {
-                "natural_language_request": context.get("natural_language_request"),
-                "stage_catalog": stage_catalog,
-            },
-            (
-                "Return one JSON object matching flow-agent.stage_routing_proposal.v1. "
-                "Return stage candidates only for read-only knowledge retrieval. "
-                "Use only stage names in stage_catalog. Do not answer the question, return operations, "
-                "commands, paths, workspace data, tool calls, or execution instructions."
-            ),
-            _stage_routing_output_schema(tuple(item["stage"] for item in stage_catalog)),
-            StageRoutingProposal,
-        )
+        try:
+            slots = _StageRoutingSlotsProposal.model_validate(
+                self._proposal(
+                    {
+                        "natural_language_request": context.get("natural_language_request"),
+                        "stage_catalog": stage_catalog,
+                    },
+                    (
+                        "Return one JSON object matching flow-agent.stage_routing_slots.v1. "
+                        "Return stage candidates only (zero to three) for read-only knowledge retrieval, "
+                        "including conceptual questions. Use only stage names in stage_catalog and each stage "
+                        "at most once. Do not answer the question, return operations, commands, paths, workspace "
+                        "data, tool calls, or execution instructions."
+                    ),
+                    _stage_routing_slots_output_schema(
+                        tuple(item["stage"] for item in stage_catalog)
+                    ),
+                    _StageRoutingSlotsProposal,
+                )
+            )
+            return StageRoutingProposal.model_validate(
+                {
+                    "schema_version": "flow-agent.stage_routing_proposal.v1",
+                    "candidate_stages": [
+                        stage
+                        for stage in (
+                            slots.primary_stage,
+                            slots.secondary_stage,
+                            slots.tertiary_stage,
+                        )
+                        if stage is not None
+                    ],
+                    "rationale": slots.rationale,
+                }
+            ).model_dump(mode="json")
+        except CodexProviderError:
+            raise
+        except ValueError as exc:
+            raise CodexProviderError(
+                "Codex stage routing proposal failed schema validation", failure_class="parse_error"
+            ) from exc
 
     def _proposal(
         self,
         context: dict[str, Any],
         system: str,
         output_schema: dict[str, Any],
-        model: type[GuiWorkspaceSetupProposal]
-        | type[GuiWorkspaceRerunParameterProposal]
-        | type[GuiChatResponseProposal]
-        | type[StageRoutingProposal],
+        model: type[BaseModel],
     ) -> dict[str, Any]:
         try:
             return model.model_validate(
@@ -253,6 +291,8 @@ class CodexAppServerProposalProvider:
         except CodexProviderError as exc:
             if self._interrupted:
                 raise CodexProviderError("Codex turn interrupted", failure_class="interrupted") from exc
+            if exc.failure_class == "timeout":
+                self.close()
             raise
         finally:
             with self._state_lock:
@@ -542,19 +582,23 @@ def _gui_chat_response_output_schema(allowed_ids: list[str]) -> dict[str, Any]:
     }
 
 
-def _stage_routing_output_schema(stages: tuple[str, ...]) -> dict[str, Any]:
+def _stage_routing_slots_output_schema(stages: tuple[str, ...]) -> dict[str, Any]:
+    stage_slot = {"type": ["string", "null"], "enum": [*stages, None]}
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "candidate_stages", "rationale"],
+        "required": [
+            "schema_version",
+            "primary_stage",
+            "secondary_stage",
+            "tertiary_stage",
+            "rationale",
+        ],
         "properties": {
-            "schema_version": {"type": "string", "const": "flow-agent.stage_routing_proposal.v1"},
-            "candidate_stages": {
-                "type": "array",
-                "maxItems": 3,
-                "uniqueItems": True,
-                "items": {"type": "string", "enum": list(stages)},
-            },
+            "schema_version": {"type": "string", "const": "flow-agent.stage_routing_slots.v1"},
+            "primary_stage": stage_slot,
+            "secondary_stage": stage_slot,
+            "tertiary_stage": stage_slot,
             "rationale": {"type": "string", "minLength": 1, "maxLength": 512},
         },
     }
