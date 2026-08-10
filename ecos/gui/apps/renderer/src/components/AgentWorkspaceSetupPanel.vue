@@ -89,8 +89,6 @@ const specRows = computed<[string, string][]>(() => {
     ['Die Area Mode', parameters.die_area_mode],
     ['Utilization', optionalValue(parameters.utilitization)],
     ['Margin', String(parameters.margin)],
-    ['Die Width', optionalValue(parameters.die_width)],
-    ['Die Height', optionalValue(parameters.die_height)],
     ['Target Density', String(parameters.target_density)],
     ['Target Overflow', String(parameters.target_overflow)],
     ['Description', optionalValue(parameters.description)],

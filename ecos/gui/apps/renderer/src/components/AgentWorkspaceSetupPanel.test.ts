@@ -31,6 +31,11 @@ describe('AgentWorkspaceSetupPanel', () => {
     expect(source).toContain("['Project Root', contract.project_context.project_root]")
   })
 
+  it('omits die dimensions derived by automatic floorplanning', () => {
+    expect(source).not.toContain("['Die Width'")
+    expect(source).not.toContain("['Die Height'")
+  })
+
   it('keeps the specification selectable and permits retrying a failed setup id', () => {
     expect(source).toContain('AgentExecutionContractPanel')
     expect(source).toContain('if (!setupId) {')
