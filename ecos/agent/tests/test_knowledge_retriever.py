@@ -27,7 +27,13 @@ def _bundles() -> tuple[StepKnowledge, ...]:
 
 
 def _bundle(*entities: tuple[str, tuple[str, ...], str]) -> KnowledgeBundle:
-    spec = KnowledgeBundleSpec("test", "test-manifest.v1", "test-catalog.v1")
+    return _bundle_for_stage("test", *entities)
+
+
+def _bundle_for_stage(
+    stage: str, *entities: tuple[str, tuple[str, ...], str]
+) -> KnowledgeBundle:
+    spec = KnowledgeBundleSpec(stage, "test-manifest.v1", "test-catalog.v1")
     records = tuple(
         KnowledgeEntity(entity_id, "knowledge.md", entity_id, "0" * 64, ("test.source",))
         for entity_id, aliases, _text in entities
@@ -62,6 +68,7 @@ def test_global_retriever_indexes_every_stage_and_records_replayable_trace() -> 
             "max_document_frequency": 0,
             "allow_metadata_match": False,
         },
+        "stage_scope": answer.contract["retrieval"]["stage_scope"],
         "query_sha256": answer.contract["retrieval"]["query_sha256"],
     }
     assert answer.contract["matches"][0]["entity_id"] == answer.entity_ids[0]
@@ -81,6 +88,62 @@ def test_global_retriever_can_return_multiple_stages() -> None:
 
     assert answer is not None
     assert {match["stage"] for match in answer.contract["matches"]} >= {"rcx", "sta"}
+
+
+def test_identifier_terms_restrict_target_density_to_its_candidate_stages() -> None:
+    answer = _retriever().reply("What is target density?")
+
+    assert answer is not None
+    assert answer.contract["retrieval"]["stage_scope"] == {
+        "mode": "candidate_union",
+        "reason": "canonical_identifier_phrase_or_acronym",
+        "candidate_stages": ["legalization", "place"],
+        "matched_entity_ids": [
+            "parameter.dreamplace.target_density",
+            "parameter.legalization.target_density",
+        ],
+    }
+    assert {match["stage"] for match in answer.contract["matches"]} <= {
+        "legalization",
+        "place",
+    }
+
+
+def test_unique_identifier_stage_scope_excludes_content_only_matches() -> None:
+    place = _bundle_for_stage(
+        "place", ("parameter.dreamplace.target_density", (), "Published place parameter.")
+    )
+    route = _bundle_for_stage(
+        "route", ("parameter.route.unrelated", (), "Target density appears only in this body.")
+    )
+
+    answer = GlobalKnowledgeRetriever((place, route)).reply("target density")
+
+    assert answer is not None
+    assert answer.entity_ids == ("parameter.dreamplace.target_density",)
+    assert answer.contract["retrieval"]["stage_scope"] == {
+        "mode": "single_stage",
+        "reason": "canonical_identifier_phrase_or_acronym",
+        "candidate_stages": ["place"],
+        "matched_entity_ids": ["parameter.dreamplace.target_density"],
+    }
+
+
+def test_insufficient_identifier_evidence_preserves_global_search() -> None:
+    place = _bundle_for_stage("place", ("parameter.dreamplace.target_density", (), "density"))
+    route = _bundle_for_stage("route", ("parameter.route.target_density", (), "density"))
+
+    answer = GlobalKnowledgeRetriever(
+        (place, route), config=RetrievalConfig(min_token_overlap=1)
+    ).reply("density")
+
+    assert answer is not None
+    assert answer.contract["retrieval"]["stage_scope"] == {
+        "mode": "global",
+        "reason": "insufficient_or_ambiguous_identifier_evidence",
+        "candidate_stages": [],
+        "matched_entity_ids": [],
+    }
 
 
 def test_global_retriever_returns_no_knowledge_for_irrelevant_or_fts_syntax_input() -> None:

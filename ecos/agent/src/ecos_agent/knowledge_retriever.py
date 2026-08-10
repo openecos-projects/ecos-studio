@@ -129,8 +129,27 @@ class _Record:
     stage: str
     text: str
     acronym_tokens: frozenset[str]
+    identifier_tokens: frozenset[str]
+    identifier_phrase_tokens: tuple[str, ...]
     tokens: frozenset[str]
     metadata_tokens: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _StageScope:
+    candidate_stages: tuple[str, ...] = ()
+    matched_entity_ids: tuple[str, ...] = ()
+    matched_keys: frozenset[str] = frozenset()
+    reason: str = "insufficient_or_ambiguous_identifier_evidence"
+
+    def contract(self) -> dict[str, object]:
+        mode = "single_stage" if len(self.candidate_stages) == 1 else "candidate_union"
+        return {
+            "mode": mode if self.candidate_stages else "global",
+            "reason": self.reason,
+            "candidate_stages": list(self.candidate_stages),
+            "matched_entity_ids": list(self.matched_entity_ids),
+        }
 
 
 class GlobalKnowledgeRetriever:
@@ -159,24 +178,36 @@ class GlobalKnowledgeRetriever:
         query_tokens = tokenize(question, limit=self._config.max_query_tokens)
         if not query_tokens or _has_unknown_named_token(question, self._corpus_tokens):
             return None
-        matches = self._search(query_tokens, _acronym_tokens(question), _phrase_tokens(question))
+        query_acronyms = _acronym_tokens(question)
+        scope = _infer_stage_scope(question, query_acronyms, self._records)
+        matches = self._search(query_tokens, query_acronyms, _phrase_tokens(question), scope)
         if not matches:
             return None
-        return _answer(question, matches, self._corpus_sha256, self._config)
+        return _answer(question, matches, self._corpus_sha256, self._config, scope)
 
     def _search(
         self,
         query_tokens: tuple[str, ...],
         query_acronyms: frozenset[str],
         query_phrase: tuple[str, ...],
+        scope: _StageScope,
     ) -> tuple[tuple[_Record, float], ...]:
         expression = " OR ".join(f'"{token}"' for token in query_tokens)
+        scope_predicate = _scope_predicate(scope.candidate_stages)
+        scope_patterns = tuple(f"{stage}:*" for stage in scope.candidate_stages)
         # ponytail: global lock; use per-thread read connections if retrieval throughput matters.
         with self._search_lock:
             rows = self._connection.execute(
                 "SELECT entity_id, bm25(knowledge, ?, ?, ?, ?, ?) AS raw_bm25 "
-                "FROM knowledge WHERE knowledge MATCH ? ORDER BY raw_bm25 ASC, entity_id ASC LIMIT ?",
-                (0.0, *self._config.field_weights, expression, self._config.top_k * 4),
+                f"FROM knowledge WHERE {scope_predicate}knowledge MATCH ? "
+                "ORDER BY raw_bm25 ASC, entity_id ASC LIMIT ?",
+                (
+                    0.0,
+                    *self._config.field_weights,
+                    *scope_patterns,
+                    expression,
+                    self._config.top_k * 4,
+                ),
             ).fetchall()
             phrase_keys = set()
             if len(query_phrase) >= 3:
@@ -184,7 +215,8 @@ class GlobalKnowledgeRetriever:
                 phrase_keys = {
                     row[0]
                     for row in self._connection.execute(
-                        "SELECT entity_id FROM knowledge WHERE knowledge MATCH ?", (phrase_expression,)
+                        f"SELECT entity_id FROM knowledge WHERE {scope_predicate}knowledge MATCH ?",
+                        (*scope_patterns, phrase_expression),
                     ).fetchall()
                 }
         records = {record.key: record for record in self._records}
@@ -192,7 +224,12 @@ class GlobalKnowledgeRetriever:
             (record, float(row[1]))
             for row in rows
             if _is_confident_match(
-                record := records[row[0]], query_tokens, query_acronyms, self._document_frequency, self._config
+                record := records[row[0]],
+                query_tokens,
+                query_acronyms,
+                self._document_frequency,
+                self._config,
+                scope,
             )
         ]
         if self._config.max_raw_bm25 is not None and matches and matches[0][1] > self._config.max_raw_bm25:
@@ -274,11 +311,74 @@ def _records_from_bundles(bundles: tuple[KnowledgeBundle, ...]) -> tuple[_Record
                     bundle.spec.slug,
                     bundle.chunk_text(entity.entity_id),
                     frozenset(token for field in fields for token in _acronym_tokens(field)),
+                    frozenset(tokenize(entity.entity_id)),
+                    _identifier_phrase_tokens(entity.entity_id),
                     frozenset(token for field in fields for token in tokenize(field)),
                     frozenset(token for field in metadata_fields for token in tokenize(field)),
                 )
             )
     return tuple(records)
+
+
+def _infer_stage_scope(
+    question: str, query_acronyms: frozenset[str], records: tuple[_Record, ...]
+) -> _StageScope:
+    query_terms = tuple(
+        term for term in _identifier_phrase_tokens(question) if term not in _STOP_TOKENS
+    )
+    matched = tuple(
+        record
+        for record in records
+        if _has_identifier_evidence(record, query_terms, query_acronyms)
+    )
+    candidate_stages = tuple(sorted({record.stage for record in matched}))
+    if not candidate_stages or len(candidate_stages) == len(
+        {record.stage for record in records}
+    ):
+        return _StageScope()
+    return _StageScope(
+        candidate_stages,
+        tuple(sorted({record.entity.entity_id for record in matched})),
+        frozenset(record.key for record in matched),
+        "canonical_identifier_phrase_or_acronym",
+    )
+
+
+def _has_identifier_evidence(
+    record: _Record, query_terms: tuple[str, ...], query_acronyms: frozenset[str]
+) -> bool:
+    return (
+        _identifier_phrase_covers_query(record.identifier_phrase_tokens, query_terms)
+        or bool(record.identifier_tokens.intersection(query_acronyms))
+    )
+
+
+def _identifier_phrase_tokens(text: str) -> tuple[str, ...]:
+    return tuple(
+        match.group().casefold()
+        for match in re.finditer(r"[a-z0-9]+", text, re.IGNORECASE)
+    )
+
+
+def _bigrams(tokens: tuple[str, ...]) -> frozenset[tuple[str, str]]:
+    return frozenset(zip(tokens, tokens[1:]))
+
+
+def _identifier_phrase_covers_query(
+    identifier_terms: tuple[str, ...], query_terms: tuple[str, ...]
+) -> bool:
+    matched_terms = {
+        term
+        for pair in _bigrams(identifier_terms).intersection(_bigrams(query_terms))
+        for term in pair
+    }
+    return bool(matched_terms) and 2 * len(matched_terms) >= len(query_terms)
+
+
+def _scope_predicate(stages: tuple[str, ...]) -> str:
+    if not stages:
+        return ""
+    return "(" + " OR ".join("entity_id GLOB ?" for _ in stages) + ") AND "
 
 
 def _create_index(records: tuple[_Record, ...]) -> sqlite3.Connection:
@@ -312,10 +412,12 @@ def _is_confident_match(
     query_acronyms: frozenset[str],
     document_frequency: Counter[str],
     config: RetrievalConfig,
+    scope: _StageScope,
 ) -> bool:
     shared = _normalized_tokens(record.tokens).intersection(_normalized_tokens(query_tokens))
     return (
         len(shared) >= config.min_token_overlap
+        or record.key in scope.matched_keys
         or bool(record.acronym_tokens.intersection(query_acronyms))
         or config.allow_metadata_match
         and bool(_normalized_tokens(record.metadata_tokens).intersection(_normalized_tokens(query_tokens)))
@@ -345,6 +447,7 @@ def _answer(
     matches: tuple[tuple[_Record, float], ...],
     corpus_sha256: str,
     config: RetrievalConfig,
+    scope: _StageScope,
 ) -> KnowledgeAnswer:
     entity_ids = tuple(record.entity.entity_id for record, _score in matches)
     source_ids = tuple(dict.fromkeys(source for record, _score in matches for source in record.entity.source_ids))
@@ -376,6 +479,7 @@ def _answer(
                 "score_order": "ascending",
                 "field_weights": dict(zip(_FIELD_NAMES, config.field_weights)),
                 "config": config.contract(),
+                "stage_scope": scope.contract(),
                 "query_sha256": _sha256(question.encode("utf-8")),
             },
             "matches": contract_matches,
