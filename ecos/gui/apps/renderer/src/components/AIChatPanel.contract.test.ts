@@ -98,6 +98,15 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('if (e.isComposing) return')
   })
 
+  it('navigates current-session text input history with the arrow keys', () => {
+    expect(source).toContain("message.role === 'user' && message.type === 'text'")
+    expect(source).toContain('@input="resetInputHistory"')
+    expect(source).toContain("e.key === 'ArrowUp' || e.key === 'ArrowDown'")
+    expect(source).toContain(
+      'navigateInputHistory(activeUi.value, userInputHistory.value, direction)',
+    )
+  })
+
   it('maps validated provider contracts to structured messages', () => {
     expect(source).toContain("event.type === 'contract'")
     expect(source).toContain('addExecutionContract(event.contract, event.sessionId)')

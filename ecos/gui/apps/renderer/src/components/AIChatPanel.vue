@@ -142,6 +142,7 @@
           :placeholder="composerPlaceholder"
           aria-label="Message"
           class="composer-input"
+          @input="resetInputHistory"
           @keydown="handleKeyDown"
         ></textarea>
 
@@ -204,7 +205,9 @@ import {
   createAgentSessionUiState,
   getAgentSessionUi,
   GUI_SWITCH_PROMPT,
+  navigateInputHistory,
   removeAgentSessionUi,
+  resetInputHistoryNavigation,
   type AgentContractSurface,
   type PendingGuiAction,
 } from './agentSessionUi'
@@ -287,6 +290,11 @@ const inputValue = computed({
     activeUi.value.inputValue = value
   },
 })
+const userInputHistory = computed(() =>
+  messages.value
+    .filter((message) => message.role === 'user' && message.type === 'text')
+    .map((message) => message.content),
+)
 const queuedMessage = computed({
   get: () => activeUi.value.queuedMessage,
   set: (value: string) => {
@@ -1225,6 +1233,7 @@ const handleSubmit = async (): Promise<void> => {
   if (isRunning.value) {
     if (message) queuedMessage.value = message
     inputValue.value = ''
+    resetInputHistory()
     return
   }
   await sendAgentMessage(message)
@@ -1240,6 +1249,7 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   messageStore.dismissOpenChoices()
   if (addToHistory && message) messageStore.addMessage(message)
   inputValue.value = ''
+  resetInputHistory()
   isAgentRequestPending.value = true
   try {
     await agent.sendMessage({
@@ -1852,8 +1862,19 @@ function assertEccSuccess(result: { response?: string } | null, message: string)
   if (result?.response !== ResponseEnum.success) throw new Error(`${message}.`)
 }
 
+function resetInputHistory(): void {
+  resetInputHistoryNavigation(activeUi.value)
+}
+
 const handleKeyDown = (e: KeyboardEvent) => {
   if (e.isComposing) return
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    const direction = e.key === 'ArrowUp' ? -1 : 1
+    if (navigateInputHistory(activeUi.value, userInputHistory.value, direction)) {
+      e.preventDefault()
+    }
+    return
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSubmit()

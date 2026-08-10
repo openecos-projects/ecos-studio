@@ -25,6 +25,8 @@ export type PendingGuiAction =
 export interface AgentSessionUiState {
   runStatus: DesktopAgentRunStatus
   inputValue: string
+  inputHistoryIndex?: number
+  inputHistoryDraft: string
   queuedMessage: string
   isConnecting: boolean
   isRequestPending: boolean
@@ -64,6 +66,7 @@ export function createAgentSessionUiState(): AgentSessionUiState {
   return {
     runStatus: 'idle',
     inputValue: '',
+    inputHistoryDraft: '',
     queuedMessage: '',
     isConnecting: false,
     isRequestPending: false,
@@ -98,4 +101,34 @@ export function getAgentSessionUi(sessionId: string): AgentSessionUiState {
 
 export function removeAgentSessionUi(sessionId: string): void {
   delete agentSessionUiById[sessionId]
+}
+
+export function resetInputHistoryNavigation(state: AgentSessionUiState): void {
+  state.inputHistoryIndex = undefined
+  state.inputHistoryDraft = ''
+}
+
+export function navigateInputHistory(
+  state: AgentSessionUiState,
+  history: readonly string[],
+  direction: -1 | 1,
+): boolean {
+  if (history.length === 0) return false
+  if (state.inputHistoryIndex === undefined) {
+    if (direction > 0) return false
+    state.inputHistoryDraft = state.inputValue
+    state.inputHistoryIndex = history.length - 1
+  } else {
+    const nextIndex = state.inputHistoryIndex + direction
+    if (nextIndex < 0) state.inputHistoryIndex = 0
+    else if (nextIndex >= history.length) {
+      state.inputValue = state.inputHistoryDraft
+      resetInputHistoryNavigation(state)
+      return true
+    } else {
+      state.inputHistoryIndex = nextIndex
+    }
+  }
+  state.inputValue = history[state.inputHistoryIndex]
+  return true
 }
