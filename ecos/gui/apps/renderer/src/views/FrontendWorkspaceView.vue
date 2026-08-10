@@ -1642,341 +1642,139 @@
                       </div>
                     </div>
                   </section>
-                  <Splitter
-                    v-if="shouldShowSimTerminal"
-                    layout="vertical"
-                    class="sim-cases-splitter frontend-resizable-splitter"
-                  >
-                    <SplitterPanel :size="58" :minSize="18" class="sim-cases-pane">
-                      <div v-if="simResultIsStale" class="sim-stale-banner">
-                        <i class="ri-time-line"></i>
-                        <span
-                          >{{ simResultFreshness.message }} Run again to refresh these
-                          case results.</span
+                  <div v-if="simResultIsStale" class="sim-stale-banner">
+                    <i class="ri-time-line"></i>
+                    <span
+                      >{{ simResultFreshness.message }} Run again to refresh these case
+                      results.</span
+                    >
+                  </div>
+                  <div v-if="cases.length === 0" class="empty-panel">
+                    <i class="ri-file-list-3-line"></i>
+                    <span>No simulation case result yet.</span>
+                  </div>
+                  <div v-else class="cases-table-wrap">
+                    <table class="cases-table">
+                      <thead>
+                        <tr>
+                          <th>Case</th>
+                          <th>Status</th>
+                          <th>Cycles</th>
+                          <th>Outcome</th>
+                          <th>Difftest</th>
+                          <th>Code</th>
+                          <th>RC</th>
+                          <th>Wave</th>
+                          <th>Image</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="testCase in cases"
+                          :key="testCase.name"
+                          :class="{
+                            selected: selectedCase?.name === testCase.name,
+                            failed: !testCase.ok,
+                          }"
+                          @click="selectCase(testCase)"
                         >
-                      </div>
-                      <div v-if="cases.length === 0" class="empty-panel">
-                        <i class="ri-file-list-3-line"></i>
-                        <span>No simulation case result yet.</span>
-                      </div>
-                      <div v-else class="cases-table-wrap">
-                        <table class="cases-table">
-                          <thead>
-                            <tr>
-                              <th>Case</th>
-                              <th>Status</th>
-                              <th>Cycles</th>
-                              <th>Outcome</th>
-                              <th>Difftest</th>
-                              <th>Code</th>
-                              <th>RC</th>
-                              <th>Wave</th>
-                              <th>Image</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr
-                              v-for="testCase in cases"
-                              :key="testCase.name"
-                              :class="{
-                                selected: selectedCase?.name === testCase.name,
-                                failed: !testCase.ok,
-                              }"
-                              @click="selectCase(testCase)"
-                            >
-                              <td>
-                                <div class="case-name">
-                                  <i
-                                    :class="
-                                      testCase.ok
-                                        ? 'ri-checkbox-circle-line'
-                                        : 'ri-close-circle-line'
-                                    "
-                                  ></i>
-                                  <span>
-                                    <strong>{{ testCase.name }}</strong>
-                                    <small
-                                      v-if="caseIssue(testCase)"
-                                      :title="caseIssue(testCase)"
-                                    >
-                                      {{ caseIssue(testCase) }}
-                                    </small>
-                                  </span>
-                                </div>
-                              </td>
-                              <td>
-                                <span
-                                  class="case-status"
-                                  :class="testCase.ok ? 'ok' : 'failed'"
-                                >
-                                  {{ testCase.ok ? 'PASS' : 'FAIL' }}
-                                </span>
-                              </td>
-                              <td>{{ caseCycles(testCase) }}</td>
-                              <td>
-                                <span class="path-pill">{{
-                                  caseTermination(testCase)
-                                }}</span>
-                              </td>
-                              <td>
-                                <button
-                                  v-if="
-                                    caseDifftestPc(testCase) &&
-                                    testCase.program?.disassembly
-                                  "
-                                  type="button"
-                                  class="path-pill path-button difftest-jump"
-                                  :title="`Open disassembly at ${caseDifftestPc(testCase)}`"
-                                  @click.stop="
-                                    openDisassembly(testCase, caseDifftestPc(testCase))
-                                  "
-                                >
-                                  <i class="ri-focus-3-line"></i>
-                                  {{ caseDifftestStatus(testCase) }}
-                                  <small>{{ caseDifftestPc(testCase) }}</small>
-                                </button>
-                                <span v-else class="path-pill">{{
-                                  caseDifftestStatus(testCase)
-                                }}</span>
-                              </td>
-                              <td>
-                                <button
-                                  v-if="testCase.program?.disassembly"
-                                  type="button"
-                                  class="case-icon-action"
-                                  :class="{
-                                    active:
-                                      disassemblyPanelOpen &&
-                                      selectedCase?.name === testCase.name,
-                                  }"
-                                  :title="
-                                    disassemblyPanelOpen &&
-                                    selectedCase?.name === testCase.name
-                                      ? 'Hide disassembly'
-                                      : `Open ${testCase.name} disassembly`
-                                  "
-                                  @click.stop="toggleDisassembly(testCase)"
-                                >
-                                  <i class="ri-code-s-slash-line"></i>
-                                </button>
-                                <span v-else class="path-pill">-</span>
-                              </td>
-                              <td>{{ testCase.returncode ?? '-' }}</td>
-                              <td>
-                                <button
-                                  v-if="testCase.wave"
-                                  type="button"
-                                  class="path-pill path-button"
-                                  :title="testCase.wave"
-                                  @click.stop="openWaveform(testCase.wave, testCase.name)"
-                                >
-                                  <i class="ri-pulse-line"></i>
-                                  {{ fileName(testCase.wave) }}
-                                </button>
-                                <span v-else class="path-pill">-</span>
-                              </td>
-                              <td>
-                                <span class="path-pill" :title="testCase.image || ''">
-                                  {{ testCase.image ? fileName(testCase.image) : '-' }}
-                                </span>
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </SplitterPanel>
-                    <SplitterPanel :size="42" :minSize="18" class="sim-terminal-pane">
-                      <section class="sim-terminal-card">
-                        <header class="sim-terminal-head">
-                          <div>
-                            <span>Simulation Terminal</span>
-                            <strong>{{ simTerminalTitle }}</strong>
-                          </div>
-                          <div class="sim-terminal-actions">
-                            <select
-                              v-if="simTerminalLogs.length"
-                              v-model="selectedLogPath"
-                              class="log-select compact"
-                              @change="loadSelectedLog"
-                            >
-                              <option
-                                v-for="log in simTerminalLogs"
-                                :key="log.path"
-                                :value="log.path"
-                              >
-                                {{ log.label }}
-                              </option>
-                            </select>
-                            <button
-                              type="button"
-                              class="icon-action compact"
-                              :disabled="logLoading || !selectedLogPath"
-                              @click="loadSelectedLog"
-                            >
+                          <td>
+                            <div class="case-name">
                               <i
                                 :class="
-                                  logLoading
-                                    ? 'ri-loader-4-line animate-spin'
-                                    : 'ri-refresh-line'
+                                  testCase.ok
+                                    ? 'ri-checkbox-circle-line'
+                                    : 'ri-close-circle-line'
                                 "
                               ></i>
+                              <span>
+                                <strong>{{ testCase.name }}</strong>
+                                <small
+                                  v-if="caseIssue(testCase)"
+                                  :title="caseIssue(testCase)"
+                                >
+                                  {{ caseIssue(testCase) }}
+                                </small>
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <span
+                              class="case-status"
+                              :class="testCase.ok ? 'ok' : 'failed'"
+                            >
+                              {{ testCase.ok ? 'PASS' : 'FAIL' }}
+                            </span>
+                          </td>
+                          <td>{{ caseCycles(testCase) }}</td>
+                          <td>
+                            <span class="path-pill">{{ caseTermination(testCase) }}</span>
+                          </td>
+                          <td>
+                            <button
+                              v-if="
+                                caseDifftestPc(testCase) && testCase.program?.disassembly
+                              "
+                              type="button"
+                              class="path-pill path-button difftest-jump"
+                              :title="`Open disassembly at ${caseDifftestPc(testCase)}`"
+                              @click.stop="
+                                openDisassembly(testCase, caseDifftestPc(testCase))
+                              "
+                            >
+                              <i class="ri-focus-3-line"></i>
+                              {{ caseDifftestStatus(testCase) }}
+                              <small>{{ caseDifftestPc(testCase) }}</small>
                             </button>
-                          </div>
-                        </header>
-                        <div
-                          v-if="selectedCase && !selectedCase.ok && selectedCase.failure"
-                          class="sim-failure-summary"
-                        >
-                          <strong>{{
-                            selectedCase.failure.message ||
-                            titleCase(selectedCase.failure.kind || 'simulation failure')
-                          }}</strong>
-                          <span v-if="selectedCase.failure.first_error">{{
-                            selectedCase.failure.first_error
-                          }}</span>
-                        </div>
-                        <pre class="sim-terminal-output">{{ simTerminalContent }}</pre>
-                      </section>
-                    </SplitterPanel>
-                  </Splitter>
-                  <template v-else>
-                    <div v-if="simResultIsStale" class="sim-stale-banner">
-                      <i class="ri-time-line"></i>
-                      <span
-                        >{{ simResultFreshness.message }} Run again to refresh these case
-                        results.</span
-                      >
-                    </div>
-                    <div v-if="cases.length === 0" class="empty-panel">
-                      <i class="ri-file-list-3-line"></i>
-                      <span>No simulation case result yet.</span>
-                    </div>
-                    <div v-else class="cases-table-wrap">
-                      <table class="cases-table">
-                        <thead>
-                          <tr>
-                            <th>Case</th>
-                            <th>Status</th>
-                            <th>Cycles</th>
-                            <th>Outcome</th>
-                            <th>Difftest</th>
-                            <th>Code</th>
-                            <th>RC</th>
-                            <th>Wave</th>
-                            <th>Image</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr
-                            v-for="testCase in cases"
-                            :key="testCase.name"
-                            :class="{
-                              selected: selectedCase?.name === testCase.name,
-                              failed: !testCase.ok,
-                            }"
-                            @click="selectCase(testCase)"
-                          >
-                            <td>
-                              <div class="case-name">
-                                <i
-                                  :class="
-                                    testCase.ok
-                                      ? 'ri-checkbox-circle-line'
-                                      : 'ri-close-circle-line'
-                                  "
-                                ></i>
-                                <span>
-                                  <strong>{{ testCase.name }}</strong>
-                                  <small
-                                    v-if="caseIssue(testCase)"
-                                    :title="caseIssue(testCase)"
-                                  >
-                                    {{ caseIssue(testCase) }}
-                                  </small>
-                                </span>
-                              </div>
-                            </td>
-                            <td>
-                              <span
-                                class="case-status"
-                                :class="testCase.ok ? 'ok' : 'failed'"
-                              >
-                                {{ testCase.ok ? 'PASS' : 'FAIL' }}
-                              </span>
-                            </td>
-                            <td>{{ caseCycles(testCase) }}</td>
-                            <td>
-                              <span class="path-pill">{{
-                                caseTermination(testCase)
-                              }}</span>
-                            </td>
-                            <td>
-                              <button
-                                v-if="
-                                  caseDifftestPc(testCase) &&
-                                  testCase.program?.disassembly
-                                "
-                                type="button"
-                                class="path-pill path-button difftest-jump"
-                                :title="`Open disassembly at ${caseDifftestPc(testCase)}`"
-                                @click.stop="
-                                  openDisassembly(testCase, caseDifftestPc(testCase))
-                                "
-                              >
-                                <i class="ri-focus-3-line"></i>
-                                {{ caseDifftestStatus(testCase) }}
-                                <small>{{ caseDifftestPc(testCase) }}</small>
-                              </button>
-                              <span v-else class="path-pill">{{
-                                caseDifftestStatus(testCase)
-                              }}</span>
-                            </td>
-                            <td>
-                              <button
-                                v-if="testCase.program?.disassembly"
-                                type="button"
-                                class="case-icon-action"
-                                :class="{
-                                  active:
-                                    disassemblyPanelOpen &&
-                                    selectedCase?.name === testCase.name,
-                                }"
-                                :title="
+                            <span v-else class="path-pill">{{
+                              caseDifftestStatus(testCase)
+                            }}</span>
+                          </td>
+                          <td>
+                            <button
+                              v-if="testCase.program?.disassembly"
+                              type="button"
+                              class="case-icon-action"
+                              :class="{
+                                active:
                                   disassemblyPanelOpen &&
-                                  selectedCase?.name === testCase.name
-                                    ? 'Hide disassembly'
-                                    : `Open ${testCase.name} disassembly`
-                                "
-                                @click.stop="toggleDisassembly(testCase)"
-                              >
-                                <i class="ri-code-s-slash-line"></i>
-                              </button>
-                              <span v-else class="path-pill">-</span>
-                            </td>
-                            <td>{{ testCase.returncode ?? '-' }}</td>
-                            <td>
-                              <button
-                                v-if="testCase.wave"
-                                type="button"
-                                class="path-pill path-button"
-                                :title="testCase.wave"
-                                @click.stop="openWaveform(testCase.wave, testCase.name)"
-                              >
-                                <i class="ri-pulse-line"></i>
-                                {{ fileName(testCase.wave) }}
-                              </button>
-                              <span v-else class="path-pill">-</span>
-                            </td>
-                            <td>
-                              <span class="path-pill" :title="testCase.image || ''">
-                                {{ testCase.image ? fileName(testCase.image) : '-' }}
-                              </span>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </template>
+                                  selectedCase?.name === testCase.name,
+                              }"
+                              :title="
+                                disassemblyPanelOpen &&
+                                selectedCase?.name === testCase.name
+                                  ? 'Hide disassembly'
+                                  : `Open ${testCase.name} disassembly`
+                              "
+                              @click.stop="toggleDisassembly(testCase)"
+                            >
+                              <i class="ri-code-s-slash-line"></i>
+                            </button>
+                            <span v-else class="path-pill">-</span>
+                          </td>
+                          <td>{{ testCase.returncode ?? '-' }}</td>
+                          <td>
+                            <button
+                              v-if="testCase.wave"
+                              type="button"
+                              class="path-pill path-button"
+                              :title="testCase.wave"
+                              @click.stop="openWaveform(testCase.wave, testCase.name)"
+                            >
+                              <i class="ri-pulse-line"></i>
+                              {{ fileName(testCase.wave) }}
+                            </button>
+                            <span v-else class="path-pill">-</span>
+                          </td>
+                          <td>
+                            <span class="path-pill" :title="testCase.image || ''">
+                              {{ testCase.image ? fileName(testCase.image) : '-' }}
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
                 <aside v-if="disassemblyPanelOpen" class="sim-disassembly-pane">
                   <FrontendDisassemblyViewer
@@ -2853,33 +2651,9 @@ const simRunSubtitle = computed(() => {
   if (!cases.value.length) return 'No simulation result yet'
   return simResultFreshness.value.message
 })
-const shouldShowSimTerminal = computed(
-  () =>
-    isSimStep.value &&
-    (runBusy.value || cases.value.length > 0 || textViewFiles.value.length > 0),
-)
-const simTerminalLogs = computed(() => textViewFiles.value)
 const selectedDisassemblyPath = computed(
   () => selectedCase.value?.program?.disassembly || '',
 )
-const simTerminalTitle = computed(() => {
-  if (runBusy.value) return `Running ${runningSimSuiteLabel.value}`
-  if (selectedCase.value?.name)
-    return `${selectedCase.value.name} · ${selectedCase.value.ok ? 'PASS' : 'FAIL'}`
-  if (resultSimRunContext.value) return simContextLabel(resultSimRunContext.value)
-  return simSuiteLabel.value
-})
-const simTerminalContent = computed(() => {
-  if (logContent.value) return logContent.value
-  if (runBusy.value) {
-    return [
-      `Running ${runningSimSuiteLabel.value}...`,
-      'Waiting for simulation output.',
-      'The terminal will refresh when the run completes.',
-    ].join('\n')
-  }
-  return 'No simulation output yet.'
-})
 const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
   {
     label: 'Design',
@@ -6473,29 +6247,6 @@ button:disabled {
   overflow: hidden;
 }
 
-.sim-cases-splitter {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  border: 0;
-  background: transparent;
-}
-
-.sim-cases-pane,
-.sim-terminal-pane {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.sim-cases-pane {
-  gap: 8px;
-}
-
 .summary-panel,
 .review-panel,
 .elab-panel,
@@ -8128,117 +7879,6 @@ button:disabled {
 
 .step-stale-banner {
   margin: 8px 10px 0;
-}
-
-.sim-terminal-card {
-  display: flex;
-  min-height: 180px;
-  max-height: 300px;
-  flex: 0 0 220px;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: #0f172a;
-}
-
-.sim-terminal-pane .sim-terminal-card {
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: none;
-}
-
-.sim-terminal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-shrink: 0;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
-  background: rgba(15, 23, 42, 0.92);
-  color: #e5e7eb;
-}
-
-.sim-terminal-head div:first-child {
-  min-width: 0;
-}
-
-.sim-terminal-head span,
-.sim-terminal-head strong {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sim-terminal-head span {
-  margin-bottom: 2px;
-  color: #94a3b8;
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.sim-terminal-head strong {
-  font-size: 12px;
-}
-
-.sim-terminal-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.sim-terminal-actions .log-select {
-  max-width: 240px;
-  border-color: rgba(148, 163, 184, 0.34);
-  background: #111827;
-  color: #e5e7eb;
-}
-
-.sim-terminal-actions .icon-action {
-  border-color: rgba(148, 163, 184, 0.34);
-  background: #111827;
-  color: #e5e7eb;
-}
-
-.sim-terminal-output {
-  flex: 1;
-  min-height: 0;
-  margin: 0;
-  overflow: auto;
-  padding: 10px 12px;
-  background: #020617;
-  color: #d1d5db;
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-
-.sim-failure-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(239, 68, 68, 0.28);
-  background: rgba(127, 29, 29, 0.28);
-  color: #fecaca;
-}
-
-.sim-failure-summary strong {
-  font-size: 11px;
-}
-
-.sim-failure-summary span {
-  overflow: hidden;
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .cases-table {
