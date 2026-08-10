@@ -21,16 +21,15 @@ export function useAppWindowClose(cleanup: () => Promise<boolean | void>) {
             shouldConfirmClose = shouldClose !== false
           } catch (error) {
             console.error('Failed to clean up workspace before window close:', error)
+          }
+          if (!shouldConfirmClose) {
+            isHandlingClose = false
+            return
+          }
+          try {
+            await desktopApi.window.confirmClose()
           } finally {
-            if (!shouldConfirmClose) {
-              isHandlingClose = false
-              return
-            }
-            try {
-              await desktopApi.window.confirmClose()
-            } finally {
-              isHandlingClose = false
-            }
+            isHandlingClose = false
           }
         })
       })

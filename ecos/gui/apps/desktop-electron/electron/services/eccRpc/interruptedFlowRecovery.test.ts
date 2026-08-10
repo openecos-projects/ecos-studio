@@ -22,7 +22,9 @@ async function writeJson(path: string, data: unknown): Promise<void> {
 
 describe('recoverInterruptedFlow', () => {
   afterEach(async () => {
-    await Promise.all(roots.splice(0).map((root) => rm(root, { force: true, recursive: true })))
+    await Promise.all(
+      roots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
+    )
     rename.mockClear()
   })
 
@@ -62,7 +64,9 @@ describe('recoverInterruptedFlow', () => {
       'Incomplete',
       'Incomplete',
     ])
-    const subflow = JSON.parse(await readFile(join(root, 'Floorplan_ecc', 'subflow.json'), 'utf8'))
+    const subflow = JSON.parse(
+      await readFile(join(root, 'Floorplan_ecc', 'subflow.json'), 'utf8'),
+    )
     expect(subflow.steps.map((step: { state: string }) => step.state)).toEqual([
       'Success',
       'Incomplete',
@@ -83,7 +87,9 @@ describe('recoverInterruptedFlow', () => {
     const result = await recoverInterruptedFlow(root)
 
     expect(result.recoveredSteps).toBe(1)
-    expect(result.errors).toContainEqual(expect.stringContaining('subflow recovery failed'))
+    expect(result.errors).toContainEqual(
+      expect.stringContaining('subflow recovery failed'),
+    )
     const flow = JSON.parse(await readFile(join(root, 'home', 'flow.json'), 'utf8'))
     expect(flow.steps[0].state).toBe('Incomplete')
   })
@@ -99,7 +105,9 @@ describe('recoverInterruptedFlow', () => {
     const result = await recoverInterruptedFlow(root)
 
     expect(result).toMatchObject({ recoveredSteps: 0 })
-    expect(result.errors).toContainEqual(expect.stringContaining('flow.json recovery failed'))
+    expect(result.errors).toContainEqual(
+      expect.stringContaining('flow.json recovery failed'),
+    )
     await expect(readFile(flowPath, 'utf8')).resolves.toBe(invalidFlow)
   })
 
@@ -117,7 +125,9 @@ describe('recoverInterruptedFlow', () => {
     const result = await recoverInterruptedFlow(root)
 
     expect(result.recoveredSteps).toBe(1)
-    expect(result.errors).toContainEqual(expect.stringContaining('subflow recovery failed'))
+    expect(result.errors).toContainEqual(
+      expect.stringContaining('subflow recovery failed'),
+    )
     const flow = JSON.parse(await readFile(join(root, 'home', 'flow.json'), 'utf8'))
     expect(flow.steps[0].state).toBe('Incomplete')
     await expect(readFile(subflowPath, 'utf8')).resolves.toBe(invalidSubflow)

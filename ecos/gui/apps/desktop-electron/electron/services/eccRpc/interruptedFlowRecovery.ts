@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { chmod, open, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 
 const RETRY_DELAY_MS = 100
 const WRITE_ATTEMPTS = 3
@@ -62,9 +62,11 @@ function parseFlowDocument(raw: string, label: string, requireTool = true): Flow
 
 async function resolveWorkspaceFile(root: string, ...parts: string[]): Promise<string> {
   const candidate = resolve(root, ...parts)
-  if (!isWithin(root, candidate)) throw new Error(`path is outside workspace: ${candidate}`)
+  if (!isWithin(root, candidate))
+    throw new Error(`path is outside workspace: ${candidate}`)
   const path = await realpath(candidate)
-  if (!isWithin(root, path)) throw new Error(`path resolves outside workspace: ${candidate}`)
+  if (!isWithin(root, path))
+    throw new Error(`path resolves outside workspace: ${candidate}`)
   return path
 }
 
@@ -101,8 +103,16 @@ async function writeJsonAtomically(path: string, data: FlowDocument): Promise<vo
 }
 
 async function recoverSubflow(root: string, step: FlowStep): Promise<void> {
-  const path = await resolveWorkspaceFile(root, workspaceStepDirectoryName(step), 'subflow.json')
-  const flow = parseFlowDocument(await readFile(path, 'utf8'), `subflow for ${step.name}`, false)
+  const path = await resolveWorkspaceFile(
+    root,
+    workspaceStepDirectoryName(step),
+    'subflow.json',
+  )
+  const flow = parseFlowDocument(
+    await readFile(path, 'utf8'),
+    `subflow for ${step.name}`,
+    false,
+  )
   let changed = false
   for (const substep of flow.steps) {
     if (!isOngoing(substep.state)) continue
@@ -127,7 +137,9 @@ export async function recoverInterruptedFlow(
     flow = parseFlowDocument(await readFile(flowPath, 'utf8'), 'flow.json')
   } catch (error) {
     return {
-      errors: [`flow.json recovery failed: ${error instanceof Error ? error.message : String(error)}`],
+      errors: [
+        `flow.json recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+      ],
       recoveredSteps: 0,
     }
   }
@@ -140,7 +152,9 @@ export async function recoverInterruptedFlow(
     await writeJsonAtomically(flowPath, flow)
   } catch (error) {
     return {
-      errors: [`flow.json recovery failed: ${error instanceof Error ? error.message : String(error)}`],
+      errors: [
+        `flow.json recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+      ],
       recoveredSteps: 0,
     }
   }
