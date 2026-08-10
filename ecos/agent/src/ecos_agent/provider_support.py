@@ -13,6 +13,7 @@ from ecos_agent.contracts import (
     GUI_WORKSPACE_FLOW_STEPS,
     GuiChatResponseProposal,
     GuiWorkspaceSetupProposal,
+    StageRoutingProposal,
 )
 from ecos_agent.messages import (
     cancellation_message,
@@ -855,6 +856,24 @@ def _propose_gui_chat_response(context: dict[str, Any]) -> GuiChatResponsePropos
     try:
         return GuiChatResponseProposal.model_validate(
             provider.respond_to_gui_chat(request_context)
+        )
+    finally:
+        register_interrupt(None)
+        provider.close()
+
+
+def _propose_stage_routing(context: dict[str, Any]) -> StageRoutingProposal:
+    progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
+    cwd = Path.cwd()
+    provider = create_required_codex_provider(
+        cwd=cwd,
+        runtime_workspace_roots=(cwd,),
+        progress_callback=progress_callback,
+    )
+    register_interrupt(provider.interrupt)
+    try:
+        return StageRoutingProposal.model_validate(
+            provider.propose_stage_routing(request_context)
         )
     finally:
         register_interrupt(None)

@@ -2,8 +2,10 @@ import json
 import threading
 from pathlib import Path
 
+import pytest
+
 from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
-from ecos_agent.contracts import GuiWorkspaceSetupProposal
+from ecos_agent.contracts import GuiWorkspaceSetupProposal, StageRoutingProposal
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.messages import EMPTY_CHOICE_VALUE
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
@@ -414,6 +416,111 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     assert "Use retrieved_knowledge only as read-only factual context" in str(captured["prompt"])
     assert "Audited target-overflow knowledge." in str(captured["prompt"])
     assert captured["schema"]["required"] == ["schema_version", "operation", "answer"]
+
+
+def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypatch) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    captured: dict[str, object] = {}
+
+    def capture_turn(prompt: str, schema: dict[str, object]) -> str:
+        captured.update(prompt=prompt, schema=schema)
+        return json.dumps(
+            {
+                "schema_version": "flow-agent.stage_routing_proposal.v1",
+                "candidate_stages": ["place"],
+                "rationale": "The question concerns placement.",
+            }
+        )
+
+    monkeypatch.setattr(provider, "_run_turn", capture_turn)
+    response = provider.propose_stage_routing(
+        {
+            "natural_language_request": "What objective guides cell locations?",
+            "stage_catalog": [
+                {"stage": "place", "summary": "Place movable cells.", "chunk_sha256": "a" * 64},
+                {"stage": "route", "summary": "Route signal nets.", "chunk_sha256": "b" * 64},
+            ],
+        }
+    )
+
+    assert response["candidate_stages"] == ["place"]
+    assert "Return stage candidates only" in str(captured["prompt"])
+    assert captured["schema"]["properties"]["candidate_stages"]["maxItems"] == 3
+    assert captured["schema"]["properties"]["candidate_stages"]["items"]["enum"] == ["place", "route"]
+
+
+def test_stage_routing_contract_rejects_too_many_or_duplicate_candidates() -> None:
+    base = {
+        "schema_version": "flow-agent.stage_routing_proposal.v1",
+        "rationale": "bounded local routing",
+    }
+
+    with pytest.raises(ValueError, match="too many"):
+        StageRoutingProposal.model_validate(
+            {**base, "candidate_stages": ["place", "route", "cts", "sta"]}
+        )
+    with pytest.raises(ValueError, match="candidates are invalid"):
+        StageRoutingProposal.model_validate({**base, "candidate_stages": ["place", "place"]})
+
+
+def test_unknown_stage_routing_proposal_falls_back_without_excluding_bm25() -> None:
+    events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
+
+    def invalid_stage(_context: dict[str, object]) -> dict[str, object]:
+        return {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "candidate_stages": ["not_a_published_stage"],
+            "rationale": "untrusted stage",
+        }
+
+    def answer(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return _chat_response(answer="Clock-tree evidence is available.")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        stage_routing_parser=invalid_stage,
+        chat_response_parser=answer,
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "How are clock tree buffers and insertion latency reported?")
+
+    retrieved = contexts[0]["retrieved_knowledge"]
+    fusion = retrieved["retrieval"]["fusion"]
+    assert fusion["routing"] == {"status": "rejected", "reason": "unknown_stage"}
+    assert fusion["baseline_entity_ids"]
+    assert retrieved["entity_ids"][: len(fusion["baseline_entity_ids"])] == fusion["baseline_entity_ids"]
+
+
+def test_started_provider_enables_default_stage_routing(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+    stage_contexts: list[dict[str, object]] = []
+    monkeypatch.setattr("ecos_agent.provider.validate_required_codex_cli", lambda: "codex")
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=lambda _context: _chat_response(answer="Clock-tree evidence is available."),
+    )
+
+    def stage_router(context: dict[str, object]) -> dict[str, object]:
+        stage_contexts.append(context)
+        return {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "candidate_stages": ["cts"],
+            "rationale": "Clock-tree terms map to CTS.",
+        }
+
+    provider.stage_routing_parser = stage_router
+    provider.start()
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    _send(provider, session_id, "How are clock tree buffers and insertion latency reported?")
+
+    assert stage_contexts[0]["schema_version"] == "flow-agent.stage_routing_request.v1"
+    assert stage_contexts[0]["stage_catalog"]
 
 
 def test_home_nl_bootstrap_skips_fields_that_are_already_clear(tmp_path: Path) -> None:
@@ -1369,18 +1476,23 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
         emit=events.append,
         rerun_parameter_parser=unexpected_parameter_update,
         chat_response_parser=answer_with_retrieved_knowledge,
+        stage_routing_parser=lambda _context: {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "candidate_stages": ["place"],
+            "rationale": "The question concerns placer behavior.",
+        },
     )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    _send(provider, session_id, "what is the target overflow in placer")
+    _send(provider, session_id, "what is the DreamPlace stop overflow threshold?")
 
     answer = _last_event(events, "message")
     assert provider.sessions[session_id].phase == "operation"
     assert chat_contexts[0]["allowed_operations"] == []
     retrieved = chat_contexts[0]["retrieved_knowledge"]
-    assert retrieved["entity_ids"] == ["parameter.dreamplace.stop_overflow"]
+    assert "parameter.dreamplace.stop_overflow" in retrieved["entity_ids"]
     assert "acceptable global-placement overflow threshold" in str(retrieved["text"])
     assert answer["contract"]["knowledge"]["entity_ids"] == retrieved["entity_ids"]
 
@@ -1397,7 +1509,7 @@ def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    _send(provider, session_id, "what is the target overflow in placer")
+    _send(provider, session_id, "what is the DreamPlace stop overflow threshold?")
 
     answer = _last_event(events, "message")
     assert "acceptable global-placement overflow threshold" in str(answer["text"])

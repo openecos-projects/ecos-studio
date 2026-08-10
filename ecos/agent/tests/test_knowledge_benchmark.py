@@ -148,3 +148,57 @@ def test_frozen_test_split_meets_the_lexical_retrieval_quality_gate(tmp_path: Pa
     assert test["subsets"]["semantic_en"]["recall_at_3"] >= 0.90
     assert test["subsets"]["semantic_zh"]["recall_at_3"] >= 0.90
     assert test["subsets"]["no_answer"]["no_answer_false_positive_rate"] <= 0.05
+
+
+def test_ablation_suite_replays_hash_locked_stage_proposals(tmp_path: Path) -> None:
+    cases = [
+        json.loads(line)
+        for line in (BENCHMARK_ROOT / "benchmark.v1.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    case = next(item for item in cases if item["split"] == "test" and item["stage"] == "place")
+    replay = tmp_path / "routing-proposals.v1.jsonl"
+    replay.write_text(
+        json.dumps(
+            {
+                "schema_version": "ecos-stage-routing-replay.v1",
+                "query_sha256": hashlib.sha256(case["query"].encode("utf-8")).hexdigest(),
+                "candidate_stages": ["place"],
+                "rationale": "offline replay",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "ablation.json"
+
+    subprocess.run(
+        [
+            "uv",
+            "run",
+            "python",
+            "scripts/evaluate_knowledge_retrieval.py",
+            "--ablation-suite",
+            "--routing-proposals",
+            str(replay),
+            "--top-k",
+            "3",
+            "--output",
+            str(output),
+        ],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    test = payload["ablation"]["test"]
+    assert set(test["strategies"]) == {
+        "global_bm25",
+        "deterministic_scope_bm25",
+        "codex_hard_filter",
+        "hybrid_union",
+    }
+    assert test["routing_replay"]["sha256"] == hashlib.sha256(replay.read_bytes()).hexdigest()
+    assert test["strategies"]["hybrid_union"]["overall"]["unsafe_exclusion_rate"] == 0.0
+    assert {"query_sha256", "candidate_stages", "final_entity_ids"} <= set(test["traces"][0])

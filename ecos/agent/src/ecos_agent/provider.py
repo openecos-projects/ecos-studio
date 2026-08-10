@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from ecos_agent.codex_provider import CodexProviderError, validate_required_codex_cli
-from ecos_agent.contracts import GuiChatResponseProposal, GuiWorkspaceSetupProposal
+from ecos_agent.contracts import (
+    GuiChatResponseProposal,
+    GuiWorkspaceSetupProposal,
+    StageRoutingProposal,
+)
 from ecos_agent.knowledge_bundle import KnowledgeAnswer
 from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, load_production_retrieval_config
 from ecos_agent.step_knowledge import StepKnowledge, load_default_step_knowledge
@@ -107,6 +112,7 @@ from ecos_agent.provider_support import (
     _path_was_explicitly_provided,
     _prompt_for_phase,
     _propose_gui_chat_response,
+    _propose_stage_routing,
     _propose_gui_workspace_path_discovery,
     _propose_gui_workspace_rerun_patch,
     _propose_gui_workspace_setup,
@@ -128,6 +134,7 @@ _WorkspaceSetupParser = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | d
 _WorkspacePathRecommender = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]]
 _ChatResponseParser = Callable[[dict[str, Any]], GuiChatResponseProposal | dict[str, Any]]
+_StageRoutingParser = Callable[[dict[str, Any]], StageRoutingProposal | dict[str, Any]]
 _CHAT_GREETING_PREFIXES = ("hello", "hi", "hey", "你好", "您好", "嗨")
 _CHAT_QUESTION_PREFIXES = (
     "what ",
@@ -158,6 +165,11 @@ def _is_conversational_input(message: str) -> bool:
         or normalized.startswith(_CHAT_QUESTION_PREFIXES)
         or normalized.endswith(("?", "？"))
     )
+
+
+def _proposal_sha256(proposal: StageRoutingProposal) -> str:
+    payload = json.dumps(proposal.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _known_projects(value: object) -> list[tuple[str, str]]:
@@ -254,6 +266,7 @@ class EcosAgentProvider:
         rerun_parameter_parser: _RerunParameterParser | None = None,
         knowledge: tuple[StepKnowledge, ...] | None = None,
         chat_response_parser: _ChatResponseParser | None = None,
+        stage_routing_parser: _StageRoutingParser | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
@@ -264,12 +277,16 @@ class EcosAgentProvider:
             self.knowledge, config=load_production_retrieval_config()
         )
         self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
+        self._uses_default_stage_routing = stage_routing_parser is None
+        self.stage_routing_parser = stage_routing_parser or _propose_stage_routing
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
+        self._started = False
 
     def start(self, _request: Mapping[str, Any] | None = None) -> None:
         validate_required_codex_cli()
         self.stopped = False
+        self._started = True
 
     def start_session(self, request: Mapping[str, Any]) -> dict[str, str]:
         session_id = _optional_text(request.get("sessionId")) or uuid.uuid4().hex
@@ -380,6 +397,7 @@ class EcosAgentProvider:
 
     def stop(self, _request: Mapping[str, Any] | None = None) -> None:
         self.stopped = True
+        self._started = False
 
     def _handle_input(self, session: _Session, message: str) -> None:
         handlers = {
@@ -445,13 +463,55 @@ class EcosAgentProvider:
     def _answer_non_state_input(
         self, session: _Session, message: str, *, allow_operations: bool
     ) -> None:
-        answer = self._knowledge_answer(message)
+        answer = self._knowledge_answer(session, message)
         self._answer_with_codex(
             session, message, allow_operations=allow_operations, knowledge_answer=answer
         )
 
-    def _knowledge_answer(self, message: str) -> KnowledgeAnswer | None:
-        return self.knowledge_retriever.reply(message)
+    def _knowledge_answer(self, session: _Session, message: str) -> KnowledgeAnswer | None:
+        baseline = self.knowledge_retriever.reply_global(message)
+        deterministic_scope = self.knowledge_retriever.stage_scope(message)
+        stages: tuple[str, ...] = ()
+        routing: dict[str, object] = {
+            "status": "not_requested",
+            "reason": "deterministic_stage_scope",
+        }
+        if not deterministic_scope.candidate_stages and (
+            self._started or not self._uses_default_stage_routing
+        ):
+            stages, routing = self._propose_knowledge_stages(session, message)
+        elif not deterministic_scope.candidate_stages:
+            routing = {"status": "not_requested", "reason": "provider_not_started"}
+        answer = self.knowledge_retriever.reply_hybrid(
+            message,
+            candidate_stages=stages,
+            deterministic_scope=deterministic_scope,
+            routing=routing,
+        )
+        return answer or baseline
+
+    def _propose_knowledge_stages(
+        self, session: _Session, message: str
+    ) -> tuple[tuple[str, ...], dict[str, object]]:
+        context = {
+            "schema_version": "flow-agent.stage_routing_request.v1",
+            "natural_language_request": message,
+            "stage_catalog": list(self.knowledge_retriever.stage_catalog),
+            "_progress_callback": lambda text: self._progress(session, text),
+            "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
+        }
+        try:
+            proposal = StageRoutingProposal.model_validate(self.stage_routing_parser(context))
+            stages = proposal.candidate_stages
+            if any(stage not in self.knowledge_retriever.stage_ids for stage in stages):
+                return (), {"status": "rejected", "reason": "unknown_stage"}
+            return stages, {
+                "status": "accepted" if stages else "abstained",
+                "candidate_stages": list(stages),
+                "proposal_sha256": _proposal_sha256(proposal),
+            }
+        except (CodexProviderError, ValueError):
+            return (), {"status": "fallback", "reason": "proposal_unavailable"}
 
     def _select_home_ready(self, session: _Session, message: str, choice: str) -> None:
         if choice == "1":

@@ -21,6 +21,7 @@ TOKENIZER_VERSION = "ecos-knowledge-tokenizer.v1"
 BACKEND = "sqlite_fts5_bm25"
 TOP_K = 3
 MAX_QUERY_TOKENS = 32
+STAGE_ROUTED_MIN_TOKEN_OVERLAP = 2
 FIELD_WEIGHTS = (10.0, 20.0, 10.0, 1.0)
 _FIELD_NAMES = ("stage", "identifier", "reserved", "content")
 _STOP_TOKENS = frozenset({"a", "an", "and", "are", "by", "does", "for", "how", "in", "is", "of", "on", "or", "the", "to", "what", "with", "了", "何", "如", "是", "的", "算", "计", "指", "标", "如何", "计算", "指标"})
@@ -175,15 +176,127 @@ class GlobalKnowledgeRetriever:
         self._search_lock = threading.Lock()
 
     def reply(self, question: str) -> KnowledgeAnswer | None:
+        return self._reply(question, self.stage_scope(question))
+
+    @property
+    def stage_ids(self) -> tuple[str, ...]:
+        return tuple(sorted({record.stage for record in self._records}))
+
+    @property
+    def corpus_sha256(self) -> str:
+        return self._corpus_sha256
+
+    @property
+    def stage_catalog(self) -> tuple[dict[str, str], ...]:
+        catalog: list[dict[str, str]] = []
+        for stage in self.stage_ids:
+            record = next(
+                (
+                    item
+                    for item in self._records
+                    if item.stage == stage
+                    and item.entity.entity_id == f"algorithm.{stage}.execution"
+                ),
+                next(item for item in self._records if item.stage == stage),
+            )
+            catalog.append(
+                {
+                    "stage": stage,
+                    "summary": " ".join(record.text.split())[:1024],
+                    "chunk_sha256": record.entity.chunk_sha256,
+                }
+            )
+        return tuple(catalog)
+
+    def stage_scope(self, question: str) -> _StageScope:
+        return _infer_stage_scope(question, _acronym_tokens(question), self._records)
+
+    def reply_global(self, question: str) -> KnowledgeAnswer | None:
+        return self._reply(question, _StageScope())
+
+    def reply_for_stages(
+        self, question: str, candidate_stages: Iterable[str]
+    ) -> KnowledgeAnswer | None:
+        stages = self._validated_stages(candidate_stages)
+        if not stages:
+            return None
+        return self._reply(
+            question,
+            _StageScope(candidate_stages=stages, reason="external_stage_routing_hint"),
+        )
+
+    def reply_hybrid(
+        self,
+        question: str,
+        *,
+        candidate_stages: Iterable[str] = (),
+        deterministic_scope: _StageScope | None = None,
+        routing: dict[str, object] | None = None,
+    ) -> KnowledgeAnswer | None:
+        baseline_scope = _StageScope()
+        baseline = self._matches(question, baseline_scope) or ()
+        deterministic = deterministic_scope or self.stage_scope(question)
+        proposed = self._validated_stages(candidate_stages)
+        stages = tuple(dict.fromkeys((*deterministic.candidate_stages, *proposed)))
+        scoped = _StageScope(
+            candidate_stages=stages,
+            matched_entity_ids=deterministic.matched_entity_ids,
+            matched_keys=deterministic.matched_keys,
+            reason=(
+                "deterministic_and_codex_stage_hints"
+                if deterministic.candidate_stages and proposed
+                else deterministic.reason
+                if deterministic.candidate_stages
+                else "codex_stage_routing_hint"
+                if proposed
+                else "no_stage_hint"
+            ),
+        )
+        supplemental = self._matches(question, scoped) if stages else ()
+        if not baseline and not supplemental:
+            return None
+        fused = _fuse_matches(baseline, supplemental, self._config.top_k * 2)
+        return _answer(
+            question,
+            fused,
+            self._corpus_sha256,
+            self._config,
+            scoped,
+            fusion={
+                "strategy": "baseline_then_scoped_unique",
+                "baseline_entity_ids": [record.entity.entity_id for record, _score in baseline],
+                "deterministic_stage_scope": deterministic.contract(),
+                "supplemental_stage_scope": scoped.contract(),
+                "supplemental_entity_ids": [record.entity.entity_id for record, _score in supplemental],
+                "routing": routing or {"status": "not_requested"},
+                "stage_routing_min_token_overlap": STAGE_ROUTED_MIN_TOKEN_OVERLAP,
+                "max_items": self._config.top_k * 2,
+            },
+        )
+
+    def _reply(self, question: str, scope: _StageScope) -> KnowledgeAnswer | None:
+        matches = self._matches(question, scope)
+        if not matches:
+            return None
+        return _answer(question, matches, self._corpus_sha256, self._config, scope)
+
+    def _matches(
+        self, question: str, scope: _StageScope
+    ) -> tuple[tuple[_Record, float], ...] | None:
         query_tokens = tokenize(question, limit=self._config.max_query_tokens)
         if not query_tokens or _has_unknown_named_token(question, self._corpus_tokens):
             return None
         query_acronyms = _acronym_tokens(question)
-        scope = _infer_stage_scope(question, query_acronyms, self._records)
         matches = self._search(query_tokens, query_acronyms, _phrase_tokens(question), scope)
-        if not matches:
-            return None
-        return _answer(question, matches, self._corpus_sha256, self._config, scope)
+        return matches or None
+
+    def _validated_stages(self, candidate_stages: Iterable[str]) -> tuple[str, ...]:
+        stages = tuple(candidate_stages)
+        if len(set(stages)) != len(stages) or any(
+            not isinstance(stage, str) or stage not in self.stage_ids for stage in stages
+        ):
+            raise ValueError("stage routing candidates are not in the knowledge catalog")
+        return stages
 
     def _search(
         self,
@@ -418,11 +531,24 @@ def _is_confident_match(
     return (
         len(shared) >= config.min_token_overlap
         or record.key in scope.matched_keys
+        or _stage_routed_overlap(scope, shared)
         or bool(record.acronym_tokens.intersection(query_acronyms))
         or config.allow_metadata_match
         and bool(_normalized_tokens(record.metadata_tokens).intersection(_normalized_tokens(query_tokens)))
         or config.max_document_frequency > 0
         and any(document_frequency[token] <= config.max_document_frequency for token in shared)
+    )
+
+
+def _stage_routed_overlap(scope: _StageScope, shared: frozenset[str]) -> bool:
+    return (
+        scope.reason
+        in {
+            "external_stage_routing_hint",
+            "codex_stage_routing_hint",
+            "deterministic_and_codex_stage_hints",
+        }
+        and len(shared) >= STAGE_ROUTED_MIN_TOKEN_OVERLAP
     )
 
 
@@ -448,6 +574,7 @@ def _answer(
     corpus_sha256: str,
     config: RetrievalConfig,
     scope: _StageScope,
+    fusion: dict[str, object] | None = None,
 ) -> KnowledgeAnswer:
     entity_ids = tuple(record.entity.entity_id for record, _score in matches)
     source_ids = tuple(dict.fromkeys(source for record, _score in matches for source in record.entity.source_ids))
@@ -481,10 +608,25 @@ def _answer(
                 "config": config.contract(),
                 "stage_scope": scope.contract(),
                 "query_sha256": _sha256(question.encode("utf-8")),
+                **({"fusion": fusion} if fusion is not None else {}),
             },
             "matches": contract_matches,
         },
     )
+
+
+def _fuse_matches(
+    baseline: tuple[tuple[_Record, float], ...],
+    supplemental: tuple[tuple[_Record, float], ...] | None,
+    limit: int,
+) -> tuple[tuple[_Record, float], ...]:
+    fused = list(baseline)
+    seen = {record.key for record, _score in baseline}
+    for match in supplemental or ():
+        if match[0].key not in seen:
+            fused.append(match)
+            seen.add(match[0].key)
+    return tuple(fused[:limit])
 
 
 def _sha256(data: bytes) -> str:

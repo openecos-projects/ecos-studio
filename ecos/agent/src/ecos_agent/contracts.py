@@ -20,6 +20,7 @@ GUI_WORKSPACE_FLOW_STEPS = (
     "Harden",
 )
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_MAX_STAGE_ROUTING_CANDIDATES = 3
 
 
 class GuiWorkspaceSetupProposal(BaseModel):
@@ -168,6 +169,36 @@ class GuiChatResponseProposal(BaseModel):
         if (self.operation is None) == (self.answer is None):
             raise ValueError("chat response must contain exactly one route")
         return self
+
+
+class StageRoutingProposal(BaseModel):
+    """Untrusted read-only stage hints for knowledge retrieval only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flow-agent.stage_routing_proposal.v1"]
+    candidate_stages: tuple[str, ...]
+    rationale: str
+
+    @field_validator("candidate_stages")
+    @classmethod
+    def validate_candidate_stages(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) > _MAX_STAGE_ROUTING_CANDIDATES:
+            raise ValueError("stage routing has too many candidates")
+        normalized = tuple(stage.strip() for stage in value)
+        if len(set(normalized)) != len(normalized) or any(
+            not _IDENTIFIER.fullmatch(stage) for stage in normalized
+        ):
+            raise ValueError("stage routing candidates are invalid")
+        return normalized
+
+    @field_validator("rationale")
+    @classmethod
+    def validate_rationale(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 512:
+            raise ValueError("stage routing rationale is invalid")
+        return value
 
 
 def recommended_gui_workspace_setup() -> GuiWorkspaceSetupProposal:

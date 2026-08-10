@@ -14,6 +14,7 @@ from ecos_agent.contracts import (
     GUI_WORKSPACE_FLOW_STEPS,
     GuiChatResponseProposal,
     GuiWorkspaceSetupProposal,
+    StageRoutingProposal,
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal
@@ -141,6 +142,23 @@ class CodexAppServerProposalProvider:
             GuiChatResponseProposal,
         )
 
+    def propose_stage_routing(self, context: dict[str, Any]) -> dict[str, Any]:
+        stage_catalog = _stage_catalog(context.get("stage_catalog"))
+        return self._proposal(
+            {
+                "natural_language_request": context.get("natural_language_request"),
+                "stage_catalog": stage_catalog,
+            },
+            (
+                "Return one JSON object matching flow-agent.stage_routing_proposal.v1. "
+                "Return stage candidates only for read-only knowledge retrieval. "
+                "Use only stage names in stage_catalog. Do not answer the question, return operations, "
+                "commands, paths, workspace data, tool calls, or execution instructions."
+            ),
+            _stage_routing_output_schema(tuple(item["stage"] for item in stage_catalog)),
+            StageRoutingProposal,
+        )
+
     def _proposal(
         self,
         context: dict[str, Any],
@@ -148,7 +166,8 @@ class CodexAppServerProposalProvider:
         output_schema: dict[str, Any],
         model: type[GuiWorkspaceSetupProposal]
         | type[GuiWorkspaceRerunParameterProposal]
-        | type[GuiChatResponseProposal],
+        | type[GuiChatResponseProposal]
+        | type[StageRoutingProposal],
     ) -> dict[str, Any]:
         try:
             return model.model_validate(
@@ -327,6 +346,32 @@ def _allowed_operation_ids(value: object) -> list[str]:
     return allowed_ids
 
 
+def _stage_catalog(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list) or not value:
+        raise CodexProviderError("stage routing request has no stage catalog", failure_class="missing_input")
+    catalog: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise CodexProviderError("stage routing catalog is invalid", failure_class="missing_input")
+        stage = item.get("stage")
+        summary = item.get("summary")
+        chunk_sha256 = item.get("chunk_sha256")
+        if (
+            not isinstance(stage, str)
+            or not stage
+            or not isinstance(summary, str)
+            or not summary
+            or len(summary) > 1024
+            or not isinstance(chunk_sha256, str)
+            or len(chunk_sha256) != 64
+        ):
+            raise CodexProviderError("stage routing catalog is invalid", failure_class="missing_input")
+        catalog.append({"stage": stage, "summary": summary, "chunk_sha256": chunk_sha256})
+    if len(catalog) > 32 or len({item["stage"] for item in catalog}) != len(catalog):
+        raise CodexProviderError("stage routing catalog is invalid", failure_class="missing_input")
+    return catalog
+
+
 def create_required_codex_provider(
     *,
     cwd: Path | None = None,
@@ -484,5 +529,23 @@ def _gui_chat_response_output_schema(allowed_ids: list[str]) -> dict[str, Any]:
             },
             "operation": {"type": ["string", "null"], "enum": [*allowed_ids, None]},
             "answer": {"type": ["string", "null"], "maxLength": 4096},
+        },
+    }
+
+
+def _stage_routing_output_schema(stages: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "candidate_stages", "rationale"],
+        "properties": {
+            "schema_version": {"type": "string", "const": "flow-agent.stage_routing_proposal.v1"},
+            "candidate_stages": {
+                "type": "array",
+                "maxItems": 3,
+                "uniqueItems": True,
+                "items": {"type": "string", "enum": list(stages)},
+            },
+            "rationale": {"type": "string", "minLength": 1, "maxLength": 512},
         },
     }

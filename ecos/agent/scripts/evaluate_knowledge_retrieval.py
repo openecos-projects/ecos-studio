@@ -47,9 +47,30 @@ class CaseOutcome:
     audited_fallback: bool
 
 
+@dataclass(frozen=True)
+class AblationOutcome:
+    case: dict[str, object]
+    answer_ids: tuple[str, ...]
+    baseline_ids: tuple[str, ...]
+    candidate_stages: tuple[str, ...]
+    latency_ms: float
+    routing_status: str
+
+
+@dataclass(frozen=True)
+class RoutingReplay:
+    proposals: dict[str, tuple[str, ...]]
+    sha256: str
+    path: str
+
+
 def _sha256(value: object) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _query_sha256(query: str) -> str:
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()
 
 
 def _rank(answer_ids: tuple[str, ...], targets: list[str]) -> int | None:
@@ -63,8 +84,14 @@ def _percentile(samples: list[float], percentile: float) -> float:
 def _case_stages(case: dict[str, object]) -> tuple[str, ...]:
     if not case["answerable"]:
         return ("no_answer",)
-    entity_ids = case["required_evidence"] or case["target_entity_ids"]
-    return tuple(sorted({str(entity_id).split(".")[1] for entity_id in entity_ids}))
+    return _expected_stages(case)
+
+
+def _expected_stages(case: dict[str, object]) -> tuple[str, ...]:
+    if not case["answerable"]:
+        return ()
+    values = case["target_stage_entity_ids"]
+    return tuple(sorted({str(value).partition(":")[0] for value in values}))
 
 
 def _answer_checks(answer: object) -> tuple[tuple[str, ...], bool, bool]:
@@ -118,6 +145,106 @@ def _evaluate_cases(cases: list[dict[str, object]], frozen: FrozenRetrievalConfi
     return outcomes
 
 
+def _load_routing_replay(path: Path, stage_ids: tuple[str, ...]) -> RoutingReplay:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"routing proposal replay is unavailable: {path}") from exc
+    proposals: dict[str, tuple[str, ...]] = {}
+    for line_number, line in enumerate(raw.decode("utf-8").splitlines(), 1):
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"routing proposal replay line {line_number} is invalid") from exc
+        if not isinstance(item, dict) or set(item) != {
+            "schema_version", "query_sha256", "candidate_stages", "rationale"
+        }:
+            raise ValueError(f"routing proposal replay line {line_number} has invalid fields")
+        query_sha256 = item.get("query_sha256")
+        stages = item.get("candidate_stages")
+        rationale = item.get("rationale")
+        if (
+            item.get("schema_version") != "ecos-stage-routing-replay.v1"
+            or not isinstance(query_sha256, str)
+            or len(query_sha256) != 64
+            or not isinstance(stages, list)
+            or len(stages) > 3
+            or not all(isinstance(stage, str) and stage in stage_ids for stage in stages)
+            or len(set(stages)) != len(stages)
+            or not isinstance(rationale, str)
+            or not rationale.strip()
+            or len(rationale) > 512
+            or query_sha256 in proposals
+        ):
+            raise ValueError(f"routing proposal replay line {line_number} is invalid")
+        proposals[query_sha256] = tuple(stages)
+    return RoutingReplay(proposals, hashlib.sha256(raw).hexdigest(), str(path))
+
+
+def _replay_stages(replay: RoutingReplay, query: str) -> tuple[tuple[str, ...], str]:
+    stages = replay.proposals.get(_query_sha256(query))
+    return (stages, "replayed") if stages is not None else ((), "missing")
+
+
+def _evaluate_ablation_strategy(
+    cases: list[dict[str, object]],
+    frozen: FrozenRetrievalConfig,
+    replay: RoutingReplay,
+    strategy: str,
+) -> list[AblationOutcome]:
+    retriever = GlobalKnowledgeRetriever(load_default_step_knowledge(), config=frozen.retrieval)
+    outcomes: list[AblationOutcome] = []
+    for case in cases:
+        query = str(case["query"])
+        proposal_stages, routing_status = _replay_stages(replay, query)
+        started = time.perf_counter()
+        deterministic_scope = retriever.stage_scope(query)
+        if strategy == "global_bm25":
+            answer = retriever.reply_global(query)
+            baseline = answer
+            candidate_stages = ()
+        elif strategy == "deterministic_scope_bm25":
+            answer = retriever.reply(query)
+            baseline = None
+            candidate_stages = deterministic_scope.candidate_stages
+        elif strategy == "codex_hard_filter":
+            answer = retriever.reply_for_stages(query, proposal_stages)
+            baseline = None
+            candidate_stages = proposal_stages
+        elif strategy == "hybrid_union":
+            answer = retriever.reply_hybrid(
+                query,
+                candidate_stages=proposal_stages,
+                deterministic_scope=deterministic_scope,
+                routing={
+                    "status": routing_status,
+                    "candidate_stages": list(proposal_stages),
+                    "source": "hash_locked_replay",
+                },
+            )
+            candidate_stages = tuple(
+                dict.fromkeys((*deterministic_scope.candidate_stages, *proposal_stages))
+            )
+            baseline = None
+        else:
+            raise ValueError(f"unknown ablation strategy: {strategy}")
+        latency_ms = (time.perf_counter() - started) * 1000
+        if baseline is None:
+            baseline = retriever.reply_global(query)
+        answer_ids, _grounding, _attribution = _answer_checks(answer)
+        outcomes.append(
+            AblationOutcome(
+                case,
+                answer_ids,
+                tuple(baseline.entity_ids) if baseline is not None else (),
+                candidate_stages,
+                latency_ms,
+                routing_status,
+            )
+        )
+    return outcomes
+
+
 def _rate(values: list[bool]) -> float:
     return sum(values) / len(values) if values else 0.0
 
@@ -132,6 +259,12 @@ def _metrics(outcomes: list[CaseOutcome]) -> dict[str, float | int | dict[str, f
         set(outcome.case["required_evidence"]).issubset(outcome.answer_ids)
         for outcome in answerable
     ]
+    required_recall = [
+        len(set(outcome.case["required_evidence"]).intersection(outcome.answer_ids))
+        / len(outcome.case["required_evidence"])
+        for outcome in answerable
+        if outcome.case["required_evidence"]
+    ]
     denominator = len(ranks) or 1
     return {
         "cases": len(outcomes),
@@ -145,10 +278,93 @@ def _metrics(outcomes: list[CaseOutcome]) -> dict[str, float | int | dict[str, f
         "latency_ms_p95": _percentile(latencies, 0.95),
         "quality": {
             "required_evidence_all_recall": _rate(required),
+            "required_evidence_recall": sum(required_recall) / len(required_recall) if required_recall else 0.0,
             "grounding_coverage": _rate([bool(outcome.answer_ids) for outcome in answerable]),
             "grounding_pass_rate": _rate([outcome.grounding for outcome in resolved]),
             "attribution_pass_rate": _rate([outcome.attribution for outcome in resolved]),
             "audited_fallback_pass_rate": _rate([outcome.audited_fallback for outcome in [*resolved, *no_answer]]),
+        },
+    }
+
+
+def _ablation_metrics(outcomes: list[AblationOutcome]) -> dict[str, float | int]:
+    answerable = [outcome for outcome in outcomes if outcome.case["answerable"]]
+    targets = [list(outcome.case["target_entity_ids"]) for outcome in answerable]
+    ranks = [_rank(outcome.answer_ids, target) for outcome, target in zip(answerable, targets)]
+    required = [
+        set(outcome.case["required_evidence"]).issubset(outcome.answer_ids)
+        for outcome in answerable
+    ]
+    required_recall = [
+        len(set(outcome.case["required_evidence"]).intersection(outcome.answer_ids))
+        / len(outcome.case["required_evidence"])
+        for outcome in answerable
+        if outcome.case["required_evidence"]
+    ]
+    stage_recall = [
+        set(_expected_stages(outcome.case)).issubset(outcome.candidate_stages)
+        for outcome in answerable
+    ]
+    unsafe_exclusions = [
+        _rank(outcome.baseline_ids, list(outcome.case["target_entity_ids"])) is not None
+        and _rank(outcome.answer_ids, list(outcome.case["target_entity_ids"])) is None
+        for outcome in answerable
+    ]
+    no_answer = [outcome for outcome in outcomes if not outcome.case["answerable"]]
+    latencies = sorted(outcome.latency_ms for outcome in outcomes)
+    denominator = len(answerable) or 1
+    return {
+        "cases": len(outcomes),
+        "recall_at_1": sum(rank == 1 for rank in ranks) / denominator,
+        "recall_at_3": sum(rank is not None and rank <= 3 for rank in ranks) / denominator,
+        "mrr": sum(1 / rank if rank else 0 for rank in ranks) / denominator,
+        "required_evidence_all_recall": _rate(required),
+        "required_evidence_recall": sum(required_recall) / len(required_recall) if required_recall else 0.0,
+        "stage_candidate_recall": _rate(stage_recall),
+        "unsafe_exclusion_rate": _rate(unsafe_exclusions),
+        "no_answer_false_positive_rate": _rate([bool(outcome.answer_ids) for outcome in no_answer]),
+        "latency_ms_p50": _percentile(latencies, 0.50),
+        "latency_ms_p95": _percentile(latencies, 0.95),
+    }
+
+
+def _ablation_traces(outcomes: list[AblationOutcome]) -> list[dict[str, object]]:
+    return [
+        {
+            "case_id": outcome.case["id"],
+            "query_sha256": _query_sha256(str(outcome.case["query"])),
+            "required_evidence": list(outcome.case["required_evidence"]),
+            "expected_stages": list(_expected_stages(outcome.case)),
+            "candidate_stages": list(outcome.candidate_stages),
+            "baseline_entity_ids": list(outcome.baseline_ids),
+            "final_entity_ids": list(outcome.answer_ids),
+            "routing_status": outcome.routing_status,
+            "unsafe_excluded": (
+                bool(outcome.case["answerable"])
+                and _rank(outcome.baseline_ids, list(outcome.case["target_entity_ids"])) is not None
+                and _rank(outcome.answer_ids, list(outcome.case["target_entity_ids"])) is None
+            ),
+        }
+        for outcome in outcomes
+    ]
+
+
+def _ablation_result(
+    cases: list[dict[str, object]], frozen: FrozenRetrievalConfig, replay: RoutingReplay
+) -> dict[str, object]:
+    strategies = ("global_bm25", "deterministic_scope_bm25", "codex_hard_filter", "hybrid_union")
+    outcomes = {
+        strategy: _evaluate_ablation_strategy(cases, frozen, replay, strategy)
+        for strategy in strategies
+    }
+    return {
+        "strategies": {
+            strategy: {"overall": _ablation_metrics(items)} for strategy, items in outcomes.items()
+        },
+        "traces": _ablation_traces(outcomes["hybrid_union"]),
+        "routing_status_counts": {
+            status: sum(outcome.routing_status == status for outcome in outcomes["hybrid_union"])
+            for status in ("replayed", "missing")
         },
     }
 
@@ -388,11 +604,19 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, choices=(3, 5, 8))
     parser.add_argument("--field-weights", type=float, nargs=4, metavar=_WEIGHT_NAMES)
     parser.add_argument("--provider-binary", type=Path, help="headless PyInstaller provider binary")
+    parser.add_argument("--ablation-suite", action="store_true")
+    parser.add_argument("--routing-proposals", type=Path, help="hash-locked stage routing replay JSONL")
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+    if args.routing_proposals and not args.ablation_suite:
+        raise ValueError("--routing-proposals requires --ablation-suite")
+    if args.ablation_suite and args.select_dev_config:
+        raise ValueError("--ablation-suite cannot be combined with --select-dev-config")
+    if args.ablation_suite and not args.routing_proposals:
+        raise ValueError("--ablation-suite requires --routing-proposals")
     tracemalloc.start()
     if args.select_dev_config:
         payload: dict[str, object] = {
@@ -413,6 +637,28 @@ def main() -> int:
         }
         if len(sweep) == 1:
             payload["frozen_config"] = sweep[0].contract()
+        if args.ablation_suite:
+            catalog = GlobalKnowledgeRetriever(
+                load_default_step_knowledge(), config=frozen.retrieval
+            )
+            replay = _load_routing_replay(args.routing_proposals, catalog.stage_ids)
+            payload["ablation"] = {
+                split: {
+                    **_ablation_result(_load_cases(split), frozen, replay),
+                    "routing_replay": {
+                        "schema_version": "ecos-stage-routing-replay.v1",
+                        "path": replay.path,
+                        "sha256": replay.sha256,
+                        "live_codex_calls": 0,
+                        "replayed_proposal_count": sum(
+                            _query_sha256(str(case["query"])) in replay.proposals
+                            for case in _load_cases(split)
+                        ),
+                    },
+                    "corpus_sha256": catalog.corpus_sha256,
+                }
+                for split in splits
+            }
     _current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     payload["peak_bytes"] = peak

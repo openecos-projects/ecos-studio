@@ -146,6 +146,48 @@ def test_insufficient_identifier_evidence_preserves_global_search() -> None:
     }
 
 
+def test_hybrid_stage_routing_keeps_global_evidence_and_adds_scoped_evidence() -> None:
+    route = _bundle_for_stage(
+        "route",
+        ("route.first", (), "alpha beta gamma delta alpha beta gamma delta"),
+        ("route.second", (), "alpha beta gamma delta alpha beta gamma delta"),
+        ("route.third", (), "alpha beta gamma delta alpha beta gamma delta"),
+    )
+    place = _bundle_for_stage(
+        "place", ("place.target", (), "alpha beta gamma placement objective")
+    )
+    retriever = GlobalKnowledgeRetriever((route, place))
+
+    baseline = retriever.reply_global("alpha beta gamma delta")
+    answer = retriever.reply_hybrid(
+        "alpha beta gamma delta",
+        candidate_stages=("place",),
+        routing={"status": "accepted", "candidate_stages": ["place"]},
+    )
+
+    assert baseline is not None
+    assert answer is not None
+    assert answer.entity_ids[: len(baseline.entity_ids)] == baseline.entity_ids
+    assert "place.target" in answer.entity_ids
+    fusion = answer.contract["retrieval"]["fusion"]
+    assert fusion["strategy"] == "baseline_then_scoped_unique"
+    assert fusion["baseline_entity_ids"] == list(baseline.entity_ids)
+    assert fusion["routing"] == {"status": "accepted", "candidate_stages": ["place"]}
+
+
+def test_stage_routing_requires_catalog_stage_but_can_use_two_lexical_terms() -> None:
+    place = _bundle_for_stage("place", ("place.target", (), "alpha beta objective"))
+    retriever = GlobalKnowledgeRetriever((place,))
+
+    assert retriever.reply_global("alpha beta") is None
+    answer = retriever.reply_for_stages("alpha beta", ("place",))
+
+    assert answer is not None
+    assert answer.entity_ids == ("place.target",)
+    with pytest.raises(ValueError, match="knowledge catalog"):
+        retriever.reply_for_stages("alpha beta", ("unpublished",))
+
+
 def test_global_retriever_returns_no_knowledge_for_irrelevant_or_fts_syntax_input() -> None:
     retriever = _retriever()
 
