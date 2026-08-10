@@ -8,6 +8,7 @@
         :has-workspace="Boolean(currentProject?.path)"
         :signoff-package-export-enabled="signoffPackageExportEnabled"
         @menu-action="handleMenuAction"
+        @step-config="showStepConfigDialog = true"
       />
       <!-- 页面内容 -->
       <div
@@ -113,6 +114,32 @@
 
     <DesignFilesManageDialog v-model="showManageDialog" />
 
+    <Dialog
+      :visible="showStepConfigDialog"
+      modal
+      maximizable
+      header="Step Configuration"
+      :style="{ width: 'min(1120px, calc(100vw - 32px))' }"
+      :draggable="false"
+      @update:visible="updateStepConfigDialogVisibility"
+    >
+      <div class="step-config-dialog">
+        <WorkspaceStepConfigDialog
+          v-if="showStepConfigDialog"
+          ref="stepConfigDialogRef"
+        />
+      </div>
+      <template #footer>
+        <button
+          type="button"
+          class="rounded border border-(--border-color) px-3 py-1.5 text-xs text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
+          @click="closeStepConfigDialog"
+        >
+          Cancel
+        </button>
+      </template>
+    </Dialog>
+
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
     <Teleport to="body">
       <Transition name="runtime-backend-overlay">
@@ -164,8 +191,10 @@ import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
 import SignoffPackageReviewDialog from '@/components/SignoffPackageReviewDialog.vue'
 import Toast from 'primevue/toast'
+import Dialog from 'primevue/dialog'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
+import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
@@ -244,9 +273,29 @@ const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
+const showStepConfigDialog = ref(false)
+const stepConfigDialogRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
+
+function closeStepConfigDialog(): void {
+  if (
+    stepConfigDialogRef.value?.hasUnsavedChanges &&
+    !confirm('Discard unsaved configuration changes?')
+  ) {
+    return
+  }
+  showStepConfigDialog.value = false
+}
+
+function updateStepConfigDialogVisibility(visible: boolean): void {
+  if (visible) {
+    showStepConfigDialog.value = true
+    return
+  }
+  closeStepConfigDialog()
+}
 const pendingWorkspaceUpdatePath = ref('')
 const showWorkspaceUpdateBackupDialog = ref(false)
 const workspaceWizardTitle = computed(() => {
@@ -1313,6 +1362,11 @@ body.window-maximized .app-container {
   display: block;
   height: var(--terminal-panel-height);
   pointer-events: none;
+}
+
+.step-config-dialog {
+  height: min(72vh, 720px);
+  min-height: 420px;
 }
 
 .workspace-update-backup-overlay {

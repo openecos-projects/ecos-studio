@@ -201,11 +201,13 @@ import { useRoute, useRouter } from 'vue-router'
 import type { DesktopApi } from '@ecos-studio/shared'
 import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 // ---- 类型定义 ----
+type TopBarMenuAction = AppMenuAction | 'step-config'
+
 interface DropdownItem {
   label?: string
   icon?: string
   shortcut?: string
-  event?: AppMenuAction
+  event?: TopBarMenuAction
   separator?: boolean
   disabled?: boolean
 }
@@ -230,6 +232,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'menu-action', action: AppMenuAction): void
+  (e: 'step-config'): void
 }>()
 
 const workspaceFocusId = computed(
@@ -243,6 +246,9 @@ const { homeAgentOpen } = storeToRefs(agentShell)
 const isDark = computed(() => themeStore.themeName === 'dark')
 const chatButtonActive = computed(() => homeAgentOpen.value)
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+const canOpenStepConfig = computed(
+  () => isWorkspaceRoute.value && Boolean(props.hasWorkspace),
+)
 const toggleTheme = () => {
   themeStore.toggleTheme()
 }
@@ -258,6 +264,19 @@ const handleGoHome = () => {
   quickMenuOpen.value = false
   router.push({ name: 'ECOS' })
 }
+
+const editMenu = computed<Menu>(() => ({
+  label: 'Edit',
+  action: 'edit',
+  children: [
+    {
+      label: 'Config',
+      icon: 'ri-settings-3-line',
+      event: 'step-config',
+      disabled: !canOpenStepConfig.value,
+    },
+  ],
+}))
 
 // ---- 菜单配置 ----
 const menus = computed<Menu[]>(() => [
@@ -297,6 +316,7 @@ const menus = computed<Menu[]>(() => [
       },
     ],
   },
+  ...(isWorkspaceRoute.value ? [editMenu.value] : []),
   {
     label: 'Help',
     action: 'help',
@@ -343,11 +363,10 @@ const handleMenuHover = (action: string) => {
 }
 
 /** 下拉项点击 */
-const handleItemClick = (event?: AppMenuAction) => {
+const handleItemClick = (event?: TopBarMenuAction) => {
   activeMenu.value = null
-  if (event) {
-    emit('menu-action', event)
-  }
+  if (event === 'step-config') return emit('step-config')
+  if (event) emit('menu-action', event)
 }
 
 function updateQuickMenuPosition() {
