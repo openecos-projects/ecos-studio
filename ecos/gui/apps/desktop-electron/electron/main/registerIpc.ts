@@ -16,6 +16,7 @@ import {
   type DesktopProjectLogTailEvent,
   type DesktopProjectDirectoryEntry,
   type DesktopProjectManagementWorkspaceTextsRequest,
+  type DesktopProjectManagementWorkspaceTextsResult,
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
   type EccFlowRunStepRequest,
@@ -146,7 +147,7 @@ export interface DesktopBridgeServices {
     listProjectEntries(projectRoot: string): Promise<string[]>
     readWorkspaceTexts(
       request: DesktopProjectManagementWorkspaceTextsRequest,
-    ): Promise<Record<string, string | null>>
+    ): Promise<DesktopProjectManagementWorkspaceTextsResult>
   }
   workspaceService: {
     clearProjectRoot(): Promise<void>

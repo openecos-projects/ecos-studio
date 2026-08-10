@@ -1099,7 +1099,8 @@ describe('registerIpc', () => {
       'ws_0001',
     ])
     services.projectManagementReadService.readWorkspaceTexts.mockResolvedValue({
-      'home/flow.json': '{"steps":[]}',
+      texts: { 'home/flow.json': '{"steps":[]}' },
+      unavailablePaths: [],
     })
     services.workspaceService.requestProjectPathAccess.mockResolvedValue(
       '/tmp/project/home.json',
@@ -1191,7 +1192,10 @@ describe('registerIpc', () => {
         workspacePath: '/tmp/project/ws_0001',
         paths: ['home/flow.json'],
       }),
-    ).resolves.toEqual({ 'home/flow.json': '{"steps":[]}' })
+    ).resolves.toEqual({
+      texts: { 'home/flow.json': '{"steps":[]}' },
+      unavailablePaths: [],
+    })
     await handlers.get(desktopApiIpcChannels.workspaceClearProjectRoot)?.(event)
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceRequestProjectPathAccess)?.(

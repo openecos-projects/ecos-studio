@@ -36,7 +36,9 @@ async function createProject(): Promise<{ projectRoot: string; workspaceRoot: st
 describe('ProjectManagementReadService', () => {
   afterEach(async () => {
     await Promise.all(
-      temporaryDirectories.splice(0).map((directory) => rm(directory, { force: true, recursive: true })),
+      temporaryDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
     )
   })
 
@@ -44,7 +46,9 @@ describe('ProjectManagementReadService', () => {
     const { projectRoot, workspaceRoot } = await createProject()
     const service = new ProjectManagementReadService()
 
-    await expect(service.readManifest(projectRoot)).resolves.toContain('"workspace_id":"ws_0001"')
+    await expect(service.readManifest(projectRoot)).resolves.toContain(
+      '"workspace_id":"ws_0001"',
+    )
     await expect(service.listProjectEntries(projectRoot)).resolves.toEqual([
       'project.json',
       'ws_0001',
@@ -56,8 +60,11 @@ describe('ProjectManagementReadService', () => {
         paths: ['home/flow.json', 'sta_ecc/analysis/qor_metrics.json'],
       }),
     ).resolves.toEqual({
-      'home/flow.json': '{"steps":[]}',
-      'sta_ecc/analysis/qor_metrics.json': null,
+      texts: {
+        'home/flow.json': '{"steps":[]}',
+        'sta_ecc/analysis/qor_metrics.json': null,
+      },
+      unavailablePaths: [],
     })
   })
 
@@ -93,7 +100,7 @@ describe('ProjectManagementReadService', () => {
     )
   })
 
-  it('bounds individual NFS-backed summary reads', async () => {
+  it('keeps readable workspace summaries when one optional artifact exceeds the limit', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
     const metricsPath = join(workspaceRoot, 'sta_ecc', 'analysis', 'qor_metrics.json')
     await mkdir(join(workspaceRoot, 'sta_ecc', 'analysis'), { recursive: true })
@@ -104,9 +111,15 @@ describe('ProjectManagementReadService', () => {
       service.readWorkspaceTexts({
         projectRoot,
         workspacePath: workspaceRoot,
-        paths: ['sta_ecc/analysis/qor_metrics.json'],
+        paths: ['home/flow.json', 'sta_ecc/analysis/qor_metrics.json'],
       }),
-    ).rejects.toThrow('exceeds')
+    ).resolves.toEqual({
+      texts: {
+        'home/flow.json': '{"steps":[]}',
+        'sta_ecc/analysis/qor_metrics.json': null,
+      },
+      unavailablePaths: ['sta_ecc/analysis/qor_metrics.json'],
+    })
   })
 
   it('rejects an allowed artifact path that resolves outside its workspace', async () => {

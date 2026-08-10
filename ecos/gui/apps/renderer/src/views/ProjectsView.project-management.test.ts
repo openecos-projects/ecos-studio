@@ -444,7 +444,7 @@ describe('ProjectsView project management surface', () => {
 
   it('loads V3 analysis artifacts and flow states for project analysis', () => {
     expect(source).toContain('workspaceFlowStates')
-    expect(analysisDataSource).toContain("readOptionalProjectTextFile('home/flow.json'")
+    expect(analysisDataSource).toContain('readProjectManagementWorkspaceTexts')
     expect(analysisDataSource).toContain('parseWorkspaceFlowStateMap')
     expect(source).toContain('workspaceAnalysisInputs')
     expect(source).toContain('readProjectManagementWorkspaceData')
@@ -559,10 +559,7 @@ describe('ProjectsView project management surface', () => {
     expect(createMutation).toBeGreaterThan(createStart)
 
     const importStart = source.indexOf('async function importProject')
-    const importRead = source.indexOf(
-      'await loadProjectFromRoot(directory)',
-      importStart,
-    )
+    const importRead = source.indexOf('await loadProjectFromRoot(directory)', importStart)
     expect(importRead).toBeGreaterThan(importStart)
 
     const refreshStart = source.indexOf('async function refreshProjectManifests')
@@ -584,17 +581,35 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('let projectManifestRefreshQueue = Promise.resolve()')
 
     const refreshStart = source.indexOf('async function refreshProjectManifestsNow')
-    const refreshEnd = source.indexOf('async function importProject', refreshStart)
+    const refreshEnd = source.indexOf(
+      'async function loadSelectedProjectWorkspaceData',
+      refreshStart,
+    )
     const refreshSource = source.slice(refreshStart, refreshEnd)
 
     expect(source).toContain('function refreshProjectManifests(): Promise<void>')
-    expect(source).toContain("import { mapWithConcurrency } from './project-management/asyncConcurrency'")
+    expect(source).toContain(
+      "import { mapWithConcurrency } from './project-management/asyncConcurrency'",
+    )
     expect(source).toContain('const PROJECT_MANIFEST_READ_CONCURRENCY = 2')
     expect(refreshSource).toContain('mapWithConcurrency(')
     expect(refreshSource).toContain('PROJECT_MANIFEST_READ_CONCURRENCY')
     expect(refreshSource).toContain('readProjectManagementManifest(project.path)')
-    expect(refreshSource).toContain('readProjectManagementWorkspaceData(path, manifest)')
+    expect(refreshSource).not.toContain('readProjectManagementWorkspaceData(')
+    expect(refreshSource).toContain('void loadSelectedProjectWorkspaceData()')
     expect(refreshSource).not.toContain('registerProjectRootForProjectManagement')
+  })
+
+  it('loads workspace summaries only for the selected project and ignores stale selections', () => {
+    expect(source).toContain('watch(selectedProjectId')
+    expect(source).toContain('loadSelectedProjectWorkspaceData')
+    expect(source).toContain('let selectedProjectSummaryLoadGeneration = 0')
+    expect(source).toContain('selectedProjectSummaryLoadGeneration !== loadGeneration')
+    expect(source).toContain('selectedProjectId.value !== projectId')
+    expect(source).toContain('projectManifests.value[project.path] !== manifest')
+    expect(source).toContain(
+      'if (!project.path || !manifest || selectedProjectId.value !== project.id)',
+    )
   })
 
   it('persists project history when project.json is updated', () => {

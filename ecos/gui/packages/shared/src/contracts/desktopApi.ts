@@ -162,6 +162,11 @@ export interface DesktopProjectManagementWorkspaceTextsRequest {
   paths: string[]
 }
 
+export interface DesktopProjectManagementWorkspaceTextsResult {
+  texts: Record<string, string | null>
+  unavailablePaths: string[]
+}
+
 export interface ChipViewerOpenRequest {
   projectPath: string
   step: string
@@ -236,7 +241,7 @@ export interface DesktopApi {
     listProjectEntries(projectRoot: string): Promise<string[]>
     readWorkspaceTexts(
       request: DesktopProjectManagementWorkspaceTextsRequest,
-    ): Promise<Record<string, string | null>>
+    ): Promise<DesktopProjectManagementWorkspaceTextsResult>
   }
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>

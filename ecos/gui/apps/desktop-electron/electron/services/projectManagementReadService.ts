@@ -4,7 +4,10 @@ import {
   parseProjectManifest,
   projectManagementWorkspaceSummaryPaths,
 } from '@ecos-studio/shared'
-import type { DesktopProjectManagementWorkspaceTextsRequest } from '@ecos-studio/shared'
+import type {
+  DesktopProjectManagementWorkspaceTextsRequest,
+  DesktopProjectManagementWorkspaceTextsResult,
+} from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
 
 const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
@@ -12,9 +15,9 @@ const PROJECT_WORKSPACE_TEXT_MAX_BYTES = 256 * 1024
 const PROJECT_WORKSPACE_READ_CONCURRENCY = 4
 const PROJECT_WORKSPACE_READ_LIMIT = 40
 
-const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(
-  projectManagementWorkspaceSummaryPaths,
-)
+const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(projectManagementWorkspaceSummaryPaths)
+
+class ProjectManagementWorkspacePathError extends Error {}
 
 function pathsEqual(leftPath: string, rightPath: string): boolean {
   return relative(resolve(leftPath), resolve(rightPath)) === ''
@@ -61,7 +64,7 @@ async function mapWithConcurrency<T, R>(
   concurrency: number,
   mapper: (value: T) => Promise<R>,
 ): Promise<R[]> {
-  const results = new Array<R>(values.length)
+  const results: R[] = []
   let nextIndex = 0
   const workers = Array.from(
     { length: Math.min(Math.max(concurrency, 1), values.length) },
@@ -97,7 +100,7 @@ export class ProjectManagementReadService {
 
   async readWorkspaceTexts(
     request: DesktopProjectManagementWorkspaceTextsRequest,
-  ): Promise<Record<string, string | null>> {
+  ): Promise<DesktopProjectManagementWorkspaceTextsResult> {
     const paths = normalizeRequestedPaths(request.paths)
     const project = await this.loadProject(request.projectRoot)
     if (!project.manifest) {
@@ -111,16 +114,29 @@ export class ProjectManagementReadService {
     const entries = await mapWithConcurrency(
       paths,
       PROJECT_WORKSPACE_READ_CONCURRENCY,
-      async (path) => [
-        path,
-        await this.readWorkspaceTextFile(
-          workspacePath,
-          path,
-          PROJECT_WORKSPACE_TEXT_MAX_BYTES,
-        ),
-      ],
+      async (path) => {
+        try {
+          return {
+            path,
+            text: await this.readWorkspaceTextFile(
+              workspacePath,
+              path,
+              PROJECT_WORKSPACE_TEXT_MAX_BYTES,
+            ),
+            unavailable: false,
+          }
+        } catch (error) {
+          if (error instanceof ProjectManagementWorkspacePathError) throw error
+          return { path, text: null, unavailable: true }
+        }
+      },
     )
-    return Object.fromEntries(entries) as Record<string, string | null>
+    return {
+      texts: Object.fromEntries(entries.map(({ path, text }) => [path, text])),
+      unavailablePaths: entries
+        .filter(({ unavailable }) => unavailable)
+        .map(({ path }) => path),
+    }
   }
 
   private async loadProject(projectRoot: string) {
@@ -134,7 +150,9 @@ export class ProjectManagementReadService {
     const manifest = parseProjectManifest(content)
     const manifestRoot = await canonicalizeExistingDirectory(manifest.root_path)
     if (!pathsEqual(root, manifestRoot)) {
-      throw new Error('Project manifest root_path does not match its containing directory.')
+      throw new Error(
+        'Project manifest root_path does not match its containing directory.',
+      )
     }
     for (const workspace of manifest.workspaces) {
       const candidate = resolve(workspace.workspace_path)
@@ -180,7 +198,9 @@ export class ProjectManagementReadService {
       throw error
     }
     if (!isPathWithinRoot(canonicalPath, workspaceRoot)) {
-      throw new Error('Project management workspace file resolves outside its workspace.')
+      throw new ProjectManagementWorkspacePathError(
+        'Project management workspace file resolves outside its workspace.',
+      )
     }
     return await readOptionalBoundedTextFile(canonicalPath, maxBytes)
   }

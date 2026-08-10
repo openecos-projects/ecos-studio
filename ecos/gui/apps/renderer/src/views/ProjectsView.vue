@@ -1047,6 +1047,7 @@ let activeProjectKey: string | null = null
 let projectManifestRefreshQueue = Promise.resolve()
 let projectMpcLoadGeneration = 0
 let projectMpcSpecLoadGeneration = 0
+let selectedProjectSummaryLoadGeneration = 0
 
 watch(
   () => projectRootDraft.value.mpcId,
@@ -1081,6 +1082,10 @@ watch(
   },
   { immediate: true },
 )
+
+watch(selectedProjectId, () => {
+  void loadSelectedProjectWorkspaceData()
+})
 
 watch(projectSources, () => {
   void refreshProjectManifests()
@@ -1484,31 +1489,50 @@ async function refreshProjectManifestsNow() {
   projectManifests.value = Object.fromEntries(
     entries.map(([path, manifest]) => [path, manifest]),
   )
-  workspaceFlowStates.value = Object.fromEntries(entries.map(([path]) => [path, {}]))
-  workspaceAnalysisInputs.value = Object.fromEntries(entries.map(([path]) => [path, {}]))
+  workspaceFlowStates.value = Object.fromEntries(
+    entries.map(([path]) => [path, workspaceFlowStates.value[path] ?? {}]),
+  )
+  workspaceAnalysisInputs.value = Object.fromEntries(
+    entries.map(([path]) => [path, workspaceAnalysisInputs.value[path] ?? {}]),
+  )
+  void loadSelectedProjectWorkspaceData()
+}
 
-  // A project tree must not wait for NFS-backed flow/QoR scans. Load one
-  // project at a time after first paint; each reader applies its own bounded
-  // workspace concurrency.
-  void (async () => {
-    for (const [path, manifest] of entries) {
-      try {
-        const summary = await readProjectManagementWorkspaceData(path, manifest)
-        if (projectManifests.value[path] === manifest) {
-          workspaceFlowStates.value = {
-            ...workspaceFlowStates.value,
-            [path]: summary.flowStates,
-          }
-          workspaceAnalysisInputs.value = {
-            ...workspaceAnalysisInputs.value,
-            [path]: summary.analysisInputs,
-          }
-        }
-      } catch (error) {
-        console.warn(`Failed to load project workspace summaries: ${path}`, error)
-      }
+async function loadSelectedProjectWorkspaceData() {
+  const project = selectedProject.value
+  const manifest = projectManifests.value[project.path]
+  if (!project.path || !manifest || selectedProjectId.value !== project.id) return
+
+  const projectId = project.id
+  const loadGeneration = ++selectedProjectSummaryLoadGeneration
+  try {
+    const summary = await readProjectManagementWorkspaceData(project.path, manifest)
+    if (
+      selectedProjectSummaryLoadGeneration !== loadGeneration ||
+      selectedProjectId.value !== projectId ||
+      projectManifests.value[project.path] !== manifest
+    ) {
+      return
     }
-  })()
+    workspaceFlowStates.value = {
+      ...workspaceFlowStates.value,
+      [project.path]: summary.flowStates,
+    }
+    workspaceAnalysisInputs.value = {
+      ...workspaceAnalysisInputs.value,
+      [project.path]: summary.analysisInputs,
+    }
+  } catch (error) {
+    if (
+      selectedProjectSummaryLoadGeneration === loadGeneration &&
+      selectedProjectId.value === projectId
+    ) {
+      console.warn(
+        `Failed to load selected project workspace summaries: ${project.path}`,
+        error,
+      )
+    }
+  }
 }
 
 async function importProject() {
@@ -1534,22 +1558,9 @@ async function importProject() {
       ...workspaceAnalysisInputs.value,
       [project.path]: {},
     }
-    void readProjectManagementWorkspaceData(project.path, manifest)
-      .then((summary) => {
-        if (projectManifests.value[project.path] !== manifest) return
-        workspaceFlowStates.value = {
-          ...workspaceFlowStates.value,
-          [project.path]: summary.flowStates,
-        }
-        workspaceAnalysisInputs.value = {
-          ...workspaceAnalysisInputs.value,
-          [project.path]: summary.analysisInputs,
-        }
-      })
-      .catch((error) => {
-        console.warn('Failed to load imported project analysis inputs.', error)
-      })
+    const wasSelected = selectedProjectId.value === project.id
     selectedProjectId.value = project.id
+    if (wasSelected) void loadSelectedProjectWorkspaceData()
   } catch (error) {
     console.warn('Failed to import project root.', error)
     showToast({
@@ -1846,8 +1857,7 @@ async function createProjectFolderDraft() {
     return
   }
 
-  const name =
-    projectRootDraft.value.name.trim() || basenamePath(directory) || 'project'
+  const name = projectRootDraft.value.name.trim() || basenamePath(directory) || 'project'
   const designName = projectRootDraft.value.designName.trim() || name
   const manifest = await mutateProjectManifest(directory, {
     type: 'create',
@@ -1930,26 +1940,15 @@ async function applyProjectManifestForProject(
     [projectRoot]: {},
     [normalizedRoot]: {},
   }
-  void readProjectManagementWorkspaceData(normalizedRoot, manifest)
-    .then((summary) => {
-      if (projectManifests.value[normalizedRoot] !== manifest) return
-      workspaceFlowStates.value = {
-        ...workspaceFlowStates.value,
-        [projectRoot]: summary.flowStates,
-        [normalizedRoot]: summary.flowStates,
-      }
-      workspaceAnalysisInputs.value = {
-        ...workspaceAnalysisInputs.value,
-        [projectRoot]: summary.analysisInputs,
-        [normalizedRoot]: summary.analysisInputs,
-      }
-    })
-    .catch((error) => {
-      console.warn('Failed to load project analysis inputs.', error)
-    })
   projectHistory.value = await rememberProjectHistoryEntry(
     projectFromManifest(manifest, normalizedRoot),
   )
+  if (
+    selectedProjectId.value === projectRoot ||
+    selectedProjectId.value === normalizedRoot
+  ) {
+    void loadSelectedProjectWorkspaceData()
+  }
 }
 
 function workspaceRouteQuery(workspacePath?: string, workspaceId?: string) {
