@@ -5,7 +5,14 @@ import { useAgentFlowProgress } from './useAgentFlowProgress'
 
 function runtimeEvent(
   type: string,
-  options: { eventId: string; state?: string; step?: string } = {
+  options: {
+    eventId: string
+    operationId?: string
+    runtimeInstanceId?: string
+    state?: string
+    step?: string
+    workspaceId?: string
+  } = {
     eventId: 'event-1',
   },
 ): RuntimeEventResponse {
@@ -13,11 +20,14 @@ function runtimeEvent(
     cmd: 'notify',
     data: {
       directory: '/runs/gcd',
+      jobId: options.operationId,
       runtimeEventId: options.eventId,
+      runtimeInstanceId: options.runtimeInstanceId,
       runtimeProtocolType: type,
       state: options.state,
       step: options.step,
       type: type === 'step.started' ? 'step_start' : 'step_complete',
+      workspaceId: options.workspaceId,
     },
     message: [],
     response: 'success',
@@ -54,7 +64,11 @@ describe('useAgentFlowProgress', () => {
   it('ignores duplicate and unrelated workspace protocol events', async () => {
     const messages: string[] = []
     const events = ref<RuntimeEventResponse[]>([])
-    const progress = useAgentFlowProgress((message) => messages.push(message), undefined, events)
+    const progress = useAgentFlowProgress(
+      (message) => messages.push(message),
+      undefined,
+      events,
+    )
     progress.start('/runs/gcd')
 
     events.value.push(runtimeEvent('step.started', { eventId: 'event-1', step: 'place' }))
@@ -71,5 +85,39 @@ describe('useAgentFlowProgress', () => {
     await nextTick()
 
     expect(messages).toEqual(['Running place.'])
+  })
+
+  it('accepts a legacy event id from a new ECC sidecar instance', async () => {
+    const messages: string[] = []
+    const events = ref<RuntimeEventResponse[]>([])
+    const progress = useAgentFlowProgress(
+      (message) => messages.push(message),
+      undefined,
+      events,
+    )
+    progress.start('/runs/gcd')
+
+    events.value.push(
+      runtimeEvent('step.started', {
+        eventId: 'workspace-gcd:1',
+        operationId: 'operation-old',
+        runtimeInstanceId: 'runtime-old',
+        step: 'place',
+        workspaceId: 'workspace-gcd',
+      }),
+    )
+    await nextTick()
+    events.value.push(
+      runtimeEvent('step.started', {
+        eventId: 'workspace-gcd:1',
+        operationId: 'operation-new',
+        runtimeInstanceId: 'runtime-new',
+        step: 'place',
+        workspaceId: 'workspace-gcd',
+      }),
+    )
+    await nextTick()
+
+    expect(messages).toEqual(['Running place.', 'Running place.'])
   })
 })

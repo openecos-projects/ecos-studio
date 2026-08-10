@@ -2319,6 +2319,49 @@ describe('useWorkspace openProject', () => {
     expect(requestHomeRunArtifactResetMock).not.toHaveBeenCalledWith('workspace-demo')
   })
 
+  it('accepts a new rerun event when a fresh sidecar reuses the legacy event id', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const sharedEventId = 'workspace-demo:1'
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'message',
+        cmd: 'rtl2gds',
+        directory: '/work/demo',
+        jobId: 'operation-old',
+        runtimeEventId: sharedEventId,
+        runtimeInstanceId: 'runtime-old',
+        runtimeProtocolType: 'operation.rerun_prepared',
+        workspaceId: 'workspace-demo',
+        rerun: true,
+        rerunScope: 'flow',
+      },
+      message: [],
+      response: 'success',
+    })
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'message',
+        cmd: 'rtl2gds',
+        directory: '/work/demo',
+        jobId: 'operation-new',
+        runtimeEventId: sharedEventId,
+        runtimeInstanceId: 'runtime-new',
+        runtimeProtocolType: 'operation.rerun_prepared',
+        workspaceId: 'workspace-demo',
+        rerun: true,
+        rerunScope: 'flow',
+      },
+      message: [],
+      response: 'success',
+    })
+
+    expect(workspace.runtimeEvents.value).toHaveLength(2)
+    expect(requestHomeRunArtifactResetMock).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps the workspace loading overlay visible while a new workspace is being created', async () => {
     const workspace = useWorkspace()
     let resolveCreateWorkspace: ((value: unknown) => void) | undefined

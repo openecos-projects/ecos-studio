@@ -48,9 +48,17 @@ export function useAgentFlowProgress(
 
       const data = event.data
       const eventId = stringValue(data.runtimeEventId)
-      if (eventId) {
-        if (handledEventIds.has(eventId)) return
-        handledEventIds.add(eventId)
+      const eventKey = eventId
+        ? [
+            stringValue(data.workspaceId),
+            stringValue(data.runtimeInstanceId),
+            stringValue(data.jobId),
+            eventId,
+          ].join('\u001f')
+        : ''
+      if (eventKey) {
+        if (handledEventIds.has(eventKey)) return
+        handledEventIds.add(eventKey)
         if (handledEventIds.size > 512) {
           handledEventIds.delete(handledEventIds.values().next().value!)
         }

@@ -233,6 +233,7 @@ export type EccRuntimeOperationState =
   | 'running'
   | 'waiting_for_gui_sync'
   | 'paused_for_gui_recovery'
+  | 'gui_sync_degraded'
   | 'succeeded'
   | 'failed'
   | 'cancelled'
@@ -251,6 +252,8 @@ export interface EccRuntimeOperation {
   operationId: string
   origin: 'gui' | 'cli'
   rerun: boolean
+  runSessionId?: string
+  runtimeInstanceId?: string
   result: Record<string, unknown> | null
   state: EccRuntimeOperationState
   step: string
@@ -260,6 +263,7 @@ export interface EccRuntimeOperation {
     | 'idle'
     | 'waiting_for_gui_sync'
     | 'paused_for_gui_recovery'
+    | 'gui_sync_degraded'
     | 'timed_out'
   renderRetryCount?: number
   lastRenderAckAt?: number | null
@@ -305,6 +309,7 @@ export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
   lastEventId: string
   operations: EccRuntimeOperation[]
   parameters: Record<string, unknown>
+  runtimeInstanceId?: string
 }
 
 export interface EccRuntimeProtocolPayload {
@@ -313,6 +318,8 @@ export interface EccRuntimeProtocolPayload {
   operationId: string
   origin: 'gui' | 'cli'
   payload: Record<string, unknown>
+  runSessionId?: string
+  runtimeInstanceId?: string
   sequence: number
   timestamp: number
   type:
@@ -323,6 +330,7 @@ export interface EccRuntimeProtocolPayload {
     | 'operation.cancelled'
     | 'operation.cancel_requested'
     | 'operation.gui_sync_paused'
+    | 'operation.gui_sync_degraded'
     | 'operation.rerun_prepared'
     | 'step.started'
     | 'step.log'

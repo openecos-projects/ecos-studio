@@ -1448,14 +1448,23 @@ export function useWorkspace() {
         const operationId = asString(response.data?.jobId)
         const eventType = asString(response.data?.runtimeProtocolType)
         const workspaceHandle = asString(response.data?.workspaceId)
+        const runtimeInstanceId = asString(response.data?.runtimeInstanceId)
         const step = asString(response.data?.step) ?? ''
         const stepCommitId = asString(response.data?.stepCommitId)
         const workspaceRevision = asNumber(response.data?.workspaceRevision)
+        const runtimeEventKey = runtimeEventId
+          ? [
+              workspaceHandle ?? '',
+              runtimeInstanceId ?? '',
+              operationId ?? '',
+              runtimeEventId,
+            ].join('\u001f')
+          : ''
         const duplicate = Boolean(
-          runtimeEventId && handledRuntimeProtocolEvents.has(runtimeEventId),
+          runtimeEventKey && handledRuntimeProtocolEvents.has(runtimeEventKey),
         )
-        if (runtimeEventId && !duplicate) {
-          handledRuntimeProtocolEvents.add(runtimeEventId)
+        if (runtimeEventKey && !duplicate) {
+          handledRuntimeProtocolEvents.add(runtimeEventKey)
           if (handledRuntimeProtocolEvents.size > 512) {
             handledRuntimeProtocolEvents.delete(
               handledRuntimeProtocolEvents.values().next().value!,
