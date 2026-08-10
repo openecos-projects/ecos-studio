@@ -143,6 +143,37 @@ describe('ECCView project management handoff', () => {
     expect(openSource).toContain('workspacePath: currentProject.value.path')
   })
 
+  it('resolves project route context when Backend Design opens an existing workspace', () => {
+    expect(source).toContain('resolveProjectRouteContextForWorkspace')
+    expect(source).toContain('resolveOpenProjectContext')
+
+    const openStart = source.indexOf('const handleOpenProject')
+    const openEnd = source.indexOf('const handleOpenRecent', openStart)
+    const openSource = source.slice(openStart, openEnd)
+    expect(openSource).toContain(
+      'await resolveOpenProjectContext(currentProject.value.path)',
+    )
+    expect(openSource).toContain('projectContext,')
+    expect(openSource).toContain(
+      'query: workspaceRouteQuery(currentProject.value.path, projectContext)',
+    )
+
+    const recentStart = source.indexOf('const handleOpenRecent')
+    const recentEnd = source.indexOf('const handleRemoveRecent', recentStart)
+    const recentSource = source.slice(recentStart, recentEnd)
+    expect(recentSource).toContain('await resolveOpenProjectContext(workspacePath)')
+    expect(recentSource).toContain('projectContext,')
+    expect(recentSource).toContain('workspaceRouteQuery(workspacePath, projectContext)')
+
+    const resolveStart = source.indexOf('async function resolveOpenProjectContext')
+    const resolveEnd = source.indexOf('function workspaceRouteQuery', resolveStart)
+    const resolveSource = source.slice(resolveStart, resolveEnd)
+    expect(resolveSource).toContain(
+      'await resolveProjectRouteContextForWorkspace(workspacePath)',
+    )
+    expect(resolveSource).toContain('queryString(route.query.projectRoot)')
+  })
+
   it('registers the project root before updating project.json from ECC', () => {
     expect(source).toContain('@/utils/projectManifestRegistration')
     expect(source).toContain('await registerProjectManagedWorkspace({')

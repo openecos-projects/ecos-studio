@@ -24,6 +24,7 @@
         >
           <router-view />
         </div>
+        <HomeAgentDrawer v-if="!isWorkspaceRoute" />
         <ECOSTerminal
           :expanded="terminalExpanded"
           :maximized="terminalPanelMaximized"
@@ -134,10 +135,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { appMenuActionIds, type DesktopApi } from '@ecos-studio/shared'
+import { ref, onMounted, onUnmounted, computed, nextTick, provide, watch } from 'vue'
+import {
+  appMenuActionIds,
+  type DesktopAgentWorkspaceSetupContract,
+  type DesktopApi,
+} from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
+import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
@@ -152,6 +158,7 @@ import {
 } from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
+import HomeAgentDrawer from '@/components/HomeAgentDrawer.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
@@ -162,6 +169,7 @@ import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
+import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
@@ -173,12 +181,14 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
   deriveDirectoryFromDesign?: boolean
   lockWorkspaceDirectory?: boolean
+  suggestedWorkspaceName?: string
 }
 
 const router = useRouter()
 const themeStore = useThemeStore()
 const route = useRoute()
 const isWelcome = computed(() => route.path === '/')
+const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
 const {
   loadRecentProjects,
   currentProject,
@@ -186,6 +196,7 @@ const {
   workspaceSession,
   openProject,
   newProject,
+  lastWorkspaceCreationError,
   closeProject,
   runtimeBackendConnecting,
   runtimeBackendTitle,
@@ -241,6 +252,48 @@ const showWorkspaceUpdateBackupDialog = ref(false)
 const workspaceWizardTitle = computed(() => {
   return reconfigureWorkspacePath.value ? 'Update Workspace' : 'New Workspace'
 })
+
+async function createWorkspaceFromAgent(
+  config: WorkspaceConfig,
+  contract: DesktopAgentWorkspaceSetupContract,
+  ownerSessionId: string,
+): Promise<import('@/composables/agentWorkspaceSetup').AgentWorkspaceCreationResult> {
+  const agentShell = useAgentShellStore()
+  agentShell.beginPreserveForAgentWorkspaceSwitch()
+  const success = await newProject(config)
+  if (!success) {
+    agentShell.consumePreserveMessages()
+    agentShell.consumePreserveSession()
+    return { created: false, error: lastWorkspaceCreationError.value }
+  }
+  const workspacePath = currentProject.value?.path
+  if (!workspacePath) throw new Error('Workspace creation did not return a project path.')
+  const api = desktopApi.value ?? (await waitForDesktopApi())
+  desktopApi.value = api
+  await api.workspace.writeProjectTextFile(
+    `${normalizeLocalPath(workspacePath)}/home/workspace_setup_contract.v2.json`,
+    `${JSON.stringify(contract, null, 2)}\n`,
+  )
+  await syncProjectManagedWorkspace(config)
+  agentShell.closeHomeAgent()
+  agentShell.setPendingPostCreateFlow({
+    setupId: contract.setup_id,
+    ownerSessionId,
+    workspacePath,
+  })
+  agentShell.setMode('workspace')
+  await router.push({
+    path: '/workspace/home',
+    query: {
+      projectRoot: contract.project_context.project_root,
+      projectName: contract.project_context.project_name,
+    },
+  })
+  await nextTick()
+  return { created: true, workspacePath }
+}
+
+provide(agentWorkspaceSetupKey, createWorkspaceFromAgent)
 const showAboutDialog = ref(false)
 const terminalExpanded = ref(false)
 const terminalPanelHeight = ref('min(300px, 42vh)')

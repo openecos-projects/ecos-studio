@@ -722,13 +722,4 @@ onUnmounted(() => {
   gap: 12px;
   margin-top: 20px;
 }
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 9999px;
-}
 </style>

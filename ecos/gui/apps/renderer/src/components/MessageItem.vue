@@ -1,13 +1,21 @@
 <template>
-  <div
-    :class="[
-      'flex w-full min-w-0',
-      message.role === 'user' ? 'justify-end' : 'justify-start',
-    ]"
-  >
+  <div class="flex w-full min-w-0 justify-start">
+    <template v-if="message.type === 'choice'">
+      <AgentChoiceCard
+        v-if="message.choice && !message.answeredOptionId"
+        :choice="message.choice"
+        :disabled="!choiceInteractive || choiceDisabled"
+        @select="emit('choice', message.choice.promptId, $event)"
+      />
+    </template>
+    <AgentToolCard
+      v-else-if="message.type === 'tool'"
+      :content="message.content"
+      :status="message.status"
+    />
     <!-- Map 消息 - 热力图/密度图展示 -->
     <div
-      v-if="message.type === 'map' && message.mapData"
+      v-else-if="message.type === 'map' && message.mapData"
       class="map-message-container w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary) text-sm text-(--text-primary) shadow-sm"
     >
       <!-- 标题栏 -->
@@ -41,15 +49,6 @@
           @click.stop="openImageLightbox(message.mapData.title, message.mapData.imageUrl)"
         >
           <i class="ri-fullscreen-fill"></i>
-        </button>
-        <button
-          type="button"
-          class="info-report-header-close-btn info-report-header-close-btn--sm shrink-0"
-          title="关闭"
-          aria-label="关闭"
-          @click.stop="emit('close')"
-        >
-          <i class="ri-close-line"></i>
         </button>
       </div>
 
@@ -180,15 +179,6 @@
         >
           <i class="ri-fullscreen-fill"></i>
         </button>
-        <button
-          type="button"
-          class="info-report-header-close-btn"
-          title="关闭"
-          aria-label="关闭"
-          @click.stop="emit('close')"
-        >
-          <i class="ri-close-line"></i>
-        </button>
       </div>
 
       <!-- 数据内容 - 直接显示表格 -->
@@ -306,22 +296,12 @@
     <div
       v-else
       :class="[
-        'message-bubble group relative max-w-[85%] rounded-lg text-sm',
+        'message-bubble group relative w-full max-w-full min-w-0 text-sm',
         message.role === 'user'
-          ? 'bg-(--accent-color) text-(--accent-text)'
-          : 'border border-(--border-color) bg-(--bg-secondary) text-(--text-primary)',
+          ? 'rounded-lg border border-(--border-color) bg-(--bg-secondary) text-(--text-primary)'
+          : 'message-bubble--assistant text-(--text-primary)',
       ]"
     >
-      <button
-        type="button"
-        class="message-close-btn"
-        title="删除"
-        aria-label="删除"
-        @click.stop="emit('close')"
-      >
-        <i class="ri-close-line"></i>
-      </button>
-
       <!-- 图片消息 -->
       <div v-if="message.type === 'image' && message.image" class="p-2">
         <p class="text-xs opacity-90">{{ message.image.label }}:</p>
@@ -350,20 +330,15 @@
           >
             <i class="ri-fullscreen-fill"></i>
           </button>
-          <button
-            type="button"
-            class="image-close-overlay-btn"
-            title="关闭"
-            aria-label="关闭"
-            @click.stop="emit('close')"
-          >
-            <i class="ri-close-line"></i>
-          </button>
         </div>
       </div>
 
       <!-- 文本消息 -->
-      <div v-else class="px-4 py-2 pr-8">
+      <div
+        v-else
+        class="selectable"
+        :class="message.role === 'user' ? 'px-3 py-2' : 'py-1'"
+      >
         <!-- 加载状态 -->
         <div
           v-if="message.status === 'loading' && !message.content"
@@ -389,7 +364,7 @@
         <!-- 错误状态 -->
         <div
           v-else-if="message.status === 'error'"
-          class="flex items-center gap-2 text-red-500"
+          class="flex items-center gap-2 text-(--danger-color)"
         >
           <i class="ri-error-warning-line"></i>
           <span>{{ message.content || 'Failed to send message' }}</span>
@@ -401,7 +376,7 @@
         <!-- 流式加载时显示光标 -->
         <span
           v-if="message.status === 'loading' && message.content"
-          class="ml-0.5 inline-block h-4 w-2 animate-pulse bg-current"
+          class="streaming-cursor ml-0.5 inline-block h-4 w-2 animate-pulse bg-current"
         ></span>
       </div>
     </div>
@@ -463,16 +438,27 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
+import type { DesktopAgentChoiceOption } from '@ecos-studio/shared'
 import type { Message } from '../types'
+import AgentChoiceCard from './AgentChoiceCard.vue'
+import AgentToolCard from './AgentToolCard.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 
-const props = defineProps<{
-  message: Message
-}>()
+const props = withDefaults(
+  defineProps<{
+    choiceDisabled?: boolean
+    choiceInteractive?: boolean
+    message: Message
+  }>(),
+  {
+    choiceDisabled: false,
+    choiceInteractive: true,
+  },
+)
 
 const emit = defineEmits<{
   (e: 'img-load'): void
-  (e: 'close'): void
+  (e: 'choice', promptId: string, option: DesktopAgentChoiceOption): void
 }>()
 
 const md = new MarkdownIt({
@@ -698,9 +684,16 @@ function csvRows(content: string): string[][] {
 </script>
 
 <style scoped>
+.message-bubble--assistant .markdown-body {
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
 .markdown-body {
-  line-height: 1.6;
+  line-height: 1.55;
   word-break: break-word;
+  color: var(--text-primary);
 }
 
 .markdown-body :deep(p) {
@@ -712,7 +705,7 @@ function csvRows(content: string): string[][] {
 }
 
 .markdown-body :deep(code) {
-  background-color: rgba(0, 0, 0, 0.1);
+  background-color: color-mix(in srgb, var(--border-color) 58%, transparent);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
   font-family: monospace;
@@ -755,17 +748,20 @@ function csvRows(content: string): string[][] {
 }
 
 .markdown-body :deep(h1) {
-  font-size: 1.5rem;
+  margin: 0.75rem 0 0.375rem;
+  font-size: 1.125rem;
   font-weight: 700;
 }
 
 .markdown-body :deep(h2) {
-  font-size: 1.25rem;
+  margin: 0.75rem 0 0.375rem;
+  font-size: 1rem;
   font-weight: 600;
 }
 
 .markdown-body :deep(h3) {
-  font-size: 1.1rem;
+  margin: 0.625rem 0 0.25rem;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -782,15 +778,13 @@ function csvRows(content: string): string[][] {
 }
 
 .markdown-body :deep(blockquote) {
-  border-left: 4px solid var(--accent-color);
-  padding-left: 1rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
   color: var(--text-secondary);
   font-style: italic;
-  margin: 1rem 0;
+  margin: 0.75rem 0;
   background-color: var(--bg-secondary);
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
-  border-radius: 0 4px 4px 0;
 }
 
 /* 文本内容预格式化样式 - 防止撑开父容器 */
@@ -832,55 +826,26 @@ function csvRows(content: string): string[][] {
   display: block;
 }
 
-.message-close-btn {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 2;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 5px;
-  background: rgba(0, 0, 0, 0.18);
-  color: currentColor;
-  cursor: pointer;
-  font-size: 12px;
-  opacity: 0;
-  transform: translateY(-2px);
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease,
-    background-color 0.15s ease;
-}
-
-.message-bubble:hover .message-close-btn,
-.message-close-btn:focus-visible {
-  opacity: 0.72;
-  transform: translateY(0);
-}
-
-.message-close-btn:hover {
-  opacity: 1;
-  background: rgba(239, 68, 68, 0.18);
-}
-
 /* 加载动画 */
 .loading-dots span {
-  animation: bounce 1s infinite;
+  animation: thinking 1.1s ease-in-out infinite;
 }
 
-@keyframes bounce {
+@keyframes thinking {
   0%,
-  80%,
   100% {
-    transform: translateY(0);
+    opacity: 0.35;
   }
 
-  40% {
-    transform: translateY(-6px);
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-dots span,
+  .streaming-cursor {
+    animation: none;
   }
 }
 
@@ -941,9 +906,8 @@ function csvRows(content: string): string[][] {
   font-weight: 600;
 }
 
-/* Info 卡片标题栏：查阅 / 关闭（与内嵌报告区分离，避免挡内容） */
-.info-report-header-fs-btn,
-.info-report-header-close-btn {
+/* Info / Map 卡片标题栏：查阅（与内嵌报告区分离，避免挡内容） */
+.info-report-header-fs-btn {
   flex-shrink: 0;
   width: 32px;
   height: 32px;
@@ -958,31 +922,20 @@ function csvRows(content: string): string[][] {
   font-size: 16px;
 }
 
-.info-report-header-fs-btn:hover,
-.info-report-header-close-btn:hover {
-  background: var(--bg-secondary);
-}
-
 .info-report-header-fs-btn:hover {
+  background: var(--bg-secondary);
   color: var(--accent-color);
 }
 
-.info-report-header-close-btn:hover {
-  color: #ef4444;
-}
-
-/* Map 标题栏更紧凑的尺寸 */
-.info-report-header-fs-btn--sm,
-.info-report-header-close-btn--sm {
+.info-report-header-fs-btn--sm {
   width: 24px;
   height: 24px;
   font-size: 13px;
   border-radius: 5px;
 }
 
-/* 图片消息：右上角浮动操作按钮 */
-.image-fs-overlay-btn,
-.image-close-overlay-btn {
+/* 图片消息：右上角查阅按钮 */
+.image-fs-overlay-btn {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -1005,25 +958,14 @@ function csvRows(content: string): string[][] {
     background-color 0.15s ease;
 }
 
-.image-close-overlay-btn {
-  right: 40px;
-}
-
 .group:hover .image-fs-overlay-btn,
-.group:hover .image-close-overlay-btn,
-.image-fs-overlay-btn:focus-visible,
-.image-close-overlay-btn:focus-visible {
+.image-fs-overlay-btn:focus-visible {
   opacity: 1;
   transform: translateY(0);
 }
 
-.image-fs-overlay-btn:hover,
-.image-close-overlay-btn:hover {
+.image-fs-overlay-btn:hover {
   background: rgba(0, 0, 0, 0.75);
-}
-
-.image-close-overlay-btn:hover {
-  color: #fecaca;
 }
 
 /* HTML 报告查阅 Lightbox（与 HomeView 图表预览一致） */

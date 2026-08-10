@@ -75,6 +75,8 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       readProjectBinaryFile: async () => new Uint8Array(),
       writeProjectTextFile: async () => undefined,
       listProjectDirectory: async () => [],
+      pathExists: async () => false,
+      discardFailedWorkspaceCreate: async () => false,
       prepareProjectDirectoryReplacement: async () => null,
       restoreProjectDirectoryReplacement: async () => undefined,
       finalizeProjectDirectoryReplacement: async () => undefined,

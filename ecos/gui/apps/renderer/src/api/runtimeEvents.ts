@@ -42,14 +42,35 @@ export type RuntimeEventClientState =
   | 'connected'
   | 'error'
 
-function methodToCommand(method: string | undefined): string | undefined {
+function methodToCommand(
+  method: string | undefined,
+  executionScope: string | undefined,
+): string | undefined {
   if (method === 'flow.run') return 'rtl2gds'
   if (method === 'flow.run_step') return 'run_step'
+  if (method === 'candidate.rerun' && executionScope === 'full_flow') return 'rtl2gds'
+  // Agent isolated reruns use candidate.rerun; single_step must refresh step UI like run_step.
+  if (method === 'candidate.rerun' && executionScope === 'single_step') return 'run_step'
   return method
 }
 
-function isFlowMethod(method: string | undefined): boolean {
-  return method === 'flow.run' || method === 'flow.run_step'
+function isFlowMethod(
+  method: string | undefined,
+  _executionScope: string | undefined,
+): boolean {
+  return (
+    method === 'flow.run' || method === 'flow.run_step' || method === 'candidate.rerun'
+  )
+}
+
+function isFullFlowMethod(
+  method: string | undefined,
+  executionScope: string | undefined,
+): boolean {
+  return (
+    method === 'flow.run' ||
+    (method === 'candidate.rerun' && executionScope === 'full_flow')
+  )
 }
 
 function eventMatchesWorkspace(event: DesignRuntimeEvent, workspaceId: string): boolean {
@@ -62,7 +83,11 @@ function notifyTypeFromEvent(event: DesignRuntimeEvent): RuntimeNotifyType | nul
     return event.reason === 'unexpected' ? 'error' : null
   }
   if (event.type === 'operation.progress') {
-    if (!isFlowMethod(event.method)) return null
+    const executionScope =
+      'executionScope' in event && typeof event.executionScope === 'string'
+        ? event.executionScope
+        : undefined
+    if (!isFlowMethod(event.method, executionScope)) return null
     const state = event.data?.state
     if (
       event.phase === 'completed' ||
@@ -73,19 +98,33 @@ function notifyTypeFromEvent(event: DesignRuntimeEvent): RuntimeNotifyType | nul
     }
     return event.step ? 'step_start' : 'message'
   }
-  if (event.type === 'operation.failed')
-    return isFlowMethod(event.method) ? 'error' : null
-  if (event.type === 'operation.cancelled')
-    return isFlowMethod(event.method) ? 'cancelled' : null
+  if (event.type === 'operation.failed') {
+    return isFlowMethod(event.method, event.executionScope) ? 'error' : null
+  }
+  if (event.type === 'operation.cancelled') {
+    const executionScope =
+      'executionScope' in event && typeof event.executionScope === 'string'
+        ? event.executionScope
+        : undefined
+    return isFlowMethod(event.method, executionScope) ? 'cancelled' : null
+  }
   if (event.type !== 'operation.completed' && event.type !== 'operation.started') {
     return null
   }
-  if (!isFlowMethod(event.method)) return null
+  if (!isFlowMethod(event.method, event.executionScope)) return null
 
   if (event.type === 'operation.started') {
-    return event.method === 'flow.run_step' ? 'step_start' : 'message'
+    if (
+      event.method === 'flow.run_step' ||
+      (event.method === 'candidate.rerun' && event.executionScope === 'single_step')
+    ) {
+      return 'step_start'
+    }
+    return 'message'
   }
-  return event.method === 'flow.run' ? 'task_complete' : 'step_complete'
+  return isFullFlowMethod(event.method, event.executionScope)
+    ? 'task_complete'
+    : 'step_complete'
 }
 
 function responseFromEvent(event: DesignRuntimeEvent): RuntimeResponseType {
@@ -112,7 +151,8 @@ function responseFromRuntimeEvent(
   if (!notifyType) return null
 
   const method = 'method' in event ? event.method : 'runtime.exited'
-  const command = methodToCommand(method)
+  const executionScope = 'executionScope' in event ? event.executionScope : undefined
+  const command = methodToCommand(method, executionScope)
   const message =
     'message' in event && typeof event.message === 'string' ? [event.message] : []
   const progressData = event.type === 'operation.progress' ? event.data : undefined
@@ -120,6 +160,7 @@ function responseFromRuntimeEvent(
     ...progressData,
     cmd: command,
     directory: 'workspaceDirectory' in event ? event.workspaceDirectory : undefined,
+    executionScope,
     jobId: 'operationId' in event ? event.operationId : undefined,
     logFile: 'logFile' in event ? event.logFile : undefined,
     method,

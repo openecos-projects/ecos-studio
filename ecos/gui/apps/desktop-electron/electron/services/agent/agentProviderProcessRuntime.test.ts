@@ -58,6 +58,8 @@ describe('AgentProviderProcessRuntime', () => {
 
     const response = runtime.startSession({
       directory: '/work/demo',
+      knownProjects: [{ name: 'work', path: '/work' }],
+      projectRoot: '/work',
       providerId: 'codex',
     })
     const child = harness.children[0]
@@ -73,6 +75,8 @@ describe('AgentProviderProcessRuntime', () => {
       method: 'startSession',
       params: {
         directory: '/work/demo',
+        knownProjects: [{ name: 'work', path: '/work' }],
+        projectRoot: '/work',
         providerId: 'codex',
       },
     })
@@ -88,6 +92,84 @@ describe('AgentProviderProcessRuntime', () => {
     await expect(response).resolves.toEqual({
       sessionId: 'session-1',
     })
+  })
+
+  it('passes trusted manifest environment to the provider process', () => {
+    const harness = createSpawnHarness()
+    const env = { HOME: '/home/tester', PATH: '/tools/bin' }
+    const runtime = new AgentProviderProcessRuntime({
+      env,
+      manifest: {
+        command: 'ecos-agent-provider',
+        environment: { ECOS_AGENT_CODEX_BIN: '~/.nvm/versions/node/v20.20.2/bin/codex' },
+        manifestPath: '/plugins/ecos-agent/agent-provider.json',
+        pluginRoot: '/plugins/ecos-agent',
+        providerId: 'ecos_agent',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    void runtime.getStatus({ providerId: 'ecos_agent' })
+
+    expect(harness.spawn).toHaveBeenCalledWith('ecos-agent-provider', [], {
+      cwd: '/plugins/ecos-agent',
+      env: { ...env, ECOS_AGENT_CODEX_BIN: '~/.nvm/versions/node/v20.20.2/bin/codex' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  })
+
+  it('reloads the provider child when Codex bin override changes', async () => {
+    const harness = createSpawnHarness()
+    const env = { HOME: '/home/tester', PATH: '/tools/bin' }
+    const runtime = new AgentProviderProcessRuntime({
+      env,
+      manifest: {
+        command: 'ecos-agent-provider',
+        manifestPath: '/plugins/ecos-agent/agent-provider.json',
+        pluginRoot: '/plugins/ecos-agent',
+        providerId: 'ecos_agent',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const pending = runtime.getStatus({ providerId: 'ecos_agent' })
+    expect(harness.children).toHaveLength(1)
+
+    runtime.syncEnvironmentOverrides({
+      ECOS_AGENT_CODEX_BIN: '/managed/bin/codex',
+    })
+    await expect(pending).rejects.toThrow('restarted to apply Codex CLI path')
+    expect(harness.children[0].kill).toHaveBeenCalled()
+
+    void runtime.getStatus({ providerId: 'ecos_agent' })
+    expect(harness.spawn).toHaveBeenLastCalledWith('ecos-agent-provider', [], {
+      cwd: '/plugins/ecos-agent',
+      env: { ...env, ECOS_AGENT_CODEX_BIN: '/managed/bin/codex' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  })
+
+  it('includes a bounded provider stderr diagnostic when the process exits', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'ecos-agent',
+        manifestPath: '/plugins/ecos-agent/agent-provider.json',
+        pluginRoot: '/plugins/ecos-agent',
+        providerId: 'ecos_agent',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const response = runtime.getStatus({ providerId: 'ecos_agent' })
+    const child = harness.children[0]
+    child.stderr.emit('data', 'Codex CLI is required for ECOS Agent\n')
+    child.emit('close', 127, null)
+
+    await expect(response).rejects.toThrow('Codex CLI is required for ECOS Agent')
   })
 
   it('forwards provider events from process stdout through AgentRuntimeManager', () => {
@@ -126,6 +208,376 @@ describe('AgentProviderProcessRuntime', () => {
       text: 'working',
       type: 'message',
     })
+  })
+
+  it('forwards structured choice, status, and streaming fields', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          choice: {
+            promptId: 'confirm-1',
+            title: 'Confirm execution',
+            options: [
+              { id: 'confirm-yes', label: 'Confirm', value: '1' },
+              { id: 'confirm-no', label: 'Cancel', value: '2' },
+            ],
+            variant: 'buttons',
+          },
+          delta: 'working',
+          messageId: 'message-1',
+          sessionId: 'session-1',
+          status: 'awaiting_choice',
+          type: 'choice',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      choice: expect.objectContaining({
+        options: expect.arrayContaining([
+          { id: 'confirm-yes', label: 'Confirm', value: '1' },
+        ]),
+        variant: 'buttons',
+      }),
+      delta: 'working',
+      messageId: 'message-1',
+      providerId: 'local',
+      sessionId: 'session-1',
+      status: 'awaiting_choice',
+      type: 'choice',
+    })
+  })
+
+  it('drops malformed execution contracts from provider stdout', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          contract: { fields: [], title: 'Unvalidated contract' },
+          type: 'contract',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('forwards execution contracts with every resolved parameter field', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          contract: {
+            fields: Array.from({ length: 25 }, (_, index) => ({
+              label: `parameter_${index}`,
+              value: String(index),
+            })),
+            presentation: 'workspace_rerun',
+            schema_version: 'flow-agent.resolved_execution_contract.v1',
+            title: 'Workspace rerun plan',
+          },
+          type: 'contract',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: expect.objectContaining({
+          fields: expect.arrayContaining([{ label: 'parameter_24', value: '24' }]),
+          presentation: 'workspace_rerun',
+        }),
+        type: 'contract',
+      }),
+    )
+  })
+
+  it('forwards validated workspace setup contracts from provider stdout', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_setup',
+          workspaceSetup: {
+            schema_version: 'flow-agent.workspace_setup_contract.v2',
+            setup_id: 'setup-1',
+            title: 'Workspace run plan',
+            directory: '/runs/gcd_trial',
+            pdk: 'ics55',
+            pdk_root: '/pdk/ics55',
+            rtl_list: ['/rtl/gcd.v'],
+            design_input_mode: 'rtl',
+            pdk_config_mode: 'default',
+            pdk_config: { mode: 'default', tech_lef: [], cell_lef: [], liberty: [] },
+            project_context: {
+              mode: 'create',
+              project_name: 'runs',
+              project_root: '/runs',
+              project_json_path: '/runs/project.json',
+            },
+            parameters: {
+              design: 'gcd',
+              top_module: 'gcd',
+              clock: 'clk',
+              description: '',
+              frequency_max: 50,
+              die_area_mode: 'utilitization_margin',
+              utilitization: 0.4,
+              margin: 0,
+              max_fanout: 32,
+              target_density: 0.2,
+              target_overflow: 0,
+            },
+            flow_config: {
+              start_step: 'Synthesis',
+              end_step: 'Harden',
+              steps: [
+                'Synthesis',
+                'Floorplan',
+                'fixFanout',
+                'place',
+                'CTS',
+                'legalization',
+                'route',
+                'drc',
+                'filler',
+                'RCX',
+                'sta',
+                'Harden',
+              ],
+            },
+            requires_gui_review: true,
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'workspace_setup',
+        workspaceSetup: expect.objectContaining({ pdk: 'ics55' }),
+      }),
+    )
+  })
+
+  it('forwards validated workspace rerun contracts from provider stdout', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_rerun',
+          workspaceRerun: {
+            design_id: 'gcd',
+            end_step: 'place',
+            execution_scope: 'single_step',
+            parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+            writes: [
+              {
+                file: 'home/parameters.json',
+                json_path: ['Target density'],
+                knob_id: 'place.target_density',
+                surface: 'parameters',
+                value: 0.55,
+              },
+            ],
+            requires_gui_review: true,
+            rerun_id: 'gcd_rerun_place',
+            schema_version: 'flow-agent.workspace_rerun_contract.v1',
+            source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+            source_flow_json_sha256: `sha256:${'a'.repeat(64)}`,
+            source_stage_artifact_sha256: `sha256:${'b'.repeat(64)}`,
+            source_workspace: '/runs/gcd',
+            target_step: 'place',
+            target_workspace: '/runs/gcd_rerun_place',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      providerId: 'local',
+      type: 'workspace_rerun',
+      workspaceRerun: expect.objectContaining({
+        rerun_id: 'gcd_rerun_place',
+        end_step: 'place',
+        source_flow_json_sha256: 'a'.repeat(64),
+        source_stage_artifact_sha256: 'b'.repeat(64),
+        writes: [
+          expect.objectContaining({
+            file: 'home/parameters.json',
+            knob_id: 'place.target_density',
+          }),
+        ],
+      }),
+    })
+  })
+
+  const parameterUpdateEvent = (writes: unknown): string =>
+    `${JSON.stringify({
+      event: {
+        type: 'workspace_parameter_update',
+        workspaceParameterUpdate: {
+          parameter_patch: [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
+          schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
+          update_id: 'update_1',
+          workspace: '/runs/gcd',
+          writes,
+        },
+      },
+      type: 'event',
+    })}\n`
+
+  const emitParameterUpdate = (writes: unknown) => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit('data', parameterUpdateEvent(writes))
+    return listener
+  }
+
+  it('forwards resolved parameter write targets from provider stdout', () => {
+    const listener = emitParameterUpdate([
+      {
+        file: 'home/parameters.json',
+        json_path: ['Core', 'Utilitization'],
+        knob_id: 'floorplan.utilitization',
+        surface: 'parameters',
+        value: 0.7,
+      },
+    ])
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'workspace_parameter_update',
+        workspaceParameterUpdate: expect.objectContaining({
+          schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
+          writes: [
+            {
+              file: 'home/parameters.json',
+              json_path: ['Core', 'Utilitization'],
+              knob_id: 'floorplan.utilitization',
+              surface: 'parameters',
+              value: 0.7,
+            },
+          ],
+        }),
+      }),
+    )
+  })
+
+  it.each([
+    ['a file outside the parameter allowlist', 'home/../../etc/passwd'],
+    ['an arbitrary project source file', 'rtl/gcd.v'],
+    ['a flow definition', 'home/flow.json'],
+  ])('drops parameter updates that target %s', (_label, file) => {
+    const listener = emitParameterUpdate([
+      {
+        file,
+        json_path: ['Core', 'Utilitization'],
+        knob_id: 'floorplan.utilitization',
+        surface: 'parameters',
+        value: 0.7,
+      },
+    ])
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('drops parameter updates whose writes do not cover every patch entry', () => {
+    expect(emitParameterUpdate([])).not.toHaveBeenCalled()
+    expect(emitParameterUpdate(undefined)).not.toHaveBeenCalled()
   })
 
   it('rejects pending requests when the provider process exits', async () => {

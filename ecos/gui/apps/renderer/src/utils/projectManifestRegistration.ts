@@ -1,6 +1,8 @@
 import type { WorkspaceConfig } from '@/types'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
+import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { parseProjectManifest } from '@/utils/projectManagement'
 
 export interface ProjectRouteContext {
   projectRoot: string
@@ -34,6 +36,93 @@ export function projectContextFromWorkspaceConfig(
         ? projectContext.project_name
         : undefined,
   }
+}
+
+/**
+ * Infers the parent project for a workspace opened outside Project Management
+ * (for example Backend Design recent workspaces) when the parent directory has a
+ * project.json that already lists that workspace.
+ */
+export async function resolveProjectRouteContextForWorkspace(
+  workspacePath: string,
+): Promise<ProjectRouteContext | null> {
+  const normalizedWorkspace = normalizePath(workspacePath)
+  if (!normalizedWorkspace) return null
+
+  const projectRoot = parentPath(normalizedWorkspace)
+  if (!projectRoot || projectRoot === normalizedWorkspace) return null
+
+  try {
+    const registeredProjectRoot = await registerLocalProjectRoot(projectRoot)
+    if (!registeredProjectRoot) return null
+
+    const manifestText = await readOptionalProjectTextFile('project.json', {
+      projectPath: registeredProjectRoot,
+    })
+    if (!manifestText) return null
+
+    const manifest = parseProjectManifest(manifestText)
+    const listed = manifest.workspaces.some(
+      (workspace) => normalizePath(workspace.workspace_path) === normalizedWorkspace,
+    )
+    if (!listed) return null
+
+    return {
+      projectRoot: registeredProjectRoot,
+      projectName: manifest.name || basenamePath(registeredProjectRoot) || undefined,
+    }
+  } catch (error) {
+    console.warn('Failed to resolve project context for workspace.', error)
+    return null
+  } finally {
+    await registerLocalProjectRoot(normalizedWorkspace)
+  }
+}
+
+/**
+ * Resolve the managed project that should own a workspace path.
+ * Prefers an explicit context (tab/route); otherwise uses the parent directory
+ * only when it already contains project.json (avoids inventing a project).
+ */
+export async function resolveManagedProjectContext(options: {
+  preferred?: ProjectRouteContext | null
+  workspacePath: string
+}): Promise<ProjectRouteContext | null> {
+  const preferredRoot = normalizePath(options.preferred?.projectRoot ?? '')
+  if (preferredRoot) {
+    return {
+      projectRoot: preferredRoot,
+      projectName:
+        optionalString(options.preferred?.projectName) ||
+        basenamePath(preferredRoot) ||
+        undefined,
+    }
+  }
+
+  const workspacePath = normalizePath(options.workspacePath)
+  if (!workspacePath) return null
+  const projectRoot = parentPath(workspacePath)
+  if (!projectRoot || projectRoot === workspacePath) return null
+
+  const registeredRoot = await registerLocalProjectRoot(projectRoot)
+  if (!registeredRoot) return null
+
+  const manifestText = await readOptionalProjectTextFile(
+    joinPath(registeredRoot, 'project.json'),
+  )
+  if (!manifestText) return null
+
+  let projectName = basenamePath(registeredRoot) || undefined
+  try {
+    const manifest = JSON.parse(manifestText) as { name?: unknown }
+    if (typeof manifest.name === 'string' && manifest.name.trim()) {
+      projectName = manifest.name.trim()
+    }
+  } catch {
+    // Keep directory basename when the manifest is not JSON-parsable.
+  }
+
+  return { projectRoot: registeredRoot, projectName }
 }
 
 export async function registerProjectManagedWorkspace(
@@ -115,6 +204,18 @@ function optionalString(value: unknown): string {
 
 function basenamePath(path: string): string {
   return normalizePath(path).split('/').filter(Boolean).pop() ?? ''
+}
+
+function parentPath(path: string): string {
+  const normalized = normalizePath(path)
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
+  const parent = parts.slice(0, -1).join('/')
+  return normalized.startsWith('/') ? `/${parent}` : parent
+}
+
+function joinPath(root: string, child: string): string {
+  return `${normalizePath(root)}/${child.replace(/^\/+/, '')}`
 }
 
 function normalizePath(path: string): string {

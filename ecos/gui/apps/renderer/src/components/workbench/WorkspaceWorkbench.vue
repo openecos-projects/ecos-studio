@@ -5,7 +5,6 @@
         <slot name="left" />
       </SplitterPanel>
       <SplitterPanel :size="40" :min-size="25" class="workspace-workbench-right">
-        <div ref="chatToolbarTarget" class="workspace-workbench-chat-toolbar" />
         <FlowStatusStrip
           class="workspace-workbench-flow-status"
           :loading="loading"
@@ -18,10 +17,7 @@
           </template>
         </FlowStatusStrip>
         <slot name="right-log" :selected-node="selectedFlowNode" />
-        <ChatInspectorPanel
-          class="workspace-workbench-inspector"
-          :toolbar-target="chatToolbarTarget"
-        />
+        <ChatInspectorPanel class="workspace-workbench-inspector" />
       </SplitterPanel>
     </Splitter>
   </div>
@@ -40,8 +36,6 @@ import {
   runningFlowNodeId,
   type FlowStatusNode,
 } from './flowStatus'
-
-const chatToolbarTarget = ref<HTMLElement | null>(null)
 
 const props = withDefaults(
   defineProps<{
@@ -149,6 +143,10 @@ defineSlots<{
   overflow: hidden;
 }
 
+.workspace-workbench-right {
+  background: var(--bg-secondary);
+}
+
 .workspace-workbench-left > *,
 .workspace-workbench-right > * {
   min-height: 0;
@@ -159,22 +157,15 @@ defineSlots<{
   flex: 1 1 auto;
 }
 
-.workspace-workbench-right > .workspace-workbench-chat-toolbar,
 .workspace-workbench-flow-status {
   flex: 0 0 auto;
   position: relative;
   z-index: 1;
 }
 
-.workspace-workbench-right > .workspace-workbench-chat-toolbar {
-  background: var(--bg-primary);
-  min-height: 40px;
-}
-
 .workspace-workbench-right > .workspace-workbench-inspector {
-  flex: 0 0 clamp(184px, 30vh, 280px);
+  flex: 1 1 auto;
   height: auto !important;
-  margin-top: auto;
-  min-height: 184px;
+  min-height: clamp(184px, 30vh, 280px);
 }
 </style>

@@ -158,6 +158,90 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     )
   })
 
+  it('maps a single-step agent rerun completion onto run_step', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const allHandler = vi.fn()
+    const stepCompleteHandler = vi.fn()
+    client.onAll(allHandler)
+    client.on('step_complete', stepCompleteHandler)
+    client.connect()
+
+    bridge.emit({
+      designTool: 'backend',
+      executionScope: 'single_step',
+      method: 'candidate.rerun',
+      operationId: 'operation-single-rerun',
+      rerun: true,
+      type: 'operation.completed',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'run_step',
+          executionScope: 'single_step',
+          method: 'candidate.rerun',
+          type: 'step_complete',
+        }),
+      }),
+    )
+    expect(stepCompleteHandler).toHaveBeenCalledTimes(1)
+  })
+
+  it('maps a full-flow agent rerun onto flow lifecycle notifications', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+
+    bridge.emit({
+      designTool: 'backend',
+      executionScope: 'full_flow',
+      method: 'candidate.rerun',
+      operationId: 'operation-rerun',
+      rerun: true,
+      type: 'operation.started',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    bridge.emit({
+      designTool: 'backend',
+      executionScope: 'full_flow',
+      method: 'candidate.rerun',
+      operationId: 'operation-rerun',
+      rerun: true,
+      type: 'operation.completed',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(allHandler).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'rtl2gds',
+          executionScope: 'full_flow',
+          rerun: true,
+          type: 'message',
+        }),
+      }),
+    )
+    expect(allHandler).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'rtl2gds',
+          executionScope: 'full_flow',
+          rerun: true,
+          type: 'task_complete',
+        }),
+      }),
+    )
+  })
+
   it('maps frontend flow progress into an incremental step completion', async () => {
     const bridge = installRuntimeEventBridge()
     const { createRuntimeEventClient } = await import('./runtimeEvents')

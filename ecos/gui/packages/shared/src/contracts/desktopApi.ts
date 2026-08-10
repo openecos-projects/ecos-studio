@@ -36,6 +36,23 @@ import type {
   DesktopShellSession,
   DesktopShellSessionOptions,
 } from './desktopShell.ts'
+import type {
+  DesktopAgentEvent,
+  DesktopAgentInterruptRequest,
+  DesktopAgentWorkspaceRerunExecuteRequest,
+  DesktopAgentWorkspaceRerunPrepareRequest,
+  DesktopAgentWorkspaceRerunPrepareResult,
+  DesktopAgentSendMessageRequest,
+  DesktopAgentSendMessageResponse,
+  DesktopAgentStartRequest,
+  DesktopAgentStartSessionRequest,
+  DesktopAgentStartSessionResponse,
+} from './desktopAgent.ts'
+import type {
+  DesktopCodexDependencyStatus,
+  DesktopCodexInstallProgressEvent,
+  DesktopCodexSetBinPathRequest,
+} from './desktopCodex.ts'
 
 export type DesktopSettingsValue =
   | string
@@ -213,6 +230,12 @@ export interface DesktopApi {
   workspace: {
     isProjectDirectory(path: string): Promise<boolean>
     openOrFocus(path: string): Promise<WorkspaceOpenOrFocusResult>
+    prepareFlowAgentRerun?(
+      request: DesktopAgentWorkspaceRerunPrepareRequest,
+    ): Promise<DesktopAgentWorkspaceRerunPrepareResult>
+    executeFlowAgentRerun?(
+      request: DesktopAgentWorkspaceRerunExecuteRequest,
+    ): Promise<void>
     bindWindow(path: string): Promise<string>
     unbindWindow(path?: string): Promise<void>
     getBoundPath(): Promise<string | null>
@@ -241,6 +264,8 @@ export interface DesktopApi {
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
+    pathExists(path: string): Promise<boolean>
+    discardFailedWorkspaceCreate(path: string): Promise<boolean>
     prepareProjectDirectoryReplacement(
       path: string,
     ): Promise<WorkspaceDirectoryReplacement | null>
@@ -292,6 +317,29 @@ export interface DesktopApi {
   }
   runtime: DesignRuntimeApi
   ecc: EccRuntimeApi
+  agent?: {
+    interrupt(request: DesktopAgentInterruptRequest): Promise<void>
+    start(request: DesktopAgentStartRequest): Promise<void>
+    startSession(
+      request: DesktopAgentStartSessionRequest,
+    ): Promise<DesktopAgentStartSessionResponse>
+    sendMessage(
+      request: DesktopAgentSendMessageRequest,
+    ): Promise<DesktopAgentSendMessageResponse>
+    onEvent(listener: (event: DesktopAgentEvent) => void): DesktopEventUnsubscribe
+    codex?: {
+      getStatus(): Promise<DesktopCodexDependencyStatus>
+      install(): Promise<DesktopCodexDependencyStatus>
+      login(): Promise<DesktopCodexDependencyStatus>
+      recheck(): Promise<DesktopCodexDependencyStatus>
+      setBinPath(
+        request: DesktopCodexSetBinPathRequest,
+      ): Promise<DesktopCodexDependencyStatus>
+      onProgress(
+        listener: (event: DesktopCodexInstallProgressEvent) => void,
+      ): DesktopEventUnsubscribe
+    }
+  }
   shell: {
     createSession(options: DesktopShellSessionOptions): Promise<DesktopShellSession>
     write(sessionId: string, data: string): Promise<void>

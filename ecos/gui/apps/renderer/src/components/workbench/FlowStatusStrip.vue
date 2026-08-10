@@ -96,7 +96,7 @@ function selectNode(id: string): void {
   gap: 12px;
   justify-content: space-between;
   min-height: 38px;
-  padding: 8px 12px 6px;
+  padding: 0.5rem 0.75rem 0.375rem;
 }
 
 .flow-status-heading {
@@ -164,6 +164,7 @@ function selectNode(id: string): void {
   overflow: hidden;
   padding: 3px 1px 5px;
   position: relative;
+  transition: color 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .flow-status-node::before,
@@ -191,7 +192,7 @@ function selectNode(id: string): void {
 
 .flow-status-node-mark {
   align-items: center;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 50%;
   display: inline-flex;
@@ -222,6 +223,16 @@ function selectNode(id: string): void {
 .flow-status-node.is-selected .flow-status-node-mark {
   border-color: var(--accent-color);
   color: var(--accent-color);
+}
+
+.flow-status-node:hover .flow-status-node-label,
+.flow-status-node.is-selected .flow-status-node-label {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.flow-status-node.is-succeeded .flow-status-node-mark {
+  border-color: color-mix(in srgb, var(--success-color) 42%, var(--border-color));
 }
 
 .flow-status-node.is-selected::before,

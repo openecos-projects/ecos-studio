@@ -439,6 +439,15 @@ export function useStepQorAnalysis() {
     { immediate: true },
   )
 
+  // Same step after Agent rerun workspace switch must not keep the previous workspace cache.
+  watch(
+    () => currentProject.value?.path,
+    (nextPath, previousPath) => {
+      if (!nextPath || nextPath === previousPath) return
+      void refetch()
+    },
+  )
+
   watch(
     () => [
       workspaceLifecycle.resourceVersions.value.step,

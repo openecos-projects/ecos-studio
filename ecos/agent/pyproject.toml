@@ -1,0 +1,15 @@
+[project]
+name = "ecos-agent"
+version = "0.1.0"
+description = "Bounded Codex proposal provider for ECOS Studio GUI workflows"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

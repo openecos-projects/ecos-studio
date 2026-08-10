@@ -6,6 +6,7 @@ import {
   type IpcMain,
   type IpcMainInvokeEvent,
 } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import {
@@ -46,6 +47,13 @@ import {
   type DesktopSettingsValue,
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
+  type DesktopAgentEvent,
+  type DesktopAgentInterruptRequest,
+  type DesktopAgentWorkspaceRerunContract,
+  type DesktopAgentSendMessageRequest,
+  type DesktopAgentStartRequest,
+  type DesktopAgentStartSessionRequest,
+  type DesktopCodexInstallProgressEvent,
   type ResourceImportPdkRequest,
   type ResourceImportLocalRequest,
   type ResourceInstallRequest,
@@ -63,6 +71,7 @@ import {
   type WorkspaceStepInfoRequest,
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
+import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import {
   closeWindow,
   confirmWindowClose,
@@ -79,6 +88,10 @@ import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
+import {
+  executeWorkspaceRerun,
+  prepareWorkspaceRerun,
+} from '../services/eccRpc/workspaceRerun'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -98,6 +111,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface DesktopBridgeServices {
+  agentRuntimeService?: AgentProviderRuntime & {
+    syncEnvironmentOverrides?(
+      overrides: Record<string, string | undefined>,
+      request?: DesktopAgentStartRequest,
+    ): void
+  }
+  codexDependencyService?: {
+    getStatus(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    install(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    login(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    recheck(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    setBinPath(
+      pathValue: string,
+    ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>>
+    onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
+  }
   appInfoService: {
     getVersions(): Promise<VersionInfo>
   }
@@ -165,6 +195,8 @@ export interface DesktopBridgeServices {
     ): Promise<string>
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
+    pathExists(path: string): Promise<boolean>
+    discardFailedWorkspaceCreate(path: string): Promise<boolean>
   }
   surferProtocolService: {
     authorizeWaveform(path: string): Promise<string>
@@ -241,7 +273,9 @@ export interface DesktopBridgeServices {
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
-    openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
+    openWorkspace(
+      request: EccWorkspaceOpenRequest,
+    ): Promise<{ directory: string; workspaceHandle: string }>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
     resetFlow(request: EccWorkspaceHandleRequest): Promise<unknown>
     rpcHello(): Promise<unknown>
@@ -544,13 +578,35 @@ export function registerIpc(
     string,
     {
       designTool: DesignTool
-      directory: string
+      /** Request path and ECC-canonical path may both be registered for one handle. */
+      directories: Set<string>
       sender: IpcMainInvokeEvent['sender']
       onDestroyed: () => void
     }
   >()
   const workspaceHandleClosePromises = new Map<string, Promise<unknown>>()
-  /** Last runtime.ready per tool and directory, replayed after ensureStarted. */
+  const agentSessionSubscriptions = new Map<
+    string,
+    {
+      sender: IpcMainInvokeEvent['sender']
+      onDestroyed: () => void
+    }
+  >()
+  const pendingWorkspaceReruns = new Map<
+    string,
+    {
+      contract: DesktopAgentWorkspaceRerunContract
+      sender: IpcMainInvokeEvent['sender']
+    }
+  >()
+  const pendingWorkspaceRerunExecutions = new Map<
+    string,
+    {
+      contract: DesktopAgentWorkspaceRerunContract
+      sender: IpcMainInvokeEvent['sender']
+    }
+  >()
+  /** Last runtime.ready per tool and directory, replayed when a handle subscribes. */
   const lastReadyByDirectory = new Map<string, EccRuntimeEvent>()
 
   const readyKey = (designTool: DesignTool, directory: string): string =>
@@ -580,6 +636,50 @@ export function registerIpc(
     })
   }
 
+  const agentSessionKey = (providerId: string, sessionId: string): string =>
+    `${providerId}:${sessionId}`
+
+  const sendAgentEventToSender = (
+    sender: IpcMainInvokeEvent['sender'],
+    payload: DesktopAgentEvent,
+  ): void => {
+    if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return
+    sender.send(desktopApiEventChannels.agentEvent, payload)
+  }
+
+  const trackAgentSession = (
+    sender: IpcMainInvokeEvent['sender'],
+    request: DesktopAgentStartSessionRequest,
+  ): void => {
+    const providerId = readAgentProviderId(request)
+    const key = agentSessionKey(providerId, request.sessionId ?? '')
+    const previous = agentSessionSubscriptions.get(key)
+    if (previous && previous.sender !== sender) {
+      throw new Error('Agent session belongs to another window.')
+    }
+    if (previous) return
+
+    const onDestroyed = (): void => {
+      agentSessionSubscriptions.delete(key)
+    }
+    agentSessionSubscriptions.set(key, { sender, onDestroyed })
+    if (typeof sender.once === 'function') sender.once('destroyed', onDestroyed)
+    if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) onDestroyed()
+  }
+
+  const requireAgentSessionOwner = (
+    sender: IpcMainInvokeEvent['sender'],
+    request: DesktopAgentInterruptRequest | DesktopAgentSendMessageRequest,
+  ): void => {
+    const providerId = readAgentProviderId(request)
+    const subscription = agentSessionSubscriptions.get(
+      agentSessionKey(providerId, request.sessionId),
+    )
+    if (!subscription || subscription.sender !== sender) {
+      throw new Error('Unknown agent session for this window.')
+    }
+  }
+
   const deliverDirectoryScopedEvent = (
     designTool: DesignTool,
     payload: EccRuntimeEvent,
@@ -606,7 +706,7 @@ export function registerIpc(
     const deliveredSenders = new Set<IpcMainInvokeEvent['sender']>()
     for (const subscription of workspaceHandleSubscriptions.values()) {
       if (subscription.designTool !== designTool) continue
-      if (subscription.directory !== normalizedDirectory) continue
+      if (!subscription.directories.has(normalizedDirectory)) continue
       if (deliveredSenders.has(subscription.sender)) continue
       deliveredSenders.add(subscription.sender)
       const scopedPayload = {
@@ -646,6 +746,27 @@ export function registerIpc(
   services.frontendRpcRuntimeService.onEvent((payload) =>
     deliverRuntimeEvent('frontend', payload),
   )
+
+  services.agentRuntimeService?.onEvent((payload) => {
+    if (!payload.providerId || !payload.sessionId) return
+    const subscription = agentSessionSubscriptions.get(
+      agentSessionKey(payload.providerId, payload.sessionId),
+    )
+    if (!subscription) return
+    if (payload.type !== 'workspace_rerun' || !payload.workspaceRerun) {
+      sendAgentEventToSender(subscription.sender, payload)
+      return
+    }
+    const token = randomUUID()
+    pendingWorkspaceReruns.set(token, {
+      contract: payload.workspaceRerun,
+      sender: subscription.sender,
+    })
+    sendAgentEventToSender(subscription.sender, {
+      ...payload,
+      workspaceRerunToken: token,
+    })
+  })
 
   const unwatchProjectFile = async (subscriptionId: string): Promise<void> => {
     const subscription = projectFileWatchSubscriptions.get(subscriptionId)
@@ -735,20 +856,26 @@ export function registerIpc(
     }
 
     const previous = workspaceHandleSubscriptions.get(workspaceHandle)
-    if (previous && typeof previous.sender.off === 'function') {
+    if (
+      previous &&
+      previous.sender !== sender &&
+      typeof previous.sender.off === 'function'
+    ) {
       previous.sender.off('destroyed', previous.onDestroyed)
     }
 
     const onDestroyed = (): void => {
       void closeTrackedWorkspaceHandle(workspaceHandle, designTool)
     }
+    const directories = previous?.directories ?? new Set<string>()
+    directories.add(normalizedDirectory)
     workspaceHandleSubscriptions.set(workspaceHandle, {
       designTool,
-      directory: normalizedDirectory,
+      directories,
       sender,
-      onDestroyed,
+      onDestroyed: previous?.sender === sender ? previous.onDestroyed : onDestroyed,
     })
-    if (typeof sender.once === 'function') {
+    if (previous?.sender !== sender && typeof sender.once === 'function') {
       sender.once('destroyed', onDestroyed)
     }
 
@@ -780,6 +907,24 @@ export function registerIpc(
     if (typeof result !== 'object' || result === null) return null
     if (!('directory' in result)) return null
     return typeof result.directory === 'string' ? result.directory : null
+  }
+
+  const workspaceHandleForSender = (
+    sender: IpcMainInvokeEvent['sender'],
+    directory: string,
+    designTool: DesignTool = 'backend',
+  ): string | null => {
+    const normalizedDirectory = normalizeWorkspacePath(directory)
+    for (const [workspaceHandle, subscription] of workspaceHandleSubscriptions) {
+      if (
+        subscription.sender === sender &&
+        subscription.designTool === designTool &&
+        subscription.directories.has(normalizedDirectory)
+      ) {
+        return workspaceHandle
+      }
+    }
+    return null
   }
 
   handle(desktopApiIpcChannels.appGetVersions, async () => {
@@ -855,6 +1000,78 @@ export function registerIpc(
       }
       return { action: 'proceed' }
     })
+  })
+
+  handle(desktopApiIpcChannels.workspacePrepareFlowAgentRerun, async (event, request) => {
+    const token = readWorkspaceRerunToken(request)
+    const pending = pendingWorkspaceReruns.get(token)
+    if (!pending || pending.sender !== event.sender) {
+      throw new Error('Workspace rerun authorization is invalid.')
+    }
+    const caller = BrowserWindow.fromWebContents(event.sender)
+    if (!caller) throw new Error('Caller window is not available')
+    const sourceWorkspace = workspaceWindowRegistry.getPathForWindow(
+      caller as WorkspaceWindowLike,
+    )
+    if (
+      !sourceWorkspace ||
+      normalizeWorkspacePath(sourceWorkspace) !==
+        normalizeWorkspacePath(pending.contract.source_workspace)
+    ) {
+      throw new Error('Workspace rerun source is not bound to this window.')
+    }
+    pendingWorkspaceReruns.delete(token)
+    const prepared = await prepareWorkspaceRerun(pending.contract)
+    const executionToken = randomUUID()
+    pendingWorkspaceRerunExecutions.set(executionToken, pending)
+    return { ...prepared, executionToken }
+  })
+
+  handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
+    const token = readWorkspaceRerunToken(request)
+    const pending = pendingWorkspaceRerunExecutions.get(token)
+    if (!pending || pending.sender !== event.sender) {
+      throw new Error('Workspace rerun execution authorization is invalid.')
+    }
+    const caller = BrowserWindow.fromWebContents(event.sender)
+    if (!caller) throw new Error('Caller window is not available')
+    const targetWorkspace = workspaceWindowRegistry.getPathForWindow(
+      caller as WorkspaceWindowLike,
+    )
+    if (
+      !targetWorkspace ||
+      normalizeWorkspacePath(targetWorkspace) !==
+        normalizeWorkspacePath(pending.contract.target_workspace)
+    ) {
+      throw new Error('Workspace rerun target is not bound to this window.')
+    }
+    let workspaceHandle =
+      workspaceHandleForSender(event.sender, targetWorkspace) ||
+      workspaceHandleForSender(event.sender, pending.contract.target_workspace)
+    if (!workspaceHandle) {
+      // openProject may have bound the window while ECC returned a different
+      // canonical directory than the contract path; open/track under both.
+      const opened = await services.eccRuntimeService.openWorkspace({
+        directory: targetWorkspace,
+      })
+      const openedHandle = workspaceHandleFromResult(opened)
+      const openedDirectory = workspaceDirectoryFromResult(opened)
+      if (!openedHandle) {
+        throw new Error('Workspace rerun target is not active in this window.')
+      }
+      trackWorkspaceHandle(event.sender, openedHandle, targetWorkspace)
+      trackWorkspaceHandle(event.sender, openedHandle, pending.contract.target_workspace)
+      if (openedDirectory) {
+        trackWorkspaceHandle(event.sender, openedHandle, openedDirectory)
+      }
+      workspaceHandle = openedHandle
+    }
+    pendingWorkspaceRerunExecutions.delete(token)
+    await executeWorkspaceRerun(
+      pending.contract,
+      services.eccRuntimeService,
+      workspaceHandle,
+    )
   })
 
   handle(desktopApiIpcChannels.workspaceBindWindow, async (event, path) => {
@@ -1086,6 +1303,23 @@ export function registerIpc(
   handle(desktopApiIpcChannels.workspaceListProjectDirectory, async (_event, path) => {
     return await services.workspaceService.listProjectDirectory(path as string)
   })
+
+  handle(desktopApiIpcChannels.workspacePathExists, async (_event, path) => {
+    if (typeof path !== 'string') {
+      throw new Error('Workspace path must be a string')
+    }
+    return await services.workspaceService.pathExists(path)
+  })
+
+  handle(
+    desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate,
+    async (_event, path) => {
+      if (typeof path !== 'string') {
+        throw new Error('Workspace path must be a string')
+      }
+      return await services.workspaceService.discardFailedWorkspaceCreate(path)
+    },
+  )
 
   handle(
     desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
@@ -1379,13 +1613,17 @@ export function registerIpc(
             runtimeRequest.payload as unknown as EccWorkspaceCreateRequest,
           )
     const workspaceHandle = workspaceHandleFromResult(result)
-    const directory =
-      workspaceDirectoryFromResult(result) ??
-      (typeof runtimeRequest.payload.directory === 'string'
-        ? runtimeRequest.payload.directory
-        : null)
-    if (workspaceHandle && directory) {
-      trackWorkspaceHandle(event.sender, workspaceHandle, directory, designTool)
+    const directory = workspaceDirectoryFromResult(result)
+    if (workspaceHandle) {
+      trackWorkspaceHandle(
+        event.sender,
+        workspaceHandle,
+        runtimeRequest.payload.directory,
+        designTool,
+      )
+      if (directory) {
+        trackWorkspaceHandle(event.sender, workspaceHandle, directory, designTool)
+      }
     }
     return result
   })
@@ -1400,9 +1638,17 @@ export function registerIpc(
             directory: runtimeRequest.directory,
           })
     const workspaceHandle = workspaceHandleFromResult(result)
-    const directory = workspaceDirectoryFromResult(result) ?? runtimeRequest.directory
-    if (workspaceHandle && directory) {
-      trackWorkspaceHandle(event.sender, workspaceHandle, directory, designTool)
+    const directory = workspaceDirectoryFromResult(result)
+    if (workspaceHandle) {
+      trackWorkspaceHandle(
+        event.sender,
+        workspaceHandle,
+        runtimeRequest.directory,
+        designTool,
+      )
+      if (directory) {
+        trackWorkspaceHandle(event.sender, workspaceHandle, directory, designTool)
+      }
     }
     return result
   })
@@ -1526,25 +1772,33 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceCreate, async (event, request) => {
-    const result = await services.eccRuntimeService.createWorkspace(
-      request as EccWorkspaceCreateRequest,
-    )
+    const createRequest = request as EccWorkspaceCreateRequest
+    const result = await services.eccRuntimeService.createWorkspace(createRequest)
     const workspaceHandle = workspaceHandleFromResult(result)
     const directory = workspaceDirectoryFromResult(result)
-    if (workspaceHandle && directory) {
-      trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+    if (workspaceHandle) {
+      if (typeof createRequest.directory === 'string') {
+        trackWorkspaceHandle(event.sender, workspaceHandle, createRequest.directory)
+      }
+      if (directory) {
+        trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+      }
     }
     return result
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceOpen, async (event, request) => {
-    const result = await services.eccRuntimeService.openWorkspace(
-      request as EccWorkspaceOpenRequest,
-    )
+    const openRequest = request as EccWorkspaceOpenRequest
+    const result = await services.eccRuntimeService.openWorkspace(openRequest)
     const workspaceHandle = workspaceHandleFromResult(result)
     const directory = workspaceDirectoryFromResult(result)
-    if (workspaceHandle && directory) {
-      trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+    if (workspaceHandle) {
+      if (typeof openRequest.directory === 'string') {
+        trackWorkspaceHandle(event.sender, workspaceHandle, openRequest.directory)
+      }
+      if (directory) {
+        trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+      }
     }
     return result
   })
@@ -1602,6 +1856,75 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccFlowRunStep, async (_event, request) => {
     return await services.eccRuntimeService.runStep(request as EccFlowRunStepRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentStart, async (_event, request) => {
+    const agentRequest = readAgentStartRequest(request)
+    await applyCodexBinEnv(services, agentRequest)
+    await requireAgentRuntime(services).start(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentCodexGetStatus, async () => {
+    return await requireCodexDependencyService(services).getStatus()
+  })
+
+  handle(desktopApiIpcChannels.agentCodexRecheck, async () => {
+    return await requireCodexDependencyService(services).recheck()
+  })
+
+  handle(desktopApiIpcChannels.agentCodexInstall, async (event) => {
+    const sender = event.sender
+    const unsubscribe = requireCodexDependencyService(services).onProgress((payload) => {
+      if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return
+      if (typeof sender.send === 'function') {
+        sender.send(desktopApiEventChannels.agentCodexProgress, payload)
+      }
+    })
+    try {
+      return await requireCodexDependencyService(services).install()
+    } finally {
+      unsubscribe()
+      await applyCodexBinEnv(services)
+    }
+  })
+
+  handle(desktopApiIpcChannels.agentCodexLogin, async () => {
+    const status = await requireCodexDependencyService(services).login()
+    await applyCodexBinEnv(services)
+    return status
+  })
+
+  handle(desktopApiIpcChannels.agentCodexSetBinPath, async (_event, request) => {
+    const pathValue = readCodexBinPathRequest(request)
+    const status = await requireCodexDependencyService(services).setBinPath(pathValue)
+    await applyCodexBinEnv(services)
+    return status
+  })
+
+  handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
+    const agentRequest = readAgentStartSessionRequest(request)
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const windowDirectory = window
+      ? workspaceWindowRegistry.getPathForWindow(window)
+      : null
+    // Prefer the tab's frozen workspace directory when provided.
+    if (!agentRequest.directory && windowDirectory) {
+      agentRequest.directory = windowDirectory
+    }
+    trackAgentSession(event.sender, agentRequest)
+    return await requireAgentRuntime(services).startSession(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentSendMessage, async (event, request) => {
+    const agentRequest = readAgentSendMessageRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    return await requireAgentRuntime(services).sendMessage(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentInterrupt, async (event, request) => {
+    const agentRequest = readAgentInterruptRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    await requireAgentRuntime(services).interrupt(agentRequest)
   })
 
   handle(desktopApiIpcChannels.shellCreateSession, async (event, options) => {
@@ -1666,4 +1989,145 @@ export function registerIpc(
   handle(desktopApiIpcChannels.systemOpenExternal, async (_event, url) => {
     await shell.openExternal(url as string)
   })
+}
+
+function requireAgentRuntime(services: DesktopBridgeServices): AgentProviderRuntime {
+  if (!services.agentRuntimeService) {
+    throw new Error(
+      'No ECOS Agent provider is available. Check the in-tree agent or ECOS_AGENT_PROVIDER_ROOTS.',
+    )
+  }
+  return services.agentRuntimeService
+}
+
+function requireCodexDependencyService(
+  services: DesktopBridgeServices,
+): NonNullable<DesktopBridgeServices['codexDependencyService']> {
+  if (!services.codexDependencyService) {
+    throw new Error('Codex dependency service is unavailable.')
+  }
+  return services.codexDependencyService
+}
+
+async function applyCodexBinEnv(
+  services: DesktopBridgeServices,
+  request?: DesktopAgentStartRequest,
+): Promise<void> {
+  const runtime = services.agentRuntimeService
+  if (!runtime?.syncEnvironmentOverrides || !services.codexDependencyService) {
+    return
+  }
+  runtime.syncEnvironmentOverrides(
+    await services.codexDependencyService.resolveEnvironmentForAgent(),
+    request,
+  )
+}
+
+function readCodexBinPathRequest(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (isRecord(value) && typeof value.path === 'string') {
+    return value.path
+  }
+  throw new Error('Invalid Codex binary path request')
+}
+
+function readAgentStartRequest(value: unknown): DesktopAgentStartRequest {
+  return { providerId: readAgentProviderId(value) }
+}
+
+function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionRequest {
+  const record = readAgentRecord(value)
+  const mode = record.mode
+  const projectRoot =
+    typeof record.projectRoot === 'string' && record.projectRoot.trim()
+      ? record.projectRoot.trim()
+      : undefined
+  const directory =
+    typeof record.directory === 'string' && record.directory.trim()
+      ? record.directory.trim()
+      : undefined
+  const knownProjects = readAgentKnownProjects(record.knownProjects)
+  return {
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+    mode: mode === 'home' || mode === 'workspace' ? mode : undefined,
+    ...(directory ? { directory } : {}),
+    ...(projectRoot ? { projectRoot } : {}),
+    ...(knownProjects ? { knownProjects } : {}),
+  }
+}
+
+function readAgentKnownProjects(
+  value: unknown,
+): DesktopAgentStartSessionRequest['knownProjects'] {
+  if (!Array.isArray(value)) return undefined
+  const projects = value
+    .slice(0, 32)
+    .map((item) => {
+      if (!isRecord(item)) return null
+      const path = typeof item.path === 'string' ? item.path.trim() : ''
+      if (!path) return null
+      const name =
+        typeof item.name === 'string' && item.name.trim()
+          ? item.name.trim()
+          : path.split(/[/\\]/).filter(Boolean).at(-1) || path
+      return { name, path }
+    })
+    .filter((item): item is { name: string; path: string } => item !== null)
+  return projects.length > 0 ? projects : undefined
+}
+
+function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageRequest {
+  const record = readAgentRecord(value)
+  const message = record.message
+  if (typeof message !== 'string' || message.length > 4096) {
+    throw new Error('Agent message must be a string of at most 4096 characters.')
+  }
+  return {
+    message,
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readAgentInterruptRequest(value: unknown): DesktopAgentInterruptRequest {
+  const record = readAgentRecord(value)
+  return {
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readWorkspaceRerunToken(value: unknown): string {
+  if (
+    !isRecord(value) ||
+    typeof value.token !== 'string' ||
+    !/^[a-f0-9-]{36}$/.test(value.token)
+  ) {
+    throw new Error('Workspace rerun token is invalid.')
+  }
+  return value.token
+}
+
+function readAgentRecord(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error('Agent request must be an object.')
+  return value
+}
+
+function readAgentProviderId(value: unknown): string {
+  const providerId = isRecord(value) ? value.providerId : undefined
+  if (
+    typeof providerId !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(providerId)
+  ) {
+    throw new Error('Agent providerId is invalid.')
+  }
+  return providerId
+}
+
+function readAgentSessionId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
+    throw new Error('Agent sessionId is invalid.')
+  }
+  return value
 }

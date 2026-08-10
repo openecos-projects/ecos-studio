@@ -15,4 +15,13 @@ describe('LeftSidebar workspace navigation', () => {
     expect(source).not.toContain('RTL to GDS Pipeline')
     expect(source).not.toContain('w-[240px]')
   })
+
+  it('keeps sidebar items within the fixed width so labels do not force horizontal scroll', () => {
+    expect(source).toContain('overflow-y-auto')
+    expect(source).not.toContain('overflow-x-hidden')
+    expect(source).toContain('w-full min-w-0')
+    expect(source).toContain('w-full max-w-full')
+    expect(source).toContain('break-words')
+    expect(source).not.toContain('scale-90')
+  })
 })

@@ -273,6 +273,12 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(stepCardSource).not.toContain('v-else>{{ index + 1 }}</span>')
   })
 
+  it('exposes placement defaults that the agent may prefill', () => {
+    expect(source).toContain('Placement Defaults')
+    expect(source).toContain('config.parameters.target_density')
+    expect(source).toContain('config.parameters.target_overflow')
+  })
+
   it('keeps the first selected flow step fixed and deselects from the end', () => {
     const boundaryStart = source.indexOf('function setFlowBoundary')
     const boundaryEnd = source.indexOf('async function ensurePdksLoaded', boundaryStart)
@@ -342,8 +348,9 @@ describe('NewProjectWizard workspace wizard redesign', () => {
   })
 
   it('keeps selected PDK resource files in an internal scroll list', () => {
+    expect(source).toContain('pdk-resource-selected-list custom-scrollbar')
     const styleStart = source.indexOf('.pdk-resource-selected-list')
-    const styleEnd = source.indexOf('.custom-scrollbar::-webkit-scrollbar', styleStart)
+    const styleEnd = source.indexOf('.flow-step-connector', styleStart)
     const styleSource = source.slice(styleStart, styleEnd)
 
     expect(styleStart).toBeGreaterThan(-1)
@@ -375,12 +382,13 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'Die Area',
       'Frequency max [MHz]',
       'Max Fanout',
+      'Target Density',
+      'Target Overflow',
     ]) {
       expect(source).toContain(label)
     }
 
     expect(source).toContain('dieAreaMode')
-    expect(source).not.toContain('Target Density')
     expect(source).not.toContain('Floorplan mode')
   })
 })

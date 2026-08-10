@@ -1,4 +1,4 @@
-import { chmod, rename, stat, writeFile } from 'node:fs/promises'
+import { chmod, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join } from 'node:path'
@@ -33,9 +33,42 @@ export async function validatePackagedEcc(appOutDir) {
       throw new Error('not an executable file')
     }
     await execFileAsync(eccPath, ['rpc', 'serve', '--help'], { timeout: 10_000 })
+    const rpcRuntime = execFileAsync(
+      eccPath,
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      { timeout: 10_000 },
+    )
+    rpcRuntime.child.stdin?.end()
+    await rpcRuntime
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     throw new Error(`Packaged ECC RPC sidecar validation failed at ${eccPath}: ${reason}`)
+  }
+}
+
+export async function validatePackagedAgent(appOutDir) {
+  const agentDirectory = join(appOutDir, 'resources', 'agent')
+  const agentPath = join(agentDirectory, 'ecos-agent')
+  const manifestPath = join(agentDirectory, 'agent-provider.json')
+  try {
+    const agent = await stat(agentPath)
+    if (!agent.isFile() || (agent.mode & 0o111) === 0) {
+      throw new Error('not an executable file')
+    }
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    if (
+      manifest.command !== './ecos-agent' ||
+      manifest.providerId !== 'ecos_agent' ||
+      manifest.protocolVersion !== 1
+    ) {
+      throw new Error('agent manifest does not match the bundled provider')
+    }
+    await execFileAsync(agentPath, ['--version'], { timeout: 10_000 })
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(
+      `Packaged ECOS Agent validation failed at ${agentDirectory}: ${reason}`,
+    )
   }
 }
 
@@ -67,4 +100,5 @@ export default async function afterPackLinuxSandbox(context) {
   }
 
   await validatePackagedEcc(context.appOutDir)
+  await validatePackagedAgent(context.appOutDir)
 }

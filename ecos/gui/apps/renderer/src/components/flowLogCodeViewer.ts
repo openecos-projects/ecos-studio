@@ -41,9 +41,9 @@ export function buildFlowLogViewerExtensions(): Extension[] {
     EditorView.theme({
       '&': {
         height: '100%',
-        backgroundColor: 'var(--bg-primary)',
+        backgroundColor: 'color-mix(in srgb, var(--bg-primary) 96%, var(--bg-secondary))',
         color: 'var(--text-primary)',
-        fontSize: '11px',
+        fontSize: '0.75rem',
       },
       '.cm-scroller': {
         fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
@@ -56,10 +56,10 @@ export function buildFlowLogViewerExtensions(): Extension[] {
         padding: '0 16px',
       },
       '.cm-gutters': {
-        backgroundColor: 'var(--bg-secondary)',
+        backgroundColor: 'color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary))',
         color: 'var(--text-secondary)',
         borderRight: '1px solid var(--border-color)',
-        fontSize: '10px',
+        fontSize: '0.6875rem',
       },
       '.cm-activeLineGutter': {
         backgroundColor: 'transparent',

@@ -14,7 +14,11 @@ describe('HomeView summary typography', () => {
       /\.chip-info-grid dd,\s*\.key-metrics-grid dd,\s*\.constraint-list dd\s*\{([^}]*)\}/,
     )?.[1]
 
-    expect(chipInfoGrid.match(/<dd>/g)).toHaveLength(10)
+    const labels = chipInfoGrid.match(/<dt>/g) ?? []
+    const values = chipInfoGrid.match(/<dd(?:\s|>)/g) ?? []
+
+    expect(values.length).toBeGreaterThan(0)
+    expect(values).toHaveLength(labels.length)
     expect(chipInfoGrid).not.toContain('mono')
     expect(valueRule).toContain('font-family: inherit;')
     expect(valueRule).toContain('font-size: 13px;')

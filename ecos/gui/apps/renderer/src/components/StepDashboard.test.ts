@@ -92,6 +92,9 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('.data-body.harden-data-body')
     expect(componentSource).toContain('.harden-output-table {')
     expect(componentSource).toContain('.harden-output-table table {')
+    expect(componentSource).toContain(
+      '.harden-output-table th,\n.harden-output-table td {\n  font-size: 11px;',
+    )
     expect(componentSource).toContain('is-sta-report-card')
     expect(componentSource).toContain('grid-auto-rows: minmax(54px, auto)')
     expect(componentSource).toContain('white-space: normal')
@@ -118,16 +121,23 @@ describe('StepDashboard', () => {
       'grid-template-columns: minmax(0, 2fr) minmax(0, 3fr)',
     )
     expect(componentSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
-    expect(componentSource).toContain('grid-template-rows: repeat(3, minmax(0, 1fr))')
+    expect(componentSource).toContain(
+      'grid-template-rows: repeat(3, minmax(min-content, 1fr))',
+    )
     expect(componentSource).toContain('.basic-info-list > div:last-child')
     expect(componentSource).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))')
-    expect(componentSource).toContain('grid-template-rows: repeat(3, minmax(0, 1fr))')
+    expect(componentSource).toContain('min-height: min-content')
     expect(componentSource).toContain('if (entries.length >= 9) return')
     expect(componentSource).toContain('<span>N/A</span>')
     expect(componentSource).not.toContain('No configuration data')
     expect(componentSource).toContain('showStepConfiguration')
     expect(componentSource).toContain('Details <i class="ri-arrow-right-up-line"')
     expect(componentSource).toContain('<StepConfigPanel />')
+  })
+
+  it('uses STA terminology for Liberty corners and signoff matrices', () => {
+    expect(componentSource).toContain('`${current.length} Liberty corners`')
+    expect(componentSource).toContain("'matrix' : 'matrices'")
   })
 
   it('shows the requested checklist empty state and every report file with its directory', () => {
@@ -161,9 +171,12 @@ describe('StepDashboard', () => {
       'grid-template-columns: minmax(0, 3fr) minmax(0, 1fr)',
     )
     expect(componentSource).toContain('overflow-wrap: anywhere')
-    expect(componentSource).toContain('grid-template-rows: repeat(6, minmax(0, 1fr))')
+    expect(componentSource).toContain(
+      'grid-template-rows: repeat(6, minmax(min-content, 1fr))',
+    )
     expect(componentSource).toContain('.qor-step-list')
-    expect(componentSource).toContain('overflow: hidden')
+    expect(componentSource).toContain('overflow-y: auto')
+    expect(componentSource).toContain('grid-auto-rows: minmax(min-content, 1fr)')
     expect(componentSource).toContain('.qor-metric-current.is-neutral')
     expect(componentSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
     expect(componentSource).not.toContain('<dt>Baseline</dt>')

@@ -105,11 +105,38 @@ export type {
   DesktopShellSessionOptions,
 } from './contracts/desktopShell.ts'
 export type {
+  DesktopCodexAuthState,
+  DesktopCodexDependencyState,
+  DesktopCodexDependencyStatus,
+  DesktopCodexInstallProgressEvent,
+  DesktopCodexSetBinPathRequest,
+} from './contracts/desktopCodex.ts'
+export { DESKTOP_CODEX_BIN_SETTING_KEY } from './contracts/desktopCodex.ts'
+export type {
   DesktopAgentEvent,
+  DesktopAgentChoice,
+  DesktopAgentChoiceOption,
+  DesktopAgentContractField,
+  DesktopAgentExecutionContract,
+  DesktopAgentParameterWriteFile,
+  DesktopAgentParameterWriteSurface,
+  DesktopAgentWorkspaceContinueContract,
+  DesktopAgentWorkspaceParameterUpdateContract,
+  DesktopAgentWorkspaceParameterWrite,
+  DesktopAgentWorkspaceRerunContract,
+  DesktopAgentWorkspaceRerunExecuteRequest,
+  DesktopAgentWorkspaceRerunParameterPatch,
+  DesktopAgentWorkspaceRerunParameterValue,
+  DesktopAgentWorkspaceRerunPrepareRequest,
+  DesktopAgentWorkspaceRerunPrepareResult,
+  DesktopAgentWorkspaceSetupContract,
+  DesktopAgentWorkspaceSetupParameters,
   DesktopAgentEventType,
+  DesktopAgentInterruptRequest,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
   DesktopAgentProviderRequest,
+  DesktopAgentRunStatus,
   DesktopAgentResumeSessionRequest,
   DesktopAgentResumeSessionResponse,
   DesktopAgentSendMessageRequest,
@@ -117,11 +144,14 @@ export type {
   DesktopAgentSessionSummary,
   DesktopAgentSetModeRequest,
   DesktopAgentStartRequest,
+  DesktopAgentKnownProject,
+  DesktopAgentSessionMode,
   DesktopAgentStartSessionRequest,
   DesktopAgentStartSessionResponse,
   DesktopAgentStatus,
   DesktopAgentStatusState,
 } from './contracts/desktopAgent.ts'
+export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
 export {
   appMenuActionIds,
   desktopMenuEventIds,

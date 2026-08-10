@@ -259,6 +259,31 @@ describe('WorkspaceService', () => {
     )
   })
 
+  it('discards an incomplete failed workspace create but refuses complete workspaces', async () => {
+    const projectRoot = await createTempDir('ecos-workspace-service-discard-root-')
+    const failedWorkspace = join(projectRoot, 'ws_0036')
+    await mkdir(failedWorkspace, { recursive: true })
+
+    const { projectScopeProvider, service } = createWorkspaceService(
+      projectRoot,
+      failedWorkspace,
+    )
+    vi.mocked(projectScopeProvider.isProjectDirectory).mockResolvedValue(false)
+
+    await expect(service.pathExists(failedWorkspace)).resolves.toBe(true)
+    await expect(service.discardFailedWorkspaceCreate(failedWorkspace)).resolves.toBe(
+      true,
+    )
+    await expect(service.pathExists(failedWorkspace)).resolves.toBe(false)
+
+    const completeWorkspace = join(projectRoot, 'ws_complete')
+    await mkdir(join(completeWorkspace, 'home'), { recursive: true })
+    vi.mocked(projectScopeProvider.isProjectDirectory).mockResolvedValueOnce(true)
+    await expect(service.discardFailedWorkspaceCreate(completeWorkspace)).rejects.toThrow(
+      /complete ECOS workspace/,
+    )
+  })
+
   it('lists project-scoped directory entries through the validated canonical path', async () => {
     const directory = await createTempDir('ecos-workspace-service-list-dir-')
     const originDirectory = join(directory, 'origin')

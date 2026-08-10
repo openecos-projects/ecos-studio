@@ -1,11 +1,13 @@
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
 import { handleSecondInstance } from '../services/appSecondInstance'
+import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
+import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
 import {
   getElectronLatestMainLogFile,
@@ -56,8 +58,9 @@ let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
-  frontendRpcRuntimeService: FrontendRpcRuntimeService
+  codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
+  frontendRpcRuntimeService: FrontendRpcRuntimeService
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
@@ -212,10 +215,19 @@ function getDesktopServices() {
     workspaceResourceService,
   })
 
+  const codexDependencyService = new CodexDependencyService({
+    env: process.env,
+    installRoot: join(app.getPath('userData'), 'codex-cli'),
+    platform: process.platform,
+    arch: process.arch,
+    settingsStore,
+  })
+
   services = {
     appInfoService,
     frontendRpcRuntimeService,
     chipViewerService,
+    codexDependencyService,
     eccRuntimeService,
     projectManifestService,
     resourceManagerService,
@@ -242,9 +254,16 @@ async function ensureDesktopBridgeReady(): Promise<void> {
   }
 
   if (!ipcRegistered) {
+    const agentRuntimeService = await createAgentRuntimeFromEnvironment(
+      process.env,
+      app.isPackaged
+        ? join(process.resourcesPath, 'agent')
+        : resolve(app.getAppPath(), '..', '..', '..', 'agent'),
+    )
     registerIpc(undefined, {
+      agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
-      frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
+      codexDependencyService: desktopServices.codexDependencyService,
       createWindow: async (options) => {
         await launchWindow({
           initialRoute:
@@ -252,6 +271,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
         })
       },
       eccRuntimeService: desktopServices.eccRuntimeService,
+      frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
       chipViewerService: desktopServices.chipViewerService,

@@ -250,6 +250,7 @@ export type EccRuntimeEvent =
       workspaceHandle?: string
     }
   | {
+      executionScope?: 'single_step' | 'full_flow'
       logFile?: string
       method: string
       operationId: string
@@ -260,6 +261,7 @@ export type EccRuntimeEvent =
       workspaceHandle?: string
     }
   | {
+      executionScope?: 'single_step' | 'full_flow'
       logFile?: string
       method: string
       operationId: string
@@ -282,6 +284,7 @@ export type EccRuntimeEvent =
       workspaceHandle?: string
     }
   | {
+      executionScope?: 'single_step' | 'full_flow'
       logFile?: string
       message: string
       method: string

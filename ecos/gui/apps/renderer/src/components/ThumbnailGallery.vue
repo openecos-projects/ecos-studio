@@ -529,20 +529,33 @@ function handleMapSelect(key: string, item: MapInfoType, blobUrl: string) {
   })
 }
 
+async function resetTabCachesAndFetch(): Promise<void> {
+  tabInfoCache.value = {}
+  tabErrorCache.value = {}
+  checklistItemsCache.value = {}
+  if (currentStep.value) {
+    await fetchTabInfo(activeTab.value)
+  }
+}
+
 // 监听 step 变化，重新获取数据
 watch(
   currentStep,
   async (newStep) => {
     if (newStep) {
-      // 清除缓存
-      tabInfoCache.value = {}
-      tabErrorCache.value = {}
-      checklistItemsCache.value = {}
-      // 获取当前 tab 的数据
-      await fetchTabInfo(activeTab.value)
+      await resetTabCachesAndFetch()
     }
   },
   { immediate: true },
+)
+
+// Same step after an Agent rerun workspace switch must not keep the previous workspace cache.
+watch(
+  () => currentProject.value?.path,
+  async (nextPath, previousPath) => {
+    if (!nextPath || nextPath === previousPath) return
+    await resetTabCachesAndFetch()
+  },
 )
 
 watch(

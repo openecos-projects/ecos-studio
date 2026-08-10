@@ -69,6 +69,18 @@
         aria-hidden="true"
       ></span>
       <button
+        v-if="!isWorkspaceRoute"
+        type="button"
+        class="window-btn"
+        :class="{ active: chatButtonActive }"
+        title="ECOS Agent"
+        aria-label="ECOS Agent"
+        :aria-pressed="chatButtonActive"
+        @click="handleAgentChatClick"
+      >
+        <i class="ri-sparkling-2-line text-base" aria-hidden="true"></i>
+      </button>
+      <button
         @click="toggleTheme"
         class="window-btn theme-btn"
         :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'"
@@ -182,7 +194,9 @@
 import type { AppMenuAction } from '@ecos-studio/shared'
 import { appMenuActionIds } from '@ecos-studio/shared'
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useThemeStore } from '@/stores/themeStore'
+import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useRoute, useRouter } from 'vue-router'
 import type { DesktopApi } from '@ecos-studio/shared'
 import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
@@ -218,11 +232,25 @@ const emit = defineEmits<{
   (e: 'menu-action', action: AppMenuAction): void
 }>()
 
+const workspaceFocusId = computed(
+  () =>
+    queryString(route.query.workspaceId) || workspaceIdFromProjectName(props.projectName),
+)
+
 const themeStore = useThemeStore()
+const agentShell = useAgentShellStore()
+const { homeAgentOpen } = storeToRefs(agentShell)
 const isDark = computed(() => themeStore.themeName === 'dark')
+const chatButtonActive = computed(() => homeAgentOpen.value)
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const toggleTheme = () => {
   themeStore.toggleTheme()
+}
+
+function handleAgentChatClick(): void {
+  activeMenu.value = null
+  quickMenuOpen.value = false
+  agentShell.toggleHomeAgent()
 }
 
 const handleGoHome = () => {
@@ -296,6 +324,11 @@ function queryString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+function workspaceIdFromProjectName(projectName?: string | null): string {
+  if (!projectName) return ''
+  return projectName.split(/[/\\]/).filter(Boolean).pop() ?? ''
+}
+
 /** 切换菜单展开/收起 */
 const toggleMenu = (action: string) => {
   quickMenuOpen.value = false
@@ -338,12 +371,12 @@ const toggleQuickMenu = async () => {
 
 const goToProjectManagement = () => {
   quickMenuOpen.value = false
-  const query = workspaceProjectRoot.value
-    ? {
-        projectRoot: workspaceProjectRoot.value,
-        projectName: workspaceProjectName.value || undefined,
-      }
-    : {}
+  const query: Record<string, string> = {}
+  if (workspaceProjectRoot.value) {
+    query.projectRoot = workspaceProjectRoot.value
+    if (workspaceProjectName.value) query.projectName = workspaceProjectName.value
+  }
+  if (workspaceFocusId.value) query.workspaceId = workspaceFocusId.value
   router.push({
     path: '/projects',
     query,
@@ -791,6 +824,11 @@ const handleClose = async () => {
 .window-btn:hover {
   background: var(--bg-secondary);
   color: var(--text-primary);
+}
+
+.window-btn.active {
+  background: var(--bg-secondary);
+  color: var(--accent-color);
 }
 
 .theme-btn {

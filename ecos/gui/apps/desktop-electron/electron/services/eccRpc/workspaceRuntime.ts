@@ -117,6 +117,7 @@ function workspaceCreatePayload(
 
 type RuntimeOperation<T> = () => Promise<T>
 interface RuntimeOperationMetadata {
+  executionScope?: 'single_step' | 'full_flow'
   rerun?: boolean
   step?: string
 }

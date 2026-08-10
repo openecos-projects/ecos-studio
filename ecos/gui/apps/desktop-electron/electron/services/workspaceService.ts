@@ -327,6 +327,49 @@ export class WorkspaceService {
     return await this.projectScopeProvider.isProjectDirectory(path)
   }
 
+  async pathExists(path: string): Promise<boolean> {
+    return await pathExists(resolve(path))
+  }
+
+  /**
+   * Remove an incomplete workspace directory left by a failed create.
+   * Refuses complete ECOS workspaces and Project roots (directories with project.json).
+   */
+  async discardFailedWorkspaceCreate(path: string): Promise<boolean> {
+    const canonicalPath = resolve(path)
+    if (!(await pathExists(canonicalPath))) return false
+
+    const pathStats = await stat(canonicalPath)
+    if (!pathStats.isDirectory()) {
+      throw new Error(`${canonicalPath} is not a directory`)
+    }
+
+    if (await this.projectScopeProvider.isProjectDirectory(canonicalPath)) {
+      throw new Error('Refusing to discard a complete ECOS workspace')
+    }
+
+    if (await pathExists(join(canonicalPath, 'project.json'))) {
+      throw new Error('Refusing to discard a Project root directory')
+    }
+
+    try {
+      const projectRoot = await this.projectScopeProvider.getProjectRoot()
+      if (isSamePath(canonicalPath, projectRoot)) {
+        throw new Error('Refusing to discard the registered project root')
+      }
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        error.message !== 'Project root is not registered'
+      ) {
+        throw error
+      }
+    }
+
+    await rm(canonicalPath, { force: true, recursive: true })
+    return true
+  }
+
   async registerProjectRoot(path: string): Promise<string> {
     return await this.projectScopeProvider.registerProjectRoot(path)
   }

@@ -67,6 +67,18 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain("path: '/projects'")
   })
 
+  it('returns to Project Management with the current workspace focus query', () => {
+    const goStart = topBarSource.indexOf('const goToProjectManagement')
+    const goEnd = topBarSource.indexOf('const handleClickOutside', goStart)
+    const goSource = topBarSource.slice(goStart, goEnd)
+
+    expect(goSource).toContain('workspaceId')
+    expect(goSource).toContain('projectRoot')
+    expect(goSource).toContain("path: '/projects'")
+    expect(goSource).toContain('query')
+    expect(topBarSource).toContain('route.query.workspaceId')
+  })
+
   it('teleports the workspace quick menu outside the app container clipping area', () => {
     expect(topBarSource).toContain('<Teleport to="body">')
     expect(topBarSource).toContain(':style="quickMenuStyle"')
