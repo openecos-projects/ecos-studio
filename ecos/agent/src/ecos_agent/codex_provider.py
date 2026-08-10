@@ -67,6 +67,15 @@ class CodexAppServerProposalProvider:
             else:
                 client.close()
 
+    def new_ephemeral_thread(self) -> None:
+        """Discard prior proposal context before an independent evaluation case."""
+
+        with self._state_lock:
+            if self._active_turn_id is not None:
+                raise CodexProviderError("Codex turn is active", failure_class="tool_error")
+            self._thread_id = None
+            self._interrupted = False
+
     def propose_gui_workspace_setup(self, context: dict[str, Any]) -> dict[str, Any]:
         return self._proposal(
             context,

@@ -6,6 +6,7 @@ import runpy
 import subprocess
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 from ecos_agent.knowledge_retriever import tokenize
 from ecos_agent.step_knowledge import STEP_KNOWLEDGE_SPECS, StepKnowledge
@@ -202,3 +203,95 @@ def test_ablation_suite_replays_hash_locked_stage_proposals(tmp_path: Path) -> N
     assert test["routing_replay"]["sha256"] == hashlib.sha256(replay.read_bytes()).hexdigest()
     assert test["strategies"]["hybrid_union"]["overall"]["unsafe_exclusion_rate"] == 0.0
     assert {"query_sha256", "candidate_stages", "final_entity_ids"} <= set(test["traces"][0])
+
+
+def test_stage_routing_collector_uses_only_query_and_audited_catalog() -> None:
+    collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
+    cases = [
+        json.loads(line)
+        for line in (BENCHMARK_ROOT / "benchmark.v1.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    case = next(item for item in cases if item["split"] == "dev")
+    contexts: list[dict[str, object]] = []
+
+    class FakeProvider:
+        codex_bin = "codex-fake"
+
+        def new_ephemeral_thread(self) -> None:
+            return None
+
+        def propose_stage_routing(self, context: dict[str, object]) -> dict[str, object]:
+            contexts.append(context)
+            return {
+                "schema_version": "flow-agent.stage_routing_proposal.v1",
+                "candidate_stages": ["place"],
+                "rationale": "test routing",
+            }
+
+    records, attempts = collector["_collect"](
+        FakeProvider(),
+        [case],
+        [{"stage": "place", "summary": "Audited placement stage.", "chunk_sha256": "a" * 64}],
+        max_failures=1,
+    )
+
+    assert records[0]["query_sha256"] == hashlib.sha256(case["query"].encode("utf-8")).hexdigest()
+    assert attempts[0]["status"] == "accepted"
+    assert set(contexts[0]) == {"natural_language_request", "stage_catalog"}
+    assert "target_entity_ids" not in str(contexts[0])
+
+
+def test_stage_routing_collector_audit_rejects_failed_or_partial_collection(tmp_path: Path) -> None:
+    collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
+    replay = tmp_path / "routing-proposals.v1.jsonl"
+    replay.write_text("", encoding="utf-8")
+    audit = collector["_audit"](
+        SimpleNamespace(split="dev", max_cases=2, max_failures=1, timeout_seconds=30),
+        b"benchmark",
+        SimpleNamespace(corpus_sha256="a" * 64),
+        [],
+        [
+            {
+                "case_id": "case-1",
+                "query_sha256": "b" * 64,
+                "status": "failed",
+                "failure_class": "timeout",
+            }
+        ],
+        replay,
+        expected_cases=2,
+    )
+
+    assert audit["complete"] is False
+    assert audit["coverage"] == {"expected_cases": 2, "attempted_cases": 1, "failed_cases": 1}
+
+
+def test_stage_routing_collector_counts_only_consecutive_failures() -> None:
+    collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
+    responses: list[object] = [
+        ValueError("first failure"),
+        {"schema_version": "flow-agent.stage_routing_proposal.v1", "candidate_stages": [], "rationale": "abstain"},
+        ValueError("second failure"),
+        {"schema_version": "flow-agent.stage_routing_proposal.v1", "candidate_stages": [], "rationale": "abstain"},
+    ]
+
+    class FakeProvider:
+        def new_ephemeral_thread(self) -> None:
+            return None
+
+        def propose_stage_routing(self, _context: dict[str, object]) -> dict[str, object]:
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+    cases = [{"id": f"case-{index}", "query": f"query-{index}"} for index in range(4)]
+    records, attempts = collector["_collect"](
+        FakeProvider(),
+        cases,
+        [{"stage": "place", "summary": "Audited placement stage.", "chunk_sha256": "a" * 64}],
+        max_failures=2,
+    )
+
+    assert len(records) == 2
+    assert [attempt["status"] for attempt in attempts] == ["failed", "abstained", "failed", "abstained"]

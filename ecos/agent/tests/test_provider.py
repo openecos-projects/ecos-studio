@@ -95,6 +95,23 @@ def test_source_manifest_uses_the_user_codex_environment() -> None:
     assert "ECOS_AGENT_CODEX_BIN" not in manifest.get("environment", {})
 
 
+def test_new_ephemeral_thread_discards_prior_case_context(tmp_path: Path) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    provider._thread_id = "prior-thread"
+    provider._interrupted = True
+
+    provider.new_ephemeral_thread()
+
+    assert provider._thread_id is None
+    assert provider._interrupted is False
+    provider._active_turn_id = "active-turn"
+    with pytest.raises(CodexProviderError, match="turn is active"):
+        provider.new_ephemeral_thread()
+
+
 def test_start_fails_closed_when_codex_cli_is_unavailable(monkeypatch) -> None:
     monkeypatch.delenv("ECOS_AGENT_CODEX_BIN", raising=False)
     monkeypatch.setenv("PATH", "")
