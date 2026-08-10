@@ -32,6 +32,8 @@ export type {
   EccFlowRunResult,
   EccFlowRunStepRequest,
   EccFlowRunStepResult,
+  EccFlowCancelRequest,
+  EccFlowCancelResult,
   EccLayoutEditApplyRequest,
   EccLayoutEditApplyResult,
   EccLayoutEditBeginRequest,

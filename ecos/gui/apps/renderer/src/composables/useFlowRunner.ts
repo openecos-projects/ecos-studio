@@ -3,7 +3,8 @@ import { useRoute } from 'vue-router'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
-import { runStepApi, rtl2gdsApi, type RunStepResponse } from '@/api/flow'
+import { cancelFlowApi, runStepApi, rtl2gdsApi, type RunStepResponse } from '@/api/flow'
+import type { EccFlowCancelResult } from '@ecos-studio/shared'
 import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
 import {
   clearHomeRunArtifactResetAwaitingBackendStart,
@@ -15,6 +16,7 @@ import {
 /** 任意流程命令执行中为 true，供 Home flow log 等订阅，避免多实例 composable 状态不一致 */
 export const flowExecutionActive = ref(false)
 const activeFlowWorkspaces = shallowReactive(new Set<string>())
+const cancellingFlowWorkspaces = shallowReactive(new Set<string>())
 // A completed step can change every data source rendered on the Home left panel:
 // flow state, QoR/checklist assets, configuration-derived values, and step metrics.
 const FLOW_COMPLETION_FALLBACK_SCOPES: WorkspaceInvalidationScope[] = ['all']
@@ -46,6 +48,22 @@ export function clearFlowExecutionActiveForWorkspace(path: string): void {
   if (!workspacePath) return
   activeFlowWorkspaces.delete(workspacePath)
   refreshGlobalFlowExecutionActive()
+}
+
+function markFlowCancellationRequestedForWorkspace(path: string): void {
+  const workspacePath = normalizeWorkspacePath(path)
+  if (workspacePath) cancellingFlowWorkspaces.add(workspacePath)
+}
+
+function clearFlowCancellationRequestedForWorkspace(path: string): void {
+  const workspacePath = normalizeWorkspacePath(path)
+  if (workspacePath) cancellingFlowWorkspaces.delete(workspacePath)
+}
+
+export function isFlowCancellationRequestedForWorkspace(
+  path: string | undefined | null,
+): boolean {
+  return Boolean(path && cancellingFlowWorkspaces.has(normalizeWorkspacePath(path)))
 }
 
 export function isFlowExecutionActiveForWorkspace(
@@ -93,6 +111,9 @@ export function useFlowRunner() {
   const isRunning = computed(() =>
     isFlowExecutionActiveForWorkspace(currentProject.value?.path),
   )
+  const isCancelling = computed(() =>
+    isFlowCancellationRequestedForWorkspace(currentProject.value?.path),
+  )
   const state = ref<StateEnum>(StateEnum.Invalid)
   const error = ref<string | null>(null)
   const lastRunResult = ref<RunStepResponse | null>(null)
@@ -124,6 +145,57 @@ export function useFlowRunner() {
 
   function getCurrentWorkspaceHandle(): string | null {
     return workspaceSession.value.workspaceId || null
+  }
+
+  async function cancelFlow(): Promise<EccFlowCancelResult> {
+    const directory = getCurrentWorkspacePath()
+    const workspaceHandle = getCurrentWorkspaceHandle()
+    if (!directory || !workspaceHandle || !isRunning.value) {
+      return { accepted: false }
+    }
+
+    markFlowCancellationRequestedForWorkspace(directory)
+    try {
+      const result = await cancelFlowApi(workspaceHandle)
+      if (!result.accepted) {
+        clearFlowCancellationRequestedForWorkspace(directory)
+      }
+      return result
+    } catch (error) {
+      clearFlowCancellationRequestedForWorkspace(directory)
+      throw error
+    }
+  }
+
+  function isRecoveryFailure(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'flow_state_recovery_failed'
+    )
+  }
+
+  function showCancellationResult(error: unknown): void {
+    invalidateWorkspaceResources(FLOW_COMPLETION_FALLBACK_SCOPES, {
+      sessionId: workspaceSession.value.sessionId,
+    })
+    state.value = StateEnum.Imcomplete
+    if (isRecoveryFailure(error)) {
+      showToast({
+        severity: 'error',
+        summary: 'Flow State Recovery Failed',
+        detail: 'Flow stopped, but state recovery failed.',
+        life: 8000,
+      })
+      return
+    }
+    showToast({
+      severity: 'info',
+      summary: 'Flow Cancelled',
+      detail: 'Flow cancelled. Unfinished steps were marked Incomplete.',
+      life: 5000,
+    })
   }
 
   /**
@@ -215,15 +287,20 @@ export function useFlowRunner() {
       return result.data
     } catch (err) {
       console.error('Single-step run failed:', err)
-      showToast({
-        severity: 'error',
-        summary: 'Step Error',
-        detail: err instanceof Error ? err.message : String(err),
-        life: 6000,
-      })
+      if (isFlowCancellationRequestedForWorkspace(directory) || isRecoveryFailure(err)) {
+        showCancellationResult(err)
+      } else {
+        showToast({
+          severity: 'error',
+          summary: 'Step Error',
+          detail: err instanceof Error ? err.message : String(err),
+          life: 6000,
+        })
+      }
     } finally {
       clearTransientInteractionLocks()
       clearFlowExecutionActiveForWorkspace(directory)
+      clearFlowCancellationRequestedForWorkspace(directory)
     }
     return null
   }
@@ -316,18 +393,23 @@ export function useFlowRunner() {
       return result.data
     } catch (err) {
       console.error('Run-all flow failed:', err)
-      error.value = err instanceof Error ? err.message : String(err)
-      state.value = StateEnum.Imcomplete
-      showToast({
-        severity: 'error',
-        summary: 'RTL2GDS Error',
-        detail: error.value ?? 'Unknown error',
-        life: 8000,
-      })
+      if (isFlowCancellationRequestedForWorkspace(directory) || isRecoveryFailure(err)) {
+        showCancellationResult(err)
+      } else {
+        error.value = err instanceof Error ? err.message : String(err)
+        state.value = StateEnum.Imcomplete
+        showToast({
+          severity: 'error',
+          summary: 'RTL2GDS Error',
+          detail: error.value ?? 'Unknown error',
+          life: 8000,
+        })
+      }
     } finally {
       clearTransientInteractionLocks()
       clearHomeRunArtifactResetAwaitingBackendStart(directory)
       clearFlowExecutionActiveForWorkspace(directory)
+      clearFlowCancellationRequestedForWorkspace(directory)
     }
     return null
   }
@@ -335,6 +417,7 @@ export function useFlowRunner() {
   return {
     // 状态
     isRunning,
+    isCancelling,
     state,
     error,
     lastRunResult,
@@ -342,5 +425,6 @@ export function useFlowRunner() {
     // 方法
     runFlow,
     runAllFlow,
+    cancelFlow,
   }
 }

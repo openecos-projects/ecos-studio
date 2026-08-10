@@ -140,6 +140,48 @@
       </template>
     </Dialog>
 
+    <Dialog
+      :visible="windowCloseCancellationVisible"
+      modal
+      header="Cancel flow?"
+      :style="{ width: 'min(420px, calc(100vw - 32px))' }"
+      :draggable="false"
+      :closable="!windowCloseCancellationPending"
+      @update:visible="updateWindowCloseCancellationVisibility"
+    >
+      <p class="text-sm leading-6 text-(--text-secondary)">
+        This stops the ECC sidecar. Unfinished steps will be marked Incomplete.
+      </p>
+      <template #footer>
+        <button
+          type="button"
+          class="rounded border border-(--border-color) px-3 py-1.5 text-xs text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary) disabled:cursor-not-allowed disabled:opacity-55"
+          :disabled="windowCloseCancellationPending"
+          @click="resolveWindowCloseCancellation(false)"
+        >
+          Keep running
+        </button>
+        <button
+          type="button"
+          class="rounded border px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-55"
+          :disabled="windowCloseCancellationPending"
+          :style="{
+            background: 'var(--danger-color)',
+            borderColor: 'var(--danger-color)',
+          }"
+          @click="confirmWindowCloseCancellation"
+        >
+          {{
+            windowCloseCancellationPending
+              ? 'Cancelling...'
+              : windowCloseCancellationUnconfirmed
+                ? 'Retry cancelling flow'
+                : 'Cancel flow'
+          }}
+        </button>
+      </template>
+    </Dialog>
+
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
     <Teleport to="body">
       <Transition name="runtime-backend-overlay">
@@ -173,6 +215,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
+import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
 import { registerHomeWorkspaceRerun } from '@/composables/homeFlowRerun'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -234,6 +277,7 @@ const {
 const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
+const { cancelFlow, isRunning: isFlowRunning } = useFlowRunner()
 const { showManageDialog, openManageDialog } = useDesignFiles()
 const {
   closeSignoffPackageReview,
@@ -987,7 +1031,109 @@ const { handleMenuAction } = useAppMenuActions({
   exportSignoffPackage,
   manageDesignFiles: openManageDialog,
 })
-useAppWindowClose(closeProject)
+
+const windowCloseCancellationVisible = ref(false)
+const windowCloseCancellationPending = ref(false)
+const windowCloseCancellationUnconfirmed = ref(false)
+let resolveWindowCloseConfirmation: ((shouldClose: boolean) => void) | null = null
+const WINDOW_CLOSE_CANCELLATION_TIMEOUT_MS = 6000
+
+function resolveWindowCloseCancellation(shouldClose: boolean): void {
+  windowCloseCancellationVisible.value = false
+  windowCloseCancellationPending.value = false
+  windowCloseCancellationUnconfirmed.value = false
+  const resolve = resolveWindowCloseConfirmation
+  resolveWindowCloseConfirmation = null
+  resolve?.(shouldClose)
+}
+
+function updateWindowCloseCancellationVisibility(visible: boolean): void {
+  if (!visible) resolveWindowCloseCancellation(false)
+}
+
+async function waitForFlowToStop(): Promise<boolean> {
+  if (!isFlowRunning.value) return true
+  return await new Promise<boolean>((resolve) => {
+    let stop: (() => void) | undefined
+    const timer = setTimeout(() => finish(false), WINDOW_CLOSE_CANCELLATION_TIMEOUT_MS)
+    const finish = (stopped: boolean) => {
+      clearTimeout(timer)
+      stop?.()
+      resolve(stopped)
+    }
+    stop = watch(isFlowRunning, (running) => {
+      if (!running) finish(true)
+    })
+  })
+}
+
+watch(isFlowRunning, (running) => {
+  if (!running && windowCloseCancellationUnconfirmed.value) {
+    resolveWindowCloseCancellation(true)
+  }
+})
+
+async function confirmWindowCloseCancellation(): Promise<void> {
+  if (windowCloseCancellationPending.value) return
+  windowCloseCancellationPending.value = true
+  windowCloseCancellationUnconfirmed.value = false
+  try {
+    const result = await cancelFlow()
+    if (!result.accepted) {
+      showToast({
+        severity: 'warn',
+        summary: 'Cancellation Unavailable',
+        detail: 'The running flow could not be cancelled.',
+        life: 5000,
+      })
+      resolveWindowCloseCancellation(false)
+      return
+    }
+    if (await waitForFlowToStop()) {
+      resolveWindowCloseCancellation(true)
+      return
+    }
+    if (!isFlowRunning.value) {
+      resolveWindowCloseCancellation(true)
+      return
+    }
+    windowCloseCancellationUnconfirmed.value = true
+    showToast({
+      severity: 'warn',
+      summary: 'Cancellation Not Confirmed',
+      detail: 'The ECC sidecar has not exited. Retry cancelling flow.',
+      life: 8000,
+    })
+  } catch (error) {
+    showToast({
+      severity: 'error',
+      summary: 'Cancellation Failed',
+      detail: error instanceof Error ? error.message : String(error),
+      life: 6000,
+    })
+    resolveWindowCloseCancellation(false)
+  } finally {
+    windowCloseCancellationPending.value = false
+  }
+}
+
+async function closeWindowProject(): Promise<boolean> {
+  if (!isFlowRunning.value) {
+    await closeProject()
+    return true
+  }
+
+  windowCloseCancellationVisible.value = true
+  const shouldClose = await new Promise<boolean>((resolve) => {
+    resolveWindowCloseConfirmation = resolve
+  })
+  if (!shouldClose) return false
+
+  await closeProject()
+  return true
+}
+
+useAppWindowClose(closeWindowProject)
 
 let isResizing = false
 

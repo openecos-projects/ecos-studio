@@ -89,6 +89,7 @@ export const desktopApiIpcChannels = {
   eccWorkspaceResetFlow: 'ecc:workspace-reset-flow',
   eccWorkspaceExportSignoff: 'ecc:workspace-export-signoff',
   eccWorkspaceInspectSignoff: 'ecc:workspace-inspect-signoff',
+  eccFlowCancel: 'ecc:flow-cancel',
   eccFlowRun: 'ecc:flow-run',
   eccFlowRunStep: 'ecc:flow-run-step',
   agentStart: 'agent:start',

@@ -1,6 +1,29 @@
 <template>
   <div class="flow-run-control">
     <button
+      v-if="isRunning"
+      type="button"
+      class="flow-run-icon-button flow-run-cancel-button"
+      :disabled="isCancelling && !cancellationUnconfirmed"
+      :title="
+        cancellationUnconfirmed
+          ? 'Retry cancelling flow'
+          : isCancelling
+            ? 'Cancelling...'
+            : 'Cancel flow'
+      "
+      @click="requestCancellation"
+    >
+      <i
+        :class="isCancelling ? 'ri-loader-4-line animate-spin' : 'ri-stop-fill'"
+        aria-hidden="true"
+      />
+    </button>
+    <span v-if="isCancelling" class="flow-run-cancelling" role="status"
+      >Cancelling...</span
+    >
+    <button
+      v-if="!isRunning"
       type="button"
       class="flow-run-icon-button flow-run-start-button"
       :aria-busy="flowRunControlBusy"
@@ -43,10 +66,38 @@
       </button>
     </div>
   </Dialog>
+
+  <Dialog
+    v-model:visible="cancellationConfirmationVisible"
+    modal
+    header="Cancel flow?"
+    :style="{ width: 'min(420px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <p class="flow-run-dialog-copy">
+      This stops the ECC sidecar. Unfinished steps will be marked Incomplete.
+    </p>
+    <div class="flow-run-dialog-actions">
+      <button
+        type="button"
+        class="flow-run-dialog-button"
+        @click="cancellationConfirmationVisible = false"
+      >
+        Keep running
+      </button>
+      <button
+        type="button"
+        class="flow-run-dialog-button is-danger"
+        @click="confirmCancellation"
+      >
+        Cancel flow
+      </button>
+    </div>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import { StateEnum } from '@/api/type'
 import { useCurrentStage } from '@/composables/useCurrentStage'
@@ -61,9 +112,19 @@ import { getDesktopApi } from '@/platform/desktop'
 import { flowNodeStatus } from './flowStatus'
 
 const rerunConfirmationVisible = ref(false)
+const cancellationConfirmationVisible = ref(false)
+const cancellationUnconfirmed = ref(false)
+let cancellationUnconfirmedTimer: ReturnType<typeof setTimeout> | null = null
 const preparingRerun = ref(false)
 const { currentStage } = useCurrentStage()
-const { isRunning, runFlow, runAllFlow, state: flowRunState } = useFlowRunner()
+const {
+  cancelFlow,
+  isCancelling,
+  isRunning,
+  runFlow,
+  runAllFlow,
+  state: flowRunState,
+} = useFlowRunner()
 const { startFlowRunArtifactCapture } = useFlowRunArtifacts()
 const {
   dynamicFlowStages,
@@ -97,6 +158,53 @@ const hasFinishedStep = computed(
 const needsRerunConfirmation = computed(() =>
   isHomeStage.value ? hasFinishedFlow.value : hasFinishedStep.value,
 )
+
+watch(isRunning, (running) => {
+  if (!running) {
+    cancellationUnconfirmed.value = false
+    clearCancellationUnconfirmedTimer()
+  }
+})
+
+function clearCancellationUnconfirmedTimer(): void {
+  if (!cancellationUnconfirmedTimer) return
+  clearTimeout(cancellationUnconfirmedTimer)
+  cancellationUnconfirmedTimer = null
+}
+
+function requestCancellation(): void {
+  if (isCancelling.value && !cancellationUnconfirmed.value) return
+  cancellationConfirmationVisible.value = true
+}
+
+async function confirmCancellation(): Promise<void> {
+  cancellationConfirmationVisible.value = false
+  cancellationUnconfirmed.value = false
+  clearCancellationUnconfirmedTimer()
+  try {
+    const result = await cancelFlow()
+    if (!result.accepted || !isRunning.value) return
+    cancellationUnconfirmedTimer = setTimeout(() => {
+      cancellationUnconfirmedTimer = null
+      if (isRunning.value && isCancelling.value) {
+        cancellationUnconfirmed.value = true
+        showToast({
+          severity: 'warn',
+          summary: 'Cancellation Not Confirmed',
+          detail: 'The ECC sidecar has not exited. Retry cancelling flow.',
+          life: 8000,
+        })
+      }
+    }, 6000)
+  } catch (error) {
+    showToast({
+      severity: 'error',
+      summary: 'Cancellation Failed',
+      detail: error instanceof Error ? error.message : String(error),
+      life: 6000,
+    })
+  }
+}
 
 async function handleRunRequest(): Promise<void> {
   if (flowRunControlBusy.value) return
@@ -236,6 +344,25 @@ async function canRerunCurrentStep(): Promise<boolean> {
 .flow-run-start-button:hover:not(:disabled) {
   color: #fff;
   opacity: 0.85;
+}
+
+.flow-run-cancel-button {
+  border-color: var(--danger-color, #d14343);
+  color: var(--danger-color, #d14343);
+}
+
+.flow-run-cancelling {
+  align-self: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.flow-run-dialog-button.is-danger {
+  background: var(--danger-color, #d14343);
+  border-color: var(--danger-color, #d14343);
+  color: #fff;
 }
 
 .flow-run-icon-button:disabled {

@@ -82,6 +82,7 @@ function notifyTypeFromEvent(event: EccRuntimeEvent): RuntimeNotifyType | null {
     return event.reason === 'unexpected' ? 'error' : null
   }
   if (event.type === 'operation.failed') {
+    if (event.code === 'flow_cancelled') return 'cancelled'
     return isFlowMethod(event.method, event.executionScope) ? 'error' : null
   }
   if (event.type !== 'operation.completed' && event.type !== 'operation.started') {
@@ -104,6 +105,9 @@ function notifyTypeFromEvent(event: EccRuntimeEvent): RuntimeNotifyType | null {
 }
 
 function responseFromEvent(event: EccRuntimeEvent): RuntimeResponseType {
+  if (event.type === 'operation.failed' && event.code === 'flow_cancelled') {
+    return 'cancelled'
+  }
   if (event.type === 'operation.failed' || event.type === 'runtime.exited') {
     return 'error'
   }

@@ -104,6 +104,14 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('resetWorkspaceWizard()')
   })
 
+  it('keeps native close cancellation retryable when sidecar exit is unconfirmed', () => {
+    expect(appSource).toContain('WINDOW_CLOSE_CANCELLATION_TIMEOUT_MS = 6000')
+    expect(appSource).toContain('windowCloseCancellationUnconfirmed')
+    expect(appSource).toContain('Retry cancelling flow')
+    expect(appSource).toContain('Cancellation Not Confirmed')
+    expect(appSource).toContain('if (!isFlowRunning.value) {')
+  })
+
   it('records project-managed workspaces into project.json after wizard create and reconfigure', () => {
     expect(appSource).toContain('registerProjectManagedWorkspace')
     expect(appSource).toContain('syncProjectManagedWorkspace')

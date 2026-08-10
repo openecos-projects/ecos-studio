@@ -27,11 +27,12 @@ class FakeChild extends EventEmitter implements SpawnedEccRpcSidecar {
   readonly stdout = new PassThrough()
   readonly signals: Array<NodeJS.Signals | undefined> = []
   killed = false
+  killResult = true
 
   kill(signal?: NodeJS.Signals): boolean {
     this.signals.push(signal)
     this.killed = true
-    return true
+    return this.killResult
   }
 }
 
@@ -343,6 +344,71 @@ describe('EccRpcSidecarProcess', () => {
 
     completeRecovery()
     await expect(request).rejects.toThrow('ECC RPC sidecar exited')
+  })
+
+  it('marks an explicitly terminated sidecar as cancelled', async () => {
+    vi.useFakeTimers()
+    const child = new FakeChild()
+    const events: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      onEvent: (event) => {
+        events.push(event)
+      },
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+    const request = client.call('flow.run')
+
+    expect(sidecar.cancel()).toBe(true)
+    expect(child.signals).toEqual(['SIGTERM'])
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(child.signals).toEqual(['SIGTERM', 'SIGKILL'])
+
+    child.emit('close', null, 'SIGKILL')
+    await expect(request).rejects.toMatchObject({ name: 'EccFlowCancelledError' })
+    expect(events).toContainEqual(
+      expect.objectContaining({ reason: 'cancelled', type: 'runtime.exited' }),
+    )
+  })
+
+  it('does not accept cancellation when SIGTERM cannot be delivered', async () => {
+    const child = new FakeChild()
+    child.killResult = false
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    await sidecar.start()
+
+    expect(sidecar.cancel()).toBe(false)
+    expect(child.signals).toEqual(['SIGTERM'])
+  })
+
+  it('waits for cancellation recovery when the sidecar emits an error before close', async () => {
+    const child = new FakeChild()
+    let completeRecovery!: () => void
+    const recovered = new Promise<void>((resolve) => {
+      completeRecovery = resolve
+    })
+    const sidecar = new EccRpcSidecarProcess({
+      onEvent: (event) => (event.type === 'runtime.exited' ? recovered : undefined),
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+    const request = client.call('flow.run')
+    let rejected = false
+    void request.catch(() => {
+      rejected = true
+    })
+
+    sidecar.cancel()
+    child.emit('error', new Error('sidecar error'))
+    await Promise.resolve()
+    expect(rejected).toBe(false)
+
+    child.emit('close', null, 'SIGTERM')
+    await Promise.resolve()
+    expect(rejected).toBe(false)
+
+    completeRecovery()
+    await expect(request).rejects.toMatchObject({ name: 'EccFlowCancelledError' })
   })
 
   it('sends SIGTERM and then SIGKILL when rpc.shutdown times out', async () => {

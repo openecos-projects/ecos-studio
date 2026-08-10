@@ -1,5 +1,5 @@
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   EccRpcRuntimeService,
@@ -91,6 +91,7 @@ class FakeRpcClient implements EccRpcRuntimeClient {
 class FakeSidecar implements EccRpcRuntimeSidecar {
   client: FakeRpcClient
   logFile: string | null = '/tmp/ecc-rpc-runtime.log'
+  cancel = vi.fn(() => true)
   shutdownCount = 0
   startCount = 0
   private started = false

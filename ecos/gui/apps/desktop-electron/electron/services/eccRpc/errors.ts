@@ -22,6 +22,13 @@ export class EccRuntimeServiceError extends Error {
   }
 }
 
+export class EccFlowCancelledError extends Error {
+  constructor() {
+    super('Flow cancelled.')
+    this.name = 'EccFlowCancelledError'
+  }
+}
+
 function codeFromJsonRpcError(error: EccJsonRpcError): string {
   switch (error.code) {
     case -32602:
@@ -59,6 +66,17 @@ export function normalizeRuntimeError(
 ): EccRuntimeServiceError {
   if (error instanceof EccRuntimeServiceError) {
     return error
+  }
+
+  if (error instanceof EccFlowCancelledError) {
+    return new EccRuntimeServiceError({
+      code: 'flow_cancelled',
+      logFile: context.logFile ?? undefined,
+      message: error.message,
+      method: context.method,
+      operationId: context.operationId,
+      workspaceHandle: context.workspaceHandle,
+    })
   }
 
   if (error instanceof EccJsonRpcError) {

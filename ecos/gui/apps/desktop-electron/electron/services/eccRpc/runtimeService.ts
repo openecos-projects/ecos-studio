@@ -1,5 +1,7 @@
 import type {
   EccFlowRunRequest,
+  EccFlowCancelRequest,
+  EccFlowCancelResult,
   EccFlowRunResult,
   EccFlowRunStepRequest,
   EccFlowRunStepResult,
@@ -190,6 +192,10 @@ export class EccRpcRuntimeService {
 
   async runFlow(request: EccFlowRunRequest): Promise<EccFlowRunResult> {
     return this.runtimeForHandle(request.workspaceHandle).runFlow(request)
+  }
+
+  async cancelFlow(request: EccFlowCancelRequest): Promise<EccFlowCancelResult> {
+    return this.runtimeForHandle(request.workspaceHandle).cancelFlow(request)
   }
 
   async runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult> {

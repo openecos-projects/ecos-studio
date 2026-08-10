@@ -175,6 +175,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         onEvent: () => () => undefined,
       },
       flow: {
+        cancel: async () => ({ accepted: true }),
         run: async (request) => ({ rerun: Boolean(request.rerun) }),
         runStep: async (request) => ({ state: 'Success', step: request.step }),
       },

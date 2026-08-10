@@ -93,4 +93,27 @@ describe('useAppWindowClose', () => {
     expect(consoleError).toHaveBeenCalledTimes(1)
     expect(confirmClose).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps the native window open when cleanup declines the close request', async () => {
+    const confirmClose = vi.fn().mockResolvedValue(undefined)
+    let onCloseRequested: (() => void) | undefined
+
+    waitForDesktopApi.mockResolvedValue({
+      window: {
+        confirmClose,
+        onCloseRequested: vi.fn((listener: () => void) => {
+          onCloseRequested = listener
+          return vi.fn()
+        }),
+      },
+    })
+
+    useAppWindowClose(async () => false)
+
+    await mountedCallbacks[0]?.()
+    await Promise.resolve()
+    await onCloseRequested?.()
+
+    expect(confirmClose).not.toHaveBeenCalled()
+  })
 })

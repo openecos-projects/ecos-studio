@@ -171,6 +171,7 @@ function registerHandlers(
       rpcHello: vi.fn(),
       rpcPing: vi.fn(),
       rpcShutdown: vi.fn(),
+      cancelFlow: vi.fn(),
       runFlow: vi.fn(),
       runStep: vi.fn(),
       syncConfig: vi.fn(),
@@ -1526,6 +1527,18 @@ describe('registerIpc', () => {
     ).resolves.toEqual(result)
 
     expect(services.eccRuntimeService.runStep).toHaveBeenCalledWith(request)
+  })
+
+  it('cancels an active ECC flow through the runtime service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = { workspaceHandle: 'workspace-handle-1' }
+    services.eccRuntimeService.cancelFlow.mockResolvedValue({ accepted: true })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccFlowCancel)?.(event, request),
+    ).resolves.toEqual({ accepted: true })
+    expect(services.eccRuntimeService.cancelFlow).toHaveBeenCalledWith(request)
   })
 
   it('exports ECC signoff through the runtime service', async () => {

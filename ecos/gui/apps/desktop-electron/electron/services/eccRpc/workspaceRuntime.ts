@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type {
   EccFlowRunRequest,
+  EccFlowCancelRequest,
+  EccFlowCancelResult,
   EccFlowRunResult,
   EccFlowRunStepRequest,
   EccFlowRunStepResult,
@@ -34,7 +36,7 @@ import type {
   EccWorkspaceSyncConfigResult,
 } from '@ecos-studio/shared'
 
-import { normalizeRuntimeError } from './errors'
+import { EccRuntimeServiceError, normalizeRuntimeError } from './errors'
 import { EccJsonRpcError } from './jsonRpcClient'
 import { recoverInterruptedFlow } from './interruptedFlowRecovery'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
@@ -48,6 +50,7 @@ export interface EccRpcRuntimeClient {
 }
 
 export interface EccRpcRuntimeSidecar {
+  cancel(): boolean
   logFile: string | null
   relocateLogFileFrom?(workspaceDirectory: string | null): void
   shutdown(): Promise<void>
@@ -60,7 +63,9 @@ export interface EccWorkspaceRuntimeOptions {
    * control runtime (rpc.hello / rpc.ping only).
    */
   directory: string | null
-  createSidecar(onEvent: (event: EccRuntimeEvent) => void | Promise<void>): EccRpcRuntimeSidecar
+  createSidecar(
+    onEvent: (event: EccRuntimeEvent) => void | Promise<void>,
+  ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   sessions?: WorkspaceSessionRegistry
 }
@@ -133,6 +138,8 @@ export class EccWorkspaceRuntime {
   private readonly sidecar: EccRpcRuntimeSidecar
   private client: EccRpcRuntimeClient | null = null
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
+  private cancellationOperation: InFlightOperation | null = null
+  private readonly recoveryFailedOperationIds = new Set<string>()
   private helloResult: EccRpcHelloResult | null = null
   private inFlightOperation: InFlightOperation | null = null
   private inFlightCount = 0
@@ -449,6 +456,22 @@ export class EccWorkspaceRuntime {
     )
   }
 
+  cancelFlow(request: EccFlowCancelRequest): EccFlowCancelResult {
+    const inFlight = this.inFlightOperation
+    if (
+      !inFlight ||
+      inFlight.workspaceHandle !== request.workspaceHandle ||
+      (inFlight.method !== 'flow.run' && inFlight.method !== 'flow.run_step')
+    ) {
+      return { accepted: false }
+    }
+    const accepted = this.sidecar.cancel()
+    if (accepted) {
+      this.cancellationOperation = inFlight
+    }
+    return { accepted }
+  }
+
   runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult> {
     const rerun = Boolean(request.rerun)
     return this.enqueue(
@@ -558,13 +581,25 @@ export class EccWorkspaceRuntime {
         })
         return result
       } catch (error) {
-        const normalized = normalizeRuntimeError(error, {
-          logFile: this.sidecar.logFile,
-          method,
-          operationId,
-          workspaceHandle,
-        })
+        const recoveryFailed = this.recoveryFailedOperationIds.delete(operationId)
+        const normalized = recoveryFailed
+          ? new EccRuntimeServiceError({
+              code: 'flow_state_recovery_failed',
+              details: error,
+              logFile: this.sidecar.logFile ?? undefined,
+              message: 'Flow stopped, but state recovery failed.',
+              method,
+              operationId,
+              workspaceHandle,
+            })
+          : normalizeRuntimeError(error, {
+              logFile: this.sidecar.logFile,
+              method,
+              operationId,
+              workspaceHandle,
+            })
         this.emit({
+          code: normalized.code,
           logFile: normalized.logFile,
           message: normalized.message,
           method,
@@ -593,7 +628,7 @@ export class EccWorkspaceRuntime {
 
   private async handleSidecarEvent(event: EccRuntimeEvent): Promise<void> {
     if (event.type === 'runtime.exited') {
-      const inFlight = this.inFlightOperation
+      const inFlight = this.cancellationOperation ?? this.inFlightOperation
       const workspaceDirectory = inFlight
         ? this.runtimeDirectoryForHandle(inFlight.workspaceHandle)
         : this.boundDirectory
@@ -605,6 +640,7 @@ export class EccWorkspaceRuntime {
       ) {
         const recovery = await recoverInterruptedFlow(workspaceDirectory)
         if (recovery.errors.length > 0) {
+          this.recoveryFailedOperationIds.add(inFlight.operationId)
           message = [message, ...recovery.errors].filter(Boolean).join(' ')
         }
       }
@@ -612,6 +648,7 @@ export class EccWorkspaceRuntime {
       this.ready = false
       this.helloResult = null
       this.sessions.clearEccWorkspaceIds()
+      this.cancellationOperation = null
       this.emit(
         inFlight
           ? {

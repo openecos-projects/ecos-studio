@@ -53,11 +53,13 @@ describe('flow API desktop bridge payloads', () => {
         refreshed: true,
       }
     })
+    const cancel = vi.fn(async () => ({ accepted: true }))
 
     setWindow({
       ecosDesktop: {
         ecc: {
           flow: {
+            cancel,
             run,
             runStep,
           },
@@ -70,8 +72,17 @@ describe('flow API desktop bridge payloads', () => {
       },
     })
 
-    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi, syncConfigApi } =
-      await import('./flow')
+    const {
+      cancelFlowApi,
+      getInfoApi,
+      refreshConfigApi,
+      rtl2gdsApi,
+      runStepApi,
+      syncConfigApi,
+    } = await import('./flow')
+
+    await expect(cancelFlowApi('workspace-handle-1')).resolves.toEqual({ accepted: true })
+    expect(cancel).toHaveBeenCalledWith({ workspaceHandle: 'workspace-handle-1' })
 
     await runStepApi(
       reactive({

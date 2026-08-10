@@ -208,6 +208,12 @@ export interface EccFlowRunStepRequest extends EccFlowRunRequest {
   step: string
 }
 
+export interface EccFlowCancelRequest extends EccWorkspaceHandleRequest {}
+
+export interface EccFlowCancelResult {
+  accepted: boolean
+}
+
 export interface EccFlowRunResult {
   rerun: boolean
 }
@@ -243,7 +249,7 @@ export type EccRuntimeEvent =
       interruptedOperationId?: string
       logFile?: string
       message?: string
-      reason: 'unexpected' | 'shutdown'
+      reason: 'cancelled' | 'unexpected' | 'shutdown'
       signal: string | null
       type: 'runtime.exited'
       workspaceDirectory?: string
@@ -271,6 +277,7 @@ export type EccRuntimeEvent =
     }
   | {
       executionScope?: 'single_step' | 'full_flow'
+      code?: string
       logFile?: string
       message: string
       method: string
@@ -286,6 +293,7 @@ export interface EccRuntimeApi {
     onEvent(listener: (event: EccRuntimeEvent) => void): DesktopEventUnsubscribe
   }
   flow: {
+    cancel(request: EccFlowCancelRequest): Promise<EccFlowCancelResult>
     run(request: EccFlowRunRequest): Promise<EccFlowRunResult>
     runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult>
   }

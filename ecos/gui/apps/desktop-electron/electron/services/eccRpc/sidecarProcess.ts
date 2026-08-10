@@ -14,6 +14,7 @@ import type { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
 
+import { EccFlowCancelledError } from './errors'
 import { EccJsonRpcClient } from './jsonRpcClient'
 
 export interface SpawnedEccRpcSidecar extends EventEmitter {
@@ -91,6 +92,7 @@ export class EccRpcSidecarProcess {
   private readonly shutdownTimeoutMs: number
   private readonly spawnImpl: EccRpcSidecarSpawn
   private readonly tempDir: string
+  private cancellingChild: SpawnedEccRpcSidecar | null = null
   private forceKillTimer: ReturnType<typeof setTimeout> | null = null
   private shuttingDown = false
   private spawnEnv: NodeJS.ProcessEnv | null = null
@@ -118,6 +120,7 @@ export class EccRpcSidecarProcess {
     }
 
     this.logFile = this.createLogFile()
+    this.cancellingChild = null
     this.shuttingDown = false
 
     const child = this.spawnImpl(
@@ -145,7 +148,11 @@ export class EccRpcSidecarProcess {
       try {
         client.feedStdout(chunk as Buffer)
       } catch (error) {
-        client.rejectPending(error instanceof Error ? error : new Error(String(error)))
+        this.rejectPendingUnlessCancelling(
+          child,
+          client,
+          error instanceof Error ? error : new Error(String(error)),
+        )
       }
     })
 
@@ -162,12 +169,17 @@ export class EccRpcSidecarProcess {
     child.once('error', (error) => {
       const sidecarError =
         error instanceof Error ? error : new Error(`ECC RPC sidecar error: ${error}`)
-      client.rejectPending(sidecarError)
+      this.rejectPendingUnlessCancelling(child, client, sidecarError)
     })
 
     child.once('close', async (code: number | null, signal: NodeJS.Signals | null) => {
       this.clearForceKillTimer()
-      const reason = this.shuttingDown ? 'shutdown' : 'unexpected'
+      const cancelled = this.cancellingChild === child
+      const reason = cancelled
+        ? 'cancelled'
+        : this.shuttingDown
+          ? 'shutdown'
+          : 'unexpected'
       const message =
         reason === 'unexpected'
           ? `ECC RPC sidecar exited with ${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`}.`
@@ -184,8 +196,13 @@ export class EccRpcSidecarProcess {
         this.client = null
         this.child = null
         this.spawnEnv = null
+        this.cancellingChild = null
       }
-      client.rejectPending(new Error(message ?? 'ECC RPC sidecar exited.'))
+      client.rejectPending(
+        cancelled
+          ? new EccFlowCancelledError()
+          : new Error(message ?? 'ECC RPC sidecar exited.'),
+      )
     })
 
     return client
@@ -206,6 +223,31 @@ export class EccRpcSidecarProcess {
         }
       }, this.forceKillTimeoutMs)
     }
+  }
+
+  cancel(): boolean {
+    const child = this.child
+    if (!child) {
+      return false
+    }
+
+    if (this.cancellingChild === child) {
+      child.kill('SIGKILL')
+      return true
+    }
+
+    this.clearForceKillTimer()
+    this.cancellingChild = child
+    if (!child.kill('SIGTERM')) {
+      this.cancellingChild = null
+      return false
+    }
+    this.forceKillTimer = setTimeout(() => {
+      if (this.child === child) {
+        child.kill('SIGKILL')
+      }
+    }, this.forceKillTimeoutMs)
+    return true
   }
 
   /**
@@ -352,5 +394,14 @@ export class EccRpcSidecarProcess {
         }\n`,
       )
     }
+  }
+
+  private rejectPendingUnlessCancelling(
+    child: SpawnedEccRpcSidecar,
+    client: EccJsonRpcClient,
+    error: Error,
+  ): void {
+    if (this.cancellingChild === child) return
+    client.rejectPending(error)
   }
 }

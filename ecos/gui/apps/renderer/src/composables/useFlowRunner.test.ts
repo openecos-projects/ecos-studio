@@ -183,6 +183,26 @@ describe('useFlowRunner desktop-only guard', () => {
     })
   })
 
+  it('shows the distinct recovery error after an unexpected full-flow interruption', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    rtl2gdsApi.mockRejectedValue(
+      Object.assign(new Error('Flow stopped, but state recovery failed.'), {
+        code: 'flow_state_recovery_failed',
+      }),
+    )
+
+    const { runAllFlow } = useFlowRunner()
+
+    await expect(runAllFlow()).resolves.toBeNull()
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'error',
+      summary: 'Flow State Recovery Failed',
+      detail: 'Flow stopped, but state recovery failed.',
+      life: 8000,
+    })
+  })
+
   it('passes rerun=true to the full flow API when requested', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }

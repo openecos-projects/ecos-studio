@@ -1107,7 +1107,10 @@ export function useHomeData() {
         workspaceLogPaths.get(flowLogLookupKey(step.name, step.tool)) ??
         fallbackWorkspaceLogPath(root, step.name, step.tool)
       const failed = step.state === 'Incomplete' || step.state === 'Invalid'
-      const live = stateLc === 'ongoing' && includeOngoingLive
+      const live =
+        stateLc === 'ongoing' &&
+        includeOngoingLive &&
+        isFlowExecutionActiveForWorkspace(currentProject.value?.path)
       const seg: FlowLogSegment = {
         stepName: step.name,
         tool: step.tool,

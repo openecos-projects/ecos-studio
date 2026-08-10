@@ -357,6 +357,44 @@ describe('createRuntimeEventClient desktop ECC events', () => {
     expect(errorHandler).toHaveBeenCalledWith('ECC RPC sidecar exited unexpectedly')
   })
 
+  it('publishes flow cancellation as a cancelled response', async () => {
+    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    setWindow({
+      ecosDesktop: {
+        ecc: {
+          events: {
+            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+              listeners.push(listener)
+              return () => undefined
+            },
+          },
+        },
+      },
+    })
+
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const cancelledHandler = vi.fn()
+    client.on('cancelled', cancelledHandler)
+    client.connect()
+
+    listeners[0]({
+      code: 'flow_cancelled',
+      message: 'Flow cancelled.',
+      method: 'flow.run',
+      operationId: 'operation-3',
+      type: 'operation.failed',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(cancelledHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: 'cancelled' }),
+        response: 'cancelled',
+      }),
+    )
+  })
+
   it('does not publish planned sidecar shutdowns as errors', async () => {
     const listeners: Array<(event: EccRuntimeEvent) => void> = []
     setWindow({

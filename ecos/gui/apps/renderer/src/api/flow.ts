@@ -9,6 +9,7 @@ import {
   ResponseEnum,
 } from './type'
 import { getDesktopApi } from '@/platform/desktop'
+import type { EccFlowCancelResult } from '@ecos-studio/shared'
 
 function workspaceHandleFromData(data: Record<string, unknown>): string {
   return String(data.workspaceHandle ?? data.workspace_handle ?? data.directory ?? '')
@@ -70,6 +71,10 @@ export function rtl2gdsApi(request: RequestData<RTL2GDSRequest>) {
     .then((result) => success(CMDEnum.rtl2gds, result as RTL2GDSResponse)) as Promise<
     ResponseData<RTL2GDSResponse>
   >
+}
+
+export function cancelFlowApi(workspaceHandle: string): Promise<EccFlowCancelResult> {
+  return getDesktopApi().ecc.flow.cancel({ workspaceHandle })
 }
 
 export interface RunStepRequest {

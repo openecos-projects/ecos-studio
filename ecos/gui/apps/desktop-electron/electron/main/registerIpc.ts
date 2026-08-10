@@ -17,6 +17,7 @@ import {
   type DesktopProjectDirectoryEntry,
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
+  type EccFlowCancelRequest,
   type EccFlowRunStepRequest,
   type EccRuntimeEvent,
   type EccWorkspaceCreateRequest,
@@ -237,6 +238,7 @@ export interface DesktopBridgeServices {
     rpcHello(): Promise<unknown>
     rpcPing(): Promise<unknown>
     rpcShutdown(): Promise<unknown>
+    cancelFlow(request: EccFlowCancelRequest): Promise<unknown>
     runFlow(request: EccFlowRunRequest): Promise<unknown>
     runStep(request: EccFlowRunStepRequest): Promise<unknown>
     syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
@@ -1543,6 +1545,10 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccFlowRun, async (_event, request) => {
     return await services.eccRuntimeService.runFlow(request as EccFlowRunRequest)
+  })
+
+  handle(desktopApiIpcChannels.eccFlowCancel, async (_event, request) => {
+    return await services.eccRuntimeService.cancelFlow(request as EccFlowCancelRequest)
   })
 
   handle(desktopApiIpcChannels.eccFlowRunStep, async (_event, request) => {

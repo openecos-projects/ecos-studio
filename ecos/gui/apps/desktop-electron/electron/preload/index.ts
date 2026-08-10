@@ -327,6 +327,7 @@ const desktopApi: DesktopApi = {
         ),
     },
     flow: {
+      cancel: (request) => invokeDesktop(desktopApiIpcChannels.eccFlowCancel, request),
       run: (request) => invokeDesktop(desktopApiIpcChannels.eccFlowRun, request),
       runStep: (request) => invokeDesktop(desktopApiIpcChannels.eccFlowRunStep, request),
     },

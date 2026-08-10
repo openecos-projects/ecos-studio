@@ -13,6 +13,7 @@ import {
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
 import { EccJsonRpcError } from './jsonRpcClient'
+import { EccFlowCancelledError } from './errors'
 
 interface RpcCall {
   method: string
@@ -67,6 +68,7 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
   client: FakeRpcClient
   logFile: string | null = '/tmp/ecc-rpc-runtime.log'
   relocateLogFileFrom = vi.fn()
+  cancel = vi.fn(() => true)
   shutdownCount = 0
   startCount = 0
 
@@ -530,6 +532,34 @@ describe('EccWorkspaceRuntime', () => {
     await expect(ping).resolves.toEqual({ ok: true })
   })
 
+  it('cancels only the active flow for the requested workspace without waiting for the queue', async () => {
+    const { client, service, sidecar } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    const blockedFlow = deferred<{ rerun: boolean }>()
+    client.responses.push(blockedFlow.promise)
+
+    const flow = service.runFlow({
+      rerun: false,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+
+    expect(service.cancelFlow({ workspaceHandle: workspace.workspaceHandle })).toEqual({
+      accepted: true,
+    })
+    expect(service.cancelFlow({ workspaceHandle: 'other-workspace' })).toEqual({
+      accepted: false,
+    })
+    expect(sidecar.cancel).toHaveBeenCalledOnce()
+
+    blockedFlow.reject(new EccFlowCancelledError())
+    await expect(flow).rejects.toMatchObject({ code: 'flow_cancelled' })
+  })
+
   it('enriches unexpected runtime exits with the in-flight operation', async () => {
     const { client, events, service, sidecarEvent } = createService()
     client.responses.push(
@@ -575,14 +605,93 @@ describe('EccWorkspaceRuntime', () => {
   it.each([
     ['flow.run', 'unexpected'],
     ['flow.run_step', 'shutdown'],
-  ] as const)('recovers persisted flow state for %s on a %s exit', async (method, reason) => {
-    const directory = await mkdtemp(join(tmpdir(), 'ecc-runtime-recovery-'))
+  ] as const)(
+    'recovers persisted flow state for %s on a %s exit',
+    async (method, reason) => {
+      const directory = await mkdtemp(join(tmpdir(), 'ecc-runtime-recovery-'))
+      recoveryRoots.push(directory)
+      await writeJson(join(directory, 'home', 'flow.json'), {
+        steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Ongoing' }],
+      })
+      await writeJson(join(directory, 'Synthesis_yosys', 'subflow.json'), {
+        steps: [{ name: 'run synthesis', state: 'Ongoing' }],
+      })
+
+      const { client, service, sidecarEvent } = createService(directory)
+      client.responses.push(
+        { capabilities: [], eccVersion: '0.1.0', version: 1 },
+        { directory, workspaceId: 'workspace-1' },
+      )
+      const workspace = await service.openWorkspace({ directory })
+      const blockedFlow = deferred<unknown>()
+      client.responses.push(blockedFlow.promise)
+      const flow =
+        method === 'flow.run'
+          ? service.runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
+          : service.runStep({
+              rerun: false,
+              step: 'Synthesis',
+              workspaceHandle: workspace.workspaceHandle,
+            })
+      await waitForQueuedOperation()
+
+      await sidecarEvent({
+        code: reason === 'unexpected' ? 1 : 0,
+        reason,
+        signal: null,
+        type: 'runtime.exited',
+      })
+
+      const mainFlow = JSON.parse(
+        await readFile(join(directory, 'home', 'flow.json'), 'utf8'),
+      )
+      const subflow = JSON.parse(
+        await readFile(join(directory, 'Synthesis_yosys', 'subflow.json'), 'utf8'),
+      )
+      expect(mainFlow.steps[0].state).toBe('Incomplete')
+      expect(subflow.steps[0].state).toBe('Incomplete')
+
+      blockedFlow.resolve({})
+      await expect(flow).resolves.toEqual({})
+    },
+  )
+
+  it('reports a distinct error when interrupted flow recovery cannot repair flow.json', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ecc-runtime-recovery-failure-'))
+    recoveryRoots.push(directory)
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await writeFile(join(directory, 'home', 'flow.json'), '{"steps": [', 'utf8')
+
+    const { client, service, sidecarEvent } = createService(directory)
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory, workspaceId: 'workspace-1' },
+    )
+    const workspace = await service.openWorkspace({ directory })
+    const blockedFlow = deferred<unknown>()
+    client.responses.push(blockedFlow.promise)
+    const flow = service.runFlow({
+      rerun: false,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+
+    await sidecarEvent({
+      code: 1,
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+    })
+    blockedFlow.reject(new EccFlowCancelledError())
+
+    await expect(flow).rejects.toMatchObject({ code: 'flow_state_recovery_failed' })
+  })
+
+  it('recovers a cancelled flow after its RPC request fails before sidecar close', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ecc-runtime-cancel-race-'))
     recoveryRoots.push(directory)
     await writeJson(join(directory, 'home', 'flow.json'), {
       steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Ongoing' }],
-    })
-    await writeJson(join(directory, 'Synthesis_yosys', 'subflow.json'), {
-      steps: [{ name: 'run synthesis', state: 'Ongoing' }],
     })
 
     const { client, service, sidecarEvent } = createService(directory)
@@ -593,28 +702,28 @@ describe('EccWorkspaceRuntime', () => {
     const workspace = await service.openWorkspace({ directory })
     const blockedFlow = deferred<unknown>()
     client.responses.push(blockedFlow.promise)
-    const flow =
-      method === 'flow.run'
-        ? service.runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
-        : service.runStep({ rerun: false, step: 'Synthesis', workspaceHandle: workspace.workspaceHandle })
+    const flow = service.runFlow({
+      rerun: false,
+      workspaceHandle: workspace.workspaceHandle,
+    })
     await waitForQueuedOperation()
 
+    expect(service.cancelFlow({ workspaceHandle: workspace.workspaceHandle })).toEqual({
+      accepted: true,
+    })
+    blockedFlow.reject(new EccFlowCancelledError())
+    await expect(flow).rejects.toMatchObject({ code: 'flow_cancelled' })
+
     await sidecarEvent({
-      code: reason === 'unexpected' ? 1 : 0,
-      reason,
-      signal: null,
+      code: null,
+      reason: 'cancelled',
+      signal: 'SIGTERM',
       type: 'runtime.exited',
     })
-
-    const mainFlow = JSON.parse(await readFile(join(directory, 'home', 'flow.json'), 'utf8'))
-    const subflow = JSON.parse(
-      await readFile(join(directory, 'Synthesis_yosys', 'subflow.json'), 'utf8'),
+    const mainFlow = JSON.parse(
+      await readFile(join(directory, 'home', 'flow.json'), 'utf8'),
     )
     expect(mainFlow.steps[0].state).toBe('Incomplete')
-    expect(subflow.steps[0].state).toBe('Incomplete')
-
-    blockedFlow.resolve({})
-    await expect(flow).resolves.toEqual({})
   })
 
   it('restarts and reopens the active workspace on the next call after exit', async () => {
