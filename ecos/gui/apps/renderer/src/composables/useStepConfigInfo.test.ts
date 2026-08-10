@@ -116,6 +116,29 @@ describe('useStepConfigInfo', () => {
     expect(testState.readProjectTextFile).not.toHaveBeenCalled()
   })
 
+  it('treats available config info without a config path as an empty state', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {},
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'Synthesis',
+    })
+    testState.route.path = '/workspace/synthesis'
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false)
+    })
+
+    expect(result.responseKind.value).toBe('success')
+    expect(result.isEmpty.value).toBe(true)
+    expect(result.stepConfigPathResolved.value).toBeNull()
+    expect(testState.readProjectTextFile).not.toHaveBeenCalled()
+  })
+
   it('keeps non-config missing metadata from rendering a blank config panel', async () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'missing',
@@ -140,7 +163,7 @@ describe('useStepConfigInfo', () => {
     expect(testState.readProjectTextFile).not.toHaveBeenCalled()
   })
 
-  it('keeps missing config info with a config path in warning state and loads the file', async () => {
+  it('treats a missing config file path as an empty state without reading it', async () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'missing',
       info: {
@@ -151,22 +174,40 @@ describe('useStepConfigInfo', () => {
       id: 'config',
       step: 'Floorplan',
     })
-    testState.readProjectTextFile.mockResolvedValue('{"FP":{}}')
-
     const result = scope.run(() => useStepConfigInfo())!
 
     await vi.waitFor(() => {
       expect(result.loading.value).toBe(false)
     })
 
-    expect(result.responseKind.value).toBe('warning')
-    expect(result.isEmpty.value).toBe(false)
-    expect(result.stepConfigPathResolved.value).toBe(
-      '/workspace/demo/config/fp_default_config.json',
-    )
-    expect(testState.readProjectTextFile).toHaveBeenCalledWith(
-      '/workspace/demo/config/fp_default_config.json',
-    )
+    expect(result.responseKind.value).toBe('idle')
+    expect(result.isEmpty.value).toBe(true)
+    expect(result.stepConfigPathResolved.value).toBeNull()
+    expect(testState.readProjectTextFile).not.toHaveBeenCalled()
+  })
+
+  it('loads a synthesis config supplied through the legacy path field', async () => {
+    testState.route.path = '/workspace/synthesis'
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        path: '/workspace/demo/config/flow_config.json',
+      },
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'Synthesis',
+    })
+    testState.readProjectTextFile.mockResolvedValue('{"SYNTHESIS":{}}')
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => {
+      expect(result.stepConfigPathResolved.value).toBe(
+        '/workspace/demo/config/flow_config.json',
+      )
+    })
+    expect(result.stepConfigParsed.value).toEqual({ SYNTHESIS: {} })
   })
 
   it('ignores stale step config reads after the workspace session changes', async () => {

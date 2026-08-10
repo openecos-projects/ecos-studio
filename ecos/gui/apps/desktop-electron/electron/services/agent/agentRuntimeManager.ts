@@ -119,6 +119,19 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     return this.eventFanout.onEvent(listener)
   }
 
+  syncEnvironmentOverrides(
+    overrides: Record<string, string | undefined>,
+    request?: DesktopAgentProviderRequest,
+  ): void {
+    const provider = this.providerForRequest(request)
+    if (
+      'syncEnvironmentOverrides' in provider &&
+      typeof provider.syncEnvironmentOverrides === 'function'
+    ) {
+      provider.syncEnvironmentOverrides(overrides)
+    }
+  }
+
   private providerForRequest(
     request?: DesktopAgentProviderRequest,
   ): AgentProviderRuntime {

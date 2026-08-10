@@ -80,10 +80,19 @@ vi.mock('@/stores/messageStore', () => ({
   }),
 }))
 
+vi.mock('@/stores/agentShellStore', () => ({
+  useAgentShellStore: () => ({
+    shouldPreserveMessages: () => false,
+    consumePreserveMessages: vi.fn(() => false),
+    resetShell: vi.fn(),
+  }),
+}))
+
 vi.mock('./homeRunArtifacts', () => ({
   requestHomeRunArtifactReset: requestHomeRunArtifactResetMock,
   clearHomeRunArtifactResetAwaitingBackendStart:
     clearHomeRunArtifactResetAwaitingBackendStartMock,
+  isAgentWorkspaceRerunHomePrepared: vi.fn(() => false),
 }))
 
 import { useWorkspace } from './useWorkspace'
@@ -151,6 +160,8 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       readProjectBinaryFile: vi.fn(),
       writeProjectTextFile: vi.fn(),
       listProjectDirectory: vi.fn(),
+      pathExists: vi.fn(async () => false),
+      discardFailedWorkspaceCreate: vi.fn(async () => false),
       prepareProjectDirectoryReplacement: vi.fn(),
       restoreProjectDirectoryReplacement: vi.fn(),
       finalizeProjectDirectoryReplacement: vi.fn(),
@@ -499,7 +510,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value).toBeNull()
   })
 
-  it('clears chat messages only after a workspace opens successfully', async () => {
+  it('keeps Agent chat messages when a workspace opens successfully', async () => {
     const workspace = useWorkspace()
     const existingProject: Project = {
       id: '/work/old',
@@ -517,7 +528,7 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(await workspace.openProject(existingProject)).toBe(true)
-    expect(clearMessagesMock).toHaveBeenCalledTimes(1)
+    expect(clearMessagesMock).not.toHaveBeenCalled()
 
     vi.mocked(desktopApi.dialog.pickDirectory).mockResolvedValueOnce('/work/bad')
     loadWorkspaceApiMock.mockResolvedValueOnce({
@@ -527,7 +538,7 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(await workspace.openProject()).toBe(false)
-    expect(clearMessagesMock).toHaveBeenCalledTimes(1)
+    expect(clearMessagesMock).not.toHaveBeenCalled()
 
     vi.mocked(desktopApi.dialog.pickDirectory).mockResolvedValueOnce('/work/new')
     loadWorkspaceApiMock.mockResolvedValueOnce({
@@ -539,10 +550,10 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(await workspace.openProject()).toBe(true)
-    expect(clearMessagesMock).toHaveBeenCalledTimes(2)
+    expect(clearMessagesMock).not.toHaveBeenCalled()
   })
 
-  it('clears chat messages when the workspace closes', async () => {
+  it('keeps Agent chat messages when the workspace closes', async () => {
     const workspace = useWorkspace()
     const project: Project = {
       id: '/work/old',
@@ -563,7 +574,7 @@ describe('useWorkspace openProject', () => {
 
     await workspace.closeProject()
 
-    expect(clearMessagesMock).toHaveBeenCalledTimes(2)
+    expect(clearMessagesMock).not.toHaveBeenCalled()
   })
 
   it('does not let an in-flight project open commit after the workspace closes', async () => {
@@ -2220,7 +2231,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.runtimeEvents.value).toHaveLength(1)
   })
 
-  it('invalidates flow, current step, maps, and logs when run_step completes', async () => {
+  it('invalidates all Home resources when run_step completes', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const before = { ...workspace.resourceVersions.value }
 
@@ -2234,11 +2245,16 @@ describe('useWorkspace openProject', () => {
       },
     })
 
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
-    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
-    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    expect(workspace.resourceVersions.value).toEqual({
+      home: before.home + 1,
+      flow: before.flow + 1,
+      parameters: before.parameters + 1,
+      step: before.step + 1,
+      'step-config': before['step-config'] + 1,
+      maps: before.maps + 1,
+      logs: before.logs + 1,
+      all: before.all + 1,
+    })
   })
 
   it('invalidates all workspace resources when rtl2gds completes', async () => {
@@ -2752,12 +2768,70 @@ describe('useWorkspace openProject', () => {
       }),
     ).resolves.toBe(false)
 
+    expect(workspace.lastWorkspaceCreationError.value).toBe('creation failed')
+
     expect(desktopApi.workspace.restoreProjectDirectoryReplacement).toHaveBeenCalledWith(
       replacement.id,
     )
     expect(
       desktopApi.workspace.finalizeProjectDirectoryReplacement,
     ).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
+  })
+
+  it('discards a brand-new incomplete workspace directory when create fails', async () => {
+    const workspace = useWorkspace()
+    vi.mocked(desktopApi.workspace.pathExists).mockResolvedValueOnce(false)
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'error',
+      data: {},
+      message: ['PDK path is missing'],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/project/ws_0036',
+        pdk: 'ics55',
+        pdk_root: '/missing/pdk',
+        parameters: {
+          design: 'gcd',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(false)
+
+    expect(workspace.lastWorkspaceCreationError.value).toBe('PDK path is missing')
+    expect(desktopApi.workspace.discardFailedWorkspaceCreate).toHaveBeenCalledWith(
+      '/work/project/ws_0036',
+    )
+  })
+
+  it('does not discard a pre-existing directory when create fails', async () => {
+    const workspace = useWorkspace()
+    vi.mocked(desktopApi.workspace.pathExists).mockResolvedValueOnce(true)
+    createWorkspaceApiMock.mockRejectedValueOnce(new Error('PDK path is missing'))
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/project/ws_0036',
+        pdk: 'ics55',
+        pdk_root: '/missing/pdk',
+        parameters: {
+          design: 'gcd',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(false)
+
+    expect(desktopApi.workspace.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
   })
 
   it('does not invalidate resources for read-only runtime events', async () => {
@@ -2808,7 +2882,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace).not.toHaveProperty('stepRefreshCounter')
   })
 
-  it('invalidates run_step resources once when run_step completes', async () => {
+  it('invalidates all Home resources once when run_step completes', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const before = { ...workspace.resourceVersions.value }
 
@@ -2822,11 +2896,16 @@ describe('useWorkspace openProject', () => {
       },
     })
 
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
-    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
-    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    expect(workspace.resourceVersions.value).toEqual({
+      home: before.home + 1,
+      flow: before.flow + 1,
+      parameters: before.parameters + 1,
+      step: before.step + 1,
+      'step-config': before['step-config'] + 1,
+      maps: before.maps + 1,
+      logs: before.logs + 1,
+      all: before.all + 1,
+    })
   })
 
   it('does not invalidate resources for stdout and stderr runtime events', async () => {
@@ -2869,11 +2948,16 @@ describe('useWorkspace openProject', () => {
     onRuntimeEvent?.(completedEvent)
     onRuntimeEvent?.(completedEvent)
 
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
-    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
-    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    expect(workspace.resourceVersions.value).toEqual({
+      home: before.home + 1,
+      flow: before.flow + 1,
+      parameters: before.parameters + 1,
+      step: before.step + 1,
+      'step-config': before['step-config'] + 1,
+      maps: before.maps + 1,
+      logs: before.logs + 1,
+      all: before.all + 1,
+    })
   })
 
   it('invalidates structured resources for runtime events with explicit data paths', async () => {
@@ -2894,11 +2978,13 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
+    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
     expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
     expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
   })
 
   it('invalidates structured resources for runtime events with top-level explicit data paths', async () => {
@@ -2918,11 +3004,13 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
+    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
     expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
     expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
   })
 
   it('invalidates home and parameters when runtime events carry a home page path', async () => {
@@ -2949,7 +3037,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
     expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
   })
 
   it('counts a final result only once after an explicit path lifecycle event for the same job', async () => {
@@ -2985,6 +3073,6 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
     expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
   })
 })

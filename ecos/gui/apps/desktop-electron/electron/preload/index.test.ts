@@ -45,6 +45,21 @@ async function loadDesktopBridge() {
         inspectSignoff(request: unknown): Promise<unknown>
       }
     }
+    agent: {
+      interrupt(request: unknown): Promise<void>
+      onEvent(listener: (event: unknown) => void): () => void
+      sendMessage(request: unknown): Promise<unknown>
+      start(request: unknown): Promise<void>
+      startSession(request: unknown): Promise<unknown>
+      codex: {
+        getStatus(): Promise<unknown>
+        install(): Promise<unknown>
+        login(): Promise<unknown>
+        recheck(): Promise<unknown>
+        setBinPath(request: unknown): Promise<unknown>
+        onProgress(listener: (event: unknown) => void): () => void
+      }
+    }
     dialog: {
       saveFile(options: unknown): Promise<unknown>
     }
@@ -191,6 +206,119 @@ describe('preload desktop bridge contract', () => {
       desktopApiIpcChannels.eccFlowRunStep,
       request,
     )
+  })
+
+  it('routes agent requests and events through shared IPC channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const session = {
+      providerId: 'ecos_agent',
+      sessionId: 'gui-session-1',
+    }
+    const listener = vi.fn()
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+    ipcRenderer.invoke.mockResolvedValueOnce(session)
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      messageId: 'message-1',
+      sessionId: session.sessionId,
+    })
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(
+      bridge.agent.start({ providerId: session.providerId }),
+    ).resolves.toBeUndefined()
+    await expect(bridge.agent.startSession(session)).resolves.toEqual(session)
+    await expect(bridge.agent.sendMessage({ ...session, message: '1' })).resolves.toEqual(
+      {
+        messageId: 'message-1',
+        sessionId: session.sessionId,
+      },
+    )
+    await expect(bridge.agent.interrupt(session)).resolves.toBeUndefined()
+    const unsubscribe = bridge.agent.onEvent(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
+    eventListener?.({}, { ...session, text: 'Select language', type: 'message' })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.agentStart,
+      { providerId: session.providerId },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.agentStartSession,
+      session,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.agentSendMessage,
+      { ...session, message: '1' },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      4,
+      desktopApiIpcChannels.agentInterrupt,
+      session,
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.agentEvent,
+      expect.any(Function),
+    )
+    expect(listener).toHaveBeenCalledWith({
+      ...session,
+      text: 'Select language',
+      type: 'message',
+    })
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.agentEvent,
+      eventListener,
+    )
+  })
+
+  it('routes Codex dependency helpers through shared IPC channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const status = {
+      authState: 'unknown',
+      platformSupportsInstall: true,
+      state: 'missing',
+    }
+    const progressListener = vi.fn()
+    ipcRenderer.invoke.mockResolvedValue(status)
+
+    await expect(bridge.agent.codex.getStatus()).resolves.toEqual(status)
+    await expect(bridge.agent.codex.install()).resolves.toEqual(status)
+    await expect(bridge.agent.codex.login()).resolves.toEqual(status)
+    await expect(bridge.agent.codex.recheck()).resolves.toEqual(status)
+    await expect(bridge.agent.codex.setBinPath({ path: '/bin/codex' })).resolves.toEqual(
+      status,
+    )
+    const unsubscribe = bridge.agent.codex.onProgress(progressListener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
+    eventListener?.({}, { message: 'downloading', phase: 'downloading', progress: 0.2 })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.agentCodexGetStatus,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.agentCodexInstall,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(desktopApiIpcChannels.agentCodexLogin)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.agentCodexRecheck,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.agentCodexSetBinPath,
+      { path: '/bin/codex' },
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.agentCodexProgress,
+      expect.any(Function),
+    )
+    expect(progressListener).toHaveBeenCalledWith({
+      message: 'downloading',
+      phase: 'downloading',
+      progress: 0.2,
+    })
   })
 
   it('routes ECC signoff export through the shared IPC channel constant', async () => {

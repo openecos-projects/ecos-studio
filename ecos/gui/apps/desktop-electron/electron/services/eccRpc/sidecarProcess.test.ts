@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Writable } from 'node:stream'
@@ -244,6 +244,53 @@ describe('EccRpcSidecarProcess', () => {
       text: 'hello stderr\n',
       type: 'runtime.stderr',
     })
+  })
+
+  it('gives concurrent sidecars separate logs in one desktop session directory', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
+    const desktopLogDirectory = join(tempDir, 'desktop-logs')
+    const first = new EccRpcSidecarProcess({
+      logDirectoryProvider: () => desktopLogDirectory,
+      spawn: () => new FakeChild(),
+      tempDir,
+    })
+    const second = new EccRpcSidecarProcess({
+      logDirectoryProvider: () => desktopLogDirectory,
+      spawn: () => new FakeChild(),
+      tempDir,
+    })
+
+    await Promise.all([first.start(), second.start()])
+
+    expect(first.logFile).not.toBe(second.logFile)
+    expect(existsSync(first.logFile!)).toBe(true)
+    expect(existsSync(second.logFile!)).toBe(true)
+  })
+
+  it('moves a legacy workspace log before rerun output is appended', async () => {
+    const child = new FakeChild()
+    const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
+    const workspaceDirectory = join(tempDir, 'workspace')
+    const workspaceLogDirectory = join(workspaceDirectory, 'log')
+    const desktopLogDirectory = join(tempDir, 'desktop-logs')
+    const legacyLogFile = join(workspaceLogDirectory, 'ecc-rpc-runtime-legacy.log')
+    mkdirSync(workspaceLogDirectory, { recursive: true })
+    writeFileSync(legacyLogFile, 'before rerun\n')
+
+    const sidecar = new EccRpcSidecarProcess({
+      logDirectoryProvider: () => desktopLogDirectory,
+      spawn: () => child,
+      tempDir,
+    })
+    await sidecar.start()
+    sidecar.logFile = legacyLogFile
+
+    sidecar.relocateLogFileFrom(workspaceDirectory)
+    child.stderr.write('during rerun\n')
+
+    expect(sidecar.logFile?.startsWith(`${desktopLogDirectory}/`)).toBe(true)
+    expect(readFileSync(sidecar.logFile!, 'utf8')).toBe('before rerun\nduring rerun\n')
+    expect(existsSync(legacyLogFile)).toBe(false)
   })
 
   it('rejects pending requests and emits an unexpected exit event', async () => {

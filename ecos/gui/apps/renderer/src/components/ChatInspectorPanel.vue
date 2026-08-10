@@ -10,62 +10,61 @@
         },
       ]"
     >
+      <!-- Config/QoR: one compact chrome row (no duplicate Chat|Config bar above tabs). -->
       <div
-        class="chat-inspector-topbar flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) px-3"
+        v-if="activeTab !== 'chat'"
+        class="panel-side-chrome"
+        role="tablist"
+        aria-label="Right panel modes"
       >
-        <div class="chat-inspector-tabs flex min-w-0 items-center gap-2">
-          <button
-            type="button"
-            @click="selectTab('chat')"
-            :class="tabClass(activeTab === 'chat')"
-            title="AI Chat"
-          >
-            <i class="ri-chat-3-line text-base"></i>
-          </button>
-          <button
-            v-if="showStepConfigInspector"
-            type="button"
-            @click="selectTab('inspector')"
-            :class="tabClass(activeTab === 'inspector')"
-            title="Configuration"
-          >
-            <i class="ri-layout-column-line text-base"></i>
-          </button>
-          <button
-            v-if="showStepQorAnalysis"
-            type="button"
-            @click="selectTab('analysis')"
-            :class="tabClass(activeTab === 'analysis')"
-            title="QoR Analysis"
-            aria-label="QoR Analysis"
-          >
-            <i class="ri-bar-chart-box-line text-base"></i>
-          </button>
-        </div>
-
         <button
           type="button"
-          class="chat-inspector-fullscreen-toggle"
+          role="tab"
+          class="panel-side-chrome__tab"
+          :aria-selected="false"
+          title="Back to Agent chat"
+          @click="selectTab('chat')"
+        >
+          Chat
+        </button>
+        <button
+          v-if="showStepConfigInspector"
+          type="button"
+          role="tab"
+          class="panel-side-chrome__tab"
+          :class="{ 'panel-side-chrome__tab--active': activeTab === 'inspector' }"
+          :aria-selected="activeTab === 'inspector'"
+          title="Configuration"
+          @click="selectTab('inspector')"
+        >
+          Config
+        </button>
+        <button
+          v-if="showStepQorAnalysis"
+          type="button"
+          role="tab"
+          class="panel-side-chrome__tab"
+          :class="{ 'panel-side-chrome__tab--active': activeTab === 'analysis' }"
+          :aria-selected="activeTab === 'analysis'"
+          title="QoR Analysis"
+          aria-label="QoR Analysis"
+          @click="selectTab('analysis')"
+        >
+          QoR
+        </button>
+        <div class="panel-side-chrome__spacer" aria-hidden="true"></div>
+        <button
+          type="button"
+          class="panel-side-chrome__icon chat-inspector-fullscreen-toggle"
           :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
-          :aria-label="
-            activePanelFullscreen
-              ? activeTab === 'chat'
-                ? 'Exit AI Chat full screen'
-                : activeTab === 'inspector'
-                  ? 'Exit step configuration full screen'
-                  : 'Exit step QoR analysis full screen'
-              : activeTab === 'chat'
-                ? 'View AI Chat full screen'
-                : activeTab === 'inspector'
-                  ? 'View step configuration full screen'
-                  : 'View step QoR analysis full screen'
-          "
+          :aria-label="fullscreenAriaLabel"
           @click="toggleActivePanelFullscreen"
         >
           <i
             :class="
               activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
             "
+            aria-hidden="true"
           ></i>
         </button>
       </div>
@@ -75,8 +74,47 @@
         <KeepAlive>
           <AIChatPanel
             v-if="activeTab === 'chat'"
+            shell="workspace"
             class="h-full min-h-0 w-full max-w-full min-w-0 flex-1 overflow-hidden"
-          />
+          >
+            <template #tab-actions>
+              <button
+                v-if="showStepConfigInspector"
+                type="button"
+                class="panel-side-chrome__tab"
+                title="Configuration"
+                @click="selectTab('inspector')"
+              >
+                Config
+              </button>
+              <button
+                v-if="showStepQorAnalysis"
+                type="button"
+                class="panel-side-chrome__tab"
+                title="QoR Analysis"
+                aria-label="QoR Analysis"
+                @click="selectTab('analysis')"
+              >
+                QoR
+              </button>
+              <button
+                type="button"
+                class="panel-side-chrome__icon chat-inspector-fullscreen-toggle"
+                :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
+                :aria-label="fullscreenAriaLabel"
+                @click="toggleActivePanelFullscreen"
+              >
+                <i
+                  :class="
+                    activePanelFullscreen
+                      ? 'ri-fullscreen-exit-line'
+                      : 'ri-fullscreen-line'
+                  "
+                  aria-hidden="true"
+                ></i>
+              </button>
+            </template>
+          </AIChatPanel>
         </KeepAlive>
 
         <StepConfigPanel
@@ -119,13 +157,18 @@ function stepFromRoutePath(): StepEnum | undefined {
   return stepEnumValues.find((s) => s.toLowerCase() === segment.toLowerCase())
 }
 
-/** Synthesis 不提供步骤配置编辑，隐藏 Inspector 标签与面板 */
-const showStepConfigInspector = computed(() => stepFromRoutePath() !== StepEnum.SYNTHESIS)
-const showStepQorAnalysis = computed(() =>
-  [StepEnum.PLACEMENT, StepEnum.ROUTING, StepEnum.STA].includes(
-    stepFromRoutePath() ?? StepEnum.INIT,
-  ),
-)
+/** 仅步骤路由显示 Config/QoR；Home/tech/configure 只保留 Chat */
+const showStepConfigInspector = computed(() => {
+  const step = stepFromRoutePath()
+  return step !== undefined && step !== StepEnum.SYNTHESIS
+})
+const showStepQorAnalysis = computed(() => {
+  const step = stepFromRoutePath()
+  return (
+    step !== undefined &&
+    [StepEnum.PLACEMENT, StepEnum.ROUTING, StepEnum.STA].includes(step)
+  )
+})
 
 const activeTab = ref<'chat' | 'inspector' | 'analysis'>('chat')
 const isChatFullscreen = ref(false)
@@ -145,6 +188,17 @@ const activePanelFullscreen = computed(() =>
       ? isStepConfigFullscreen.value
       : isStepQorAnalysisFullscreen.value,
 )
+
+const fullscreenAriaLabel = computed(() => {
+  if (activePanelFullscreen.value) {
+    if (activeTab.value === 'chat') return 'Exit AI Chat full screen'
+    if (activeTab.value === 'inspector') return 'Exit step configuration full screen'
+    return 'Exit step QoR analysis full screen'
+  }
+  if (activeTab.value === 'chat') return 'View AI Chat full screen'
+  if (activeTab.value === 'inspector') return 'View step configuration full screen'
+  return 'View step QoR analysis full screen'
+})
 
 watch(
   () => route.path,
@@ -212,15 +266,6 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onFullscreenKeydown)
 })
-
-function tabClass(active: boolean) {
-  return [
-    'h-8 w-9 rounded flex items-center justify-center transition-all cursor-pointer border',
-    active
-      ? 'text-(--accent-color) bg-(--accent-color)/20 border-(--accent-color)/50'
-      : 'text-(--text-secondary) border-transparent hover:bg-(--bg-hover)',
-  ]
-}
 </script>
 
 <style scoped>
@@ -243,42 +288,72 @@ function tabClass(active: boolean) {
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.34);
 }
 
-.chat-inspector-topbar {
-  justify-content: space-between;
+.panel-side-chrome {
+  display: flex;
+  height: 2.25rem;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.125rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  padding: 0 0.35rem 0 0.4rem;
+  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--bg-primary));
 }
 
-.chat-inspector-tabs {
-  flex: 1 1 auto;
+.panel-side-chrome__spacer {
+  min-width: 0;
+  flex: 1;
 }
 
-.chat-inspector-fullscreen-toggle {
+.panel-side-chrome__tab {
   display: inline-flex;
+  height: 1.5rem;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  padding: 0 0.5rem;
+  background: transparent;
   color: var(--text-secondary);
-  background: var(--bg-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
   cursor: pointer;
-  transition:
-    background-color 0.16s ease,
-    border-color 0.16s ease,
-    color 0.16s ease,
-    transform 0.16s ease;
 }
 
-.chat-inspector-fullscreen-toggle:hover {
-  color: var(--accent-color);
-  border-color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-primary));
-  transform: translateY(-1px);
+.panel-side-chrome__tab:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
 }
 
-.chat-inspector-fullscreen-toggle:active {
-  transform: translateY(0);
+.panel-side-chrome__tab--active {
+  border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-primary));
+  color: var(--text-primary);
+}
+
+.panel-side-chrome__tab:focus-visible,
+.panel-side-chrome__icon:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.panel-side-chrome__icon {
+  display: inline-flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.panel-side-chrome__icon:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
 }
 
 .panel-fullscreen-overlay {

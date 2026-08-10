@@ -345,9 +345,15 @@ export function useSubflow() {
     { immediate: true },
   )
 
+  // Coalesce a workspace switch and its resource invalidation into one refresh.
   watch(
-    () => [resourceVersions.value.step, resourceVersions.value.all],
-    async () => {
+    [
+      () => currentProject.value?.path,
+      () => resourceVersions.value.step,
+      () => resourceVersions.value.all,
+    ],
+    async ([nextPath], [previousPath]) => {
+      if (!nextPath && nextPath !== previousPath) return
       await refreshCurrentSubflow()
     },
   )

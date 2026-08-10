@@ -3,6 +3,7 @@ type HomeRunArtifactResetListener = (projectPath: string) => void
 const resetListeners = new Set<HomeRunArtifactResetListener>()
 const pendingResetProjectPaths = new Set<string>()
 const awaitingBackendStartProjectPaths = new Set<string>()
+const agentPreparedRerunHomeProjectPaths = new Set<string>()
 
 function normalizeProjectPath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/')
@@ -36,6 +37,23 @@ export function clearHomeRunArtifactResetAwaitingBackendStart(projectPath: strin
 export function isHomeRunArtifactResetAwaitingBackendStart(projectPath: string): boolean {
   const normalizedProjectPath = normalizeProjectPath(projectPath)
   return awaitingBackendStartProjectPaths.has(normalizedProjectPath)
+}
+
+export function markAgentWorkspaceRerunHomePrepared(projectPath: string): void {
+  const normalizedProjectPath = normalizeProjectPath(projectPath)
+  if (!normalizedProjectPath) return
+  agentPreparedRerunHomeProjectPaths.add(normalizedProjectPath)
+}
+
+export function clearAgentWorkspaceRerunHomePrepared(projectPath: string): void {
+  const normalizedProjectPath = normalizeProjectPath(projectPath)
+  if (!normalizedProjectPath) return
+  agentPreparedRerunHomeProjectPaths.delete(normalizedProjectPath)
+}
+
+export function isAgentWorkspaceRerunHomePrepared(projectPath: string): boolean {
+  const normalizedProjectPath = normalizeProjectPath(projectPath)
+  return agentPreparedRerunHomeProjectPaths.has(normalizedProjectPath)
 }
 
 export function isHomeRunArtifactResetPending(projectPath: string): boolean {

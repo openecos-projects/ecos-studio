@@ -171,16 +171,47 @@ describe('useStepQorAnalysis', () => {
     })
   })
 
-  it('does not request analysis for unsupported workspace steps', async () => {
+  it('loads generic metric analysis for a flow step without a specialized detail table', async () => {
     testState.route.path = '/workspace/Floorplan'
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue(
+      analysisResponse('/workspace/demo/Floorplan_ecc/analysis/qor_metrics.json'),
+    )
+    testState.readProjectTextFile
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          schema_version: 3,
+          metrics: [
+            {
+              id: 'floorplan_die_area',
+              display_name: 'Die area',
+              value: 1234,
+              unit: 'um2',
+              direction: 'lower_is_better',
+              step_role: 'primary',
+              source: featureSource('feature/Floorplan.step.json'),
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({ schema_version: 4, quality_status: 'pass', gates: [] }),
+      )
 
     const result = scope.run(() => useStepQorAnalysis())!
 
-    await nextTick()
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false)
+    })
 
-    expect(result.isSupported.value).toBe(false)
-    expect(result.isEmpty.value).toBe(true)
-    expect(testState.resolveWorkspaceStepInfoApi).not.toHaveBeenCalled()
+    expect(result.isSupported.value).toBe(true)
+    expect(result.kind.value).toBeUndefined()
+    expect(result.metrics.value).toEqual([
+      expect.objectContaining({ id: 'floorplan_die_area', value: 1234 }),
+    ])
+    expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledWith({
+      step: 'Floorplan',
+      id: 'analysis',
+    })
   })
 
   it('treats a metrics file without the expected detail block as empty', async () => {

@@ -266,13 +266,4 @@ export default {
   opacity: 0.4;
   cursor: not-allowed;
 }
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 9999px;
-}
 </style>

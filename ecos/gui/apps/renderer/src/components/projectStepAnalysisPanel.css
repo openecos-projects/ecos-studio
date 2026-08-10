@@ -19,7 +19,6 @@
   border-bottom: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
   overflow-x: auto;
-  scrollbar-width: thin;
 }
 
 .step-rail-item {
@@ -247,7 +246,6 @@
   margin: 0;
   padding: 0;
   overflow: auto;
-  scrollbar-width: thin;
   list-style: none;
 }
 
@@ -1682,7 +1680,6 @@
     width: 100%;
     padding-bottom: 2px;
     overflow-x: auto;
-    scrollbar-width: thin;
   }
 
   .severity-filters button {

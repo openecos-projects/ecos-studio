@@ -28,7 +28,7 @@ describe('createMainWindow', () => {
     delete process.env.ECOS_ELECTRON_OPEN_DEVTOOLS
   })
 
-  it('creates a frameless transparent window so renderer border radius can cut the native corners', async () => {
+  it('creates a frameless opaque window so remote/software compositors keep 1px borders', async () => {
     const windowDouble = {
       loadFile: vi.fn().mockResolvedValue(undefined),
       loadURL: vi.fn().mockResolvedValue(undefined),
@@ -46,8 +46,8 @@ describe('createMainWindow', () => {
     expect(browserWindowConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
         frame: false,
-        transparent: true,
-        backgroundColor: '#00000000',
+        transparent: false,
+        backgroundColor: '#ffffff',
       }),
     )
     expect(windowDouble.loadFile).toHaveBeenCalledWith(

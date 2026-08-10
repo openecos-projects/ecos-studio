@@ -13,6 +13,23 @@ async function createTempDir(prefix: string): Promise<string> {
   return directory
 }
 
+async function writeProjectManifest(
+  projectRoot: string,
+  workspacePaths: readonly string[],
+): Promise<void> {
+  await writeFile(
+    join(projectRoot, 'project.json'),
+    JSON.stringify({
+      schema_version: 1,
+      root_path: projectRoot,
+      workspaces: workspacePaths.map((workspacePath, index) => ({
+        workspace_id: `ws_${String(index + 1).padStart(4, '0')}`,
+        workspace_path: workspacePath,
+      })),
+    }),
+  )
+}
+
 describe('ProjectScopeService', () => {
   afterEach(async () => {
     await Promise.all(
@@ -57,6 +74,81 @@ describe('ProjectScopeService', () => {
 
       await expect(service.resolveProjectRoot(manifestRoot)).resolves.toBe(manifestRoot)
       await expect(service.getProjectRoot()).resolves.toBe(activeRoot)
+    })
+  })
+
+  it('adds the workspace parent as a read root without replacing the active root', async () => {
+    const projectRoot = await createTempDir('ecos-parent-project-root-')
+    const workspaceRoot = join(projectRoot, 'ws_0004')
+    const siblingWorkspace = join(projectRoot, 'ws_0001')
+    const manifestPath = join(projectRoot, 'project.json')
+    const siblingFlowPath = join(siblingWorkspace, 'home', 'flow.json')
+    const unrelatedFile = join(projectRoot, 'unrelated.txt')
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    await mkdir(join(siblingWorkspace, 'home'), { recursive: true })
+    await writeProjectManifest(projectRoot, [workspaceRoot, siblingWorkspace])
+    await writeFile(siblingFlowPath, '{"steps":[]}')
+    await writeFile(unrelatedFile, 'not a workspace artifact')
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(workspaceRoot)
+      await expect(service.registerProjectReadRoot(projectRoot)).resolves.toBe(
+        projectRoot,
+      )
+
+      await expect(service.getProjectRoot()).resolves.toBe(workspaceRoot)
+      await expect(service.requestProjectPathAccess(manifestPath)).resolves.toBe(
+        manifestPath,
+      )
+      await expect(service.requestProjectPathAccess(siblingFlowPath)).resolves.toBe(
+        siblingFlowPath,
+      )
+      await expect(service.requestProjectPathAccess(unrelatedFile)).rejects.toThrow(
+        'outside current project root',
+      )
+      await expect(
+        service.requestWritableProjectPathAccess(manifestPath),
+      ).rejects.toThrow('outside current project root')
+      await expect(
+        service.requestWritableProjectPathAccess(
+          join(workspaceRoot, 'home', 'parameters.json'),
+        ),
+      ).resolves.toBe(join(workspaceRoot, 'home', 'parameters.json'))
+    })
+  })
+
+  it('rejects a parent project whose manifest does not declare the active workspace', async () => {
+    const projectRoot = await createTempDir('ecos-parent-project-root-')
+    const workspaceRoot = join(projectRoot, 'ws_0004')
+    const siblingWorkspace = join(projectRoot, 'ws_0001')
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    await mkdir(join(siblingWorkspace, 'home'), { recursive: true })
+    await writeProjectManifest(projectRoot, [siblingWorkspace])
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(workspaceRoot)
+
+      await expect(service.registerProjectReadRoot(projectRoot)).rejects.toThrow(
+        'does not declare the active workspace',
+      )
+      await expect(
+        service.requestProjectPathAccess(join(siblingWorkspace, 'home', 'flow.json')),
+      ).rejects.toThrow('outside current project root')
+    })
+  })
+
+  it('rejects a read root that is not the active workspace parent', async () => {
+    const workspaceRoot = await createTempDir('ecos-active-project-root-')
+    const unrelatedRoot = await createTempDir('ecos-unrelated-project-root-')
+    const service = new ProjectScopeService()
+
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(workspaceRoot)
+      await expect(service.registerProjectReadRoot(unrelatedRoot)).rejects.toThrow(
+        'Project read root must be the active workspace root or its parent directory',
+      )
     })
   })
 

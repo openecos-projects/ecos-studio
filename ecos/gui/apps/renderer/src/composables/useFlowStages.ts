@@ -39,6 +39,7 @@ export interface FlowStage {
   path: string
   icon: string
   group: 'setup' | 'run'
+  tool: string
   state: string
   runtime: string
   'peak memory (mb)': number
@@ -54,6 +55,7 @@ const FIXED_SETUP_STAGES: FlowStage[] = Object.entries(STEP_METADATA)
     path: meta.path,
     icon: meta.icon,
     group: 'setup' as const,
+    tool: '',
     state: 'pending',
     runtime: '',
     'peak memory (mb)': 0,
@@ -72,6 +74,7 @@ function transformFlowData(flowData: FlowData): FlowStage[] {
       path: metadata?.path ?? step.name,
       icon: metadata?.icon ?? 'ri-checkbox-blank-circle-line',
       group: 'run',
+      tool: step.tool,
       state: step.state,
       runtime: step.runtime || '',
       'peak memory (mb)': step['peak memory (mb)'] || 0,

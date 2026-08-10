@@ -11,10 +11,14 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).not.toContain('hasLayoutInspectorContent')
   })
 
-  it('keeps the drawing and thumbnail column beside chat', () => {
-    expect(source).toContain('<DrawingArea />')
-    expect(source).toContain('<ThumbnailGallery />')
-    expect(source).toContain('<ChatInspectorPanel />')
+  it('keeps the step dashboard in the shared workbench', () => {
+    expect(source).toContain("import StepDashboard from '@/components/StepDashboard.vue'")
+    expect(source).toContain('<StepDashboard />')
+    expect(source).not.toContain('<DrawingArea />')
+    expect(source).not.toContain('<ThumbnailGallery />')
+    expect(source).toContain('<WorkspaceWorkbench')
+    expect(source).toContain('useSubflow')
+    expect(source).not.toContain('<ChatInspectorPanel />')
   })
 
   it('does not render project labels above the workspace step canvas', () => {
@@ -27,6 +31,24 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).not.toContain('Create Workspace From Current Step')
     expect(source).not.toContain('createWorkspaceFromCurrentStep')
     expect(source).not.toContain('project-context-actions')
-    expect(source).not.toContain('useRoute')
+  })
+
+  it('renders the current flow step log with the same Home log panel', () => {
+    expect(source).toContain(
+      "import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'",
+    )
+    expect(source).toContain('useHomeData()')
+    expect(source).toContain('const currentStepLogNode')
+    expect(source).toContain('const stepKey = typeof route.params.step')
+    expect(source).toContain('getStepMetadata(stepKey)')
+    expect(source).toContain('<template #right-log>')
+    expect(source).toContain(':selected-node="currentStepLogNode"')
+    expect(source).toContain(':ensure-content="ensureFlowLogSegmentContentLoaded"')
+  })
+
+  it('leaves split-pane ownership to the shared workbench', () => {
+    expect(source).not.toContain('SplitterPanel')
+    expect(source).not.toContain('step-presentation-splitter')
+    expect(source).not.toContain('\n:deep(.p-splitterpanel > *)')
   })
 })

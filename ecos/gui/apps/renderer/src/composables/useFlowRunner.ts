@@ -15,7 +15,9 @@ import {
 /** 任意流程命令执行中为 true，供 Home flow log 等订阅，避免多实例 composable 状态不一致 */
 export const flowExecutionActive = ref(false)
 const activeFlowWorkspaces = shallowReactive(new Set<string>())
-const RUN_STEP_FALLBACK_SCOPES: WorkspaceInvalidationScope[] = ['home', 'parameters']
+// A completed step can change every data source rendered on the Home left panel:
+// flow state, QoR/checklist assets, configuration-derived values, and step metrics.
+const FLOW_COMPLETION_FALLBACK_SCOPES: WorkspaceInvalidationScope[] = ['all']
 
 export interface FlowRunOptions {
   rerun?: boolean
@@ -185,11 +187,11 @@ export function useFlowRunner() {
       })
       console.log('run step result', result)
 
-      const homeAndParametersAlreadyInvalidated = RUN_STEP_FALLBACK_SCOPES.every(
+      const allResourcesAlreadyInvalidated = FLOW_COMPLETION_FALLBACK_SCOPES.every(
         (key) => resourceVersions.value[key] !== versionsBeforeRunStep[key],
       )
-      if (!homeAndParametersAlreadyInvalidated) {
-        invalidateWorkspaceResources(RUN_STEP_FALLBACK_SCOPES, {
+      if (!allResourcesAlreadyInvalidated) {
+        invalidateWorkspaceResources(FLOW_COMPLETION_FALLBACK_SCOPES, {
           sessionId: runSessionId,
         })
       }
@@ -273,6 +275,7 @@ export function useFlowRunner() {
 
     try {
       console.log('Starting rtl2gds flow...')
+      const runSessionId = workspaceSession.value.sessionId
 
       const result = await rtl2gdsApi({
         cmd: CMDEnum.rtl2gds,
@@ -283,6 +286,13 @@ export function useFlowRunner() {
         },
       })
       console.log('rtl2gds result:', result)
+
+      // The runtime emits a final lifecycle event in normal desktop operation.
+      // Keep an RPC-return fallback so Home is still refreshed when that event is
+      // delayed or unavailable.
+      invalidateWorkspaceResources(FLOW_COMPLETION_FALLBACK_SCOPES, {
+        sessionId: runSessionId,
+      })
 
       if (result.response === 'success') {
         state.value = StateEnum.Success

@@ -84,7 +84,7 @@ describe('ProjectAnalysisPanel dashboard health', () => {
   })
 })
 
-describe('ProjectAnalysisPanel baseline and export controls', () => {
+describe('ProjectAnalysisPanel baseline controls', () => {
   it('shows the active baseline', () => {
     expect(mountPanel().find('.dash-baseline-chip strong').text()).toBe('ws_a')
   })
@@ -130,15 +130,11 @@ describe('ProjectAnalysisPanel baseline and export controls', () => {
     expect(wrapper.find('.dash-actions .dash-btn').attributes('disabled')).toBeDefined()
   })
 
-  it('emits an export request', async () => {
-    const wrapper = mountPanel()
-    const exportButton = wrapper
-      .findAll('.dash-actions .dash-btn')
-      .find((button) => button.text() === 'Export report')
+  it('keeps the action row compact without an export report control', () => {
+    const actions = mountPanel().find('.dash-actions')
 
-    await exportButton?.trigger('click')
-
-    expect(wrapper.emitted('export-report')).toHaveLength(1)
+    expect(actions.text()).not.toContain('Export report')
+    expect(actions.findAll('.dash-btn')).toHaveLength(1)
   })
 })
 

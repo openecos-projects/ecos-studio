@@ -21,6 +21,9 @@ import type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
   DesktopShellSessionOptions,
+  DesktopAgentEvent,
+  DesktopCodexInstallProgressEvent,
+  DesktopCodexSetBinPathRequest,
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
 
@@ -137,12 +140,18 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceIsProjectDirectory, path),
     openOrFocus: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceOpenOrFocus, path),
+    prepareFlowAgentRerun: (request) =>
+      invokeDesktop(desktopApiIpcChannels.workspacePrepareFlowAgentRerun, request),
+    executeFlowAgentRerun: (request) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, request),
     bindWindow: (path) => invokeDesktop(desktopApiIpcChannels.workspaceBindWindow, path),
     unbindWindow: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceUnbindWindow, path),
     getBoundPath: () => invokeDesktop(desktopApiIpcChannels.workspaceGetBoundPath),
     registerProjectRoot: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRegisterProjectRoot, path),
+    registerProjectReadRoot: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceRegisterProjectReadRoot, path),
     clearProjectRoot: () =>
       invokeDesktop(desktopApiIpcChannels.workspaceClearProjectRoot),
     requestProjectPathAccess: (path) =>
@@ -202,6 +211,9 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceWriteProjectTextFile, path, content),
     listProjectDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceListProjectDirectory, path),
+    pathExists: (path) => invokeDesktop(desktopApiIpcChannels.workspacePathExists, path),
+    discardFailedWorkspaceCreate: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate, path),
     prepareProjectDirectoryReplacement: (path) =>
       invokeDesktop(
         desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
@@ -260,6 +272,8 @@ const desktopApi: DesktopApi = {
   chipViewer: {
     open: (request: ChipViewerOpenRequest) =>
       invokeDesktop(desktopApiIpcChannels.chipViewerOpen, request),
+    isOpen: (request: ChipViewerOpenRequest) =>
+      invokeDesktop(desktopApiIpcChannels.chipViewerIsOpen, request),
   },
   workspaceResources: {
     getIndex: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesGetIndex),
@@ -338,6 +352,36 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.eccWorkspaceResetFlow, request),
       syncConfig: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccWorkspaceSyncConfig, request),
+    },
+  },
+  agent: {
+    interrupt: (request) => invokeDesktop(desktopApiIpcChannels.agentInterrupt, request),
+    start: (request) => invokeDesktop(desktopApiIpcChannels.agentStart, request),
+    startSession: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentStartSession, request),
+    sendMessage: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentSendMessage, request),
+    onEvent: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.agentEvent,
+        (_event, payload: unknown) => {
+          listener(payload as DesktopAgentEvent)
+        },
+      ),
+    codex: {
+      getStatus: () => invokeDesktop(desktopApiIpcChannels.agentCodexGetStatus),
+      install: () => invokeDesktop(desktopApiIpcChannels.agentCodexInstall),
+      login: () => invokeDesktop(desktopApiIpcChannels.agentCodexLogin),
+      recheck: () => invokeDesktop(desktopApiIpcChannels.agentCodexRecheck),
+      setBinPath: (request: DesktopCodexSetBinPathRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentCodexSetBinPath, request),
+      onProgress: (listener) =>
+        subscribeToDesktopEvent(
+          desktopApiEventChannels.agentCodexProgress,
+          (_event, payload: unknown) => {
+            listener(payload as DesktopCodexInstallProgressEvent)
+          },
+        ),
     },
   },
   shell: {

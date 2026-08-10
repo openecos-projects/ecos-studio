@@ -1,0 +1,17 @@
+import type { InjectionKey } from 'vue'
+import type { DesktopAgentWorkspaceSetupContract } from '@ecos-studio/shared'
+import type { WorkspaceConfig } from '@/types'
+
+export interface AgentWorkspaceCreationResult {
+  created: boolean
+  error?: string
+  workspacePath?: string
+}
+
+export const agentWorkspaceSetupKey: InjectionKey<
+  (
+    config: WorkspaceConfig,
+    contract: DesktopAgentWorkspaceSetupContract,
+    ownerSessionId: string,
+  ) => Promise<AgentWorkspaceCreationResult>
+> = Symbol('agentWorkspaceSetup')

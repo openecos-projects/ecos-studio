@@ -71,10 +71,11 @@ export async function createMainWindow(
     minHeight: 720,
     autoHideMenuBar: true,
     frame: false,
-    // Let the native window itself expose transparent corners; CSS border-radius
-    // alone can only round the web contents, not the OS-level window bounds.
-    transparent: true,
-    backgroundColor: '#00000000',
+    // Opaque window by default: transparent frameless windows drop 1px borders
+    // under remote/software compositors (e.g. WSL + VNC). The shell no longer
+    // relies on native transparent corners for rounded chrome.
+    transparent: false,
+    backgroundColor: '#ffffff',
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

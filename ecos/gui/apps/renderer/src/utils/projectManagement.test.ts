@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  archiveWorkspaceInManifest,
   createProjectManifestDraft,
+  deleteWorkspaceFromManifest,
   parseProjectManifest,
   registerWorkspaceInManifest,
   setQorBaselineInManifest,
@@ -12,6 +14,7 @@ import {
   createSelectionState,
   parseWorkspaceFlowStateMap,
   projectMpcOptionFromResource,
+  resolveProjectQorBaselineWorkspace,
   workspaceStatusFromFlow,
   type FlowStep,
   type ProjectStepStatus,
@@ -637,6 +640,49 @@ describe('project management V3 model', () => {
     expect(updated.workspaces[0]).toMatchObject({
       metrics_summary: {},
       step_metrics: {},
+    })
+  })
+
+  it('resolves and persists the project-local default QoR baseline rule', () => {
+    const first = manifestWithWorkspace('ws_0001')
+    const manifest = registerWorkspaceInManifest(first, {
+      projectRoot: '/projects/gcd',
+      workspacePath: '/projects/gcd/ws_0004',
+      now: '2026-08-04T00:00:00.000Z',
+    })
+    const legacyManifest = { ...manifest, qor_baseline: null }
+
+    expect(resolveProjectQorBaselineWorkspace(legacyManifest, 'ws_0004')).toEqual({
+      workspaceId: 'ws_0001',
+      source: 'default',
+    })
+    expect(resolveProjectQorBaselineWorkspace(legacyManifest, 'ws_0001')).toEqual({
+      workspaceId: 'ws_0004',
+      source: 'default',
+    })
+    expect(
+      resolveProjectQorBaselineWorkspace(manifestWithWorkspace(), 'ws_0004'),
+    ).toEqual({
+      workspaceId: 'ws_0004',
+      source: 'selected',
+    })
+  })
+
+  it('moves a removed QoR baseline to the first remaining available workspace', () => {
+    const first = manifestWithWorkspace('ws_0001')
+    const manifest = registerWorkspaceInManifest(first, {
+      projectRoot: '/projects/gcd',
+      workspacePath: '/projects/gcd/ws_0004',
+      now: '2026-08-04T00:00:00.000Z',
+    })
+
+    expect(archiveWorkspaceInManifest(manifest, 'ws_0001').qor_baseline).toEqual({
+      workspace_id: 'ws_0004',
+      reason: 'Default project QoR baseline',
+    })
+    expect(deleteWorkspaceFromManifest(manifest, 'ws_0001').qor_baseline).toEqual({
+      workspace_id: 'ws_0004',
+      reason: 'Default project QoR baseline',
     })
   })
 })

@@ -16,7 +16,7 @@ import {
 import * as runtimeEventApi from '../api/runtimeEvents'
 import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
 import { setDesktopWindowTitle } from './windowTitle'
-import { useMessageStore } from '@/stores/messageStore'
+import { useAgentShellStore } from '@/stores/agentShellStore'
 import {
   useWorkspaceLifecycle,
   type WorkspaceSession,
@@ -29,6 +29,7 @@ import {
 } from '@/api/workspaceResources'
 import {
   clearHomeRunArtifactResetAwaitingBackendStart,
+  isAgentWorkspaceRerunHomePrepared,
   requestHomeRunArtifactReset,
 } from './homeRunArtifacts'
 import {
@@ -114,6 +115,7 @@ const runtimeBackendTitle = ref('Preparing your workspace')
 const runtimeBackendSubtitle = ref(
   'First load or restoring your project may take a moment',
 )
+const lastWorkspaceCreationError = ref('')
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
@@ -156,7 +158,6 @@ async function updateWindowTitle(projectName?: string) {
 
 export function useWorkspace() {
   const router = useRouter()
-  const messageStore = useMessageStore()
   // 在组件 setup 上下文中初始化 Toast（仅初始化一次）
   if (!_toast && getCurrentInstance()) {
     _toast = useToast()
@@ -500,7 +501,6 @@ export function useWorkspace() {
             ...restored,
             path: canonicalProjectRoot,
           }
-          messageStore.clearMessages()
           await bindWorkspaceWindow(canonicalProjectRoot)
           await updateWindowTitle(restored.name)
           const workspaceId = workspaceHandleFromResponseData(
@@ -722,7 +722,10 @@ export function useWorkspace() {
         workspaceLifecycle.setSessionLoading(activeSession.sessionId)
 
         currentProject.value = loadedProject
-        messageStore.clearMessages()
+        // Agent chat tabs persist across workspace opens; do not wipe transcripts.
+        if (useAgentShellStore().shouldPreserveMessages()) {
+          useAgentShellStore().consumePreserveMessages()
+        }
         if (claimedAffinityPath && claimedAffinityPath !== canonicalProjectRoot) {
           await unbindWorkspaceWindow(claimedAffinityPath)
         }
@@ -802,6 +805,7 @@ export function useWorkspace() {
    * @param config 项目配置（来自向导）
    */
   const newProject = async (config?: WorkspaceConfig) => {
+    lastWorkspaceCreationError.value = ''
     let sessionId: string | null = null
     let replacement: WorkspaceDirectoryReplacement | null = null
     let committedReplacement = false
@@ -809,6 +813,9 @@ export function useWorkspace() {
     let candidateWorkspaceHandle = ''
     let claimedCreatePath: string | null = null
     let previousCreatePath: string | null = null
+    let selectedPath = ''
+    let existedBeforeCreate = false
+    let usedDirectoryReplacement = false
     const restoreReplacement = async () => {
       if (!replacement || committedReplacement) return
       const desktopApi = await waitForDesktopApi()
@@ -822,13 +829,28 @@ export function useWorkspace() {
       committedReplacement = true
       replacement = null
     }
+    const discardFailedCreateIfNeeded = async () => {
+      // Replacement failures restore the prior workspace; only discard brand-new residue.
+      if (
+        !selectedPath ||
+        existedBeforeCreate ||
+        usedDirectoryReplacement ||
+        candidateWorkspaceCommitted
+      ) {
+        return
+      }
+      try {
+        const desktopApi = await waitForDesktopApi()
+        await desktopApi.workspace.discardFailedWorkspaceCreate(selectedPath)
+      } catch (cleanupError) {
+        console.error('Failed to discard incomplete workspace create:', cleanupError)
+      }
+    }
     try {
       runtimeBackendTitle.value = 'Creating your workspace'
       runtimeBackendSubtitle.value =
         'Writing project files and preparing the workspace view'
       runtimeBackendConnecting.value = true
-
-      let selectedPath: string
 
       if (config) {
         // 使用向导提供的配置
@@ -844,6 +866,8 @@ export function useWorkspace() {
       selectedPath = normalizePath(selectedPath)
       const createAffinity = await resolveWorkspaceWindowAffinity(selectedPath)
       if (createAffinity.action === 'focused') {
+        lastWorkspaceCreationError.value =
+          'The workspace is already open in another window.'
         return false
       }
       claimedCreatePath = selectedPath
@@ -858,6 +882,8 @@ export function useWorkspace() {
         if (reclaim.action === 'focused') {
           claimedCreatePath = null
           previousCreatePath = null
+          lastWorkspaceCreationError.value =
+            'The workspace is already open in another window.'
           return false
         }
         claimedCreatePath = selectedPath
@@ -873,6 +899,7 @@ export function useWorkspace() {
         replacement =
           await desktopApi.workspace.prepareProjectDirectoryReplacement(selectedPath)
         if (replacement) {
+          usedDirectoryReplacement = true
           replacement = {
             id: replacement.id,
             targetPath: normalizePath(replacement.targetPath),
@@ -896,6 +923,8 @@ export function useWorkspace() {
           if (replacementAffinity.action === 'focused') {
             claimedCreatePath = null
             previousCreatePath = null
+            lastWorkspaceCreationError.value =
+              'The workspace is already open in another window.'
             return false
           }
           claimedCreatePath = selectedPath
@@ -911,6 +940,8 @@ export function useWorkspace() {
       if (!(await ensureApiReady({ keepLoading: true }))) {
         workspaceLifecycle.failSession(session.sessionId)
         await restoreReplacement()
+        lastWorkspaceCreationError.value =
+          'The desktop runtime is unavailable. Restart the application and try again.'
         return false
       }
 
@@ -918,6 +949,9 @@ export function useWorkspace() {
       runtimeBackendSubtitle.value =
         'Writing project files and preparing the workspace view'
       workspaceLifecycle.setSessionLoading(session.sessionId)
+
+      const desktopApiForCreate = await waitForDesktopApi()
+      existedBeforeCreate = await desktopApiForCreate.workspace.pathExists(selectedPath)
 
       // 3. 通过 ECC RPC 创建工作区（传递 Wizard 配置信息）
       const frontendParams = creationConfig?.parameters || {}
@@ -953,6 +987,8 @@ export function useWorkspace() {
         'Die Area': dieArea,
         'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
         'Max fanout': toNumber(frontendParams.max_fanout, 20),
+        'Target density': toNumber(frontendParams.target_density, 0.2),
+        'Target overflow': toNumber(frontendParams.target_overflow, 0.1),
         PDK: pdkName,
         Core: {
           Utilitization:
@@ -990,6 +1026,8 @@ export function useWorkspace() {
       }
       if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
         await restoreReplacement()
+        lastWorkspaceCreationError.value =
+          'The workspace creation request was superseded.'
         return false
       }
       if (response.response === 'success') {
@@ -997,6 +1035,8 @@ export function useWorkspace() {
         const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
         if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
           await restoreReplacement()
+          lastWorkspaceCreationError.value =
+            'The workspace creation request was superseded.'
           return false
         }
         if (!canonicalProjectRoot) {
@@ -1008,6 +1048,8 @@ export function useWorkspace() {
             detail:
               'The project directory could not be registered for local file access.',
           })
+          lastWorkspaceCreationError.value =
+            'The project directory could not be registered for local file access.'
           return false
         }
 
@@ -1027,7 +1069,9 @@ export function useWorkspace() {
         }
 
         currentProject.value = createdProject
-        messageStore.clearMessages()
+        if (useAgentShellStore().shouldPreserveMessages()) {
+          useAgentShellStore().consumePreserveMessages()
+        }
         if (claimedCreatePath && claimedCreatePath !== canonicalProjectRoot) {
           await unbindWorkspaceWindow(claimedCreatePath)
         }
@@ -1062,12 +1106,15 @@ export function useWorkspace() {
         return true
       } else {
         await restoreReplacement()
+        await discardFailedCreateIfNeeded()
         workspaceLifecycle.failSession(session.sessionId)
+        const error = response.message?.join('; ') || 'Unknown error'
+        lastWorkspaceCreationError.value = error
         console.error('Failed to create project:', response.message)
         showToast({
           severity: 'error',
           summary: 'Failed to Create Project',
-          detail: response.message?.join('; ') || 'Unknown error',
+          detail: error,
         })
         return false
       }
@@ -1079,7 +1126,10 @@ export function useWorkspace() {
           console.error('Failed to restore workspace replacement backup:', restoreError)
         }
       }
+      await discardFailedCreateIfNeeded()
       if (sessionId) workspaceLifecycle.failSession(sessionId)
+      lastWorkspaceCreationError.value =
+        error instanceof Error ? error.message : String(error)
       console.error('New project error:', error)
       showToast({
         severity: 'error',
@@ -1275,7 +1325,8 @@ export function useWorkspace() {
 
     const closingProjectPath = currentProject.value?.path
     currentProject.value = null
-    messageStore.clearMessages()
+    // Keep Agent tabs/messages when leaving a workspace.
+    useAgentShellStore().resetShell()
     disconnectRuntimeEvents()
     workspaceLifecycle.closeSession()
     runtimeBackendConnecting.value = false
@@ -1320,7 +1371,7 @@ export function useWorkspace() {
             asString(response.data.directory) ??
             currentProject.value?.path ??
             asString(response.data.workspaceId)
-          if (resetProjectPath) {
+          if (resetProjectPath && !isAgentWorkspaceRerunHomePrepared(resetProjectPath)) {
             clearHomeRunArtifactResetAwaitingBackendStart(resetProjectPath)
             requestHomeRunArtifactReset(resetProjectPath)
           }
@@ -1385,9 +1436,9 @@ export function useWorkspace() {
       return null
     }
 
-    const scopes = new Set<WorkspaceInvalidationScope>(
-      cmd === 'rtl2gds' ? ['all'] : ['flow', 'step', 'maps', 'logs'],
-    )
+    // A successful step updates the same Home data sources as a full flow. Keeping
+    // this broad also lets Home refresh before the RPC caller regains control.
+    const scopes = new Set<WorkspaceInvalidationScope>(['all'])
 
     const info = event.info
     if (info && typeof info === 'object') {
@@ -1471,6 +1522,7 @@ export function useWorkspace() {
     runtimeBackendTitle,
     runtimeBackendSubtitle,
     ensureApiReady,
+    lastWorkspaceCreationError,
     // Toast
     showToast,
   }

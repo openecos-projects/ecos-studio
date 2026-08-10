@@ -69,7 +69,7 @@ export interface StepMetadata {
 export const STEP_METADATA: Record<string, StepMetadata> = {
   // 设置页面
   home: {
-    label: 'Home',
+    label: 'Dashboard',
     icon: 'ri-home-4-line',
     path: 'home',
     showInSidebar: true,
@@ -79,7 +79,7 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'Tech',
     icon: 'ri-database-2-line',
     path: 'tech',
-    showInSidebar: true,
+    showInSidebar: false,
     group: 'setup',
   },
   configure: {

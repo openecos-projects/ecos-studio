@@ -2,7 +2,7 @@ import type {
   EccRuntimeEvent,
   EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   EccWorkspaceRuntime,
@@ -56,6 +56,7 @@ class FakeRpcClient implements EccRpcRuntimeClient {
 class FakeSidecar implements EccRpcRuntimeSidecar {
   client: FakeRpcClient
   logFile: string | null = '/tmp/ecc-rpc-runtime.log'
+  relocateLogFileFrom = vi.fn()
   shutdownCount = 0
   startCount = 0
 
@@ -294,8 +295,8 @@ describe('EccWorkspaceRuntime', () => {
     })
   })
 
-  it('maps flow.run_step requests through the stored ECC workspace id', async () => {
-    const { client, service } = createService()
+  it('moves a legacy sidecar log before rerunning a flow step', async () => {
+    const { client, service, sidecar } = createService()
     client.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
@@ -311,6 +312,7 @@ describe('EccWorkspaceRuntime', () => {
       }),
     ).resolves.toEqual({ state: 'Success', step: 'placement' })
 
+    expect(sidecar.relocateLogFileFrom).toHaveBeenCalledWith('/work/demo')
     expect(client.calls.at(-1)).toEqual({
       method: 'flow.run_step',
       options: { timeoutMs: 0 },
@@ -418,6 +420,28 @@ describe('EccWorkspaceRuntime', () => {
         workspaceHandle: workspace.workspaceHandle,
       }),
     )
+  })
+
+  it('moves a legacy sidecar log before sending a rerun request', async () => {
+    const { client, service, sidecar } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      { rerun: true },
+    )
+
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    await service.runFlow({
+      rerun: true,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    expect(sidecar.relocateLogFileFrom).toHaveBeenCalledWith('/work/demo')
+    expect(client.calls.at(-1)).toEqual({
+      method: 'flow.run',
+      options: { timeoutMs: 0 },
+      params: { rerun: true, workspaceId: 'workspace-1' },
+    })
   })
 
   it('cleans runtime activity tracking when an operation-started listener throws', async () => {

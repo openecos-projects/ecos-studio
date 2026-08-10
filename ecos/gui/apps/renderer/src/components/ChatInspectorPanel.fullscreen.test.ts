@@ -14,6 +14,8 @@ describe('ChatInspectorPanel fullscreen controls', () => {
     expect(chatInspectorSource).toContain('closePanelFullscreen')
     expect(chatInspectorSource).toContain('View AI Chat full screen')
     expect(chatInspectorSource).toContain('View step configuration full screen')
+    expect(chatInspectorSource).toContain('#tab-actions')
+    expect(chatInspectorSource).not.toContain('chat-inspector-topbar')
   })
 
   it('offers QoR analysis only on supported workspace steps', () => {

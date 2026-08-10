@@ -39,6 +39,8 @@ export interface ProjectScopeProvider {
   getProjectRoot(): Promise<string>
   isProjectDirectory(path: string): Promise<boolean>
   requestProjectPathAccess(path: string): Promise<string>
+  requestWritableProjectPathAccess(path: string): Promise<string>
+  registerProjectReadRoot(path: string): Promise<string>
   registerProjectRoot(path: string): Promise<string>
   scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
 }
@@ -325,8 +327,55 @@ export class WorkspaceService {
     return await this.projectScopeProvider.isProjectDirectory(path)
   }
 
+  async pathExists(path: string): Promise<boolean> {
+    return await pathExists(resolve(path))
+  }
+
+  /**
+   * Remove an incomplete workspace directory left by a failed create.
+   * Refuses complete ECOS workspaces and Project roots (directories with project.json).
+   */
+  async discardFailedWorkspaceCreate(path: string): Promise<boolean> {
+    const canonicalPath = resolve(path)
+    if (!(await pathExists(canonicalPath))) return false
+
+    const pathStats = await stat(canonicalPath)
+    if (!pathStats.isDirectory()) {
+      throw new Error(`${canonicalPath} is not a directory`)
+    }
+
+    if (await this.projectScopeProvider.isProjectDirectory(canonicalPath)) {
+      throw new Error('Refusing to discard a complete ECOS workspace')
+    }
+
+    if (await pathExists(join(canonicalPath, 'project.json'))) {
+      throw new Error('Refusing to discard a Project root directory')
+    }
+
+    try {
+      const projectRoot = await this.projectScopeProvider.getProjectRoot()
+      if (isSamePath(canonicalPath, projectRoot)) {
+        throw new Error('Refusing to discard the registered project root')
+      }
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        error.message !== 'Project root is not registered'
+      ) {
+        throw error
+      }
+    }
+
+    await rm(canonicalPath, { force: true, recursive: true })
+    return true
+  }
+
   async registerProjectRoot(path: string): Promise<string> {
     return await this.projectScopeProvider.registerProjectRoot(path)
+  }
+
+  async registerProjectReadRoot(path: string): Promise<string> {
+    return await this.projectScopeProvider.registerProjectReadRoot(path)
   }
 
   async clearProjectRoot(): Promise<void> {
@@ -464,7 +513,8 @@ export class WorkspaceService {
   }
 
   async writeProjectTextFile(path: string, content: string): Promise<void> {
-    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    const canonicalPath =
+      await this.projectScopeProvider.requestWritableProjectPathAccess(path)
     await this.assertCanWriteProjectTextFile(canonicalPath)
     await writeFile(canonicalPath, content, 'utf8')
   }
@@ -498,7 +548,8 @@ export class WorkspaceService {
   async prepareProjectDirectoryReplacement(
     path: string,
   ): Promise<WorkspaceDirectoryReplacement | null> {
-    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    const canonicalPath =
+      await this.projectScopeProvider.requestWritableProjectPathAccess(path)
     const projectRoot = await this.projectScopeProvider.getProjectRoot()
     return await this.prepareDirectoryReplacement(canonicalPath, projectRoot, {
       requireEcOSWorkspace: true,
@@ -934,9 +985,10 @@ export class WorkspaceService {
 
   async addDesignFiles(sourcePaths: string[]): Promise<WorkspaceDesignFileAddResult> {
     const projectRoot = await this.projectScopeProvider.getProjectRoot()
-    const canonicalFilelist = await this.projectScopeProvider.requestProjectPathAccess(
-      getWorkspaceFilelistPath(projectRoot),
-    )
+    const canonicalFilelist =
+      await this.projectScopeProvider.requestWritableProjectPathAccess(
+        getWorkspaceFilelistPath(projectRoot),
+      )
     await this.assertCanWriteProjectTextFile(canonicalFilelist)
     return await addWorkspaceDesignFiles(projectRoot, sourcePaths)
   }
@@ -945,9 +997,10 @@ export class WorkspaceService {
     filelistEntry: string,
   ): Promise<WorkspaceDesignFileEntry | null> {
     const projectRoot = await this.projectScopeProvider.getProjectRoot()
-    const canonicalFilelist = await this.projectScopeProvider.requestProjectPathAccess(
-      getWorkspaceFilelistPath(projectRoot),
-    )
+    const canonicalFilelist =
+      await this.projectScopeProvider.requestWritableProjectPathAccess(
+        getWorkspaceFilelistPath(projectRoot),
+      )
     await this.assertCanWriteProjectTextFile(canonicalFilelist)
     return await removeWorkspaceDesignFile(projectRoot, filelistEntry)
   }

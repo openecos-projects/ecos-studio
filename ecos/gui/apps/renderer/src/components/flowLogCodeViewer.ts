@@ -4,6 +4,8 @@ import { search, searchKeymap } from '@codemirror/search'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 
 export const FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX = 16
+export const FLOW_LOG_SCROLLBAR_MIN_THUMB_PX = 32
+export const FLOW_LOG_WHEEL_LINE_HEIGHT_PX = 18
 
 export type FlowLogViewerSelectionState = {
   selection: {
@@ -21,6 +23,12 @@ export type FlowLogContextMenuStyle = {
   top: string
 }
 
+export type FlowLogVerticalScrollbarGeometry = {
+  maxScrollTop: number
+  thumbHeight: number
+  thumbOffset: number
+}
+
 export function buildFlowLogViewerExtensions(): Extension[] {
   return [
     lineNumbers(),
@@ -33,9 +41,9 @@ export function buildFlowLogViewerExtensions(): Extension[] {
     EditorView.theme({
       '&': {
         height: '100%',
-        backgroundColor: 'var(--bg-primary)',
+        backgroundColor: 'color-mix(in srgb, var(--bg-primary) 96%, var(--bg-secondary))',
         color: 'var(--text-primary)',
-        fontSize: '11px',
+        fontSize: '0.75rem',
       },
       '.cm-scroller': {
         fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
@@ -48,10 +56,10 @@ export function buildFlowLogViewerExtensions(): Extension[] {
         padding: '0 16px',
       },
       '.cm-gutters': {
-        backgroundColor: 'var(--bg-secondary)',
+        backgroundColor: 'color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary))',
         color: 'var(--text-secondary)',
         borderRight: '1px solid var(--border-color)',
-        fontSize: '10px',
+        fontSize: '0.6875rem',
       },
       '.cm-activeLineGutter': {
         backgroundColor: 'transparent',
@@ -95,6 +103,42 @@ export function isFlowLogViewerNearTail(
   thresholdPx = FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
 ): boolean {
   return metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight <= thresholdPx
+}
+
+export function flowLogVerticalScrollbarGeometry(metrics: {
+  scrollHeight: number
+  scrollTop: number
+  clientHeight: number
+}): FlowLogVerticalScrollbarGeometry {
+  const viewportHeight = Math.max(0, metrics.clientHeight)
+  const scrollHeight = Math.max(viewportHeight, metrics.scrollHeight)
+  const maxScrollTop = Math.max(0, scrollHeight - viewportHeight)
+  const thumbHeight =
+    viewportHeight === 0
+      ? 0
+      : Math.max(
+          Math.min(FLOW_LOG_SCROLLBAR_MIN_THUMB_PX, viewportHeight),
+          (viewportHeight / scrollHeight) * viewportHeight,
+        )
+  const thumbTravel = Math.max(0, viewportHeight - thumbHeight)
+  const normalizedScrollTop = Math.max(0, Math.min(metrics.scrollTop, maxScrollTop))
+
+  return {
+    maxScrollTop,
+    thumbHeight,
+    thumbOffset:
+      maxScrollTop === 0 ? 0 : (normalizedScrollTop / maxScrollTop) * thumbTravel,
+  }
+}
+
+export function flowLogWheelDeltaPx(metrics: {
+  deltaY: number
+  deltaMode: number
+  clientHeight: number
+}): number {
+  if (metrics.deltaMode === 1) return metrics.deltaY * FLOW_LOG_WHEEL_LINE_HEIGHT_PX
+  if (metrics.deltaMode === 2) return metrics.deltaY * Math.max(1, metrics.clientHeight)
+  return metrics.deltaY
 }
 
 export function getFlowLogViewerSelectedText(state: FlowLogViewerSelectionState): string {

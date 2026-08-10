@@ -264,6 +264,22 @@ function createService(options: {
 }
 
 describe('ChipViewerService', () => {
+  it('tracks a launched viewer until its native process exits', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnedProcess } = createService({
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
+    })
+    const request = { projectPath: PROJECT_ROOT, step: STEP_NAME }
+
+    await expect(service.isOpen(request)).resolves.toEqual({ open: false })
+    await service.open(request)
+    await expect(service.isOpen(request)).resolves.toEqual({ open: true })
+
+    spawnedProcess.emit('exit', 0, null)
+    await expect(service.isOpen(request)).resolves.toEqual({ open: false })
+  })
+
   it('rejects unsupported viewer modes before spawning the native process', async () => {
     const devBinaries = devChipViewerPaths()
     const { service, spawnProcess } = createService({

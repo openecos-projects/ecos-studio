@@ -40,4 +40,5 @@ skills-lock.json
 apps/desktop-electron/release/
 apps/desktop-electron/resources/binaries/*
 !apps/desktop-electron/resources/binaries/.gitkeep
+apps/desktop-electron/resources/agent/*
 apps/desktop-electron/resources/oss-cad-suite/

@@ -11,6 +11,8 @@ files:
 extraResources:
   - from: resources/binaries
     to: binaries
+  - from: resources/agent
+    to: agent
 linux:
   artifactName: ECOS-Studio_${version}_${arch}.${ext}
   executableName: ecos-studio

@@ -65,6 +65,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       getBoundPath: async () => null,
       isProjectDirectory: async () => false,
       registerProjectRoot: async (path: string) => path,
+      registerProjectReadRoot: async (path: string) => path,
       clearProjectRoot: async () => undefined,
       requestProjectPathAccess: async (path: string) => path,
       readProjectTextFile: async () => '',
@@ -73,6 +74,8 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       readProjectBinaryFile: async () => new Uint8Array(),
       writeProjectTextFile: async () => undefined,
       listProjectDirectory: async () => [],
+      pathExists: async () => false,
+      discardFailedWorkspaceCreate: async () => false,
       prepareProjectDirectoryReplacement: async () => null,
       restoreProjectDirectoryReplacement: async () => undefined,
       finalizeProjectDirectoryReplacement: async () => undefined,
@@ -217,6 +220,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       onExit: () => () => undefined,
     },
     chipViewer: {
+      isOpen: async () => ({ open: false }),
       open: async () => ({
         geometryManifestPath: '/tmp/geometry/geometry.manifest',
         spawned: true,

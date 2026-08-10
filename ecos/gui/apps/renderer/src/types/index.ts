@@ -1,4 +1,5 @@
 import type {
+  DesktopAgentChoice,
   ProjectManifestType,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
@@ -18,6 +19,7 @@ export interface InfoData {
   title: string
   step: string
   items: InfoItem[]
+  compact?: boolean
 }
 
 // Map 信息数据结构
@@ -34,13 +36,15 @@ export interface MapData {
   localPath: string
   info: string[]
   category?: string
+  compact?: boolean
+  showLegend?: boolean
 }
 
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'info' | 'map'
+  type?: 'text' | 'image' | 'info' | 'map' | 'choice' | 'tool'
   status?: 'loading' | 'done' | 'error'
   image?: {
     url: string
@@ -51,6 +55,8 @@ export interface Message {
   }
   infoData?: InfoData
   mapData?: MapData
+  choice?: DesktopAgentChoice
+  answeredOptionId?: string
 }
 
 export interface Thumbnail {

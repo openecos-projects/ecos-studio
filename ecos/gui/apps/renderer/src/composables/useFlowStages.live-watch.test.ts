@@ -174,6 +174,11 @@ describe('useFlowStages live project file watchers', () => {
       expect(findStageState('synthesis')).toBe('Success')
       expect(findStageState('floorplan')).toBe('Ongoing')
     })
+    expect(
+      flow.dynamicFlowStages.value.find(
+        (stage) => stage.path.toLowerCase() === 'floorplan',
+      )?.tool,
+    ).toBe('yosys')
   })
 
   it('reports that a workspace flow is running when any run stage is ongoing', async () => {

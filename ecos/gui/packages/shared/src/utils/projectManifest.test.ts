@@ -129,7 +129,9 @@ describe('project manifest parsing', () => {
       selected.qor_baseline,
     )
     expect(setQorBaselineInManifest(selected, 'missing')).toBe(selected)
-    expect(archiveWorkspaceInManifest(selected, 'ws_0001').qor_baseline).toBeNull()
+    const archived = archiveWorkspaceInManifest(selected, 'ws_0001')
+    expect(archived.qor_baseline).toBeNull()
+    expect(setQorBaselineInManifest(archived, 'ws_0001')).toBe(archived)
     expect(deleteWorkspaceFromManifest(selected, 'ws_0001').qor_baseline).toBeNull()
   })
 
@@ -243,5 +245,52 @@ describe('project manifest parsing', () => {
       (updated.workspaces[0] as unknown as Record<string, unknown> | undefined)
         ?.custom_workspace_setting,
     ).toEqual({ keep: true })
+  })
+
+  it('persists the first available workspace as the default QoR baseline', () => {
+    const first = registerWorkspaceInManifest(
+      createProjectManifestDraft({ rootPath: '/work/gcd', name: 'gcd' }),
+      {
+        projectRoot: '/work/gcd',
+        workspacePath: '/work/gcd/ws_0001',
+        now: '2026-08-04T00:00:00.000Z',
+      },
+    )
+    const second = registerWorkspaceInManifest(first, {
+      projectRoot: '/work/gcd',
+      workspacePath: '/work/gcd/ws_0002',
+      now: '2026-08-04T01:00:00.000Z',
+    })
+
+    expect(first.qor_baseline).toEqual({
+      workspace_id: 'ws_0001',
+      reason: 'Default project QoR baseline',
+    })
+    expect(second.qor_baseline).toEqual(first.qor_baseline)
+  })
+
+  it('moves the QoR baseline when its workspace is archived or deleted', () => {
+    const first = registerWorkspaceInManifest(
+      createProjectManifestDraft({ rootPath: '/work/gcd', name: 'gcd' }),
+      {
+        projectRoot: '/work/gcd',
+        workspacePath: '/work/gcd/ws_0001',
+        now: '2026-08-04T00:00:00.000Z',
+      },
+    )
+    const second = registerWorkspaceInManifest(first, {
+      projectRoot: '/work/gcd',
+      workspacePath: '/work/gcd/ws_0002',
+      now: '2026-08-04T01:00:00.000Z',
+    })
+
+    expect(archiveWorkspaceInManifest(second, 'ws_0001').qor_baseline).toEqual({
+      workspace_id: 'ws_0002',
+      reason: 'Default project QoR baseline',
+    })
+    expect(deleteWorkspaceFromManifest(second, 'ws_0001').qor_baseline).toEqual({
+      workspace_id: 'ws_0002',
+      reason: 'Default project QoR baseline',
+    })
   })
 })

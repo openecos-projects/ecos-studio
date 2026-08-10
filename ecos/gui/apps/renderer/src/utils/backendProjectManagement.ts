@@ -85,6 +85,13 @@ export interface ProjectManifestMpcCandidate {
   spec_path: string
 }
 
+export type ProjectQorBaselineSource = 'selected' | 'default'
+
+export interface ProjectQorBaselineResolution {
+  workspaceId: string
+  source: ProjectQorBaselineSource
+}
+
 export interface ProjectStepCell {
   step: FlowStep
   status: ProjectStepStatus
@@ -348,6 +355,77 @@ const RUNTIME_STEP_ARTIFACTS: Record<
   Harden: { directory: 'Harden_ecc', outputName: 'Harden' },
 }
 
+/** Build the project-wide QoR trend used by both Project Management and Home. */
+export function buildProjectQorTrendForManifest(
+  manifest: ProjectManifest,
+  workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
+  workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
+  options: { baselineWorkspaceId?: string | null } = {},
+): ProjectQorTrendSummary {
+  const sortedWorkspaces = sortWorkspacesByLineage(manifest.workspaces).map(
+    (item) => item.workspace,
+  )
+  return buildProjectQorTrendSummary(
+    sortedWorkspaces.map((workspace) => ({
+      workspaceId: workspace.workspace_id,
+      workspaceName: workspaceDisplayName(workspace),
+      workspacePath: workspace.workspace_path,
+      createdAt: workspace.created_at,
+      status: workspaceStatusFromFlow(
+        workspace.status,
+        workspaceFlowStates[workspace.workspace_id] ?? {},
+      ),
+      branchFrom: workspace.branch_from,
+      stepMetricTexts:
+        workspaceAnalysisInputs[workspace.workspace_id]?.stepMetricTexts ?? {},
+      stepSummaryTexts:
+        workspaceAnalysisInputs[workspace.workspace_id]?.stepSummaryTexts ?? {},
+      stepHotspotTexts:
+        workspaceAnalysisInputs[workspace.workspace_id]?.stepHotspotTexts ?? {},
+      staTimingIssuesText:
+        workspaceAnalysisInputs[workspace.workspace_id]?.staTimingIssuesText ?? null,
+      stepStatuses: workspaceFlowStates[workspace.workspace_id] ?? {},
+    })),
+    {
+      baselineWorkspaceId:
+        options.baselineWorkspaceId ?? manifest.qor_baseline?.workspace_id ?? null,
+    },
+  )
+}
+
+/** Resolve the baseline Home stores in project.json when older projects omit one. */
+export function resolveProjectQorBaselineWorkspace(
+  manifest: ProjectManifest,
+  currentWorkspaceId: string,
+): ProjectQorBaselineResolution | null {
+  const selectedId = manifest.qor_baseline?.workspace_id
+  if (
+    selectedId &&
+    manifest.workspaces.some(
+      (workspace) =>
+        workspace.workspace_id === selectedId && workspace.status !== 'archived',
+    )
+  ) {
+    return { workspaceId: selectedId, source: 'selected' }
+  }
+
+  const defaultWorkspace = manifest.workspaces.find(
+    (workspace) =>
+      workspace.workspace_id !== currentWorkspaceId && workspace.status !== 'archived',
+  )
+  if (defaultWorkspace) {
+    return { workspaceId: defaultWorkspace.workspace_id, source: 'default' }
+  }
+
+  const currentWorkspace = manifest.workspaces.find(
+    (workspace) =>
+      workspace.workspace_id === currentWorkspaceId && workspace.status !== 'archived',
+  )
+  return currentWorkspace
+    ? { workspaceId: currentWorkspace.workspace_id, source: 'default' }
+    : null
+}
+
 export function buildBackendProjectManagementProject(
   project?: Project | null,
   manifest?: ProjectManifest | null,
@@ -378,30 +456,10 @@ export function buildBackendProjectManagementProject(
     )
   })
   const qorTrendSummary = manifest
-    ? buildProjectQorTrendSummary(
-        sortedWorkspaces.map((workspace) => ({
-          workspaceId: workspace.workspace_id,
-          workspaceName: workspaceDisplayName(workspace),
-          workspacePath: workspace.workspace_path,
-          createdAt: workspace.created_at,
-          status: workspaceStatusFromFlow(
-            workspace.status,
-            workspaceFlowStates[workspace.workspace_id] ?? {},
-          ),
-          branchFrom: workspace.branch_from,
-          stepMetricTexts:
-            workspaceAnalysisInputs[workspace.workspace_id]?.stepMetricTexts ?? {},
-          stepSummaryTexts:
-            workspaceAnalysisInputs[workspace.workspace_id]?.stepSummaryTexts ?? {},
-          stepHotspotTexts:
-            workspaceAnalysisInputs[workspace.workspace_id]?.stepHotspotTexts ?? {},
-          staTimingIssuesText:
-            workspaceAnalysisInputs[workspace.workspace_id]?.staTimingIssuesText ?? null,
-          stepStatuses: workspaceFlowStates[workspace.workspace_id] ?? {},
-        })),
-        {
-          baselineWorkspaceId: manifest.qor_baseline?.workspace_id ?? null,
-        },
+    ? buildProjectQorTrendForManifest(
+        manifest,
+        workspaceFlowStates,
+        workspaceAnalysisInputs,
       )
     : buildProjectQorTrendSummary([])
   const snapshots = buildProjectAnalysisSnapshots(

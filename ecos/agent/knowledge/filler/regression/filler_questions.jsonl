@@ -1,0 +1,9 @@
+{"entity_id": "algorithm.filler.execution", "id": "filler-execution", "question": "How does the filler stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.filler.filler_model_initialization", "id": "filler-filler_model_initialization", "question": "filler model initialization", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.filler.available_segment_extraction", "id": "filler-available_segment_extraction", "question": "filler blockage site bitmap", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.filler.greedy_segment_packing", "id": "filler-greedy_segment_packing", "question": "filler largest first packing", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.filler.instance_writeback", "id": "filler-instance_writeback", "question": "filler placed instance creation", "required_text": "Source evidence:"}
+{"entity_id": "parameter.filler.workspace_config", "id": "filler-parameter", "question": "filler workspace_config", "required_text": "**Role:**"}
+{"entity_id": "metric.filler.database_summary", "id": "filler-metric", "question": "filler.database summary", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.filler.outputs", "id": "filler-artifact", "question": "filler artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.filler.preconditions", "id": "filler-failure", "question": "filler failed", "required_text": "**Failure mode:**"}

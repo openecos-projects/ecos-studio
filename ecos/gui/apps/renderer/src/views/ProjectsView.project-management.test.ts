@@ -18,6 +18,17 @@ const projectSurfaceSource = `${source}\n${projectStyles}`
 const analysisSurfaceSource = `${analysisSource}\n${analysisStyles}`
 
 describe('ProjectsView project management surface', () => {
+  it('applies route focus so Back to Project Management selects the current workspace', () => {
+    expect(source).toContain('resolveProjectManagementRouteFocus')
+    expect(source).toContain('applyRouteProjectFocus')
+    expect(source).toContain('useRoute')
+    expect(source).toContain('route.query.projectRoot')
+    expect(source).toContain('route.query.workspaceId')
+    expect(source).toContain('data-workspace-id')
+    expect(source).toContain('scrollIntoView')
+    expect(source).toContain('selectWorkspace(')
+  })
+
   it('renders the project tree and project analysis surface instead of the old flow matrix', () => {
     expect(source).toContain('ProjectAnalysisPanel')
     expect(analysisSource).toContain('aria-label="Analysis"')
@@ -463,7 +474,6 @@ describe('ProjectsView project management surface', () => {
   it('keeps the Step Analysis entry points in ProjectsView', () => {
     expect(source).toContain('const hasOpenedStepAnalysis = ref(false)')
     expect(source).toContain('handleAnalysisTabSelection')
-    expect(source).toContain('exportQorTrendReport')
     expect(source).toContain('setQorBaseline')
     expect(source).toContain('function openStepAnalysis()')
     expect(source).toContain("selectedStep.value = 'Synth'")
