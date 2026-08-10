@@ -15,12 +15,8 @@ const testState = vi.hoisted(() => ({
     all: number
   }> | null,
   route: { query: {} as Record<string, unknown> },
-  registerProjectReadRoot: vi.fn(async (path: string) => path),
-  registerProjectRoot: vi.fn(async (path: string) => path),
-  readOptionalProjectTextFile: vi.fn(),
-  writeProjectTextFile: vi.fn(),
-  readProjectWorkspaceAnalysisInputs: vi.fn(),
-  readProjectWorkspaceFlowStates: vi.fn(),
+  readManifest: vi.fn(),
+  readProjectQorWorkspaceData: vi.fn(),
   resolveProjectRouteContextForWorkspace: vi.fn(),
 }))
 
@@ -37,21 +33,14 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
-    workspace: {
-      registerProjectReadRoot: testState.registerProjectReadRoot,
-      registerProjectRoot: testState.registerProjectRoot,
+    projectManagement: {
+      readManifest: testState.readManifest,
     },
   }),
 }))
 
-vi.mock('@/utils/projectFiles', () => ({
-  readOptionalProjectTextFile: testState.readOptionalProjectTextFile,
-  writeProjectTextFile: testState.writeProjectTextFile,
-}))
-
 vi.mock('@/views/project-management/projectWorkspaceAnalysisData', () => ({
-  readProjectWorkspaceAnalysisInputs: testState.readProjectWorkspaceAnalysisInputs,
-  readProjectWorkspaceFlowStates: testState.readProjectWorkspaceFlowStates,
+  readProjectQorWorkspaceData: testState.readProjectQorWorkspaceData,
 }))
 
 vi.mock('@/utils/projectManifestRegistration', () => ({
@@ -107,20 +96,16 @@ describe('useHomeQorComparison', () => {
     testState.currentProject = ref({ path: '/projects/gcd/ws_0004' })
     testState.resourceVersions = ref({ home: 0, parameters: 0, step: 0, all: 0 })
     testState.route.query = { projectRoot: '/projects/gcd' }
-    testState.registerProjectReadRoot.mockReset()
-    testState.registerProjectReadRoot.mockImplementation(async (path: string) => path)
-    testState.registerProjectRoot.mockReset()
-    testState.readOptionalProjectTextFile.mockReset()
-    testState.writeProjectTextFile.mockReset()
-    testState.readProjectWorkspaceAnalysisInputs.mockReset()
-    testState.readProjectWorkspaceFlowStates.mockReset()
+    testState.readManifest.mockReset()
+    testState.readProjectQorWorkspaceData.mockReset()
     testState.resolveProjectRouteContextForWorkspace.mockReset()
     testState.resolveProjectRouteContextForWorkspace.mockResolvedValue(null)
-    testState.readOptionalProjectTextFile.mockResolvedValue(
-      JSON.stringify(projectManifest()),
-    )
-    testState.readProjectWorkspaceAnalysisInputs.mockResolvedValue({})
-    testState.readProjectWorkspaceFlowStates.mockResolvedValue({})
+    testState.readManifest.mockResolvedValue(JSON.stringify(projectManifest()))
+    testState.readProjectQorWorkspaceData.mockResolvedValue({
+      analysisInputs: {},
+      flowStates: {},
+      unavailableWorkspaceIds: [],
+    })
   })
 
   afterEach(() => {
@@ -142,11 +127,12 @@ describe('useHomeQorComparison', () => {
       baselineScore: null,
       available: true,
     })
-    expect(testState.registerProjectReadRoot).toHaveBeenCalledWith('/projects/gcd')
-    expect(testState.registerProjectRoot).not.toHaveBeenCalled()
-    expect(testState.readOptionalProjectTextFile).toHaveBeenCalledWith('project.json', {
-      projectPath: '/projects/gcd',
-    })
+    expect(testState.readManifest).toHaveBeenCalledWith('/projects/gcd')
+    expect(testState.readProjectQorWorkspaceData).toHaveBeenCalledWith(
+      '/projects/gcd',
+      expect.any(Object),
+      ['ws_0004', 'ws_0001'],
+    )
   })
 
   it('retains the baseline comparison while a resource refresh is pending', async () => {
@@ -157,7 +143,7 @@ describe('useHomeQorComparison', () => {
     const previousComparison = comparison.state.value.comparison
 
     let releaseManifest: ((value: string) => void) | undefined
-    testState.readOptionalProjectTextFile.mockImplementationOnce(
+    testState.readManifest.mockImplementationOnce(
       () =>
         new Promise<string>((resolve) => {
           releaseManifest = resolve
@@ -169,7 +155,7 @@ describe('useHomeQorComparison', () => {
     }
 
     await vi.waitFor(() => {
-      expect(testState.readOptionalProjectTextFile).toHaveBeenCalledTimes(2)
+      expect(testState.readManifest).toHaveBeenCalledTimes(2)
     })
     expect(comparison.state.value.status).toBe('available')
     expect(comparison.state.value.comparison).toBe(previousComparison)
@@ -178,6 +164,115 @@ describe('useHomeQorComparison', () => {
     await vi.waitFor(() => {
       expect(comparison.state.value.status).toBe('available')
     })
+  })
+
+  it('retries a baseline after a transient NFS input failure instead of caching empty data', async () => {
+    testState.readProjectQorWorkspaceData
+      .mockResolvedValueOnce({
+        analysisInputs: { ws_0004: {} },
+        flowStates: { ws_0004: {} },
+        unavailableWorkspaceIds: ['ws_0001'],
+      })
+      .mockResolvedValueOnce({
+        analysisInputs: { ws_0004: {}, ws_0001: {} },
+        flowStates: { ws_0004: {}, ws_0001: {} },
+        unavailableWorkspaceIds: [],
+      })
+
+    const comparison = scope.run(() => useHomeQorComparison())!
+    await vi.waitFor(() => {
+      expect(comparison.state.value.status).toBe('unavailable')
+    })
+
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      step: 1,
+    }
+
+    await vi.waitFor(() => {
+      expect(testState.readProjectQorWorkspaceData).toHaveBeenCalledTimes(2)
+    })
+    expect(testState.readProjectQorWorkspaceData).toHaveBeenLastCalledWith(
+      '/projects/gcd',
+      expect.any(Object),
+      ['ws_0004', 'ws_0001'],
+    )
+    await vi.waitFor(() => {
+      expect(comparison.state.value.status).toBe('available')
+    })
+  })
+
+  it('settles the optional QoR refresh after its NFS deadline and keeps the last snapshot', async () => {
+    const comparison = scope.run(() => useHomeQorComparison())!
+    await vi.waitFor(() => {
+      expect(comparison.state.value.status).toBe('available')
+    })
+    const previousComparison = comparison.state.value.comparison
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    try {
+      testState.readManifest.mockImplementationOnce(
+        () => new Promise<string>(() => undefined),
+      )
+      vi.useFakeTimers()
+      const refresh = comparison.refresh()
+      expect(testState.readManifest).toHaveBeenCalledTimes(2)
+
+      await vi.advanceTimersByTimeAsync(12_000)
+      await expect(refresh).resolves.toBeUndefined()
+      expect(comparison.state.value.status).toBe('available')
+      expect(comparison.state.value.comparison).toBe(previousComparison)
+    } finally {
+      vi.useRealTimers()
+      warn.mockRestore()
+    }
+  })
+
+  it('settles a slow parent project-context lookup without leaving the render task rejected', async () => {
+    testState.route.query = {}
+    testState.resolveProjectRouteContextForWorkspace.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    try {
+      vi.useFakeTimers()
+      const comparison = scope.run(() => useHomeQorComparison())!
+      expect(testState.resolveProjectRouteContextForWorkspace).toHaveBeenCalledWith(
+        '/projects/gcd/ws_0004',
+      )
+
+      await vi.advanceTimersByTimeAsync(12_000)
+      expect(comparison.state.value.status).toBe('unavailable')
+    } finally {
+      vi.useRealTimers()
+      warn.mockRestore()
+    }
+  })
+
+  it('coalesces concurrent refreshes so one completed step does not duplicate NFS reads', async () => {
+    const comparison = scope.run(() => useHomeQorComparison())!
+    await vi.waitFor(() => {
+      expect(comparison.state.value.status).toBe('available')
+    })
+
+    let releaseManifest: ((value: string) => void) | undefined
+    testState.readManifest.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseManifest = resolve
+        }),
+    )
+
+    const first = comparison.refresh()
+    const second = comparison.refresh()
+    await vi.waitFor(() => {
+      expect(testState.readManifest).toHaveBeenCalledTimes(2)
+    })
+    expect(first).toBe(second)
+
+    releaseManifest?.(JSON.stringify(projectManifest()))
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined])
   })
 
   it('reuses the last baseline comparison when the dashboard is recreated', async () => {
@@ -212,7 +307,7 @@ describe('useHomeQorComparison', () => {
   })
 
   it('uses the first other workspace as the legacy project default baseline without writing', async () => {
-    testState.readOptionalProjectTextFile.mockResolvedValue(
+    testState.readManifest.mockResolvedValue(
       JSON.stringify(projectManifest(false)),
     )
     const comparison = scope.run(() => useHomeQorComparison())!
@@ -222,12 +317,11 @@ describe('useHomeQorComparison', () => {
     })
 
     expect(comparison.state.value.baselineSource).toBe('default')
-    expect(testState.writeProjectTextFile).not.toHaveBeenCalled()
   })
 
   it('uses the current workspace as the legacy default when it is the only workspace', async () => {
     const manifest = singleWorkspaceManifest()
-    testState.readOptionalProjectTextFile.mockResolvedValue(
+    testState.readManifest.mockResolvedValue(
       JSON.stringify({ ...manifest, qor_baseline: null }),
     )
     const comparison = scope.run(() => useHomeQorComparison())!
@@ -238,6 +332,5 @@ describe('useHomeQorComparison', () => {
 
     expect(comparison.state.value.baselineWorkspaceName).toBe('ws_0004')
     expect(comparison.state.value.baselineSource).toBe('default')
-    expect(testState.writeProjectTextFile).not.toHaveBeenCalled()
   })
 })

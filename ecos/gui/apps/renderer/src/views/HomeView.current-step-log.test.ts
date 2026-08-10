@@ -10,13 +10,12 @@ describe('FlowLogPanel current-step viewer', () => {
   })
 
   it('renders under the flow card and changes with the selected flow step', () => {
-    expect(flowLogPanelSource).toContain(
-      'props.executionActive || props.segments.length > 0',
-    )
+    expect(flowLogPanelSource).toContain('<section class="flow-log-panel"')
     expect(flowLogPanelSource).toContain('selectSegmentForNode')
     expect(flowLogPanelSource).toContain('props.selectedNode')
     expect(flowLogPanelSource).toContain('currentRuntimeSegment')
     expect(flowLogPanelSource).toContain('activeStepName: string')
+    expect(flowLogPanelSource).toContain('selectionPinned')
     expect(flowLogPanelSource).not.toContain('aria-label="Select a flow step log"')
   })
 })

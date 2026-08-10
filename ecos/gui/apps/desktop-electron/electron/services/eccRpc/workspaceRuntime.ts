@@ -329,6 +329,7 @@ export class EccWorkspaceRuntime {
       idempotencyKey: request.idempotencyKey,
       origin: 'gui',
       rerun: Boolean(request.rerun),
+      resetDependents: Boolean(request.resetDependents),
       step: request.step,
       workspaceId,
     })

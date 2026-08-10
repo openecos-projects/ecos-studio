@@ -117,6 +117,69 @@ export async function readProjectManagementWorkspaceData(
   }
 }
 
+/**
+ * Reads only the current/baseline workspaces used by Dashboard QoR. This keeps
+ * GUI commit rendering off the renderer filesystem path and avoids a Project-
+ * wide NFS fan-out for every completed step.
+ */
+export async function readProjectQorWorkspaceData(
+  projectRoot: string,
+  manifest: ProjectManifest,
+  workspaceIds: readonly string[],
+): Promise<{
+  analysisInputs: ProjectWorkspaceAnalysisInputsById
+  flowStates: ProjectWorkspaceFlowStatesById
+  unavailableWorkspaceIds: string[]
+}> {
+  const requestedIds = new Set(workspaceIds)
+  const workspaces = manifest.workspaces.filter((workspace) =>
+    requestedIds.has(workspace.workspace_id),
+  )
+  const entries = await mapWithConcurrency(
+    workspaces,
+    PROJECT_READ_CONCURRENCY,
+    async (workspace) => {
+      try {
+        const values = await readProjectManagementWorkspaceTexts(
+          projectRoot,
+          workspace.workspace_path,
+          projectManagementAnalysisPaths(),
+        )
+        const flowText = values['home/flow.json'] ?? null
+        return [
+          workspace.workspace_id,
+          {
+            analysis: analysisInputFromValues(values),
+            flow: flowText ? parseWorkspaceFlowStateMap(flowText) : {},
+            unavailable: false,
+          },
+        ] as const
+      } catch (error) {
+        console.warn(
+          `Failed to load Dashboard QoR input: ${workspace.workspace_path}`,
+          error,
+        )
+        return [
+          workspace.workspace_id,
+          { analysis: {}, flow: {}, unavailable: true },
+        ] as const
+      }
+    },
+  )
+
+  return {
+    analysisInputs: Object.fromEntries(
+      entries.map(([workspaceId, data]) => [workspaceId, data.analysis]),
+    ),
+    flowStates: Object.fromEntries(
+      entries.map(([workspaceId, data]) => [workspaceId, data.flow]),
+    ),
+    unavailableWorkspaceIds: entries
+      .filter(([, data]) => data.unavailable)
+      .map(([workspaceId]) => workspaceId),
+  }
+}
+
 async function readWorkspaceAnalysisInput(
   workspacePath: string,
 ): Promise<ProjectWorkspaceAnalysisInput> {

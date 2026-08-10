@@ -148,4 +148,47 @@ describe('useHomeData runtime updates', () => {
     expect(Object.values(home.flowLogContentByKey.value)).toContain('final synthesis log')
     scope.stop()
   })
+
+  it('keeps upstream logs but clears affected segments after a GUI single-step rerun', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    const { useHomeData } = await import('./useHomeData')
+    const scope = effectScope()
+    const home = scope.run(() => useHomeData())!
+
+    for (const [step, tool] of [
+      ['Synthesis', 'yosys'],
+      ['Floorplan', 'ecc'],
+      ['route', 'ecc'],
+    ]) {
+      testState.runtimeEvents.value.push({
+        data: {
+          finalLog: `${step} final log`,
+          runtimeProtocolType: 'step.completed',
+          state: 'Success',
+          step,
+          tool,
+        },
+      })
+      await nextTick()
+    }
+
+    testState.runtimeEvents.value.push({
+      data: {
+        affectedSteps: ['Floorplan', 'route'],
+        directory: '/workspace/demo',
+        rerun: true,
+        rerunScope: 'step',
+        runtimeProtocolType: 'operation.rerun_prepared',
+      },
+    })
+    await nextTick()
+
+    expect(home.flowLogSegments.value).toEqual([
+      expect.objectContaining({ stepName: 'Synthesis', tool: 'yosys' }),
+    ])
+    expect(home.flowLogRerunAffectedSteps.value).toEqual(['Floorplan', 'route'])
+    expect(Object.values(home.flowLogContentByKey.value)).toContain('Synthesis final log')
+    scope.stop()
+  })
 })

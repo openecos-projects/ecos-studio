@@ -2276,7 +2276,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
   })
 
-  it('requests Home artifact reset when backend reports rerun start', async () => {
+  it('requests Home artifact reset after ECC prepares a full-flow rerun', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
 
     onRuntimeEvent?.({
@@ -2286,6 +2286,8 @@ describe('useWorkspace openProject', () => {
         cmd: 'rtl2gds',
         directory: '/work/demo',
         rerun: true,
+        rerunScope: 'flow',
+        runtimeProtocolType: 'operation.rerun_prepared',
       },
       message: ['Started rtl2gds'],
       response: 'success',
@@ -2295,7 +2297,7 @@ describe('useWorkspace openProject', () => {
     expect(requestHomeRunArtifactResetMock).toHaveBeenCalledWith('/work/demo')
   })
 
-  it('uses the current project path for RPC rerun start events that only carry a workspace handle', async () => {
+  it('uses the current project path for prepared rerun events with only a workspace handle', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
 
     onRuntimeEvent?.({
@@ -2305,6 +2307,8 @@ describe('useWorkspace openProject', () => {
         cmd: 'rtl2gds',
         workspaceId: 'workspace-demo',
         rerun: true,
+        rerunScope: 'flow',
+        runtimeProtocolType: 'operation.rerun_prepared',
       },
       message: ['Started rtl2gds'],
       response: 'success',

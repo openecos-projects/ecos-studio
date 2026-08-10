@@ -1,5 +1,10 @@
 <template>
-  <WorkspaceWorkbench flow-title="Flow status" :loading="flowLoading" :nodes="flowNodes">
+  <WorkspaceWorkbench
+    flow-title="Flow status"
+    :loading="flowLoading"
+    :log-rerun-affected-steps="flowLogRerunAffectedSteps"
+    :nodes="flowNodes"
+  >
     <template #left>
       <main class="home-dashboard" aria-label="Workspace dashboard">
         <div class="home-dashboard-row home-dashboard-top">
@@ -379,7 +384,7 @@
       </main>
     </template>
 
-    <template #right-log="{ selectedNode }">
+    <template #right-log="{ selectedNode, selectedNodePinned }">
       <FlowLogPanel
         :active-step-name="flowLogStepName"
         :content-by-key="flowLogContentByKey"
@@ -388,6 +393,7 @@
         :execution-active="currentWorkspaceFlowExecutionActive"
         :loading="flowLogLoading"
         :selected-node="selectedNode"
+        :selected-node-pinned="selectedNodePinned"
         :segments="flowLogSegments"
       />
     </template>
@@ -653,6 +659,7 @@ const {
   flowLogContentByKey,
   flowLogError,
   flowLogLoading,
+  flowLogRerunAffectedSteps,
   flowLogSegments,
   flowLogStepName,
   layoutBlobUrl,
@@ -852,7 +859,14 @@ async function openQorDetails(): Promise<void> {
 
 const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
 const qorStatusTone = computed<'pass' | 'warning' | 'blocked' | 'unavailable'>(() => {
-  if (qorComparisonState.value.status !== 'available') return 'unavailable'
+  if (
+    qorComparisonState.value.status !== 'available' &&
+    qorComparisonState.value.status !== 'baseline'
+  ) {
+    return 'unavailable'
+  }
+  if (qorComparisonState.value.comparison?.score === null) return 'unavailable'
+  if (qorComparisonState.value.status === 'baseline') return 'pass'
   return qorComparisonSummary.value.regressedCount > 0 ? 'blocked' : 'pass'
 })
 const checklistCenterPrimary = computed(() =>
@@ -942,6 +956,9 @@ const qorDashboardSteps = computed(() => {
     qorComparisonSummary.value.steps.map((step) => [step.step, step]),
   )
   const comparisonReady = qorComparisonState.value.status === 'available'
+  const currentQorReady =
+    qorComparisonState.value.status === 'available' ||
+    qorComparisonState.value.status === 'baseline'
   return qorSteps.value.map((step) => {
     const comparisonStep = homeQorFlowStepForLabel(step.label)
       ? comparisonByStep.get(homeQorFlowStepForLabel(step.label)!)
@@ -957,7 +974,9 @@ const qorDashboardSteps = computed(() => {
       unchangedCount,
       comparableCount,
       comparisonState: !comparisonReady
-        ? 'unavailable'
+        ? currentQorReady
+          ? 'available'
+          : 'unavailable'
         : regressedCount > 0
           ? 'regressed'
           : improvedCount > 0

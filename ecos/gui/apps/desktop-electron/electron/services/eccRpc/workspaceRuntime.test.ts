@@ -254,6 +254,53 @@ describe('EccWorkspaceRuntime', () => {
     })
   })
 
+  it('forwards GUI single-step rerun reset intent to ECC', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        awaitingEventId: null,
+        createdAt: 1,
+        currentStep: 'Floorplan',
+        currentTool: '',
+        error: null,
+        kind: 'step',
+        operationId: 'operation-2',
+        origin: 'gui',
+        rerun: true,
+        result: null,
+        state: 'queued',
+        step: 'Floorplan',
+        updatedAt: 1,
+        workspaceId: 'workspace-1',
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(
+      service.startStepOperation({
+        idempotencyKey: 'request-2',
+        rerun: true,
+        resetDependents: true,
+        step: 'Floorplan',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ operationId: 'operation-2', state: 'queued' })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'operation.start_step',
+      params: {
+        idempotencyKey: 'request-2',
+        origin: 'gui',
+        rerun: true,
+        resetDependents: true,
+        step: 'Floorplan',
+        workspaceId: 'workspace-1',
+      },
+    })
+  })
+
   it('resolves an operation waiter from its terminal protocol event', async () => {
     const { client, service, sidecarNotification } = createService()
     client.responses.push(

@@ -22,6 +22,7 @@ import {
 /** 任意流程命令执行中为 true，供 Home flow log 等订阅，避免多实例 composable 状态不一致 */
 export interface FlowRunOptions {
   rerun?: boolean
+  resetDependents?: boolean
 }
 
 export {
@@ -156,6 +157,7 @@ export function useFlowRunner() {
       const operation = await startStepOperationApi({
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
+        resetDependents: Boolean(options.resetDependents),
         step,
         workspaceHandle,
       })

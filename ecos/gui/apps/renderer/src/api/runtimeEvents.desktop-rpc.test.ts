@@ -226,6 +226,65 @@ describe('createRuntimeEventClient desktop ECC events', () => {
     )
   })
 
+  it('maps prepared single-step rerun scope and affected steps to the renderer', async () => {
+    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    setWindow({
+      ecosDesktop: {
+        ecc: {
+          events: {
+            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+              listeners.push(listener)
+              return () => undefined
+            },
+          },
+        },
+      },
+    })
+
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+
+    listeners[0]({
+      event: {
+        eventId: 'workspace-1:5',
+        kind: 'step',
+        operationId: 'operation-rerun-step',
+        origin: 'gui',
+        payload: {
+          affectedSteps: ['Floorplan', 'route'],
+          scope: 'step',
+          targetStep: 'Floorplan',
+        },
+        rerun: true,
+        sequence: 5,
+        timestamp: 5,
+        type: 'operation.rerun_prepared',
+        workspaceId: 'workspace-1',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          affectedSteps: ['Floorplan', 'route'],
+          cmd: 'run_step',
+          directory: '/work/demo',
+          rerun: true,
+          rerunScope: 'step',
+          runtimeProtocolType: 'operation.rerun_prepared',
+          targetStep: 'Floorplan',
+          type: 'message',
+        }),
+      }),
+    )
+  })
+
   it('maps full-flow candidate reruns onto flow lifecycle notifications', async () => {
     const listeners: Array<(event: EccRuntimeEvent) => void> = []
     setWindow({

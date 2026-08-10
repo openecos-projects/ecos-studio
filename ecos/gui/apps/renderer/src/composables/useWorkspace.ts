@@ -1484,7 +1484,7 @@ export function useWorkspace() {
         if (runtimeEvents.value.length > 200) {
           runtimeEvents.value.splice(0, runtimeEvents.value.length - 200)
         }
-        if (isRtl2gdsRerunStartEvent(response)) {
+        if (isFullFlowRerunPreparedEvent(response)) {
           const resetProjectPath =
             asString(response.data.directory) ??
             currentProject.value?.path ??
@@ -1563,6 +1563,7 @@ export function useWorkspace() {
     // independent NFS scans before the renderer can acknowledge the step.
     if (protocolType === 'step.started' || protocolType === 'step.log') return null
     if (protocolType === 'step.completed') return null
+    if (protocolType === 'operation.rerun_prepared') return ['all']
     if (
       !eventType ||
       !['step_complete', 'task_complete', 'error', 'cancelled'].includes(eventType)
@@ -1621,9 +1622,14 @@ export function useWorkspace() {
     return [...scopes]
   }
 
-  function isRtl2gdsRerunStartEvent(response: RuntimeEventResponse): boolean {
+  function isFullFlowRerunPreparedEvent(response: RuntimeEventResponse): boolean {
     const event = response.data
-    return event?.cmd === 'rtl2gds' && event.type === 'message' && event.rerun === true
+    return (
+      event?.cmd === 'rtl2gds' &&
+      event.runtimeProtocolType === 'operation.rerun_prepared' &&
+      event.rerun === true &&
+      event.rerunScope === 'flow'
+    )
   }
 
   function invalidateResourcesForRuntimeEvent(

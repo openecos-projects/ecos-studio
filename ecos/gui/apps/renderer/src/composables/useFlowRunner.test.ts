@@ -214,6 +214,7 @@ describe('useFlowRunner desktop-only guard', () => {
     expect(startStepOperationApi).toHaveBeenCalledWith({
       idempotencyKey: expect.any(String),
       rerun: false,
+      resetDependents: false,
       step: StepEnum.FLOORPLAN,
       workspaceHandle: 'workspace-demo',
     })
@@ -229,7 +230,11 @@ describe('useFlowRunner desktop-only guard', () => {
     await runFlow({ rerun: true })
 
     expect(startStepOperationApi).toHaveBeenCalledWith(
-      expect.objectContaining({ rerun: true, step: StepEnum.FLOORPLAN }),
+      expect.objectContaining({
+        rerun: true,
+        resetDependents: false,
+        step: StepEnum.FLOORPLAN,
+      }),
     )
   })
 

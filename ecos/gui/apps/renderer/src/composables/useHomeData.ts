@@ -159,6 +159,8 @@ const flowLogSegmentsState = ref<FlowLogSegment[]>([])
 const flowLogContentState = shallowRef<Record<string, string>>({})
 const flowLogStepNameState = ref('')
 const flowLogErrorState = ref<string | null>(null)
+/** Replaced for every rerun preparation event so the workbench can unpin invalid logs. */
+const flowLogRerunAffectedStepsState = ref<string[]>([])
 /** 首次构建（segments 为空）时才会显示 loading；后续重新校验不再阻塞 UI */
 const flowLogLoadingState = ref(false)
 /** 递增的 load 会话号：新一次 loadAllFlowStepLogsFromFlowPath 发起后旧回调自动放弃 */
@@ -174,6 +176,7 @@ function resetFlowLogState(): void {
   flowLogContentState.value = {}
   flowLogStepNameState.value = ''
   flowLogErrorState.value = null
+  flowLogRerunAffectedStepsState.value = []
   flowLogLoadingState.value = false
   flowLogContentGenerations.clear()
   flowLogLiveCursorByKey.clear()
@@ -330,32 +333,31 @@ function flowLogContentGeneration(key: string): number {
 }
 
 /**
- * Clears only the visible state for one step before a rerun starts. The backend
- * owns the actual log file lifecycle; this prevents old output or an in-flight
- * read from being rendered until the live step log supplies fresh content.
+ * Removes visible logs only for steps whose artifacts ECC has invalidated.
+ * Ordinary resource version changes must never erase a completed flow log.
  */
-export function prepareFlowLogSegmentForRerun(stepName: string): void {
-  const normalizedStepName = stepName.trim().toLowerCase()
-  if (!normalizedStepName) return
+export function prepareFlowLogSegmentsForRerun(stepNames: readonly string[]): void {
+  const affectedStepNames = new Set(
+    stepNames.map((stepName) => stepName.trim().toLowerCase()).filter(Boolean),
+  )
+  if (affectedStepNames.size === 0) return
 
-  let matched = false
-  flowLogSegmentsState.value = flowLogSegmentsState.value.map((segment) => {
-    if (segment.stepName.trim().toLowerCase() !== normalizedStepName) return segment
-
-    matched = true
+  const remainingSegments: FlowLogSegment[] = []
+  for (const segment of flowLogSegmentsState.value) {
+    if (!affectedStepNames.has(segment.stepName.trim().toLowerCase())) {
+      remainingSegments.push(segment)
+      continue
+    }
     const key = flowLogSegmentKey(segment)
     invalidateFlowLogContent(key)
     invalidateLogFileCache(segment.logPath)
-    return {
-      ...segment,
-      missing: false,
-      truncated: false,
-      totalSize: 0,
-      lastReadOffsetBytes: 0,
-    }
-  })
-
-  if (matched) flowLogErrorState.value = null
+    flowLogLiveCursorByKey.delete(key)
+  }
+  flowLogSegmentsState.value = remainingSegments
+  if (affectedStepNames.has(flowLogStepNameState.value.trim().toLowerCase())) {
+    flowLogStepNameState.value = ''
+  }
+  flowLogErrorState.value = null
 }
 
 function pruneFlowLogContentKeepOnly(aliveKeys: Iterable<string>): void {
@@ -701,8 +703,6 @@ export function invalidateSharedHomeData() {
 function invalidateHomeDataForResourceChange() {
   invalidateSharedHomeData()
   markHomeAssetSignaturesStale()
-  resetFlowLogState()
-  invalidateLogFileCache()
 }
 
 function normalizeWorkspaceEventPath(value: unknown): string {
@@ -779,21 +779,29 @@ function shouldDeferHomeDataUntilBackendRerunStart(
   )
 }
 
-function isCurrentWorkspaceRerunStartEvent(event: unknown, projectPath: string): boolean {
-  if (!event || typeof event !== 'object') return false
+function currentWorkspaceRerunPreparedEvent(
+  event: unknown,
+  projectPath: string,
+): { affectedSteps: string[]; scope: 'flow' | 'step' } | null {
+  if (!event || typeof event !== 'object') return null
   const payload = event as Record<string, unknown>
   const data = payload.data
-  if (!data || typeof data !== 'object') return false
+  if (!data || typeof data !== 'object') return null
 
   const eventData = data as Record<string, unknown>
-  if (eventData.cmd !== 'rtl2gds') return false
-  if (eventData.type !== 'message') return false
-  if (eventData.rerun !== true) return false
+  if (eventData.runtimeProtocolType !== 'operation.rerun_prepared') return null
+  if (eventData.rerun !== true) return null
+  const scope = eventData.rerunScope
+  if (scope !== 'flow' && scope !== 'step') return null
 
   const eventWorkspace =
     normalizeWorkspaceEventPath(eventData.directory) ||
     normalizeWorkspaceEventPath(eventData.workspaceId)
-  return eventWorkspace === normalizeWorkspaceEventPath(projectPath)
+  if (eventWorkspace !== normalizeWorkspaceEventPath(projectPath)) return null
+  const affectedSteps = Array.isArray(eventData.affectedSteps)
+    ? eventData.affectedSteps.filter((step): step is string => typeof step === 'string')
+    : []
+  return { affectedSteps, scope }
 }
 
 function isCurrentWorkspaceRerunTerminalEvent(
@@ -1658,11 +1666,16 @@ export function useHomeData() {
         flowLogStepName.value = segment.stepName
         flowLogError.value = null
       }
-      if (isCurrentWorkspaceRerunStartEvent(event, projectPath)) {
-        if (!isAgentWorkspaceRerunHomePrepared(projectPath)) {
-          clearHomeRunArtifactsForRerun(projectPath)
+      const rerunPrepared = currentWorkspaceRerunPreparedEvent(event, projectPath)
+      if (rerunPrepared) {
+        flowLogRerunAffectedStepsState.value = [...rerunPrepared.affectedSteps]
+        prepareFlowLogSegmentsForRerun(rerunPrepared.affectedSteps)
+        if (rerunPrepared.scope === 'flow') {
+          if (!isAgentWorkspaceRerunHomePrepared(projectPath)) {
+            clearHomeRunArtifactsForRerun(projectPath)
+          }
+          markFlowExecutionActiveForWorkspace(projectPath)
         }
-        markFlowExecutionActiveForWorkspace(projectPath)
         return
       }
       if (isCurrentWorkspaceRerunTerminalEvent(event, projectPath)) {
@@ -1709,6 +1722,7 @@ export function useHomeData() {
     flowLogContentByKey,
     flowLogStepName,
     flowLogError,
+    flowLogRerunAffectedSteps: flowLogRerunAffectedStepsState,
     flowLogLoading,
     isLoading,
     error,

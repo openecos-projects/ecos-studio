@@ -52,8 +52,6 @@ import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useFlowStages } from '@/composables/useFlowStages'
-import { prepareFlowLogSegmentForRerun } from '@/composables/useHomeData'
-import { rerunHomeWorkspace } from '@/composables/homeFlowRerun'
 import { useSubflow } from '@/composables/useSubflow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
@@ -122,17 +120,8 @@ async function executeRun(rerun: boolean): Promise<void> {
   if (rerun) {
     preparingRerun.value = true
     try {
-      if (isHomeStage.value) {
-        const rebuilt = await rerunHomeWorkspace()
-        if (!rebuilt) {
-          await refreshFlowStages()
-          return
-        }
-        await refreshFlowStages()
-      } else if (!(await canRerunCurrentStep())) {
+      if (!isHomeStage.value && !(await canRerunCurrentStep())) {
         return
-      } else {
-        prepareFlowLogSegmentForRerun(currentStage.value)
       }
     } catch (error) {
       showToast({
@@ -155,16 +144,12 @@ async function executeRun(rerun: boolean): Promise<void> {
 
   if (isHomeStage.value) {
     setFirstRunStepOngoing()
-    if (rerun) {
-      if (!(await runAllFlow({ rerun: false }))) capture.stop()
-    } else {
-      if (!(await runAllFlow({ rerun }))) capture.stop()
-    }
+    if (!(await runAllFlow({ rerun }))) capture.stop()
     return
   }
 
   setRunStepOngoingByPath(currentStage.value)
-  if (!(await runFlow({ rerun }))) capture.stop()
+  if (!(await runFlow({ rerun, resetDependents: rerun }))) capture.stop()
 }
 
 async function canRerunCurrentStep(): Promise<boolean> {

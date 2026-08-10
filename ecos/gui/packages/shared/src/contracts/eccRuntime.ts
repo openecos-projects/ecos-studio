@@ -275,6 +275,8 @@ export interface EccRuntimeStartFlowRequest extends EccWorkspaceHandleRequest {
 }
 
 export interface EccRuntimeStartStepRequest extends EccRuntimeStartFlowRequest {
+  /** GUI-only reruns invalidate the selected step and its downstream closure. */
+  resetDependents?: boolean
   step: string
 }
 
@@ -321,6 +323,7 @@ export interface EccRuntimeProtocolPayload {
     | 'operation.cancelled'
     | 'operation.cancel_requested'
     | 'operation.gui_sync_paused'
+    | 'operation.rerun_prepared'
     | 'step.started'
     | 'step.log'
     | 'step.completed'
