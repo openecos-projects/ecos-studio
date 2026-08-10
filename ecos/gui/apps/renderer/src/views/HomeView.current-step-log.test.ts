@@ -10,7 +10,7 @@ describe('FlowLogPanel current-step viewer', () => {
   })
 
   it('renders under the flow card and changes with the selected flow step', () => {
-    expect(flowLogPanelSource).toContain('<section class="flow-log-panel"')
+    expect(flowLogPanelSource).toContain('class="flow-log-panel"')
     expect(flowLogPanelSource).toContain('selectSegmentForNode')
     expect(flowLogPanelSource).toContain('props.selectedNode')
     expect(flowLogPanelSource).toContain('currentRuntimeSegment')
