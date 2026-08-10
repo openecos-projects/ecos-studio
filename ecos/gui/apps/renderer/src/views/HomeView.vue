@@ -244,31 +244,40 @@
                   </button>
                   <div
                     class="qor-step-trend"
-                    :aria-label="`${step.label}: ${step.improvedCount} improved, ${step.regressedCount} regressed, ${step.unchangedCount} unchanged, ${step.comparableCount} compared`"
+                    :aria-label="
+                      step.displayMode === 'summary'
+                        ? `${step.label}: ${step.summaryMetricCount} reported metrics, ${step.status}`
+                        : `${step.label}: ${step.improvedCount} improved, ${step.regressedCount} regressed, ${step.unchangedCount} unchanged, ${step.comparableCount} compared`
+                    "
                   >
                     <div class="qor-step-trend-bar" aria-hidden="true">
                       <span
-                        v-if="step.improvedCount"
+                        v-if="step.displayMode === 'summary'"
+                        :class="`is-${step.status}`"
+                        :style="{ flexGrow: 1 }"
+                      />
+                      <span
+                        v-if="step.displayMode === 'comparison' && step.improvedCount"
                         class="is-improved"
                         :style="{ flexGrow: step.improvedCount }"
                       />
                       <span
-                        v-if="step.regressedCount"
+                        v-if="step.displayMode === 'comparison' && step.regressedCount"
                         class="is-regressed"
                         :style="{ flexGrow: step.regressedCount }"
                       />
                       <span
-                        v-if="step.unchangedCount"
+                        v-if="step.displayMode === 'comparison' && step.unchangedCount"
                         class="is-neutral"
                         :style="{ flexGrow: step.unchangedCount }"
                       />
                       <span
-                        v-if="!step.comparableCount"
+                        v-if="step.displayMode === 'comparison' && !step.comparableCount"
                         class="is-unavailable"
                         :style="{ flexGrow: 1 }"
                       />
                     </div>
-                    <strong class="qor-step-total">{{ step.comparableCount }}</strong>
+                    <strong class="qor-step-total">{{ step.displayCount }}</strong>
                   </div>
                 </section>
                 <div v-if="!qorDashboardSteps.length" class="dashboard-empty compact">
@@ -956,6 +965,7 @@ const qorDashboardSteps = computed(() => {
     qorComparisonSummary.value.steps.map((step) => [step.step, step]),
   )
   const comparisonReady = qorComparisonState.value.status === 'available'
+  const showBaselineSummary = qorComparisonState.value.status === 'baseline'
   const currentQorReady =
     qorComparisonState.value.status === 'available' ||
     qorComparisonState.value.status === 'baseline'
@@ -967,21 +977,28 @@ const qorDashboardSteps = computed(() => {
     const regressedCount = comparisonReady ? (comparisonStep?.regressedCount ?? 0) : 0
     const unchangedCount = comparisonReady ? (comparisonStep?.unchangedCount ?? 0) : 0
     const comparableCount = comparisonReady ? (comparisonStep?.comparableCount ?? 0) : 0
+    const displayMode =
+      showBaselineSummary && step.status !== 'unavailable' ? 'summary' : 'comparison'
     return {
       ...step,
+      displayCount: displayMode === 'summary' ? step.summaryMetricCount : comparableCount,
+      displayMode,
       improvedCount,
       regressedCount,
       unchangedCount,
       comparableCount,
-      comparisonState: !comparisonReady
-        ? currentQorReady
-          ? 'available'
-          : 'unavailable'
-        : regressedCount > 0
-          ? 'regressed'
-          : improvedCount > 0
-            ? 'improved'
-            : 'neutral',
+      comparisonState:
+        displayMode === 'summary'
+          ? step.status
+          : !comparisonReady
+            ? currentQorReady
+              ? 'available'
+              : 'unavailable'
+            : regressedCount > 0
+              ? 'regressed'
+              : improvedCount > 0
+                ? 'improved'
+                : 'neutral',
     }
   })
 })
@@ -1642,6 +1659,15 @@ async function openLayoutChipViewer(): Promise<void> {
 .qor-step-status.is-regressed {
   background: var(--danger-color);
 }
+.qor-step-status.is-pass {
+  background: var(--success-color);
+}
+.qor-step-status.is-blocked {
+  background: var(--danger-color);
+}
+.qor-step-status.is-incomplete {
+  background: var(--warning-color);
+}
 
 .qor-overview {
   grid-template-columns: minmax(112px, 0.34fr) minmax(160px, 0.62fr) minmax(0, 1fr);
@@ -1744,6 +1770,18 @@ async function openLayoutChipViewer(): Promise<void> {
 
 .qor-step-trend-bar > .is-neutral {
   background: var(--text-secondary);
+}
+
+.qor-step-trend-bar > .is-pass {
+  background: var(--success-color);
+}
+
+.qor-step-trend-bar > .is-blocked {
+  background: var(--danger-color);
+}
+
+.qor-step-trend-bar > .is-incomplete {
+  background: var(--warning-color);
 }
 
 .qor-step-trend-bar > .is-unavailable {

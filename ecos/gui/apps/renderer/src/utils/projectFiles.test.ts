@@ -2,6 +2,7 @@ import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getMimeTypeFromPath,
+  readOptionalProjectTextFileChunk,
   readOptionalProjectTextFileTail,
   readOptionalProjectTextFileUpdate,
   readProjectTextFileTail,
@@ -67,6 +68,12 @@ describe('projectFiles', () => {
       reset: false,
       truncated: false,
     })
+    const readOptionalProjectTextChunk = vi.fn().mockResolvedValue({
+      content: 'complete log',
+      eof: true,
+      nextOffsetBytes: 12,
+      sizeBytes: 12,
+    })
     const readProjectBinary = vi
       .fn()
       .mockResolvedValue(Uint8Array.from([0x45, 0x43, 0x4f, 0x53]))
@@ -79,6 +86,7 @@ describe('projectFiles', () => {
           readProjectTextFileTail: readProjectTextTail,
           readOptionalProjectTextFileTail: readOptionalProjectTextTail,
           readOptionalProjectTextFileUpdate: readOptionalProjectTextUpdate,
+          readOptionalProjectTextFileChunk: readOptionalProjectTextChunk,
           readProjectBinaryFile: readProjectBinary,
           writeProjectTextFile: writeProjectText,
         },
@@ -112,6 +120,14 @@ describe('projectFiles', () => {
       nextOffsetBytes: 14,
     })
     await expect(
+      readOptionalProjectTextFileChunk('logs/run.log', 0, 262144, {
+        projectPath: '/workspace/demo',
+      }),
+    ).resolves.toMatchObject({
+      content: 'complete log',
+      eof: true,
+    })
+    await expect(
       writeProjectTextFile('home/parameters.json', '{"PDK":"ics55"}', {
         projectPath: '/workspace/demo',
       }),
@@ -127,6 +143,11 @@ describe('projectFiles', () => {
       '/workspace/demo/logs/run.log',
       10,
       64,
+    )
+    expect(readOptionalProjectTextChunk).toHaveBeenCalledWith(
+      '/workspace/demo/logs/run.log',
+      0,
+      262144,
     )
     expect(readProjectBinary).toHaveBeenCalledWith('/workspace/demo/images/layout.png')
     expect(writeProjectText).toHaveBeenCalledWith(

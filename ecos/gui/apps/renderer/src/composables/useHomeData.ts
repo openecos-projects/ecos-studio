@@ -11,8 +11,7 @@ import {
   readWorkspaceHomeResourceApi,
 } from '@/api/workspaceResources'
 import {
-  readOptionalProjectTextFile,
-  readOptionalProjectTextFileTail,
+  readOptionalProjectTextFileChunk,
   readProjectBlobUrl,
   readProjectTextFile,
 } from '@/utils/projectFiles'
@@ -116,6 +115,10 @@ export interface FlowLogSegment {
   lastReadOffsetBytes?: number
   /** 生成该段时对应的 log 文件绝对路径（用于展开完整内容） */
   logPath?: string
+  /** 已通过受限分块 IPC 读取完整历史日志。 */
+  contentComplete?: boolean
+  /** 正在读取完整日志；现有 tail 在完成前保持可见。 */
+  contentLoading?: boolean
 }
 
 type HomeAssetLoadGuard = () => boolean
@@ -168,8 +171,15 @@ let flowLogLoadSession = 0
 const flowLogContentGenerations = new Map<string, number>()
 /** Runtime log cursors make at-least-once ECC delivery safe for the visible tail. */
 const flowLogLiveCursorByKey = new Map<string, number>()
+/** One in-flight historical log hydration per (step, tool). */
+const flowLogFullContentLoads = new Map<string, Promise<boolean>>()
+/** Only one full NFS log may hydrate at a time; the newest selected segment wins. */
+let flowLogHydrationQueue: Promise<void> = Promise.resolve()
+let flowLogHydrationRequestGeneration = 0
+let flowLogHydrationRequestedKey = ''
 const MAX_RUNTIME_FLOW_LOG_CHARS = 128 * 1024
 const MAX_RUNTIME_FLOW_LOG_SEGMENTS = 32
+const FLOW_LOG_CONTENT_CHUNK_BYTES = 256 * 1024
 
 function resetFlowLogState(): void {
   flowLogSegmentsState.value = []
@@ -180,63 +190,16 @@ function resetFlowLogState(): void {
   flowLogLoadingState.value = false
   flowLogContentGenerations.clear()
   flowLogLiveCursorByKey.clear()
+  flowLogFullContentLoads.clear()
+  flowLogHydrationQueue = Promise.resolve()
+  flowLogHydrationRequestGeneration += 1
+  flowLogHydrationRequestedKey = ''
   // 下发新的会话号，让进行中的 hydrate 早返回
   flowLogLoadSession++
 }
 
-/**
- * 单个 log 文件尾部内容缓存。
- *
- * **Key 约定**：必须是 `resolveProjectPathAccess` 之后的**规范化绝对路径**。
- * 所有读取/失效入口都必须先 `resolvedPathMemo(localPath)` 再触达本 Map，
- * 否则 runtime event 失效时会拿未 canonicalize 的路径去 delete，导致旧内容滞留。
- *
- * **上限**：采用简单 LRU（`Map` 迭代顺序 = 插入顺序）。同一项目内跑多次
- * flow、生成大量历史 step log 时，超限自动 evict 最早一条，避免无限增长。
- */
-interface LogFileCacheEntry {
-  content: string
-  truncated: boolean
-  /** 完整文件字节数 */
-  totalSize: number
-}
-const logFileCache = new Map<string, LogFileCacheEntry>()
-/** 至多保留多少条日志缓存；命中时 refresh 插入顺序充当 LRU */
-const LOG_CACHE_MAX_ENTRIES = 64
-
-function logCacheGet(key: string): LogFileCacheEntry | undefined {
-  const hit = logFileCache.get(key)
-  if (!hit) return undefined
-  // LRU: 访问一下就重排到末尾
-  logFileCache.delete(key)
-  logFileCache.set(key, hit)
-  return hit
-}
-
-function logCacheSet(key: string, entry: LogFileCacheEntry): void {
-  if (logFileCache.has(key)) logFileCache.delete(key)
-  logFileCache.set(key, entry)
-  while (logFileCache.size > LOG_CACHE_MAX_ENTRIES) {
-    const oldest = logFileCache.keys().next().value
-    if (oldest === undefined) break
-    logFileCache.delete(oldest)
-  }
-}
-
 /** resolveProjectPathAccess 结果缓存，key = local path, value = resolved/canonical path */
 const resolvedPathCache = new Map<string, string>()
-
-/**
- * 单个 log 文件默认展示上限（**JS 字符串 `.length`**，即 UTF-16 code unit 数；
- * ASCII 下与字节数等价，多字节字符下会偏小——这是有意的，我们要的是 UI
- * 展示规模上限，不是磁盘字节上限）。
- *
- * 超过时切尾部 + 置 `truncated: true`，UI 上的"查看完整日志"按钮会以
- * `forceFull: true` 再读一次，拿到整个文件。
- *
- * 常规查看只从桌面桥接读取尾部；只有用户显式点击 Show full log 才会读取完整文件。
- */
-const MAX_LOG_READ_CHARS = 512 * 1024
 
 function flowLogSegmentKey(seg: Pick<FlowLogSegment, 'stepName' | 'tool'>): string {
   return `${seg.stepName}\u001f${seg.tool}`
@@ -325,11 +288,23 @@ function clearFlowLogContent(key: string): void {
 
 function invalidateFlowLogContent(key: string): void {
   flowLogContentGenerations.set(key, (flowLogContentGenerations.get(key) ?? 0) + 1)
+  // A new execution may reuse the same (step, tool) key. Let it start its own
+  // hydration rather than waiting for an obsolete NFS read to settle.
+  flowLogFullContentLoads.delete(key)
   clearFlowLogContent(key)
 }
 
 function flowLogContentGeneration(key: string): number {
   return flowLogContentGenerations.get(key) ?? 0
+}
+
+function queueFlowLogHydration(hydrate: () => Promise<boolean>): Promise<boolean> {
+  const queued = flowLogHydrationQueue.then(hydrate, hydrate)
+  flowLogHydrationQueue = queued.then(
+    () => undefined,
+    () => undefined,
+  )
+  return queued
 }
 
 /**
@@ -350,7 +325,6 @@ export function prepareFlowLogSegmentsForRerun(stepNames: readonly string[]): vo
     }
     const key = flowLogSegmentKey(segment)
     invalidateFlowLogContent(key)
-    invalidateLogFileCache(segment.logPath)
     flowLogLiveCursorByKey.delete(key)
   }
   flowLogSegmentsState.value = remainingSegments
@@ -372,6 +346,9 @@ function pruneFlowLogContentKeepOnly(aliveKeys: Iterable<string>): void {
     next[key] = value
   }
   if (changed) flowLogContentState.value = next
+  for (const key of flowLogFullContentLoads.keys()) {
+    if (!alive.has(key)) flowLogFullContentLoads.delete(key)
+  }
 }
 
 async function resolvedPathMemo(localPath: string): Promise<string | null> {
@@ -381,99 +358,6 @@ async function resolvedPathMemo(localPath: string): Promise<string | null> {
   const resolved = await resolveProjectPathAccess(localPath)
   if (resolved) resolvedPathCache.set(localPath, resolved)
   return resolved
-}
-
-interface LogReadResult {
-  content: string
-  truncated: boolean
-  missing: boolean
-  totalSize: number
-}
-
-/**
- * 读取单个 step log 文件内容。默认只读取尾部，避免巨型日志跨 IPC 进入 renderer。
- * 只有 `forceFull` 用于用户显式展开完整日志时才读取整文件。
- *
- * @param logPath **已 resolve / canonicalize 的绝对路径**。作为 `logFileCache` 的 key，
- *                调用方必须先走 `resolvedPathMemo` 保证同一文件始终用同一 key。
- */
-async function readLogFileSmart(
-  logPath: string,
-  opts: { forceFull?: boolean; skipCache?: boolean } = {},
-): Promise<LogReadResult> {
-  if (!opts.skipCache) {
-    const cached = logCacheGet(logPath)
-    if (cached) {
-      // forceFull 要完整内容；若缓存还是截断版则绕过缓存重新读
-      if (!opts.forceFull || !cached.truncated) {
-        return {
-          content: cached.content,
-          truncated: cached.truncated,
-          missing: false,
-          totalSize: cached.totalSize,
-        }
-      }
-    }
-  }
-
-  try {
-    if (!opts.forceFull) {
-      const tail = await readOptionalProjectTextFileTail(logPath, MAX_LOG_READ_CHARS)
-      if (tail === null) {
-        logFileCache.delete(logPath)
-        return { content: '', truncated: false, missing: true, totalSize: 0 }
-      }
-
-      const totalSize = tail.sizeBytes
-      if (tail.truncated) {
-        const firstNl = tail.content.indexOf('\n')
-        const shownTail = firstNl >= 0 ? tail.content.slice(firstNl + 1) : tail.content
-        const shownKb = Math.floor(MAX_LOG_READ_CHARS / 1024)
-        const totalKb = Math.floor(totalSize / 1024)
-        const content = `[… truncated — showing last ~${shownKb} KB of ${totalKb} KB. Click "Show full log" above to load everything. …]\n${shownTail}`
-        logCacheSet(logPath, { content, truncated: true, totalSize })
-        return { content, truncated: true, missing: false, totalSize }
-      }
-
-      logCacheSet(logPath, { content: tail.content, truncated: false, totalSize })
-      return { content: tail.content, truncated: false, missing: false, totalSize }
-    }
-
-    const fullContent = await readOptionalProjectTextFile(logPath)
-    if (fullContent === null) {
-      logFileCache.delete(logPath)
-      return { content: '', truncated: false, missing: true, totalSize: 0 }
-    }
-
-    const totalSize = new TextEncoder().encode(fullContent).byteLength
-    logCacheSet(logPath, { content: fullContent, truncated: false, totalSize })
-    return { content: fullContent, truncated: false, missing: false, totalSize }
-  } catch {
-    logFileCache.delete(logPath)
-    return { content: '', truncated: false, missing: true, totalSize: 0 }
-  }
-}
-
-/**
- * 使某个 log 文件的缓存失效。
- *
- * **前置条件**：`logPath` 必须与读取时的 cache key 一致——即也经过 `resolvedPathMemo`。
- * 传 undefined / 空串时清全部。调用方参考 runtime event 分支的处理方式。
- */
-function invalidateLogFileCache(logPath?: string): void {
-  if (!logPath) {
-    logFileCache.clear()
-    return
-  }
-  logFileCache.delete(logPath)
-}
-
-/** 从缓存里删掉"不再出现在当前 plan 里"的 entry，避免单项目内长期积累 */
-function pruneLogCacheKeepOnly(aliveKeys: Iterable<string>): void {
-  const alive = aliveKeys instanceof Set ? aliveKeys : new Set(aliveKeys)
-  for (const key of logFileCache.keys()) {
-    if (!alive.has(key)) logFileCache.delete(key)
-  }
 }
 
 function currentFlowLogStepName(segments: FlowLogSegment[]): string {
@@ -630,9 +514,8 @@ export async function fetchSharedHomeData(
     _fetchPromise = null
     _cachedForProject = projectPath
     _fetchGeneration += 1
-    // 项目路径不同：所有模块级缓存（log、路径解析、home 资源 blob / 签名）
+    // 项目路径不同：所有模块级缓存（路径解析、home 资源 blob / 签名）
     // 全部失效，否则新项目首屏会闪一下旧项目的 step log / layout / metrics。
-    logFileCache.clear()
     resolvedPathCache.clear()
     resetFlowLogState()
     invalidateHomeAssetCache()
@@ -724,7 +607,6 @@ function clearHomeRunArtifactsForRerun(projectPath: string): void {
   invalidateSharedHomeData()
   invalidateHomeAssetCache()
   resetFlowLogState()
-  invalidateLogFileCache()
 }
 
 function hasHomeRunArtifacts(data: HomeData | null): boolean {
@@ -837,7 +719,6 @@ export function resetSharedHomeDataProjectState() {
   _pendingRerunResetConfirmationWorkspace = ''
   _pendingRerunStaleHomeSignature = ''
   // 项目切换时，所有跨组件的模块级缓存一并失效
-  logFileCache.clear()
   resolvedPathCache.clear()
   resetFlowLogState()
   invalidateHomeAssetCache()
@@ -1159,49 +1040,174 @@ export function useHomeData() {
     if (!isDesktopRuntimeAvailable) return false
 
     const key = flowLogSegmentKey(segment)
-    if (Object.prototype.hasOwnProperty.call(flowLogContentState.value, key)) return true
-    const contentGeneration = flowLogContentGeneration(key)
-
-    const logPath = segment.logPath
-    if (!logPath) return false
-
+    if (flowLogHydrationRequestedKey !== key) {
+      flowLogHydrationRequestedKey = key
+      flowLogHydrationRequestGeneration += 1
+    }
+    const hydrationRequestGeneration = flowLogHydrationRequestGeneration
     const findIndex = (): number =>
-      flowLogSegments.value.findIndex(
-        (s) => s.stepName === segment.stepName && s.tool === segment.tool,
+      flowLogSegments.value.findIndex((candidate) =>
+        sameRuntimeFlowLogSegment(candidate, segment.stepName, segment.tool),
       )
 
-    const idx = findIndex()
-    if (idx < 0) return false
-
-    const result = await readLogFileSmart(logPath)
-    if (contentGeneration !== flowLogContentGeneration(key)) {
-      invalidateLogFileCache(logPath)
-      return false
-    }
-    const current = flowLogSegments.value[idx]
+    let index = findIndex()
+    if (index < 0) return false
+    let current: FlowLogSegment | undefined = flowLogSegments.value[index]
     if (!current) return false
-
-    if (result.missing && current.live) {
-      // Live logs commonly appear a moment after the step starts. Do not rewrite the
-      // segment here: HomeView watches selected segment identity and would immediately
-      // retry this on-demand read, creating a tight IPC loop while the file is absent.
-      return false
+    const hydrationSession = flowLogLoadSession
+    const contentGeneration = flowLogContentGeneration(key)
+    const isCurrentHydration = (): boolean =>
+      hydrationSession === flowLogLoadSession &&
+      hydrationRequestGeneration === flowLogHydrationRequestGeneration &&
+      contentGeneration === flowLogContentGeneration(key)
+    if (
+      current.contentComplete &&
+      Object.prototype.hasOwnProperty.call(flowLogContentState.value, key)
+    ) {
+      return true
     }
 
-    const nextContent = result.missing
-      ? `(Log file not found or unreadable)\n${logPath}`
-      : result.content
-    setFlowLogContent(key, nextContent)
+    const inFlight = flowLogFullContentLoads.get(key)
+    if (inFlight) return await inFlight
 
-    flowLogSegments.value[idx] = {
-      ...current,
-      missing: result.missing,
-      truncated: result.truncated,
-      totalSize: result.totalSize,
-      lastReadOffsetBytes: result.totalSize,
-      logPath,
-    }
-    return !result.missing
+    let hydration: Promise<boolean>
+    hydration = queueFlowLogHydration(async () => {
+      if (!isCurrentHydration()) return false
+      // Runtime events may create a segment before its complete flow.json metadata
+      // arrives. Its conventional ECC log path is enough for the first on-demand
+      // read, so do not re-read flow.json while a completed-event UI is settling.
+      if (!current?.logPath) {
+        const workspacePath = currentProject.value?.path
+        const currentForFallback = current
+        if (workspacePath && currentForFallback?.tool && index >= 0) {
+          const nextCurrent: FlowLogSegment = {
+            ...currentForFallback,
+            logPath: fallbackWorkspaceLogPath(
+              workspacePath,
+              currentForFallback.stepName,
+              currentForFallback.tool,
+            ),
+          }
+          current = nextCurrent
+          flowLogSegments.value[index] = nextCurrent
+        } else {
+          await ensureFlowLogsLoaded()
+          index = findIndex()
+          const refreshedCurrent: FlowLogSegment | undefined =
+            index >= 0 ? flowLogSegments.value[index] : undefined
+          current = refreshedCurrent
+        }
+      }
+      if (!current?.logPath || index < 0) return false
+
+      const logPath = await resolvedPathMemo(current.logPath)
+      if (!logPath) return false
+      if (!isCurrentHydration()) return false
+      const markLoading = (): boolean => {
+        const currentIndex = findIndex()
+        const currentSegment =
+          currentIndex >= 0 ? flowLogSegments.value[currentIndex] : undefined
+        if (!currentSegment) return false
+        flowLogSegments.value[currentIndex] = {
+          ...currentSegment,
+          contentComplete: false,
+          contentLoading: true,
+          logPath,
+          missing: false,
+        }
+        return true
+      }
+      if (!markLoading()) return false
+
+      const chunks: string[] = []
+      let offsetBytes = 0
+      let lastSizeBytes = 0
+      try {
+        while (true) {
+          if (!isCurrentHydration()) return false
+          const chunk = await readOptionalProjectTextFileChunk(
+            logPath,
+            offsetBytes,
+            FLOW_LOG_CONTENT_CHUNK_BYTES,
+          )
+          if (!isCurrentHydration()) return false
+          if (chunk === null) {
+            const currentIndex = findIndex()
+            const currentSegment =
+              currentIndex >= 0 ? flowLogSegments.value[currentIndex] : undefined
+            if (currentSegment) {
+              flowLogSegments.value[currentIndex] = {
+                ...currentSegment,
+                contentComplete: false,
+                contentLoading: false,
+                missing: true,
+              }
+            }
+            setFlowLogContent(key, `(Log file not found or unreadable)\n${logPath}`)
+            return false
+          }
+
+          if (chunk.nextOffsetBytes < offsetBytes) {
+            throw new Error('Log chunk reader returned a backwards byte offset.')
+          }
+          if (!chunk.eof && chunk.nextOffsetBytes === offsetBytes) {
+            throw new Error('Log chunk reader made no byte-offset progress.')
+          }
+
+          chunks.push(chunk.content)
+          offsetBytes = chunk.nextOffsetBytes
+          lastSizeBytes = chunk.sizeBytes
+          if (!chunk.eof) {
+            // Do not monopolize the renderer between NFS reads. This path is user
+            // initiated and intentionally excluded from the runtime render gate.
+            await new Promise<void>((resolve) => {
+              if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => resolve())
+              } else {
+                setTimeout(resolve, 0)
+              }
+            })
+            continue
+          }
+
+          const content = chunks.join('')
+          const currentIndex = findIndex()
+          const currentSegment =
+            currentIndex >= 0 ? flowLogSegments.value[currentIndex] : undefined
+          if (!currentSegment) return false
+          setFlowLogContent(key, content)
+          flowLogSegments.value[currentIndex] = {
+            ...currentSegment,
+            contentComplete: true,
+            contentLoading: false,
+            lastReadOffsetBytes: offsetBytes,
+            logPath,
+            missing: false,
+            totalSize: lastSizeBytes,
+            truncated: false,
+          }
+          return true
+        }
+      } catch (error) {
+        console.warn('Failed to hydrate complete flow log:', error)
+        const currentIndex = findIndex()
+        const currentSegment =
+          currentIndex >= 0 ? flowLogSegments.value[currentIndex] : undefined
+        if (currentSegment) {
+          flowLogSegments.value[currentIndex] = {
+            ...currentSegment,
+            contentLoading: false,
+          }
+        }
+        return false
+      }
+    }).finally(() => {
+      if (flowLogFullContentLoads.get(key) === hydration) {
+        flowLogFullContentLoads.delete(key)
+      }
+    })
+    flowLogFullContentLoads.set(key, hydration)
+    return await hydration
   }
 
   /**
@@ -1213,11 +1219,8 @@ export function useHomeData() {
    *     这一步瞬时完成，不走文件 IO —— remount 或 flow.json 小改动时 UI 零闪烁。
    *  2) 只有当第一屏没有任何 segments 时才置 `flowLogLoading = true`；
    *     revalidate 场景下保持原 segments 持续可见。
-   *  3) 并发 stat + 按需读 log 文件，每完成若干个就 flush 一次 ref
-   *     —— 首批 log 读完就能看到，不用等全部结束。
-   *  4) 单文件超过 MAX_LOG_READ_CHARS 时只读尾部，拦住巨型日志拖垮前端。
-   *  5) plan 构建后清理模块级 `logFileCache` 里本 plan 不再包含的 entry，
-   *     避免同一项目内跑多次 flow 之后缓存无上限累积。
+   *  3) 只同步元数据；日志正文仅在用户选择对应 step 时按需分块读取，
+   *     避免 flow 完成时集中读取 NFS 文件阻塞界面。
    */
   async function loadAllFlowStepLogsFromFlowPath(flowPathRemote: string): Promise<void> {
     if (!isDesktopRuntimeAvailable || !flowPathRemote) {
@@ -1257,12 +1260,7 @@ export function useHomeData() {
         return
       }
 
-      const logPaths = plan.tasks.map((t) => t.logPath)
       const logKeys = plan.tasks.map((t) => flowLogSegmentKey(t.seg))
-
-      // 本次 plan 里不再出现的 log 文件缓存直接清掉，防止同一项目内反复 run
-      // 后 logFileCache 单调增长
-      pruneLogCacheKeepOnly(logPaths)
       pruneFlowLogContentKeepOnly(logKeys)
 
       // 当前页面只展示一个选中 step 的正文，因此这里仅同步 metadata；
@@ -1310,49 +1308,9 @@ export function useHomeData() {
     }
   }
 
-  /**
-   * 展开某个被截断的 step log：绕过缓存、以 `forceFull: true` 重新读整个文件，
-   * 把完整内容写回对应 segment。UI 的"查看完整日志"按钮调用这个。
-   *
-   * 返回：true = 成功加载完整内容；false = 文件丢失 / 读取失败 / 目标 segment 已不存在
-   */
+  /** Reads the complete selected step log through bounded sequential IPC chunks. */
   async function expandFlowLogSegment(segment: FlowLogSegment): Promise<boolean> {
-    if (!isDesktopRuntimeAvailable) return false
-    const logPath = segment.logPath
-    if (!logPath) return false
-
-    const findIndex = (): number =>
-      flowLogSegments.value.findIndex(
-        (s) => s.stepName === segment.stepName && s.tool === segment.tool,
-      )
-
-    if (findIndex() < 0) return false
-
-    const key = flowLogSegmentKey(segment)
-    const contentGeneration = flowLogContentGeneration(key)
-    const result = await readLogFileSmart(logPath, { forceFull: true, skipCache: true })
-    if (contentGeneration !== flowLogContentGeneration(key)) {
-      invalidateLogFileCache(logPath)
-      return false
-    }
-    const idx = findIndex()
-    if (idx < 0) return false
-
-    if (result.missing) {
-      // 展开失败就保持原 truncated 状态，交由 UI 提示
-      return false
-    }
-
-    const cur = flowLogSegments.value[idx]!
-    setFlowLogContent(flowLogSegmentKey(cur), result.content)
-    flowLogSegments.value[idx] = {
-      ...cur,
-      truncated: false,
-      totalSize: result.totalSize,
-      lastReadOffsetBytes: result.totalSize,
-      missing: false,
-    }
-    return true
+    return await ensureFlowLogSegmentContentLoaded(segment)
   }
 
   async function loadHomeAssetsFromData(
@@ -1611,6 +1569,16 @@ export function useHomeData() {
         const key = flowLogSegmentKey(segment)
         invalidateFlowLogContent(key)
         flowLogLiveCursorByKey.delete(key)
+        const index = flowLogSegments.value.findIndex(
+          (candidate) => flowLogSegmentKey(candidate) === key,
+        )
+        if (index >= 0) {
+          flowLogSegments.value[index] = {
+            ...flowLogSegments.value[index]!,
+            contentComplete: false,
+            contentLoading: false,
+          }
+        }
         flowLogStepName.value = segment.stepName
         flowLogError.value = null
       }
@@ -1651,15 +1619,23 @@ export function useHomeData() {
         })
         const key = flowLogSegmentKey(segment)
         const finalLog = typeof eventData.finalLog === 'string' ? eventData.finalLog : ''
-        setFlowLogContent(key, finalLog)
+        // `finalLog` is a bounded ECC tail. Keep it for instant feedback, but do not
+        // treat an empty payload or a 64 KiB tail as the complete on-disk log.
+        if (finalLog) setFlowLogContent(key, finalLog)
         flowLogLiveCursorByKey.delete(key)
         const index = flowLogSegments.value.findIndex(
           (candidate) => flowLogSegmentKey(candidate) === key,
         )
         if (index >= 0) {
+          const finalLogSize = new TextEncoder().encode(finalLog).byteLength
           flowLogSegments.value[index] = {
             ...flowLogSegments.value[index]!,
-            totalSize: new TextEncoder().encode(finalLog).byteLength,
+            contentComplete: false,
+            contentLoading: false,
+            totalSize: Math.max(
+              flowLogSegments.value[index]!.totalSize ?? 0,
+              finalLogSize,
+            ),
             truncated: finalLog.length >= 64 * 1024,
           }
         }

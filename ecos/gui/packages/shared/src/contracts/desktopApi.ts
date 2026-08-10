@@ -136,6 +136,14 @@ export interface DesktopProjectTextFileUpdate {
   truncated: boolean
 }
 
+/** A bounded sequential chunk from a project-scoped UTF-8 text file. */
+export interface DesktopProjectTextFileChunk {
+  content: string
+  eof: boolean
+  nextOffsetBytes: number
+  sizeBytes: number
+}
+
 export interface DesktopProjectLogTailSubscriptionOptions {
   maxInitialChars?: number
   maxChunkChars?: number
@@ -266,6 +274,11 @@ export interface DesktopApi {
       fromOffsetBytes: number,
       maxChars: number,
     ): Promise<DesktopProjectTextFileUpdate | null>
+    readOptionalProjectTextFileChunk?(
+      path: string,
+      fromOffsetBytes: number,
+      maxBytes: number,
+    ): Promise<DesktopProjectTextFileChunk | null>
     subscribeProjectLogTail?(
       path: string,
       options: DesktopProjectLogTailSubscriptionOptions,

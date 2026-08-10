@@ -38,6 +38,7 @@ import {
   type PickedRtlSources,
   type ProjectManifestMutationRequest,
   type ProjectManifestMutationResult,
+  type DesktopProjectTextFileChunk,
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
@@ -163,6 +164,11 @@ export interface DesktopBridgeServices {
       fromOffsetBytes: number,
       maxChars: number,
     ): Promise<DesktopProjectTextFileUpdate | null>
+    readOptionalProjectTextFileChunk(
+      path: string,
+      fromOffsetBytes: number,
+      maxBytes: number,
+    ): Promise<DesktopProjectTextFileChunk | null>
     subscribeProjectLogTail(
       path: string,
       options: {
@@ -1236,6 +1242,17 @@ export function registerIpc(
         path as string,
         fromOffsetBytes as number,
         maxChars as number,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk,
+    async (_event, path, fromOffsetBytes, maxBytes) => {
+      return await services.workspaceService.readOptionalProjectTextFileChunk(
+        path as string,
+        fromOffsetBytes as number,
+        maxBytes as number,
       )
     },
   )

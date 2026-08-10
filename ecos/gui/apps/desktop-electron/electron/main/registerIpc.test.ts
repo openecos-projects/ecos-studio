@@ -111,6 +111,7 @@ function registerHandlers(
       isProjectDirectory: vi.fn(),
       readProjectBinaryFile: vi.fn(),
       readOptionalProjectTextFile: vi.fn(),
+      readOptionalProjectTextFileChunk: vi.fn(),
       readOptionalProjectTextFileTail: vi.fn(),
       readOptionalProjectTextFileUpdate: vi.fn(),
       readProjectTextFile: vi.fn(),
@@ -1051,6 +1052,12 @@ describe('registerIpc', () => {
     services.workspaceService.isProjectDirectory.mockResolvedValue(true)
     services.workspaceService.readProjectTextFile.mockResolvedValue('{"steps":[]}')
     services.workspaceService.readOptionalProjectTextFile.mockResolvedValue(null)
+    services.workspaceService.readOptionalProjectTextFileChunk.mockResolvedValue({
+      content: 'complete log',
+      eof: true,
+      nextOffsetBytes: 12,
+      sizeBytes: 12,
+    })
     services.workspaceService.readProjectTextFileTail.mockResolvedValue('tail log')
     services.workspaceService.readOptionalProjectTextFileTail.mockResolvedValue({
       content: 'tail log',
@@ -1234,6 +1241,17 @@ describe('registerIpc', () => {
       nextOffsetBytes: 1032,
     })
     await expect(
+      handlers.get(desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk)?.(
+        event,
+        '/tmp/project/Synthesis_yosys/log/Synthesis.log',
+        0,
+        262144,
+      ),
+    ).resolves.toMatchObject({
+      content: 'complete log',
+      eof: true,
+    })
+    await expect(
       handlers.get(desktopApiIpcChannels.workspaceSubscribeProjectLogTail)?.(
         event,
         '/tmp/project/Synthesis_yosys/log/Synthesis.log',
@@ -1324,6 +1342,9 @@ describe('registerIpc', () => {
     expect(
       services.workspaceService.readOptionalProjectTextFileUpdate,
     ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 1024, 2048)
+    expect(
+      services.workspaceService.readOptionalProjectTextFileChunk,
+    ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 0, 262144)
     expect(services.workspaceService.subscribeProjectLogTail).toHaveBeenCalledWith(
       '/tmp/project/Synthesis_yosys/log/Synthesis.log',
       {

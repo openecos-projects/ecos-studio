@@ -37,6 +37,8 @@ export const desktopApiIpcChannels = {
     'workspace:read-optional-project-text-file-tail',
   workspaceReadOptionalProjectTextFileUpdate:
     'workspace:read-optional-project-text-file-update',
+  workspaceReadOptionalProjectTextFileChunk:
+    'workspace:read-optional-project-text-file-chunk',
   workspaceSubscribeProjectLogTail: 'workspace:subscribe-project-log-tail',
   workspaceUnsubscribeProjectLogTail: 'workspace:unsubscribe-project-log-tail',
   workspaceReadProjectBinaryFile: 'workspace:read-project-binary-file',

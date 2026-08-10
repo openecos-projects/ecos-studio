@@ -47,6 +47,8 @@ export interface DashboardQorStep {
   passCount: number
   reportCount: number
   runtime: string
+  /** Number of metrics reported by this step's qor_summary.json. */
+  summaryMetricCount: number
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
   totalCount: number
 }
@@ -156,18 +158,23 @@ export function qorSummaryStatus(value: unknown): DashboardQorStep['status'] {
 /** A summary is one analyzed step result, independent of its optional gate list. */
 export function qorSummaryCounts(
   value: unknown,
-): Pick<DashboardQorStep, 'blockedCount' | 'passCount' | 'totalCount'> {
+): Pick<
+  DashboardQorStep,
+  'blockedCount' | 'passCount' | 'summaryMetricCount' | 'totalCount'
+> {
   const summary = record(value)
   const declaredStatus = stringValue(
     summary?.quality_status || summary?.status,
   ).toLowerCase()
+  const summaryMetricCount = finiteNumber(summary?.metric_count) ?? 0
   if (!declaredStatus) {
-    return { blockedCount: 0, passCount: 0, totalCount: 0 }
+    return { blockedCount: 0, passCount: 0, summaryMetricCount, totalCount: 0 }
   }
   const status = qorSummaryStatus(summary)
   return {
     blockedCount: status === 'blocked' ? 1 : 0,
     passCount: status === 'pass' ? 1 : 0,
+    summaryMetricCount,
     totalCount: 1,
   }
 }
@@ -252,6 +259,7 @@ export function qorStepsFromIndex(index: WorkspaceResourceIndex): DashboardQorSt
       passCount: 0,
       reportCount: reports.length,
       runtime: step.runtime,
+      summaryMetricCount: 0,
       status: 'unavailable',
       totalCount: 0,
     }

@@ -187,6 +187,13 @@ const desktopApi: DesktopApi = {
         fromOffsetBytes,
         maxChars,
       ),
+    readOptionalProjectTextFileChunk: (path, fromOffsetBytes, maxBytes) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk,
+        path,
+        fromOffsetBytes,
+        maxBytes,
+      ),
     subscribeProjectLogTail: async (path, options, listener) => {
       const subscriptionId = (await ipcRenderer.invoke(
         desktopApiIpcChannels.workspaceSubscribeProjectLogTail,
@@ -348,7 +355,8 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered, request),
       cancel: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationCancel, request),
-      snapshot: (request) => invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
+      snapshot: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
       startFlow: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeStartFlow, request),
       startStep: (request) =>

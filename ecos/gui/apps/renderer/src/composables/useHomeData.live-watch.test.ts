@@ -13,6 +13,7 @@ const testState = vi.hoisted(() => ({
     monitor: { step: [] },
   })),
   runtimeEvents: null as Ref<unknown[]> | null,
+  readOptionalProjectTextFileChunk: vi.fn(),
   subscribeProjectLogTail: vi.fn(),
   watchProjectFile: vi.fn(),
 }))
@@ -49,6 +50,7 @@ vi.mock('@/api/workspaceResources', () => ({
 
 vi.mock('@/utils/projectFiles', () => ({
   readOptionalProjectTextFile: vi.fn(),
+  readOptionalProjectTextFileChunk: testState.readOptionalProjectTextFileChunk,
   readOptionalProjectTextFileTail: vi.fn(),
   readOptionalProjectTextFileUpdate: vi.fn(),
   readProjectBlobUrl: vi.fn(),
@@ -147,6 +149,67 @@ describe('useHomeData runtime updates', () => {
     )
     expect(Object.values(home.flowLogContentByKey.value)).toContain('final synthesis log')
     scope.stop()
+  })
+
+  it('hydrates a completed step log from bounded chunks when ECC has no final tail', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    testState.readOptionalProjectTextFileChunk.mockReset()
+    testState.readOptionalProjectTextFileChunk.mockImplementation(
+      async (_path: string, offsetBytes: number) =>
+        offsetBytes === 0
+          ? {
+              content: 'complete ',
+              eof: false,
+              nextOffsetBytes: 9,
+              sizeBytes: 12,
+            }
+          : {
+              content: 'log',
+              eof: true,
+              nextOffsetBytes: 12,
+              sizeBytes: 12,
+            },
+    )
+    const { resetSharedHomeDataProjectState, useHomeData } = await import('./useHomeData')
+    const scope = effectScope()
+    const home = scope.run(() => useHomeData())!
+
+    testState.runtimeEvents.value.push({
+      data: {
+        finalLog: '',
+        runtimeProtocolType: 'step.completed',
+        state: 'Success',
+        step: 'fixFanout',
+        tool: 'ecc',
+      },
+    })
+    await nextTick()
+    const segment = home.flowLogSegments.value.find(
+      (item) => item.stepName === 'fixFanout',
+    )
+    expect(segment).toBeDefined()
+    await expect(home.ensureFlowLogSegmentContentLoaded(segment!)).resolves.toBe(true)
+
+    expect(testState.readOptionalProjectTextFileChunk).toHaveBeenNthCalledWith(
+      1,
+      '/workspace/demo/fixFanout_ecc/log/fixFanout.log',
+      0,
+      256 * 1024,
+    )
+    expect(Object.values(home.flowLogContentByKey.value)).toContain('complete log')
+    expect(home.flowLogSegments.value).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          contentComplete: true,
+          contentLoading: false,
+          stepName: 'fixFanout',
+          truncated: false,
+        }),
+      ]),
+    )
+    scope.stop()
+    resetSharedHomeDataProjectState()
   })
 
   it('keeps upstream logs but clears affected segments after a GUI single-step rerun', async () => {

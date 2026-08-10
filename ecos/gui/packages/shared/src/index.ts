@@ -15,6 +15,7 @@ export type {
   DesktopProjectLogTailSubscriptionOptions,
   DesktopProjectDirectoryEntry,
   DesktopProjectManagementWorkspaceTextsRequest,
+  DesktopProjectTextFileChunk,
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,

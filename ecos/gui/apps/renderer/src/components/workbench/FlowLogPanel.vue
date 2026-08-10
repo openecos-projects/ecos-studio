@@ -1,5 +1,9 @@
 <template>
-  <section class="flow-log-panel" :class="{ 'is-collapsed': !expanded }" aria-label="Flow step log">
+  <section
+    class="flow-log-panel"
+    :class="{ 'is-collapsed': !expanded }"
+    aria-label="Flow step log"
+  >
     <header>
       <div class="flow-log-title">
         <i class="ri-terminal-box-line" aria-hidden="true" />
@@ -43,7 +47,7 @@
         <FlowLogCodeViewer
           :content="selectedContent"
           :live="Boolean(selectedSegment.live)"
-          :loading="loading"
+          :loading="loading || Boolean(selectedSegment.contentLoading)"
           :missing="selectedSegment.missing"
         />
       </div>
@@ -159,7 +163,8 @@ function selectSegmentForNode(): void {
 
   selectionPinned.value = true
   const matchingSegments = props.segments.filter(
-    (segment) => segment.stepName.trim().toLowerCase() === node.label.trim().toLowerCase(),
+    (segment) =>
+      segment.stepName.trim().toLowerCase() === node.label.trim().toLowerCase(),
   )
   const segment = matchingSegments.find((item) => item.live) ?? matchingSegments[0]
   if (!segment) {

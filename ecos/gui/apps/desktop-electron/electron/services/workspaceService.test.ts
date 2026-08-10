@@ -126,6 +126,70 @@ describe('WorkspaceService', () => {
     )
   })
 
+  it('reads UTF-8 project text in bounded sequential chunks', async () => {
+    const directory = await createTempDir('ecos-workspace-service-chunk-')
+    const filePath = join(directory, 'fixFanout_ecc', 'log', 'fixFanout.log')
+    await mkdir(join(directory, 'fixFanout_ecc', 'log'), { recursive: true })
+    await writeFile(filePath, 'ab中cd', 'utf8')
+
+    const { service } = createWorkspaceService(directory, filePath)
+    const first = await service.readOptionalProjectTextFileChunk(
+      '/workspace/fixFanout_ecc/log/fixFanout.log',
+      0,
+      4,
+    )
+    const second = await service.readOptionalProjectTextFileChunk(
+      '/workspace/fixFanout_ecc/log/fixFanout.log',
+      first?.nextOffsetBytes ?? 0,
+      4,
+    )
+    const third = await service.readOptionalProjectTextFileChunk(
+      '/workspace/fixFanout_ecc/log/fixFanout.log',
+      second?.nextOffsetBytes ?? 0,
+      4,
+    )
+
+    expect(first).toEqual({
+      content: 'ab',
+      eof: false,
+      nextOffsetBytes: 2,
+      sizeBytes: Buffer.byteLength('ab中cd'),
+    })
+    expect(second).toEqual({
+      content: '中c',
+      eof: false,
+      nextOffsetBytes: 6,
+      sizeBytes: Buffer.byteLength('ab中cd'),
+    })
+    expect(third).toEqual({
+      content: 'd',
+      eof: true,
+      nextOffsetBytes: Buffer.byteLength('ab中cd'),
+      sizeBytes: Buffer.byteLength('ab中cd'),
+    })
+  })
+
+  it('caps a project text chunk to the desktop bridge byte limit', async () => {
+    const directory = await createTempDir('ecos-workspace-service-chunk-limit-')
+    const filePath = join(directory, 'Route_openroad', 'log', 'Route.log')
+    await mkdir(join(directory, 'Route_openroad', 'log'), { recursive: true })
+    await writeFile(filePath, 'x'.repeat(300 * 1024), 'utf8')
+
+    const { service } = createWorkspaceService(directory, filePath)
+    const chunk = await service.readOptionalProjectTextFileChunk(
+      '/workspace/Route_openroad/log/Route.log',
+      0,
+      Number.MAX_SAFE_INTEGER,
+    )
+
+    expect(chunk).toMatchObject({
+      eof: false,
+      nextOffsetBytes: 256 * 1024,
+      sizeBytes: 300 * 1024,
+    })
+    expect(chunk?.content).toHaveLength(256 * 1024)
+  })
+
   it('reads only the tail of a project-scoped text file', async () => {
     const directory = await createTempDir('ecos-workspace-service-tail-')
     const filePath = join(directory, 'Synthesis_yosys', 'log', 'Synthesis.log')
