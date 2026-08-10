@@ -219,6 +219,8 @@ export interface DesktopBridgeServices {
     removePdkReference(resourceId: string): Promise<unknown>
     importPdkPath(path: string): Promise<unknown>
     importLocalPath(resourceId: string, path: string): Promise<unknown>
+    validatePdkRootForWorkspace(pdkRoot: string): Promise<void>
+    recordPdkReference(projectPath: string, pdkRoot: string): Promise<void>
     refreshRegistry(): Promise<unknown>
   }
   eccRuntimeService: {
@@ -1455,7 +1457,14 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccWorkspaceCreate, async (event, request) => {
     const createRequest = request as EccWorkspaceCreateRequest
+    await services.resourceManagerService.validatePdkRootForWorkspace(
+      createRequest.pdkRoot ?? '',
+    )
     const result = await services.eccRuntimeService.createWorkspace(createRequest)
+    await services.resourceManagerService.recordPdkReference(
+      typeof createRequest.directory === 'string' ? createRequest.directory : '',
+      typeof createRequest.pdkRoot === 'string' ? createRequest.pdkRoot : '',
+    )
     const workspaceHandle = workspaceHandleFromResult(result)
     const directory = workspaceDirectoryFromResult(result)
     if (workspaceHandle) {

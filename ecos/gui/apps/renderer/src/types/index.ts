@@ -94,6 +94,12 @@ export interface ImportedPdk {
     directories: string[]
     files: string[]
   }
+  source?: string
+  version?: string
+  active?: boolean
+  status?: string
+  valid?: boolean
+  knownLayout?: boolean
 }
 
 export interface DesignFile {

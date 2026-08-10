@@ -2412,6 +2412,53 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
   })
 
+  it('creates an external PDK JSON from manual PDK resources', async () => {
+    const workspace = useWorkspace()
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/manual-pdk',
+        workspace_id: 'workspace-manual-pdk',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/manual-pdk',
+        pdk: 'local-pdk',
+        pdk_root: '/pdks/local-pdk',
+        parameters: {
+          design: 'manual_pdk',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+        pdk_config_mode: 'manual',
+        pdk_config: {
+          mode: 'manual',
+          tech_lef: ['/pdks/local-pdk/tech.lef'],
+          cell_lef: ['/pdks/local-pdk/stdcells.lef'],
+          liberty: ['/pdks/local-pdk/stdcells.lib'],
+        },
+      }),
+    ).resolves.toBe(true)
+
+    expect(createWorkspaceApiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pdk_json: {
+          name: 'local-pdk',
+          root: '/pdks/local-pdk',
+          tech: '/pdks/local-pdk/tech.lef',
+          lefs: ['/pdks/local-pdk/stdcells.lef'],
+          libs: ['/pdks/local-pdk/stdcells.lib'],
+        },
+      }),
+    )
+  })
+
   it('closes a freshly created workspace handle when local activation fails', async () => {
     const workspace = useWorkspace()
     vi.mocked(desktopApi.workspace.registerProjectRoot).mockResolvedValueOnce('')

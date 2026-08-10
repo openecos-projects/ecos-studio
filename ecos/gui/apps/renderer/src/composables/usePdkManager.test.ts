@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DesktopApi,
   DesktopSettingsValue,
+  ResourceInfo,
   ScannedPdkDirectory,
 } from '@ecos-studio/shared'
 
@@ -16,8 +17,8 @@ const settingsSet = vi.fn(async (_key: string, value: DesktopSettingsValue) => {
 })
 const settingsDelete = vi.fn(async () => undefined)
 const pickDirectory = vi.fn(async () => '/tmp/pdk')
-const importPdkPath = vi.fn(async () => ({
-  id: 'pdk:ics55',
+const pdkResource: ResourceInfo = {
+  id: 'pdk:ics55:local:test',
   type: 'pdk' as const,
   name: 'ics55',
   display_name: 'ics55',
@@ -34,32 +35,16 @@ const importPdkPath = vi.fn(async () => ({
   size: null,
   source: 'local',
   homepage: '',
-  actions: ['validate' as const, 'activate' as const, 'remove_reference' as const],
-  health: {},
+  actions: ['validate', 'activate', 'remove_reference'],
+  health: {
+    detected_file_groups: { directories: ['IP', 'prtech'], files: [] },
+    known_layout: true,
+  },
   error: null,
-}))
-const importLocalPath = vi.fn(async () => ({
-  id: 'pdk:ics55',
-  type: 'pdk' as const,
-  name: 'ics55',
-  display_name: 'ics55',
-  description: '',
-  category: 'pdk',
-  status: 'installed' as const,
-  installed_version: null,
-  available_versions: [],
-  active_version: null,
-  active: false,
-  path: '/tmp/pdk',
-  managed_root: null,
-  platform: null,
-  size: null,
-  source: 'local',
-  homepage: '',
-  actions: ['validate' as const, 'activate' as const, 'remove_reference' as const],
-  health: {},
-  error: null,
-}))
+}
+const importPdkPath = vi.fn(async () => pdkResource)
+const importLocalPath = vi.fn(async () => pdkResource)
+const listResources = vi.fn(async () => ({ diagnostics: [], resources: [pdkResource] }))
 const removePdkReference = vi.fn(async (resourceId: string) => ({
   status: 'removed',
   resource_id: resourceId,
@@ -200,7 +185,7 @@ const desktopBridge = {
     }),
   },
   resources: {
-    list: async () => ({ diagnostics: [], resources: [] }),
+    list: listResources,
     get: async () => {
       throw new Error('not found')
     },
@@ -309,6 +294,7 @@ describe('usePdkManager', () => {
     pickDirectory.mockReset()
     importPdkPath.mockReset()
     importLocalPath.mockReset()
+    listResources.mockReset()
     removePdkReference.mockReset()
     scanPdkDirectory.mockReset()
     localStorageState.clear()
@@ -328,8 +314,9 @@ describe('usePdkManager', () => {
       structuredClone(value)
     })
     pickDirectory.mockResolvedValue('/tmp/pdk')
-    importPdkPath.mockResolvedValue({} as never)
-    importLocalPath.mockResolvedValue({} as never)
+    importPdkPath.mockResolvedValue(pdkResource)
+    importLocalPath.mockResolvedValue(pdkResource)
+    listResources.mockResolvedValue({ diagnostics: [], resources: [pdkResource] })
     removePdkReference.mockImplementation(async (resourceId: string) => ({
       status: 'removed',
       resource_id: resourceId,
@@ -349,7 +336,7 @@ describe('usePdkManager', () => {
     delete (globalThis as { localStorage?: unknown }).localStorage
   })
 
-  it('serializes imported PDKs into plain values before persisting settings', async () => {
+  it('loads PDK instances from Resource Manager after importing a local directory', async () => {
     const { importPdk, importedPdks } = usePdkManager()
 
     const imported = await importPdk()
@@ -359,36 +346,20 @@ describe('usePdkManager', () => {
       pdkId: 'ics55',
     })
     expect(importPdkPath).toHaveBeenCalledWith({ path: '/tmp/pdk' })
-    expect(importedPdks.value).toHaveLength(1)
-    expect(settingsSet).toHaveBeenCalledTimes(1)
-    expect(settingsSet).toHaveBeenCalledWith('imported_pdks', expect.any(Array))
-
-    const persistedValue = settingsSet.mock.calls[0]?.[1]
-    expect(() => structuredClone(persistedValue)).not.toThrow()
+    expect(importedPdks.value).toEqual([
+      expect.objectContaining({
+        id: 'pdk:ics55:local:test',
+        source: 'local',
+        valid: true,
+      }),
+    ])
+    expect(listResources).toHaveBeenCalled()
+    expect(settingsSet).toHaveBeenCalledWith('pdk_inventory_migrated_v1', true)
     expect(showToast).not.toHaveBeenCalled()
   })
 
-  it('falls back to localStorage when desktop settings persistence fails', async () => {
-    settingsSet.mockRejectedValueOnce(new Error('ECOS desktop bridge is not available.'))
-
-    const { importPdk, importedPdks } = usePdkManager()
-    const imported = await importPdk()
-
-    expect(imported).toMatchObject({
-      path: '/tmp/pdk',
-      pdkId: 'ics55',
-    })
-    expect(importedPdks.value).toHaveLength(1)
-    expect(localStorageMock.setItem).toHaveBeenCalledTimes(1)
-    expect(localStorageMock.setItem).toHaveBeenCalledWith(
-      'ecos.imported_pdks',
-      expect.stringContaining('"pdkId":"ics55"'),
-    )
-    expect(showToast).not.toHaveBeenCalled()
-  })
-
-  it('syncs and refreshes persisted imported PDKs during load', async () => {
-    settingsGet.mockResolvedValueOnce([
+  it('imports legacy settings once without writing them back', async () => {
+    settingsGet.mockResolvedValueOnce(null).mockResolvedValueOnce([
       {
         id: 'local-ics55',
         name: 'ICSPROUT 55nm PDK',
@@ -403,43 +374,15 @@ describe('usePdkManager', () => {
         },
       },
     ])
-    scanPdkDirectory.mockResolvedValueOnce({
-      ...scannedPdk,
-      canonicalPath: '/tmp/pdks/ics55',
-      detectedFiles: {
-        directories: ['IP', 'IP/STD_cell', 'prtech', 'prtech/techLEF'],
-        files: [
-          'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
-          'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
-          'prtech/techLEF/N551P6M.lef',
-        ],
-      },
-    })
-
     const { loadPdks, importedPdks } = usePdkManager()
-    await loadPdks()
+    await loadPdks(true)
 
-    expect(scanPdkDirectory).toHaveBeenCalledWith('/tmp/pdks/ics55')
     expect(importPdkPath).toHaveBeenCalledWith({ path: '/tmp/pdks/ics55' })
     expect(importedPdks.value).toHaveLength(1)
-    expect(importedPdks.value[0]?.detectedFiles?.files).toEqual([
-      'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
-      'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
-      'prtech/techLEF/N551P6M.lef',
-    ])
-    expect(settingsSet).toHaveBeenCalledWith(
-      'imported_pdks',
-      expect.arrayContaining([
-        expect.objectContaining({
-          detectedFiles: expect.objectContaining({
-            files: expect.arrayContaining(['prtech/techLEF/N551P6M.lef']),
-          }),
-        }),
-      ]),
-    )
+    expect(settingsSet).toHaveBeenCalledWith('pdk_inventory_migrated_v1', true)
   })
 
-  it('imports a row-bound PDK through the local resource API and persists it for project creation', async () => {
+  it('imports a row-bound PDK through the local resource API', async () => {
     const { importPdkForResource, importedPdks } = usePdkManager()
 
     const imported = await importPdkForResource('pdk:ics55', '/tmp/pdk')
@@ -448,14 +391,12 @@ describe('usePdkManager', () => {
       path: '/tmp/pdk',
       pdkId: 'ics55',
     })
-    expect(scanPdkDirectory).toHaveBeenCalledWith('/tmp/pdk')
     expect(importLocalPath).toHaveBeenCalledWith({
       resourceId: 'pdk:ics55',
       path: '/tmp/pdk',
     })
     expect(importPdkPath).not.toHaveBeenCalled()
     expect(importedPdks.value).toHaveLength(1)
-    expect(settingsSet).toHaveBeenCalledWith('imported_pdks', expect.any(Array))
     expect(showToast).not.toHaveBeenCalled()
   })
 
@@ -475,7 +416,7 @@ describe('usePdkManager', () => {
 
     await removePdk('local-ics55')
 
-    expect(removePdkReference).toHaveBeenCalledWith('pdk:ics55')
-    expect(importedPdks.value).toEqual([])
+    expect(removePdkReference).toHaveBeenCalledWith('local-ics55')
+    expect(listResources).toHaveBeenCalled()
   })
 })
