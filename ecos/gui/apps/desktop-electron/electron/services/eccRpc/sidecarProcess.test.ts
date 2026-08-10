@@ -228,7 +228,9 @@ describe('EccRpcSidecarProcess', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
     const events: unknown[] = []
     const sidecar = new EccRpcSidecarProcess({
-      onEvent: (event) => events.push(event),
+      onEvent: (event) => {
+        events.push(event)
+      },
       spawn: () => child,
       tempDir,
     })
@@ -297,7 +299,9 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     const events: unknown[] = []
     const sidecar = new EccRpcSidecarProcess({
-      onEvent: (event) => events.push(event),
+      onEvent: (event) => {
+        events.push(event)
+      },
       spawn: () => child,
     })
     const client = await sidecar.start()
@@ -314,6 +318,31 @@ describe('EccRpcSidecarProcess', () => {
         type: 'runtime.exited',
       }),
     )
+  })
+
+  it('waits for exit recovery before rejecting pending requests', async () => {
+    const child = new FakeChild()
+    let completeRecovery!: () => void
+    const recovered = new Promise<void>((resolve) => {
+      completeRecovery = resolve
+    })
+    const sidecar = new EccRpcSidecarProcess({
+      onEvent: (event) => (event.type === 'runtime.exited' ? recovered : undefined),
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+    const request = client.call('flow.run')
+    let rejected = false
+    void request.catch(() => {
+      rejected = true
+    })
+
+    child.emit('close', 1, null)
+    await Promise.resolve()
+    expect(rejected).toBe(false)
+
+    completeRecovery()
+    await expect(request).rejects.toThrow('ECC RPC sidecar exited')
   })
 
   it('sends SIGTERM and then SIGKILL when rpc.shutdown times out', async () => {

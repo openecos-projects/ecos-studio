@@ -2,7 +2,10 @@ import type {
   EccRuntimeEvent,
   EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   EccWorkspaceRuntime,
@@ -15,6 +18,13 @@ interface RpcCall {
   method: string
   options?: { timeoutMs?: number }
   params?: Record<string, unknown>
+}
+
+const recoveryRoots: string[] = []
+
+async function writeJson(path: string, data: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, `${JSON.stringify(data, null, 4)}\n`, 'utf8')
 }
 
 function deferred<T>() {
@@ -78,7 +88,7 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
 function createService(directory = '/work/demo') {
   const client = new FakeRpcClient()
   const events: EccRuntimeEvent[] = []
-  let sidecarEvent: ((event: EccRuntimeEvent) => void) | null = null
+  let sidecarEvent: ((event: EccRuntimeEvent) => void | Promise<void>) | null = null
   const sidecar = new FakeSidecar(client)
   const service = new EccWorkspaceRuntime({
     createSidecar: (onEvent) => {
@@ -93,11 +103,17 @@ function createService(directory = '/work/demo') {
     events,
     service,
     sidecar,
-    sidecarEvent: (event: EccRuntimeEvent) => sidecarEvent?.(event),
+    sidecarEvent: async (event: EccRuntimeEvent) => await sidecarEvent?.(event),
   }
 }
 
 describe('EccWorkspaceRuntime', () => {
+  afterEach(async () => {
+    await Promise.all(
+      recoveryRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
+    )
+  })
+
   it('forwards the wizard flow range when creating a workspace', async () => {
     const { client, service } = createService()
     client.responses.push(
@@ -535,7 +551,7 @@ describe('EccWorkspaceRuntime', () => {
         event.type === 'operation.started' && event.method === 'flow.run',
     )
 
-    sidecarEvent({
+    await sidecarEvent({
       code: 1,
       reason: 'unexpected',
       signal: null,
@@ -556,6 +572,51 @@ describe('EccWorkspaceRuntime', () => {
     await expect(flow).resolves.toEqual({ rerun: false })
   })
 
+  it.each([
+    ['flow.run', 'unexpected'],
+    ['flow.run_step', 'shutdown'],
+  ] as const)('recovers persisted flow state for %s on a %s exit', async (method, reason) => {
+    const directory = await mkdtemp(join(tmpdir(), 'ecc-runtime-recovery-'))
+    recoveryRoots.push(directory)
+    await writeJson(join(directory, 'home', 'flow.json'), {
+      steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Ongoing' }],
+    })
+    await writeJson(join(directory, 'Synthesis_yosys', 'subflow.json'), {
+      steps: [{ name: 'run synthesis', state: 'Ongoing' }],
+    })
+
+    const { client, service, sidecarEvent } = createService(directory)
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory, workspaceId: 'workspace-1' },
+    )
+    const workspace = await service.openWorkspace({ directory })
+    const blockedFlow = deferred<unknown>()
+    client.responses.push(blockedFlow.promise)
+    const flow =
+      method === 'flow.run'
+        ? service.runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
+        : service.runStep({ rerun: false, step: 'Synthesis', workspaceHandle: workspace.workspaceHandle })
+    await waitForQueuedOperation()
+
+    await sidecarEvent({
+      code: reason === 'unexpected' ? 1 : 0,
+      reason,
+      signal: null,
+      type: 'runtime.exited',
+    })
+
+    const mainFlow = JSON.parse(await readFile(join(directory, 'home', 'flow.json'), 'utf8'))
+    const subflow = JSON.parse(
+      await readFile(join(directory, 'Synthesis_yosys', 'subflow.json'), 'utf8'),
+    )
+    expect(mainFlow.steps[0].state).toBe('Incomplete')
+    expect(subflow.steps[0].state).toBe('Incomplete')
+
+    blockedFlow.resolve({})
+    await expect(flow).resolves.toEqual({})
+  })
+
   it('restarts and reopens the active workspace on the next call after exit', async () => {
     const { client, service, sidecar, sidecarEvent } = createService()
     client.responses.push(
@@ -567,7 +628,7 @@ describe('EccWorkspaceRuntime', () => {
     )
 
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
-    sidecarEvent({
+    await sidecarEvent({
       code: 1,
       reason: 'unexpected',
       signal: null,

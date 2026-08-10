@@ -36,6 +36,7 @@ import type {
 
 import { normalizeRuntimeError } from './errors'
 import { EccJsonRpcError } from './jsonRpcClient'
+import { recoverInterruptedFlow } from './interruptedFlowRecovery'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
 
 export interface EccRpcRuntimeClient {
@@ -59,7 +60,7 @@ export interface EccWorkspaceRuntimeOptions {
    * control runtime (rpc.hello / rpc.ping only).
    */
   directory: string | null
-  createSidecar(onEvent: (event: EccRuntimeEvent) => void): EccRpcRuntimeSidecar
+  createSidecar(onEvent: (event: EccRuntimeEvent) => void | Promise<void>): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   sessions?: WorkspaceSessionRegistry
 }
@@ -122,6 +123,7 @@ interface RuntimeOperationMetadata {
 }
 
 interface InFlightOperation {
+  method: string
   operationId: string
   workspaceHandle: string | undefined
 }
@@ -530,6 +532,7 @@ export class EccWorkspaceRuntime {
         this.runtimeDirectoryForHandle(workspaceHandle) ?? this.boundDirectory
       this.inFlightCount += 1
       this.inFlightOperation = {
+        method,
         operationId,
         workspaceHandle,
       }
@@ -588,26 +591,39 @@ export class EccWorkspaceRuntime {
     return next
   }
 
-  private handleSidecarEvent(event: EccRuntimeEvent): void {
+  private async handleSidecarEvent(event: EccRuntimeEvent): Promise<void> {
     if (event.type === 'runtime.exited') {
+      const inFlight = this.inFlightOperation
+      const workspaceDirectory = inFlight
+        ? this.runtimeDirectoryForHandle(inFlight.workspaceHandle)
+        : this.boundDirectory
+      let message = event.message
+      if (
+        inFlight &&
+        workspaceDirectory &&
+        (inFlight.method === 'flow.run' || inFlight.method === 'flow.run_step')
+      ) {
+        const recovery = await recoverInterruptedFlow(workspaceDirectory)
+        if (recovery.errors.length > 0) {
+          message = [message, ...recovery.errors].filter(Boolean).join(' ')
+        }
+      }
       this.client = null
       this.ready = false
       this.helloResult = null
       this.sessions.clearEccWorkspaceIds()
-      const inFlight = this.inFlightOperation
       this.emit(
         inFlight
           ? {
               ...event,
+              ...(message ? { message } : {}),
               interruptedOperationId: inFlight.operationId,
-              workspaceDirectory:
-                this.runtimeDirectoryForHandle(inFlight.workspaceHandle) ??
-                this.boundDirectory ??
-                undefined,
+              workspaceDirectory: workspaceDirectory ?? undefined,
               workspaceHandle: inFlight.workspaceHandle,
             }
           : {
               ...event,
+              ...(message ? { message } : {}),
               ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
             },
       )

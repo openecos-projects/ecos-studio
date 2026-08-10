@@ -37,7 +37,7 @@ export interface EccRpcSidecarProcessOptions {
   env?: NodeJS.ProcessEnv
   envProvider?: () => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>
   logDirectoryProvider?: () => string | null
-  onEvent?: (event: EccRuntimeEvent) => void
+  onEvent?: (event: EccRuntimeEvent) => void | Promise<void>
   shutdownTimeoutMs?: number
   spawn?: EccRpcSidecarSpawn
   tempDir?: string
@@ -152,7 +152,7 @@ export class EccRpcSidecarProcess {
     child.stderr?.on('data', (chunk) => {
       const text = dataToString(chunk)
       this.appendLog(text)
-      this.options.onEvent?.({
+      void this.notify({
         logFile: this.logFile ?? undefined,
         text,
         type: 'runtime.stderr',
@@ -165,21 +165,14 @@ export class EccRpcSidecarProcess {
       client.rejectPending(sidecarError)
     })
 
-    child.once('close', (code: number | null, signal: NodeJS.Signals | null) => {
+    child.once('close', async (code: number | null, signal: NodeJS.Signals | null) => {
       this.clearForceKillTimer()
       const reason = this.shuttingDown ? 'shutdown' : 'unexpected'
       const message =
         reason === 'unexpected'
           ? `ECC RPC sidecar exited with ${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`}.`
           : undefined
-      const exitError = new Error(message ?? 'ECC RPC sidecar exited.')
-      client.rejectPending(exitError)
-      if (this.child === child) {
-        this.client = null
-        this.child = null
-        this.spawnEnv = null
-      }
-      this.options.onEvent?.({
+      await this.notify({
         code,
         logFile: this.logFile ?? undefined,
         message,
@@ -187,6 +180,12 @@ export class EccRpcSidecarProcess {
         signal,
         type: 'runtime.exited',
       })
+      if (this.child === child) {
+        this.client = null
+        this.child = null
+        this.spawnEnv = null
+      }
+      client.rejectPending(new Error(message ?? 'ECC RPC sidecar exited.'))
     })
 
     return client
@@ -341,5 +340,17 @@ export class EccRpcSidecarProcess {
       return
     }
     appendFileSync(this.logFile, text, 'utf8')
+  }
+
+  private async notify(event: EccRuntimeEvent): Promise<void> {
+    try {
+      await this.options.onEvent?.(event)
+    } catch (error) {
+      this.appendLog(
+        `ECC RPC runtime event handler failed: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`,
+      )
+    }
   }
 }
