@@ -3567,7 +3567,11 @@ function requiredToolMarkers(normalizedName: string): string[] {
     return ['tools/riscv32-spike-so']
   }
   if (normalizedName === 'ecc-fe-examples') {
-    return ['examples/cl3/filelist.cpu.f', 'examples/cl3/cl3_verilog/cpu_top.sv']
+    return [
+      'examples/ysyx_00000000/filelist.cpu.f',
+      'examples/ysyx_00000000/rtl/ysyx_00000000.sv',
+      'examples/ysyx_00000000/rtl/ysyx_00000000_difftest.sv',
+    ]
   }
   if (normalizedName.startsWith('ecc-fe-test-')) {
     return ['tests']

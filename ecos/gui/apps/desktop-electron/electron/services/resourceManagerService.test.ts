@@ -209,15 +209,20 @@ async function createEccFeExamplesArchive(
   const sourceRoot = join(root, 'ecc-fe-examples-source')
   const sourceDir = join(sourceRoot, 'ecc-fe-examples')
   const archive = join(root, 'ecc-fe-examples.tar')
-  await mkdir(join(sourceDir, 'examples', 'cl3', 'cl3_verilog'), { recursive: true })
+  await mkdir(join(sourceDir, 'examples', 'ysyx_00000000', 'rtl'), { recursive: true })
   await writeFile(
-    join(sourceDir, 'examples', 'cl3', 'filelist.cpu.f'),
-    'cl3_verilog/cpu_top.sv\n',
+    join(sourceDir, 'examples', 'ysyx_00000000', 'filelist.cpu.f'),
+    '+define+ECOS_DIFFTEST\nrtl/ysyx_00000000_difftest.sv\nrtl/ysyx_00000000.sv\n',
     'utf8',
   )
   await writeFile(
-    join(sourceDir, 'examples', 'cl3', 'cl3_verilog', 'cpu_top.sv'),
-    'module cpu_top; endmodule\n',
+    join(sourceDir, 'examples', 'ysyx_00000000', 'rtl', 'ysyx_00000000_difftest.sv'),
+    'module ysyx_00000000_difftest; endmodule\n',
+    'utf8',
+  )
+  await writeFile(
+    join(sourceDir, 'examples', 'ysyx_00000000', 'rtl', 'ysyx_00000000.sv'),
+    'module ysyx_00000000; endmodule\n',
     'utf8',
   )
   await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-examples'])
@@ -1217,7 +1222,7 @@ describe('ResourceManagerService', () => {
     await createInstalledVerilatorRoot(verilatorRoot)
     await createInstalledEccFeRoot(eccFeRoot)
     await createInstalledEccFeSocRoot(eccFeSocRoot)
-    await mkdir(join(eccFeExamplesRoot, 'examples', 'cl3', 'cl3_verilog'), {
+    await mkdir(join(eccFeExamplesRoot, 'examples', 'ysyx_00000000', 'rtl'), {
       recursive: true,
     })
     await mkdir(join(riscvRoot, 'bin'), { recursive: true })
@@ -1244,13 +1249,24 @@ describe('ResourceManagerService', () => {
       await chmod(join(riscvRoot, 'bin', executable), 0o755)
     }
     await writeFile(
-      join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'),
-      'cl3_verilog/cpu_top.sv\n',
+      join(eccFeExamplesRoot, 'examples', 'ysyx_00000000', 'filelist.cpu.f'),
+      '+define+ECOS_DIFFTEST\nrtl/ysyx_00000000_difftest.sv\nrtl/ysyx_00000000.sv\n',
       'utf8',
     )
     await writeFile(
-      join(eccFeExamplesRoot, 'examples', 'cl3', 'cl3_verilog', 'cpu_top.sv'),
-      'module cpu_top; endmodule\n',
+      join(
+        eccFeExamplesRoot,
+        'examples',
+        'ysyx_00000000',
+        'rtl',
+        'ysyx_00000000_difftest.sv',
+      ),
+      'module ysyx_00000000_difftest; endmodule\n',
+      'utf8',
+    )
+    await writeFile(
+      join(eccFeExamplesRoot, 'examples', 'ysyx_00000000', 'rtl', 'ysyx_00000000.sv'),
+      'module ysyx_00000000; endmodule\n',
       'utf8',
     )
     await writeFile(join(surferRoot, 'index.html'), '<!doctype html>\n', 'utf8')
@@ -2186,8 +2202,11 @@ describe('ResourceManagerService', () => {
       readFile(join(eccFeSocRoot, 'ecos_sim_top.v'), 'utf8'),
     ).resolves.toContain('module ecos_sim_top')
     await expect(
-      readFile(join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'), 'utf8'),
-    ).resolves.toContain('cpu_top.sv')
+      readFile(
+        join(eccFeExamplesRoot, 'examples', 'ysyx_00000000', 'filelist.cpu.f'),
+        'utf8',
+      ),
+    ).resolves.toContain('ysyx_00000000.sv')
 
     const manifest = JSON.parse(
       await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),

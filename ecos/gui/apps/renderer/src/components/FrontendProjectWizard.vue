@@ -121,7 +121,7 @@
                     <input
                       v-model="config.parameters.design"
                       type="text"
-                      placeholder="e.g. cl3_soc"
+                      placeholder="e.g. ysyx_00000000_soc"
                       :class="[
                         'w-full rounded-xl border bg-(--bg-secondary)/40 px-4 py-3.5 text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80 focus:outline-none',
                         designNameError
