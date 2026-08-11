@@ -382,6 +382,100 @@ describe('EccWorkspaceRuntime', () => {
     ).toHaveLength(1)
   })
 
+  it('waits for the terminal snapshot instead of returning an Ongoing cache to a remounted page', async () => {
+    const { client, service, sidecarNotification } = createService()
+    const finalSnapshot = deferred<{
+      directory: string
+      flow: {
+        steps: Array<{ name: string; runtime: string; state: string; tool: string }>
+      }
+      home: Record<string, never>
+      lastEventId: string
+      operations: []
+      parameters: Record<string, never>
+    }>()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        directory: '/work/demo',
+        flow: {
+          steps: [{ name: 'Harden', runtime: '', state: 'Ongoing', tool: 'ecc' }],
+        },
+        home: {},
+        lastEventId: 'workspace-1:ongoing',
+        operations: [],
+        parameters: {},
+      },
+      finalSnapshot.promise,
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:1',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { step: 'Harden', tool: 'ecc' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'step.started',
+        workspaceId: 'workspace-1',
+      },
+    })
+    await expect(
+      service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle }),
+    ).resolves.toMatchObject({ lastEventId: 'workspace-1:ongoing' })
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:2',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { result: { state: 'Success' }, step: 'Harden', tool: 'ecc' },
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.completed',
+        workspaceId: 'workspace-1',
+      },
+    })
+
+    const remountedPageSnapshot = service.workspaceSnapshot({
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    let resolved = false
+    void remountedPageSnapshot.then(() => {
+      resolved = true
+    })
+    await waitForQueuedOperation()
+    expect(resolved).toBe(false)
+
+    finalSnapshot.resolve({
+      directory: '/work/demo',
+      flow: {
+        steps: [{ name: 'Harden', runtime: '0:0:10', state: 'Success', tool: 'ecc' }],
+      },
+      home: {},
+      lastEventId: 'workspace-1:completed',
+      operations: [],
+      parameters: {},
+    })
+
+    await expect(remountedPageSnapshot).resolves.toMatchObject({
+      flow: { steps: [expect.objectContaining({ state: 'Success' })] },
+      lastEventId: 'workspace-1:completed',
+    })
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.snapshot'),
+    ).toHaveLength(2)
+  })
+
   it('persists a detached step snapshot before releasing its GUI ACK gate', async () => {
     const { client, service } = createService()
     client.responses.push(

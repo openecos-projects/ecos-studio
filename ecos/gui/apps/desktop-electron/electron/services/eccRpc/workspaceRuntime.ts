@@ -400,6 +400,12 @@ export class EccWorkspaceRuntime {
   async workspaceSnapshot(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRuntimeSnapshot> {
+    // A route can mount after ECC publishes its terminal event but before the
+    // final snapshot has been captured. Do not expose the preceding Ongoing
+    // cache entry to that new renderer surface.
+    const finalSnapshotTask = this.sidecarLifecycle.waitForFinalSnapshot()
+    if (finalSnapshotTask) await finalSnapshotTask
+
     const cachedSnapshot = this.snapshotCache.get()
     if (!this.isActive() && cachedSnapshot) {
       return { ...cachedSnapshot, workspaceHandle: request.workspaceHandle }
@@ -611,12 +617,24 @@ export class EccWorkspaceRuntime {
       return
     }
     const protocolEvent = notification.params
+    const terminalAlreadyRecorded = this.operationTracker.hasTerminalOperation(
+      protocolEvent.operationId,
+    )
     const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     const isTerminal = this.operationTracker.track(protocolEvent)
-    if (protocolEvent.type === 'operation.completed') {
+    if (
+      protocolEvent.type === 'operation.completed' &&
+      isTerminal &&
+      !terminalAlreadyRecorded
+    ) {
+      // The prior cache may describe the final step as Ongoing. A fresh page
+      // must wait for the terminal snapshot or fall back to the bounded disk
+      // loader if capture fails.
+      this.snapshotCache.clear()
       this.sidecarLifecycle.releaseAfterSuccessfulOperation(protocolEvent.workspaceId)
     } else if (
       isTerminal &&
+      !terminalAlreadyRecorded &&
       (protocolEvent.type === 'operation.failed' ||
         protocolEvent.type === 'operation.cancelled')
     ) {

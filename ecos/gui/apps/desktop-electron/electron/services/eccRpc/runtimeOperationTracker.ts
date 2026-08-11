@@ -29,6 +29,10 @@ export class RuntimeOperationTracker {
     return this.activeOperationIds.values().next().value ?? null
   }
 
+  hasTerminalOperation(operationId: string): boolean {
+    return this.terminalOperations.has(operationId)
+  }
+
   track(protocolEvent: EccRuntimeProtocolPayload): boolean {
     if (!terminalEventTypes.has(protocolEvent.type)) {
       if (this.terminalOperations.has(protocolEvent.operationId)) return false
@@ -82,7 +86,9 @@ export class RuntimeOperationTracker {
   }
 }
 
-export function isRuntimeProtocolPayload(value: unknown): value is EccRuntimeProtocolPayload {
+export function isRuntimeProtocolPayload(
+  value: unknown,
+): value is EccRuntimeProtocolPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const event = value as Record<string, unknown>
   return (
@@ -97,7 +103,9 @@ export function isRuntimeProtocolPayload(value: unknown): value is EccRuntimePro
   )
 }
 
-function terminalOperationFrom(protocolEvent: EccRuntimeProtocolPayload): EccRuntimeOperation {
+function terminalOperationFrom(
+  protocolEvent: EccRuntimeProtocolPayload,
+): EccRuntimeOperation {
   const payload = protocolEvent.payload
   const error = isRuntimeErrorPayload(payload.error)
     ? payload.error

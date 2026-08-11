@@ -24,6 +24,10 @@ export class RuntimeSidecarLifecycle {
     return this.finalSnapshotTask !== null
   }
 
+  waitForFinalSnapshot(): Promise<void> | null {
+    return this.finalSnapshotTask
+  }
+
   releaseAfterSuccessfulOperation(workspaceId: string): void {
     if (this.finalSnapshotTask || this.options.hasActiveOperations()) return
     this.cancelDiagnosticRelease()
@@ -39,7 +43,8 @@ export class RuntimeSidecarLifecycle {
 
   retainFailedOperationForDiagnostics(): void {
     if (this.options.hasActiveOperations() || this.diagnosticReleaseTimer) return
-    const timeoutMs = this.options.diagnosticIdleTimeoutMs ?? DEFAULT_DIAGNOSTIC_IDLE_TIMEOUT_MS
+    const timeoutMs =
+      this.options.diagnosticIdleTimeoutMs ?? DEFAULT_DIAGNOSTIC_IDLE_TIMEOUT_MS
     this.diagnosticReleaseTimer = setTimeout(() => {
       this.diagnosticReleaseTimer = null
       if (this.options.hasActiveOperations()) return
