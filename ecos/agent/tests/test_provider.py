@@ -397,19 +397,21 @@ def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
 
 
 @pytest.mark.parametrize(
-    ("message", "expected"),
+    ("message", "language"),
     [
-        ("hello", "Hello. What would you like to know about ECOS?"),
-        ("你好", "你好。你想了解 ECOS 的什么内容？"),
+        ("hello", "en"),
+        ("你好", "zh"),
     ],
 )
-def test_home_greeting_does_not_call_codex_or_advance(
-    message: str, expected: str
+def test_home_greeting_uses_codex_chat_fallback_without_advancing(
+    message: str, language: str
 ) -> None:
     events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
 
-    def answer_chat(_context: dict[str, object]) -> dict[str, object]:
-        raise AssertionError("a pure greeting must not call Codex")
+    def answer_chat(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return _chat_response(answer=f"Codex answered {context['natural_language_request']}.")
 
     provider = EcosAgentProvider(emit=events.append, chat_response_parser=answer_chat)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
@@ -417,7 +419,10 @@ def test_home_greeting_does_not_call_codex_or_advance(
     _send(provider, session_id, message)
 
     assert provider.sessions[session_id].phase == "home_ready"
-    assert _last_event(events, "message")["text"] == expected
+    assert contexts[0]["natural_language_request"] == message
+    assert contexts[0]["response_language"] == language
+    assert _last_event(events, "message")["text"] == f"Codex answered {message}."
+    assert _last_event(events, "message")["contract"]["schema_version"] == "flow-agent.gui_chat_response.v1"
     assert len([event for event in events if event["type"] == "choice"]) == choice_count
     assert not any(event["type"] == "error" for event in events)
 
