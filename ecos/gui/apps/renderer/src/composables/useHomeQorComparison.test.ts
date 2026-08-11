@@ -307,9 +307,7 @@ describe('useHomeQorComparison', () => {
   })
 
   it('uses the first other workspace as the legacy project default baseline without writing', async () => {
-    testState.readManifest.mockResolvedValue(
-      JSON.stringify(projectManifest(false)),
-    )
+    testState.readManifest.mockResolvedValue(JSON.stringify(projectManifest(false)))
     const comparison = scope.run(() => useHomeQorComparison())!
 
     await vi.waitFor(() => {

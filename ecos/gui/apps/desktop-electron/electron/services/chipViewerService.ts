@@ -10,7 +10,7 @@ import {
   watch as watchFsDirectoryCallback,
 } from 'node:fs'
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import {
   normalizeLocalPath,
   type ChipViewerOpenRequest,

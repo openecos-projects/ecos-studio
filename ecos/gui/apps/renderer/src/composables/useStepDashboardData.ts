@@ -256,8 +256,7 @@ export function useStepDashboardData() {
       affectedStepNames.has(currentStep.value.trim().toLowerCase())
     ) {
       requestVersion += 1
-      // Keep Basic Info mounted while ECC resets and recreates step artifacts.
-      // The terminal resource refresh replaces this snapshot with new values.
+      data.value = null
       error.value = null
       loading.value = false
     }

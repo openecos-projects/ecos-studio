@@ -1,10 +1,7 @@
 import type { EccRpcShutdownResult, EccRuntimeEvent } from '@ecos-studio/shared'
 
 export interface RuntimeQuitGuardApp {
-  on(
-    event: 'before-quit',
-    listener: (event: { preventDefault(): void }) => void,
-  ): unknown
+  on(event: 'before-quit', listener: (event: { preventDefault(): void }) => void): unknown
   quit(): void
 }
 
@@ -67,7 +64,10 @@ export function installRuntimeQuitGuard(options: RuntimeQuitGuardOptions): void 
   })
 }
 
-function shouldRetryShutdown(event: EccRuntimeEvent, runtime: RuntimeQuitGuardRuntime): boolean {
+function shouldRetryShutdown(
+  event: EccRuntimeEvent,
+  runtime: RuntimeQuitGuardRuntime,
+): boolean {
   if (!runtime.hasPendingRuntimeWork()) return true
   if (event.type === 'runtime.idle' || event.type === 'runtime.exited') return true
   return event.type === 'runtime.protocol' && safeBoundaryEventTypes.has(event.event.type)

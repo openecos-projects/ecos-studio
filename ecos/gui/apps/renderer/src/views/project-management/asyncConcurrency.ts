@@ -3,10 +3,12 @@ export async function mapWithConcurrency<T, R>(
   concurrency: number,
   mapper: (value: T) => Promise<R>,
 ): Promise<R[]> {
-  const results = new Array<R>(values.length)
+  const results = Array.from({ length: values.length }, () => undefined as R)
   let nextIndex = 0
   const workers = Array.from(
-    { length: Math.min(Math.max(concurrency, 1), values.length) },
+    {
+      length: Math.min(Math.max(concurrency, 1), values.length),
+    },
     async () => {
       while (nextIndex < values.length) {
         const index = nextIndex

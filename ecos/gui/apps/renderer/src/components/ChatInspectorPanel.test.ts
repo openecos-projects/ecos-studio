@@ -16,7 +16,10 @@ describe('ChatInspectorPanel', () => {
   it('places the GUI artifact clear control immediately before chat fullscreen', () => {
     const tabActionsStart = source.indexOf('<template #tab-actions>')
     const clearControl = source.indexOf('chat-inspector-clear-artifacts', tabActionsStart)
-    const fullscreenControl = source.indexOf('chat-inspector-fullscreen-toggle', tabActionsStart)
+    const fullscreenControl = source.indexOf(
+      'chat-inspector-fullscreen-toggle',
+      tabActionsStart,
+    )
 
     expect(clearControl).toBeGreaterThan(tabActionsStart)
     expect(fullscreenControl).toBeGreaterThan(clearControl)

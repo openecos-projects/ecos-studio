@@ -1224,7 +1224,7 @@ export function registerWorkspaceInManifest(
     : normalizeFlowStep(existingWorkspace?.end_step ?? 'Harden')
   const workspaceName = manifest.design_name
   const workspaceParameters = {
-    ...(input.config?.parameters ?? {}),
+    ...input.config?.parameters,
     design: manifest.design_name,
   }
   const parameterPatch = input.config
@@ -1235,7 +1235,7 @@ export function registerWorkspaceInManifest(
           workspaceParameters,
         ),
       }
-    : (existingWorkspace?.parameter_patch ?? {})
+    : { ...existingWorkspace?.parameter_patch }
 
   const workspace: ProjectWorkspaceManifest = {
     workspace_id: workspaceId,

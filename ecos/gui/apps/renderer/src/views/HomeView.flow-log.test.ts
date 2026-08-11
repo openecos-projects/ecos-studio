@@ -12,7 +12,9 @@ describe('HomeView flow run integration', () => {
     expect(homeViewSource).toContain(
       ':execution-active="currentWorkspaceFlowExecutionActive"',
     )
-    expect(homeViewSource).toContain(':log-rerun-affected-steps="flowLogRerunAffectedSteps"')
+    expect(homeViewSource).toContain(
+      ':log-rerun-affected-steps="flowLogRerunAffectedSteps"',
+    )
   })
 
   it('does not retain the removed overview or left-side flow panel', () => {

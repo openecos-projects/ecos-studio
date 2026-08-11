@@ -42,11 +42,7 @@ export function notifyWorkspaceRerunPrepared(event: WorkspaceRerunPrepared): voi
   if (!projectPath) return
 
   const affectedSteps = Array.from(
-    new Set(
-      event.affectedSteps
-        .map((step) => step.trim())
-        .filter(Boolean),
-    ),
+    new Set(event.affectedSteps.map((step) => step.trim()).filter(Boolean)),
   )
   const preparedEvent: WorkspaceRerunPrepared = {
     ...event,

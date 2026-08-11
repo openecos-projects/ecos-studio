@@ -245,7 +245,9 @@ describe('useHomeData runtime updates', () => {
 
     await nextTick()
 
-    expect(Object.values(home.flowLogContentByKey.value)).toContain('cts completed output\n')
+    expect(Object.values(home.flowLogContentByKey.value)).toContain(
+      'cts completed output\n',
+    )
     expect(home.flowLogSegments.value).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ live: false, state: 'Success', stepName: 'cts' }),

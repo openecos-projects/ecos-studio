@@ -361,7 +361,7 @@ describe('EccRpcRuntimeService pool', () => {
 
   it('requests ECC cancellation when GUI quit reaches a rendered-step safe boundary', async () => {
     const pool = createPool()
-    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    await pool.service.openWorkspace({ directory: '/work/demo' })
     const sidecar = pool.sidecarFor('/work/demo')
     sidecar.shutdownError = new EccRpcShutdownDeferredError({
       operationId: 'operation-1',

@@ -697,9 +697,7 @@ function isCurrentWorkspaceRerunTerminalEvent(
   const eventData = data as Record<string, unknown>
   if (eventData.cmd !== 'rtl2gds' && eventData.cmd !== 'run_step') return false
   const protocolType =
-    typeof eventData.runtimeProtocolType === 'string'
-      ? eventData.runtimeProtocolType
-      : ''
+    typeof eventData.runtimeProtocolType === 'string' ? eventData.runtimeProtocolType : ''
   const isTerminalOperation = [
     'operation.completed',
     'operation.failed',
@@ -812,7 +810,10 @@ export function useHomeData() {
 
   function enqueueRuntimeFlowLogChunk(key: string, chunk: string): void {
     if (!chunk) return
-    pendingRuntimeFlowLogChunks.set(key, `${pendingRuntimeFlowLogChunks.get(key) ?? ''}${chunk}`)
+    pendingRuntimeFlowLogChunks.set(
+      key,
+      `${pendingRuntimeFlowLogChunks.get(key) ?? ''}${chunk}`,
+    )
     scheduleRuntimeFlowLogFlush()
   }
 
@@ -847,7 +848,9 @@ export function useHomeData() {
   function processRuntimeEvent(event: unknown): void {
     const projectPath = currentProject.value?.path
     if (!projectPath || !shouldProcessRuntimeEvent(event)) return
-    const eventData = (event as { data?: unknown }).data as Record<string, unknown> | undefined
+    const eventData = (event as { data?: unknown }).data as
+      | Record<string, unknown>
+      | undefined
     const protocolType = eventData?.runtimeProtocolType
     if (
       protocolType === 'step.started' ||
@@ -927,10 +930,7 @@ export function useHomeData() {
           ...flowLogSegments.value[index]!,
           contentComplete: false,
           contentLoading: false,
-          totalSize: Math.max(
-            flowLogSegments.value[index]!.totalSize ?? 0,
-            finalLogSize,
-          ),
+          totalSize: Math.max(flowLogSegments.value[index]!.totalSize ?? 0, finalLogSize),
           truncated: finalLog.length >= 64 * 1024,
         }
       }
@@ -1756,11 +1756,11 @@ export function useHomeData() {
     },
   )
 
-  watch(
-    runtimeEvents,
-    (events) => consumeRuntimeEvents(events),
-    { deep: true, flush: 'sync', immediate: true },
-  )
+  watch(runtimeEvents, (events) => consumeRuntimeEvents(events), {
+    deep: true,
+    flush: 'sync',
+    immediate: true,
+  })
 
   unregisterHomeRunArtifactReset = onHomeRunArtifactReset((projectPath) => {
     const currentProjectPath = currentProject.value?.path

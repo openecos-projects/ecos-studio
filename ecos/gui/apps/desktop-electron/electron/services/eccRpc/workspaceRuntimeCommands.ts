@@ -75,7 +75,10 @@ export class WorkspaceRuntimeCommands {
             workspaceCreatePayload(request, payloadOptions),
           )
         } catch (error) {
-          if (payloadOptions.includeFlowConfig && isUnknownJsonRpcFieldError(error, 'flowConfig')) {
+          if (
+            payloadOptions.includeFlowConfig &&
+            isUnknownJsonRpcFieldError(error, 'flowConfig')
+          ) {
             payloadOptions.includeFlowConfig = false
             continue
           }
@@ -86,7 +89,10 @@ export class WorkspaceRuntimeCommands {
           throw error
         }
       }
-      const session = this.context.sessions.activate(response.directory, response.workspaceId)
+      const session = this.context.sessions.activate(
+        response.directory,
+        response.workspaceId,
+      )
       return { directory: session.directory, workspaceHandle: session.workspaceHandle }
     })
   }
@@ -95,14 +101,18 @@ export class WorkspaceRuntimeCommands {
     return this.context.enqueue('workspace.open', undefined, async () => {
       if (this.context.lazyWorkspaceOpen) {
         const existing = this.context.sessions.findByDirectory(request.directory)
-        const session = existing ?? this.context.sessions.activate(request.directory, null)
+        const session =
+          existing ?? this.context.sessions.activate(request.directory, null)
         return { directory: session.directory, workspaceHandle: session.workspaceHandle }
       }
       const client = await this.context.ensureStarted()
       const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {
         directory: request.directory,
       })
-      const session = this.context.sessions.activate(response.directory, response.workspaceId)
+      const session = this.context.sessions.activate(
+        response.directory,
+        response.workspaceId,
+      )
       return { directory: session.directory, workspaceHandle: session.workspaceHandle }
     })
   }
@@ -138,7 +148,9 @@ export class WorkspaceRuntimeCommands {
   }
 
   workspaceHome(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult> {
-    return this.workspaceCall('workspace.home', request, (workspaceId) => ({ workspaceId }))
+    return this.workspaceCall('workspace.home', request, (workspaceId) => ({
+      workspaceId,
+    }))
   }
 
   workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {
@@ -149,11 +161,17 @@ export class WorkspaceRuntimeCommands {
     }))
   }
 
-  refreshConfig(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRefreshConfigResult> {
-    return this.workspaceCall('workspace.refresh_config', request, (workspaceId) => ({ workspaceId }))
+  refreshConfig(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceRefreshConfigResult> {
+    return this.workspaceCall('workspace.refresh_config', request, (workspaceId) => ({
+      workspaceId,
+    }))
   }
 
-  syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<EccWorkspaceSyncConfigResult> {
+  syncConfig(
+    request: EccWorkspaceSyncConfigRequest,
+  ): Promise<EccWorkspaceSyncConfigResult> {
     return this.workspaceCall('workspace.sync_config', request, (workspaceId) => ({
       configPath: request.configPath,
       workspaceId,
@@ -161,7 +179,9 @@ export class WorkspaceRuntimeCommands {
   }
 
   resetFlow(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceResetFlowResult> {
-    return this.workspaceCall('workspace.reset_flow', request, (workspaceId) => ({ workspaceId }))
+    return this.workspaceCall('workspace.reset_flow', request, (workspaceId) => ({
+      workspaceId,
+    }))
   }
 
   exportSignoff(
@@ -194,16 +214,20 @@ export class WorkspaceRuntimeCommands {
   }
 
   layoutEditApply(request: EccLayoutEditApplyRequest): Promise<EccLayoutEditApplyResult> {
-    return this.context.enqueue('layout.edit.apply', request.workspaceHandle, async () => {
-      const client = await this.context.ensureStarted()
-      await this.context.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccLayoutEditApplyResult>('layout.edit.apply', {
-        baseRevision: request.baseRevision,
-        commandId: request.commandId,
-        editSessionId: request.editSessionId,
-        operation: request.operation,
-      })
-    })
+    return this.context.enqueue(
+      'layout.edit.apply',
+      request.workspaceHandle,
+      async () => {
+        const client = await this.context.ensureStarted()
+        await this.context.resolveEccWorkspaceId(request.workspaceHandle)
+        return await client.call<EccLayoutEditApplyResult>('layout.edit.apply', {
+          baseRevision: request.baseRevision,
+          commandId: request.commandId,
+          editSessionId: request.editSessionId,
+          operation: request.operation,
+        })
+      },
+    )
   }
 
   layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult> {
@@ -212,7 +236,10 @@ export class WorkspaceRuntimeCommands {
       await this.context.resolveEccWorkspaceId(request.workspaceHandle)
       return await client.call<EccLayoutEditSaveResult>(
         'layout.edit.save',
-        { editSessionId: request.editSessionId, expectedRevision: request.expectedRevision },
+        {
+          editSessionId: request.editSessionId,
+          expectedRevision: request.expectedRevision,
+        },
         { timeoutMs: 0 },
       )
     })
@@ -221,13 +248,17 @@ export class WorkspaceRuntimeCommands {
   layoutEditDiscard(
     request: EccLayoutEditDiscardRequest,
   ): Promise<EccLayoutEditDiscardResult> {
-    return this.context.enqueue('layout.edit.discard', request.workspaceHandle, async () => {
-      const client = await this.context.ensureStarted()
-      await this.context.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccLayoutEditDiscardResult>('layout.edit.discard', {
-        editSessionId: request.editSessionId,
-      })
-    })
+    return this.context.enqueue(
+      'layout.edit.discard',
+      request.workspaceHandle,
+      async () => {
+        const client = await this.context.ensureStarted()
+        await this.context.resolveEccWorkspaceId(request.workspaceHandle)
+        return await client.call<EccLayoutEditDiscardResult>('layout.edit.discard', {
+          editSessionId: request.editSessionId,
+        })
+      },
+    )
   }
 
   runFlow(request: EccFlowRunRequest): Promise<EccFlowRunResult> {
@@ -237,8 +268,11 @@ export class WorkspaceRuntimeCommands {
       request.workspaceHandle,
       async () => {
         const client = await this.context.ensureStarted()
-        if (rerun) this.context.sidecar.relocateLogFileFrom?.(this.context.boundDirectory())
-        const workspaceId = await this.context.resolveEccWorkspaceId(request.workspaceHandle)
+        if (rerun)
+          this.context.sidecar.relocateLogFileFrom?.(this.context.boundDirectory())
+        const workspaceId = await this.context.resolveEccWorkspaceId(
+          request.workspaceHandle,
+        )
         return await client.call<EccFlowRunResult>(
           'flow.run',
           { rerun, workspaceId },
@@ -256,8 +290,11 @@ export class WorkspaceRuntimeCommands {
       request.workspaceHandle,
       async () => {
         const client = await this.context.ensureStarted()
-        if (rerun) this.context.sidecar.relocateLogFileFrom?.(this.context.boundDirectory())
-        const workspaceId = await this.context.resolveEccWorkspaceId(request.workspaceHandle)
+        if (rerun)
+          this.context.sidecar.relocateLogFileFrom?.(this.context.boundDirectory())
+        const workspaceId = await this.context.resolveEccWorkspaceId(
+          request.workspaceHandle,
+        )
         return await client.call<EccFlowRunStepResult>(
           'flow.run_step',
           { rerun, step: request.step, workspaceId },
@@ -276,7 +313,9 @@ export class WorkspaceRuntimeCommands {
   ): Promise<T> {
     return this.context.enqueue(method, request.workspaceHandle, async () => {
       const client = await this.context.ensureStarted()
-      const workspaceId = await this.context.resolveEccWorkspaceId(request.workspaceHandle)
+      const workspaceId = await this.context.resolveEccWorkspaceId(
+        request.workspaceHandle,
+      )
       return await client.call<T>(method, params(workspaceId), options)
     })
   }

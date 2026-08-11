@@ -11,9 +11,7 @@ import {
   type ProjectQorWorkspaceComparison,
 } from '@/utils/projectQorTrend'
 import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
-import {
-  readProjectQorWorkspaceData,
-} from '@/views/project-management/projectWorkspaceAnalysisData'
+import { readProjectQorWorkspaceData } from '@/views/project-management/projectWorkspaceAnalysisData'
 import { getDesktopApi } from '@/platform/desktop'
 import { onWorkspaceRerunPrepared } from './homeRunArtifacts'
 import { useWorkspace } from './useWorkspace'
@@ -229,7 +227,8 @@ export function useHomeQorComparison() {
         return
       }
       const currentWorkspaceId = currentWorkspace.workspace_id
-      const workspaceCacheKey = (workspaceId: string) => `${projectRoot}\u0000${workspaceId}`
+      const workspaceCacheKey = (workspaceId: string) =>
+        `${projectRoot}\u0000${workspaceId}`
       const loadWorkspaceIds = [currentWorkspaceId]
       if (
         baseline.workspaceId !== currentWorkspaceId &&
@@ -361,7 +360,9 @@ function normalizePath(path: string): string {
 function withQorReadDeadline<T>(request: Promise<T>, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error(`Timed out after ${QOR_READ_TIMEOUT_MS}ms while reading ${label}.`))
+      reject(
+        new Error(`Timed out after ${QOR_READ_TIMEOUT_MS}ms while reading ${label}.`),
+      )
     }, QOR_READ_TIMEOUT_MS)
     request.then(
       (value) => {

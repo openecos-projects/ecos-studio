@@ -36,13 +36,17 @@ describe('WorkspaceWorkbench shared right panel', () => {
     expect(source).toContain('lastRunningNodeId')
     expect(source).toContain('nextFlowNodeSelection')
     expect(source).toContain('selectedFlowNode.value =')
-    expect(source).toContain('if (!logSelectionPinned.value) selectedLogNode.value = selectedFlowNode.value')
+    expect(source).toContain(
+      'if (!logSelectionPinned.value) selectedLogNode.value = selectedFlowNode.value',
+    )
     expect(source).toContain('function selectFlowNode')
   })
 
   it('unpins a selected log when GUI rerun preparation invalidates that step', () => {
     expect(source).toContain('logRerunAffectedSteps?: readonly string[]')
-    expect(source).toContain('affectedLabels.has(selectedLogNode.value.label.trim().toLowerCase())')
+    expect(source).toContain(
+      'affectedLabels.has(selectedLogNode.value.label.trim().toLowerCase())',
+    )
     expect(source).toContain('logSelectionPinned.value = false')
   })
 })

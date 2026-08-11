@@ -247,8 +247,12 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
  */
 export function useParameters() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, resourceVersions, invalidateWorkspaceResources, workspaceSession } =
-    useWorkspace()
+  const {
+    currentProject,
+    resourceVersions,
+    invalidateWorkspaceResources,
+    workspaceSession,
+  } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
 
   const config = reactive<ConfigData>(getDefaultConfig())
@@ -331,7 +335,6 @@ export function useParameters() {
   }
 
   function applyParametersData(parametersData: ParametersData): void {
-
     console.log('Loaded parameters data:', parametersData)
 
     const transformedConfig = transformParametersToConfig(parametersData)
@@ -493,7 +496,10 @@ export function useParameters() {
           const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
             resolveProjectPathAccess(parametersPath),
           )
-          if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) {
+          if (
+            resolvedPath === undefined &&
+            !workspaceLifecycle.isCurrentSession(sessionId)
+          ) {
             return
           }
           if (loadResourceToken !== parametersResourceToken) return

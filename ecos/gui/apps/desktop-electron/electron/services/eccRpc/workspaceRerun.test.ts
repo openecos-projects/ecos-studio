@@ -354,9 +354,11 @@ describe('prepareWorkspaceRerun', () => {
     ]
     const runtime = {
       refreshConfig: vi.fn().mockResolvedValue({}),
-      startStepOperation: vi.fn().mockImplementation(async (request: { step: string }) => ({
-        operationId: `operation-${request.step}`,
-      })),
+      startStepOperation: vi
+        .fn()
+        .mockImplementation(async (request: { step: string }) => ({
+          operationId: `operation-${request.step}`,
+        })),
       syncConfig: vi.fn().mockResolvedValue({}),
       waitForOperation: vi.fn().mockResolvedValue({ error: null, state: 'succeeded' }),
     }
@@ -367,7 +369,9 @@ describe('prepareWorkspaceRerun', () => {
       configPath: `${contract.target_workspace}/config/dreamplace.json`,
       workspaceHandle: 'target-gui-handle',
     })
-    expect(runtime.startStepOperation.mock.calls.map(([request]) => request.step)).toEqual([
+    expect(
+      runtime.startStepOperation.mock.calls.map(([request]) => request.step),
+    ).toEqual([
       'place',
       'CTS',
       'legalization',
