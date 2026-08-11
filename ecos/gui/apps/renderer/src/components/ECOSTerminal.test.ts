@@ -298,6 +298,19 @@ describe('ECOSTerminal', () => {
     )
   })
 
+  it('closes the panel instead of recreating zsh after deleting the last session', () => {
+    const deleteStart = terminalSource.indexOf(
+      'async function deleteTerminal(localId: string)',
+    )
+    const deleteEnd = terminalSource.indexOf('function closePanel()', deleteStart)
+    const deleteSource = terminalSource.slice(deleteStart, deleteEnd)
+
+    expect(deleteSource).toMatch(
+      /if \(!replacementRecord\) \{[\s\S]*activeTerminalId\.value = null[\s\S]*closePanel\(\)[\s\S]*return/,
+    )
+    expect(deleteSource).not.toContain('createAndActivateTerminal()')
+  })
+
   it('lets the right-side terminal session list be resized horizontally', () => {
     expect(terminalSource).toContain('const DEFAULT_TERMINAL_SESSION_LIST_WIDTH = 150')
     expect(terminalSource).toContain('const MIN_TERMINAL_SESSION_LIST_WIDTH = 104')
