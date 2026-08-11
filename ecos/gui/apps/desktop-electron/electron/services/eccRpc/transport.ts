@@ -1,5 +1,6 @@
 const HEADER_SEPARATOR = Buffer.from('\r\n\r\n', 'ascii')
 const CONTENT_LENGTH_PATTERN = /^Content-Length:\s*(\d+)$/i
+const CONTENT_LENGTH_PREFIX = Buffer.from('Content-Length:', 'ascii')
 
 export class TransportError extends Error {
   constructor(message: string) {
@@ -45,6 +46,35 @@ export class ContentLengthDecoder {
     }
 
     return messages
+  }
+
+  /**
+   * Drops a malformed stdout preamble and positions the decoder at the next
+   * complete Content-Length frame. Tool output must never permanently poison
+   * the sidecar event stream after it leaks onto stdout.
+   */
+  discardMalformedPrefix(): string {
+    const nextFrame = this.buffer.indexOf(CONTENT_LENGTH_PREFIX, 1)
+    if (nextFrame > 0) {
+      const discarded = this.buffer.subarray(0, nextFrame)
+      this.buffer = this.buffer.subarray(nextFrame)
+      return discarded.toString('utf8')
+    }
+
+    const headerEnd = this.buffer.indexOf(HEADER_SEPARATOR)
+    if (headerEnd >= 0) {
+      const discarded = this.buffer.subarray(0, headerEnd + HEADER_SEPARATOR.byteLength)
+      this.buffer = this.buffer.subarray(headerEnd + HEADER_SEPARATOR.byteLength)
+      return discarded.toString('utf8')
+    }
+
+    const retainedTailLength = Math.min(
+      this.buffer.byteLength,
+      CONTENT_LENGTH_PREFIX.byteLength - 1,
+    )
+    const discarded = this.buffer.subarray(0, this.buffer.byteLength - retainedTailLength)
+    this.buffer = this.buffer.subarray(this.buffer.byteLength - retainedTailLength)
+    return discarded.toString('utf8')
   }
 
   private parseContentLength(headerText: string): number {

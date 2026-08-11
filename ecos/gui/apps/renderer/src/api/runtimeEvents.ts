@@ -174,6 +174,7 @@ function responseFromProtocolEvent(
     'step.log': 'log',
     'step.completed': 'step_complete',
     'step.started': 'step_start',
+    'subflow.stage': 'message',
   }
   const notifyType = typeByProtocol[protocol.type]
   if (!notifyType) return null
@@ -194,6 +195,9 @@ function responseFromProtocolEvent(
       runtimeInstanceId: protocol.runtimeInstanceId,
       rerunScope: payload.scope,
       stepCommitId: payload.stepCommitId,
+      subflowPeakMemory: payload.peakMemory,
+      subflowRuntime: payload.runtime,
+      subflowStep: payload.subflowStep,
       targetStep: payload.targetStep,
       workspaceRevision: payload.workspaceRevision,
       state,

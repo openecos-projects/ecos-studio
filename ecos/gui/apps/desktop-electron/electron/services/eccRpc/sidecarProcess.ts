@@ -162,6 +162,27 @@ export class EccRpcSidecarProcess {
       try {
         client.feedStdout(chunk as Buffer)
       } catch (error) {
+        const recovered = client.recoverStdout()
+        if (recovered) {
+          const text = `[protocol] discarded malformed stdout before the next RPC frame:\n${recovered}\n`
+          this.appendLog(text)
+          this.options.onEvent?.({
+            logFile: this.logFile ?? undefined,
+            text,
+            type: 'runtime.stderr',
+          })
+          try {
+            client.feedStdout(Buffer.alloc(0))
+            return
+          } catch (recoveryError) {
+            client.rejectPending(
+              recoveryError instanceof Error
+                ? recoveryError
+                : new Error(String(recoveryError)),
+            )
+            return
+          }
+        }
         client.rejectPending(error instanceof Error ? error : new Error(String(error)))
       }
     })
@@ -298,7 +319,9 @@ export class EccRpcSidecarProcess {
     }
   }
 
-  private async requestShutdown(client: EccJsonRpcClient): Promise<ShutdownRequestResult> {
+  private async requestShutdown(
+    client: EccJsonRpcClient,
+  ): Promise<ShutdownRequestResult> {
     this.shuttingDown = true
     try {
       const result = await client.call<{

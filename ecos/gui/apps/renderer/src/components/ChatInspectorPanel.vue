@@ -13,6 +13,20 @@
         <template #tab-actions>
           <button
             type="button"
+            class="chat-inspector-clear-artifacts"
+            :disabled="!canClearGuiArtifacts"
+            :title="
+              canClearGuiArtifacts
+                ? 'Clear reports and layouts'
+                : 'No reports or layouts to clear'
+            "
+            aria-label="Clear reports and layouts"
+            @click="clearGuiArtifacts"
+          >
+            <i class="ri-eraser-line" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
             class="chat-inspector-fullscreen-toggle"
             :title="isFullscreen ? 'Exit full screen' : 'Full screen'"
             :aria-label="
@@ -40,10 +54,18 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useMessageStore } from '@/stores/messageStore'
 import AIChatPanel from './AIChatPanel.vue'
 
 const isFullscreen = ref(false)
+const messageStore = useMessageStore()
+
+const canClearGuiArtifacts = computed(() => messageStore.hasSessionGuiArtifacts())
+
+function clearGuiArtifacts(): void {
+  messageStore.clearSessionGuiArtifacts()
+}
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.defaultPrevented) return
@@ -79,6 +101,34 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
+}
+
+.chat-inspector-clear-artifacts {
+  display: inline-flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.chat-inspector-clear-artifacts:hover {
+  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
+  color: var(--text-primary);
+}
+
+.chat-inspector-clear-artifacts:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.chat-inspector-clear-artifacts:disabled:hover {
+  background: transparent;
+  color: var(--text-secondary);
 }
 
 .chat-inspector-fullscreen-toggle:hover {

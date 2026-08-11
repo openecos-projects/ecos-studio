@@ -61,4 +61,17 @@ describe('ECC RPC stdio transport', () => {
       TransportError,
     )
   })
+
+  it('resynchronizes at the next valid frame after a stdout preamble', () => {
+    const decoder = new ContentLengthDecoder()
+    const frame = encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":true}')
+
+    expect(() =>
+      decoder.feed(Buffer.concat([Buffer.from('tool output\r\n\r\n'), frame])),
+    ).toThrow(TransportError)
+    expect(decoder.discardMalformedPrefix()).toContain('tool output')
+    expect(decoder.feed(Buffer.alloc(0))).toEqual([
+      '{"jsonrpc":"2.0","id":1,"result":true}',
+    ])
+  })
 })

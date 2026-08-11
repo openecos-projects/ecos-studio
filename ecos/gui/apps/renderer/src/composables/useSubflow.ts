@@ -118,7 +118,7 @@ function parseTimeString(timeStr: string): number {
  */
 export function useSubflow() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, resourceVersions } = useWorkspace()
+  const { currentProject, resourceVersions, runtimeEvents } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
   const route = useRoute()
 
@@ -128,6 +128,41 @@ export function useSubflow() {
   const error = ref<string | null>(null)
   const currentStepTitle = ref('Run Flow')
   const currentStepEngine = ref('ECC Engine')
+
+  function sameStepName(left: string, right: string): boolean {
+    return left.trim().toLowerCase() === right.trim().toLowerCase()
+  }
+
+  function resetSubflowForRerun(startImmediately: boolean): void {
+    if (subflowSteps.value.length === 0) return
+    subflowSteps.value = subflowSteps.value.map((step, index) => ({
+      ...step,
+      description: 'Peak Memory: 0 MB',
+      duration: undefined,
+      peakMemory: undefined,
+      status: startImmediately && index === 0 ? 'running' : 'pending',
+    }))
+  }
+
+  function updateSubflowStage(
+    name: string,
+    state: string,
+    runtime: string,
+    peakMemory: number | undefined,
+  ): void {
+    const index = subflowSteps.value.findIndex((step) => sameStepName(step.name, name))
+    if (index < 0) return
+    const next = [...subflowSteps.value]
+    const current = next[index]!
+    next[index] = {
+      ...current,
+      description: `Peak Memory: ${peakMemory ?? 0} MB`,
+      duration: runtime || undefined,
+      peakMemory,
+      status: mapState(state),
+    }
+    subflowSteps.value = next
+  }
 
   // ============ 计算属性 ============
 
@@ -190,14 +225,17 @@ export function useSubflow() {
 
       if (response.response === 'error') {
         console.warn('workspace subflow resolver failed:', response.message)
-        subflowSteps.value = []
-        error.value = response.message[0] || 'Failed to resolve subflow path'
+        if (subflowSteps.value.length === 0) {
+          error.value = response.message[0] || 'Failed to resolve subflow path'
+        }
         return
       }
 
       if (response.response === 'missing') {
         console.warn('Subflow path is missing:', response.message)
-        subflowSteps.value = []
+        // Rerun removes artifacts before the first runtime event. Keep the
+        // already-rendered skeleton until ECC republishes the reset subflow.
+        if (subflowSteps.value.length === 0) subflowSteps.value = []
         return
       }
 
@@ -205,7 +243,6 @@ export function useSubflow() {
         typeof response.info?.path === 'string' ? response.info.path : ''
       if (!subflowPath) {
         console.warn('No subflow path in response')
-        subflowSteps.value = []
         return
       }
 
@@ -224,7 +261,6 @@ export function useSubflow() {
       )
       if (!isCurrent()) return
       if (!resolvedPath) {
-        subflowSteps.value = []
         return
       }
       const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
@@ -240,8 +276,9 @@ export function useSubflow() {
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to fetch subflow info:', err)
-      error.value = err instanceof Error ? err.message : String(err)
-      subflowSteps.value = []
+      if (subflowSteps.value.length === 0) {
+        error.value = err instanceof Error ? err.message : String(err)
+      }
     } finally {
       if (isCurrent()) {
         isLoading.value = false
@@ -380,10 +417,58 @@ export function useSubflow() {
     if (affectedStepNames.size > 0 && !affectedStepNames.has(currentStep.toLowerCase())) {
       return
     }
-    subflowSteps.value = []
     error.value = null
+    resetSubflowForRerun(event.scope === 'step')
     isLoading.value = false
   })
+
+  const existingRuntimeEvents = new WeakSet<object>()
+  const handledRuntimeEvents = new WeakSet<object>()
+  for (const event of runtimeEvents.value) {
+    if (event && typeof event === 'object') existingRuntimeEvents.add(event)
+  }
+
+  const stopWatchingRuntimeEvents = watch(
+    runtimeEvents,
+    (events) => {
+      const currentStep = getCurrentRouteStep()
+      if (!currentStep) return
+      for (const event of events) {
+        if (
+          !event ||
+          typeof event !== 'object' ||
+          existingRuntimeEvents.has(event) ||
+          handledRuntimeEvents.has(event)
+        ) {
+          continue
+        }
+        handledRuntimeEvents.add(event)
+        const data = (event as { data?: unknown }).data
+        if (!data || typeof data !== 'object') continue
+        const payload = data as Record<string, unknown>
+        if (!sameStepName(String(payload.step ?? ''), currentStep)) continue
+
+        if (payload.runtimeProtocolType === 'step.started') {
+          resetSubflowForRerun(true)
+          continue
+        }
+        if (payload.runtimeProtocolType !== 'subflow.stage') continue
+
+        const subflowStep =
+          typeof payload.subflowStep === 'string' ? payload.subflowStep : ''
+        if (!subflowStep) continue
+        updateSubflowStage(
+          subflowStep,
+          typeof payload.state === 'string' ? payload.state : 'Unstart',
+          typeof payload.subflowRuntime === 'string' ? payload.subflowRuntime : '',
+          typeof payload.subflowPeakMemory === 'number'
+            ? payload.subflowPeakMemory
+            : undefined,
+        )
+      }
+    },
+    { deep: true, flush: 'sync' },
+  )
 
   const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
     const currentStep = getCurrentRouteStep()
@@ -396,6 +481,7 @@ export function useSubflow() {
   onScopeDispose(() => {
     unregisterWorkspaceRerunPrepared()
     unregisterStepRenderTask()
+    stopWatchingRuntimeEvents()
   })
 
   return {

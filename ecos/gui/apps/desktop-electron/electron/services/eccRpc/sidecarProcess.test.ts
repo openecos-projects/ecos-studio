@@ -227,6 +227,32 @@ describe('EccRpcSidecarProcess', () => {
     await expect(promise).resolves.toEqual({ ok: true })
   })
 
+  it('recovers a response after malformed tool output leaks to stdout', async () => {
+    const child = new FakeChild()
+    const events: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      onEvent: (event) => events.push(event),
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+
+    const promise = client.call<{ ok: boolean }>('rpc.ping')
+    child.stdout.write(
+      Buffer.concat([
+        Buffer.from('tool output before protocol frame\r\n\r\n'),
+        encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+      ]),
+    )
+
+    await expect(promise).resolves.toEqual({ ok: true })
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining('discarded malformed stdout'),
+        type: 'runtime.stderr',
+      }),
+    )
+  })
+
   it('does not signal a sidecar when ECC defers shutdown for an active operation', async () => {
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({ spawn: () => child })

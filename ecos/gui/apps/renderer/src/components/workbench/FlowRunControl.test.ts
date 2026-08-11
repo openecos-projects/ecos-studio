@@ -31,5 +31,6 @@ describe('FlowRunControl', () => {
     expect(source).not.toContain('menuitemradio')
     expect(source).not.toContain('useFlowRunMode')
     expect(source).toContain('aria-busy="flowRunControlBusy"')
+    expect(source).toContain('preparingRerun.value || isRunning.value')
   })
 })

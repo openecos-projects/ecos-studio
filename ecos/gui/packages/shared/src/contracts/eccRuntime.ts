@@ -335,6 +335,7 @@ export interface EccRuntimeProtocolPayload {
     | 'step.started'
     | 'step.log'
     | 'step.completed'
+    | 'subflow.stage'
   workspaceId: string
   rerun?: boolean
 }

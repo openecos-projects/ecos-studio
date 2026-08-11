@@ -11,6 +11,10 @@ import {
   flowStepRunArtifacts,
   isSuccessfulFlowStep,
 } from './flowRunArtifacts'
+import {
+  normalizeWorkspaceProjectPath,
+  onWorkspaceRerunPrepared,
+} from './homeRunArtifacts'
 import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
 
 const MAX_STEP_REPORTS = 8
@@ -40,7 +44,7 @@ function filename(path: string): string {
  */
 export function useFlowRunArtifacts() {
   const messageStore = useMessageStore()
-  const { runtimeEvents } = useWorkspace()
+  const { currentProject, runtimeEvents } = useWorkspace()
   const { registerBlobUrl } = useWorkspaceLifecycle()
   const activeCaptures = new Set<FlowRunArtifactCapture>()
 
@@ -160,6 +164,7 @@ export function useFlowRunArtifacts() {
     }
 
     let stopWatchingRuntimeEvents: (() => void) | null = null
+    let unregisterWorkspaceRerunPrepared: (() => void) | null = null
     const capture: FlowRunArtifactCapture = {
       async settle(settleOptions: FlowRunArtifactSettleOptions = {}): Promise<void> {
         for (const stepName of settleOptions.forceStepNames ?? []) {
@@ -174,6 +179,8 @@ export function useFlowRunArtifacts() {
         stopWatchingRuntimeEvents?.()
         stopWatchingRuntimeEvents = null
         unregisterStepRenderTask()
+        unregisterWorkspaceRerunPrepared?.()
+        unregisterWorkspaceRerunPrepared = null
         activeCaptures.delete(capture)
       },
     }
@@ -182,6 +189,21 @@ export function useFlowRunArtifacts() {
       if (stopped || !commit.step || !matchesTarget(commit.step)) return
       completedSteps.add(flowStepKey(commit.step))
       await enqueueInspection([flowStepKey(commit.step)], await commit.resourceIndex())
+    })
+
+    unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
+      const projectPath = currentProject.value?.path
+      if (
+        !projectPath ||
+        normalizeWorkspaceProjectPath(event.projectPath) !==
+          normalizeWorkspaceProjectPath(projectPath)
+      ) {
+        return
+      }
+      const affected = event.affectedSteps.filter(matchesTarget)
+      if (affected.length > 0) {
+        messageStore.clearSessionGuiArtifactsForSteps(affected)
+      }
     })
 
     function consumeRuntimeEvent(event: unknown): void {
@@ -201,7 +223,8 @@ export function useFlowRunArtifacts() {
       const protocolType = eventData.runtimeProtocolType
       const step = typeof eventData.step === 'string' ? eventData.step : ''
       if (protocolType === 'step.completed' && step) {
-        const state = typeof eventData.state === 'string' ? eventData.state.toLowerCase() : ''
+        const state =
+          typeof eventData.state === 'string' ? eventData.state.toLowerCase() : ''
         if (state === 'success') completedSteps.add(flowStepKey(step))
         return
       }

@@ -12,4 +12,14 @@ describe('ChatInspectorPanel', () => {
     expect(source).toContain("event.key !== 'Escape'")
     expect(source).toContain('if (event.defaultPrevented) return')
   })
+
+  it('places the GUI artifact clear control immediately before chat fullscreen', () => {
+    const tabActionsStart = source.indexOf('<template #tab-actions>')
+    const clearControl = source.indexOf('chat-inspector-clear-artifacts', tabActionsStart)
+    const fullscreenControl = source.indexOf('chat-inspector-fullscreen-toggle', tabActionsStart)
+
+    expect(clearControl).toBeGreaterThan(tabActionsStart)
+    expect(fullscreenControl).toBeGreaterThan(clearControl)
+    expect(source).toContain('clearSessionGuiArtifacts')
+  })
 })

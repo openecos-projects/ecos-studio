@@ -241,7 +241,10 @@ export function useStepDashboardData() {
 
   const unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
     const projectPath = currentProject.value?.path
-    if (!projectPath || normalizedPath(event.projectPath) !== normalizedPath(projectPath)) {
+    if (
+      !projectPath ||
+      normalizedPath(event.projectPath) !== normalizedPath(projectPath)
+    ) {
       return
     }
     clearStepDashboardDataForRerun(projectPath, event.affectedSteps)
@@ -253,7 +256,8 @@ export function useStepDashboardData() {
       affectedStepNames.has(currentStep.value.trim().toLowerCase())
     ) {
       requestVersion += 1
-      data.value = null
+      // Keep Basic Info mounted while ECC resets and recreates step artifacts.
+      // The terminal resource refresh replaces this snapshot with new values.
       error.value = null
       loading.value = false
     }

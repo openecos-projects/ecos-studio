@@ -116,6 +116,11 @@ export class EccJsonRpcClient {
     }
   }
 
+  /** Returns the discarded non-protocol stdout so the sidecar can log it. */
+  recoverStdout(): string {
+    return this.decoder.discardMalformedPrefix()
+  }
+
   rejectPending(error: Error): void {
     for (const [id, pending] of this.pending) {
       this.clearTimer(pending)
@@ -179,7 +184,9 @@ export class EccJsonRpcClient {
     }
   }
 
-  private isNotification(payload: JsonRpcResponsePayload): payload is JsonRpcNotificationPayload {
+  private isNotification(
+    payload: JsonRpcResponsePayload,
+  ): payload is JsonRpcNotificationPayload {
     return (
       payload.jsonrpc === '2.0' &&
       typeof (payload as { method?: unknown }).method === 'string' &&

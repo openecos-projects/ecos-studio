@@ -62,6 +62,7 @@ export function useFlowRunner() {
     currentProject,
     ensureApiReady,
     showToast,
+    invalidateWorkspaceResources,
     waitForRuntimeOperation,
     workspaceSession,
   } = useWorkspace()
@@ -110,6 +111,12 @@ export function useFlowRunner() {
 
   function observeRuntimeOperation(operationId: string, directory: string): void {
     void waitForRuntimeOperation(operationId)
+      .then(() => {
+        // The main-process operation tracker is authoritative when renderer IPC
+        // delivery was delayed or replayed. Reconcile resource-backed panels
+        // before releasing the shared run lock.
+        invalidateWorkspaceResources('all')
+      })
       .catch((reason: unknown) => {
         error.value = reason instanceof Error ? reason.message : String(reason)
         state.value = StateEnum.Imcomplete

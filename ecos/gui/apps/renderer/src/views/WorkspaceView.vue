@@ -104,6 +104,7 @@ onUnmounted(() => {
         :execution-active="currentWorkspaceFlowExecutionActive"
         :loading="flowLogLoading"
         :selected-node="currentStepLogNode"
+        :selected-node-pinned="true"
         :segments="flowLogSegments"
       />
     </template>

@@ -64,7 +64,6 @@ const { isRunning, runFlow, runAllFlow } = useFlowRunner()
 const { startFlowRunArtifactCapture } = useFlowRunArtifacts()
 const {
   dynamicFlowStages,
-  hasOngoingRunStage,
   refreshFlowStages,
   setFirstRunStepOngoing,
   setRunStepOngoingByPath,
@@ -72,9 +71,7 @@ const {
 const { overallStatus } = useSubflow()
 const { currentProject, ensureApiReady, showToast } = useWorkspace()
 
-const flowRunControlBusy = computed(
-  () => preparingRerun.value || isRunning.value || hasOngoingRunStage.value,
-)
+const flowRunControlBusy = computed(() => preparingRerun.value || isRunning.value)
 const isHomeStage = computed(() => currentStage.value === 'home')
 const runTargetLabel = computed(() => (isHomeStage.value ? 'the full flow' : 'this step'))
 const runButtonLabel = computed(() =>
