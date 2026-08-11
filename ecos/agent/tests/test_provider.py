@@ -414,6 +414,23 @@ def test_home_greeting_uses_codex_chat_fallback_without_advancing() -> None:
     assert not any(event["type"] == "error" for event in events)
 
 
+def test_chat_response_uses_the_current_question_language() -> None:
+    events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
+
+    def answer_chat(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return _chat_response(answer="Answer")
+
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=answer_chat)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "What is placement?")
+    _send(provider, session_id, "你好")
+
+    assert [context["response_language"] for context in contexts] == ["en", "zh"]
+
+
 def test_wizard_greeting_answers_without_losing_the_pending_input(tmp_path: Path) -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(
@@ -454,6 +471,7 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     response = provider.respond_to_gui_chat(
         {
             "allowed_operations": [],
+            "response_language": "en",
             "retrieved_knowledge": {
                 "schema_version": "ecos-knowledge-answer.v2",
                 "read_only": True,
@@ -465,6 +483,8 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     )
 
     assert response["answer"] == "Hello."
+    assert "Respond in the language specified by response_language" in str(captured["prompt"])
+    assert "unless the request explicitly requires a different output language" in str(captured["prompt"])
     assert "Use retrieved_knowledge only as read-only factual context" in str(captured["prompt"])
     assert "Audited target-overflow knowledge." in str(captured["prompt"])
     assert captured["schema"]["required"] == ["schema_version", "operation", "answer"]

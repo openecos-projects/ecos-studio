@@ -633,6 +633,7 @@ class EcosAgentProvider:
         context: dict[str, Any] = {
             "schema_version": "flow-agent.gui_chat_request_context.v1",
             "natural_language_request": message,
+            "response_language": language_for_text(message),
             "mode": session.mode,
             "phase": session.phase,
             "allowed_operations": allowed_options,
