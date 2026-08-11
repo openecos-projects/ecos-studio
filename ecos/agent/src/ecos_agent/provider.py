@@ -30,6 +30,7 @@ from ecos_agent.messages import (
     default_value_prompt,
     flow_end_choice,
     flow_end_prompt,
+    greeting_message,
     home_ready_choice,
     home_ready_prompt,
     invalid_choice,
@@ -141,6 +142,9 @@ _ChatResponseParser = Callable[[dict[str, Any]], GuiChatResponseProposal | dict[
 _SourceRetrievalParser = Callable[[dict[str, Any]], SourceSearchProposal | dict[str, Any]]
 _StageRoutingParser = Callable[[dict[str, Any]], StageRoutingProposal | dict[str, Any]]
 _CHAT_GREETING_PREFIXES = ("hello", "hi", "hey", "你好", "您好", "嗨")
+_GREETING_PATTERN = re.compile(
+    r"^(?:hello|hi|hey|你好|您好|嗨)[\s!,.?，。！？]*$", re.IGNORECASE
+)
 _CHAT_QUESTION_PREFIXES = (
     "what ",
     "why ",
@@ -177,6 +181,10 @@ def _is_conversational_input(message: str) -> bool:
         or normalized.startswith(_CHAT_QUESTION_PREFIXES)
         or normalized.endswith(("?", "？"))
     )
+
+
+def _is_greeting(message: str) -> bool:
+    return bool(_GREETING_PATTERN.fullmatch(message))
 
 
 def _source_evidence_requested(message: str) -> bool:
@@ -469,6 +477,9 @@ class EcosAgentProvider:
         handler(session, message)
 
     def _handle_idle_input(self, session: _Session, message: str) -> None:
+        if _is_greeting(message):
+            self._emit(session, "message", greeting_message(session.language))
+            return
         if _is_conversational_input(message):
             self._answer_non_state_input(session, message, allow_operations=False)
             return
@@ -552,6 +563,9 @@ class EcosAgentProvider:
             "schema_version": "flow-agent.source_search_request.v1",
             "natural_language_request": message,
             "available_source_roots": list(self.source_retriever.available_root_ids),
+            "source_workspace_roots": [
+                str(root) for root in self.source_retriever.source_workspace_roots
+            ],
             "_progress_callback": lambda text: self._progress(session, text),
             "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
         }

@@ -72,6 +72,14 @@ def home_ready_prompt(language: str) -> str:
     )
 
 
+def greeting_message(language: str) -> str:
+    return _prompt(
+        language,
+        "你好。你想了解 ECOS 的什么内容？",
+        "Hello. What would you like to know about ECOS?",
+    )
+
+
 def unmatched_operation_prompt(language: str) -> str:
     return _prompt(
         language,

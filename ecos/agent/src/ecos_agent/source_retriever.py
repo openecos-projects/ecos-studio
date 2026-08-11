@@ -112,6 +112,10 @@ class SourceCodeRetriever:
     def available_root_ids(self) -> tuple[str, ...]:
         return tuple(self._roots)
 
+    @property
+    def source_workspace_roots(self) -> tuple[Path, ...]:
+        return tuple(self._roots.values())
+
     def retrieve(self, proposal: SourceSearchProposal) -> SourceSearchResult:
         evidence: list[SourceEvidence] = []
         unavailable: list[str] = []

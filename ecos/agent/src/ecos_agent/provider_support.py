@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -845,19 +844,23 @@ def _allowed_operation_options(
 
 def _propose_gui_chat_response(context: dict[str, Any]) -> GuiChatResponseProposal:
     progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
-    with tempfile.TemporaryDirectory(prefix="ecos-agent-chat-") as directory:
-        root = Path(directory)
-        provider = create_required_codex_provider(
-            cwd=root, runtime_workspace_roots=(root,), progress_callback=progress_callback
+    cwd_value = request_context.get("workspace") or request_context.get("project_root")
+    cwd = Path(cwd_value).expanduser().resolve() if isinstance(cwd_value, str) and cwd_value else Path.cwd()
+    if not cwd.is_dir():
+        cwd = Path.cwd()
+    provider = create_required_codex_provider(
+        cwd=cwd,
+        runtime_workspace_roots=(cwd,),
+        progress_callback=progress_callback,
+    )
+    register_interrupt(provider.interrupt)
+    try:
+        return GuiChatResponseProposal.model_validate(
+            provider.respond_to_gui_chat(request_context)
         )
-        register_interrupt(provider.interrupt)
-        try:
-            return GuiChatResponseProposal.model_validate(
-                provider.respond_to_gui_chat(request_context)
-            )
-        finally:
-            register_interrupt(None)
-            provider.close()
+    finally:
+        register_interrupt(None)
+        provider.close()
 
 
 def _propose_stage_routing(context: dict[str, Any]) -> StageRoutingProposal:
@@ -880,17 +883,32 @@ def _propose_stage_routing(context: dict[str, Any]) -> StageRoutingProposal:
 
 def _propose_source_retrieval(context: dict[str, Any]) -> SourceSearchProposal:
     progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
-    with tempfile.TemporaryDirectory(prefix="ecos-agent-source-search-") as directory:
-        root = Path(directory)
-        provider = create_required_codex_provider(
-            cwd=root, runtime_workspace_roots=(root,), progress_callback=progress_callback
+    roots = _source_workspace_roots(request_context)
+    provider = create_required_codex_provider(
+        cwd=roots[0],
+        runtime_workspace_roots=roots,
+        progress_callback=progress_callback,
+    )
+    register_interrupt(provider.interrupt)
+    try:
+        return SourceSearchProposal.model_validate(
+            provider.propose_source_search(request_context)
         )
-        register_interrupt(provider.interrupt)
-        try:
-            return SourceSearchProposal.model_validate(provider.propose_source_search(request_context))
-        finally:
-            register_interrupt(None)
-            provider.close()
+    finally:
+        register_interrupt(None)
+        provider.close()
+
+
+def _source_workspace_roots(context: Mapping[str, Any]) -> tuple[Path, ...]:
+    raw_roots = context.get("source_workspace_roots")
+    if not isinstance(raw_roots, list) or not raw_roots:
+        raise CodexProviderError("source search roots are missing", failure_class="missing_input")
+    roots = tuple(
+        dict.fromkeys(Path(root).expanduser().resolve() for root in raw_roots if isinstance(root, str))
+    )
+    if len(roots) != len(raw_roots) or any(not root.is_dir() for root in roots):
+        raise CodexProviderError("source search roots are invalid", failure_class="missing_input")
+    return roots
 
 
 def _optional_text(value: object) -> str | None:

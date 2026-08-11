@@ -396,22 +396,28 @@ def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
     assert len([event for event in events if event["type"] == "choice"]) == choice_count
 
 
-def test_home_greeting_uses_codex_chat_fallback_without_advancing() -> None:
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("hello", "Hello. What would you like to know about ECOS?"),
+        ("你好", "你好。你想了解 ECOS 的什么内容？"),
+    ],
+)
+def test_home_greeting_does_not_call_codex_or_advance(
+    message: str, expected: str
+) -> None:
     events: list[dict[str, object]] = []
 
-    def answer_chat(context: dict[str, object]) -> dict[str, object]:
-        assert context["natural_language_request"] == "你好"
-        assert context["mode"] == "home"
-        return _chat_response(answer="你好，我可以回答 ECOS 物理设计流程相关问题。")
+    def answer_chat(_context: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("a pure greeting must not call Codex")
 
     provider = EcosAgentProvider(emit=events.append, chat_response_parser=answer_chat)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
     choice_count = len([event for event in events if event["type"] == "choice"])
-    _send(provider, session_id, "你好")
+    _send(provider, session_id, message)
 
     assert provider.sessions[session_id].phase == "home_ready"
-    assert _last_event(events, "message")["text"] == "你好，我可以回答 ECOS 物理设计流程相关问题。"
-    assert _last_event(events, "message")["contract"]["schema_version"] == "flow-agent.gui_chat_response.v1"
+    assert _last_event(events, "message")["text"] == expected
     assert len([event for event in events if event["type"] == "choice"]) == choice_count
     assert not any(event["type"] == "error" for event in events)
 
@@ -428,7 +434,7 @@ def test_chat_response_uses_the_current_question_language() -> None:
     session_id = provider.start_session({"mode": "home"})["sessionId"]
 
     _send(provider, session_id, "What is placement?")
-    _send(provider, session_id, "你好")
+    _send(provider, session_id, "什么是 placement？")
 
     assert [context["response_language"] for context in contexts] == ["en", "zh"]
 
@@ -510,8 +516,12 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     assert captured["schema"]["required"] == ["schema_version", "operation", "answer"]
 
 
-def test_chat_and_source_planning_use_an_empty_runtime_root(tmp_path: Path, monkeypatch) -> None:
+def test_chat_uses_the_bound_workspace_and_source_planning_uses_whitelisted_roots(
+    tmp_path: Path, monkeypatch
+) -> None:
     captured: list[Path] = []
+    source_root = tmp_path / "ecc"
+    source_root.mkdir()
 
     class FakeCodexProvider:
         def interrupt(self) -> None:
@@ -542,13 +552,18 @@ def test_chat_and_source_planning_use_an_empty_runtime_root(tmp_path: Path, monk
         {"workspace": str(tmp_path), "allowed_operations": [], "response_language": "en"}
     )
     search = provider_support._propose_source_retrieval(
-        {"natural_language_request": "How does it work?", "available_source_roots": ["ecc"]}
+        {
+            "natural_language_request": "How does it work?",
+            "available_source_roots": ["ecc"],
+            "source_workspace_roots": [str(source_root)],
+        }
     )
 
     assert chat.answer == "Read-only answer."
     assert search.queries == ()
     assert len(captured) == 2
-    assert all(root != tmp_path and not root.exists() for root in captured)
+    assert captured[0] == tmp_path
+    assert captured[1] == source_root
 
 
 def test_source_search_prompt_is_bounded_and_structured(tmp_path: Path, monkeypatch) -> None:
@@ -1765,6 +1780,7 @@ def test_chat_combines_knowledge_and_bounded_source_evidence(tmp_path: Path) -> 
     assert "retrieved_knowledge" in chat_contexts[0]
     retrieved_code = chat_contexts[0]["retrieved_code"]
     assert source_contexts[0]["available_source_roots"] == ["ecc"]
+    assert source_contexts[0]["source_workspace_roots"] == [str(repository / "ecc")]
     assert retrieved_code["evidence"][0]["path"] == "ecc/route.py"
     assert "stop_overflow_reached" in retrieved_code["evidence"][0]["text"]
     assert _last_event(events, "message")["contract"]["source_evidence_ids"] == ["source-1"]
