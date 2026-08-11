@@ -30,7 +30,28 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('lockWorkspaceDirectory: true')
     expect(appSource).toContain('readOptionalProjectTextFile')
     expect(appSource).toContain('registerProjectReadRoot')
-    expect(appSource).toContain('parentLocalPath(normalizedWorkspacePath)')
+    expect(appSource).toContain('resolveProjectRouteContextForWorkspace')
+
+    const openStart = appSource.indexOf('async function openWorkspaceReconfigureWizard')
+    const openEnd = appSource.indexOf(
+      'async function buildReconfigureWizardInitialConfig',
+      openStart,
+    )
+    const openSource = appSource.slice(openStart, openEnd)
+    expect(openSource).toContain('if (projectContext)')
+    expect(openSource).toContain(
+      'await api.workspace.registerProjectReadRoot(projectContext.projectRoot)',
+    )
+    expect(openSource).not.toContain('parentLocalPath')
+  })
+
+  it('keeps standalone workspace updates outside project management', () => {
+    expect(appSource).toContain('standaloneWorkspace: !resolvedProjectContext')
+    expect(appSource).toContain('project_context: resolvedProjectContext')
+    expect(appSource).toContain(': undefined,')
+    expect(appSource).not.toContain(
+      'queryString(route.query.projectRoot) || parentLocalPath(workspacePath)',
+    )
   })
 
   it('asks whether to keep the old workspace backup before running update workspace', () => {

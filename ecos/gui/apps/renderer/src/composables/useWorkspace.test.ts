@@ -2730,6 +2730,52 @@ describe('useWorkspace openProject', () => {
     expect(desktopApi.workspace.retainProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 
+  it('keeps a standalone workspace backup without writing project.json', async () => {
+    const workspace = useWorkspace()
+    const replacement = {
+      id: 'replacement-standalone-1',
+      targetPath: '/work/standalone',
+      backupPath: '/work/.standalone.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/standalone',
+        workspace_id: 'workspace-standalone',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/standalone',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'standalone',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(true)
+
+    expect(desktopApi.workspace.retainProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement.id,
+    )
+    expect(desktopApi.projectManifest.mutate).not.toHaveBeenCalled()
+    expect(
+      desktopApi.workspace.finalizeProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
+  })
+
   it('restores the original workspace when replacement finalization fails', async () => {
     const workspace = useWorkspace()
     const replacement = {

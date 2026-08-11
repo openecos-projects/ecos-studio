@@ -91,7 +91,16 @@
                 key="project-setup"
                 class="mx-auto w-full max-w-3xl"
               >
-                <header class="mb-7">
+                <header v-if="standaloneWorkspace" class="mb-7">
+                  <h2 class="text-2xl font-bold text-(--text-primary)">
+                    Workspace Setup
+                  </h2>
+                  <p class="mt-2 text-sm text-(--text-secondary)">
+                    Review the standalone workspace that will be updated.
+                  </p>
+                </header>
+
+                <header v-else class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Project Setup</h2>
                   <p class="mt-2 text-sm text-(--text-secondary)">
                     Choose the project that will own this workspace, or define a project
@@ -100,7 +109,23 @@
                 </header>
 
                 <div
-                  v-if="projectManifestError"
+                  v-if="standaloneWorkspace"
+                  class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
+                >
+                  <span
+                    class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                    >Workspace Path</span
+                  >
+                  <p
+                    class="mt-2 font-mono text-sm break-all text-(--text-primary)"
+                    :title="config.directory"
+                  >
+                    {{ config.directory }}
+                  </p>
+                </div>
+
+                <div
+                  v-if="!standaloneWorkspace && projectManifestError"
                   role="alert"
                   class="mb-5 rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
                 >
@@ -108,6 +133,7 @@
                 </div>
 
                 <div
+                  v-if="!standaloneWorkspace"
                   class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
                 >
                   <div
@@ -1487,6 +1513,7 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
   deriveDirectoryFromDesign?: boolean
   lockWorkspaceDirectory?: boolean
+  standaloneWorkspace?: boolean
   suggestedWorkspaceName?: string
 }
 
@@ -1546,9 +1573,13 @@ interface SourceContext {
 const emit = defineEmits<Emits>()
 const props = defineProps<Props>()
 const wizardTitle = computed(() => props.title || 'New Workspace')
+const standaloneWorkspace = computed(() =>
+  Boolean(props.initialConfig?.standaloneWorkspace),
+)
 
 onMounted(() => {
   document.addEventListener('keydown', handleWizardKeydown)
+  if (standaloneWorkspace.value) return
   void loadProjectHistoryEntries()
   void applyProjectDefaultsForProject(projectContext.value.project_root)
 })
@@ -1620,7 +1651,10 @@ const dieAreaMode = ref<DieAreaMode>(
 )
 
 const steps = [
-  { id: 1, title: 'Project Setup' },
+  {
+    id: 1,
+    title: standaloneWorkspace.value ? 'Workspace Setup' : 'Project Setup',
+  },
   { id: 2, title: 'Basic Info' },
   { id: 3, title: 'Flow Setup' },
   { id: 4, title: 'Design Files' },
@@ -1788,7 +1822,9 @@ function createInitialConfig(
       initialConfig?.pdk_config ?? source_config?.pdk_config ?? defaultPdkConfig,
     pdk_json: initialConfig?.pdk_json ?? source_config?.pdk_json ?? '',
     mpc: initialConfig?.mpc ?? source_config?.mpc ?? null,
-    project_context: initialConfig?.project_context ?? projectContext.value,
+    project_context: initialConfig?.standaloneWorkspace
+      ? undefined
+      : (initialConfig?.project_context ?? projectContext.value),
     source_context: initialConfig?.source_context,
     source_config,
   }
@@ -1797,6 +1833,14 @@ function createInitialConfig(
 function createInitialProjectContext(
   initialConfig?: WorkspaceWizardInitialConfig,
 ): ProjectContext {
+  if (initialConfig?.standaloneWorkspace) {
+    return {
+      mode: 'select',
+      project_name: '',
+      project_root: '',
+      project_json_path: '',
+    }
+  }
   const projectRoot = initialProjectRoot(initialConfig)
   return {
     mode: 'select',
@@ -1807,6 +1851,7 @@ function createInitialProjectContext(
 }
 
 function initialProjectRoot(initialConfig?: WorkspaceWizardInitialConfig) {
+  if (initialConfig?.standaloneWorkspace) return ''
   if (initialConfig?.managedWorkspaceRoot) {
     return normalizePath(initialConfig.managedWorkspaceRoot)
   }
@@ -2141,6 +2186,7 @@ const detectedPdkFiles = computed<Record<PdkResourceKey, string[]>>(() => {
 const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
+      if (standaloneWorkspace.value) return true
       return (
         projectContext.value.project_root.trim() !== '' &&
         projectContext.value.project_name.trim() !== '' &&
@@ -3097,8 +3143,12 @@ function syncWorkspaceConfig() {
     liberty: pdkSelections.value.liberty,
   }
   config.value.mpc = projectMpc.value
-  config.value.project_context = {
-    ...projectContext.value,
+  if (standaloneWorkspace.value) {
+    delete config.value.project_context
+  } else {
+    config.value.project_context = {
+      ...projectContext.value,
+    }
   }
 }
 
