@@ -99,6 +99,7 @@ export const desktopApiIpcChannels = {
   eccRuntimeStartFlow: 'ecc:runtime-start-flow',
   eccRuntimeStartStep: 'ecc:runtime-start-step',
   eccRuntimeOperationStatus: 'ecc:runtime-operation-status',
+  eccRuntimeWaitForOperation: 'ecc:runtime-wait-operation',
   eccRuntimeOperationCancel: 'ecc:runtime-operation-cancel',
   eccRuntimeAcknowledgeStepRendered: 'ecc:runtime-acknowledge-step-rendered',
   eccRuntimeSnapshot: 'ecc:runtime-snapshot',

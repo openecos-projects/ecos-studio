@@ -442,6 +442,7 @@ export interface EccRuntimeApi {
     startFlow(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
     startStep(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
     status(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
+    waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
   }
   workspace: {
     close(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult>

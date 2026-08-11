@@ -848,6 +848,19 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.rpcPing).toHaveBeenCalledTimes(1)
   })
 
+  it('waits for a runtime operation through the main-process tracker', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = { operationId: 'operation-1', workspaceHandle: 'workspace-handle-1' }
+    const operation = { operationId: 'operation-1', state: 'succeeded' }
+    services.eccRuntimeService.waitForOperation.mockResolvedValue(operation)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeWaitForOperation)?.(event, request),
+    ).resolves.toEqual(operation)
+    expect(services.eccRuntimeService.waitForOperation).toHaveBeenCalledWith(request)
+  })
+
   it('forwards resource progress to the requesting renderer during installs', async () => {
     const { handlers, services } = registerHandlers()
     const sender = {

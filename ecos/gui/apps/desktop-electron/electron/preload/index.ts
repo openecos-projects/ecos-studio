@@ -363,6 +363,8 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.eccRuntimeStartStep, request),
       status: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationStatus, request),
+      waitForOperation: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeWaitForOperation, request),
     },
     workspace: {
       close: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceClose, request),

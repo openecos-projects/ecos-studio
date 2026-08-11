@@ -1667,9 +1667,7 @@ export function useWorkspace() {
     ) {
       return true
     }
-    return ['task_complete', 'error', 'cancelled'].includes(
-      String(response.data?.type),
-    )
+    return ['task_complete', 'error', 'cancelled'].includes(String(response.data?.type))
   }
 
   function invalidateResourcesForRuntimeEvent(
@@ -1723,35 +1721,78 @@ export function useWorkspace() {
     }
 
     const client = runtimeEventClient.value
-    if (!client) {
-      return Promise.reject(new Error('ECC runtime event stream is unavailable.'))
+    const workspaceHandle = workspaceLifecycle.session.value.workspaceId
+    const waitForOperation = getOptionalDesktopApi()?.ecc.runtime?.waitForOperation
+    if (!client && (!waitForOperation || !workspaceHandle)) {
+      return Promise.reject(new Error('ECC runtime operation stream is unavailable.'))
     }
 
     return new Promise<void>((resolve, reject) => {
       let unregisterCleanup: (() => void) | null = null
+      let settled = false
+      const settle = (complete: () => void) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        complete()
+      }
       const handler = (response: RuntimeEventResponse) => {
         if (!isTerminalEvent(response)) return
-        cleanup()
-        finishFromEvent(response, resolve, reject)
+        finishFromEvent(
+          response,
+          () => settle(resolve),
+          (reason) => settle(() => reject(reason)),
+        )
       }
       const cleanup = () => {
-        client.offAll(handler)
+        client?.offAll(handler)
         unregisterCleanup?.()
         unregisterCleanup = null
       }
-      client.onAll(handler)
+      client?.onAll(handler)
       unregisterCleanup = workspaceLifecycle.registerCleanup(
         () => {
-          cleanup()
-          reject(new Error('Workspace closed before the ECC operation completed.'))
+          settle(() =>
+            reject(new Error('Workspace closed before the ECC operation completed.')),
+          )
         },
         { label: `runtime operation ${operationId}` },
       )
 
       const terminal = [...runtimeEvents.value].reverse().find(isTerminalEvent)
       if (terminal) {
-        cleanup()
-        finishFromEvent(terminal, resolve, reject)
+        finishFromEvent(
+          terminal,
+          () => settle(resolve),
+          (reason) => settle(() => reject(reason)),
+        )
+        return
+      }
+
+      if (waitForOperation && workspaceHandle) {
+        void waitForOperation({ operationId, workspaceHandle }).then(
+          (operation) => {
+            if (operation.state === 'succeeded') {
+              settle(resolve)
+              return
+            }
+            settle(() =>
+              reject(
+                new Error(
+                  operation.error?.message ?? `ECC operation ${operation.state}.`,
+                ),
+              ),
+            )
+          },
+          (reason: unknown) =>
+            settle(() =>
+              reject(
+                reason instanceof Error
+                  ? reason
+                  : new Error('ECC operation wait failed.'),
+              ),
+            ),
+        )
       }
     })
   }

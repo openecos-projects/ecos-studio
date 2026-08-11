@@ -16,6 +16,7 @@ const {
   toastAddMock,
   waitForRuntimeReadyMock,
   waitForDesktopApiMock,
+  getOptionalDesktopApiMock,
   requestHomeRunArtifactResetMock,
   clearHomeRunArtifactResetAwaitingBackendStartMock,
   notifyWorkspaceRerunPreparedMock,
@@ -34,6 +35,7 @@ const {
   toastAddMock: vi.fn(),
   waitForRuntimeReadyMock: vi.fn(),
   waitForDesktopApiMock: vi.fn(),
+  getOptionalDesktopApiMock: vi.fn(),
   requestHomeRunArtifactResetMock: vi.fn(),
   clearHomeRunArtifactResetAwaitingBackendStartMock: vi.fn(),
   notifyWorkspaceRerunPreparedMock: vi.fn(),
@@ -54,6 +56,7 @@ vi.mock('primevue/usetoast', () => ({
 }))
 
 vi.mock('@/platform/desktop', () => ({
+  getOptionalDesktopApi: getOptionalDesktopApiMock,
   waitForDesktopApi: waitForDesktopApiMock,
 }))
 
@@ -221,6 +224,7 @@ describe('useWorkspace openProject', () => {
     toastAddMock.mockReset()
     waitForRuntimeReadyMock.mockReset()
     waitForDesktopApiMock.mockReset()
+    getOptionalDesktopApiMock.mockReset()
     requestHomeRunArtifactResetMock.mockReset()
     notifyWorkspaceRerunPreparedMock.mockReset()
     clearFlowExecutionActiveForWorkspaceMock.mockReset()
@@ -239,12 +243,14 @@ describe('useWorkspace openProject', () => {
       activeProjectRoot = null
     })
     waitForDesktopApiMock.mockResolvedValue(desktopApi)
+    getOptionalDesktopApiMock.mockReturnValue(desktopApi)
     waitForRuntimeReadyMock.mockResolvedValue(undefined)
     onRuntimeEvent = undefined
     createRuntimeEventClientMock.mockReturnValue({
       onAll: vi.fn((handler: (response: unknown) => void) => {
         onRuntimeEvent = handler
       }),
+      offAll: vi.fn(),
       connect: vi.fn(),
       close: vi.fn(),
     })
@@ -2358,6 +2364,30 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(clearFlowExecutionActiveForWorkspaceMock).toHaveBeenCalledWith('/work/demo')
+  })
+
+  it('waits for the main-process terminal tracker when the renderer misses completion', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    let resolveTracker: ((operation: { state: string }) => void) | undefined
+    const waitForOperation = vi.fn(
+      () =>
+        new Promise<{ state: string }>((resolve) => {
+          resolveTracker = resolve
+        }),
+    )
+    getOptionalDesktopApiMock.mockReturnValue({
+      ecc: { runtime: { waitForOperation } },
+    } as unknown as DesktopApi)
+
+    const completion = workspace.waitForRuntimeOperation('operation-1')
+
+    expect(waitForOperation).toHaveBeenCalledWith({
+      operationId: 'operation-1',
+      workspaceHandle: 'workspace-demo',
+    })
+
+    resolveTracker?.({ state: 'succeeded' })
+    await expect(completion).resolves.toBeUndefined()
   })
 
   it('uses the current project path for prepared rerun events with only a workspace handle', async () => {

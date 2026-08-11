@@ -10,6 +10,7 @@ const {
   workspaceSession,
   startFlowOperationApi,
   startStepOperationApi,
+  waitForRuntimeOperation,
   currentProject,
   requestHomeRunArtifactReset,
   markHomeRunArtifactResetAwaitingBackendStart,
@@ -39,6 +40,7 @@ const {
   },
   startFlowOperationApi: vi.fn(),
   startStepOperationApi: vi.fn(),
+  waitForRuntimeOperation: vi.fn(),
   currentProject: { value: null as { path: string } | null },
   requestHomeRunArtifactReset: vi.fn(),
   markHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
@@ -68,6 +70,7 @@ vi.mock('./useWorkspace', () => ({
     invalidateWorkspaceResources,
     resourceVersions,
     workspaceSession,
+    waitForRuntimeOperation,
   }),
 }))
 
@@ -114,6 +117,8 @@ describe('useFlowRunner desktop-only guard', () => {
     }
     startFlowOperationApi.mockReset()
     startStepOperationApi.mockReset()
+    waitForRuntimeOperation.mockReset()
+    waitForRuntimeOperation.mockImplementation(() => new Promise<void>(() => undefined))
     requestHomeRunArtifactReset.mockReset()
     markHomeRunArtifactResetAwaitingBackendStart.mockReset()
     clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
@@ -161,7 +166,10 @@ describe('useFlowRunner desktop-only guard', () => {
   it('starts a full flow as an asynchronous runtime operation', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
-    startFlowOperationApi.mockResolvedValue({ operationId: 'operation-1', state: 'queued' })
+    startFlowOperationApi.mockResolvedValue({
+      operationId: 'operation-1',
+      state: 'queued',
+    })
 
     const { runAllFlow, isRunning } = useFlowRunner()
 
@@ -175,15 +183,45 @@ describe('useFlowRunner desktop-only guard', () => {
     expect(invalidateWorkspaceResources).not.toHaveBeenCalled()
   })
 
+  it('releases the workspace lock when the main operation waiter completes', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    startFlowOperationApi.mockResolvedValue({
+      operationId: 'operation-1',
+      state: 'queued',
+    })
+    let resolveOperation: (() => void) | undefined
+    waitForRuntimeOperation.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveOperation = resolve
+        }),
+    )
+
+    const { isRunning, runAllFlow } = useFlowRunner()
+
+    await runAllFlow()
+    expect(waitForRuntimeOperation).toHaveBeenCalledWith('operation-1')
+    expect(isRunning.value).toBe(true)
+
+    resolveOperation?.()
+    await vi.waitFor(() => expect(isRunning.value).toBe(false))
+  })
+
   it('passes rerun=true when starting a full flow operation', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
-    startFlowOperationApi.mockResolvedValue({ operationId: 'operation-1', state: 'queued' })
+    startFlowOperationApi.mockResolvedValue({
+      operationId: 'operation-1',
+      state: 'queued',
+    })
 
     const { runAllFlow } = useFlowRunner()
 
     await runAllFlow({ rerun: true })
-    expect(markHomeRunArtifactResetAwaitingBackendStart).toHaveBeenCalledWith('/work/demo')
+    expect(markHomeRunArtifactResetAwaitingBackendStart).toHaveBeenCalledWith(
+      '/work/demo',
+    )
     expect(startFlowOperationApi).toHaveBeenCalledWith(
       expect.objectContaining({ rerun: true }),
     )
@@ -205,7 +243,10 @@ describe('useFlowRunner desktop-only guard', () => {
   it('starts the active step through the asynchronous runtime operation API', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
-    startStepOperationApi.mockResolvedValue({ operationId: 'operation-1', state: 'queued' })
+    startStepOperationApi.mockResolvedValue({
+      operationId: 'operation-1',
+      state: 'queued',
+    })
 
     const { runFlow } = useFlowRunner()
 
@@ -223,7 +264,10 @@ describe('useFlowRunner desktop-only guard', () => {
   it('passes rerun=true to the single step API when requested', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
-    startStepOperationApi.mockResolvedValue({ operationId: 'operation-1', state: 'queued' })
+    startStepOperationApi.mockResolvedValue({
+      operationId: 'operation-1',
+      state: 'queued',
+    })
 
     const { runFlow } = useFlowRunner()
 
@@ -237,7 +281,6 @@ describe('useFlowRunner desktop-only guard', () => {
       }),
     )
   })
-
 
   it('tracks running flow state per workspace', () => {
     currentProject.value = { path: '/work/a' }

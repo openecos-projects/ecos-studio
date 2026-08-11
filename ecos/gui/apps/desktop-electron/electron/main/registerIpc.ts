@@ -1685,6 +1685,12 @@ export function registerIpc(
     )
   })
 
+  handle(desktopApiIpcChannels.eccRuntimeWaitForOperation, async (_event, request) => {
+    return await services.eccRuntimeService.waitForOperation(
+      request as EccRuntimeOperationRequest,
+    )
+  })
+
   handle(desktopApiIpcChannels.eccRuntimeOperationCancel, async (_event, request) => {
     return await services.eccRuntimeService.cancelOperation(
       request as EccRuntimeOperationRequest,

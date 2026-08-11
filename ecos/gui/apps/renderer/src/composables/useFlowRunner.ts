@@ -62,6 +62,7 @@ export function useFlowRunner() {
     currentProject,
     ensureApiReady,
     showToast,
+    waitForRuntimeOperation,
     workspaceSession,
   } = useWorkspace()
   const route = useRoute()
@@ -105,6 +106,19 @@ export function useFlowRunner() {
 
   function getCurrentWorkspaceHandle(): string | null {
     return workspaceSession.value.workspaceId || null
+  }
+
+  function observeRuntimeOperation(operationId: string, directory: string): void {
+    void waitForRuntimeOperation(operationId)
+      .catch((reason: unknown) => {
+        error.value = reason instanceof Error ? reason.message : String(reason)
+        state.value = StateEnum.Imcomplete
+      })
+      .finally(() => {
+        // The main-process tracker resolves even when the renderer missed its
+        // terminal IPC event, so this lock cannot outlive the operation.
+        clearFlowExecutionActiveForWorkspace(directory)
+      })
   }
 
   /**
@@ -161,6 +175,7 @@ export function useFlowRunner() {
         step,
         workspaceHandle,
       })
+      observeRuntimeOperation(operation.operationId, directory)
       lastRunResult.value = { step: step as StepEnum, state: StateEnum.Ongoing }
       showToast({
         severity: 'info',
@@ -237,6 +252,7 @@ export function useFlowRunner() {
         rerun: Boolean(options.rerun),
         workspaceHandle,
       })
+      observeRuntimeOperation(operation.operationId, directory)
       showToast({
         severity: 'info',
         summary: 'RTL2GDS Started',
