@@ -53,6 +53,11 @@ export function useFlowRunArtifacts() {
     const publishedSteps = new Set<string>()
     const completedSteps = new Set<string>()
     const forcedSteps = new Set<string>()
+    const existingRuntimeEvents = new WeakSet<object>()
+    const handledRuntimeEvents = new WeakSet<object>()
+    for (const event of runtimeEvents.value) {
+      if (event && typeof event === 'object') existingRuntimeEvents.add(event)
+    }
     let stopped = false
     let inspectionQueue = Promise.resolve()
 
@@ -179,27 +184,43 @@ export function useFlowRunArtifacts() {
       await enqueueInspection([flowStepKey(commit.step)], await commit.resourceIndex())
     })
 
+    function consumeRuntimeEvent(event: unknown): void {
+      if (
+        stopped ||
+        !event ||
+        typeof event !== 'object' ||
+        existingRuntimeEvents.has(event) ||
+        handledRuntimeEvents.has(event)
+      ) {
+        return
+      }
+      handledRuntimeEvents.add(event)
+      const data = (event as { data?: unknown }).data
+      if (!data || typeof data !== 'object') return
+      const eventData = data as Record<string, unknown>
+      const protocolType = eventData.runtimeProtocolType
+      const step = typeof eventData.step === 'string' ? eventData.step : ''
+      if (protocolType === 'step.completed' && step) {
+        const state = typeof eventData.state === 'string' ? eventData.state.toLowerCase() : ''
+        if (state === 'success') completedSteps.add(flowStepKey(step))
+        return
+      }
+      if (
+        ['operation.completed', 'operation.failed', 'operation.cancelled'].includes(
+          String(protocolType),
+        )
+      ) {
+        enqueueFinalInspection()
+        void inspectionQueue.finally(() => capture.stop())
+      }
+    }
+
     stopWatchingRuntimeEvents = watch(
-      () => runtimeEvents.value[runtimeEvents.value.length - 1],
-      (event) => {
-        if (stopped || !event) return
-        const data = event.data
-        const protocolType = data.runtimeProtocolType
-        const step = typeof data.step === 'string' ? data.step : ''
-        if (protocolType === 'step.completed' && step) {
-          const state = typeof data.state === 'string' ? data.state.toLowerCase() : ''
-          if (state === 'success') completedSteps.add(flowStepKey(step))
-          return
-        }
-        if (
-          ['operation.completed', 'operation.failed', 'operation.cancelled'].includes(
-            String(protocolType),
-          )
-        ) {
-          enqueueFinalInspection()
-          void inspectionQueue.finally(() => capture.stop())
-        }
+      runtimeEvents,
+      (events) => {
+        for (const event of events) consumeRuntimeEvent(event)
       },
+      { deep: true, flush: 'sync' },
     )
 
     activeCaptures.add(capture)

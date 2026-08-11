@@ -12,6 +12,10 @@ import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
+import {
+  normalizeWorkspaceProjectPath,
+  onWorkspaceRerunPrepared,
+} from './homeRunArtifacts'
 import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
 
 export interface HomeSnapshotImage {
@@ -273,6 +277,17 @@ export function clearHomeSnapshotCache(): void {
   homeSnapshotCache.clear()
 }
 
+function clearHomeSnapshotCacheForWorkspace(projectPath: string): void {
+  const normalizedProjectPath = normalizeWorkspaceProjectPath(projectPath)
+  for (const [cachedProjectPath, cachedData] of homeSnapshotCache.entries()) {
+    if (normalizeWorkspaceProjectPath(cachedProjectPath) !== normalizedProjectPath) {
+      continue
+    }
+    homeSnapshotCache.delete(cachedProjectPath)
+    releaseSnapshotImages(cachedData)
+  }
+}
+
 export function useHomeSnapshots() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { currentProject, resourceVersions } = useWorkspace()
@@ -280,6 +295,22 @@ export function useHomeSnapshots() {
   const loading = ref(false)
   const error = ref<string | null>(null)
   let requestVersion = 0
+
+  const unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
+    const projectPath = currentProject.value?.path
+    if (
+      !projectPath ||
+      normalizeWorkspaceProjectPath(projectPath) !==
+        normalizeWorkspaceProjectPath(event.projectPath)
+    ) {
+      return
+    }
+    requestVersion += 1
+    clearHomeSnapshotCacheForWorkspace(projectPath)
+    items.value = []
+    error.value = null
+    loading.value = false
+  })
 
   async function refresh(resourceIndex?: WorkspaceResourceIndex): Promise<void> {
     const projectPath = currentProject.value?.path
@@ -321,7 +352,10 @@ export function useHomeSnapshots() {
   const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
     await refresh(await commit.resourceIndex())
   })
-  onScopeDispose(unregisterStepRenderTask)
+  onScopeDispose(() => {
+    unregisterStepRenderTask()
+    unregisterWorkspaceRerunPrepared()
+  })
 
   watch(
     () => [

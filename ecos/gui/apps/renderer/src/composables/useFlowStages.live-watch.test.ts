@@ -66,4 +66,40 @@ describe('useFlowStages runtime updates', () => {
     })
     scope.stop()
   })
+
+  it('applies a step start even when a terminal event is delivered in the same batch', async () => {
+    testState.runtimeEvents = ref([])
+    testState.readWorkspaceFlowResourceApi.mockResolvedValueOnce({
+      steps: [{ name: 'Synthesis', state: 'Success', tool: 'yosys' }],
+    })
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const stages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value[0]?.state).toBe('Success')
+    })
+
+    testState.runtimeEvents.value.push(
+      {
+        data: {
+          runtimeProtocolType: 'step.started',
+          state: 'Ongoing',
+          step: 'Synthesis',
+          tool: 'yosys',
+        },
+      },
+      {
+        data: {
+          runtimeProtocolType: 'operation.completed',
+          type: 'step_complete',
+        },
+      },
+    )
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value[0]?.state).toBe('Ongoing')
+    })
+    scope.stop()
+  })
 })

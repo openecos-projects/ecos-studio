@@ -1,6 +1,10 @@
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import type { WorkspaceResourceFile, WorkspaceStepResource } from '@ecos-studio/shared'
+import type {
+  WorkspaceResourceFile,
+  WorkspaceResourceIndex,
+  WorkspaceStepResource,
+} from '@ecos-studio/shared'
 import { InfoEnum } from '@/api/type'
 import {
   getWorkspaceResourceIndexApi,
@@ -9,6 +13,8 @@ import {
 import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
+import { onWorkspaceRerunPrepared } from '@/composables/homeRunArtifacts'
+import { registerRuntimeStepRenderTask } from '@/composables/runtimeStepRenderSync'
 import { useWorkspace } from '@/composables/useWorkspace'
 import {
   checklistSummary,
@@ -201,6 +207,29 @@ export function clearStepDashboardDataCache(): void {
   stepDashboardCache.clear()
 }
 
+/** Removes only artifacts ECC invalidated for the active workspace rerun. */
+export function clearStepDashboardDataForRerun(
+  projectPath: string,
+  affectedSteps: readonly string[],
+): void {
+  const workspaceKey = normalizedPath(projectPath)
+  const affectedStepNames = new Set(
+    affectedSteps.map((step) => step.trim().toLowerCase()).filter(Boolean),
+  )
+  for (const [cacheKey, cachedData] of stepDashboardCache.entries()) {
+    const [cachedWorkspace] = cacheKey.split('\u0000')
+    if (normalizedPath(cachedWorkspace ?? '') !== workspaceKey) continue
+    if (
+      affectedStepNames.size > 0 &&
+      !affectedStepNames.has(cachedData.step.trim().toLowerCase())
+    ) {
+      continue
+    }
+    stepDashboardCache.delete(cacheKey)
+    releaseDashboardImages(cachedData)
+  }
+}
+
 export function useStepDashboardData() {
   const route = useRoute()
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
@@ -209,6 +238,26 @@ export function useStepDashboardData() {
   const loading = ref(false)
   const error = ref<string | null>(null)
   let requestVersion = 0
+
+  const unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
+    const projectPath = currentProject.value?.path
+    if (!projectPath || normalizedPath(event.projectPath) !== normalizedPath(projectPath)) {
+      return
+    }
+    clearStepDashboardDataForRerun(projectPath, event.affectedSteps)
+    const affectedStepNames = new Set(
+      event.affectedSteps.map((step) => step.trim().toLowerCase()).filter(Boolean),
+    )
+    if (
+      affectedStepNames.size === 0 ||
+      affectedStepNames.has(currentStep.value.trim().toLowerCase())
+    ) {
+      requestVersion += 1
+      data.value = null
+      error.value = null
+      loading.value = false
+    }
+  })
 
   const currentStep = computed(() => {
     const param = route.params.step
@@ -249,7 +298,7 @@ export function useStepDashboardData() {
     }
   }
 
-  async function refresh(): Promise<void> {
+  async function refresh(resourceIndex?: WorkspaceResourceIndex): Promise<void> {
     const step = currentStep.value
     const projectPath = currentProject.value?.path
     const version = ++requestVersion
@@ -263,7 +312,7 @@ export function useStepDashboardData() {
     loading.value = true
     try {
       const [index, layoutResponse, analysisResponse, mapResponse] = await Promise.all([
-        getWorkspaceResourceIndexApi(),
+        resourceIndex ?? getWorkspaceResourceIndexApi(),
         resolveWorkspaceStepInfoApi({ step, id: InfoEnum.layout }),
         resolveWorkspaceStepInfoApi({ step, id: InfoEnum.analysis }),
         resolveWorkspaceStepInfoApi({ step, id: InfoEnum.maps }),
@@ -437,8 +486,17 @@ export function useStepDashboardData() {
     { immediate: true },
   )
 
+  const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
+    if (commit.step.trim().toLowerCase() !== currentStep.value.trim().toLowerCase()) {
+      return
+    }
+    await refresh(await commit.resourceIndex())
+  })
+
   onScopeDispose(() => {
     requestVersion += 1
+    unregisterWorkspaceRerunPrepared()
+    unregisterStepRenderTask()
   })
 
   return { currentStep, data, error, loading, refresh }

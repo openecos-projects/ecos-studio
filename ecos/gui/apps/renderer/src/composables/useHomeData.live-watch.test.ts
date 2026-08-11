@@ -64,6 +64,11 @@ vi.mock('@/utils/projectFs', () => ({
   resolveProjectPathAccess: vi.fn(async (path: string) => path),
 }))
 
+async function waitForLiveLogFrame(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  await nextTick()
+}
+
 describe('useHomeData runtime updates', () => {
   it('does not attach NFS file or log subscriptions while a GUI flow is active', async () => {
     testState.currentProject = ref(null)
@@ -117,7 +122,7 @@ describe('useHomeData runtime updates', () => {
         tool: 'yosys',
       },
     })
-    await nextTick()
+    await waitForLiveLogFrame()
     expect(Object.values(home.flowLogContentByKey.value)).toContain(
       'live synthesis log\n',
     )
@@ -148,6 +153,104 @@ describe('useHomeData runtime updates', () => {
       ]),
     )
     expect(Object.values(home.flowLogContentByKey.value)).toContain('final synthesis log')
+    scope.stop()
+  })
+
+  it('consumes every live log chunk delivered in one reactive batch', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    const { useHomeData } = await import('./useHomeData')
+    const scope = effectScope()
+    const home = scope.run(() => useHomeData())!
+
+    testState.runtimeEvents.value.push({
+      data: {
+        runtimeEventId: 'runtime-1:1',
+        runtimeProtocolType: 'step.started',
+        state: 'Ongoing',
+        step: 'route',
+        tool: 'ecc',
+      },
+    })
+    testState.runtimeEvents.value.push({
+      data: {
+        logChunk: 'route line one\n',
+        logCursor: 15,
+        runtimeEventId: 'runtime-1:2',
+        runtimeProtocolType: 'step.log',
+        step: 'route',
+        tool: 'ecc',
+      },
+    })
+    testState.runtimeEvents.value.push({
+      data: {
+        logChunk: 'route line two\n',
+        logCursor: 30,
+        runtimeEventId: 'runtime-1:3',
+        runtimeProtocolType: 'step.log',
+        step: 'route',
+        tool: 'ecc',
+      },
+    })
+
+    await waitForLiveLogFrame()
+
+    expect(Object.values(home.flowLogContentByKey.value)).toContain(
+      'route line one\nroute line two\n',
+    )
+    expect(home.flowLogSegments.value).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ live: true, stepName: 'route', tool: 'ecc' }),
+      ]),
+    )
+    scope.stop()
+  })
+
+  it('flushes queued live log chunks before a step completion boundary', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    const { useHomeData } = await import('./useHomeData')
+    const scope = effectScope()
+    const home = scope.run(() => useHomeData())!
+
+    testState.runtimeEvents.value.push({
+      data: {
+        runtimeEventId: 'runtime-2:1',
+        runtimeProtocolType: 'step.started',
+        state: 'Ongoing',
+        step: 'cts',
+        tool: 'ecc',
+      },
+    })
+    testState.runtimeEvents.value.push({
+      data: {
+        logChunk: 'cts completed output\n',
+        logCursor: 21,
+        runtimeEventId: 'runtime-2:2',
+        runtimeProtocolType: 'step.log',
+        step: 'cts',
+        tool: 'ecc',
+      },
+    })
+    testState.runtimeEvents.value.push({
+      data: {
+        finalLog: '',
+        runtimeEventId: 'runtime-2:3',
+        runtimeProtocolType: 'step.completed',
+        state: 'Success',
+        step: 'cts',
+        tool: 'ecc',
+      },
+    })
+
+    await nextTick()
+
+    expect(Object.values(home.flowLogContentByKey.value)).toContain('cts completed output\n')
+    expect(home.flowLogSegments.value).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ live: false, state: 'Success', stepName: 'cts' }),
+      ]),
+    )
     scope.stop()
   })
 

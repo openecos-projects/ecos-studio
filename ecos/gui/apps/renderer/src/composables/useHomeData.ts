@@ -606,7 +606,6 @@ function clearHomeRunArtifactsForRerun(projectPath: string): void {
   _pendingRerunResetConfirmationWorkspace = workspaceKey
   invalidateSharedHomeData()
   invalidateHomeAssetCache()
-  resetFlowLogState()
 }
 
 function hasHomeRunArtifacts(data: HomeData | null): boolean {
@@ -696,14 +695,21 @@ function isCurrentWorkspaceRerunTerminalEvent(
   if (!data || typeof data !== 'object') return false
 
   const eventData = data as Record<string, unknown>
-  if (eventData.cmd !== 'rtl2gds') return false
-  if (
-    eventData.type !== 'task_complete' &&
-    eventData.type !== 'error' &&
-    eventData.type !== 'cancelled'
-  ) {
-    return false
-  }
+  if (eventData.cmd !== 'rtl2gds' && eventData.cmd !== 'run_step') return false
+  const protocolType =
+    typeof eventData.runtimeProtocolType === 'string'
+      ? eventData.runtimeProtocolType
+      : ''
+  const isTerminalOperation = [
+    'operation.completed',
+    'operation.failed',
+    'operation.cancelled',
+  ].includes(protocolType)
+  const isLegacyTerminal =
+    eventData.type === 'task_complete' ||
+    eventData.type === 'error' ||
+    eventData.type === 'cancelled'
+  if (!isTerminalOperation && !isLegacyTerminal) return false
 
   const eventWorkspace =
     normalizeWorkspaceEventPath(eventData.directory) ||
@@ -756,6 +762,203 @@ export function useHomeData() {
 
   let homeDataLoadSession = 0
   let unregisterHomeRunArtifactReset: (() => void) | null = null
+  const handledRuntimeEventIds = new Set<string>()
+  const handledRuntimeEventObjects = new WeakSet<object>()
+  const pendingRuntimeFlowLogChunks = new Map<string, string>()
+  let runtimeFlowLogBatchFrame: number | null = null
+  let runtimeFlowLogBatchTimer: ReturnType<typeof setTimeout> | null = null
+
+  function cancelRuntimeFlowLogBatch(): void {
+    if (runtimeFlowLogBatchFrame !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(runtimeFlowLogBatchFrame)
+    }
+    if (runtimeFlowLogBatchTimer !== null) {
+      clearTimeout(runtimeFlowLogBatchTimer)
+    }
+    runtimeFlowLogBatchFrame = null
+    runtimeFlowLogBatchTimer = null
+  }
+
+  function flushRuntimeFlowLogChunks(): void {
+    cancelRuntimeFlowLogBatch()
+    if (pendingRuntimeFlowLogChunks.size === 0) return
+
+    const chunks = Array.from(pendingRuntimeFlowLogChunks.entries())
+    pendingRuntimeFlowLogChunks.clear()
+    for (const [key, chunk] of chunks) {
+      appendRuntimeFlowLogContent(key, chunk)
+    }
+  }
+
+  function discardRuntimeFlowLogChunks(): void {
+    cancelRuntimeFlowLogBatch()
+    pendingRuntimeFlowLogChunks.clear()
+  }
+
+  function scheduleRuntimeFlowLogFlush(): void {
+    if (runtimeFlowLogBatchFrame !== null || runtimeFlowLogBatchTimer !== null) return
+    if (typeof requestAnimationFrame === 'function') {
+      runtimeFlowLogBatchFrame = requestAnimationFrame(() => {
+        runtimeFlowLogBatchFrame = null
+        flushRuntimeFlowLogChunks()
+      })
+      return
+    }
+    runtimeFlowLogBatchTimer = setTimeout(() => {
+      runtimeFlowLogBatchTimer = null
+      flushRuntimeFlowLogChunks()
+    }, 0)
+  }
+
+  function enqueueRuntimeFlowLogChunk(key: string, chunk: string): void {
+    if (!chunk) return
+    pendingRuntimeFlowLogChunks.set(key, `${pendingRuntimeFlowLogChunks.get(key) ?? ''}${chunk}`)
+    scheduleRuntimeFlowLogFlush()
+  }
+
+  function shouldProcessRuntimeEvent(event: unknown): boolean {
+    if (!event || typeof event !== 'object') return false
+    const eventRecord = event as Record<string, unknown>
+    const eventData = eventRecord.data
+    const data =
+      eventData && typeof eventData === 'object'
+        ? (eventData as Record<string, unknown>)
+        : undefined
+    const eventId = typeof data?.runtimeEventId === 'string' ? data.runtimeEventId : ''
+    if (eventId) {
+      const identity = [
+        typeof data?.workspaceId === 'string' ? data.workspaceId : '',
+        typeof data?.runtimeInstanceId === 'string' ? data.runtimeInstanceId : '',
+        typeof data?.jobId === 'string' ? data.jobId : '',
+        eventId,
+      ].join('\u001f')
+      if (handledRuntimeEventIds.has(identity)) return false
+      handledRuntimeEventIds.add(identity)
+      if (handledRuntimeEventIds.size > 512) {
+        handledRuntimeEventIds.delete(handledRuntimeEventIds.values().next().value!)
+      }
+      return true
+    }
+    if (handledRuntimeEventObjects.has(event)) return false
+    handledRuntimeEventObjects.add(event)
+    return true
+  }
+
+  function processRuntimeEvent(event: unknown): void {
+    const projectPath = currentProject.value?.path
+    if (!projectPath || !shouldProcessRuntimeEvent(event)) return
+    const eventData = (event as { data?: unknown }).data as Record<string, unknown> | undefined
+    const protocolType = eventData?.runtimeProtocolType
+    if (
+      protocolType === 'step.started' ||
+      protocolType === 'step.completed' ||
+      protocolType === 'operation.rerun_prepared'
+    ) {
+      // Keep every queued log byte ordered before a stage boundary changes its segment.
+      flushRuntimeFlowLogChunks()
+    }
+    if (protocolType === 'step.started' && typeof eventData?.step === 'string') {
+      const segment = upsertRuntimeFlowLogSegment({
+        live: true,
+        state: typeof eventData.state === 'string' ? eventData.state : 'Ongoing',
+        stepName: eventData.step,
+        tool: typeof eventData.tool === 'string' ? eventData.tool : '',
+      })
+      const key = flowLogSegmentKey(segment)
+      invalidateFlowLogContent(key)
+      flowLogLiveCursorByKey.delete(key)
+      const index = flowLogSegments.value.findIndex(
+        (candidate) => flowLogSegmentKey(candidate) === key,
+      )
+      if (index >= 0) {
+        flowLogSegments.value[index] = {
+          ...flowLogSegments.value[index]!,
+          contentComplete: false,
+          contentLoading: false,
+        }
+      }
+      flowLogStepName.value = segment.stepName
+      flowLogError.value = null
+    }
+    if (
+      protocolType === 'step.log' &&
+      typeof eventData?.step === 'string' &&
+      typeof eventData.logChunk === 'string'
+    ) {
+      const segment = upsertRuntimeFlowLogSegment({
+        live: true,
+        state: typeof eventData.state === 'string' ? eventData.state : 'Ongoing',
+        stepName: eventData.step,
+        tool: typeof eventData.tool === 'string' ? eventData.tool : '',
+      })
+      const key = flowLogSegmentKey(segment)
+      const cursor =
+        typeof eventData.logCursor === 'number' && Number.isFinite(eventData.logCursor)
+          ? eventData.logCursor
+          : undefined
+      if (cursor === undefined || cursor > (flowLogLiveCursorByKey.get(key) ?? -1)) {
+        enqueueRuntimeFlowLogChunk(key, eventData.logChunk)
+        if (cursor !== undefined) flowLogLiveCursorByKey.set(key, cursor)
+      }
+      flowLogStepName.value = segment.stepName
+      flowLogError.value = null
+    }
+    if (protocolType === 'step.completed' && typeof eventData?.step === 'string') {
+      const state = typeof eventData.state === 'string' ? eventData.state : 'Success'
+      const segment = upsertRuntimeFlowLogSegment({
+        failed: ['Incomplete', 'Invalid', 'Failed'].includes(state),
+        live: false,
+        state,
+        stepName: eventData.step,
+        tool: typeof eventData.tool === 'string' ? eventData.tool : '',
+      })
+      const key = flowLogSegmentKey(segment)
+      const finalLog = typeof eventData.finalLog === 'string' ? eventData.finalLog : ''
+      // `finalLog` is a bounded ECC tail. Keep it for instant feedback, but do not
+      // treat an empty payload or a 64 KiB tail as the complete on-disk log.
+      if (finalLog) setFlowLogContent(key, finalLog)
+      flowLogLiveCursorByKey.delete(key)
+      const index = flowLogSegments.value.findIndex(
+        (candidate) => flowLogSegmentKey(candidate) === key,
+      )
+      if (index >= 0) {
+        const finalLogSize = new TextEncoder().encode(finalLog).byteLength
+        flowLogSegments.value[index] = {
+          ...flowLogSegments.value[index]!,
+          contentComplete: false,
+          contentLoading: false,
+          totalSize: Math.max(
+            flowLogSegments.value[index]!.totalSize ?? 0,
+            finalLogSize,
+          ),
+          truncated: finalLog.length >= 64 * 1024,
+        }
+      }
+      flowLogStepName.value = segment.stepName
+      flowLogError.value = null
+    }
+    const rerunPrepared = currentWorkspaceRerunPreparedEvent(event, projectPath)
+    if (rerunPrepared) {
+      flowLogRerunAffectedStepsState.value = [...rerunPrepared.affectedSteps]
+      prepareFlowLogSegmentsForRerun(rerunPrepared.affectedSteps)
+      if (!isAgentWorkspaceRerunHomePrepared(projectPath)) {
+        clearHomeRunArtifactsForRerun(projectPath)
+      }
+      if (rerunPrepared.scope === 'flow') {
+        markFlowExecutionActiveForWorkspace(projectPath)
+      }
+      return
+    }
+    if (isCurrentWorkspaceRerunTerminalEvent(event, projectPath)) {
+      _pendingRerunResetConfirmationWorkspace = ''
+      _pendingRerunStaleHomeSignature = ''
+      clearAgentWorkspaceRerunHomePrepared(projectPath)
+    }
+  }
+
+  function consumeRuntimeEvents(events: readonly unknown[] = runtimeEvents.value): void {
+    for (const event of events) processRuntimeEvent(event)
+  }
 
   /**
    * 将远程路径转换为本地项目路径
@@ -1521,7 +1724,9 @@ export function useHomeData() {
         const projectChanged = Boolean(oldPath && oldPath !== newPath)
         if (projectChanged) {
           // Project changes invalidate view state; no filesystem watcher is attached.
+          discardRuntimeFlowLogChunks()
         }
+        consumeRuntimeEvents()
         if (consumePendingHomeRunArtifactReset(newPath)) {
           clearHomeRunArtifactsForRerun(newPath)
           markFlowExecutionActiveForWorkspace(newPath)
@@ -1531,6 +1736,7 @@ export function useHomeData() {
         }
         await loadHomeData()
       } else {
+        discardRuntimeFlowLogChunks()
         clearHomeData(true)
       }
     },
@@ -1551,115 +1757,9 @@ export function useHomeData() {
   )
 
   watch(
-    () => runtimeEvents.value[runtimeEvents.value.length - 1],
-    (event) => {
-      const projectPath = currentProject.value?.path
-      if (!projectPath) return
-      const eventData = event?.data as Record<string, unknown> | undefined
-      if (
-        eventData?.runtimeProtocolType === 'step.started' &&
-        typeof eventData.step === 'string'
-      ) {
-        const segment = upsertRuntimeFlowLogSegment({
-          live: true,
-          state: typeof eventData.state === 'string' ? eventData.state : 'Ongoing',
-          stepName: eventData.step,
-          tool: typeof eventData.tool === 'string' ? eventData.tool : '',
-        })
-        const key = flowLogSegmentKey(segment)
-        invalidateFlowLogContent(key)
-        flowLogLiveCursorByKey.delete(key)
-        const index = flowLogSegments.value.findIndex(
-          (candidate) => flowLogSegmentKey(candidate) === key,
-        )
-        if (index >= 0) {
-          flowLogSegments.value[index] = {
-            ...flowLogSegments.value[index]!,
-            contentComplete: false,
-            contentLoading: false,
-          }
-        }
-        flowLogStepName.value = segment.stepName
-        flowLogError.value = null
-      }
-      if (
-        eventData?.runtimeProtocolType === 'step.log' &&
-        typeof eventData.step === 'string' &&
-        typeof eventData.logChunk === 'string'
-      ) {
-        const segment = upsertRuntimeFlowLogSegment({
-          live: true,
-          state: typeof eventData.state === 'string' ? eventData.state : 'Ongoing',
-          stepName: eventData.step,
-          tool: typeof eventData.tool === 'string' ? eventData.tool : '',
-        })
-        const key = flowLogSegmentKey(segment)
-        const cursor =
-          typeof eventData.logCursor === 'number' && Number.isFinite(eventData.logCursor)
-            ? eventData.logCursor
-            : undefined
-        if (cursor === undefined || cursor > (flowLogLiveCursorByKey.get(key) ?? -1)) {
-          appendRuntimeFlowLogContent(key, eventData.logChunk)
-          if (cursor !== undefined) flowLogLiveCursorByKey.set(key, cursor)
-        }
-        flowLogStepName.value = segment.stepName
-        flowLogError.value = null
-      }
-      if (
-        eventData?.runtimeProtocolType === 'step.completed' &&
-        typeof eventData.step === 'string'
-      ) {
-        const state = typeof eventData.state === 'string' ? eventData.state : 'Success'
-        const segment = upsertRuntimeFlowLogSegment({
-          failed: ['Incomplete', 'Invalid', 'Failed'].includes(state),
-          live: false,
-          state,
-          stepName: eventData.step,
-          tool: typeof eventData.tool === 'string' ? eventData.tool : '',
-        })
-        const key = flowLogSegmentKey(segment)
-        const finalLog = typeof eventData.finalLog === 'string' ? eventData.finalLog : ''
-        // `finalLog` is a bounded ECC tail. Keep it for instant feedback, but do not
-        // treat an empty payload or a 64 KiB tail as the complete on-disk log.
-        if (finalLog) setFlowLogContent(key, finalLog)
-        flowLogLiveCursorByKey.delete(key)
-        const index = flowLogSegments.value.findIndex(
-          (candidate) => flowLogSegmentKey(candidate) === key,
-        )
-        if (index >= 0) {
-          const finalLogSize = new TextEncoder().encode(finalLog).byteLength
-          flowLogSegments.value[index] = {
-            ...flowLogSegments.value[index]!,
-            contentComplete: false,
-            contentLoading: false,
-            totalSize: Math.max(
-              flowLogSegments.value[index]!.totalSize ?? 0,
-              finalLogSize,
-            ),
-            truncated: finalLog.length >= 64 * 1024,
-          }
-        }
-        flowLogStepName.value = segment.stepName
-        flowLogError.value = null
-      }
-      const rerunPrepared = currentWorkspaceRerunPreparedEvent(event, projectPath)
-      if (rerunPrepared) {
-        flowLogRerunAffectedStepsState.value = [...rerunPrepared.affectedSteps]
-        prepareFlowLogSegmentsForRerun(rerunPrepared.affectedSteps)
-        if (rerunPrepared.scope === 'flow') {
-          if (!isAgentWorkspaceRerunHomePrepared(projectPath)) {
-            clearHomeRunArtifactsForRerun(projectPath)
-          }
-          markFlowExecutionActiveForWorkspace(projectPath)
-        }
-        return
-      }
-      if (isCurrentWorkspaceRerunTerminalEvent(event, projectPath)) {
-        _pendingRerunResetConfirmationWorkspace = ''
-        _pendingRerunStaleHomeSignature = ''
-        clearAgentWorkspaceRerunHomePrepared(projectPath)
-      }
-    },
+    runtimeEvents,
+    (events) => consumeRuntimeEvents(events),
+    { deep: true, flush: 'sync', immediate: true },
   )
 
   unregisterHomeRunArtifactReset = onHomeRunArtifactReset((projectPath) => {
@@ -1683,6 +1783,7 @@ export function useHomeData() {
   // 在 onUnmounted 里 revoke 会导致下一次 mount 的 <img :src> 拿到已失效的 URL。
   // 数据新鲜度由 runtime events（markHomeAssetSignaturesStale）+ 项目切换里的 reset 负责。
   onUnmounted(() => {
+    flushRuntimeFlowLogChunks()
     homeStepRenderRefreshers.delete(refreshForStepRender)
     unregisterHomeRunArtifactReset?.()
     unregisterHomeRunArtifactReset = null

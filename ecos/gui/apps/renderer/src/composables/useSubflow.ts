@@ -1,4 +1,4 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onScopeDispose, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
@@ -8,6 +8,11 @@ import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { InfoEnum, StepEnum } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import {
+  normalizeWorkspaceProjectPath,
+  onWorkspaceRerunPrepared,
+} from './homeRunArtifacts'
+import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
 
 // ============ 类型定义 ============
 
@@ -357,6 +362,41 @@ export function useSubflow() {
       await refreshCurrentSubflow()
     },
   )
+
+  const unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
+    const projectPath = currentProject.value?.path
+    const currentStep = getCurrentRouteStep()
+    if (
+      !projectPath ||
+      !currentStep ||
+      normalizeWorkspaceProjectPath(event.projectPath) !==
+        normalizeWorkspaceProjectPath(projectPath)
+    ) {
+      return
+    }
+    const affectedStepNames = new Set(
+      event.affectedSteps.map((step) => step.trim().toLowerCase()).filter(Boolean),
+    )
+    if (affectedStepNames.size > 0 && !affectedStepNames.has(currentStep.toLowerCase())) {
+      return
+    }
+    subflowSteps.value = []
+    error.value = null
+    isLoading.value = false
+  })
+
+  const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
+    const currentStep = getCurrentRouteStep()
+    if (!currentStep || commit.step.trim().toLowerCase() !== currentStep.toLowerCase()) {
+      return
+    }
+    await refreshCurrentSubflow()
+  })
+
+  onScopeDispose(() => {
+    unregisterWorkspaceRerunPrepared()
+    unregisterStepRenderTask()
+  })
 
   return {
     // 状态

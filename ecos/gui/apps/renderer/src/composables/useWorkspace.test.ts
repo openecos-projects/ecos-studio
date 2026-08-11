@@ -18,6 +18,8 @@ const {
   waitForDesktopApiMock,
   requestHomeRunArtifactResetMock,
   clearHomeRunArtifactResetAwaitingBackendStartMock,
+  notifyWorkspaceRerunPreparedMock,
+  clearFlowExecutionActiveForWorkspaceMock,
 } = vi.hoisted(() => ({
   createRuntimeEventClientMock: vi.fn(),
   closeWorkspaceApiMock: vi.fn(),
@@ -34,6 +36,8 @@ const {
   waitForDesktopApiMock: vi.fn(),
   requestHomeRunArtifactResetMock: vi.fn(),
   clearHomeRunArtifactResetAwaitingBackendStartMock: vi.fn(),
+  notifyWorkspaceRerunPreparedMock: vi.fn(),
+  clearFlowExecutionActiveForWorkspaceMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -93,6 +97,11 @@ vi.mock('./homeRunArtifacts', () => ({
   clearHomeRunArtifactResetAwaitingBackendStart:
     clearHomeRunArtifactResetAwaitingBackendStartMock,
   isAgentWorkspaceRerunHomePrepared: vi.fn(() => false),
+  notifyWorkspaceRerunPrepared: notifyWorkspaceRerunPreparedMock,
+}))
+
+vi.mock('./flowExecutionState', () => ({
+  clearFlowExecutionActiveForWorkspace: clearFlowExecutionActiveForWorkspaceMock,
 }))
 
 import { useWorkspace } from './useWorkspace'
@@ -213,6 +222,8 @@ describe('useWorkspace openProject', () => {
     waitForRuntimeReadyMock.mockReset()
     waitForDesktopApiMock.mockReset()
     requestHomeRunArtifactResetMock.mockReset()
+    notifyWorkspaceRerunPreparedMock.mockReset()
+    clearFlowExecutionActiveForWorkspaceMock.mockReset()
     settingsData.clear()
 
     desktopApi = createDesktopApiMock()
@@ -2295,6 +2306,58 @@ describe('useWorkspace openProject', () => {
 
     expect(workspace.runtimeEvents.value).toHaveLength(1)
     expect(requestHomeRunArtifactResetMock).toHaveBeenCalledWith('/work/demo')
+    expect(notifyWorkspaceRerunPreparedMock).toHaveBeenCalledWith({
+      affectedSteps: [],
+      projectPath: '/work/demo',
+      scope: 'flow',
+      targetStep: '',
+    })
+  })
+
+  it('broadcasts a single-step rerun without resetting the whole Home workspace', async () => {
+    await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        affectedSteps: ['Floorplan', 'route'],
+        cmd: 'run_step',
+        directory: '/work/demo',
+        rerun: true,
+        rerunScope: 'step',
+        runtimeProtocolType: 'operation.rerun_prepared',
+        targetStep: 'Floorplan',
+        type: 'message',
+      },
+      message: [],
+      response: 'success',
+    })
+
+    expect(notifyWorkspaceRerunPreparedMock).toHaveBeenCalledWith({
+      affectedSteps: ['Floorplan', 'route'],
+      projectPath: '/work/demo',
+      scope: 'step',
+      targetStep: 'Floorplan',
+    })
+    expect(requestHomeRunArtifactResetMock).not.toHaveBeenCalled()
+  })
+
+  it('releases the workspace run lock when a single-step operation completes', async () => {
+    await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        cmd: 'run_step',
+        directory: '/work/demo',
+        runtimeProtocolType: 'operation.completed',
+        type: 'step_complete',
+      },
+      message: [],
+      response: 'success',
+    })
+
+    expect(clearFlowExecutionActiveForWorkspaceMock).toHaveBeenCalledWith('/work/demo')
   })
 
   it('uses the current project path for prepared rerun events with only a workspace handle', async () => {

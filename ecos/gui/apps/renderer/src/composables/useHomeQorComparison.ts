@@ -15,6 +15,7 @@ import {
   readProjectQorWorkspaceData,
 } from '@/views/project-management/projectWorkspaceAnalysisData'
 import { getDesktopApi } from '@/platform/desktop'
+import { onWorkspaceRerunPrepared } from './homeRunArtifacts'
 import { useWorkspace } from './useWorkspace'
 import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
 import type {
@@ -66,6 +67,16 @@ export function clearHomeQorComparisonCache(): void {
   homeQorWorkspaceCache.clear()
 }
 
+function clearHomeQorComparisonCacheForWorkspace(workspacePath: string): void {
+  const normalizedWorkspacePath = normalizePath(workspacePath)
+  for (const cacheKey of homeQorComparisonCache.keys()) {
+    const [cachedWorkspacePath] = cacheKey.split('\u0000')
+    if (normalizePath(cachedWorkspacePath ?? '') === normalizedWorkspacePath) {
+      homeQorComparisonCache.delete(cacheKey)
+    }
+  }
+}
+
 /**
  * Loads Home's QoR data from the parent project named by the Project view route. The
  * desktop bridge grants that parent as an additional read root without changing the
@@ -89,6 +100,20 @@ export function useHomeQorComparison() {
   let disposed = false
   let refreshPromise: Promise<void> | null = null
   let refreshRequests = 0
+
+  const unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
+    const workspacePath = currentProject.value?.path
+    if (!workspacePath || !samePath(event.projectPath, workspacePath)) return
+    requestToken += 1
+    clearHomeQorComparisonCacheForWorkspace(workspacePath)
+    state.value = {
+      status: 'loading',
+      projectName: null,
+      baselineWorkspaceName: null,
+      baselineSource: null,
+      comparison: null,
+    }
+  })
 
   function refresh(): Promise<void> {
     refreshRequests += 1
@@ -309,6 +334,7 @@ export function useHomeQorComparison() {
   onScopeDispose(() => {
     disposed = true
     requestToken += 1
+    unregisterWorkspaceRerunPrepared()
     unregisterStepRenderTask()
   })
 

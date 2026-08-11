@@ -32,6 +32,7 @@ import {
 import {
   clearHomeRunArtifactResetAwaitingBackendStart,
   isAgentWorkspaceRerunHomePrepared,
+  notifyWorkspaceRerunPrepared,
   requestHomeRunArtifactReset,
 } from './homeRunArtifacts'
 import {
@@ -1493,11 +1494,12 @@ export function useWorkspace() {
         if (runtimeEvents.value.length > 200) {
           runtimeEvents.value.splice(0, runtimeEvents.value.length - 200)
         }
-        if (isFullFlowRerunPreparedEvent(response)) {
-          const resetProjectPath =
-            asString(response.data.directory) ??
-            currentProject.value?.path ??
-            asString(response.data.workspaceId)
+        const rerunPrepared = workspaceRerunPreparedEvent(response)
+        if (rerunPrepared) {
+          notifyWorkspaceRerunPrepared(rerunPrepared)
+        }
+        if (rerunPrepared?.scope === 'flow') {
+          const resetProjectPath = rerunPrepared.projectPath
           if (resetProjectPath && !isAgentWorkspaceRerunHomePrepared(resetProjectPath)) {
             clearHomeRunArtifactResetAwaitingBackendStart(resetProjectPath)
             requestHomeRunArtifactReset(resetProjectPath)
@@ -1519,9 +1521,7 @@ export function useWorkspace() {
             workspaceHandle,
           })
         }
-        if (
-          ['task_complete', 'error', 'cancelled'].includes(String(response.data?.type))
-        ) {
+        if (isTerminalRuntimeOperationEvent(response)) {
           const directory =
             asString(response.data?.directory) ?? currentProject.value?.path
           if (directory) clearFlowExecutionActiveForWorkspace(directory)
@@ -1631,13 +1631,44 @@ export function useWorkspace() {
     return [...scopes]
   }
 
-  function isFullFlowRerunPreparedEvent(response: RuntimeEventResponse): boolean {
+  function workspaceRerunPreparedEvent(
+    response: RuntimeEventResponse,
+  ): import('./homeRunArtifacts').WorkspaceRerunPrepared | null {
     const event = response.data
-    return (
-      event?.cmd === 'rtl2gds' &&
-      event.runtimeProtocolType === 'operation.rerun_prepared' &&
-      event.rerun === true &&
-      event.rerunScope === 'flow'
+    if (
+      event.runtimeProtocolType !== 'operation.rerun_prepared' ||
+      event.rerun !== true ||
+      (event.rerunScope !== 'flow' && event.rerunScope !== 'step')
+    ) {
+      return null
+    }
+    const projectPath =
+      asString(event.directory) ??
+      currentProject.value?.path ??
+      asString(event.workspaceId) ??
+      ''
+    if (!projectPath) return null
+    return {
+      affectedSteps: Array.isArray(event.affectedSteps)
+        ? event.affectedSteps.filter((step): step is string => typeof step === 'string')
+        : [],
+      projectPath,
+      scope: event.rerunScope,
+      targetStep: asString(event.targetStep) ?? '',
+    }
+  }
+
+  function isTerminalRuntimeOperationEvent(response: RuntimeEventResponse): boolean {
+    const protocolType = asString(response.data?.runtimeProtocolType)
+    if (
+      protocolType === 'operation.completed' ||
+      protocolType === 'operation.failed' ||
+      protocolType === 'operation.cancelled'
+    ) {
+      return true
+    }
+    return ['task_complete', 'error', 'cancelled'].includes(
+      String(response.data?.type),
     )
   }
 

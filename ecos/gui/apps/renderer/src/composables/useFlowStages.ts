@@ -14,6 +14,7 @@ import {
   consumePendingHomeRunArtifactReset,
   isHomeRunArtifactResetPending,
   onHomeRunArtifactReset,
+  onWorkspaceRerunPrepared,
 } from './homeRunArtifacts'
 
 // ============ 类型定义 ============
@@ -141,8 +142,9 @@ export function useFlowStages() {
   let unwatchFlowJsonFile: (() => void) | null = null
   let unregisterFlowJsonLifecycleCleanup: (() => void) | null = null
   let unregisterHomeRunArtifactReset: (() => void) | null = null
+  let unregisterWorkspaceRerunPrepared: (() => void) | null = null
   let pendingRerunFlowStartProjectPath = ''
-  let watchSession = 0
+  const handledRuntimeEventObjects = new WeakSet<object>()
 
   function stageMatchesRuntimeStep(stage: FlowStage, stepName: string): boolean {
     const key = stepName.trim().toLowerCase()
@@ -328,14 +330,54 @@ export function useFlowStages() {
       : normalized
   }
 
-  function resetRunStagesForRerun(): void {
+  function resetRunStagesForRerun(affectedSteps: readonly string[] = []): void {
     if (dynamicFlowStages.value.length === 0) return
+    const affectedStepNames = new Set(
+      affectedSteps.map((step) => step.trim().toLowerCase()).filter(Boolean),
+    )
     dynamicFlowStages.value = dynamicFlowStages.value.map((stage) => ({
       ...stage,
-      state: 'Unstart',
-      runtime: '',
-      'peak memory (mb)': 0,
+      ...(affectedStepNames.size === 0 ||
+      affectedStepNames.has(stage.path.trim().toLowerCase()) ||
+      affectedStepNames.has(stage.label.trim().toLowerCase())
+        ? {
+            state: 'Unstart',
+            runtime: '',
+            'peak memory (mb)': 0,
+          }
+        : {}),
     }))
+  }
+
+  function processRuntimeEvent(event: unknown): void {
+    if (!event || typeof event !== 'object' || handledRuntimeEventObjects.has(event)) {
+      return
+    }
+    handledRuntimeEventObjects.add(event)
+    const data = (event as { data?: unknown }).data
+    if (!data || typeof data !== 'object') return
+    const eventData = data as Record<string, unknown>
+    const protocolType =
+      typeof eventData.runtimeProtocolType === 'string'
+        ? eventData.runtimeProtocolType
+        : ''
+    if (protocolType !== 'step.started' && protocolType !== 'step.completed') return
+    const stepName = typeof eventData.step === 'string' ? eventData.step : ''
+    if (!stepName) return
+    applyRuntimeStepState(
+      stepName,
+      typeof eventData.tool === 'string' ? eventData.tool : '',
+      typeof eventData.state === 'string'
+        ? eventData.state
+        : protocolType === 'step.started'
+          ? 'Ongoing'
+          : 'Success',
+      protocolType === 'step.started',
+    )
+  }
+
+  function consumeRuntimeEvents(events: readonly unknown[] = runtimeEvents.value): void {
+    for (const event of events) processRuntimeEvent(event)
   }
 
   function shouldApplyFlowData(flowData: FlowData): boolean {
@@ -411,7 +453,6 @@ export function useFlowStages() {
         await loadFlowStages()
         await startFlowJsonWatchForCurrentProject()
       } else {
-        watchSession++
         cleanupFlowJsonWatch()
         clearFlowStages()
       }
@@ -427,27 +468,11 @@ export function useFlowStages() {
     },
   )
 
-  watch(
-    () => runtimeEvents.value[runtimeEvents.value.length - 1],
-    (event) => {
-      const data = event?.data
-      const protocolType =
-        typeof data?.runtimeProtocolType === 'string' ? data.runtimeProtocolType : ''
-      if (!['step.started', 'step.completed'].includes(protocolType)) return
-      const stepName = typeof data?.step === 'string' ? data.step : ''
-      if (!stepName) return
-      applyRuntimeStepState(
-        stepName,
-        typeof data?.tool === 'string' ? data.tool : '',
-        typeof data?.state === 'string'
-          ? data.state
-          : protocolType === 'step.started'
-            ? 'Ongoing'
-            : 'Success',
-        protocolType === 'step.started',
-      )
-    },
-  )
+  watch(runtimeEvents, (events) => consumeRuntimeEvents(events), {
+    deep: true,
+    flush: 'sync',
+    immediate: true,
+  })
 
   unregisterHomeRunArtifactReset = onHomeRunArtifactReset((projectPath) => {
     const currentProjectPath = currentProject.value?.path
@@ -462,12 +487,27 @@ export function useFlowStages() {
     resetRunStagesForRerun()
   })
 
+  unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
+    const currentProjectPath = currentProject.value?.path
+    if (
+      !currentProjectPath ||
+      normalizeProjectPath(event.projectPath) !== normalizeProjectPath(currentProjectPath)
+    ) {
+      return
+    }
+    if (event.scope === 'flow') {
+      pendingRerunFlowStartProjectPath = normalizeProjectPath(currentProjectPath)
+    }
+    resetRunStagesForRerun(event.affectedSteps)
+  })
+
   if (getCurrentInstance()) {
     onUnmounted(() => {
-      watchSession++
       cleanupFlowJsonWatch()
       unregisterHomeRunArtifactReset?.()
       unregisterHomeRunArtifactReset = null
+      unregisterWorkspaceRerunPrepared?.()
+      unregisterWorkspaceRerunPrepared = null
     })
   }
 
