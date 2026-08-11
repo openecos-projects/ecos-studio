@@ -141,6 +141,9 @@ _ChatResponseParser = Callable[[dict[str, Any]], GuiChatResponseProposal | dict[
 _SourceRetrievalParser = Callable[[dict[str, Any]], SourceSearchProposal | dict[str, Any]]
 _StageRoutingParser = Callable[[dict[str, Any]], StageRoutingProposal | dict[str, Any]]
 _CHAT_GREETING_PREFIXES = ("hello", "hi", "hey", "你好", "您好", "嗨")
+_GREETING_PATTERN = re.compile(
+    r"^(?:hello|hi|hey|你好|您好|嗨)[\s!,.?，。！？]*$", re.IGNORECASE
+)
 _CHAT_QUESTION_PREFIXES = (
     "what ",
     "why ",
@@ -177,6 +180,10 @@ def _is_conversational_input(message: str) -> bool:
         or normalized.startswith(_CHAT_QUESTION_PREFIXES)
         or normalized.endswith(("?", "？"))
     )
+
+
+def _is_greeting(message: str) -> bool:
+    return bool(_GREETING_PATTERN.fullmatch(message))
 
 
 def _source_evidence_requested(message: str) -> bool:
@@ -495,6 +502,8 @@ class EcosAgentProvider:
         )
 
     def _knowledge_answer(self, session: _Session, message: str) -> KnowledgeAnswer | None:
+        if _is_greeting(message):
+            return None
         baseline = self.knowledge_retriever.reply_global(message)
         deterministic_scope = self.knowledge_retriever.stage_scope(message)
         stages: tuple[str, ...] = ()

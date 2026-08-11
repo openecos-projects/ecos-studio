@@ -403,7 +403,7 @@ def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
         ("你好", "zh"),
     ],
 )
-def test_home_greeting_uses_codex_chat_fallback_without_advancing(
+def test_home_greeting_uses_direct_codex_chat_without_advancing(
     message: str, language: str
 ) -> None:
     events: list[dict[str, object]] = []
@@ -413,7 +413,15 @@ def test_home_greeting_uses_codex_chat_fallback_without_advancing(
         contexts.append(context)
         return _chat_response(answer=f"Codex answered {context['natural_language_request']}.")
 
-    provider = EcosAgentProvider(emit=events.append, chat_response_parser=answer_chat)
+    def route_stages(_context: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("a pure greeting must not call stage routing")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=answer_chat,
+        stage_routing_parser=route_stages,
+    )
+    provider._started = True
     session_id = provider.start_session({"mode": "home"})["sessionId"]
     choice_count = len([event for event in events if event["type"] == "choice"])
     _send(provider, session_id, message)
