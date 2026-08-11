@@ -1116,6 +1116,18 @@ export function useWorkspace() {
         }
 
         const resolvedPdkRoot = creationConfig?.pdk_root || ''
+        const manualPdkConfig = creationConfig?.pdk_config
+        const pdkJson =
+          creationConfig?.pdk_config_mode === 'manual' ||
+          manualPdkConfig?.mode === 'manual'
+            ? {
+                name: pdkName,
+                root: resolvedPdkRoot,
+                tech: manualPdkConfig?.tech_lef[0] ?? '',
+                lefs: manualPdkConfig?.cell_lef ?? [],
+                libs: manualPdkConfig?.liberty ?? [],
+              }
+            : creationConfig?.pdk_json
 
         response = await createWorkspaceApi({
           directory: selectedPath,
@@ -1132,7 +1144,7 @@ export function useWorkspace() {
           flow_config: creationConfig?.flow_config,
           pdk_config_mode: creationConfig?.pdk_config_mode,
           pdk_config: creationConfig?.pdk_config,
-          pdk_json: creationConfig?.pdk_json,
+          pdk_json: pdkJson,
           project_context: creationConfig?.project_context,
         })
         createdProjectName = backendParameters.Design as string

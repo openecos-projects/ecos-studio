@@ -1,4 +1,4 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, unref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { CMDEnum, InfoEnum, ResponseEnum, StepEnum } from '@/api/type'
 import { syncConfigApi } from '@/api/flow'
@@ -83,7 +83,7 @@ function firstResponseMessage(
   return response?.message?.[0] || fallback
 }
 
-export function useStepConfigInfo() {
+export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undefined>) {
   const route = useRoute()
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { currentProject } = useWorkspace()
@@ -119,6 +119,8 @@ export function useStepConfigInfo() {
   let lastLoadedStep: StepEnum | null = null
 
   const currentStep = computed(() => {
+    const explicitStep = unref(stepOverride)
+    if (explicitStep) return explicitStep
     const pathParts = route.path.split('/')
     const segment = pathParts[pathParts.length - 1] || ''
     return getStepEnumFromPath(segment)
@@ -301,7 +303,7 @@ export function useStepConfigInfo() {
   }
 
   watch(
-    () => route.path,
+    currentStep,
     () => {
       void refetch()
     },
@@ -468,6 +470,12 @@ export function useStepConfigInfo() {
           )
           return false
         }
+
+        workspaceLifecycle.invalidate('step', {
+          reason: 'step-config-save',
+          sessionId,
+          step,
+        })
 
         return true
       }

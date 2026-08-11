@@ -12,6 +12,7 @@ const testState = vi.hoisted(() => ({
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope } from 'vue'
+import { InfoEnum, StepEnum } from '@/api/type'
 
 vi.mock('vue-router', () => ({
   useRoute: () => testState.route,
@@ -210,6 +211,42 @@ describe('useStepConfigInfo', () => {
     expect(result.stepConfigParsed.value).toEqual({ SYNTHESIS: {} })
   })
 
+  it('uses an explicitly selected flow step instead of the current route', async () => {
+    testState.route.path = '/workspace/synthesis'
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'missing',
+      info: {},
+      missing: ['config'],
+      message: [],
+      id: 'config',
+      step: 'Floorplan',
+    })
+    const selectedStep = ref<StepEnum | undefined>(StepEnum.FLOORPLAN)
+
+    scope.run(() => useStepConfigInfo(selectedStep))!
+
+    await vi.waitFor(() => {
+      expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledWith({
+        step: StepEnum.FLOORPLAN,
+        id: InfoEnum.config,
+      })
+    })
+
+    selectedStep.value = StepEnum.PLACEMENT
+
+    await vi.waitFor(() => {
+      expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenLastCalledWith({
+        step: StepEnum.PLACEMENT,
+        id: InfoEnum.config,
+      })
+    })
+
+    const requestCount = testState.resolveWorkspaceStepInfoApi.mock.calls.length
+    testState.route.path = '/workspace/routing'
+    await nextTick()
+    expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledTimes(requestCount)
+  })
+
   it('ignores stale step config reads after the workspace session changes', async () => {
     let resolveOldRead: ((content: string) => void) | undefined
     testState.resolveWorkspaceStepInfoApi
@@ -396,6 +433,7 @@ describe('useStepConfigInfo', () => {
     expect(result.hasStepConfigChanges.value).toBe(true)
     const lifecycle = useWorkspaceLifecycle()
     const stepConfigVersionBeforeSave = lifecycle.resourceVersions.value['step-config']
+    const stepVersionBeforeSave = lifecycle.resourceVersions.value.step
     await expect(result.saveStepConfig()).resolves.toBe(true)
 
     expect(testState.writeProjectTextFile).toHaveBeenCalledWith(
@@ -413,6 +451,7 @@ describe('useStepConfigInfo', () => {
     expect(lifecycle.resourceVersions.value['step-config']).toBe(
       stepConfigVersionBeforeSave + 1,
     )
+    expect(lifecycle.resourceVersions.value.step).toBe(stepVersionBeforeSave + 1)
     await vi.waitFor(() => {
       expect(result.stepConfigRaw.value).toBe('{\n    "density": 0.6\n}')
       expect(result.hasStepConfigChanges.value).toBe(false)
@@ -592,12 +631,16 @@ describe('useStepConfigInfo', () => {
     })
 
     result.stepConfigDraft.value = { density: 0.9 }
+    const stepVersionBeforeSave = useWorkspaceLifecycle().resourceVersions.value.step
 
     await expect(result.saveStepConfig()).resolves.toBe(false)
 
     expect(testState.writeProjectTextFile).toHaveBeenCalled()
     expect(result.hasStepConfigChanges.value).toBe(false)
     expect(result.stepConfigSaveError.value).toBe('sync failed')
+    expect(useWorkspaceLifecycle().resourceVersions.value.step).toBe(
+      stepVersionBeforeSave,
+    )
   })
 
   it('ignores stale step config save completions after the workspace session changes', async () => {

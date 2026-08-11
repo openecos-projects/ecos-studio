@@ -48,7 +48,7 @@ export interface CreateWorkspaceRequest {
     flow_config?: Record<string, unknown>
     pdk_config_mode?: string
     pdk_config?: Record<string, unknown>
-    pdk_json?: string
+    pdk_json?: unknown
     project_context?: Record<string, unknown>
     soc_filelist?: string
     testbench?: string
@@ -103,7 +103,7 @@ export function createWorkspaceApi(options: {
   flow_config?: Record<string, unknown>
   pdk_config_mode?: string
   pdk_config?: Record<string, unknown>
-  pdk_json?: string
+  pdk_json?: unknown
   project_context?: Record<string, unknown>
   cpu_filelist?: string
   cpu_rtl_files?: string[]
@@ -228,7 +228,7 @@ export function createWorkspaceApi(options: {
         originVerilog: String(data.origin_verilog ?? ''),
         parameters: (data.parameters as Record<string, unknown>) ?? {},
         pdk: String(data.pdk ?? ''),
-        pdkJson: String(data.pdk_json ?? ''),
+        pdkJson: data.pdk_json ?? null,
         pdkRoot: String(data.pdk_root ?? ''),
         rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
         sdc: String(data.sdc ?? ''),

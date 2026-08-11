@@ -146,6 +146,7 @@ function registerHandlers(
       cancelResource: vi.fn(),
       getResource: vi.fn(),
       readMpcSpec: vi.fn(),
+      recordPdkReference: vi.fn(),
       importLocalPath: vi.fn(),
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
@@ -156,6 +157,7 @@ function registerHandlers(
       uninstallResource: vi.fn(),
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
+      validatePdkRootForWorkspace: vi.fn(),
     },
     frontendRpcRuntimeService: {
       cancelOperation: vi.fn(),

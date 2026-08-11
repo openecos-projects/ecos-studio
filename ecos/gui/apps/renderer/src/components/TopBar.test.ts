@@ -98,6 +98,23 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain('ri-window-line')
   })
 
+  it('adds Edit > Config for the active workspace flow', () => {
+    const menuStart = topBarSource.indexOf('const menus = computed<Menu[]>')
+    const menuEnd = topBarSource.indexOf('// ---- 下拉菜单状态 ----', menuStart)
+    const menuSource = topBarSource.slice(menuStart, menuEnd)
+    const fileIndex = menuSource.indexOf("label: 'File'")
+    const editIndex = menuSource.indexOf('...(isWorkspaceRoute.value')
+    const helpIndex = menuSource.indexOf("label: 'Help'")
+
+    expect(editIndex).toBeGreaterThan(fileIndex)
+    expect(helpIndex).toBeGreaterThan(editIndex)
+    expect(topBarSource).toContain("label: 'Config'")
+    expect(topBarSource).toContain("event: 'step-config'")
+    expect(topBarSource).toContain('canOpenStepConfig')
+    expect(topBarSource).toContain("emit('step-config')")
+    expect(topBarSource).toContain('...(isWorkspaceRoute.value ? [editMenu.value] : [])')
+  })
+
   it('binds File shortcuts for new window, new workspace, and open workspace', () => {
     expect(topBarSource).toContain("key === 'n'")
     expect(topBarSource).toContain("key === 'o'")
