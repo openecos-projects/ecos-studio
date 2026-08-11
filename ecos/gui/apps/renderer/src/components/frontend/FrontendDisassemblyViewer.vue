@@ -67,18 +67,10 @@
 </template>
 
 <script setup lang="ts">
-import type { Extension } from '@codemirror/state'
-import { EditorState, StateEffect, StateField } from '@codemirror/state'
-import { search, searchKeymap } from '@codemirror/search'
-import {
-  Decoration,
-  EditorView,
-  keymap,
-  lineNumbers,
-  type DecorationSet,
-} from '@codemirror/view'
+import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useThemeStore } from '@/stores/themeStore'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
   findDisassemblyAddressLine,
@@ -99,6 +91,7 @@ const emit = defineEmits<{
 }>()
 
 const { currentProject } = useWorkspace()
+const themeStore = useThemeStore()
 const editorHost = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -106,38 +99,55 @@ const navigationMessage = ref('')
 const addressInput = ref('')
 const content = ref('')
 const message = computed(() => error.value || navigationMessage.value)
+const editorTheme = computed<'dark' | 'light'>(() =>
+  themeStore.themeName === 'dark' ? 'dark' : 'light',
+)
 
-let view: EditorView | null = null
+let monaco: typeof Monaco | null = null
+let editor: Monaco.editor.IStandaloneCodeEditor | null = null
+let model: Monaco.editor.ITextModel | null = null
+let pcDecorations: Monaco.editor.IEditorDecorationsCollection | null = null
+let applyTheme: ((theme: 'light' | 'dark') => void) | null = null
+let runtimeDisposed = false
+let editorId = 0
+let disassemblyLanguageId = ''
 let loadToken = 0
 
-const setHighlightedLine = StateEffect.define<number | null>()
-const highlightedLine = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(value, transaction) {
-    for (const effect of transaction.effects) {
-      if (!effect.is(setHighlightedLine)) continue
-      if (effect.value === null) return Decoration.none
-      const line = transaction.state.doc.line(effect.value)
-      return Decoration.set([Decoration.line({ class: 'cm-pc-line' }).range(line.from)])
+onMounted(async () => {
+  loading.value = Boolean(props.path)
+  try {
+    const runtime = await import('../monacoRuntime')
+    if (runtimeDisposed) return
+    monaco = runtime.getMonacoRuntime(editorTheme.value)
+    applyTheme = runtime.setMonacoTheme
+    editorId = runtime.nextMonacoEditorId()
+    disassemblyLanguageId = runtime.MONACO_DISASSEMBLY_LANGUAGE_ID
+    await nextTick()
+    ensureEditor()
+    await loadDisassembly()
+  } catch (err) {
+    if (!runtimeDisposed) {
+      error.value = err instanceof Error ? err.message : String(err)
+      loading.value = false
     }
-    return value.map(transaction.changes)
-  },
-  provide: (field) => EditorView.decorations.from(field),
-})
-
-onMounted(() => {
-  ensureEditor()
-  void loadDisassembly()
+  }
 })
 
 onBeforeUnmount(() => {
-  view?.destroy()
-  view = null
+  runtimeDisposed = true
+  loadToken += 1
+  disposeEditor()
+  monaco = null
 })
 
 watch(
   () => [props.path, props.reloadToken],
-  () => void loadDisassembly(),
+  async () => {
+    await nextTick()
+    if (props.path) ensureEditor()
+    else disposeEditor()
+    void loadDisassembly()
+  },
 )
 
 watch(
@@ -145,72 +155,92 @@ watch(
   () => applyExternalTarget(),
 )
 
+watch(editorTheme, (theme) => {
+  applyTheme?.(theme)
+})
+
 function fileName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path
 }
 
 function ensureEditor(): void {
-  if (view || !editorHost.value) return
-  view = new EditorView({
-    parent: editorHost.value,
-    state: EditorState.create({
-      doc: '',
-      extensions: editorExtensions(),
+  if (editor || !monaco || !disassemblyLanguageId || !editorHost.value) return
+  model = monaco.editor.createModel(
+    '',
+    disassemblyLanguageId,
+    monaco.Uri.from({
+      scheme: 'disassembly',
+      authority: `ecos-studio-${editorId}`,
+      path: '/artifact.asm',
     }),
+  )
+  editor = monaco.editor.create(editorHost.value, {
+    model,
+    readOnly: true,
+    domReadOnly: true,
+    readOnlyMessage: { value: 'Disassembly is read-only.' },
+    ariaLabel: 'Disassembly',
+    automaticLayout: true,
+    wordWrap: 'off',
+    lineNumbers: 'on',
+    glyphMargin: false,
+    folding: false,
+    lineDecorationsWidth: 8,
+    minimap: { enabled: false },
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    renderLineHighlight: 'none',
+    scrollBeyondLastLine: false,
+    smoothScrolling: true,
+    contextmenu: true,
+    links: false,
+    occurrencesHighlight: 'off',
+    selectionHighlight: false,
+    stickyScroll: { enabled: false },
+    guides: { indentation: false, bracketPairs: false },
+    bracketPairColorization: { enabled: false },
+    unicodeHighlight: {
+      ambiguousCharacters: false,
+      invisibleCharacters: false,
+      nonBasicASCII: false,
+    },
+    fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
+    fontSize: 11,
+    lineHeight: 17,
+    padding: { top: 10, bottom: 16 },
+    scrollbar: {
+      verticalScrollbarSize: 8,
+      horizontalScrollbarSize: 8,
+      alwaysConsumeMouseWheel: false,
+    },
   })
+  pcDecorations = editor.createDecorationsCollection()
 }
 
-function editorExtensions(): Extension[] {
-  return [
-    lineNumbers(),
-    search({ top: true }),
-    keymap.of(searchKeymap),
-    EditorState.readOnly.of(true),
-    highlightedLine,
-    EditorView.theme({
-      '&': {
-        height: '100%',
-        color: 'var(--text-primary)',
-        backgroundColor: 'var(--bg-primary)',
-        fontSize: '11px',
-      },
-      '.cm-scroller': {
-        fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
-        lineHeight: '1.55',
-      },
-      '.cm-content': { padding: '10px 0 16px' },
-      '.cm-line': { padding: '0 12px' },
-      '.cm-gutters': {
-        backgroundColor: 'var(--bg-secondary)',
-        color: 'var(--text-secondary)',
-        borderRight: '1px solid var(--border-color)',
-        fontSize: '10px',
-      },
-      '.cm-pc-line': {
-        backgroundColor: 'rgba(var(--accent-rgb, 59, 130, 246), 0.18)',
-        boxShadow: 'inset 3px 0 0 var(--accent-color)',
-      },
-      '&.cm-focused': { outline: 'none' },
-      '.cm-selectionBackground': {
-        backgroundColor: 'rgba(var(--accent-rgb, 59, 130, 246), 0.24) !important',
-      },
-      '.cm-panels': {
-        backgroundColor: 'var(--bg-secondary)',
-        color: 'var(--text-primary)',
-      },
-    }),
-  ]
+function disposeEditor(): void {
+  pcDecorations?.clear()
+  pcDecorations = null
+  editor?.dispose()
+  editor = null
+  model?.dispose()
+  model = null
 }
 
 async function loadDisassembly(): Promise<void> {
-  ensureEditor()
   const path = props.path
   const token = ++loadToken
   error.value = ''
   navigationMessage.value = ''
   content.value = ''
   setEditorContent('')
-  if (!path || !view) return
+  if (!path) {
+    loading.value = false
+    return
+  }
+  if (!editor || !model) {
+    loading.value = true
+    return
+  }
 
   loading.value = true
   try {
@@ -234,11 +264,9 @@ async function loadDisassembly(): Promise<void> {
 }
 
 function setEditorContent(nextContent: string): void {
-  if (!view) return
-  view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: nextContent },
-    effects: setHighlightedLine.of(null),
-  })
+  if (!model) return
+  setHighlightedLine(null)
+  if (model.getValue() !== nextContent) model.setValue(nextContent)
 }
 
 function applyExternalTarget(): void {
@@ -253,7 +281,7 @@ function jumpToInputAddress(): void {
 }
 
 function jumpToAddress(address: string): void {
-  if (!view || !content.value) return
+  if (!editor || !model || !content.value) return
   const normalized = normalizeDisassemblyAddress(address)
   if (!normalized) {
     navigationMessage.value = 'Enter a hexadecimal instruction address.'
@@ -262,21 +290,33 @@ function jumpToAddress(address: string): void {
   addressInput.value = `0x${normalized}`
   const lineNumber = findDisassemblyAddressLine(content.value, normalized)
   if (lineNumber === null) {
-    view.dispatch({ effects: setHighlightedLine.of(null) })
+    setHighlightedLine(null)
     navigationMessage.value = `Address 0x${normalized} is not present in this file.`
     return
   }
 
-  const line = view.state.doc.line(lineNumber)
-  view.dispatch({
-    selection: { anchor: line.from },
-    effects: [
-      setHighlightedLine.of(lineNumber),
-      EditorView.scrollIntoView(line.from, { y: 'center' }),
-    ],
-  })
+  editor.setPosition({ lineNumber, column: 1 })
+  setHighlightedLine(lineNumber)
+  editor.revealLineInCenter(lineNumber)
   navigationMessage.value = `PC 0x${normalized} · line ${lineNumber}`
-  view.focus()
+  editor.focus()
+}
+
+function setHighlightedLine(lineNumber: number | null): void {
+  if (!monaco || !pcDecorations) return
+  if (lineNumber === null) {
+    pcDecorations.clear()
+    return
+  }
+  pcDecorations.set([
+    {
+      range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+      options: {
+        isWholeLine: true,
+        className: 'monaco-pc-line',
+      },
+    },
+  ])
 }
 </script>
 
@@ -410,7 +450,23 @@ function jumpToAddress(address: string): void {
   display: flex;
 }
 .disassembly-editor {
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+}
+
+:deep(.monaco-editor),
+:deep(.monaco-editor .overflow-guard) {
+  border-radius: 0;
+}
+
+:deep(.monaco-editor .view-line) {
+  user-select: text;
+}
+
+:deep(.monaco-editor .monaco-pc-line) {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.18);
+  box-shadow: inset 3px 0 0 var(--accent-color);
 }
 
 .disassembly-overlay,

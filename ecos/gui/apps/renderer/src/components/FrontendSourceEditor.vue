@@ -108,16 +108,13 @@
 </template>
 
 <script setup lang="ts">
+import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Extension } from '@codemirror/state'
-import { Compartment, EditorState } from '@codemirror/state'
-import { Decoration, EditorView, ViewPlugin, keymap, lineNumbers } from '@codemirror/view'
-import type { DecorationSet, ViewUpdate } from '@codemirror/view'
-import { search, searchKeymap } from '@codemirror/search'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useThemeStore } from '@/stores/themeStore'
+import { frontendSourceLanguageForPath } from './frontendSourceLanguage'
 import {
   readOptionalProjectTextFileTail,
   writeProjectTextFile,
@@ -163,6 +160,7 @@ const emit = defineEmits<{
 
 const SOURCE_CHAR_LIMIT = 4_000_000
 const LINT_LOG_CHAR_LIMIT = 300_000
+const DIAGNOSTIC_MARKER_OWNER = 'ecos-verilator-lint'
 
 const { currentProject, showToast, invalidateWorkspaceResources, workspaceSession } =
   useWorkspace()
@@ -179,10 +177,18 @@ const showLintLog = ref(false)
 const diagnostics = ref<VerilatorDiagnostic[]>([])
 const sourceTruncated = ref(false)
 
-let view: EditorView | null = null
+let monaco: typeof Monaco | null = null
+let editor: Monaco.editor.IStandaloneCodeEditor | null = null
+let sourceModel: Monaco.editor.ITextModel | null = null
+let modelChangeSubscription: Monaco.IDisposable | null = null
+let applyTheme: ((theme: 'light' | 'dark') => void) | null = null
+let initializePromise: Promise<void> | null = null
+let editorId = 0
+let activeModelPath = ''
 let savedContent = ''
 let loadToken = 0
-const themeCompartment = new Compartment()
+let applyingContent = false
+let componentDisposed = false
 
 const editorTheme = computed<'dark' | 'light'>(() =>
   themeStore.themeName === 'dark' ? 'dark' : 'light',
@@ -190,7 +196,11 @@ const editorTheme = computed<'dark' | 'light'>(() =>
 const busy = computed(() => loading.value || saving.value || lintRunning.value)
 const canSave = computed(() =>
   Boolean(
-    props.source?.path && view && isDirty.value && !busy.value && !sourceTruncated.value,
+    props.source?.path &&
+    sourceModel &&
+    isDirty.value &&
+    !busy.value &&
+    !sourceTruncated.value,
   ),
 )
 const canLint = computed(() => Boolean(props.source?.path && !busy.value))
@@ -215,14 +225,14 @@ const lintSubtitle = computed(() => {
   return lintLog.value ? 'no diagnostics parsed' : 'not run yet'
 })
 
-onMounted(() => {
-  ensureEditor()
-  void loadSource()
-})
+onMounted(() => void loadSource())
 
 onBeforeUnmount(() => {
-  view?.destroy()
-  view = null
+  componentDisposed = true
+  loadToken += 1
+  disposeEditor()
+  monaco = null
+  applyTheme = null
 })
 
 watch(
@@ -231,6 +241,7 @@ watch(
     resetLint()
     void loadSource()
   },
+  { flush: 'post' },
 )
 
 watch(
@@ -241,53 +252,84 @@ watch(
 )
 
 watch(editorTheme, (theme) => {
-  view?.dispatch({ effects: themeCompartment.reconfigure(editorThemeExtension(theme)) })
+  applyTheme?.(theme)
 })
 
-function ensureEditor(): void {
-  if (view || !editorHost.value) return
-  view = new EditorView({
-    parent: editorHost.value,
-    state: EditorState.create({
-      doc: '',
-      extensions: editorExtensions(),
-    }),
-  })
+async function ensureEditor(): Promise<void> {
+  if (editor || componentDisposed || !props.source?.path) return
+  if (initializePromise) {
+    await initializePromise
+    return
+  }
+
+  initializePromise = initializeEditor()
+  try {
+    await initializePromise
+  } finally {
+    initializePromise = null
+  }
 }
 
-function editorExtensions(): Extension[] {
-  return [
-    lineNumbers(),
-    search({ top: true }),
-    keymap.of(searchKeymap),
-    EditorView.lineWrapping,
-    syntaxHighlighter(),
-    EditorView.updateListener.of((update) => {
-      if (!update.docChanged || loading.value) return
-      isDirty.value = currentContent() !== savedContent
-    }),
-    themeCompartment.of(editorThemeExtension(editorTheme.value)),
-  ]
+async function initializeEditor(): Promise<void> {
+  const runtime = await import('./monacoRuntime')
+  if (componentDisposed || !props.source?.path || !editorHost.value) return
+
+  editorId ||= runtime.nextMonacoEditorId()
+  monaco = runtime.getMonacoRuntime(editorTheme.value)
+  applyTheme = runtime.setMonacoTheme
+  editor = monaco.editor.create(editorHost.value, {
+    model: null,
+    readOnly: false,
+    domReadOnly: false,
+    ariaLabel: 'Source code editor',
+    automaticLayout: true,
+    wordWrap: 'on',
+    wrappingIndent: 'same',
+    lineNumbers: 'on',
+    glyphMargin: true,
+    folding: true,
+    minimap: { enabled: false },
+    renderLineHighlight: 'all',
+    scrollBeyondLastLine: false,
+    smoothScrolling: true,
+    contextmenu: true,
+    links: true,
+    stickyScroll: { enabled: false },
+    fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
+    fontSize: 12,
+    lineHeight: 19,
+    padding: { top: 12, bottom: 16 },
+    scrollbar: {
+      verticalScrollbarSize: 8,
+      horizontalScrollbarSize: 8,
+      alwaysConsumeMouseWheel: false,
+    },
+  })
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveSource())
 }
 
 async function loadSource(): Promise<void> {
-  ensureEditor()
+  const token = ++loadToken
   const source = props.source
-  if (!source?.path || !view) {
-    setEditorContent('')
+  if (!source?.path) {
+    loading.value = false
+    disposeEditor()
     savedContent = ''
     isDirty.value = false
     sourceTruncated.value = false
     return
   }
-  const token = ++loadToken
+
   loading.value = true
   error.value = ''
   try {
+    await ensureEditor()
+    if (token !== loadToken || !editor || !monaco) return
+    const targetModel = activateSourceModel(source.path)
     const result = await readOptionalProjectTextFileTail(source.path, SOURCE_CHAR_LIMIT, {
       projectPath: currentProject.value?.path,
     })
-    if (token !== loadToken) return
+    if (token !== loadToken || targetModel !== sourceModel) return
     if (!result) {
       throw new Error('Source file is not readable in current workspace scope.')
     }
@@ -295,17 +337,19 @@ async function loadSource(): Promise<void> {
       ? `/* File is too large; showing tail only. */\n${result.content}`
       : result.content
     sourceTruncated.value = result.truncated
-    setEditorContent(content)
     savedContent = content
+    setEditorContent(content)
     isDirty.value = false
+    updateDiagnosticMarkers()
     focusExternalTarget()
   } catch (err) {
     if (token === loadToken) {
       error.value = err instanceof Error ? err.message : String(err)
-      setEditorContent('')
       savedContent = ''
+      setEditorContent('')
       isDirty.value = false
       sourceTruncated.value = false
+      updateDiagnosticMarkers()
     }
   } finally {
     if (token === loadToken) loading.value = false
@@ -313,7 +357,9 @@ async function loadSource(): Promise<void> {
 }
 
 async function saveSource(): Promise<void> {
-  if (!props.source?.path || !view) return
+  const sourcePath = props.source?.path
+  const targetModel = sourceModel
+  if (!sourcePath || !targetModel || activeModelPath !== sourcePath) return
   if (sourceTruncated.value) {
     error.value =
       'This source file is displayed as a truncated tail and cannot be saved safely.'
@@ -325,20 +371,27 @@ async function saveSource(): Promise<void> {
     })
     return
   }
+  if (!isDirty.value || busy.value) return
+
   saving.value = true
   error.value = ''
+  const content = targetModel.getValue()
+  const projectPath = currentProject.value?.path
   try {
-    const content = currentContent()
-    await writeProjectTextFile(props.source.path, content, {
-      projectPath: currentProject.value?.path,
-    })
-    savedContent = content
-    isDirty.value = false
+    await writeProjectTextFile(sourcePath, content, { projectPath })
+    if (
+      sourceModel === targetModel &&
+      props.source?.path === sourcePath &&
+      activeModelPath === sourcePath
+    ) {
+      savedContent = content
+      isDirty.value = currentContent() !== savedContent
+    }
     emit('saved')
     showToast({
       severity: 'success',
       summary: 'Source Saved',
-      detail: fileName(props.source.path),
+      detail: fileName(sourcePath),
       life: 3000,
     })
   } catch (err) {
@@ -360,7 +413,7 @@ async function runLint(): Promise<void> {
   lintRunning.value = true
   lintStatus.value = 'running'
   lintLog.value = ''
-  diagnostics.value = []
+  setDiagnostics([])
   try {
     const result = await runStepApi({
       cmd: CMDEnum.run_step,
@@ -407,7 +460,7 @@ async function loadLintDetail(): Promise<void> {
   )?.path
   if (!logPath) {
     lintLog.value = JSON.stringify(detail, null, 2)
-    diagnostics.value = parseCurrentDiagnostics(lintLog.value)
+    setDiagnostics(parseCurrentDiagnostics(lintLog.value))
     return
   }
 
@@ -415,7 +468,7 @@ async function loadLintDetail(): Promise<void> {
     projectPath: currentProject.value?.path,
   })
   lintLog.value = log?.content || ''
-  diagnostics.value = parseCurrentDiagnostics(lintLog.value)
+  setDiagnostics(parseCurrentDiagnostics(lintLog.value))
 }
 
 function parseCurrentDiagnostics(text: string): VerilatorDiagnostic[] {
@@ -425,19 +478,78 @@ function parseCurrentDiagnostics(text: string): VerilatorDiagnostic[] {
   )
 }
 
-function setEditorContent(content: string): void {
-  if (!view) return
-  view.dispatch({
-    changes: {
-      from: 0,
-      to: view.state.doc.length,
-      insert: content,
-    },
+function activateSourceModel(sourcePath: string): Monaco.editor.ITextModel {
+  if (!monaco || !editor) throw new Error('Monaco source editor is not ready.')
+  if (sourceModel && activeModelPath === sourcePath) return sourceModel
+
+  disposeSourceModel()
+  const normalizedPath = sourcePath.replace(/\\/g, '/')
+  const modelPath = normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`
+  sourceModel = monaco.editor.createModel(
+    '',
+    frontendSourceLanguageForPath(sourcePath),
+    monaco.Uri.from({
+      scheme: 'file',
+      authority: `ecos-studio-source-${editorId}`,
+      path: modelPath,
+    }),
+  )
+  activeModelPath = sourcePath
+  savedContent = ''
+  isDirty.value = false
+  editor.setModel(sourceModel)
+  modelChangeSubscription = editor.onDidChangeModelContent(() => {
+    if (applyingContent || loading.value) return
+    isDirty.value = currentContent() !== savedContent
   })
+  return sourceModel
+}
+
+function setEditorContent(content: string): void {
+  if (!sourceModel) return
+  applyingContent = true
+  try {
+    sourceModel.setValue(content)
+  } finally {
+    applyingContent = false
+  }
 }
 
 function currentContent(): string {
-  return view?.state.doc.toString() ?? ''
+  return sourceModel?.getValue() ?? ''
+}
+
+function setDiagnostics(nextDiagnostics: VerilatorDiagnostic[]): void {
+  diagnostics.value = nextDiagnostics
+  updateDiagnosticMarkers()
+}
+
+function updateDiagnosticMarkers(): void {
+  if (!monaco || !sourceModel) return
+  const markers: Monaco.editor.IMarkerData[] = sourceTruncated.value
+    ? []
+    : diagnostics.value.map((diagnostic) => {
+        const lineNumber = clampLineNumber(diagnostic.line)
+        const maxColumn = sourceModel?.getLineMaxColumn(lineNumber) || 1
+        const startColumn = Math.min(
+          maxColumn,
+          Math.max(1, Math.trunc(diagnostic.column || 1)),
+        )
+        return {
+          severity:
+            diagnostic.severity === 'error'
+              ? monaco?.MarkerSeverity.Error || 8
+              : monaco?.MarkerSeverity.Warning || 4,
+          code: diagnostic.code,
+          message: diagnostic.message || diagnostic.raw,
+          source: 'Verilator',
+          startLineNumber: lineNumber,
+          startColumn,
+          endLineNumber: lineNumber,
+          endColumn: Math.min(maxColumn, startColumn + 1),
+        }
+      })
+  monaco.editor.setModelMarkers(sourceModel, DIAGNOSTIC_MARKER_OWNER, markers)
 }
 
 function jumpToDiagnostic(diagnostic: VerilatorDiagnostic): void {
@@ -457,16 +569,23 @@ function focusExternalTarget(): void {
 }
 
 function jumpToPosition(lineNumber: number, columnNumber = 1): void {
-  if (!view) return
-  const line = view.state.doc.line(
-    Math.min(Math.max(1, lineNumber), view.state.doc.lines),
-  )
-  const pos = Math.min(line.to, line.from + Math.max(0, columnNumber - 1))
-  view.dispatch({
-    selection: { anchor: pos },
-    effects: EditorView.scrollIntoView(pos, { y: 'center' }),
-  })
-  view.focus()
+  if (!editor || !sourceModel) return
+  const targetLine = clampLineNumber(lineNumber)
+  const position = {
+    lineNumber: targetLine,
+    column: Math.min(
+      sourceModel.getLineMaxColumn(targetLine),
+      Math.max(1, Math.trunc(columnNumber || 1)),
+    ),
+  }
+  editor.setPosition(position)
+  editor.revealPositionInCenter(position)
+  editor.focus()
+}
+
+function clampLineNumber(lineNumber: number): number {
+  const normalized = Number.isFinite(lineNumber) ? Math.trunc(lineNumber) : 1
+  return Math.min(Math.max(1, normalized), sourceModel?.getLineCount() || 1)
 }
 
 function diagnosticKey(diagnostic: VerilatorDiagnostic): string {
@@ -481,172 +600,25 @@ function resetLint(): void {
   lintStatus.value = 'idle'
   lintLog.value = ''
   showLintLog.value = false
-  diagnostics.value = []
+  setDiagnostics([])
 }
 
-function editorThemeExtension(theme: 'dark' | 'light'): Extension {
-  const dark = theme === 'dark'
-  return EditorView.theme(
-    {
-      '&': {
-        height: '100%',
-        color: dark ? '#d4d4d4' : '#1f2937',
-        backgroundColor: dark ? '#1e1e1e' : '#ffffff',
-        fontSize: '12px',
-      },
-      '.cm-scroller': {
-        fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
-        lineHeight: '1.55',
-      },
-      '.cm-content': {
-        caretColor: dark ? '#38bdf8' : '#2563eb',
-        padding: '12px 0 16px',
-      },
-      '.cm-line': {
-        padding: '0 12px',
-      },
-      '.cm-gutters': {
-        backgroundColor: dark ? '#252526' : '#f6f8fa',
-        color: dark ? '#858585' : '#64748b',
-        borderRight: `1px solid ${dark ? '#3c3c3c' : '#d9e2ec'}`,
-      },
-      '.cm-activeLine': {
-        backgroundColor: dark ? '#2a2d2e' : '#f1f5f9',
-      },
-      '.cm-activeLineGutter': {
-        backgroundColor: dark ? '#2a2d2e' : '#eef2ff',
-        color: dark ? '#cbd5e1' : '#1e40af',
-      },
-      '&.cm-focused': {
-        outline: 'none',
-      },
-      '.cm-selectionBackground': {
-        backgroundColor: `${dark ? '#2563eb88' : '#93c5fd80'} !important`,
-      },
-      '.cm-keyword': { color: dark ? '#569cd6' : '#1d4ed8', fontWeight: '700' },
-      '.cm-type': { color: dark ? '#4ec9b0' : '#0f766e' },
-      '.cm-number': { color: dark ? '#b5cea8' : '#a16207' },
-      '.cm-string': { color: dark ? '#ce9178' : '#047857' },
-      '.cm-comment': { color: dark ? '#6a9955' : '#64748b', fontStyle: 'italic' },
-      '.cm-directive': { color: dark ? '#c586c0' : '#9333ea', fontWeight: '700' },
-      '.cm-operator': { color: dark ? '#d4d4d4' : '#334155' },
-    },
-    { dark },
-  )
-}
-
-function syntaxHighlighter(): Extension {
-  return ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet
-
-      constructor(view: EditorView) {
-        this.decorations = buildSyntaxDecorations(view)
-      }
-
-      update(update: ViewUpdate): void {
-        if (update.docChanged || update.viewportChanged) {
-          this.decorations = buildSyntaxDecorations(update.view)
-        }
-      }
-    },
-    {
-      decorations: (plugin) => plugin.decorations,
-    },
-  )
-}
-
-function buildSyntaxDecorations(view: EditorView): DecorationSet {
-  const builder: { from: number; to: number; value: Decoration }[] = []
-  for (const range of view.visibleRanges) {
-    const fromLine = view.state.doc.lineAt(range.from).number
-    const toLine = view.state.doc.lineAt(range.to).number
-    for (let lineNo = fromLine; lineNo <= toLine; lineNo += 1) {
-      const line = view.state.doc.line(lineNo)
-      decorateLine(line.text, line.from, builder)
-    }
+function disposeSourceModel(): void {
+  modelChangeSubscription?.dispose()
+  modelChangeSubscription = null
+  if (monaco && sourceModel) {
+    monaco.editor.setModelMarkers(sourceModel, DIAGNOSTIC_MARKER_OWNER, [])
   }
-  return Decoration.set(builder, true)
+  editor?.setModel(null)
+  sourceModel?.dispose()
+  sourceModel = null
+  activeModelPath = ''
 }
 
-const KEYWORDS = new Set([
-  'always',
-  'always_comb',
-  'always_ff',
-  'assign',
-  'begin',
-  'case',
-  'default',
-  'else',
-  'end',
-  'endcase',
-  'endfunction',
-  'endmodule',
-  'endtask',
-  'for',
-  'forever',
-  'function',
-  'generate',
-  'genvar',
-  'if',
-  'initial',
-  'localparam',
-  'module',
-  'negedge',
-  'package',
-  'parameter',
-  'posedge',
-  'return',
-  'task',
-  'typedef',
-  'while',
-])
-const TYPES = new Set([
-  'bit',
-  'byte',
-  'enum',
-  'input',
-  'int',
-  'integer',
-  'logic',
-  'output',
-  'reg',
-  'signed',
-  'string',
-  'struct',
-  'time',
-  'wire',
-])
-const TOKEN_RE =
-  /`[A-Za-z_][\w$]*|\/\/.*|\/\*.*?\*\/|"([^"\\]|\\.)*"|\b\d+'[bhd][0-9a-fA-F_xzXZ]+\b|\b\d+\b|\b[A-Za-z_][\w$]*\b|[+\-*/%=<>!&|^~?:]+/g
-
-function decorateLine(
-  text: string,
-  lineStart: number,
-  builder: { from: number; to: number; value: Decoration }[],
-): void {
-  for (const match of text.matchAll(TOKEN_RE)) {
-    const token = match[0]
-    const index = match.index ?? 0
-    const className = tokenClass(token)
-    if (!className) continue
-    builder.push({
-      from: lineStart + index,
-      to: lineStart + index + token.length,
-      value: Decoration.mark({ class: className }),
-    })
-  }
-}
-
-function tokenClass(token: string): string {
-  if (token.startsWith('//') || token.startsWith('/*')) return 'cm-comment'
-  if (token.startsWith('"')) return 'cm-string'
-  if (token.startsWith('`')) return 'cm-directive'
-  if (/^\d/.test(token)) return 'cm-number'
-  if (KEYWORDS.has(token)) return 'cm-keyword'
-  if (TYPES.has(token)) return 'cm-type'
-  if (/^[+\-*/%=<>!&|^~?:]+$/.test(token)) return 'cm-operator'
-  return ''
+function disposeEditor(): void {
+  disposeSourceModel()
+  editor?.dispose()
+  editor = null
 }
 </script>
 
@@ -786,7 +758,15 @@ button:disabled {
 }
 
 .editor-host {
+  width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+:deep(.monaco-editor),
+:deep(.monaco-editor .overflow-guard) {
+  border-radius: 0;
 }
 
 .editor-overlay,

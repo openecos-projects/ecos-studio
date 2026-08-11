@@ -1,37 +1,52 @@
 <script setup lang="ts">
-import { EditorState } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useThemeStore } from '@/stores/themeStore'
 import {
-  buildFlowLogViewerExtensions,
   computeFlowLogContextMenuStyle,
   FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
-  flowLogVerticalScrollbarGeometry,
-  flowLogWheelDeltaPx,
-  getFlowLogViewerSelectedText,
+  flowLogContentUpdate,
   isFlowLogViewerNearTail,
 } from './flowLogCodeViewer'
 import { copyFlowLogText } from './flowLogCopy'
+import { normalizeLogContent, presentLog } from './logPresentation'
+import { MONACO_LOG_LANGUAGE_ID } from './monacoLanguageIds'
+
+interface ModelRecord {
+  content: string
+  decorationIds: string[]
+  model: Monaco.editor.ITextModel
+  viewState: Monaco.editor.ICodeEditorViewState | null
+}
 
 const props = withDefaults(
   defineProps<{
     content: string
+    channelKey?: string
     live?: boolean
     missing?: boolean
     loading?: boolean
+    ariaLabel?: string
   }>(),
   {
+    channelKey: 'flow-step-log',
     live: false,
     missing: false,
     loading: false,
+    ariaLabel: 'Flow step log',
   },
 )
 
-const rootRef = ref<HTMLElement | null>(null)
+const themeStore = useThemeStore()
+const editorHost = ref<HTMLElement | null>(null)
 const flowLogContextMenuRef = ref<HTMLElement | null>(null)
 const flowLogContextMenuCopyButtonRef = ref<HTMLButtonElement | null>(null)
-const flowLogVerticalScrollbarRef = ref<HTMLElement | null>(null)
+const runtimeLoading = ref(true)
+const runtimeError = ref('')
 const isViewerEmpty = computed(() => !props.content)
+const editorTheme = computed<'light' | 'dark'>(() =>
+  themeStore.themeName === 'dark' ? 'dark' : 'light',
+)
 const flowLogContextMenu = ref<{
   text: string
   style: { left: string; top: string }
@@ -45,26 +60,275 @@ const flowLogContextMenuCopyLabel = computed(() => {
   return 'Copy'
 })
 
-let view: EditorView | null = null
-let lastSyncedContent = ''
-let pendingContent: string | null = null
+let monaco: typeof Monaco | null = null
+let editor: Monaco.editor.IStandaloneCodeEditor | null = null
+let applyTheme: ((theme: 'light' | 'dark') => void) | null = null
+let activeChannelKey = ''
+let viewerId = 0
+let viewerDisposed = false
 let pendingSyncRaf: number | null = null
 let pendingTailScrollRaf: number | null = null
 let flowLogContextMenuFeedbackTimer: ReturnType<typeof setTimeout> | null = null
-let flowLogScrollbarResizeObserver: ResizeObserver | null = null
-let flowLogScrollbarDrag: { pointerId: number; pointerOffsetY: number } | null = null
-const flowLogVerticalScrollbar = ref({
-  maxScrollTop: 0,
-  thumbHeight: 0,
-  thumbOffset: 0,
+const models = new Map<string, ModelRecord>()
+
+onMounted(async () => {
+  document.addEventListener?.('pointerdown', onFlowLogContextMenuPointerDown)
+  document.addEventListener?.('keydown', onFlowLogContextMenuKeydown)
+  window.addEventListener?.('resize', closeFlowLogContextMenu)
+  document.addEventListener?.('scroll', closeFlowLogContextMenu, true)
+
+  try {
+    const runtime = await import('./monacoRuntime')
+    if (viewerDisposed || !editorHost.value) return
+    viewerId = runtime.nextMonacoEditorId()
+    monaco = runtime.getMonacoRuntime(editorTheme.value)
+    applyTheme = runtime.setMonacoTheme
+    editor = monaco.editor.create(editorHost.value, {
+      model: null,
+      readOnly: true,
+      domReadOnly: true,
+      readOnlyMessage: { value: 'Flow log output is read-only.' },
+      ariaLabel: props.ariaLabel,
+      automaticLayout: true,
+      wordWrap: 'on',
+      wrappingIndent: 'same',
+      lineNumbers: 'on',
+      lineNumbersMinChars: 3,
+      glyphMargin: false,
+      folding: false,
+      lineDecorationsWidth: 8,
+      minimap: { enabled: false },
+      overviewRulerLanes: 0,
+      hideCursorInOverviewRuler: true,
+      renderLineHighlight: 'none',
+      scrollBeyondLastLine: false,
+      smoothScrolling: true,
+      contextmenu: false,
+      links: true,
+      occurrencesHighlight: 'off',
+      selectionHighlight: false,
+      stickyScroll: { enabled: false },
+      guides: { indentation: false, bracketPairs: false },
+      bracketPairColorization: { enabled: false },
+      unicodeHighlight: {
+        ambiguousCharacters: false,
+        invisibleCharacters: false,
+        nonBasicASCII: false,
+      },
+      fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
+      fontSize: 12,
+      lineHeight: 19,
+      padding: { top: 12, bottom: 16 },
+      scrollbar: {
+        verticalScrollbarSize: 8,
+        horizontalScrollbarSize: 8,
+        alwaysConsumeMouseWheel: false,
+      },
+    })
+    syncActiveModel()
+  } catch (error) {
+    runtimeError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    runtimeLoading.value = false
+  }
 })
-const isFlowLogScrollbarDragging = ref(false)
+
+watch(
+  () => [props.channelKey, props.content, props.loading, props.missing],
+  () => scheduleActiveModelSync(),
+  { flush: 'post' },
+)
+
+watch(
+  () => props.live,
+  (live) => {
+    if (live && props.content) scheduleScrollViewerToTail()
+  },
+  { flush: 'post' },
+)
+
+watch(editorTheme, (theme) => {
+  applyTheme?.(theme)
+})
+
+onBeforeUnmount(() => {
+  viewerDisposed = true
+  document.removeEventListener?.('pointerdown', onFlowLogContextMenuPointerDown)
+  document.removeEventListener?.('keydown', onFlowLogContextMenuKeydown)
+  window.removeEventListener?.('resize', closeFlowLogContextMenu)
+  document.removeEventListener?.('scroll', closeFlowLogContextMenu, true)
+  closeFlowLogContextMenu()
+  cancelPendingAnimationFrames()
+  saveActiveViewState()
+  editor?.dispose()
+  editor = null
+  for (const record of models.values()) {
+    record.model.deltaDecorations(record.decorationIds, [])
+    record.model.dispose()
+  }
+  models.clear()
+  monaco = null
+})
+
+function scheduleActiveModelSync(): void {
+  if (pendingSyncRaf !== null) return
+  pendingSyncRaf = requestAnimationFrame(() => {
+    pendingSyncRaf = null
+    syncActiveModel()
+  })
+}
+
+function syncActiveModel(): void {
+  if (!monaco || !editor) return
+  const channelKey = normalizedChannelKey()
+  const content = normalizeLogContent(props.content)
+  if (!content && !models.has(channelKey)) {
+    if (activeChannelKey !== channelKey) {
+      saveActiveViewState()
+      editor.setModel(null)
+      activeChannelKey = channelKey
+    }
+    return
+  }
+
+  const record = ensureModel(channelKey)
+  const isActive = activeChannelKey === channelKey && editor.getModel() === record.model
+  const shouldFollowTail = isActive && props.live && viewerIsNearTail()
+  const activeViewState = isActive ? editor.saveViewState() : null
+  const update = flowLogContentUpdate(record.content, content)
+
+  if (update.kind === 'append') {
+    const end = record.model.getFullModelRange().getEndPosition()
+    record.model.applyEdits([
+      {
+        range: new monaco.Range(end.lineNumber, end.column, end.lineNumber, end.column),
+        text: update.text,
+        forceMoveMarkers: true,
+      },
+    ])
+  } else if (update.kind === 'replace') {
+    record.model.applyEdits([
+      {
+        range: record.model.getFullModelRange(),
+        text: update.text,
+        forceMoveMarkers: true,
+      },
+    ])
+  }
+
+  if (update.kind !== 'none') {
+    record.content = content
+    updateDecorations(record)
+    if (activeViewState) {
+      record.viewState = activeViewState
+      editor.restoreViewState(activeViewState)
+    }
+  }
+
+  if (!isActive) {
+    saveActiveViewState()
+    editor.setModel(record.model)
+    activeChannelKey = channelKey
+    if (record.viewState) {
+      editor.restoreViewState(record.viewState)
+    } else if (props.live) {
+      scheduleScrollViewerToTail()
+    } else {
+      editor.setScrollPosition({ scrollTop: 0, scrollLeft: 0 })
+    }
+  } else if (shouldFollowTail && update.kind !== 'none') {
+    scheduleScrollViewerToTail()
+  }
+}
+
+function ensureModel(channelKey: string): ModelRecord {
+  const existing = models.get(channelKey)
+  if (existing) return existing
+  if (!monaco) throw new Error('Monaco runtime is not ready.')
+
+  const model = monaco.editor.createModel(
+    '',
+    MONACO_LOG_LANGUAGE_ID,
+    monaco.Uri.from({
+      scheme: 'output',
+      authority: `ecos-studio-flow-${viewerId}`,
+      path: `/${encodeURIComponent(channelKey)}.log`,
+    }),
+  )
+  const record: ModelRecord = {
+    content: '',
+    decorationIds: [],
+    model,
+    viewState: null,
+  }
+  models.set(channelKey, record)
+  return record
+}
+
+function updateDecorations(record: ModelRecord): void {
+  const api = monaco
+  if (!api) return
+  const decorations = presentLog(record.content)
+    .filter((line) => line.tone !== 'plain')
+    .map((line) => ({
+      range: new api.Range(line.number, 1, line.number, 1),
+      options: {
+        isWholeLine: true,
+        className: `ecos-log-line-${line.tone}`,
+      },
+    }))
+  record.decorationIds = record.model.deltaDecorations(record.decorationIds, decorations)
+}
+
+function saveActiveViewState(): void {
+  if (!editor || !activeChannelKey) return
+  const record = models.get(activeChannelKey)
+  if (record) record.viewState = editor.saveViewState()
+}
+
+function normalizedChannelKey(): string {
+  return props.channelKey.trim() || 'flow-step-log'
+}
+
+function viewerIsNearTail(): boolean {
+  if (!editor) return false
+  return isFlowLogViewerNearTail(
+    {
+      scrollHeight: editor.getScrollHeight(),
+      scrollTop: editor.getScrollTop(),
+      clientHeight: editor.getLayoutInfo().height,
+    },
+    FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
+  )
+}
+
+function scheduleScrollViewerToTail(): void {
+  if (!editor) return
+  if (pendingTailScrollRaf !== null) cancelAnimationFrame(pendingTailScrollRaf)
+  pendingTailScrollRaf = requestAnimationFrame(() => {
+    pendingTailScrollRaf = null
+    editor?.setScrollTop(editor.getScrollHeight())
+  })
+}
+
+function cancelPendingAnimationFrames(): void {
+  if (pendingSyncRaf !== null) cancelAnimationFrame(pendingSyncRaf)
+  if (pendingTailScrollRaf !== null) cancelAnimationFrame(pendingTailScrollRaf)
+  pendingSyncRaf = null
+  pendingTailScrollRaf = null
+}
+
+function selectedText(): string {
+  const selection = editor?.getSelection()
+  const model = editor?.getModel()
+  if (!selection || selection.isEmpty() || !model) return ''
+  return model.getValueInRange(selection)
+}
 
 function clearFlowLogContextMenuFeedbackTimer(): void {
-  if (flowLogContextMenuFeedbackTimer) {
-    clearTimeout(flowLogContextMenuFeedbackTimer)
-    flowLogContextMenuFeedbackTimer = null
-  }
+  if (!flowLogContextMenuFeedbackTimer) return
+  clearTimeout(flowLogContextMenuFeedbackTimer)
+  flowLogContextMenuFeedbackTimer = null
 }
 
 function closeFlowLogContextMenu(): void {
@@ -75,17 +339,14 @@ function closeFlowLogContextMenu(): void {
 }
 
 function onViewerContextMenu(event: MouseEvent): void {
-  if (!view) return
-
-  const selectedText = getFlowLogViewerSelectedText(view.state)
-  if (!selectedText) return
-
+  const text = selectedText()
+  if (!text) return
   event.preventDefault()
   clearFlowLogContextMenuFeedbackTimer()
   flowLogContextMenuFeedback.value = null
   flowLogContextMenuCopying.value = false
   flowLogContextMenu.value = {
-    text: selectedText,
+    text,
     style: computeFlowLogContextMenuStyle(
       { x: event.clientX, y: event.clientY },
       { width: window.innerWidth, height: window.innerHeight },
@@ -97,17 +358,13 @@ function onViewerContextMenu(event: MouseEvent): void {
 async function copyFlowLogSelection(): Promise<void> {
   const contextMenu = flowLogContextMenu.value
   if (!contextMenu || flowLogContextMenuCopying.value) return
-
   flowLogContextMenuCopying.value = true
   const result = await copyFlowLogText(contextMenu.text)
   flowLogContextMenuCopying.value = false
   flowLogContextMenuFeedback.value = result.ok ? 'copied' : 'failed'
-
   if (result.ok) {
     clearFlowLogContextMenuFeedbackTimer()
-    flowLogContextMenuFeedbackTimer = setTimeout(() => {
-      closeFlowLogContextMenu()
-    }, 900)
+    flowLogContextMenuFeedbackTimer = setTimeout(closeFlowLogContextMenu, 900)
   }
 }
 
@@ -123,265 +380,20 @@ function onFlowLogContextMenuKeydown(event: KeyboardEvent): void {
   event.preventDefault()
   closeFlowLogContextMenu()
 }
-
-function syncFlowLogVerticalScrollbar(): void {
-  if (!view) return
-  flowLogVerticalScrollbar.value = flowLogVerticalScrollbarGeometry(view.scrollDOM)
-}
-
-function clearFlowLogScrollbarBindings(): void {
-  if (view) {
-    view.scrollDOM.removeEventListener?.('scroll', syncFlowLogVerticalScrollbar)
-  }
-  flowLogScrollbarResizeObserver?.disconnect()
-  flowLogScrollbarResizeObserver = null
-  stopFlowLogScrollbarDrag()
-  flowLogVerticalScrollbar.value = {
-    maxScrollTop: 0,
-    thumbHeight: 0,
-    thumbOffset: 0,
-  }
-}
-
-function bindFlowLogScrollbar(): void {
-  if (!view) return
-  const scrollDOM = view.scrollDOM
-  scrollDOM.addEventListener?.('scroll', syncFlowLogVerticalScrollbar, { passive: true })
-  if (typeof ResizeObserver !== 'undefined') {
-    flowLogScrollbarResizeObserver = new ResizeObserver(syncFlowLogVerticalScrollbar)
-    flowLogScrollbarResizeObserver.observe(scrollDOM)
-  }
-  syncFlowLogVerticalScrollbar()
-}
-
-function setFlowLogScrollFromPointer(event: PointerEvent): void {
-  const scrollDOM = view?.scrollDOM
-  const scrollbar = flowLogVerticalScrollbarRef.value
-  const drag = flowLogScrollbarDrag
-  if (!scrollDOM || !scrollbar || !drag) return
-
-  const bounds = scrollbar.getBoundingClientRect()
-  const thumbTravel = Math.max(
-    0,
-    bounds.height - flowLogVerticalScrollbar.value.thumbHeight,
-  )
-  if (thumbTravel === 0 || flowLogVerticalScrollbar.value.maxScrollTop === 0) return
-
-  const thumbOffset = Math.max(
-    0,
-    Math.min(thumbTravel, event.clientY - bounds.top - drag.pointerOffsetY),
-  )
-  scrollDOM.scrollTop =
-    (thumbOffset / thumbTravel) * flowLogVerticalScrollbar.value.maxScrollTop
-  syncFlowLogVerticalScrollbar()
-}
-
-function onFlowLogWheel(event: WheelEvent): void {
-  const scrollDOM = view?.scrollDOM
-  if (!scrollDOM) return
-
-  const delta = flowLogWheelDeltaPx({
-    deltaY: event.deltaY,
-    deltaMode: event.deltaMode,
-    clientHeight: scrollDOM.clientHeight,
-  })
-  if (delta === 0) return
-
-  const maxScrollTop = Math.max(0, scrollDOM.scrollHeight - scrollDOM.clientHeight)
-  const nextScrollTop = Math.max(0, Math.min(maxScrollTop, scrollDOM.scrollTop + delta))
-  if (nextScrollTop === scrollDOM.scrollTop) return
-
-  event.preventDefault()
-  scrollDOM.scrollTop = nextScrollTop
-  syncFlowLogVerticalScrollbar()
-}
-
-function onFlowLogScrollbarPointerDown(event: PointerEvent): void {
-  const scrollbar = flowLogVerticalScrollbarRef.value
-  if (!view || !scrollbar || flowLogVerticalScrollbar.value.thumbHeight === 0) return
-
-  event.preventDefault()
-  const bounds = scrollbar.getBoundingClientRect()
-  const position = event.clientY - bounds.top
-  const thumbStart = flowLogVerticalScrollbar.value.thumbOffset
-  const thumbEnd = thumbStart + flowLogVerticalScrollbar.value.thumbHeight
-  flowLogScrollbarDrag = {
-    pointerId: event.pointerId,
-    pointerOffsetY:
-      position >= thumbStart && position <= thumbEnd
-        ? position - thumbStart
-        : flowLogVerticalScrollbar.value.thumbHeight / 2,
-  }
-  isFlowLogScrollbarDragging.value = true
-  scrollbar.setPointerCapture?.(event.pointerId)
-  window.addEventListener?.('pointermove', onFlowLogScrollbarPointerMove)
-  window.addEventListener?.('pointerup', stopFlowLogScrollbarDrag)
-  window.addEventListener?.('pointercancel', stopFlowLogScrollbarDrag)
-  setFlowLogScrollFromPointer(event)
-}
-
-function onFlowLogScrollbarPointerMove(event: PointerEvent): void {
-  if (flowLogScrollbarDrag?.pointerId !== event.pointerId) return
-  setFlowLogScrollFromPointer(event)
-}
-
-function stopFlowLogScrollbarDrag(event?: PointerEvent): void {
-  if (event && flowLogScrollbarDrag?.pointerId !== event.pointerId) return
-  const scrollbar = flowLogVerticalScrollbarRef.value
-  if (event && scrollbar?.hasPointerCapture?.(event.pointerId)) {
-    scrollbar.releasePointerCapture?.(event.pointerId)
-  }
-  window.removeEventListener?.('pointermove', onFlowLogScrollbarPointerMove)
-  window.removeEventListener?.('pointerup', stopFlowLogScrollbarDrag)
-  window.removeEventListener?.('pointercancel', stopFlowLogScrollbarDrag)
-  flowLogScrollbarDrag = null
-  isFlowLogScrollbarDragging.value = false
-}
-
-function destroyViewer(): void {
-  closeFlowLogContextMenu()
-  if (pendingSyncRaf !== null) {
-    cancelAnimationFrame(pendingSyncRaf)
-    pendingSyncRaf = null
-  }
-  if (pendingTailScrollRaf !== null) {
-    cancelAnimationFrame(pendingTailScrollRaf)
-    pendingTailScrollRaf = null
-  }
-  clearFlowLogScrollbarBindings()
-  view?.destroy()
-  view = null
-  lastSyncedContent = ''
-}
-
-function scrollViewerToTail(): void {
-  if (!view) return
-  const scrollDOM = view.scrollDOM
-  scrollDOM.scrollTop = Math.max(0, scrollDOM.scrollHeight - scrollDOM.clientHeight)
-  syncFlowLogVerticalScrollbar()
-}
-
-function scheduleScrollViewerToTail(): void {
-  if (pendingTailScrollRaf !== null) {
-    cancelAnimationFrame(pendingTailScrollRaf)
-  }
-  pendingTailScrollRaf = requestAnimationFrame(() => {
-    pendingTailScrollRaf = null
-    scrollViewerToTail()
-  })
-}
-
-function ensureViewerState(): void {
-  if (isViewerEmpty.value || !rootRef.value) {
-    if (view) destroyViewer()
-    return
-  }
-
-  if (view) return
-
-  view = new EditorView({
-    parent: rootRef.value,
-    state: EditorState.create({
-      doc: props.content,
-      extensions: buildFlowLogViewerExtensions(),
-    }),
-  })
-  lastSyncedContent = props.content
-  bindFlowLogScrollbar()
-  if (props.live) {
-    scheduleScrollViewerToTail()
-  }
-}
-
-function syncViewerContent(nextContent: string): void {
-  if (!view) return
-
-  if (lastSyncedContent === nextContent) return
-
-  const scrollDOM = view.scrollDOM
-  const shouldFollowTail =
-    props.live &&
-    isFlowLogViewerNearTail(
-      {
-        scrollHeight: scrollDOM.scrollHeight,
-        scrollTop: scrollDOM.scrollTop,
-        clientHeight: scrollDOM.clientHeight,
-      },
-      FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
-    )
-
-  const docLength = view.state.doc.length
-  const changes = nextContent.startsWith(lastSyncedContent)
-    ? { from: docLength, insert: nextContent.slice(lastSyncedContent.length) }
-    : { from: 0, to: docLength, insert: nextContent }
-
-  view.dispatch({ changes })
-  lastSyncedContent = nextContent
-  syncFlowLogVerticalScrollbar()
-
-  if (shouldFollowTail) {
-    scheduleScrollViewerToTail()
-  }
-}
-
-function scheduleViewerContentSync(nextContent: string): void {
-  pendingContent = nextContent
-  if (pendingSyncRaf !== null) return
-  pendingSyncRaf = requestAnimationFrame(() => {
-    pendingSyncRaf = null
-    const content = pendingContent
-    pendingContent = null
-    if (content === null) return
-    ensureViewerState()
-    syncViewerContent(content)
-  })
-}
-
-onMounted(() => {
-  ensureViewerState()
-  document.addEventListener?.('pointerdown', onFlowLogContextMenuPointerDown)
-  document.addEventListener?.('keydown', onFlowLogContextMenuKeydown)
-  window.addEventListener?.('resize', closeFlowLogContextMenu)
-  document.addEventListener?.('scroll', closeFlowLogContextMenu, true)
-})
-
-watch(
-  () => props.content,
-  (nextContent) => {
-    scheduleViewerContentSync(nextContent)
-  },
-  { flush: 'post' },
-)
-
-watch(
-  [rootRef, isViewerEmpty],
-  () => {
-    ensureViewerState()
-  },
-  { flush: 'post' },
-)
-
-watch(
-  () => props.live,
-  (isLive) => {
-    if (isLive) {
-      scheduleScrollViewerToTail()
-    }
-  },
-  { flush: 'post' },
-)
-
-onUnmounted(() => {
-  document.removeEventListener?.('pointerdown', onFlowLogContextMenuPointerDown)
-  document.removeEventListener?.('keydown', onFlowLogContextMenuKeydown)
-  window.removeEventListener?.('resize', closeFlowLogContextMenu)
-  document.removeEventListener?.('scroll', closeFlowLogContextMenu, true)
-  destroyViewer()
-})
 </script>
 
 <template>
-  <div class="flow-log-viewer-shell">
+  <div class="flow-log-viewer-shell" role="region" :aria-label="ariaLabel">
+    <div
+      v-show="!isViewerEmpty"
+      class="flow-log-viewer-editor-wrap"
+      :class="{ 'is-live': live }"
+      @contextmenu="onViewerContextMenu"
+    >
+      <div ref="editorHost" class="flow-log-viewer-editor"></div>
+      <span v-if="live" class="flow-log-terminal-cursor" aria-hidden="true"></span>
+    </div>
+
     <div v-if="isViewerEmpty" class="flow-log-viewer-empty">
       <i class="ri-file-list-3-line"></i>
       <p>
@@ -399,30 +411,17 @@ onUnmounted(() => {
       >
       <span v-else>Select a started step or wait for the current step to emit logs.</span>
     </div>
+
     <div
-      v-else
-      class="flow-log-viewer-editor-wrap"
-      :class="{ 'is-live': live }"
-      @contextmenu="onViewerContextMenu"
-      @wheel="onFlowLogWheel"
+      v-if="runtimeError || (runtimeLoading && !isViewerEmpty)"
+      class="flow-log-overlay"
     >
-      <div ref="rootRef" class="flow-log-viewer-editor"></div>
-      <div
-        ref="flowLogVerticalScrollbarRef"
-        class="flow-log-vertical-scrollbar"
-        :class="{ 'is-dragging': isFlowLogScrollbarDragging }"
-        @pointerdown.stop.prevent="onFlowLogScrollbarPointerDown"
-      >
-        <span
-          class="flow-log-vertical-scrollbar-thumb"
-          :style="{
-            height: `${flowLogVerticalScrollbar.thumbHeight}px`,
-            transform: `translateY(${flowLogVerticalScrollbar.thumbOffset}px)`,
-          }"
-        ></span>
-      </div>
-      <span v-if="live" class="flow-log-terminal-cursor" aria-hidden="true"></span>
+      <i
+        :class="runtimeError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'"
+      ></i>
+      <span>{{ runtimeError || 'Loading log viewer...' }}</span>
     </div>
+
     <Teleport to="body">
       <div
         v-if="flowLogContextMenu"
@@ -457,14 +456,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.flow-log-viewer-shell {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  background: var(--bg-primary);
-}
-
+.flow-log-viewer-shell,
 .flow-log-viewer-editor-wrap,
 .flow-log-viewer-editor {
   flex: 1;
@@ -472,80 +464,58 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+.flow-log-viewer-shell,
 .flow-log-viewer-editor-wrap {
   position: relative;
   display: flex;
   overflow: hidden;
+  background: var(--bg-primary);
 }
 
 .flow-log-viewer-editor {
   overflow: hidden;
 }
 
-.flow-log-vertical-scrollbar {
+.flow-log-overlay {
   position: absolute;
-  z-index: 5;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 8px;
-  background: transparent;
-  cursor: grab;
-  pointer-events: auto;
-  touch-action: none;
-  user-select: none;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  font-size: 11px;
 }
 
-.flow-log-vertical-scrollbar.is-dragging {
-  cursor: grabbing;
+:deep(.monaco-editor),
+:deep(.monaco-editor .overflow-guard) {
+  border-radius: 0;
 }
 
-.flow-log-vertical-scrollbar-thumb {
-  position: absolute;
-  top: 0;
-  right: 2px;
-  left: 2px;
-  min-height: 24px;
-  border: 0 solid transparent;
-  border-radius: var(--scrollbar-radius);
-  background-color: transparent;
-  background-clip: padding-box;
+:deep(.monaco-editor .view-line) {
+  user-select: text;
 }
 
-.flow-log-viewer-editor-wrap:hover .flow-log-vertical-scrollbar-thumb,
-.flow-log-viewer-editor-wrap:has(.is-scrolling) .flow-log-vertical-scrollbar-thumb,
-.flow-log-vertical-scrollbar.is-dragging .flow-log-vertical-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb);
+:deep(.ecos-log-line-info) {
+  background: color-mix(in srgb, var(--info-bg) 38%, transparent);
 }
 
-.flow-log-viewer-editor-wrap:hover
-  .flow-log-vertical-scrollbar:hover
-  .flow-log-vertical-scrollbar-thumb,
-.flow-log-viewer-editor-wrap:has(.is-scrolling)
-  .flow-log-vertical-scrollbar:hover
-  .flow-log-vertical-scrollbar-thumb,
-.flow-log-vertical-scrollbar.is-dragging .flow-log-vertical-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb-hover);
+:deep(.ecos-log-line-phase) {
+  background: color-mix(in srgb, var(--accent-color) 5%, transparent);
 }
 
-:deep(.cm-scroller) {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: scroll;
-  overscroll-behavior: contain;
-  /* Custom overlay scrollbar matches the app-wide tokens; hide the native bar. */
-  scrollbar-width: none;
+:deep(.ecos-log-line-success) {
+  background: var(--success-bg);
 }
 
-:deep(.cm-editor) {
-  height: 100%;
-  min-height: 0;
+:deep(.ecos-log-line-warning) {
+  background: var(--warn-bg);
 }
 
-:deep(.cm-scroller::-webkit-scrollbar) {
-  width: 0;
-  height: 0;
+:deep(.ecos-log-line-error) {
+  background: var(--danger-bg);
 }
 
 .flow-log-context-menu {
@@ -648,9 +618,9 @@ onUnmounted(() => {
 }
 
 .flow-log-viewer-empty span {
-  font-size: 10px;
-  opacity: 0.7;
   max-width: 320px;
+  font-size: 10px;
   line-height: 1.45;
+  opacity: 0.7;
 }
 </style>

@@ -1898,7 +1898,12 @@
                     ></i>
                   </button>
                 </div>
-                <pre class="console-log">{{ logContent || 'No log content.' }}</pre>
+                <MonacoLogViewer
+                  class="console-log"
+                  :channel-key="selectedLogPath || `${currentStepName || 'step'}-log`"
+                  :content="logContent"
+                  :loading="logLoading"
+                />
               </section>
             </div>
           </section>
@@ -1916,7 +1921,13 @@ import {
   getWorkspaceResourceIndexApi,
   resolveWorkspaceStepInfoApi,
 } from '@/api/workspaceResources'
-import { CMDEnum, InfoEnum, StateEnum, getStepMetadata } from '@/api/type'
+import {
+  CMDEnum,
+  FrontendStepEnum,
+  InfoEnum,
+  StateEnum,
+  getStepMetadata,
+} from '@/api/type'
 import { runStepApi } from '@/api/flow'
 import { loadFrontendStepDetailApi } from '@/api/frontendDetail'
 import {
@@ -1937,6 +1948,7 @@ import { getDesktopApi } from '@/platform/desktop'
 import FrontendDisassemblyViewer from '@/components/frontend/FrontendDisassemblyViewer.vue'
 import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
 import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
+import MonacoLogViewer from '@/components/MonacoLogViewer.vue'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import {
@@ -2372,6 +2384,10 @@ interface ReviewHotspot {
 
 const route = useRoute()
 const router = useRouter()
+const initialConsoleStepIsSim =
+  String(route.params.step || '')
+    .trim()
+    .toLowerCase() === FrontendStepEnum.SIM
 const {
   currentProject,
   resourceVersions,
@@ -2404,10 +2420,10 @@ const logContent = ref('')
 const activeSource = ref<FrontendSourceSelection | null>(null)
 const activeWaveform = ref<WaveSelection | null>(null)
 const cachedWaveItems = ref<WaveSelection[]>([])
-const consoleCollapsed = ref(true)
+const consoleCollapsed = ref(!initialConsoleStepIsSim)
 const consoleHeight = ref(CONSOLE_DEFAULT_HEIGHT)
 const consoleResizing = ref(false)
-const consoleTab = ref<ConsoleTabId>('problems')
+const consoleTab = ref<ConsoleTabId>(initialConsoleStepIsSim ? 'log' : 'problems')
 const reviewMode = ref<ReviewMode>('source')
 const lintScope = ref<'actionable' | 'all'>('actionable')
 const sourceFocusTarget = ref<{
@@ -5271,7 +5287,7 @@ watch(
 
 watch(
   () => String(route.params.step || ''),
-  () => {
+  (step) => {
     detail.value = null
     logContent.value = ''
     selectedCase.value = null
@@ -5279,6 +5295,10 @@ watch(
     disassemblyTarget.value = { address: '', token: 0 }
     selectedLogPath.value = ''
     activeTab.value = defaultTabForCurrentStep()
+    if (step.trim().toLowerCase() === FrontendStepEnum.SIM) {
+      consoleCollapsed.value = false
+      consoleTab.value = 'log'
+    }
     if (!isGlobalSrcView.value) {
       activeSource.value = null
     }
@@ -8332,12 +8352,7 @@ button:disabled {
   flex: 1;
   min-height: 0;
   margin: 0;
-  overflow: auto;
-  padding: 10px 12px;
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  font-size: 10px;
-  line-height: 1.45;
+  overflow: hidden;
 }
 
 .text-action {

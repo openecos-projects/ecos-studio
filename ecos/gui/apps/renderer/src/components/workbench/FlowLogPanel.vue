@@ -46,6 +46,7 @@
       <div v-if="error" class="flow-log-message is-error">{{ error }}</div>
       <div v-else-if="selectedSegment" class="flow-log-viewer">
         <FlowLogCodeViewer
+          :channel-key="keyFor(selectedSegment)"
           :content="selectedContent"
           :live="Boolean(selectedSegment.live)"
           :loading="loading"
@@ -71,9 +72,18 @@
     :style="{ width: 'min(980px, calc(100vw - 32px))' }"
     :draggable="false"
   >
-    <pre class="flow-log-dialog-content">{{
-      selectedContent || 'No log content yet.'
-    }}</pre>
+    <div class="flow-log-dialog-content">
+      <FlowLogCodeViewer
+        v-if="dialogVisible && selectedSegment"
+        :channel-key="`${keyFor(selectedSegment)}\u001fdialog`"
+        :content="selectedContent"
+        :live="Boolean(selectedSegment.live)"
+        :loading="loading"
+        :missing="selectedSegment.missing"
+        aria-label="Expanded flow step log"
+      />
+      <div v-else class="flow-log-message">No log content yet.</div>
+    </div>
   </Dialog>
 </template>
 
@@ -294,20 +304,11 @@ onBeforeUnmount(() => {
 }
 
 .flow-log-dialog-content {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0;
+  display: flex;
+  height: min(70vh, 760px);
   max-height: min(70vh, 760px);
-  min-height: 0;
-  overflow: auto;
-  padding: 12px;
-  user-select: text;
-  white-space: pre-wrap;
-  word-break: break-word;
+  min-height: min(280px, 70vh);
+  overflow: hidden;
 }
 </style>
 
