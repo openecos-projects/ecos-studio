@@ -44,10 +44,36 @@ const MAP_THUMBNAIL_WIDTH: u32 = 128;
 const MAP_THUMBNAIL_HEIGHT: u32 = 96;
 const MAP_THUMBNAIL_MAX_DIMENSION: u32 = 8192;
 const MAP_THUMBNAIL_MAX_DECODE_BYTES: u64 = 128 * 1024 * 1024;
-const COORDINATE_RULER_THICKNESS: f32 = 20.0;
-const COORDINATE_RULER_TARGET_TICK_PX: f32 = 80.0;
-const RULER_EDGE_SNAP_RADIUS_PX: f32 = 10.0;
 const REDUCED_MOTION_ENV: &str = "ECOS_REDUCED_MOTION";
+const RENDER_STATS_ENV: &str = "ECOS_RENDER_STATS";
+
+#[derive(Clone, Debug, Default)]
+pub struct CanvasRenderStats {
+    pub frame_time_ms: f32,
+    pub query_time_ms: f32,
+    pub filter_time_ms: f32,
+    pub paint_time_ms: f32,
+    pub drawn_shapes: usize,
+    pub estimated_primitives: usize,
+    pub label_count: usize,
+    pub use_view_tiles: bool,
+    pub zoom: f32,
+    pub lod: u8,
+    pub visible_drc_count: usize,
+    pub visible_antenna_count: usize,
+}
+
+struct GpuCachedLabel {
+    key: ShapeLabelKey,
+    rect: Rect32,
+    text: String,
+    kind: ShapeLabelKind,
+}
+
+struct GpuTileData {
+    instances: std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>>,
+    labels: Vec<GpuCachedLabel>,
+}
 
 pub struct ChipViewerApp {
     state: ViewerState,
@@ -65,7 +91,10 @@ struct LoadingViewer {
     edit_result_dir: Option<PathBuf>,
     drc_data_path: Option<PathBuf>,
     drc_statis_path: Option<PathBuf>,
+    antenna_data_path: Option<PathBuf>,
+    antenna_statis_path: Option<PathBuf>,
     map_root_path: Option<PathBuf>,
+    pub target_format: wgpu::TextureFormat,
 }
 
 struct LoadedViewer {
@@ -100,6 +129,8 @@ struct LoadedViewer {
     next_command_counter: u32,
     drc_overlay: Option<DrcOverlay>,
     selected_drc: Option<usize>,
+    antenna_overlay: Option<AntennaOverlay>,
+    selected_antenna: Option<usize>,
     map_catalog: Option<MapCatalog>,
     map_catalog_error: Option<String>,
     analysis_tab: AnalysisTab,
@@ -114,10 +145,15 @@ struct LoadedViewer {
     zoom: f32,
     pan: egui::Vec2,
     pan_drag: PanDragState,
-    ruler_tool: OrthogonalRuler,
     object_visibility: ObjectVisibility,
     coordinate_unit: CoordinateUnit,
     sidebar_info_panel: Option<SidebarInfoPanel>,
+    geometry_epoch: u64,
+    owner_category_cache: OwnerCategoryCache,
+    visibility_rules_cache: VisibilityRulesCache,
+    gpu_canvas: crate::canvas_gpu::GpuCanvasState,
+    gpu_frame_counter: u64,
+    gpu_tile_instances: std::collections::HashMap<crate::canvas_gpu::GpuBufferKey, std::sync::Arc<GpuTileData>>,
 }
 
 struct LayerUiState {
@@ -155,11 +191,22 @@ struct DrcOverlay {
     statis_path: Option<PathBuf>,
     type_states: Vec<DrcTypeState>,
     violations: Vec<DrcViolation>,
+    rtree: rstar::RTree<DrcViolationRTreeNode>,
+    load_error: Option<String>,
+}
+
+struct AntennaOverlay {
+    data_path: Option<PathBuf>,
+    statis_path: Option<PathBuf>,
+    type_states: Vec<AntennaTypeState>,
+    violations: Vec<AntennaViolation>,
+    rtree: rstar::RTree<AntennaViolationRTreeNode>,
     load_error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AnalysisTab {
+    Antenna,
     Drc,
     Map,
 }
@@ -191,66 +238,6 @@ struct DecodedMapThumbnail {
     rgba: Vec<u8>,
 }
 
-#[derive(Debug, Default)]
-struct OrthogonalRuler {
-    enabled: bool,
-    active: bool,
-    points: Vec<Point32>,
-}
-
-impl OrthogonalRuler {
-    fn toggle(&mut self) {
-        self.enabled = !self.enabled;
-        self.active = false;
-        self.points.clear();
-    }
-
-    fn start(&mut self, point: Point32) {
-        self.active = true;
-        self.points.clear();
-        self.points.push(point);
-    }
-
-    fn preview(&self, pointer: Point32) -> Option<Point32> {
-        if !self.active {
-            return None;
-        }
-        self.points
-            .last()
-            .copied()
-            .map(|anchor| orthogonal_ruler_point(anchor, pointer))
-    }
-
-    fn commit(&mut self, pointer: Point32) {
-        let Some(point) = self.preview(pointer) else {
-            return;
-        };
-        if self.points.last() != Some(&point) {
-            self.points.push(point);
-        }
-    }
-
-    fn finish(&mut self) {
-        self.active = false;
-        if self.points.len() < 2 {
-            self.points.clear();
-        }
-    }
-
-    fn clear(&mut self) {
-        self.active = false;
-        self.points.clear();
-    }
-}
-
-fn ruler_start_requested(
-    input: &egui::InputState,
-    enabled: bool,
-    pointer_over_layout: bool,
-) -> bool {
-    enabled && pointer_over_layout && input.pointer.button_pressed(egui::PointerButton::Secondary)
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DrcTypeState {
     name: String,
@@ -274,6 +261,55 @@ struct DrcViolation {
     required_size: Option<i64>,
     nets: Vec<String>,
     insts: Vec<String>,
+}
+
+struct DrcViolationRTreeNode {
+    bbox: rstar::AABB<[i32; 2]>,
+    index: usize,
+}
+
+impl rstar::RTreeObject for DrcViolationRTreeNode {
+    type Envelope = rstar::AABB<[i32; 2]>;
+    fn envelope(&self) -> Self::Envelope {
+        self.bbox
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AntennaTypeState {
+    name: String,
+    total_count: usize,
+    layer_counts: BTreeMap<String, usize>,
+    visible: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct AntennaTypeCounts {
+    total_count: usize,
+    layer_counts: BTreeMap<String, usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AntennaViolation {
+    id: usize,
+    antenna_type: String,
+    layer: String,
+    bbox: Rect32,
+    required_size: Option<i64>,
+    nets: Vec<String>,
+    insts: Vec<String>,
+}
+
+struct AntennaViolationRTreeNode {
+    bbox: rstar::AABB<[i32; 2]>,
+    index: usize,
+}
+
+impl rstar::RTreeObject for AntennaViolationRTreeNode {
+    type Envelope = rstar::AABB<[i32; 2]>;
+    fn envelope(&self) -> Self::Envelope {
+        self.bbox
+    }
 }
 
 struct EditDraft {
@@ -502,6 +538,27 @@ struct ObjectVisibility {
     boundaries: bool,
     fill: bool,
     regions: bool,
+}
+
+impl ObjectVisibility {
+    pub fn bits(&self) -> u32 {
+        let mut b = 0;
+        if self.instances { b |= 1 << 0; }
+        if self.net_signal { b |= 1 << 1; }
+        if self.net_clock { b |= 1 << 2; }
+        if self.net_other { b |= 1 << 3; }
+        if self.pdn { b |= 1 << 4; }
+        if self.vias { b |= 1 << 5; }
+        if self.io_pin { b |= 1 << 6; }
+        if self.placement { b |= 1 << 7; }
+        if self.tracks { b |= 1 << 8; }
+        if self.gcells { b |= 1 << 9; }
+        if self.obstructions { b |= 1 << 10; }
+        if self.boundaries { b |= 1 << 11; }
+        if self.fill { b |= 1 << 12; }
+        if self.regions { b |= 1 << 13; }
+        b
+    }
 }
 
 impl Default for ObjectVisibility {
@@ -738,6 +795,154 @@ fn net_kind_drawing_category(kind: Option<&str>) -> DrawingCategory {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct OwnerCategoryCache {
+    epoch: u64,
+    net_categories: std::collections::HashMap<u64, Option<DrawingCategory>>,
+}
+
+impl OwnerCategoryCache {
+    fn get(&mut self, epoch: u64, db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
+        if self.epoch != epoch {
+            self.epoch = epoch;
+            self.net_categories.clear();
+        }
+        let owner_type = OwnerType::from_raw(owner.owner_type)?;
+        if owner_type == OwnerType::NetWireSegment {
+            let owner_id = owner.owner_id;
+            if let Some(cat) = self.net_categories.get(&owner_id) {
+                return *cat;
+            }
+            let cat = drawing_category_for_owner(db, owner);
+            self.net_categories.insert(owner_id, cat);
+            cat
+        } else {
+            drawing_category_for_owner(db, owner)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct ZoomVisibilityRules {
+    track_grid_suppressed: bool,
+    gcell_grid_suppressed: bool,
+}
+
+impl ZoomVisibilityRules {
+    fn new(db: &ChipViewDb) -> Self {
+        let grid_metadata = db.grid_metadata();
+        Self {
+            track_grid_suppressed: grid_metadata
+                .iter()
+                .any(|grid| grid_owner_type(grid) == Some(OwnerType::TrackGrid)),
+            gcell_grid_suppressed: grid_metadata
+                .iter()
+                .any(|grid| grid_owner_type(grid) == Some(OwnerType::GCellGrid)),
+        }
+    }
+
+    #[inline]
+    fn is_drawn_at_zoom(&self, owner_type: Option<OwnerType>, zoom: f32) -> bool {
+        let Some(owner_type) = owner_type else {
+            return true;
+        };
+        match owner_type {
+            OwnerType::TrackGrid if self.track_grid_suppressed => false,
+            OwnerType::GCellGrid if self.gcell_grid_suppressed => false,
+            _ => zoom > 1.25 || !is_context_owner_type(owner_type as u8),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct VisibilityRulesCache {
+    epoch: u64,
+    layer_visibility_hash: u64,
+    layer_index: LayerRenderIndex,
+    zoom_rules: ZoomVisibilityRules,
+}
+
+#[derive(Clone, Debug, Default)]
+struct LayerRenderIndex {
+    visible_layer_map: BTreeMap<LayerId, bool>,
+    style_map: BTreeMap<LayerId, LayerStyle>,
+}
+
+impl LayerRenderIndex {
+    fn new(layers: &[LayerUiState]) -> Self {
+        let mut visible_layer_map = BTreeMap::new();
+        let mut style_map = BTreeMap::new();
+        for layer in layers {
+            visible_layer_map.insert(layer.layer_id, layer.visible);
+            style_map.insert(layer.layer_id, layer.style);
+        }
+        visible_layer_map.insert(LAYOUT_GEOMETRY_LAYER, true);
+        style_map.insert(LAYOUT_GEOMETRY_LAYER, layout_geometry_layer_style());
+        Self {
+            visible_layer_map,
+            style_map,
+        }
+    }
+
+    fn visibility_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for (layer_id, visible) in &self.visible_layer_map {
+            layer_id.hash(&mut hasher);
+            visible.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    #[inline]
+    fn is_layer_visible(&self, layer_id: LayerId) -> bool {
+        self.visible_layer_map.get(&layer_id).copied().unwrap_or(false)
+    }
+
+    #[inline]
+    fn get_style(&self, layer_id: LayerId) -> Option<&LayerStyle> {
+        self.style_map.get(&layer_id)
+    }
+}
+
+#[inline]
+fn shape_is_visible_fast(
+    shape: &ShapeRecord,
+    owner_type: Option<OwnerType>,
+    owner_category: Option<DrawingCategory>,
+    layer_index: &LayerRenderIndex,
+    object_visibility: &ObjectVisibility,
+) -> bool {
+    let layer_visible = if shape_uses_layer_visibility(shape, owner_type) {
+        layer_index.is_layer_visible(shape.layer_id)
+    } else {
+        true
+    };
+    let owner_visible =
+        owner_category.is_none_or(|category| object_visibility.is_category_visible(category));
+    layer_visible && owner_visible
+}
+
+#[inline]
+fn visible_style_for_shape_fast<'a>(
+    shape: &ShapeRecord,
+    owner: Option<&'a OwnerRef>,
+    owner_type: Option<OwnerType>,
+    layer_index: &'a LayerRenderIndex,
+) -> Option<LayerStyle> {
+    let layer_id = shape.layer_id;
+    let base_style = if shape_uses_layer_visibility(shape, owner_type) {
+        if layer_index.is_layer_visible(layer_id) {
+            layer_index.get_style(layer_id)?
+        } else {
+            return None;
+        }
+    } else {
+        layer_index.get_style(layer_id)?
+    };
+    Some(style_for_shape(*base_style, owner))
+}
+
 impl SearchMode {
     const ALL: [Self; 6] = [
         Self::All,
@@ -826,7 +1031,10 @@ impl ChipViewerApp {
         initial_session_dirty: bool,
         drc_data_path: Option<PathBuf>,
         drc_statis_path: Option<PathBuf>,
+        antenna_data_path: Option<PathBuf>,
+        antenna_statis_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
+        target_format: wgpu::TextureFormat,
     ) -> Self {
         let edit_enabled = mode == "edit";
         let (sender, receiver) = mpsc::channel();
@@ -846,7 +1054,10 @@ impl ChipViewerApp {
                 edit_result_dir,
                 drc_data_path,
                 drc_statis_path,
+                antenna_data_path,
+                antenna_statis_path,
                 map_root_path,
+                target_format,
             }),
             theme_initialized: false,
             startup_focus_requested: false,
@@ -917,7 +1128,10 @@ impl ChipViewerApp {
                     loading.edit_result_dir.clone(),
                     loading.drc_data_path.clone(),
                     loading.drc_statis_path.clone(),
+                    loading.antenna_data_path.clone(),
+                    loading.antenna_statis_path.clone(),
                     loading.map_root_path.clone(),
+                    loading.target_format,
                 ))),
                 Ok(Err(err)) => Some(ViewerState::Error(err)),
                 Err(mpsc::TryRecvError::Disconnected) => Some(ViewerState::Error(
@@ -978,11 +1192,18 @@ impl DrcOverlay {
         merge_drc_counts(&mut counts, drc_counts_from_violations(&violations));
         let type_states = drc_type_states_from_counts(counts);
 
+        let rtree_nodes: Vec<_> = violations.iter().enumerate().map(|(i, v)| DrcViolationRTreeNode {
+            bbox: rstar::AABB::from_corners([v.bbox.lx, v.bbox.ly], [v.bbox.hx, v.bbox.hy]),
+            index: i,
+        }).collect();
+        let rtree = rstar::RTree::bulk_load(rtree_nodes);
+
         Some(Self {
             data_path,
             statis_path,
             type_states,
             violations,
+            rtree,
             load_error,
         })
     }
@@ -1070,7 +1291,7 @@ fn parse_drc_violation(
     Some(DrcViolation {
         id,
         drc_type: drc_type.to_string(),
-        layer: layer.to_string(),
+        layer: layer.to_ascii_lowercase(),
         bbox: Rect32 {
             lx: llx.min(urx),
             ly: lly.min(ury),
@@ -1170,6 +1391,253 @@ fn drc_type_states_from_counts(counts: BTreeMap<String, DrcTypeCounts>) -> Vec<D
         .collect()
 }
 
+impl AntennaOverlay {
+    fn load(data_path: Option<PathBuf>, statis_path: Option<PathBuf>) -> Option<Self> {
+        if data_path.is_none() && statis_path.is_none() {
+            return None;
+        }
+
+        let mut load_error = None;
+        let mut violations = Vec::new();
+        let mut counts = BTreeMap::new();
+
+        if let Some(path) = data_path.as_deref() {
+            match fs::read_to_string(path)
+                .map_err(|err| err.to_string())
+                .and_then(|text| parse_antenna_json_text(&text))
+            {
+                Ok((json_violations, json_counts)) => {
+                    violations = json_violations;
+                    counts = json_counts;
+                }
+                Err(err) => {
+                    load_error = Some(format!(
+                        "failed to load Antenna data {}: {err}",
+                        path.display()
+                    ));
+                }
+            }
+        }
+
+        if let Some(path) = statis_path.as_deref() {
+            match fs::read_to_string(path)
+                .map_err(|err| err.to_string())
+                .map(|text| parse_antenna_statis_csv(&text))
+            {
+                Ok(csv_counts) => merge_antenna_counts(&mut counts, csv_counts),
+                Err(err) => {
+                    let message = format!(
+                        "failed to load Antenna statistics {}: {err}",
+                        path.display()
+                    );
+                    load_error = Some(match load_error {
+                        Some(existing) => format!("{existing}; {message}"),
+                        None => message,
+                    });
+                }
+            }
+        }
+
+        merge_antenna_counts(&mut counts, antenna_counts_from_violations(&violations));
+        let type_states = antenna_type_states_from_counts(counts);
+
+        let rtree_nodes: Vec<_> = violations.iter().enumerate().map(|(i, v)| AntennaViolationRTreeNode {
+            bbox: rstar::AABB::from_corners([v.bbox.lx, v.bbox.ly], [v.bbox.hx, v.bbox.hy]),
+            index: i,
+        }).collect();
+        let rtree = rstar::RTree::bulk_load(rtree_nodes);
+
+        Some(Self {
+            data_path,
+            statis_path,
+            type_states,
+            violations,
+            rtree,
+            load_error,
+        })
+    }
+
+    fn total_count(&self) -> usize {
+        self.type_states.iter().map(|state| state.total_count).sum()
+    }
+
+    fn selected_type_count(&self) -> usize {
+        self.type_states
+            .iter()
+            .filter(|state| state.visible)
+            .count()
+    }
+
+    fn set_all_visible(&mut self, visible: bool) {
+        for state in &mut self.type_states {
+            state.visible = visible;
+        }
+    }
+
+    fn type_is_visible(&self, antenna_type: &str) -> bool {
+        self.type_states
+            .iter()
+            .find(|state| state.name == antenna_type)
+            .is_some_and(|state| state.visible)
+    }
+}
+
+fn parse_antenna_json_text(
+    text: &str,
+) -> Result<(Vec<AntennaViolation>, BTreeMap<String, AntennaTypeCounts>), String> {
+    let root: serde_json::Value = serde_json::from_str(text).map_err(|err| err.to_string())?;
+    let Some(distribution) = root
+        .get("antenna")
+        .and_then(|node| node.get("distribution"))
+        .and_then(|node| node.as_object())
+    else {
+        return Ok((Vec::new(), BTreeMap::new()));
+    };
+
+    let mut violations = Vec::new();
+    let mut counts = BTreeMap::new();
+    for (antenna_type, type_node) in distribution {
+        let mut type_counts = AntennaTypeCounts {
+            total_count: json_usize(type_node.get("number")).unwrap_or(0),
+            layer_counts: BTreeMap::new(),
+        };
+        if let Some(layers) = type_node.get("layers").and_then(|node| node.as_object()) {
+            for (layer, layer_node) in layers {
+                let layer_count = json_usize(layer_node.get("number")).unwrap_or(0);
+                if layer_count > 0 {
+                    type_counts.layer_counts.insert(layer.clone(), layer_count);
+                }
+                if let Some(list) = layer_node.get("list").and_then(|node| node.as_array()) {
+                    for item in list {
+                        if let Some(violation) =
+                            parse_antenna_violation(item, violations.len(), antenna_type, layer)
+                        {
+                            violations.push(violation);
+                        }
+                    }
+                }
+            }
+        }
+        if type_counts.total_count == 0 {
+            type_counts.total_count = type_counts.layer_counts.values().sum();
+        }
+        counts.insert(antenna_type.clone(), type_counts);
+    }
+
+    Ok((violations, counts))
+}
+
+fn parse_antenna_violation(
+    node: &serde_json::Value,
+    id: usize,
+    antenna_type: &str,
+    layer: &str,
+) -> Option<AntennaViolation> {
+    let llx = json_i32(node.get("llx"))?;
+    let lly = json_i32(node.get("lly"))?;
+    let urx = json_i32(node.get("urx"))?;
+    let ury = json_i32(node.get("ury"))?;
+    Some(AntennaViolation {
+        id,
+        antenna_type: antenna_type.to_string(),
+        layer: layer.to_ascii_lowercase(),
+        bbox: Rect32 {
+            lx: llx.min(urx),
+            ly: lly.min(ury),
+            hx: llx.max(urx),
+            hy: lly.max(ury),
+        },
+        required_size: json_i64(node.get("required_size")),
+        nets: json_string_vec(node.get("net")),
+        insts: json_string_vec(node.get("inst")),
+    })
+}
+
+fn parse_antenna_statis_csv(text: &str) -> BTreeMap<String, AntennaTypeCounts> {
+    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+    let Some(header_line) = lines.next() else {
+        return BTreeMap::new();
+    };
+    let headers = split_simple_csv_line(header_line);
+    if headers.is_empty() {
+        return BTreeMap::new();
+    }
+
+    let mut counts = BTreeMap::new();
+    for line in lines {
+        let fields = split_simple_csv_line(line);
+        if fields.is_empty() {
+            continue;
+        }
+        let antenna_type = fields[0].trim();
+        if antenna_type.is_empty() || antenna_type.eq_ignore_ascii_case("total") {
+            continue;
+        }
+        let mut type_counts = AntennaTypeCounts::default();
+        for (index, header) in headers.iter().enumerate().skip(1) {
+            let value = fields
+                .get(index)
+                .and_then(|field| field.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            if header.eq_ignore_ascii_case("total") {
+                type_counts.total_count = value;
+            } else if value > 0 {
+                type_counts.layer_counts.insert(header.clone(), value);
+            }
+        }
+        if type_counts.total_count == 0 {
+            type_counts.total_count = type_counts.layer_counts.values().sum();
+        }
+        counts.insert(antenna_type.to_string(), type_counts);
+    }
+    counts
+}
+
+fn merge_antenna_counts(
+    target: &mut BTreeMap<String, AntennaTypeCounts>,
+    source: BTreeMap<String, AntennaTypeCounts>,
+) {
+    for (antenna_type, source_counts) in source {
+        let target_counts = target.entry(antenna_type).or_default();
+        if target_counts.total_count == 0 {
+            target_counts.total_count = source_counts.total_count;
+        }
+        for (layer, count) in source_counts.layer_counts {
+            target_counts.layer_counts.entry(layer).or_insert(count);
+        }
+    }
+}
+
+fn antenna_counts_from_violations(
+    violations: &[AntennaViolation],
+) -> BTreeMap<String, AntennaTypeCounts> {
+    let mut counts = BTreeMap::<String, AntennaTypeCounts>::new();
+    for violation in violations {
+        let type_counts = counts.entry(violation.antenna_type.clone()).or_default();
+        type_counts.total_count += 1;
+        *type_counts
+            .layer_counts
+            .entry(violation.layer.clone())
+            .or_insert(0) += 1;
+    }
+    counts
+}
+
+fn antenna_type_states_from_counts(
+    counts: BTreeMap<String, AntennaTypeCounts>,
+) -> Vec<AntennaTypeState> {
+    counts
+        .into_iter()
+        .filter(|(_, counts)| counts.total_count > 0 || !counts.layer_counts.is_empty())
+        .map(|(name, counts)| AntennaTypeState {
+            name,
+            total_count: counts.total_count,
+            layer_counts: counts.layer_counts,
+            visible: true,
+        })
+        .collect()
+}
+
 fn json_i32(value: Option<&serde_json::Value>) -> Option<i32> {
     value
         .and_then(|value| value.as_i64())
@@ -1211,7 +1679,10 @@ impl LoadedViewer {
         edit_result_dir: Option<PathBuf>,
         drc_data_path: Option<PathBuf>,
         drc_statis_path: Option<PathBuf>,
+        antenna_data_path: Option<PathBuf>,
+        antenna_statis_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
+        target_format: wgpu::TextureFormat,
     ) -> Self {
         let stats = db.stats();
         let grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
@@ -1219,6 +1690,7 @@ impl LoadedViewer {
         let drawing_category_counts = drawing_category_counts(&db);
         let layers = layer_ui_states(&db, &BTreeMap::new());
         let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
+        let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
         let (map_catalog, map_catalog_error) = match map_root_path.as_deref() {
             Some(root) => match MapCatalog::discover(root) {
                 Ok(catalog) if !catalog.is_empty() => (Some(catalog), None),
@@ -1229,6 +1701,8 @@ impl LoadedViewer {
         };
         let analysis_tab = if drc_overlay.is_some() {
             AnalysisTab::Drc
+        } else if antenna_overlay.is_some() {
+            AnalysisTab::Antenna
         } else {
             AnalysisTab::Map
         };
@@ -1270,6 +1744,8 @@ impl LoadedViewer {
             next_command_counter: 1,
             drc_overlay,
             selected_drc: None,
+            antenna_overlay,
+            selected_antenna: None,
             map_catalog,
             map_catalog_error,
             analysis_tab,
@@ -1284,10 +1760,15 @@ impl LoadedViewer {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             pan_drag: PanDragState::default(),
-            ruler_tool: OrthogonalRuler::default(),
             object_visibility: ObjectVisibility::default(),
             coordinate_unit: CoordinateUnit::Dbu,
             sidebar_info_panel: None,
+            geometry_epoch: 1,
+            owner_category_cache: OwnerCategoryCache::default(),
+            visibility_rules_cache: VisibilityRulesCache::default(),
+            gpu_canvas: crate::canvas_gpu::GpuCanvasState::new_from_env(target_format),
+            gpu_tile_instances: std::collections::HashMap::new(),
+            gpu_frame_counter: 0,
         }
     }
 
@@ -1296,11 +1777,15 @@ impl LoadedViewer {
     }
 
     fn has_analysis_panel(&self) -> bool {
-        self.drc_overlay.is_some() || self.map_catalog.is_some() || self.map_catalog_error.is_some()
+        self.drc_overlay.is_some()
+            || self.antenna_overlay.is_some()
+            || self.map_catalog.is_some()
+            || self.map_catalog_error.is_some()
     }
 
     fn analysis_sidebar(&mut self, ui: &mut egui::Ui) {
         let has_drc = self.drc_overlay.is_some();
+        let has_antenna = self.antenna_overlay.is_some();
         let has_maps = self.map_catalog.is_some() || self.map_catalog_error.is_some();
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -1308,17 +1793,34 @@ impl LoadedViewer {
             if has_drc && analysis_tab_button(ui, "DRC", self.analysis_tab == AnalysisTab::Drc) {
                 self.analysis_tab = AnalysisTab::Drc;
             }
+            if has_antenna
+                && analysis_tab_button(ui, "ANTENNA", self.analysis_tab == AnalysisTab::Antenna)
+            {
+                self.analysis_tab = AnalysisTab::Antenna;
+            }
             if has_maps && analysis_tab_button(ui, "MAP", self.analysis_tab == AnalysisTab::Map) {
                 self.analysis_tab = AnalysisTab::Map;
             }
         });
         ui.add_space(4.0);
         ui.separator();
-        match self.analysis_tab {
-            AnalysisTab::Drc if has_drc => self.drc_sidebar(ui),
-            AnalysisTab::Map if has_maps => self.map_sidebar(ui),
-            AnalysisTab::Drc => self.map_sidebar(ui),
-            AnalysisTab::Map => self.drc_sidebar(ui),
+
+        let show_drc = self.analysis_tab == AnalysisTab::Drc && has_drc;
+        let show_antenna = self.analysis_tab == AnalysisTab::Antenna && has_antenna;
+        let show_map = self.analysis_tab == AnalysisTab::Map && has_maps;
+
+        if show_drc {
+            self.drc_sidebar(ui);
+        } else if show_antenna {
+            self.antenna_sidebar(ui);
+        } else if show_map {
+            self.map_sidebar(ui);
+        } else if has_drc {
+            self.drc_sidebar(ui);
+        } else if has_antenna {
+            self.antenna_sidebar(ui);
+        } else if has_maps {
+            self.map_sidebar(ui);
         }
     }
 
@@ -1392,6 +1894,81 @@ impl LoadedViewer {
             .show(ui, |ui| {
                 for state in &mut overlay.type_states {
                     drc_type_card(ui, state);
+                    ui.add_space(8.0);
+                }
+            });
+    }
+
+    fn antenna_sidebar(&mut self, ui: &mut egui::Ui) {
+        let visible_count = self.visible_antenna_violation_count(None);
+        let Some(overlay) = &mut self.antenna_overlay else {
+            return;
+        };
+
+        ui.horizontal(|ui| {
+            section_heading(ui, "VIOLATIONS");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(format!("{visible_count}/{}", overlay.total_count()))
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+            });
+        });
+        ui.horizontal(|ui| {
+            if ui.small_button("All").clicked() {
+                overlay.set_all_visible(true);
+            }
+            if ui.small_button("None").clicked() {
+                overlay.set_all_visible(false);
+                self.selected_drc = None;
+            }
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} / {} types",
+                    overlay.selected_type_count(),
+                    overlay.type_states.len()
+                ))
+                .small()
+                .color(ecos_text_secondary()),
+            );
+        });
+
+        if let Some(err) = &overlay.load_error {
+            ui.add_space(6.0);
+            ui.colored_label(ecos_warning(), err);
+        }
+
+        ui.add_space(6.0);
+        if overlay.type_states.is_empty() {
+            ui.label(
+                egui::RichText::new("No Antenna violations")
+                    .color(ecos_text_secondary())
+                    .size(13.0),
+            );
+            if let Some(path) = overlay.data_path.as_deref() {
+                ui.label(
+                    egui::RichText::new(path.display().to_string())
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+            }
+            if let Some(path) = overlay.statis_path.as_deref() {
+                ui.label(
+                    egui::RichText::new(path.display().to_string())
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+            }
+            return;
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt("chip_viewer_antenna_type_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for state in &mut overlay.type_states {
+                    antenna_type_card(ui, state);
                     ui.add_space(8.0);
                 }
             });
@@ -1690,17 +2267,6 @@ impl LoadedViewer {
                     }
                 }
             }
-            let ruler_response = ui
-                .add_sized(
-                    egui::vec2(30.0, 26.0),
-                    egui::Button::new("").selected(self.ruler_tool.enabled),
-                )
-                .on_hover_text("Measure");
-            paint_ruler_tool_icon(ui.painter(), ruler_response.rect, ecos_text_primary());
-            if ruler_response.clicked() {
-                self.ruler_tool.toggle();
-                self.pan_drag.reset();
-            }
             ui.separator();
             let dbu_per_micron = self.db.snapshot().manifest().dbu_per_micron;
             for unit in [CoordinateUnit::Dbu, CoordinateUnit::Micron] {
@@ -1868,7 +2434,7 @@ impl LoadedViewer {
     fn query_input_ui(&mut self, ui: &mut egui::Ui, height: f32) {
         egui::Frame::NONE
             .fill(ecos_canvas())
-            .stroke(egui::Stroke::new(1.0, ecos_border()))
+            .stroke(egui::Stroke::new(1.0_f32, ecos_border()))
             .corner_radius(14)
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
@@ -2073,66 +2639,24 @@ impl LoadedViewer {
         }
     }
 
-    fn ruler_edge_snap(
-        &self,
-        pointer: Point32,
-        world: Rect32,
-        canvas: egui::Rect,
-        layer_ids: &[LayerId],
-        use_view_tiles: bool,
-    ) -> Option<Point32> {
-        if !self.ruler_tool.active {
-            return None;
-        }
-        let anchor = self.ruler_tool.points.last().copied()?;
-        let radius = ruler_edge_snap_radius_dbu(world, canvas, self.zoom);
-        let mut rects = Vec::new();
-        if !use_view_tiles {
-            for shape_id in self.db.query_layers_near_point(layer_ids, pointer, radius) {
-                let Some(shape) = self.db.find_shape(shape_id) else {
-                    continue;
-                };
-                if !is_renderable_shape(shape)
-                    || !self.shape_is_visible(shape)
-                    || !self.shape_is_drawn_at_current_zoom(shape)
-                {
-                    continue;
-                }
-                if let ShapeGeometry::Rect(rect) = self.db.shape_geometry(shape) {
-                    rects.push(rect);
-                }
-            }
-        }
-        if let Some(rect) = self.selected_map_bbox {
-            rects.push(rect);
-        }
-        nearest_orthogonal_edge_snap(anchor, pointer, &rects, radius)
-    }
-
     fn canvas(&mut self, ui: &mut egui::Ui) {
+        let canvas_start = Instant::now();
+        let mut query_duration = Duration::ZERO;
+        let mut filter_duration = Duration::ZERO;
+        let mut paint_duration = Duration::ZERO;
+        let mut estimated_primitives = 0usize;
+        let mut visible_drc_count = 0usize;
+        let mut visible_antenna_count = 0usize;
         let available = ui.available_size();
-        let (response, frame_painter) =
-            ui.allocate_painter(available, egui::Sense::click_and_drag());
-        let frame = response.rect;
-        frame_painter.rect_filled(frame, 0.0, ecos_canvas());
-        let canvas = layout_canvas_rect(frame);
-        let ruler_painter = frame_painter.clone();
-        let painter = frame_painter.with_clip_rect(canvas);
+        let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
+        let canvas = response.rect;
         let heatmap_popup_rect = self.map_heatmap_popup_rect(canvas);
         let pointer_over_heatmap = heatmap_popup_rect.is_some_and(|rect| {
             ui.ctx()
                 .input(|input| input.pointer.hover_pos())
                 .is_some_and(|pos| rect.contains(pos))
         });
-        let pointer_in_canvas = ui
-            .ctx()
-            .input(|input| input.pointer.hover_pos())
-            .is_some_and(|pos| canvas.contains(pos));
-        let pointer_over_layout = pointer_in_canvas && !pointer_over_heatmap;
-        let drag_started_in_canvas = ui
-            .ctx()
-            .input(|input| input.pointer.press_origin())
-            .is_some_and(|pos| canvas.contains(pos));
+        painter.rect_filled(canvas, 0.0, ecos_canvas());
 
         let Some(world) = self.stats.bbox else {
             painter.text(
@@ -2145,7 +2669,7 @@ impl LoadedViewer {
             return;
         };
 
-        if pointer_over_layout {
+        if response.hovered() && !pointer_over_heatmap {
             let raw_scroll_delta_y = ui.ctx().input(|input| input.raw_scroll_delta.y);
             let zoom_delta = ui.ctx().input(|input| input.zoom_delta());
             let zoom_factor = if raw_scroll_delta_y.abs() > 0.0 {
@@ -2168,13 +2692,10 @@ impl LoadedViewer {
 
         self.focus_pending_shape(ui.ctx(), world, canvas);
 
-        let all_layers: BTreeMap<LayerId, LayerStyle> = self
-            .layers
-            .iter()
-            .map(|layer| (layer.layer_id, layer.style))
-            .collect();
-        let mut all_layers = all_layers;
-        all_layers.insert(LAYOUT_GEOMETRY_LAYER, layout_geometry_layer_style());
+        self.gpu_frame_counter = self.gpu_frame_counter.wrapping_add(1);
+
+        let collect_stats = env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref());
+
         let visible_layers: BTreeMap<LayerId, LayerStyle> = self
             .layers
             .iter()
@@ -2183,38 +2704,32 @@ impl LoadedViewer {
             .collect();
         let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
-        let use_view_tiles = self.should_use_view_tiles(viewport, world);
         let hover_world_point = ui
             .ctx()
             .input(|input| input.pointer.hover_pos())
-            .filter(|_| pointer_over_layout)
+            .filter(|pos| response.hovered() && !pointer_over_heatmap && canvas.contains(*pos))
             .map(|pos| screen_to_world_point(pos, world, canvas, self.zoom, self.pan));
 
-        if response.drag_started() && drag_started_in_canvas && !pointer_over_heatmap {
+        if response.drag_started() && !pointer_over_heatmap {
             self.focus_animation = None;
             self.pan_drag.reset();
             let mode = if response.drag_started_by(egui::PointerButton::Middle)
-                || (!self.ruler_tool.enabled
-                    && response.drag_started_by(egui::PointerButton::Secondary))
+                || response.drag_started_by(egui::PointerButton::Secondary)
             {
                 Some(CanvasDragMode::Pan)
             } else if response.drag_started_by(egui::PointerButton::Primary) {
-                if self.ruler_tool.enabled {
-                    None
+                let edit_start_pos = ui
+                    .ctx()
+                    .input(|input| input.pointer.press_origin())
+                    .or_else(|| response.interact_pointer_pos());
+                let edit_started = self.edit_enabled
+                    && edit_start_pos
+                        .is_some_and(|pos| self.begin_edit_drag_at_pointer(pos, world, canvas));
+                Some(if edit_started {
+                    CanvasDragMode::Edit
                 } else {
-                    let edit_start_pos = ui
-                        .ctx()
-                        .input(|input| input.pointer.press_origin())
-                        .or_else(|| response.interact_pointer_pos());
-                    let edit_started = self.edit_enabled
-                        && edit_start_pos
-                            .is_some_and(|pos| self.begin_edit_drag_at_pointer(pos, world, canvas));
-                    Some(if edit_started {
-                        CanvasDragMode::Edit
-                    } else {
-                        CanvasDragMode::Pan
-                    })
-                }
+                    CanvasDragMode::Pan
+                })
             } else {
                 None
             };
@@ -2222,7 +2737,7 @@ impl LoadedViewer {
                 self.pan_drag.start(mode);
             }
         }
-        if response.dragged() && !pointer_over_heatmap && self.pan_drag.mode().is_some() {
+        if response.dragged() && !pointer_over_heatmap {
             let frame_delta = response.drag_delta();
             match self.pan_drag.mode() {
                 Some(CanvasDragMode::Edit) if self.draft.is_some() => {
@@ -2230,11 +2745,13 @@ impl LoadedViewer {
                     self.update_edit_drag(total_delta, world, canvas);
                     ui.ctx().request_repaint();
                 }
-                Some(CanvasDragMode::Pan) => {
+                _ => {
+                    if self.pan_drag.mode().is_none() {
+                        self.pan_drag.start(CanvasDragMode::Pan);
+                    }
                     self.pan = self.pan_drag.apply_pan_frame(self.pan, frame_delta);
                     ui.ctx().request_repaint();
                 }
-                _ => {}
             }
         }
         if response.drag_stopped() {
@@ -2244,60 +2761,29 @@ impl LoadedViewer {
             self.pan_drag.reset();
         }
 
-        if self.ruler_tool.enabled && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            self.ruler_tool.clear();
-        }
-        let interaction_point = response
-            .interact_pointer_pos()
-            .filter(|pos| canvas.contains(*pos) && !pointer_over_heatmap)
-            .map(|pos| screen_to_world_point(pos, world, canvas, self.zoom, self.pan));
-        let ruler_pointer = interaction_point.or(hover_world_point);
-        let ruler_snap = ruler_pointer.and_then(|pointer| {
-            self.ruler_edge_snap(pointer, world, canvas, &query_layer_ids, use_view_tiles)
-        });
-        let ruler_start_requested = ui.ctx().input(|input| {
-            ruler_start_requested(input, self.ruler_tool.enabled, pointer_over_layout)
-        });
-        if ruler_start_requested {
-            if self.ruler_tool.active {
-                self.ruler_tool.finish();
-            } else if let Some(point) = interaction_point {
-                self.ruler_tool.start(point);
-            }
-        }
-        let drc_double_clicked =
-            !self.ruler_tool.enabled && response.double_clicked_by(egui::PointerButton::Primary);
-        if drc_double_clicked && pointer_over_layout {
+        let drc_double_clicked = response.double_clicked_by(egui::PointerButton::Primary);
+        if drc_double_clicked && !pointer_over_heatmap {
             self.selected_drc = response
                 .interact_pointer_pos()
                 .and_then(|pos| self.pick_drc_violation_at(pos, world, canvas, viewport));
         }
         if response.clicked_by(egui::PointerButton::Primary)
             && !drc_double_clicked
-            && pointer_over_layout
+            && !pointer_over_heatmap
         {
-            if self.ruler_tool.enabled {
-                if let Some(point) = ruler_snap.or(interaction_point) {
-                    self.ruler_tool.commit(point);
-                }
-            } else {
-                self.selected = response
-                    .interact_pointer_pos()
-                    .and_then(|pos| self.pick_shape_at(pos, world, canvas, &query_layer_ids));
-            }
+            self.selected = response
+                .interact_pointer_pos()
+                .and_then(|pos| self.pick_shape_at(pos, world, canvas, &query_layer_ids));
         }
-        if self.ruler_tool.enabled && pointer_over_layout {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
-        } else {
-            if let Some(cursor_icon) = canvas_cursor_icon(
-                pointer_over_layout,
-                self.pan_drag.mode() == Some(CanvasDragMode::Pan)
-                    && (response.drag_started() || response.dragged()),
-            ) {
-                ui.ctx().set_cursor_icon(cursor_icon);
-            }
+        if let Some(cursor_icon) = canvas_cursor_icon(
+            response.hovered() && !pointer_over_heatmap,
+            self.pan_drag.mode() == Some(CanvasDragMode::Pan)
+                && (response.drag_started() || response.dragged()),
+        ) {
+            ui.ctx().set_cursor_icon(cursor_icon);
         }
         let mut drawn = 0usize;
+        let use_view_tiles = self.should_use_view_tiles(viewport, world);
         let view_lod = self.view_lod_level();
         let hover_nearest = if use_view_tiles {
             None
@@ -2334,34 +2820,204 @@ impl LoadedViewer {
                 }
             }
         } else {
-            for shape_id in
-                self.render_cache
-                    .visible_shape_ids_for_layers(&self.db, &query_layer_ids, viewport)
-            {
+            let visibility_hash = layers_visibility_hash(&self.layers);
+            if self.visibility_rules_cache.epoch != self.geometry_epoch || self.visibility_rules_cache.layer_visibility_hash != visibility_hash {
+                self.visibility_rules_cache = VisibilityRulesCache {
+                    epoch: self.geometry_epoch,
+                    layer_visibility_hash: visibility_hash,
+                    layer_index: LayerRenderIndex::new(&self.layers),
+                    zoom_rules: ZoomVisibilityRules::new(&self.db),
+                };
+            }
+            let layer_index = &self.visibility_rules_cache.layer_index;
+            let zoom_rules = &self.visibility_rules_cache.zoom_rules;
+            let query_start = Instant::now();
+            let visible_ids = self
+                .render_cache
+                .visible_shape_ids_for_layers(&self.db, &query_layer_ids, viewport);
+            query_duration += query_start.elapsed();
+
+            if self.gpu_canvas.enabled {
+                let gpu_start = Instant::now();
+                
+                self.gpu_tile_instances.retain(|key, _| {
+                    key.geometry_epoch == self.geometry_epoch
+                        && key.layer_visibility_hash == self.visibility_rules_cache.layer_visibility_hash
+                        && key.object_visibility_bits == self.object_visibility.bits()
+                });
+
+                let gpu_scale = world_to_screen_scale(world, canvas, self.zoom);
+                let world_cx = (world.lx + world.hx) as f32 * 0.5;
+                let world_cy = (world.ly + world.hy) as f32 * 0.5;
+                let _gpu_canvas_center = canvas.center() + self.pan;
+
+                let uniform = crate::canvas_gpu::CanvasUniform {
+                    world_center_dbu: [world_cx, world_cy],
+                    canvas_center_px: [canvas.width() * 0.5 + self.pan.x, canvas.height() * 0.5 + self.pan.y],
+                    scale_px_per_dbu: gpu_scale,
+                    pixels_per_point: ui.ctx().pixels_per_point(),
+                    pattern_min_size_px: crate::canvas_gpu::PATTERN_MIN_SIZE_PX,
+                    min_shape_screen_size: crate::canvas_gpu::MIN_SHAPE_SCREEN_SIZE,
+                    screen_size_px: [canvas.width(), canvas.height()],
+                    pad: [0.0, 0.0],
+                };
+
+                let tiles = crate::canvas_gpu::tile_coords_for_bbox(viewport, crate::canvas_gpu::GPU_TILE_SIZE_DBU);
+                for (tx, ty) in tiles {
+                    let tile_bbox = Rect32 {
+                        lx: tx * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
+                        ly: ty * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
+                        hx: (tx + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
+                        hy: (ty + 1) * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
+                    };
+                    let buffer_key = crate::canvas_gpu::GpuBufferKey {
+                        geometry_epoch: self.geometry_epoch,
+                        tile_x: tx,
+                        tile_y: ty,
+                        zoom_tier: crate::canvas_gpu::GpuBufferKey::zoom_tier(self.zoom),
+                        layer_visibility_hash: self.visibility_rules_cache.layer_visibility_hash,
+                        object_visibility_bits: self.object_visibility.bits(),
+                    };
+
+                    let tile_instances = if let Some(cached) = self.gpu_tile_instances.get(&buffer_key) {
+                        std::sync::Arc::clone(cached)
+                    } else {
+                        let query_start_tile = collect_stats.then(Instant::now);
+                        let tile_visible_ids = self.render_cache.visible_shape_ids_for_layers(&self.db, &query_layer_ids, tile_bbox);
+                        if let Some(start) = query_start_tile { query_duration += start.elapsed(); }
+
+                        let mut valid_shapes = Vec::new();
+                        let mut valid_labels = Vec::new();
+                        for &shape_id in &tile_visible_ids {
+                            let filter_start = collect_stats.then(Instant::now);
+                            let Some(shape) = self.db.find_shape(shape_id) else {
+                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                                continue;
+                            };
+                            if !is_renderable_shape(shape) {
+                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                                continue;
+                            }
+                            let owner = self.db.owner_for_shape(shape);
+                            let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+                            if !zoom_rules.is_drawn_at_zoom(owner_type, self.zoom) {
+                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                                continue;
+                            }
+                            let owner_category = owner.and_then(|owner| {
+                                self.owner_category_cache.get(self.geometry_epoch, &self.db, owner)
+                            });
+                            if !shape_is_visible_fast(shape, owner_type, owner_category, &layer_index, &self.object_visibility) {
+                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                                continue;
+                            }
+                            let Some(style) = visible_style_for_shape_fast(shape, owner, owner_type, &layer_index) else {
+                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                                continue;
+                            };
+                            let geometry = self.db.shape_geometry(shape);
+                            if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                            
+                            if let Some(label_info) = shape_label_info(
+                                &geometry,
+                                owner,
+                                owner.and_then(|owner| self.db.owner_name(owner)),
+                            ) {
+                                valid_labels.push(label_info);
+                            }
+                            
+                            valid_shapes.push((geometry, style));
+                        }
+
+                        let gpu_instances = crate::canvas_gpu::build_gpu_instances(valid_shapes.into_iter());
+                        let built = std::sync::Arc::new(GpuTileData {
+                            instances: std::sync::Arc::new(gpu_instances),
+                            labels: valid_labels,
+                        });
+                        self.gpu_tile_instances.insert(buffer_key, std::sync::Arc::clone(&built));
+                        built
+                    };
+
+                    for label in &tile_instances.labels {
+                        let screen_rect = shape_screen_rect(label.rect, world, canvas, self.zoom, self.pan);
+                        let visible_rect = screen_rect.intersect(canvas);
+                        if screen_rect.is_positive() && visible_rect.is_positive() && visible_rect.width() >= 12.0 && visible_rect.height() >= 8.0 {
+                            label_overlays.insert(ShapeLabelOverlay {
+                                key: label.key.clone(),
+                                rect: screen_rect,
+                                text: label.text.clone(),
+                                kind: label.kind,
+                                rank_area: visible_rect.width() * visible_rect.height(),
+                            });
+                        }
+                    }
+
+                    drawn += tile_instances.instances.len();
+
+                    let callback = crate::canvas_gpu::CanvasGpuCallback {
+                        uniform,
+                        instances: std::sync::Arc::clone(&tile_instances.instances),
+                        buffer_key,
+                        frame_counter: self.gpu_frame_counter,
+                        target_format: self.gpu_canvas.target_format,
+                    };
+
+                    ui.painter().add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
+                }
+
+                paint_duration += gpu_start.elapsed();
+            } else {
+            for shape_id in visible_ids {
+                let filter_start = collect_stats.then(Instant::now);
                 let Some(shape) = self.db.find_shape(shape_id) else {
+                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
                     continue;
                 };
                 if !is_renderable_shape(shape) {
+                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
                     continue;
                 }
-                if !self.shape_is_visible(shape) {
-                    continue;
-                }
-                if !self.shape_is_drawn_at_current_zoom(shape) {
-                    continue;
-                }
+
                 let owner = self.db.owner_for_shape(shape);
-                let Some(style) =
-                    visible_style_for_shape(shape, owner, &visible_layers, &all_layers)
+                let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+
+                if !zoom_rules.is_drawn_at_zoom(owner_type, self.zoom) {
+                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                    continue;
+                }
+
+                let owner_category = owner.and_then(|owner| {
+                    self.owner_category_cache
+                        .get(self.geometry_epoch, &self.db, owner)
+                });
+                if !shape_is_visible_fast(
+                    shape,
+                    owner_type,
+                    owner_category,
+                    &layer_index,
+                    &self.object_visibility,
+                ) {
+                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                    continue;
+                }
+
+                let Some(style) = visible_style_for_shape_fast(shape, owner, owner_type, &layer_index)
                 else {
+                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
                     continue;
                 };
-                let style = style_for_shape(*style, owner);
                 let geometry = self.db.shape_geometry(shape);
-                if paint_styled_shape_geometry(
+                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+
+                let paint_start = Instant::now();
+                let prim_count = paint_styled_shape_geometry(
                     &painter, geometry, world, canvas, self.zoom, self.pan, &style,
-                ) {
+                );
+                paint_duration += paint_start.elapsed();
+
+                if prim_count > 0 {
                     drawn += 1;
+                    estimated_primitives += prim_count;
                     if let Some(label) = shape_label_overlay(
                         geometry,
                         owner,
@@ -2374,6 +3030,7 @@ impl LoadedViewer {
                         label_overlays.insert(label);
                     }
                 }
+            }
             }
         }
         drawn += paint_parameterized_grid_overlay(
@@ -2403,9 +3060,32 @@ impl LoadedViewer {
             paint_shape_label_overlay(&painter, label, canvas);
         }
 
+        let hidden_drc_layer_names: std::collections::HashSet<String> = self
+            .layers
+            .iter()
+            .filter(|l| !l.visible)
+            .map(|l| l.name.to_ascii_lowercase())
+            .collect();
+
+        let visible_drc_types: std::collections::HashSet<&str> = self.drc_overlay
+            .as_ref()
+            .map(|o| o.type_states.iter().filter(|s| s.visible).map(|s| s.name.as_str()).collect())
+            .unwrap_or_default();
+
+        let visible_antenna_types: std::collections::HashSet<&str> = self.antenna_overlay
+            .as_ref()
+            .map(|o| o.type_states.iter().filter(|s| s.visible).map(|s| s.name.as_str()).collect())
+            .unwrap_or_default();
+
+        let viewport_aabb = rstar::AABB::from_corners([viewport.lx, viewport.ly], [viewport.hx, viewport.hy]);
+
         if let Some(overlay) = &self.drc_overlay {
-            for violation in &overlay.violations {
-                if self.drc_violation_is_visible(violation, Some(viewport)) {
+            for node in overlay.rtree.locate_in_envelope_intersecting(viewport_aabb) {
+                let violation = &overlay.violations[node.index];
+                if !hidden_drc_layer_names.contains(&violation.layer)
+                    && visible_drc_types.contains(violation.drc_type.as_str())
+                {
+                    visible_drc_count += 1;
                     if paint_drc_violation_overlay(
                         &painter,
                         violation,
@@ -2421,8 +3101,32 @@ impl LoadedViewer {
             }
         }
 
-        if let Some(bbox) = self.selected_map_bbox {
-            paint_map_selection_overlay(&painter, bbox, world, canvas, self.zoom, self.pan);
+        if let Some(overlay) = &self.antenna_overlay {
+            for node in overlay.rtree.locate_in_envelope_intersecting(viewport_aabb) {
+                let violation = &overlay.violations[node.index];
+                if !hidden_drc_layer_names.contains(&violation.layer)
+                    && visible_antenna_types.contains(violation.antenna_type.as_str())
+                {
+                    visible_antenna_count += 1;
+                    if paint_antenna_violation_overlay(
+                        &painter,
+                        violation,
+                        world,
+                        canvas,
+                        self.zoom,
+                        self.pan,
+                        self.selected_antenna == Some(violation.id),
+                    ) {
+                        drawn += 1;
+                    }
+                }
+            }
+        }
+
+        if self.analysis_tab == AnalysisTab::Map {
+            if let Some(bbox) = self.selected_map_bbox {
+                paint_map_selection_overlay(&painter, bbox, world, canvas, self.zoom, self.pan);
+            }
         }
 
         for shape_id in &overlay_shape_ids {
@@ -2452,7 +3156,7 @@ impl LoadedViewer {
                     canvas,
                     self.zoom,
                     self.pan,
-                    egui::Stroke::new(2.0, ecos_accent()),
+                    egui::Stroke::new(2.0_f32, ecos_accent()),
                 );
             }
         }
@@ -2463,23 +3167,16 @@ impl LoadedViewer {
             painter.rect_stroke(
                 screen.expand(2.0),
                 0.0,
-                egui::Stroke::new(2.0, ecos_accent()),
+                egui::Stroke::new(2.0_f32, ecos_accent()),
                 egui::StrokeKind::Inside,
             );
         }
 
-        let ruler_preview = ruler_snap
-            .or(hover_world_point)
-            .and_then(|point| self.ruler_tool.preview(point));
-        paint_orthogonal_ruler(
+        paint_scale_ruler(
             &painter,
-            &self.ruler_tool.points,
-            ruler_preview,
-            ruler_snap,
             world,
             canvas,
             self.zoom,
-            self.pan,
             self.coordinate_unit,
             self.db.snapshot().manifest().dbu_per_micron,
         );
@@ -2495,9 +3192,28 @@ impl LoadedViewer {
                 self.zoom,
                 viewport,
             ),
-            egui::FontId::monospace(12.0),
+            egui::FontId::proportional(13.0),
             ecos_text_secondary(),
         );
+
+        if env_flag_requested(std::env::var(RENDER_STATS_ENV).ok().as_deref()) {
+            let stats = CanvasRenderStats {
+                frame_time_ms: canvas_start.elapsed().as_secs_f32() * 1000.0,
+                query_time_ms: query_duration.as_secs_f32() * 1000.0,
+                filter_time_ms: filter_duration.as_secs_f32() * 1000.0,
+                paint_time_ms: paint_duration.as_secs_f32() * 1000.0,
+                drawn_shapes: drawn,
+                estimated_primitives,
+                label_count: label_overlays.len(),
+                use_view_tiles,
+                zoom: self.zoom,
+                lod: view_lod,
+                visible_drc_count,
+                visible_antenna_count,
+            };
+            paint_render_stats_overlay(&painter, canvas, &stats);
+        }
+
         if let Some(point) = hover_world_point {
             painter.text(
                 canvas.left_top() + egui::vec2(10.0, 28.0),
@@ -2512,33 +3228,9 @@ impl LoadedViewer {
                 ecos_text_secondary(),
             );
         }
-        if let Some(status) = ruler_status_line(
-            &self.ruler_tool.points,
-            ruler_preview,
-            self.ruler_tool.active,
-            self.coordinate_unit,
-            self.db.snapshot().manifest().dbu_per_micron,
-        ) {
-            painter.text(
-                canvas.left_top() + egui::vec2(10.0, 46.0),
-                egui::Align2::LEFT_TOP,
-                status,
-                egui::FontId::monospace(12.0),
-                ecos_info_text(),
-            );
-        }
-        paint_coordinate_rulers(
-            &ruler_painter,
-            frame,
-            canvas,
-            world,
-            self.zoom,
-            self.pan,
-            self.coordinate_unit,
-            self.db.snapshot().manifest().dbu_per_micron,
-        );
         self.canvas_info_overlay(ui, canvas);
         self.drc_detail_overlay(ui, canvas);
+        self.antenna_detail_overlay(ui, canvas);
         self.map_heatmap_overlay(ui, canvas);
     }
 
@@ -2579,7 +3271,7 @@ impl LoadedViewer {
                 ui.set_width(popup_rect.width());
                 egui::Frame::NONE
                     .fill(egui::Color32::from_rgb(29, 30, 34))
-                    .stroke(egui::Stroke::new(1.0, ecos_accent()))
+                    .stroke(egui::Stroke::new(1.0_f32, ecos_accent()))
                     .corner_radius(8)
                     .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
@@ -2633,7 +3325,7 @@ impl LoadedViewer {
                                     columns,
                                     row,
                                     column,
-                                    egui::Stroke::new(1.5, egui::Color32::WHITE),
+                                    egui::Stroke::new(1.5_f32, egui::Color32::WHITE),
                                 );
                                 if let Some(value) = heatmap.data.value(row, column) {
                                     response.clone().on_hover_text(format!(
@@ -2735,7 +3427,7 @@ impl LoadedViewer {
                 ui.set_width(popup_width);
                 egui::Frame::NONE
                     .fill(ecos_panel())
-                    .stroke(egui::Stroke::new(1.0, ecos_border()))
+                    .stroke(egui::Stroke::new(1.0_f32, ecos_border()))
                     .corner_radius(12)
                     .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
@@ -2764,6 +3456,9 @@ impl LoadedViewer {
     }
 
     fn should_use_view_tiles(&self, viewport: Rect32, world: Rect32) -> bool {
+        if self.gpu_canvas.enabled {
+            return false;
+        }
         should_use_view_tiles_for_state(
             self.db.view_tile_count(),
             !self.highlighted.is_empty(),
@@ -3304,6 +3999,7 @@ impl LoadedViewer {
         self.drawing_category_counts = drawing_category_counts(&db);
         self.layers = layer_ui_states(&db, &visibility);
         self.db = db;
+        self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
         self.render_cache.clear();
         self.view_tile_cache.clear();
         self.refresh_highlight();
@@ -3403,29 +4099,44 @@ impl LoadedViewer {
     }
 
     fn visible_drc_violation_count(&self, viewport: Option<Rect32>) -> usize {
-        self.drc_overlay
-            .as_ref()
-            .map(|overlay| {
-                overlay
-                    .violations
-                    .iter()
-                    .filter(|violation| self.drc_violation_is_visible(violation, viewport))
-                    .count()
-            })
-            .unwrap_or(0)
+        let Some(overlay) = &self.drc_overlay else { return 0; };
+        let hidden_layers: std::collections::HashSet<&str> = self.layers.iter().filter(|l| !l.visible).map(|l| l.name.as_str()).collect();
+        let visible_types: std::collections::HashSet<&str> = overlay.type_states.iter().filter(|s| s.visible).map(|s| s.name.as_str()).collect();
+        
+        let is_visible = |v: &DrcViolation| {
+            !hidden_layers.contains(v.layer.as_str()) && visible_types.contains(v.drc_type.as_str())
+        };
+
+        if let Some(vp) = viewport {
+            let vp_aabb = rstar::AABB::from_corners([vp.lx, vp.ly], [vp.hx, vp.hy]);
+            overlay.rtree.locate_in_envelope_intersecting(vp_aabb)
+                .filter(|node| is_visible(&overlay.violations[node.index]))
+                .count()
+        } else {
+            overlay.violations.iter().filter(|v| is_visible(v)).count()
+        }
     }
 
-    fn drc_violation_is_visible(&self, violation: &DrcViolation, viewport: Option<Rect32>) -> bool {
-        self.drc_overlay.as_ref().is_some_and(|overlay| {
-            overlay.type_is_visible(&violation.drc_type)
-                && self.drc_layer_is_visible(&violation.layer)
-                && viewport.is_none_or(|viewport| violation.bbox.intersects(viewport))
-        })
+    fn visible_antenna_violation_count(&self, viewport: Option<Rect32>) -> usize {
+        let Some(overlay) = &self.antenna_overlay else { return 0; };
+        let hidden_layers: std::collections::HashSet<&str> = self.layers.iter().filter(|l| !l.visible).map(|l| l.name.as_str()).collect();
+        let visible_types: std::collections::HashSet<&str> = overlay.type_states.iter().filter(|s| s.visible).map(|s| s.name.as_str()).collect();
+        
+        let is_visible = |v: &AntennaViolation| {
+            !hidden_layers.contains(v.layer.as_str()) && visible_types.contains(v.antenna_type.as_str())
+        };
+
+        if let Some(vp) = viewport {
+            let vp_aabb = rstar::AABB::from_corners([vp.lx, vp.ly], [vp.hx, vp.hy]);
+            overlay.rtree.locate_in_envelope_intersecting(vp_aabb)
+                .filter(|node| is_visible(&overlay.violations[node.index]))
+                .count()
+        } else {
+            overlay.violations.iter().filter(|v| is_visible(v)).count()
+        }
     }
 
-    fn drc_layer_is_visible(&self, layer_name: &str) -> bool {
-        drc_layer_is_visible(&self.layers, layer_name)
-    }
+    // drc_violation_is_visible and antenna_violation_is_visible were removed for performance reasons.
 
     fn shape_is_drawn_at_current_zoom(&self, shape: &ShapeRecord) -> bool {
         let owner_type = self.db.owner_for_shape(shape).and_then(|owner| {
@@ -3519,16 +4230,42 @@ impl LoadedViewer {
         canvas: egui::Rect,
         viewport: Rect32,
     ) -> Option<usize> {
-        self.drc_overlay.as_ref().and_then(|overlay| {
-            overlay.violations.iter().rev().find_map(|violation| {
-                if !self.drc_violation_is_visible(violation, Some(viewport)) {
-                    return None;
+        let overlay = self.drc_overlay.as_ref()?;
+        
+        let hidden_drc_layer_names: std::collections::HashSet<&str> = self
+            .layers
+            .iter()
+            .filter(|l| !l.visible)
+            .map(|l| l.name.as_str())
+            .collect();
+
+        let visible_drc_types: std::collections::HashSet<&str> = overlay.type_states
+            .iter()
+            .filter(|s| s.visible)
+            .map(|s| s.name.as_str())
+            .collect();
+
+        let vp_aabb = rstar::AABB::from_corners([viewport.lx, viewport.ly], [viewport.hx, viewport.hy]);
+        
+        let mut best_match: Option<usize> = None;
+        for node in overlay.rtree.locate_in_envelope_intersecting(vp_aabb) {
+            let violation = &overlay.violations[node.index];
+            if !hidden_drc_layer_names.contains(violation.layer.as_str())
+                && visible_drc_types.contains(violation.drc_type.as_str())
+            {
+                let screen = drc_violation_screen_rect(violation, world, canvas, self.zoom, self.pan);
+                if screen.expand(5.0).contains(pos) {
+                    if let Some(current_best) = best_match {
+                        if violation.id > current_best {
+                            best_match = Some(violation.id);
+                        }
+                    } else {
+                        best_match = Some(violation.id);
+                    }
                 }
-                let screen =
-                    drc_violation_screen_rect(violation, world, canvas, self.zoom, self.pan);
-                screen.expand(5.0).contains(pos).then_some(violation.id)
-            })
-        })
+            }
+        }
+        best_match
     }
 
     fn drc_detail_overlay(&mut self, ui: &mut egui::Ui, canvas: egui::Rect) {
@@ -3566,7 +4303,7 @@ impl LoadedViewer {
                 ui.set_width(popup_width);
                 egui::Frame::NONE
                     .fill(ecos_panel())
-                    .stroke(egui::Stroke::new(1.0, drc_overlay_primary_color()))
+                    .stroke(egui::Stroke::new(1.0_f32, drc_overlay_primary_color()))
                     .corner_radius(12)
                     .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
@@ -3593,6 +4330,79 @@ impl LoadedViewer {
                         });
                         egui::ScrollArea::vertical()
                             .id_salt("chip_viewer_drc_detail_scroll")
+                            .max_height(popup_height - 52.0)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                for line in lines {
+                                    info_panel_label(ui, line);
+                                }
+                            });
+                    });
+            });
+    }
+
+    fn antenna_detail_overlay(&mut self, ui: &mut egui::Ui, canvas: egui::Rect) {
+        let Some(selected_id) = self.selected_drc else {
+            return;
+        };
+        let Some(violation) = self.antenna_overlay.as_ref().and_then(|overlay| {
+            overlay
+                .violations
+                .iter()
+                .find(|item| item.id == selected_id)
+        }) else {
+            self.selected_drc = None;
+            return;
+        };
+        let title = format!("{} / {}", violation.antenna_type, violation.layer);
+        let lines = antenna_detail_lines(violation);
+
+        let ctx = ui.ctx().clone();
+        let popup_width = (canvas.width() * 0.34)
+            .clamp(340.0, 480.0)
+            .min((canvas.width() - 24.0).max(220.0));
+        let popup_height = (canvas.height() * 0.3)
+            .clamp(190.0, 280.0)
+            .min((canvas.height() - 24.0).max(150.0));
+        let popup_pos = egui::pos2(
+            canvas.left() + 12.0,
+            (canvas.bottom() - popup_height - 12.0).max(canvas.top() + 12.0),
+        );
+
+        egui::Area::new(egui::Id::new("chip_viewer_antenna_detail_popup"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup_pos)
+            .show(&ctx, |ui| {
+                ui.set_width(popup_width);
+                egui::Frame::NONE
+                    .fill(ecos_panel())
+                    .stroke(egui::Stroke::new(1.0_f32, antenna_overlay_primary_color()))
+                    .corner_radius(12)
+                    .inner_margin(egui::Margin::same(10))
+                    .show(ui, |ui| {
+                        ui.set_min_size(egui::vec2(popup_width - 20.0, popup_height - 20.0));
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(title)
+                                    .strong()
+                                    .size(14.0)
+                                    .color(ecos_text_primary()),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .small_button("×")
+                                        .on_hover_text("Hide Antenna detail")
+                                        .clicked()
+                                    {
+                                        self.selected_drc = None;
+                                    }
+                                },
+                            );
+                        });
+                        egui::ScrollArea::vertical()
+                            .id_salt("chip_viewer_antenna_detail_scroll")
                             .max_height(popup_height - 52.0)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
@@ -3732,17 +4542,17 @@ fn apply_ecos_theme(ctx: &egui::Context) {
     visuals.window_fill = ecos_panel();
     visuals.extreme_bg_color = ecos_canvas();
     visuals.faint_bg_color = egui::Color32::from_rgb(40, 40, 45);
-    visuals.window_stroke = egui::Stroke::new(1.0, ecos_border());
+    visuals.window_stroke = egui::Stroke::new(1.0_f32, ecos_border());
     visuals.selection.bg_fill = egui::Color32::from_rgba_unmultiplied(0, 191, 165, 48);
-    visuals.selection.stroke = egui::Stroke::new(1.0, ecos_accent());
+    visuals.selection.stroke = egui::Stroke::new(1.0_f32, ecos_accent());
     visuals.widgets.noninteractive.bg_fill = ecos_panel();
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, ecos_border());
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, ecos_border());
     visuals.widgets.inactive.bg_fill = ecos_canvas();
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, ecos_border());
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, ecos_border());
     visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(39, 57, 57);
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ecos_accent());
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, ecos_accent());
     visuals.widgets.active.bg_fill = egui::Color32::from_rgb(35, 72, 66);
-    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, ecos_accent());
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, ecos_accent());
     ctx.set_visuals(visuals);
 
     let mut style = (*ctx.style()).clone();
@@ -3782,7 +4592,7 @@ fn analysis_tab_button(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
                 egui::pos2(response.rect.left() + 8.0, response.rect.bottom()),
                 egui::pos2(response.rect.right() - 8.0, response.rect.bottom()),
             ],
-            egui::Stroke::new(2.0, ecos_accent()),
+            egui::Stroke::new(2.0_f32, ecos_accent()),
         );
     }
     response.clicked()
@@ -3872,7 +4682,7 @@ fn paint_heatmap_grid(
     painter.rect_stroke(
         rect,
         2.0,
-        egui::Stroke::new(1.0, ecos_border()),
+        egui::Stroke::new(1.0_f32, ecos_border()),
         egui::StrokeKind::Inside,
     );
     if let Some((row, column)) = selected_cell {
@@ -3884,13 +4694,13 @@ fn paint_heatmap_grid(
                 columns,
                 row,
                 column,
-                egui::Stroke::new(2.0, egui::Color32::WHITE),
+                egui::Stroke::new(2.0_f32, egui::Color32::WHITE),
             );
         }
     }
 
     if cell_width >= 8.0 && cell_height >= 8.0 {
-        let stroke = egui::Stroke::new(0.5, egui::Color32::from_black_alpha(48));
+        let stroke = egui::Stroke::new(0.5_f32, egui::Color32::from_black_alpha(48));
         for column in 1..columns {
             let x = rect.left() + column as f32 * cell_width;
             painter.line_segment(
@@ -4072,16 +4882,12 @@ fn paint_map_selection_overlay(
         0.0,
         egui::Color32::from_rgba_unmultiplied(0, 191, 165, 36),
     );
-    let rect = rect.expand(1.5);
-    let stroke = egui::Stroke::new(2.0, ecos_accent());
-    for (begin, end) in [
-        (rect.left_top(), rect.right_top()),
-        (rect.right_top(), rect.right_bottom()),
-        (rect.right_bottom(), rect.left_bottom()),
-        (rect.left_bottom(), rect.left_top()),
-    ] {
-        paint_dashed_line(painter, begin, end, stroke, 7.0, 4.0);
-    }
+    painter.rect_stroke(
+        rect.expand(1.5),
+        0.0,
+        egui::Stroke::new(2.0_f32, ecos_accent()),
+        egui::StrokeKind::Inside,
+    );
 }
 
 fn info_panel_label(ui: &mut egui::Ui, text: impl Into<String>) {
@@ -4091,7 +4897,7 @@ fn info_panel_label(ui: &mut egui::Ui, text: impl Into<String>) {
 fn drc_type_card(ui: &mut egui::Ui, state: &mut DrcTypeState) {
     egui::Frame::NONE
         .fill(egui::Color32::from_rgb(30, 30, 34))
-        .stroke(egui::Stroke::new(1.0, ecos_border()))
+        .stroke(egui::Stroke::new(1.0_f32, ecos_border()))
         .corner_radius(8)
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
@@ -4123,7 +4929,61 @@ fn drc_type_card(ui: &mut egui::Ui, state: &mut DrcTypeState) {
         });
 }
 
+fn antenna_type_card(ui: &mut egui::Ui, state: &mut AntennaTypeState) {
+    egui::Frame::NONE
+        .fill(egui::Color32::from_rgb(30, 30, 34))
+        .stroke(egui::Stroke::new(1.0_f32, ecos_border()))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut state.visible, "");
+                ui.label(
+                    egui::RichText::new(&state.name)
+                        .strong()
+                        .size(13.5)
+                        .color(ecos_text_primary()),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(state.total_count.to_string())
+                            .size(12.5)
+                            .color(ecos_info_text()),
+                    );
+                });
+            });
+            let layer_summary = antenna_layer_counts_summary(&state.layer_counts);
+            if !layer_summary.is_empty() {
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(layer_summary)
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+            }
+        });
+}
+
 fn drc_layer_counts_summary(layer_counts: &BTreeMap<String, usize>) -> String {
+    const MAX_LAYER_SUMMARY_ITEMS: usize = 6;
+    let mut parts = layer_counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .take(MAX_LAYER_SUMMARY_ITEMS)
+        .map(|(layer, count)| format!("{layer}: {count}"))
+        .collect::<Vec<_>>();
+    let omitted = layer_counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .count()
+        .saturating_sub(MAX_LAYER_SUMMARY_ITEMS);
+    if omitted > 0 {
+        parts.push(format!("+{omitted} layers"));
+    }
+    parts.join("  ")
+}
+
+fn antenna_layer_counts_summary(layer_counts: &BTreeMap<String, usize>) -> String {
     const MAX_LAYER_SUMMARY_ITEMS: usize = 6;
     let mut parts = layer_counts
         .iter()
@@ -4404,6 +5264,10 @@ impl ShapeLabelCollector {
             .or_insert(overlay);
     }
 
+    fn len(&self) -> usize {
+        self.overlays.len()
+    }
+
     fn overlays(&self) -> impl Iterator<Item = &ShapeLabelOverlay> {
         self.overlays.values()
     }
@@ -4417,10 +5281,10 @@ fn paint_styled_shape_geometry(
     zoom: f32,
     pan: egui::Vec2,
     style: &LayerStyle,
-) -> bool {
+) -> usize {
     let primitive = shape_screen_primitive(geometry, world, canvas, zoom, pan);
     if !screen_primitive_bounds(primitive).intersects(canvas) {
-        return false;
+        return 0;
     }
 
     match primitive {
@@ -4433,12 +5297,13 @@ fn paint_styled_shape_geometry(
                     color32(style.frame_rgba),
                 ),
             );
+            1
         }
         ScreenShapePrimitive::Point { center, radius } => {
             painter.circle_filled(center, radius, color32(style.frame_rgba));
+            1
         }
     }
-    true
 }
 
 fn paint_styled_rect(
@@ -4446,11 +5311,12 @@ fn paint_styled_rect(
     rect: egui::Rect,
     canvas: egui::Rect,
     style: LayerStyle,
-) {
+) -> usize {
     let visible_rect = rect.intersect(canvas);
     if !visible_rect.is_positive() {
-        return;
+        return 0;
     }
+    let mut primitives = 0usize;
     let can_pattern =
         visible_rect.width() >= PATTERN_MIN_SIZE_PX && visible_rect.height() >= PATTERN_MIN_SIZE_PX;
     let fill_color = color32(style.rgba);
@@ -4458,33 +5324,35 @@ fn paint_styled_rect(
         FillPattern::Hollow => {}
         FillPattern::Solid => {
             painter.rect_filled(visible_rect, 0.0, fill_color);
+            primitives += 1;
         }
         FillPattern::SparseDots if can_pattern => {
-            draw_pattern_dots(painter, visible_rect, fill_color, 9.0);
+            primitives += draw_pattern_dots(painter, visible_rect, fill_color, 9.0);
         }
         FillPattern::DenseDots if can_pattern => {
-            draw_pattern_dots(painter, visible_rect, fill_color, 5.0);
+            primitives += draw_pattern_dots(painter, visible_rect, fill_color, 5.0);
         }
         FillPattern::DiagonalHatch if can_pattern => {
-            draw_hatch(painter, visible_rect, fill_color, false);
+            primitives += draw_hatch(painter, visible_rect, fill_color, false);
         }
         FillPattern::CrossHatch if can_pattern => {
-            draw_hatch(painter, visible_rect, fill_color, true);
+            primitives += draw_hatch(painter, visible_rect, fill_color, true);
         }
         FillPattern::HorizontalHatch if can_pattern => {
-            draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
+            primitives += draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
         }
         FillPattern::VerticalHatch if can_pattern => {
-            draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
+            primitives += draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
         }
         FillPattern::Grid if can_pattern => {
-            draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
-            draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
+            primitives += draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
+            primitives += draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
         }
         FillPattern::XMark => {
             painter.rect_filled(visible_rect, 0.0, fill_color);
+            primitives += 1;
             if visible_rect.width() >= 6.0 && visible_rect.height() >= 6.0 {
-                draw_x_mark(
+                primitives += draw_x_mark(
                     painter,
                     visible_rect,
                     color32(style.frame_rgba),
@@ -4506,7 +5374,9 @@ fn paint_styled_rect(
             egui::Stroke::new(style.line_width_px.max(1) as f32, color32(frame_rgba)),
             egui::StrokeKind::Inside,
         );
+        primitives += 1;
     }
+    primitives
 }
 
 fn draw_pattern_dots(
@@ -4514,7 +5384,7 @@ fn draw_pattern_dots(
     rect: egui::Rect,
     color: egui::Color32,
     spacing: f32,
-) {
+) -> usize {
     let mut count = 0usize;
     let mut y = rect.top() + 2.0;
     while y < rect.bottom() && count < MAX_PATTERN_OPS_PER_SHAPE {
@@ -4526,14 +5396,15 @@ fn draw_pattern_dots(
         }
         y += spacing;
     }
+    count
 }
 
-fn draw_hatch(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32, cross: bool) {
+fn draw_hatch(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32, cross: bool) -> usize {
     let mut count = draw_hatch_direction(painter, rect, color, false);
     if cross && count < MAX_PATTERN_OPS_PER_SHAPE {
         count += draw_hatch_direction(painter, rect, color, true);
     }
-    let _ = count;
+    count
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4557,7 +5428,7 @@ fn draw_axis_hatch(
                 if y <= rect.bottom() {
                     painter.line_segment(
                         [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-                        egui::Stroke::new(1.0, color),
+                        egui::Stroke::new(1.0_f32, color),
                     );
                     count += 1;
                 }
@@ -4567,7 +5438,7 @@ fn draw_axis_hatch(
                 if x <= rect.right() {
                     painter.line_segment(
                         [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                        egui::Stroke::new(1.0, color),
+                        egui::Stroke::new(1.0_f32, color),
                     );
                     count += 1;
                 }
@@ -4578,26 +5449,63 @@ fn draw_axis_hatch(
     count
 }
 
-fn draw_x_mark(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32, width: f32) {
+fn draw_x_mark(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32, width: f32) -> usize {
     let inset = 1.5_f32.min(rect.width() * 0.2).min(rect.height() * 0.2);
     let rect = rect.shrink(inset);
     if !rect.is_positive() {
-        return;
+        return 0;
     }
     let stroke = egui::Stroke::new(width, color);
     painter.line_segment([rect.left_top(), rect.right_bottom()], stroke);
     painter.line_segment([rect.left_bottom(), rect.right_top()], stroke);
+    2
 }
 
-fn shape_label_overlay(
-    geometry: ShapeGeometry,
+fn paint_render_stats_overlay(
+    painter: &egui::Painter,
+    canvas: egui::Rect,
+    stats: &CanvasRenderStats,
+) {
+    let margin = 10.0;
+    let overlay_width = 320.0;
+    let overlay_height = 110.0;
+    let top_right = egui::pos2(canvas.right() - margin - overlay_width, canvas.top() + margin);
+    let rect = egui::Rect::from_min_size(top_right, egui::vec2(overlay_width, overlay_height));
+
+    painter.rect_filled(rect, 6.0, egui::Color32::from_black_alpha(200));
+    painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0_f32, ecos_border()), egui::StrokeKind::Outside);
+
+    let lines = [
+        format!("Frame: {:.2} ms | Paint: {:.2} ms", stats.frame_time_ms, stats.paint_time_ms),
+        format!("Query: {:.2} ms | Filter: {:.2} ms", stats.query_time_ms, stats.filter_time_ms),
+        format!("Mode: {} | Zoom: {:.2} | LOD: {}", if stats.use_view_tiles { "Tiles" } else { "Exact" }, stats.zoom, stats.lod),
+        format!("Shapes: {} | Est Primitives: {}", stats.drawn_shapes, stats.estimated_primitives),
+        format!("Labels: {} | DRC: {} | Antenna: {}", stats.label_count, stats.visible_drc_count, stats.visible_antenna_count),
+    ];
+
+    let font_id = egui::FontId::monospace(11.0);
+    let text_color = egui::Color32::from_rgb(220, 225, 230);
+    let mut y = rect.top() + 8.0;
+    for line in lines {
+        painter.text(
+            egui::pos2(rect.left() + 10.0, y),
+            egui::Align2::LEFT_TOP,
+            line,
+            font_id.clone(),
+            text_color,
+        );
+        y += 18.0;
+    }
+}
+
+fn shape_label_info(
+    geometry: &ShapeGeometry,
     owner: Option<&OwnerRef>,
     owner_name: Option<&str>,
-    world: Rect32,
-    canvas: egui::Rect,
-    zoom: f32,
-    pan: egui::Vec2,
-) -> Option<ShapeLabelOverlay> {
+) -> Option<GpuCachedLabel> {
+    let ShapeGeometry::Rect(rect) = geometry else {
+        return None;
+    };
     let owner = owner?;
     let owner_type = OwnerType::from_raw(owner.owner_type)?;
     let owner_name = owner_name?.trim();
@@ -4614,6 +5522,23 @@ fn shape_label_overlay(
     let text = shape_label_text(kind, owner_type, owner, owner_name)?;
     let key = shape_label_key(kind, owner, owner_name);
 
+    Some(GpuCachedLabel {
+        key,
+        rect: *rect,
+        text,
+        kind,
+    })
+}
+
+fn shape_label_overlay(
+    geometry: ShapeGeometry,
+    owner: Option<&OwnerRef>,
+    owner_name: Option<&str>,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> Option<ShapeLabelOverlay> {
     let ShapeGeometry::Rect(rect) = geometry else {
         return None;
     };
@@ -4622,6 +5547,26 @@ fn shape_label_overlay(
     if !screen_rect.is_positive() || !visible_rect.is_positive() {
         return None;
     }
+    if visible_rect.width() < 12.0 || visible_rect.height() < 8.0 {
+        return None;
+    }
+
+    let owner = owner?;
+    let owner_type = OwnerType::from_raw(owner.owner_type)?;
+    let owner_name = owner_name?.trim();
+
+    let kind = match owner_type {
+        OwnerType::IoPinPortShape => ShapeLabelKind::IoPin,
+        OwnerType::PinPortShape if owner.path0 == 0 => ShapeLabelKind::IoPin,
+        OwnerType::PinPortShape | OwnerType::InstancePinPortShape => ShapeLabelKind::Pin,
+        OwnerType::NetWireSegment => ShapeLabelKind::Net,
+        OwnerType::SpecialWireSegment => ShapeLabelKind::Pdn,
+        OwnerType::InstanceBBox => ShapeLabelKind::Instance,
+        _ => return None,
+    };
+    let text = shape_label_text(kind, owner_type, owner, owner_name)?;
+    let key = shape_label_key(kind, owner, owner_name);
+
     Some(ShapeLabelOverlay {
         key,
         rect: screen_rect,
@@ -4769,7 +5714,7 @@ fn draw_hatch_direction(
             };
             painter.line_segment(
                 [egui::pos2(x0, y0), egui::pos2(x1, y1)],
-                egui::Stroke::new(1.0, color),
+                egui::Stroke::new(1.0_f32, color),
             );
             count += 1;
         }
@@ -4843,11 +5788,11 @@ fn paint_shape_overlay(
 }
 
 fn search_highlight_outer_stroke() -> egui::Stroke {
-    egui::Stroke::new(4.0, egui::Color32::from_rgb(255, 64, 192))
+    egui::Stroke::new(4.0_f32, egui::Color32::from_rgb(255, 64, 192))
 }
 
 fn search_highlight_inner_stroke() -> egui::Stroke {
-    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 248, 210))
+    egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 248, 210))
 }
 
 fn paint_search_highlight_overlay(
@@ -4883,12 +5828,33 @@ fn drc_overlay_primary_color() -> egui::Color32 {
     egui::Color32::from_rgb(250, 250, 255)
 }
 
+fn antenna_overlay_primary_color() -> egui::Color32 {
+    egui::Color32::from_rgb(250, 250, 255)
+}
+
 fn drc_overlay_secondary_color() -> egui::Color32 {
+    egui::Color32::from_rgb(0, 191, 165)
+}
+
+fn antenna_overlay_secondary_color() -> egui::Color32 {
     egui::Color32::from_rgb(0, 191, 165)
 }
 
 fn drc_violation_screen_rect(
     violation: &DrcViolation,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> egui::Rect {
+    expand_screen_rect_to_min_size(
+        world_to_screen_rect(violation.bbox, world, canvas, zoom, pan),
+        8.0,
+    )
+}
+
+fn antenna_violation_screen_rect(
+    violation: &AntennaViolation,
     world: Rect32,
     canvas: egui::Rect,
     zoom: f32,
@@ -4915,14 +5881,44 @@ fn paint_drc_violation_overlay(
     }
 
     let stroke = egui::Stroke::new(
-        if selected { 4.0 } else { 3.0 },
+        if selected { 4.0_f32 } else { 3.0_f32 },
         if selected {
             drc_overlay_secondary_color()
         } else {
             drc_overlay_primary_color()
         },
     );
-    let inner_stroke = egui::Stroke::new(1.5, drc_overlay_primary_color());
+    let inner_stroke = egui::Stroke::new(1.5_f32, drc_overlay_primary_color());
+    let rect = rect.expand(1.5);
+    painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
+    painter.line_segment([rect.left_top(), rect.right_bottom()], inner_stroke);
+    painter.line_segment([rect.left_bottom(), rect.right_top()], inner_stroke);
+    true
+}
+
+fn paint_antenna_violation_overlay(
+    painter: &egui::Painter,
+    violation: &AntennaViolation,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+    selected: bool,
+) -> bool {
+    let rect = antenna_violation_screen_rect(violation, world, canvas, zoom, pan);
+    if !rect.intersects(canvas) {
+        return false;
+    }
+
+    let stroke = egui::Stroke::new(
+        if selected { 4.0_f32 } else { 3.0_f32 },
+        if selected {
+            antenna_overlay_secondary_color()
+        } else {
+            antenna_overlay_primary_color()
+        },
+    );
+    let inner_stroke = egui::Stroke::new(1.5_f32, antenna_overlay_primary_color());
     let rect = rect.expand(1.5);
     painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
     painter.line_segment([rect.left_top(), rect.right_bottom()], inner_stroke);
@@ -4933,6 +5929,27 @@ fn paint_drc_violation_overlay(
 fn drc_detail_lines(violation: &DrcViolation) -> Vec<String> {
     let mut lines = vec![
         format!("type: {}", violation.drc_type),
+        format!("layer: {}", violation.layer),
+        format!(
+            "bbox: ({}, {}) - ({}, {})",
+            violation.bbox.lx, violation.bbox.ly, violation.bbox.hx, violation.bbox.hy
+        ),
+    ];
+    if let Some(required_size) = violation.required_size {
+        lines.push(format!("required size: {required_size}"));
+    }
+    if !violation.nets.is_empty() {
+        lines.push(format!("nets: {}", violation.nets.join(", ")));
+    }
+    if !violation.insts.is_empty() {
+        lines.push(format!("instances: {}", violation.insts.join(", ")));
+    }
+    lines
+}
+
+fn antenna_detail_lines(violation: &AntennaViolation) -> Vec<String> {
+    let mut lines = vec![
+        format!("type: {}", violation.antenna_type),
         format!("layer: {}", violation.layer),
         format!(
             "bbox: ({}, {}) - ({}, {})",
@@ -5045,7 +6062,7 @@ fn unrouted_net_guide_stroke(category: DrawingCategory) -> egui::Stroke {
         DrawingCategory::NetOther => egui::Color32::from_rgba_unmultiplied(228, 176, 72, 132),
         _ => egui::Color32::from_rgba_unmultiplied(180, 190, 204, 120),
     };
-    egui::Stroke::new(1.25, color)
+    egui::Stroke::new(1.25_f32, color)
 }
 
 fn paint_dashed_line(
@@ -5138,9 +6155,9 @@ fn parameterized_grid_stroke(
 ) -> egui::Stroke {
     if let Some(style) = grid_layer_style(grid, layers) {
         let (width, alpha) = match owner_type {
-            OwnerType::TrackGrid => (1.0, 82),
-            OwnerType::GCellGrid => (2.0, 104),
-            _ => (1.0, style.frame_alpha),
+            OwnerType::TrackGrid => (1.0_f32, 82),
+            OwnerType::GCellGrid => (2.0_f32, 104),
+            _ => (1.0_f32, style.frame_alpha),
         };
         return egui::Stroke::new(
             width,
@@ -5155,7 +6172,7 @@ fn parameterized_grid_stroke(
 
     match owner_type {
         OwnerType::TrackGrid => egui::Stroke::new(
-            1.0,
+            1.0_f32,
             egui::Color32::from_rgba_unmultiplied(
                 LAYOUT_GEOMETRY_RGB[0],
                 LAYOUT_GEOMETRY_RGB[1],
@@ -5164,7 +6181,7 @@ fn parameterized_grid_stroke(
             ),
         ),
         OwnerType::GCellGrid => egui::Stroke::new(
-            2.0,
+            2.0_f32,
             egui::Color32::from_rgba_unmultiplied(
                 LAYOUT_GEOMETRY_RGB[0],
                 LAYOUT_GEOMETRY_RGB[1],
@@ -5172,7 +6189,7 @@ fn parameterized_grid_stroke(
                 104,
             ),
         ),
-        _ => egui::Stroke::new(1.0, ecos_text_secondary()),
+        _ => egui::Stroke::new(1.0_f32, ecos_text_secondary()),
     }
 }
 
@@ -5297,409 +6314,49 @@ fn saturating_i64_to_i32(value: i64) -> i32 {
     value.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
-fn layout_canvas_rect(frame: egui::Rect) -> egui::Rect {
-    egui::Rect::from_min_max(
-        egui::pos2(
-            (frame.left() + COORDINATE_RULER_THICKNESS).min(frame.right()),
-            frame.top(),
-        ),
-        egui::pos2(
-            frame.right(),
-            (frame.bottom() - COORDINATE_RULER_THICKNESS).max(frame.top()),
-        ),
-    )
-}
-
-fn paint_coordinate_rulers(
+fn paint_scale_ruler(
     painter: &egui::Painter,
-    frame: egui::Rect,
-    canvas: egui::Rect,
     world: Rect32,
+    canvas: egui::Rect,
     zoom: f32,
-    pan: egui::Vec2,
     unit: CoordinateUnit,
     dbu_per_micron: Option<u32>,
 ) {
     let scale = world_to_screen_scale(world, canvas, zoom);
-    if !scale.is_finite() || scale <= 0.0 || !canvas.is_positive() {
+    if !scale.is_finite() || scale <= 0.0 || canvas.width() < 80.0 {
         return;
     }
 
-    let horizontal = egui::Rect::from_min_max(
-        egui::pos2(canvas.left(), canvas.bottom()),
-        frame.right_bottom(),
-    );
-    let vertical = egui::Rect::from_min_max(frame.left_top(), canvas.left_bottom());
-    let background = egui::Color32::from_rgb(34, 35, 39);
-    let tick_color = egui::Color32::from_rgb(91, 94, 101);
-    let text_color = ecos_text_secondary();
-    painter.rect_filled(horizontal, 0.0, background);
-    painter.rect_filled(vertical, 0.0, background);
-    painter.rect_filled(
-        egui::Rect::from_min_max(
-            egui::pos2(frame.left(), canvas.bottom()),
-            egui::pos2(canvas.left(), frame.bottom()),
-        ),
-        0.0,
-        background,
-    );
-    painter.line_segment(
-        [canvas.left_top(), canvas.left_bottom()],
-        egui::Stroke::new(1.0, tick_color),
-    );
-    painter.line_segment(
-        [canvas.left_bottom(), canvas.right_bottom()],
-        egui::Stroke::new(1.0, tick_color),
-    );
-
-    let viewport = screen_to_world_rect(canvas, world, canvas, zoom, pan);
-    let major_interval = coordinate_ruler_interval_dbu(scale, unit, dbu_per_micron);
-    let minor_interval = if major_interval >= 10 {
-        major_interval / 10
-    } else {
-        major_interval
-    }
-    .max(1);
-    let font = egui::FontId::monospace(9.0);
-    let tick_stroke = egui::Stroke::new(1.0, tick_color);
-
-    let mut x = floor_div_i64(i64::from(viewport.lx), minor_interval) * minor_interval;
-    let mut last_label_right = f32::NEG_INFINITY;
-    let mut tick_count = 0usize;
-    while x <= i64::from(viewport.hx) && tick_count < MAX_PARAMETERIZED_GRID_LINES_PER_GRID {
-        let point = Point32 {
-            x: saturating_i64_to_i32(x),
-            y: viewport.ly,
-        };
-        let screen_x = world_to_screen_point(point, world, canvas, zoom, pan).x;
-        if screen_x < canvas.left() || screen_x > canvas.right() {
-            x = x.saturating_add(minor_interval);
-            tick_count += 1;
-            continue;
-        }
-        let major = x.rem_euclid(major_interval) == 0;
-        let height = if major {
-            COORDINATE_RULER_THICKNESS * 0.6
-        } else {
-            COORDINATE_RULER_THICKNESS * 0.3
-        };
-        painter.line_segment(
-            [
-                egui::pos2(screen_x, frame.bottom() - height),
-                egui::pos2(screen_x, frame.bottom()),
-            ],
-            tick_stroke,
-        );
-        if major && screen_x >= canvas.left() && screen_x >= last_label_right + 12.0 {
-            let label = format_axis_coordinate(x, unit, dbu_per_micron);
-            let rect = painter.text(
-                egui::pos2(screen_x + 2.0, horizontal.top() + 2.0),
-                egui::Align2::LEFT_TOP,
-                label,
-                font.clone(),
-                text_color,
-            );
-            last_label_right = rect.right();
-        }
-        x = x.saturating_add(minor_interval);
-        tick_count += 1;
-    }
-
-    let mut y = floor_div_i64(i64::from(viewport.ly), minor_interval) * minor_interval;
-    let mut last_label_y = f32::NEG_INFINITY;
-    let mut tick_count = 0usize;
-    while y <= i64::from(viewport.hy) && tick_count < MAX_PARAMETERIZED_GRID_LINES_PER_GRID {
-        let point = Point32 {
-            x: viewport.lx,
-            y: saturating_i64_to_i32(y),
-        };
-        let screen_y = world_to_screen_point(point, world, canvas, zoom, pan).y;
-        if screen_y < canvas.top() || screen_y > canvas.bottom() {
-            y = y.saturating_add(minor_interval);
-            tick_count += 1;
-            continue;
-        }
-        let major = y.rem_euclid(major_interval) == 0;
-        let width = if major {
-            COORDINATE_RULER_THICKNESS * 0.6
-        } else {
-            COORDINATE_RULER_THICKNESS * 0.3
-        };
-        painter.line_segment(
-            [
-                egui::pos2(canvas.left() - width, screen_y),
-                egui::pos2(canvas.left(), screen_y),
-            ],
-            tick_stroke,
-        );
-        if major && screen_y < canvas.bottom() && (screen_y - last_label_y).abs() >= 40.0 {
-            let label = format_axis_coordinate(y, unit, dbu_per_micron);
-            let galley = painter.layout_no_wrap(label, font.clone(), text_color);
-            let position = egui::pos2(vertical.left() + 2.0, screen_y + galley.size().x * 0.5);
-            painter.add(
-                egui::epaint::TextShape::new(position, galley, text_color)
-                    .with_angle(-std::f32::consts::FRAC_PI_2),
-            );
-            last_label_y = screen_y;
-        }
-        y = y.saturating_add(minor_interval);
-        tick_count += 1;
-    }
-}
-
-fn coordinate_ruler_interval_dbu(
-    scale: f32,
-    unit: CoordinateUnit,
-    dbu_per_micron: Option<u32>,
-) -> i64 {
-    let target_dbu = f64::from(COORDINATE_RULER_TARGET_TICK_PX / scale.max(0.001));
-    let interval = match effective_coordinate_unit(unit, dbu_per_micron) {
-        CoordinateUnit::Dbu => nice_ruler_interval(target_dbu),
-        CoordinateUnit::Micron => {
-            let dbu_per_micron = dbu_per_micron.filter(|value| *value > 0).unwrap_or(1);
-            nice_ruler_interval(target_dbu / f64::from(dbu_per_micron)) * f64::from(dbu_per_micron)
-        }
-    };
-    interval.round().clamp(1.0, i32::MAX as f64) as i64
-}
-
-fn format_axis_coordinate(
-    value_dbu: i64,
-    unit: CoordinateUnit,
-    dbu_per_micron: Option<u32>,
-) -> String {
-    let value = match effective_coordinate_unit(unit, dbu_per_micron) {
-        CoordinateUnit::Dbu => value_dbu as f64,
-        CoordinateUnit::Micron => {
-            value_dbu as f64 / f64::from(dbu_per_micron.filter(|value| *value > 0).unwrap_or(1))
-        }
-    };
-    let magnitude = value.abs();
-    if magnitude >= 1_000_000.0 {
-        format_compact_number(value / 1_000_000.0, "M")
-    } else if magnitude >= 10_000.0 {
-        format_compact_number(value / 1_000.0, "K")
-    } else {
-        format_compact_number(value, "")
-    }
-}
-
-fn format_compact_number(value: f64, suffix: &str) -> String {
-    let text = if (value - value.round()).abs() <= 0.000_5 {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.3}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_string()
-    };
-    format!("{text}{suffix}")
-}
-
-fn orthogonal_ruler_point(anchor: Point32, pointer: Point32) -> Point32 {
-    let dx = (i64::from(pointer.x) - i64::from(anchor.x)).abs();
-    let dy = (i64::from(pointer.y) - i64::from(anchor.y)).abs();
-    if dx >= dy {
-        Point32 {
-            x: pointer.x,
-            y: anchor.y,
-        }
-    } else {
-        Point32 {
-            x: anchor.x,
-            y: pointer.y,
-        }
-    }
-}
-
-fn nearest_orthogonal_edge_snap(
-    anchor: Point32,
-    pointer: Point32,
-    rects: &[Rect32],
-    radius: i32,
-) -> Option<Point32> {
-    let locked = orthogonal_ruler_point(anchor, pointer);
-    let horizontal = locked.y == anchor.y;
-    let max_distance_squared = i128::from(radius.max(0)).pow(2);
-    let mut nearest: Option<(i128, Point32)> = None;
-    let mut consider = |point: Point32| {
-        let dx = i128::from(point.x) - i128::from(pointer.x);
-        let dy = i128::from(point.y) - i128::from(pointer.y);
-        let distance_squared = dx * dx + dy * dy;
-        if distance_squared <= max_distance_squared
-            && nearest.is_none_or(|(best, _)| distance_squared < best)
-        {
-            nearest = Some((distance_squared, point));
-        }
-    };
-
-    for rect in rects {
-        if horizontal && (rect.ly..=rect.hy).contains(&anchor.y) {
-            consider(Point32 {
-                x: rect.lx,
-                y: anchor.y,
-            });
-            consider(Point32 {
-                x: rect.hx,
-                y: anchor.y,
-            });
-        } else if !horizontal && (rect.lx..=rect.hx).contains(&anchor.x) {
-            consider(Point32 {
-                x: anchor.x,
-                y: rect.ly,
-            });
-            consider(Point32 {
-                x: anchor.x,
-                y: rect.hy,
-            });
-        }
-    }
-    nearest.map(|(_, point)| point)
-}
-
-fn ruler_distances(points: &[Point32], preview: Option<Point32>) -> (i64, i64) {
-    let mut x_distance = 0i64;
-    let mut y_distance = 0i64;
-    let mut add_segment = |begin: Point32, end: Point32| {
-        x_distance += (i64::from(end.x) - i64::from(begin.x)).abs();
-        y_distance += (i64::from(end.y) - i64::from(begin.y)).abs();
-    };
-    for pair in points.windows(2) {
-        add_segment(pair[0], pair[1]);
-    }
-    if let (Some(begin), Some(end)) = (points.last().copied(), preview) {
-        add_segment(begin, end);
-    }
-    (x_distance, y_distance)
-}
-
-fn ruler_status_line(
-    points: &[Point32],
-    preview: Option<Point32>,
-    active: bool,
-    unit: CoordinateUnit,
-    dbu_per_micron: Option<u32>,
-) -> Option<String> {
-    (!points.is_empty()).then(|| {
-        let (x_distance, y_distance) = ruler_distances(points, preview);
-        format!(
-            "ruler{}: X {}, Y {}",
-            if active { "" } else { " done" },
-            format_distance_i64(x_distance, unit, dbu_per_micron),
-            format_distance_i64(y_distance, unit, dbu_per_micron)
-        )
-    })
-}
-
-fn paint_orthogonal_ruler(
-    painter: &egui::Painter,
-    points: &[Point32],
-    preview: Option<Point32>,
-    snap_point: Option<Point32>,
-    world: Rect32,
-    canvas: egui::Rect,
-    zoom: f32,
-    pan: egui::Vec2,
-    unit: CoordinateUnit,
-    dbu_per_micron: Option<u32>,
-) {
-    if points.is_empty() {
+    let target_px = (canvas.width() * 0.24).clamp(56.0, 120.0);
+    let distance_dbu = nice_ruler_distance_dbu(target_px / scale);
+    let length_px = distance_dbu as f32 * scale;
+    if !length_px.is_finite() || length_px < 8.0 {
         return;
     }
-    let color = egui::Color32::from_rgb(240, 197, 78);
-    let stroke = egui::Stroke::new(1.75, color);
-    let paint_segment = |begin: Point32, end: Point32, pending: bool| {
-        let begin_screen = world_to_screen_point(begin, world, canvas, zoom, pan);
-        let end_screen = world_to_screen_point(end, world, canvas, zoom, pan);
-        if pending {
-            paint_dashed_line(painter, begin_screen, end_screen, stroke, 6.0, 4.0);
-        } else {
-            painter.line_segment([begin_screen, end_screen], stroke);
-        }
-        if begin == end {
-            return;
-        }
-        let horizontal = begin.y == end.y;
-        let distance = if horizontal {
-            (i64::from(end.x) - i64::from(begin.x)).abs()
-        } else {
-            (i64::from(end.y) - i64::from(begin.y)).abs()
-        };
-        let label = format!(
-            "{} {}",
-            if horizontal { "X" } else { "Y" },
-            format_distance_i64(distance, unit, dbu_per_micron)
-        );
-        let midpoint = begin_screen + (end_screen - begin_screen) * 0.5;
-        let (position, align) = if horizontal {
-            (
-                midpoint + egui::vec2(0.0, -5.0),
-                egui::Align2::CENTER_BOTTOM,
-            )
-        } else {
-            (midpoint + egui::vec2(5.0, 0.0), egui::Align2::LEFT_CENTER)
-        };
-        painter.text(
-            position + egui::vec2(1.0, 1.0),
-            align,
-            &label,
-            egui::FontId::monospace(11.0),
-            egui::Color32::from_black_alpha(220),
-        );
-        painter.text(position, align, label, egui::FontId::monospace(11.0), color);
-    };
 
-    for pair in points.windows(2) {
-        paint_segment(pair[0], pair[1], false);
+    let start = egui::pos2(canvas.left() + 12.0, canvas.bottom() - 18.0);
+    let end = egui::pos2((start.x + length_px).min(canvas.right() - 12.0), start.y);
+    if end.x <= start.x + 4.0 {
+        return;
     }
-    if let (Some(begin), Some(end)) = (points.last().copied(), preview) {
-        paint_segment(begin, end, true);
-    }
-    for point in points {
-        let screen = world_to_screen_point(*point, world, canvas, zoom, pan);
-        painter.circle_filled(screen, 3.25, color);
-        painter.circle_stroke(screen, 4.25, egui::Stroke::new(1.0, ecos_canvas()));
-    }
-    if let Some(point) = preview {
-        let screen = world_to_screen_point(point, world, canvas, zoom, pan);
-        painter.circle_stroke(screen, 3.5, egui::Stroke::new(1.5, color));
-    }
-    if let Some(point) = snap_point {
-        let screen = world_to_screen_point(point, world, canvas, zoom, pan);
-        painter.circle_stroke(screen, 6.5, egui::Stroke::new(1.5, color));
-    }
-}
 
-fn paint_ruler_tool_icon(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
-    let center = rect.center();
-    let left = center.x - 8.0;
-    let right = center.x + 8.0;
-    let top = center.y - 4.0;
-    let bottom = center.y + 4.0;
-    let stroke = egui::Stroke::new(1.5, color);
+    let color = ecos_text_secondary();
+    let stroke = egui::Stroke::new(1.0_f32, color);
+    painter.line_segment([start, end], stroke);
     painter.line_segment(
-        [egui::pos2(left, bottom), egui::pos2(right, bottom)],
-        stroke,
-    );
-    for (x, height) in [
-        (left, 8.0),
-        (center.x - 4.0, 4.0),
-        (center.x, 6.0),
-        (center.x + 4.0, 4.0),
-        (right, 8.0),
-    ] {
-        painter.line_segment(
-            [egui::pos2(x, bottom - height), egui::pos2(x, bottom)],
-            stroke,
-        );
-    }
-    painter.line_segment(
-        [egui::pos2(left, top), egui::pos2(left + 2.5, top + 2.5)],
+        [start + egui::vec2(0.0, -4.0), start + egui::vec2(0.0, 4.0)],
         stroke,
     );
     painter.line_segment(
-        [egui::pos2(right, top), egui::pos2(right - 2.5, top + 2.5)],
+        [end + egui::vec2(0.0, -4.0), end + egui::vec2(0.0, 4.0)],
         stroke,
+    );
+    painter.text(
+        start + egui::vec2(0.0, -18.0),
+        egui::Align2::LEFT_BOTTOM,
+        format_distance(distance_dbu, unit, dbu_per_micron),
+        egui::FontId::monospace(11.0),
+        color,
     );
 }
 
@@ -5893,52 +6550,25 @@ fn hover_nearest_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32
     (HOVER_NEAREST_RADIUS_PX / scale).ceil().max(1.0) as i32
 }
 
-fn ruler_edge_snap_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32 {
-    let scale = world_to_screen_scale(world, canvas, zoom);
-    if !scale.is_finite() || scale <= 0.0 {
-        return 0;
-    }
-    (RULER_EDGE_SNAP_RADIUS_PX / scale).ceil().max(1.0) as i32
-}
-
 fn format_distance(distance_dbu: i32, unit: CoordinateUnit, dbu_per_micron: Option<u32>) -> String {
-    format_distance_i64(i64::from(distance_dbu), unit, dbu_per_micron)
-}
-
-fn format_distance_i64(
-    distance_dbu: i64,
-    unit: CoordinateUnit,
-    dbu_per_micron: Option<u32>,
-) -> String {
     match effective_coordinate_unit(unit, dbu_per_micron) {
         CoordinateUnit::Dbu => format!("{distance_dbu} DBU"),
-        CoordinateUnit::Micron => {
-            format!("{} um", format_micron_i64(distance_dbu, dbu_per_micron))
-        }
+        CoordinateUnit::Micron => format!("{} um", format_micron(distance_dbu, dbu_per_micron)),
     }
 }
 
 fn format_micron(value_dbu: i32, dbu_per_micron: Option<u32>) -> String {
-    format_micron_i64(i64::from(value_dbu), dbu_per_micron)
-}
-
-fn format_micron_i64(value_dbu: i64, dbu_per_micron: Option<u32>) -> String {
     let dbu_per_micron = dbu_per_micron.filter(|value| *value > 0).unwrap_or(1);
     format!("{:.3}", value_dbu as f64 / dbu_per_micron as f64)
 }
 
 fn nice_ruler_distance_dbu(target_dbu: f32) -> i32 {
-    nice_ruler_interval(f64::from(target_dbu))
-        .round()
-        .clamp(1.0, i32::MAX as f64) as i32
-}
-
-fn nice_ruler_interval(target: f64) -> f64 {
-    if !target.is_finite() || target <= 0.0 {
-        return 1.0;
+    if !target_dbu.is_finite() || target_dbu <= 1.0 {
+        return 1;
     }
-    let magnitude = 10_f64.powf(target.log10().floor());
-    let normalized = target / magnitude;
+
+    let magnitude = 10_f32.powf(target_dbu.log10().floor());
+    let normalized = target_dbu / magnitude;
     let nice = if normalized <= 1.0 {
         1.0
     } else if normalized <= 2.0 {
@@ -5948,7 +6578,8 @@ fn nice_ruler_interval(target: f64) -> f64 {
     } else {
         10.0
     };
-    nice * magnitude
+
+    (nice * magnitude).round().clamp(1.0, i32::MAX as f32) as i32
 }
 
 fn scroll_zoom_factor(scroll: f32) -> f32 {
@@ -6750,12 +7381,16 @@ fn focus_animation_enabled(ctx: &egui::Context) -> bool {
         && !reduced_motion_requested(std::env::var(REDUCED_MOTION_ENV).ok().as_deref())
 }
 
-fn reduced_motion_requested(value: Option<&str>) -> bool {
+fn env_flag_requested(value: Option<&str>) -> bool {
     value.is_some_and(|value| {
         ["1", "true", "yes", "on"]
             .iter()
             .any(|enabled| value.trim().eq_ignore_ascii_case(enabled))
     })
+}
+
+fn reduced_motion_requested(value: Option<&str>) -> bool {
+    env_flag_requested(value)
 }
 
 fn retain_existing_shape_id<F>(shape_id: Option<ShapeId>, mut exists: F) -> Option<ShapeId>
@@ -6815,7 +7450,27 @@ fn visible_layer_count(layers: &[LayerUiState]) -> usize {
     layers.iter().filter(|layer| layer.visible).count()
 }
 
+fn layers_visibility_hash(layers: &[LayerUiState]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for l in layers {
+        l.layer_id.hash(&mut hasher);
+        l.visible.hash(&mut hasher);
+    }
+    LAYOUT_GEOMETRY_LAYER.hash(&mut hasher);
+    true.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn drc_layer_is_visible(layers: &[LayerUiState], layer_name: &str) -> bool {
+    layers
+        .iter()
+        .find(|layer| layer.name.eq_ignore_ascii_case(layer_name))
+        .map(|layer| layer.visible)
+        .unwrap_or(true)
+}
+
+fn antenna_layer_is_visible(layers: &[LayerUiState], layer_name: &str) -> bool {
     layers
         .iter()
         .find(|layer| layer.name.eq_ignore_ascii_case(layer_name))
@@ -7327,8 +7982,6 @@ mod tests {
 
         assert_eq!(hover_nearest_radius_dbu(world, canvas, 1.0), 80);
         assert_eq!(hover_nearest_radius_dbu(world, canvas, 2.0), 40);
-        assert_eq!(ruler_edge_snap_radius_dbu(world, canvas, 1.0), 100);
-        assert_eq!(ruler_edge_snap_radius_dbu(world, canvas, 2.0), 50);
     }
 
     #[test]
@@ -7350,213 +8003,6 @@ mod tests {
         assert_eq!(nice_ruler_distance_dbu(3.1), 5);
         assert_eq!(nice_ruler_distance_dbu(7.0), 10);
         assert_eq!(nice_ruler_distance_dbu(1200.0), 2000);
-    }
-
-    #[test]
-    fn layout_canvas_reserves_gui_coordinate_ruler_edges() {
-        let frame = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(400.0, 300.0));
-
-        let canvas = layout_canvas_rect(frame);
-
-        assert_eq!(canvas.left(), frame.left() + COORDINATE_RULER_THICKNESS);
-        assert_eq!(canvas.top(), frame.top());
-        assert_eq!(canvas.right(), frame.right());
-        assert_eq!(canvas.bottom(), frame.bottom() - COORDINATE_RULER_THICKNESS);
-    }
-
-    #[test]
-    fn orthogonal_ruler_locks_to_the_dominant_math_axis() {
-        let anchor = Point32 { x: 100, y: 100 };
-
-        assert_eq!(
-            orthogonal_ruler_point(anchor, Point32 { x: 160, y: 120 }),
-            Point32 { x: 160, y: 100 }
-        );
-        assert_eq!(
-            orthogonal_ruler_point(anchor, Point32 { x: 110, y: 180 }),
-            Point32 { x: 100, y: 180 }
-        );
-        assert_eq!(
-            orthogonal_ruler_point(anchor, Point32 { x: 120, y: 120 }),
-            Point32 { x: 120, y: 100 }
-        );
-    }
-
-    #[test]
-    fn orthogonal_ruler_snaps_to_the_nearest_intersecting_edge() {
-        let vertical_edge = Rect32 {
-            lx: 100,
-            ly: 0,
-            hx: 120,
-            hy: 100,
-        };
-        assert_eq!(
-            nearest_orthogonal_edge_snap(
-                Point32 { x: 0, y: 50 },
-                Point32 { x: 96, y: 53 },
-                &[vertical_edge],
-                10,
-            ),
-            Some(Point32 { x: 100, y: 50 })
-        );
-        assert_eq!(
-            nearest_orthogonal_edge_snap(
-                Point32 { x: 0, y: 50 },
-                Point32 { x: 80, y: 53 },
-                &[vertical_edge],
-                10,
-            ),
-            None
-        );
-
-        let horizontal_edge = Rect32 {
-            lx: 0,
-            ly: 100,
-            hx: 100,
-            hy: 120,
-        };
-        assert_eq!(
-            nearest_orthogonal_edge_snap(
-                Point32 { x: 50, y: 0 },
-                Point32 { x: 53, y: 96 },
-                &[horizontal_edge],
-                10,
-            ),
-            Some(Point32 { x: 50, y: 100 })
-        );
-        assert_eq!(
-            nearest_orthogonal_edge_snap(
-                Point32 { x: 0, y: 150 },
-                Point32 { x: 96, y: 153 },
-                &[vertical_edge],
-                10,
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn touchpad_secondary_press_starts_the_orthogonal_ruler_before_drag_classification() {
-        let context = egui::Context::default();
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
-        let start = egui::pos2(80.0, 80.0);
-        let mut requested = false;
-
-        for events in [
-            vec![
-                egui::Event::PointerMoved(start),
-                egui::Event::PointerButton {
-                    pos: start,
-                    button: egui::PointerButton::Secondary,
-                    pressed: true,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ],
-            vec![
-                egui::Event::PointerMoved(start + egui::vec2(12.0, 2.0)),
-                egui::Event::PointerButton {
-                    pos: start + egui::vec2(12.0, 2.0),
-                    button: egui::PointerButton::Secondary,
-                    pressed: false,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ],
-        ] {
-            let input = egui::RawInput {
-                screen_rect: Some(screen),
-                events,
-                ..Default::default()
-            };
-            let _ = context.run(input, |context| {
-                egui::CentralPanel::default().show(context, |ui| {
-                    let (_response, _) =
-                        ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-                    requested |= context.input(|input| ruler_start_requested(input, true, true));
-                });
-            });
-        }
-
-        assert!(requested);
-    }
-
-    #[test]
-    fn orthogonal_ruler_accumulates_x_and_y_while_continuing() {
-        let mut ruler = OrthogonalRuler::default();
-        ruler.toggle();
-        ruler.start(Point32 { x: 10, y: 20 });
-        ruler.commit(Point32 { x: 50, y: 25 });
-        ruler.commit(Point32 { x: 60, y: 70 });
-        let preview = ruler.preview(Point32 { x: 90, y: 60 });
-
-        assert_eq!(
-            ruler.points,
-            vec![
-                Point32 { x: 10, y: 20 },
-                Point32 { x: 50, y: 20 },
-                Point32 { x: 50, y: 70 },
-            ]
-        );
-        assert_eq!(preview, Some(Point32 { x: 90, y: 70 }));
-        assert_eq!(ruler_distances(&ruler.points, preview), (80, 50));
-        assert_eq!(
-            ruler_status_line(
-                &ruler.points,
-                preview,
-                ruler.active,
-                CoordinateUnit::Dbu,
-                Some(2000)
-            ),
-            Some("ruler: X 80 DBU, Y 50 DBU".to_string())
-        );
-
-        ruler.toggle();
-        assert!(!ruler.enabled);
-        assert!(ruler.points.is_empty());
-    }
-
-    #[test]
-    fn orthogonal_ruler_finishes_without_discarding_the_measurement() {
-        let mut ruler = OrthogonalRuler::default();
-        ruler.toggle();
-        ruler.start(Point32 { x: 10, y: 20 });
-        ruler.commit(Point32 { x: 50, y: 25 });
-        let points = ruler.points.clone();
-
-        ruler.finish();
-
-        assert!(!ruler.active);
-        assert_eq!(ruler.points, points);
-        assert_eq!(ruler.preview(Point32 { x: 90, y: 60 }), None);
-        assert_eq!(
-            ruler_status_line(
-                &ruler.points,
-                None,
-                ruler.active,
-                CoordinateUnit::Dbu,
-                Some(2000)
-            ),
-            Some("ruler done: X 40 DBU, Y 0 DBU".to_string())
-        );
-
-        ruler.start(Point32 { x: 100, y: 200 });
-        assert!(ruler.active);
-        assert_eq!(ruler.points, vec![Point32 { x: 100, y: 200 }]);
-    }
-
-    #[test]
-    fn coordinate_ruler_labels_follow_the_selected_unit() {
-        assert_eq!(
-            format_axis_coordinate(1_500_000, CoordinateUnit::Dbu, Some(2000)),
-            "1.5M"
-        );
-        assert_eq!(
-            format_axis_coordinate(1_500_000, CoordinateUnit::Micron, Some(2000)),
-            "750"
-        );
-        assert_eq!(
-            format_distance_i64(3_000, CoordinateUnit::Micron, Some(2000)),
-            "1.500 um"
-        );
     }
 
     #[test]
@@ -8296,6 +8742,18 @@ mod tests {
             assert!(!reduced_motion_requested(Some(value)));
         }
         assert!(!reduced_motion_requested(None));
+    }
+
+    #[test]
+    fn render_stats_environment_values_enable_stats_overlay() {
+        for value in ["1", "true", "TRUE", "yes", "on"] {
+            assert!(env_flag_requested(Some(value)));
+        }
+        for value in ["0", "false", "off", ""] {
+            assert!(!env_flag_requested(Some(value)));
+        }
+        assert!(!env_flag_requested(None));
+        assert_eq!(RENDER_STATS_ENV, "ECOS_RENDER_STATS");
     }
 
     #[test]
@@ -9519,7 +9977,7 @@ mod tests {
         let dir = temp_snapshot_dir("external-refresh-new-delta");
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
-        let mut loaded = LoadedViewer::new(db, false, false, None, None, None, None, None);
+        let mut loaded = LoadedViewer::new(db, false, false, None, None, None, None, None, None, None);
         let delta_path = dir.join("geometry.delta.bin");
 
         assert!(!loaded.snapshot_signature.files.contains_key(&delta_path));
@@ -9546,7 +10004,7 @@ mod tests {
         let dir = temp_snapshot_dir("restored-edit-session-dirty");
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
-        let loaded = LoadedViewer::new(db, true, true, None, None, None, None, None);
+        let loaded = LoadedViewer::new(db, true, true, None, None, None, None, None, None, None);
 
         assert!(loaded.session_dirty);
 

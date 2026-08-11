@@ -6,14 +6,18 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+bytemuck.workspace = true
 chip-display = { path = "../../crates/chip-display" }
 chip-render = { path = "../../crates/chip-render" }
 chip-view-db = { path = "../../crates/chip-view-db" }
 chipgeom-format = { path = "../../crates/chipgeom-format" }
 clap.workspace = true
 csv.workspace = true
-eframe.workspace = true
+eframe = { workspace = true, features = ["wgpu"] }
 egui.workspace = true
+egui-wgpu.workspace = true
 image.workspace = true
+rstar.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+wgpu.workspace = true

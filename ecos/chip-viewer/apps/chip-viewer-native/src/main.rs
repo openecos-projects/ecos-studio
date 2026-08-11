@@ -1,4 +1,5 @@
 mod app;
+mod canvas_gpu;
 mod map_data;
 
 use std::path::PathBuf;
@@ -31,6 +32,12 @@ struct Args {
     drc_statis: Option<PathBuf>,
 
     #[arg(long)]
+    antenna_data: Option<PathBuf>,
+
+    #[arg(long)]
+    antenna_statis: Option<PathBuf>,
+
+    #[arg(long)]
     map_root: Option<PathBuf>,
 }
 
@@ -56,7 +63,10 @@ fn main() -> Result<()> {
                 args.edit_dirty,
                 args.drc_data.clone(),
                 args.drc_statis.clone(),
+                args.antenna_data.clone(),
+                args.antenna_statis.clone(),
                 args.map_root.clone(),
+                _cc.wgpu_render_state.as_ref().map(|s| s.target_format).unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb),
             )))
         }),
     )
