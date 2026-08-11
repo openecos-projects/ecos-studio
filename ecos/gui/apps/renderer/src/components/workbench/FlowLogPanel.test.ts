@@ -21,6 +21,7 @@ describe('FlowLogPanel embedded controls', () => {
     expect(titleSource).toContain('Peak memory')
     expect(source).not.toContain('aria-label="Select a flow step log"')
     expect(source).not.toContain('v-model="selectedKey"')
+    expect(source).toContain(':channel-key="keyFor(selectedSegment)"')
   })
 
   it('keeps the embedded viewer constrained so its log text can scroll', () => {
@@ -30,6 +31,8 @@ describe('FlowLogPanel embedded controls', () => {
   it('lets the open-log dialog fill the viewport when maximized', () => {
     expect(source).toContain('class="flow-log-dialog"')
     expect(source).toContain('maximizable')
+    expect(source).toContain('aria-label="Expanded flow step log"')
+    expect(source).toContain('`${keyFor(selectedSegment)}\\u001fdialog`')
     expect(source).toContain(
       '.flow-log-dialog.p-dialog-maximized .flow-log-dialog-content',
     )

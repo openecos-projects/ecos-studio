@@ -13,4 +13,20 @@ describe('FrontendWorkspaceView simulation layout', () => {
     expect(frontendWorkspaceViewSource).toContain('class="console-log"')
     expect(frontendWorkspaceViewSource).toContain('@change="loadSelectedLog"')
   })
+
+  it('opens the simulation log console by default and highlights semantic lines', () => {
+    expect(frontendWorkspaceViewSource).toContain('const initialConsoleStepIsSim =')
+    expect(frontendWorkspaceViewSource).toContain(
+      'const consoleCollapsed = ref(!initialConsoleStepIsSim)',
+    )
+    expect(frontendWorkspaceViewSource).toContain(
+      "initialConsoleStepIsSim ? 'log' : 'problems'",
+    )
+    expect(frontendWorkspaceViewSource).toContain(
+      'step.trim().toLowerCase() === FrontendStepEnum.SIM',
+    )
+    expect(frontendWorkspaceViewSource).toContain('<MonacoLogViewer')
+    expect(frontendWorkspaceViewSource).toContain(':channel-key="selectedLogPath')
+    expect(frontendWorkspaceViewSource).toContain(':content="logContent"')
+  })
 })
