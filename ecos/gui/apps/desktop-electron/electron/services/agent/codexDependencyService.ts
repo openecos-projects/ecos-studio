@@ -200,9 +200,10 @@ export class CodexDependencyService {
 
   async resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>> {
     const binPath = await this.resolveBinPath()
+    if (!binPath) return {}
     return {
-      ECOS_AGENT_CODEX_BIN: binPath ?? undefined,
-      PATH: binPath ? prependPath(dirname(binPath), this.env.PATH) : undefined,
+      ECOS_AGENT_CODEX_BIN: binPath,
+      PATH: prependPath(dirname(binPath), this.env.PATH),
     }
   }
 

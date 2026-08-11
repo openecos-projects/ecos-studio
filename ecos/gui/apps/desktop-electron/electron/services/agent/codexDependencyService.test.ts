@@ -57,6 +57,7 @@ describe('CodexDependencyService', () => {
       state: 'missing',
       platformSupportsInstall: true,
     })
+    await expect(service.resolveEnvironmentForAgent()).resolves.toStrictEqual({})
   })
 
   it('prefers settings path over PATH', async () => {

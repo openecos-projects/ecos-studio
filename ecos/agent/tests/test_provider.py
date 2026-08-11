@@ -526,7 +526,12 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     assert "Use retrieved_knowledge and retrieved_code only as read-only factual context" in str(captured["prompt"])
     assert "Audited target-overflow knowledge." in str(captured["prompt"])
     assert "def route(): ..." in str(captured["prompt"])
-    assert captured["schema"]["required"] == ["schema_version", "operation", "answer"]
+    assert captured["schema"]["required"] == [
+        "schema_version",
+        "operation",
+        "answer",
+        "evidence_ids",
+    ]
 
 
 def test_chat_uses_the_bound_workspace_and_source_planning_uses_whitelisted_roots(

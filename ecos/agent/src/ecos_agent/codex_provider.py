@@ -607,7 +607,7 @@ def _gui_chat_response_output_schema(allowed_ids: list[str]) -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "operation", "answer"],
+        "required": ["schema_version", "operation", "answer", "evidence_ids"],
         "properties": {
             "schema_version": {
                 "type": "string",
