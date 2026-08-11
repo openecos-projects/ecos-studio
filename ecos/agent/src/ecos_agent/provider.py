@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -153,6 +154,13 @@ _CHAT_QUESTION_PREFIXES = (
     "如何",
     "怎么",
 )
+_SOURCE_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:source\s+code|implementation|implemented|code\s+(?:path|location)|"
+    r"where\s+(?:is|are).{0,80}\b(?:defined|implemented))\b|"
+    r"(?:源码|源代码|代码).{0,24}(?:实现|定义|位置)|"
+    r"(?:实现|定义).{0,24}(?:源码|源代码|代码)",
+    re.IGNORECASE,
+)
 
 
 def _project_root_for_workspace(workspace: str) -> str | None:
@@ -169,6 +177,10 @@ def _is_conversational_input(message: str) -> bool:
         or normalized.startswith(_CHAT_QUESTION_PREFIXES)
         or normalized.endswith(("?", "？"))
     )
+
+
+def _source_evidence_requested(message: str) -> bool:
+    return bool(_SOURCE_EVIDENCE_PATTERN.search(message))
 
 
 def _proposal_sha256(proposal: StageRoutingProposal) -> str:
@@ -282,6 +294,7 @@ class EcosAgentProvider:
         self.knowledge_retriever = GlobalKnowledgeRetriever(
             self.knowledge, config=load_production_retrieval_config()
         )
+        self._uses_default_chat_response = chat_response_parser is None
         self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
         self._uses_default_stage_routing = stage_routing_parser is None
         self.stage_routing_parser = stage_routing_parser or _propose_stage_routing
@@ -473,6 +486,13 @@ class EcosAgentProvider:
         self, session: _Session, message: str, *, allow_operations: bool
     ) -> None:
         answer = self._knowledge_answer(session, message)
+        if (
+            answer is not None
+            and self._uses_default_chat_response
+            and not _source_evidence_requested(message)
+        ):
+            self._emit(session, "message", answer.text, contract=answer.contract)
+            return
         source_result = self._source_code_evidence(session, message, answer)
         self._answer_with_codex(
             session,
@@ -530,8 +550,10 @@ class EcosAgentProvider:
     def _source_code_evidence(
         self, session: _Session, message: str, knowledge_answer: KnowledgeAnswer | None
     ) -> SourceSearchResult | None:
-        if not self.source_retriever.available_root_ids or (
-            self._uses_default_source_retrieval and not self._started
+        if (
+            not _source_evidence_requested(message)
+            or not self.source_retriever.available_root_ids
+            or (self._uses_default_source_retrieval and not self._started)
         ):
             return None
         context: dict[str, Any] = {

@@ -1678,6 +1678,56 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
     assert answer["contract"]["knowledge"]["entity_ids"] == retrieved["entity_ids"]
 
 
+@pytest.mark.parametrize(
+    ("message", "entity_id_fragment"),
+    [
+        ("what is RUDY", "rudy"),
+        ("what is place target density", "parameter.dreamplace.target_density"),
+    ],
+)
+def test_known_concepts_skip_source_search_planning(
+    tmp_path: Path, monkeypatch, message: str, entity_id_fragment: str
+) -> None:
+    repository = tmp_path / "ecos-studio"
+    (repository / "ecc").mkdir(parents=True)
+    events: list[dict[str, object]] = []
+    source_contexts: list[dict[str, object]] = []
+
+    def source_search(context: dict[str, object]) -> dict[str, object]:
+        source_contexts.append(context)
+        return {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [],
+            "rationale": "No source lookup is needed.",
+        }
+
+    def unexpected_chat_response(_context: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("known concepts must not wait for Codex chat")
+
+    monkeypatch.setattr(
+        "ecos_agent.provider._propose_gui_chat_response", unexpected_chat_response
+    )
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        source_retrieval_parser=source_search,
+        source_retriever=SourceCodeRetriever(repository),
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, message)
+
+    assert source_contexts == []
+    assert any(
+        entity_id_fragment in entity_id
+        for entity_id in _last_event(events, "message")["contract"]["entity_ids"]
+    )
+    assert (
+        _last_event(events, "message")["contract"]["schema_version"]
+        == "ecos-knowledge-answer.v2"
+    )
+
+
 def test_chat_combines_knowledge_and_bounded_source_evidence(tmp_path: Path) -> None:
     repository = tmp_path / "ecos-studio"
     source = repository / "ecc" / "route.py"
@@ -1772,8 +1822,8 @@ def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp
     answer = _last_event(events, "message")
     assert "acceptable global-placement overflow threshold" in str(answer["text"])
     assert answer["contract"]["schema_version"] == "ecos-knowledge-answer.v2"
-    assert answer["contract"]["source_evidence_ids"] == []
-    assert answer["contract"]["source_retrieval"]["evidence"][0]["path"] == "ecc/route.py"
+    assert "source_evidence_ids" not in answer["contract"]
+    assert "source_retrieval" not in answer["contract"]
     assert not any(event["type"] == "error" for event in events)
 
 
