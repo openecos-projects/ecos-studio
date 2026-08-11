@@ -294,7 +294,6 @@ class EcosAgentProvider:
         self.knowledge_retriever = GlobalKnowledgeRetriever(
             self.knowledge, config=load_production_retrieval_config()
         )
-        self._uses_default_chat_response = chat_response_parser is None
         self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
         self._uses_default_stage_routing = stage_routing_parser is None
         self.stage_routing_parser = stage_routing_parser or _propose_stage_routing
@@ -486,13 +485,6 @@ class EcosAgentProvider:
         self, session: _Session, message: str, *, allow_operations: bool
     ) -> None:
         answer = self._knowledge_answer(session, message)
-        if (
-            answer is not None
-            and self._uses_default_chat_response
-            and not _source_evidence_requested(message)
-        ):
-            self._emit(session, "message", answer.text, contract=answer.contract)
-            return
         source_result = self._source_code_evidence(session, message, answer)
         self._answer_with_codex(
             session,

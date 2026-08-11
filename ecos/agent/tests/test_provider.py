@@ -1417,7 +1417,10 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     project_root.mkdir()
     (project_root / "project.json").write_text("{}", encoding="utf-8")
     events: list[dict[str, object]] = []
-    provider = EcosAgentProvider(emit=events.append)
+    provider = EcosAgentProvider(
+        emit=events.append,
+        workspace_path_recommender=lambda _context: _proposal(),
+    )
     session_id = provider.start_session(
         {
             "mode": "home",
@@ -1692,6 +1695,7 @@ def test_known_concepts_skip_source_search_planning(
     (repository / "ecc").mkdir(parents=True)
     events: list[dict[str, object]] = []
     source_contexts: list[dict[str, object]] = []
+    chat_contexts: list[dict[str, object]] = []
 
     def source_search(context: dict[str, object]) -> dict[str, object]:
         source_contexts.append(context)
@@ -1701,12 +1705,11 @@ def test_known_concepts_skip_source_search_planning(
             "rationale": "No source lookup is needed.",
         }
 
-    def unexpected_chat_response(_context: dict[str, object]) -> dict[str, object]:
-        raise AssertionError("known concepts must not wait for Codex chat")
+    def chat_response(context: dict[str, object]) -> dict[str, object]:
+        chat_contexts.append(context)
+        return _chat_response(answer="Codex-organized knowledge answer.")
 
-    monkeypatch.setattr(
-        "ecos_agent.provider._propose_gui_chat_response", unexpected_chat_response
-    )
+    monkeypatch.setattr("ecos_agent.provider._propose_gui_chat_response", chat_response)
 
     provider = EcosAgentProvider(
         emit=events.append,
@@ -1720,12 +1723,10 @@ def test_known_concepts_skip_source_search_planning(
     assert source_contexts == []
     assert any(
         entity_id_fragment in entity_id
-        for entity_id in _last_event(events, "message")["contract"]["entity_ids"]
+        for entity_id in chat_contexts[0]["retrieved_knowledge"]["entity_ids"]
     )
-    assert (
-        _last_event(events, "message")["contract"]["schema_version"]
-        == "ecos-knowledge-answer.v2"
-    )
+    assert "retrieved_code" not in chat_contexts[0]
+    assert _last_event(events, "message")["text"] == "Codex-organized knowledge answer."
 
 
 def test_chat_combines_knowledge_and_bounded_source_evidence(tmp_path: Path) -> None:
