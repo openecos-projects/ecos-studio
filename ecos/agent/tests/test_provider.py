@@ -4,11 +4,13 @@ from pathlib import Path
 
 import pytest
 
+import ecos_agent.provider_support as provider_support
 from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
 from ecos_agent.contracts import GuiWorkspaceSetupProposal, StageRoutingProposal
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.messages import EMPTY_CHOICE_VALUE
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
+from ecos_agent.source_retriever import SourceCodeRetriever
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
 from ecos_agent.workspace_setup import (
     display_path,
@@ -465,7 +467,7 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
 
     def capture_turn(prompt: str, schema: dict[str, object]) -> str:
         captured.update(prompt=prompt, schema=schema)
-        return json.dumps(_chat_response(answer="Hello."))
+        return json.dumps(_chat_response(answer="Hello.", evidence_ids=["source-1"]))
 
     monkeypatch.setattr(provider, "_run_turn", capture_turn)
     response = provider.respond_to_gui_chat(
@@ -477,17 +479,110 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
                 "read_only": True,
                 "entity_ids": ["parameter.dreamplace.stop_overflow"],
                 "source_ids": ["dreamplace.config"],
-                "text": "Audited target-overflow knowledge.",
+            "text": "Audited target-overflow knowledge.",
+            },
+            "retrieved_code": {
+                "schema_version": "ecos-source-code-evidence.v1",
+                "read_only": True,
+                "evidence": [
+                    {
+                        "evidence_id": "source-1",
+                        "path": "ecc/chipcompiler/route.py",
+                        "line_start": 10,
+                        "line_end": 12,
+                        "file_sha256": "a" * 64,
+                        "snippet_sha256": "b" * 64,
+                        "root_id": "ecc",
+                        "text": "def route(): ...",
+                    }
+                ],
             },
         }
     )
 
     assert response["answer"] == "Hello."
+    assert response["evidence_ids"] == ["source-1"]
     assert "Respond in the language specified by response_language" in str(captured["prompt"])
     assert "unless the request explicitly requires a different output language" in str(captured["prompt"])
-    assert "Use retrieved_knowledge only as read-only factual context" in str(captured["prompt"])
+    assert "Use retrieved_knowledge and retrieved_code only as read-only factual context" in str(captured["prompt"])
     assert "Audited target-overflow knowledge." in str(captured["prompt"])
+    assert "def route(): ..." in str(captured["prompt"])
     assert captured["schema"]["required"] == ["schema_version", "operation", "answer"]
+
+
+def test_chat_and_source_planning_use_an_empty_runtime_root(tmp_path: Path, monkeypatch) -> None:
+    captured: list[Path] = []
+
+    class FakeCodexProvider:
+        def interrupt(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+        def respond_to_gui_chat(self, _context: dict[str, object]) -> dict[str, object]:
+            return _chat_response(answer="Read-only answer.")
+
+        def propose_source_search(self, _context: dict[str, object]) -> dict[str, object]:
+            return {
+                "schema_version": "flow-agent.source_search_proposal.v1",
+                "queries": [],
+                "rationale": "No source lookup is required.",
+            }
+
+    def create_provider(**kwargs: object) -> FakeCodexProvider:
+        root = kwargs["cwd"]
+        assert isinstance(root, Path) and root.is_dir()
+        captured.append(root)
+        assert kwargs["runtime_workspace_roots"] == (root,)
+        return FakeCodexProvider()
+
+    monkeypatch.setattr(provider_support, "create_required_codex_provider", create_provider)
+    chat = provider_support._propose_gui_chat_response(
+        {"workspace": str(tmp_path), "allowed_operations": [], "response_language": "en"}
+    )
+    search = provider_support._propose_source_retrieval(
+        {"natural_language_request": "How does it work?", "available_source_roots": ["ecc"]}
+    )
+
+    assert chat.answer == "Read-only answer."
+    assert search.queries == ()
+    assert len(captured) == 2
+    assert all(root != tmp_path and not root.exists() for root in captured)
+
+
+def test_source_search_prompt_is_bounded_and_structured(tmp_path: Path, monkeypatch) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    captured: dict[str, object] = {}
+
+    def capture_turn(prompt: str, schema: dict[str, object]) -> str:
+        captured.update(prompt=prompt, schema=schema)
+        return json.dumps(
+            {
+                "schema_version": "flow-agent.source_search_proposal.v1",
+                "queries": [{"root_id": "ecc", "query": "stop_overflow"}],
+                "rationale": "Need the implementation site.",
+            }
+        )
+
+    monkeypatch.setattr(provider, "_run_turn", capture_turn)
+    response = provider.propose_source_search(
+        {
+            "natural_language_request": "How is stop_overflow consumed?",
+            "available_source_roots": ["ecc", "ecos"],
+        }
+    )
+
+    assert response["queries"] == [{"root_id": "ecc", "query": "stop_overflow"}]
+    assert "Return zero to three literal source-search queries" in str(captured["prompt"])
+    assert captured["schema"]["required"] == ["schema_version", "queries", "rationale"]
+    assert captured["schema"]["properties"]["queries"]["items"]["properties"]["root_id"]["enum"] == [
+        "ecc",
+        "ecos",
+    ]
 
 
 def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypatch) -> None:
@@ -585,6 +680,11 @@ def test_started_provider_enables_default_stage_routing(monkeypatch) -> None:
     provider = EcosAgentProvider(
         emit=events.append,
         chat_response_parser=lambda _context: _chat_response(answer="Clock-tree evidence is available."),
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [],
+            "rationale": "No source lookup is needed for this stage-routing test.",
+        },
     )
 
     def stage_router(context: dict[str, object]) -> dict[str, object]:
@@ -1578,14 +1678,91 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
     assert answer["contract"]["knowledge"]["entity_ids"] == retrieved["entity_ids"]
 
 
+def test_chat_combines_knowledge_and_bounded_source_evidence(tmp_path: Path) -> None:
+    repository = tmp_path / "ecos-studio"
+    source = repository / "ecc" / "route.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def stop_overflow_reached():\n    return overflow <= target\n", encoding="utf-8")
+    events: list[dict[str, object]] = []
+    source_contexts: list[dict[str, object]] = []
+    chat_contexts: list[dict[str, object]] = []
+
+    def source_search(context: dict[str, object]) -> dict[str, object]:
+        source_contexts.append(context)
+        return {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [{"root_id": "ecc", "query": "stop_overflow_reached"}],
+            "rationale": "Need the implementation.",
+        }
+
+    def answer(context: dict[str, object]) -> dict[str, object]:
+        chat_contexts.append(context)
+        return _chat_response(
+            answer="The threshold is checked in stop_overflow_reached.", evidence_ids=["source-1"]
+        )
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=answer,
+        source_retrieval_parser=source_search,
+        source_retriever=SourceCodeRetriever(repository),
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "How is the placement overflow threshold implemented?")
+
+    assert "retrieved_knowledge" in chat_contexts[0]
+    retrieved_code = chat_contexts[0]["retrieved_code"]
+    assert source_contexts[0]["available_source_roots"] == ["ecc"]
+    assert retrieved_code["evidence"][0]["path"] == "ecc/route.py"
+    assert "stop_overflow_reached" in retrieved_code["evidence"][0]["text"]
+    assert _last_event(events, "message")["contract"]["source_evidence_ids"] == ["source-1"]
+
+
+def test_chat_rejects_unavailable_source_evidence_id(tmp_path: Path) -> None:
+    repository = tmp_path / "ecos-studio"
+    source = repository / "ecc" / "route.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("needle = True\n", encoding="utf-8")
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=lambda _context: _chat_response(answer="Unsupported claim.", evidence_ids=["source-2"]),
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [{"root_id": "ecc", "query": "needle"}],
+            "rationale": "Need source evidence.",
+        },
+        source_retriever=SourceCodeRetriever(repository),
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "How is this implemented?")
+
+    assert _last_event(events, "error")["text"] == "The answer cited unavailable source evidence."
+
+
 def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp_path: Path) -> None:
     workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    repository = tmp_path / "ecos-studio"
+    source = repository / "ecc" / "route.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("stop_overflow = 0.1\n", encoding="utf-8")
     events: list[dict[str, object]] = []
 
     def unavailable_codex(_context: dict[str, object]) -> dict[str, object]:
         raise CodexProviderError("Codex timed out", failure_class="timeout")
 
-    provider = EcosAgentProvider(emit=events.append, chat_response_parser=unavailable_codex)
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=unavailable_codex,
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [{"root_id": "ecc", "query": "stop_overflow"}],
+            "rationale": "Need source evidence.",
+        },
+        source_retriever=SourceCodeRetriever(repository),
+    )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
@@ -1595,6 +1772,8 @@ def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp
     answer = _last_event(events, "message")
     assert "acceptable global-placement overflow threshold" in str(answer["text"])
     assert answer["contract"]["schema_version"] == "ecos-knowledge-answer.v2"
+    assert answer["contract"]["source_evidence_ids"] == []
+    assert answer["contract"]["source_retrieval"]["evidence"][0]["path"] == "ecc/route.py"
     assert not any(event["type"] == "error" for event in events)
 
 

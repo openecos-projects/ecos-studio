@@ -13,10 +13,12 @@ from ecos_agent.codex_provider import CodexProviderError, validate_required_code
 from ecos_agent.contracts import (
     GuiChatResponseProposal,
     GuiWorkspaceSetupProposal,
+    SourceSearchProposal,
     StageRoutingProposal,
 )
 from ecos_agent.knowledge_bundle import KnowledgeAnswer
 from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, load_production_retrieval_config
+from ecos_agent.source_retriever import SourceCodeRetriever, SourceSearchResult
 from ecos_agent.step_knowledge import StepKnowledge, load_default_step_knowledge
 from ecos_agent.messages import (
     cancellation_message,
@@ -112,6 +114,7 @@ from ecos_agent.provider_support import (
     _path_was_explicitly_provided,
     _prompt_for_phase,
     _propose_gui_chat_response,
+    _propose_source_retrieval,
     _propose_stage_routing,
     _propose_gui_workspace_path_discovery,
     _propose_gui_workspace_rerun_patch,
@@ -134,6 +137,7 @@ _WorkspaceSetupParser = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | d
 _WorkspacePathRecommender = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]]
 _ChatResponseParser = Callable[[dict[str, Any]], GuiChatResponseProposal | dict[str, Any]]
+_SourceRetrievalParser = Callable[[dict[str, Any]], SourceSearchProposal | dict[str, Any]]
 _StageRoutingParser = Callable[[dict[str, Any]], StageRoutingProposal | dict[str, Any]]
 _CHAT_GREETING_PREFIXES = ("hello", "hi", "hey", "你好", "您好", "嗨")
 _CHAT_QUESTION_PREFIXES = (
@@ -267,6 +271,8 @@ class EcosAgentProvider:
         knowledge: tuple[StepKnowledge, ...] | None = None,
         chat_response_parser: _ChatResponseParser | None = None,
         stage_routing_parser: _StageRoutingParser | None = None,
+        source_retrieval_parser: _SourceRetrievalParser | None = None,
+        source_retriever: SourceCodeRetriever | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
@@ -279,6 +285,9 @@ class EcosAgentProvider:
         self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
         self._uses_default_stage_routing = stage_routing_parser is None
         self.stage_routing_parser = stage_routing_parser or _propose_stage_routing
+        self._uses_default_source_retrieval = source_retrieval_parser is None
+        self.source_retrieval_parser = source_retrieval_parser or _propose_source_retrieval
+        self.source_retriever = source_retriever or SourceCodeRetriever()
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
         self._started = False
@@ -464,8 +473,13 @@ class EcosAgentProvider:
         self, session: _Session, message: str, *, allow_operations: bool
     ) -> None:
         answer = self._knowledge_answer(session, message)
+        source_result = self._source_code_evidence(session, message, answer)
         self._answer_with_codex(
-            session, message, allow_operations=allow_operations, knowledge_answer=answer
+            session,
+            message,
+            allow_operations=allow_operations,
+            knowledge_answer=answer,
+            source_result=source_result,
         )
 
     def _knowledge_answer(self, session: _Session, message: str) -> KnowledgeAnswer | None:
@@ -512,6 +526,32 @@ class EcosAgentProvider:
             }
         except (CodexProviderError, ValueError):
             return (), {"status": "fallback", "reason": "proposal_unavailable"}
+
+    def _source_code_evidence(
+        self, session: _Session, message: str, knowledge_answer: KnowledgeAnswer | None
+    ) -> SourceSearchResult | None:
+        if not self.source_retriever.available_root_ids or (
+            self._uses_default_source_retrieval and not self._started
+        ):
+            return None
+        context: dict[str, Any] = {
+            "schema_version": "flow-agent.source_search_request.v1",
+            "natural_language_request": message,
+            "available_source_roots": list(self.source_retriever.available_root_ids),
+            "_progress_callback": lambda text: self._progress(session, text),
+            "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
+        }
+        if knowledge_answer is not None:
+            context["retrieved_knowledge"] = {
+                **knowledge_answer.contract,
+                "entity_ids": list(knowledge_answer.entity_ids),
+                "text": knowledge_answer.text,
+            }
+        try:
+            proposal = SourceSearchProposal.model_validate(self.source_retrieval_parser(context))
+            return self.source_retriever.retrieve(proposal)
+        except (CodexProviderError, ValueError):
+            return None
 
     def _select_home_ready(self, session: _Session, message: str, choice: str) -> None:
         if choice == "1":
@@ -571,6 +611,7 @@ class EcosAgentProvider:
         *,
         allow_operations: bool,
         knowledge_answer: KnowledgeAnswer | None,
+        source_result: SourceSearchResult | None,
     ) -> None:
         allowed_options = self._chat_allowed_operations(session) if allow_operations else []
         response = self._parse_chat_response(
@@ -578,12 +619,17 @@ class EcosAgentProvider:
             message,
             allowed_options,
             knowledge_answer=knowledge_answer,
+            source_result=source_result,
             report_error=knowledge_answer is None,
         )
         if response is None:
             if knowledge_answer is not None:
+                contract = dict(knowledge_answer.contract)
+                if source_result is not None:
+                    contract["source_retrieval"] = source_result.contract()
+                    contract["source_evidence_ids"] = []
                 self._emit(
-                    session, "message", knowledge_answer.text, contract=knowledge_answer.contract
+                    session, "message", knowledge_answer.text, contract=contract
                 )
             return
         if response.operation is None:
@@ -595,6 +641,13 @@ class EcosAgentProvider:
             }
             if knowledge_answer is not None:
                 contract["knowledge"] = knowledge_answer.contract
+            if source_result is not None:
+                evidence_ids = {item.evidence_id for item in source_result.evidence}
+                if not set(response.evidence_ids).issubset(evidence_ids):
+                    self._emit(session, "error", "The answer cited unavailable source evidence.")
+                    return
+                contract["source_retrieval"] = source_result.contract()
+                contract["source_evidence_ids"] = list(response.evidence_ids)
             self._emit(
                 session,
                 "message",
@@ -628,6 +681,7 @@ class EcosAgentProvider:
         allowed_options: list[dict[str, str]],
         *,
         knowledge_answer: KnowledgeAnswer | None,
+        source_result: SourceSearchResult | None,
         report_error: bool,
     ) -> GuiChatResponseProposal | None:
         context: dict[str, Any] = {
@@ -648,6 +702,8 @@ class EcosAgentProvider:
                 "entity_ids": list(knowledge_answer.entity_ids),
                 "text": knowledge_answer.text,
             }
+        if source_result is not None:
+            context["retrieved_code"] = source_result.contract()
         try:
             response = GuiChatResponseProposal.model_validate(self.chat_response_parser(context))
             self._check_interrupted(session)
