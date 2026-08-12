@@ -19,7 +19,8 @@ pub struct CanvasUniform {
     pub pattern_min_size_px: f32,
     pub min_shape_screen_size: f32,
     pub screen_size_px: [f32; 2],
-    pub pad: [f32; 2],
+    pub is_interacting: f32,
+    pub pad: f32,
 }
 
 #[repr(C)]
@@ -131,7 +132,8 @@ struct CanvasUniform {
     pattern_min_size_px: f32,
     min_shape_screen_size: f32,
     screen_size_px: vec2<f32>,
-    pad: vec2<f32>,
+    is_interacting: f32,
+    pad: f32,
 };
 
 struct GpuShapeInstance {
@@ -150,6 +152,9 @@ struct VertexOutput {
     @location(0) local_uv: vec2<f32>,
     @location(1) rect_size_px: vec2<f32>,
     @location(2) @interpolate(flat) instance_idx: u32,
+    @location(3) @interpolate(flat) shape_type: u32,
+    @location(4) line_p1_px: vec2<f32>,
+    @location(5) line_p2_px: vec2<f32>,
 };
 
 @vertex
@@ -168,18 +173,59 @@ fn vs_main(
 
     let unit_pos = quad_positions[vertex_index];
     let inst = s_instances[instance_index];
+    let shape_type = inst.pattern_bits >> 16u;
 
-    let world_min = vec2<f32>(f32(inst.rect_dbu.x), f32(inst.rect_dbu.y));
-    let world_max = vec2<f32>(f32(inst.rect_dbu.z), f32(inst.rect_dbu.w));
+    var screen_min: vec2<f32>;
+    var screen_max: vec2<f32>;
+    var line_p1_px = vec2<f32>(0.0);
+    var line_p2_px = vec2<f32>(0.0);
 
-    let screen_min = vec2<f32>(
-        u_canvas.canvas_center_px.x + (world_min.x - u_canvas.world_center_dbu.x) * u_canvas.scale_px_per_dbu,
-        u_canvas.canvas_center_px.y - (world_max.y - u_canvas.world_center_dbu.y) * u_canvas.scale_px_per_dbu
-    );
-    let screen_max = vec2<f32>(
-        u_canvas.canvas_center_px.x + (world_max.x - u_canvas.world_center_dbu.x) * u_canvas.scale_px_per_dbu,
-        u_canvas.canvas_center_px.y - (world_min.y - u_canvas.world_center_dbu.y) * u_canvas.scale_px_per_dbu
-    );
+    if shape_type == 0u {
+        // Rect
+        let world_min = vec2<f32>(f32(inst.rect_dbu.x), f32(inst.rect_dbu.y));
+        let world_max = vec2<f32>(f32(inst.rect_dbu.z), f32(inst.rect_dbu.w));
+
+        screen_min = vec2<f32>(
+            u_canvas.canvas_center_px.x + (world_min.x - u_canvas.world_center_dbu.x) * u_canvas.scale_px_per_dbu,
+            u_canvas.canvas_center_px.y - (world_max.y - u_canvas.world_center_dbu.y) * u_canvas.scale_px_per_dbu
+        );
+        screen_max = vec2<f32>(
+            u_canvas.canvas_center_px.x + (world_max.x - u_canvas.world_center_dbu.x) * u_canvas.scale_px_per_dbu,
+            u_canvas.canvas_center_px.y - (world_min.y - u_canvas.world_center_dbu.y) * u_canvas.scale_px_per_dbu
+        );
+    } else if shape_type == 1u {
+        // Line
+        let p1_world = vec2<f32>(f32(inst.rect_dbu.x), f32(inst.rect_dbu.y));
+        let p2_world = vec2<f32>(f32(inst.rect_dbu.z), f32(inst.rect_dbu.w));
+        
+        let p1_screen = vec2<f32>(
+            u_canvas.canvas_center_px.x + (p1_world.x - u_canvas.world_center_dbu.x) * u_canvas.scale_px_per_dbu,
+            u_canvas.canvas_center_px.y - (p1_world.y - u_canvas.world_center_dbu.y) * u_canvas.scale_px_per_dbu
+        );
+        let p2_screen = vec2<f32>(
+            u_canvas.canvas_center_px.x + (p2_world.x - u_canvas.world_center_dbu.x) * u_canvas.scale_px_per_dbu,
+            u_canvas.canvas_center_px.y - (p2_world.y - u_canvas.world_center_dbu.y) * u_canvas.scale_px_per_dbu
+        );
+        
+        let w = max(inst.line_width_px, u_canvas.min_shape_screen_size) * 0.5;
+        screen_min = min(p1_screen, p2_screen) - vec2<f32>(w);
+        screen_max = max(p1_screen, p2_screen) + vec2<f32>(w);
+        
+        // Pass line endpoints in quad-local pixel coordinates
+        line_p1_px = p1_screen - screen_min;
+        line_p2_px = p2_screen - screen_min;
+    } else {
+        // Point
+        let p_world = vec2<f32>(f32(inst.rect_dbu.x), f32(inst.rect_dbu.y));
+        let p_screen = vec2<f32>(
+            u_canvas.canvas_center_px.x + (p_world.x - u_canvas.world_center_dbu.x) * u_canvas.scale_px_per_dbu,
+            u_canvas.canvas_center_px.y - (p_world.y - u_canvas.world_center_dbu.y) * u_canvas.scale_px_per_dbu
+        );
+        let r = max(u_canvas.min_shape_screen_size, 2.0);
+        screen_min = p_screen - vec2<f32>(r);
+        screen_max = p_screen + vec2<f32>(r);
+        line_p1_px = p_screen - screen_min; // center in quad-local coords
+    }
 
     let screen_pos = mix(screen_min, screen_max, unit_pos);
     let rect_size_px = abs(screen_max - screen_min);
@@ -192,6 +238,9 @@ fn vs_main(
     out.local_uv = unit_pos;
     out.rect_size_px = rect_size_px;
     out.instance_idx = instance_index;
+    out.shape_type = shape_type;
+    out.line_p1_px = line_p1_px;
+    out.line_p2_px = line_p2_px;
     return out;
 }
 
@@ -225,73 +274,77 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var is_filled = false;
 
-    switch pattern_id {
-        case 1u: {
-            is_filled = true;
-        }
-        case 2u: {
-            if can_pattern {
-                let mod_pos = fract((pixel_pos - vec2<f32>(2.0)) / 9.0) * 9.0;
-                if length(mod_pos - vec2<f32>(0.8)) < 0.8 {
-                    is_filled = true;
-                }
-            }
-        }
-        case 3u: {
-            if can_pattern {
-                let mod_pos = fract((pixel_pos - vec2<f32>(2.0)) / 5.0) * 5.0;
-                if length(mod_pos - vec2<f32>(0.8)) < 0.8 {
-                    is_filled = true;
-                }
-            }
-        }
-        case 4u, 5u: {
-            if can_pattern {
-                let d = pixel_pos.x + pixel_pos.y;
-                if fract(d / 8.0) * 8.0 < 1.0 {
-                    is_filled = true;
-                }
-                if pattern_id == 5u {
-                    let d2 = pixel_pos.x - pixel_pos.y;
-                    if fract(d2 / 8.0) * 8.0 < 1.0 {
-                        is_filled = true;
-                    }
-                }
-            }
-        }
-        case 6u, 7u, 8u: {
-            if can_pattern {
-                if pattern_id == 6u || pattern_id == 8u {
-                    if fract((pixel_pos.y - 4.0) / 10.0) * 10.0 < 1.0 {
-                        is_filled = true;
-                    }
-                }
-                if pattern_id == 7u || pattern_id == 8u {
-                    if fract((pixel_pos.x - 4.0) / 10.0) * 10.0 < 1.0 {
-                        is_filled = true;
-                    }
-                }
-            }
-        }
-        case 9u: {
-            if can_pattern {
-                let inset = 1.5;
-                let inner_size = rect_px - vec2<f32>(inset * 2.0);
-                if inner_size.x > 0.0 && inner_size.y > 0.0 {
-                    let p = pixel_pos - vec2<f32>(inset);
-                    let len = length(inner_size);
-                    let d1 = abs(p.y * inner_size.x - p.x * inner_size.y) / len;
-                    let p2 = vec2<f32>(p.x, inner_size.y - p.y);
-                    let d2 = abs(p2.y * inner_size.x - p2.x * inner_size.y) / len;
-                    if (d1 < 0.75 || d2 < 0.75) && p.x >= 0.0 && p.x <= inner_size.x && p.y >= 0.0 && p.y <= inner_size.y {
-                        is_filled = true;
-                    }
-                }
-            } else {
+    if u_canvas.is_interacting > 0.5 && pattern_id > 1u {
+        is_filled = true;
+    } else {
+        switch pattern_id {
+            case 1u: {
                 is_filled = true;
             }
+            case 2u: {
+                if can_pattern {
+                    let mod_pos = fract((pixel_pos - vec2<f32>(2.0)) / 9.0) * 9.0;
+                    if length(mod_pos - vec2<f32>(0.8)) < 0.8 {
+                        is_filled = true;
+                    }
+                }
+            }
+            case 3u: {
+                if can_pattern {
+                    let mod_pos = fract((pixel_pos - vec2<f32>(2.0)) / 5.0) * 5.0;
+                    if length(mod_pos - vec2<f32>(0.8)) < 0.8 {
+                        is_filled = true;
+                    }
+                }
+            }
+            case 4u, 5u: {
+                if can_pattern {
+                    let d = pixel_pos.x + pixel_pos.y;
+                    if fract(d / 8.0) * 8.0 < 1.0 {
+                        is_filled = true;
+                    }
+                    if pattern_id == 5u {
+                        let d2 = pixel_pos.x - pixel_pos.y;
+                        if fract(d2 / 8.0) * 8.0 < 1.0 {
+                            is_filled = true;
+                        }
+                    }
+                }
+            }
+            case 6u, 7u, 8u: {
+                if can_pattern {
+                    if pattern_id == 6u || pattern_id == 8u {
+                        if fract((pixel_pos.y - 4.0) / 10.0) * 10.0 < 1.0 {
+                            is_filled = true;
+                        }
+                    }
+                    if pattern_id == 7u || pattern_id == 8u {
+                        if fract((pixel_pos.x - 4.0) / 10.0) * 10.0 < 1.0 {
+                            is_filled = true;
+                        }
+                    }
+                }
+            }
+            case 9u: {
+                if can_pattern {
+                    let inset = 1.5;
+                    let inner_size = rect_px - vec2<f32>(inset * 2.0);
+                    if inner_size.x > 0.0 && inner_size.y > 0.0 {
+                        let p = pixel_pos - vec2<f32>(inset);
+                        let len = length(inner_size);
+                        let d1 = abs(p.y * inner_size.x - p.x * inner_size.y) / len;
+                        let p2 = vec2<f32>(p.x, inner_size.y - p.y);
+                        let d2 = abs(p2.y * inner_size.x - p2.x * inner_size.y) / len;
+                        if (d1 < 0.75 || d2 < 0.75) && p.x >= 0.0 && p.x <= inner_size.x && p.y >= 0.0 && p.y <= inner_size.y {
+                            is_filled = true;
+                        }
+                    }
+                } else {
+                    is_filled = true;
+                }
+            }
+            default: {}
         }
-        default: {}
     }
 
     let fill_a = fill_color.a;
@@ -313,8 +366,36 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     if rect_px.x >= u_canvas.min_shape_screen_size || rect_px.y >= u_canvas.min_shape_screen_size {
         let stroke_w = max(inst.line_width_px, 1.0);
-        let dist_to_edge = min(min(pixel_pos.x, rect_px.x - pixel_pos.x), min(pixel_pos.y, rect_px.y - pixel_pos.y));
-        if dist_to_edge <= stroke_w {
+        var dist_to_edge = 0.0;
+        if in.shape_type == 0u { // Rect
+            dist_to_edge = min(min(pixel_pos.x, rect_px.x - pixel_pos.x), min(pixel_pos.y, rect_px.y - pixel_pos.y));
+        } else if in.shape_type == 1u { // Line
+            let pa = pixel_pos - in.line_p1_px;
+            let ba = in.line_p2_px - in.line_p1_px;
+            let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+            let d = length(pa - ba * h);
+            let radius = max(inst.line_width_px, u_canvas.min_shape_screen_size) * 0.5;
+            dist_to_edge = radius - d;
+            
+            if dist_to_edge < 0.0 {
+                is_filled = false; // Outside capsule
+            }
+        } else { // Point
+            let d = length(pixel_pos - in.line_p1_px); // line_p1_px holds center
+            let radius = max(u_canvas.min_shape_screen_size, 2.0) * 0.5; // smaller radius for point
+            dist_to_edge = radius - d;
+            
+            if dist_to_edge < 0.0 {
+                is_filled = false; // Outside circle
+            }
+        }
+        
+        if !is_filled {
+            out_rgb = vec3<f32>(0.0);
+            out_a = 0.0;
+        }
+
+        if dist_to_edge >= 0.0 && dist_to_edge <= stroke_w {
             out_rgb = frame_rgb + out_rgb * (1.0 - frame_a);
             out_a = frame_a + out_a * (1.0 - frame_a);
         }
@@ -606,8 +687,10 @@ pub fn build_gpu_instances(
 ) -> Vec<GpuShapeInstance> {
     let mut instances = Vec::new();
     for (geometry, style) in shapes {
-        let chip_view_db::ShapeGeometry::Rect(rect) = geometry else {
-            continue; // Skip lines/points for now
+        let (rect_dbu, shape_type) = match geometry {
+            chip_view_db::ShapeGeometry::Rect(rect) => ([rect.lx, rect.ly, rect.hx, rect.hy], 0u32),
+            chip_view_db::ShapeGeometry::Line(line) => ([line.begin.x, line.begin.y, line.end.x, line.end.y], 1u32),
+            chip_view_db::ShapeGeometry::Point(point) => ([point.point.x, point.point.y, 0, 0], 2u32),
         };
         
         let mut fill_rgba = style.rgba;
@@ -616,11 +699,14 @@ pub fn build_gpu_instances(
         let mut frame_rgba = style.frame_rgba;
         frame_rgba[3] = style.frame_alpha;
 
+        let pattern_id = fill_pattern_id(style.fill_pattern);
+        let pattern_bits = (shape_type << 16) | pattern_id;
+
         instances.push(GpuShapeInstance {
-            rect_dbu: [rect.lx, rect.ly, rect.hx, rect.hy],
+            rect_dbu,
             fill_rgba: pack_rgba_u32(fill_rgba),
             frame_rgba: pack_rgba_u32(frame_rgba),
-            pattern_bits: fill_pattern_id(style.fill_pattern),
+            pattern_bits,
             line_width_px: style.line_width_px as f32,
         });
     }

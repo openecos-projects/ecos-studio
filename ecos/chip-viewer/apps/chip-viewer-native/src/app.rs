@@ -44,6 +44,9 @@ const MAP_THUMBNAIL_WIDTH: u32 = 128;
 const MAP_THUMBNAIL_HEIGHT: u32 = 96;
 const MAP_THUMBNAIL_MAX_DIMENSION: u32 = 8192;
 const MAP_THUMBNAIL_MAX_DECODE_BYTES: u64 = 128 * 1024 * 1024;
+const COORDINATE_RULER_THICKNESS: f32 = 20.0;
+const COORDINATE_RULER_TARGET_TICK_PX: f32 = 80.0;
+const RULER_EDGE_SNAP_RADIUS_PX: f32 = 10.0;
 const REDUCED_MOTION_ENV: &str = "ECOS_REDUCED_MOTION";
 const RENDER_STATS_ENV: &str = "ECOS_RENDER_STATS";
 
@@ -53,6 +56,7 @@ pub struct CanvasRenderStats {
     pub query_time_ms: f32,
     pub filter_time_ms: f32,
     pub paint_time_ms: f32,
+    pub label_paint_time_ms: f32,
     pub drawn_shapes: usize,
     pub estimated_primitives: usize,
     pub label_count: usize,
@@ -71,6 +75,8 @@ struct GpuCachedLabel {
 }
 
 struct GpuTileData {
+    /// Instances are stored in an Arc so CanvasGpuCallback can cheaply clone
+    /// the refcount each frame without copying the underlying Vec.
     instances: std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>>,
     labels: Vec<GpuCachedLabel>,
 }
@@ -145,6 +151,7 @@ struct LoadedViewer {
     zoom: f32,
     pan: egui::Vec2,
     pan_drag: PanDragState,
+    ruler_tool: OrthogonalRuler,
     object_visibility: ObjectVisibility,
     coordinate_unit: CoordinateUnit,
     sidebar_info_panel: Option<SidebarInfoPanel>,
@@ -154,6 +161,15 @@ struct LoadedViewer {
     gpu_canvas: crate::canvas_gpu::GpuCanvasState,
     gpu_frame_counter: u64,
     gpu_tile_instances: std::collections::HashMap<crate::canvas_gpu::GpuBufferKey, std::sync::Arc<GpuTileData>>,
+    label_collector: ShapeLabelCollector,
+    /// Persistent scratch buffer for shape geometry + style pairs, cleared each tile.
+    /// Avoids per-tile Vec::new() allocations in the GPU tile build loop.
+    frame_valid_shapes: Vec<(chip_view_db::ShapeGeometry, chip_display::LayerStyle)>,
+    /// Persistent scratch buffer for cached labels, cleared each tile.
+    frame_valid_labels: Vec<GpuCachedLabel>,
+    /// Pre-allocated string buffer for canvas/hover status lines.
+    /// Re-used every frame via fmt::Write to avoid String heap allocations.
+    status_line_buffer: String,
 }
 
 struct LayerUiState {
@@ -514,6 +530,66 @@ enum QueryInputMode {
 enum SidebarInfoPanel {
     Selection,
     Diagnostics,
+}
+
+#[derive(Debug, Default)]
+struct OrthogonalRuler {
+    enabled: bool,
+    active: bool,
+    points: Vec<Point32>,
+}
+
+impl OrthogonalRuler {
+    fn toggle(&mut self) {
+        self.enabled = !self.enabled;
+        self.active = false;
+        self.points.clear();
+    }
+
+    fn start(&mut self, point: Point32) {
+        self.active = true;
+        self.points.clear();
+        self.points.push(point);
+    }
+
+    fn preview(&self, pointer: Point32) -> Option<Point32> {
+        if !self.active {
+            return None;
+        }
+        self.points
+            .last()
+            .copied()
+            .map(|anchor| orthogonal_ruler_point(anchor, pointer))
+    }
+
+    fn commit(&mut self, pointer: Point32) {
+        let Some(point) = self.preview(pointer) else {
+            return;
+        };
+        if self.points.last() != Some(&point) {
+            self.points.push(point);
+        }
+    }
+
+    fn finish(&mut self) {
+        self.active = false;
+        if self.points.len() < 2 {
+            self.points.clear();
+        }
+    }
+
+    fn clear(&mut self) {
+        self.active = false;
+        self.points.clear();
+    }
+}
+
+fn ruler_start_requested(
+    input: &egui::InputState,
+    enabled: bool,
+    pointer_over_layout: bool,
+) -> bool {
+    enabled && pointer_over_layout && input.pointer.button_pressed(egui::PointerButton::Secondary)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1760,6 +1836,7 @@ impl LoadedViewer {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             pan_drag: PanDragState::default(),
+            ruler_tool: OrthogonalRuler::default(),
             object_visibility: ObjectVisibility::default(),
             coordinate_unit: CoordinateUnit::Dbu,
             sidebar_info_panel: None,
@@ -1769,6 +1846,10 @@ impl LoadedViewer {
             gpu_canvas: crate::canvas_gpu::GpuCanvasState::new_from_env(target_format),
             gpu_tile_instances: std::collections::HashMap::new(),
             gpu_frame_counter: 0,
+            label_collector: ShapeLabelCollector::default(),
+            frame_valid_shapes: Vec::new(),
+            frame_valid_labels: Vec::new(),
+            status_line_buffer: String::with_capacity(128),
         }
     }
 
@@ -2267,6 +2348,17 @@ impl LoadedViewer {
                     }
                 }
             }
+            let ruler_response = ui
+                .add_sized(
+                    egui::vec2(30.0, 26.0),
+                    egui::Button::new("").selected(self.ruler_tool.enabled),
+                )
+                .on_hover_text("Measure");
+            paint_ruler_tool_icon(ui.painter(), ruler_response.rect, ecos_text_primary());
+            if ruler_response.clicked() {
+                self.ruler_tool.toggle();
+                self.pan_drag.reset();
+            }
             ui.separator();
             let dbu_per_micron = self.db.snapshot().manifest().dbu_per_micron;
             for unit in [CoordinateUnit::Dbu, CoordinateUnit::Micron] {
@@ -2639,6 +2731,42 @@ impl LoadedViewer {
         }
     }
 
+    fn ruler_edge_snap(
+        &self,
+        pointer: Point32,
+        world: Rect32,
+        canvas: egui::Rect,
+        layer_ids: &[LayerId],
+        use_view_tiles: bool,
+    ) -> Option<Point32> {
+        if !self.ruler_tool.active {
+            return None;
+        }
+        let anchor = self.ruler_tool.points.last().copied()?;
+        let radius = ruler_edge_snap_radius_dbu(world, canvas, self.zoom);
+        let mut rects = Vec::new();
+        if !use_view_tiles {
+            for shape_id in self.db.query_layers_near_point(layer_ids, pointer, radius) {
+                let Some(shape) = self.db.find_shape(shape_id) else {
+                    continue;
+                };
+                if !is_renderable_shape(shape)
+                    || !self.shape_is_visible(shape)
+                    || !self.shape_is_drawn_at_current_zoom(shape)
+                {
+                    continue;
+                }
+                if let ShapeGeometry::Rect(rect) = self.db.shape_geometry(shape) {
+                    rects.push(rect);
+                }
+            }
+        }
+        if let Some(rect) = self.selected_map_bbox {
+            rects.push(rect);
+        }
+        nearest_orthogonal_edge_snap(anchor, pointer, &rects, radius)
+    }
+
     fn canvas(&mut self, ui: &mut egui::Ui) {
         let canvas_start = Instant::now();
         let mut query_duration = Duration::ZERO;
@@ -2648,15 +2776,28 @@ impl LoadedViewer {
         let mut visible_drc_count = 0usize;
         let mut visible_antenna_count = 0usize;
         let available = ui.available_size();
-        let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-        let canvas = response.rect;
+        let (response, frame_painter) =
+            ui.allocate_painter(available, egui::Sense::click_and_drag());
+        let frame = response.rect;
+        frame_painter.rect_filled(frame, 0.0, ecos_canvas());
+        let canvas = layout_canvas_rect(frame);
+        let ruler_painter = frame_painter.clone();
+        let painter = frame_painter.with_clip_rect(canvas);
         let heatmap_popup_rect = self.map_heatmap_popup_rect(canvas);
         let pointer_over_heatmap = heatmap_popup_rect.is_some_and(|rect| {
             ui.ctx()
                 .input(|input| input.pointer.hover_pos())
                 .is_some_and(|pos| rect.contains(pos))
         });
-        painter.rect_filled(canvas, 0.0, ecos_canvas());
+        let pointer_in_canvas = ui
+            .ctx()
+            .input(|input| input.pointer.hover_pos())
+            .is_some_and(|pos| canvas.contains(pos));
+        let pointer_over_layout = pointer_in_canvas && !pointer_over_heatmap;
+        let drag_started_in_canvas = ui
+            .ctx()
+            .input(|input| input.pointer.press_origin())
+            .is_some_and(|pos| canvas.contains(pos));
 
         let Some(world) = self.stats.bbox else {
             painter.text(
@@ -2704,32 +2845,38 @@ impl LoadedViewer {
             .collect();
         let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
+        let use_view_tiles = self.should_use_view_tiles(viewport, world);
         let hover_world_point = ui
             .ctx()
             .input(|input| input.pointer.hover_pos())
-            .filter(|pos| response.hovered() && !pointer_over_heatmap && canvas.contains(*pos))
+            .filter(|_| pointer_over_layout)
             .map(|pos| screen_to_world_point(pos, world, canvas, self.zoom, self.pan));
 
-        if response.drag_started() && !pointer_over_heatmap {
+        if response.drag_started() && drag_started_in_canvas && !pointer_over_heatmap {
             self.focus_animation = None;
             self.pan_drag.reset();
             let mode = if response.drag_started_by(egui::PointerButton::Middle)
-                || response.drag_started_by(egui::PointerButton::Secondary)
+                || (!self.ruler_tool.enabled
+                    && response.drag_started_by(egui::PointerButton::Secondary))
             {
                 Some(CanvasDragMode::Pan)
             } else if response.drag_started_by(egui::PointerButton::Primary) {
-                let edit_start_pos = ui
-                    .ctx()
-                    .input(|input| input.pointer.press_origin())
-                    .or_else(|| response.interact_pointer_pos());
-                let edit_started = self.edit_enabled
-                    && edit_start_pos
-                        .is_some_and(|pos| self.begin_edit_drag_at_pointer(pos, world, canvas));
-                Some(if edit_started {
-                    CanvasDragMode::Edit
+                if self.ruler_tool.enabled {
+                    None
                 } else {
-                    CanvasDragMode::Pan
-                })
+                    let edit_start_pos = ui
+                        .ctx()
+                        .input(|input| input.pointer.press_origin())
+                        .or_else(|| response.interact_pointer_pos());
+                    let edit_started = self.edit_enabled
+                        && edit_start_pos
+                            .is_some_and(|pos| self.begin_edit_drag_at_pointer(pos, world, canvas));
+                    Some(if edit_started {
+                        CanvasDragMode::Edit
+                    } else {
+                        CanvasDragMode::Pan
+                    })
+                }
             } else {
                 None
             };
@@ -2737,7 +2884,7 @@ impl LoadedViewer {
                 self.pan_drag.start(mode);
             }
         }
-        if response.dragged() && !pointer_over_heatmap {
+        if response.dragged() && !pointer_over_heatmap && self.pan_drag.mode().is_some() {
             let frame_delta = response.drag_delta();
             match self.pan_drag.mode() {
                 Some(CanvasDragMode::Edit) if self.draft.is_some() => {
@@ -2745,13 +2892,11 @@ impl LoadedViewer {
                     self.update_edit_drag(total_delta, world, canvas);
                     ui.ctx().request_repaint();
                 }
-                _ => {
-                    if self.pan_drag.mode().is_none() {
-                        self.pan_drag.start(CanvasDragMode::Pan);
-                    }
+                Some(CanvasDragMode::Pan) => {
                     self.pan = self.pan_drag.apply_pan_frame(self.pan, frame_delta);
                     ui.ctx().request_repaint();
                 }
+                _ => {}
             }
         }
         if response.drag_stopped() {
@@ -2761,26 +2906,58 @@ impl LoadedViewer {
             self.pan_drag.reset();
         }
 
-        let drc_double_clicked = response.double_clicked_by(egui::PointerButton::Primary);
-        if drc_double_clicked && !pointer_over_heatmap {
+        if self.ruler_tool.enabled && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.ruler_tool.clear();
+        }
+        let interaction_point = response
+            .interact_pointer_pos()
+            .filter(|pos| canvas.contains(*pos) && !pointer_over_heatmap)
+            .map(|pos| screen_to_world_point(pos, world, canvas, self.zoom, self.pan));
+        let ruler_pointer = interaction_point.or(hover_world_point);
+        let ruler_snap = ruler_pointer.and_then(|pointer| {
+            self.ruler_edge_snap(pointer, world, canvas, &query_layer_ids, use_view_tiles)
+        });
+        let ruler_start_requested = ui.ctx().input(|input| {
+            ruler_start_requested(input, self.ruler_tool.enabled, pointer_over_layout)
+        });
+        if ruler_start_requested {
+            if self.ruler_tool.active {
+                self.ruler_tool.finish();
+            } else if let Some(point) = interaction_point {
+                self.ruler_tool.start(point);
+            }
+        }
+        let drc_double_clicked =
+            !self.ruler_tool.enabled && response.double_clicked_by(egui::PointerButton::Primary);
+        if drc_double_clicked && pointer_over_layout {
             self.selected_drc = response
                 .interact_pointer_pos()
                 .and_then(|pos| self.pick_drc_violation_at(pos, world, canvas, viewport));
         }
         if response.clicked_by(egui::PointerButton::Primary)
             && !drc_double_clicked
-            && !pointer_over_heatmap
+            && pointer_over_layout
         {
-            self.selected = response
-                .interact_pointer_pos()
-                .and_then(|pos| self.pick_shape_at(pos, world, canvas, &query_layer_ids));
+            if self.ruler_tool.enabled {
+                if let Some(point) = ruler_snap.or(interaction_point) {
+                    self.ruler_tool.commit(point);
+                }
+            } else {
+                self.selected = response
+                    .interact_pointer_pos()
+                    .and_then(|pos| self.pick_shape_at(pos, world, canvas, &query_layer_ids));
+            }
         }
-        if let Some(cursor_icon) = canvas_cursor_icon(
-            response.hovered() && !pointer_over_heatmap,
-            self.pan_drag.mode() == Some(CanvasDragMode::Pan)
-                && (response.drag_started() || response.dragged()),
-        ) {
-            ui.ctx().set_cursor_icon(cursor_icon);
+        if self.ruler_tool.enabled && pointer_over_layout {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        } else {
+            if let Some(cursor_icon) = canvas_cursor_icon(
+                pointer_over_layout,
+                self.pan_drag.mode() == Some(CanvasDragMode::Pan)
+                    && (response.drag_started() || response.dragged()),
+            ) {
+                ui.ctx().set_cursor_icon(cursor_icon);
+            }
         }
         let mut drawn = 0usize;
         let use_view_tiles = self.should_use_view_tiles(viewport, world);
@@ -2801,7 +2978,9 @@ impl LoadedViewer {
             })
         };
         let overlay_shape_ids = overlay_shape_ids(self.selected, &self.highlighted);
-        let mut label_overlays = ShapeLabelCollector::default();
+        self.label_collector.clear();
+        
+        let is_interacting = (response.dragged() || response.drag_started() || (ui.ctx().input(|i| i.zoom_delta()) - 1.0).abs() > 1e-5 || self.focus_animation.is_some()) && !pointer_over_heatmap;
 
         if use_view_tiles {
             for (layer_id, style) in &visible_layers {
@@ -2831,11 +3010,14 @@ impl LoadedViewer {
             }
             let layer_index = &self.visibility_rules_cache.layer_index;
             let zoom_rules = &self.visibility_rules_cache.zoom_rules;
-            let query_start = Instant::now();
-            let visible_ids = self
-                .render_cache
-                .visible_shape_ids_for_layers(&self.db, &query_layer_ids, viewport);
-            query_duration += query_start.elapsed();
+            let mut visible_ids = Vec::new();
+            if !self.gpu_canvas.enabled {
+                let query_start = Instant::now();
+                visible_ids = self
+                    .render_cache
+                    .visible_shape_ids_for_layers(&self.db, &query_layer_ids, viewport);
+                query_duration += query_start.elapsed();
+            }
 
             if self.gpu_canvas.enabled {
                 let gpu_start = Instant::now();
@@ -2859,10 +3041,35 @@ impl LoadedViewer {
                     pattern_min_size_px: crate::canvas_gpu::PATTERN_MIN_SIZE_PX,
                     min_shape_screen_size: crate::canvas_gpu::MIN_SHAPE_SCREEN_SIZE,
                     screen_size_px: [canvas.width(), canvas.height()],
-                    pad: [0.0, 0.0],
+                    is_interacting: if is_interacting { 1.0 } else { 0.0 },
+                    pad: 0.0,
                 };
 
                 let tiles = crate::canvas_gpu::tile_coords_for_bbox(viewport, crate::canvas_gpu::GPU_TILE_SIZE_DBU);
+                
+                if self.gpu_tile_instances.len() > crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS {
+                    let vx = (viewport.lx as i64 + viewport.hx as i64) / 2;
+                    let vy = (viewport.ly as i64 + viewport.hy as i64) / 2;
+                    let ts = crate::canvas_gpu::GPU_TILE_SIZE_DBU as i64;
+                    
+                    let mut cached_keys: Vec<_> = self.gpu_tile_instances.keys().copied().collect();
+                    cached_keys.sort_by_key(|k| {
+                        let tx = k.tile_x as i64 * ts + ts / 2;
+                        let ty = k.tile_y as i64 * ts + ts / 2;
+                        let dx = tx - vx;
+                        let dy = ty - vy;
+                        dx * dx + dy * dy
+                    });
+                    
+                    // Evict down to 96 (3/4 of max) to avoid thrashing every frame
+                    let retain_count = crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS * 3 / 4;
+                    if cached_keys.len() > retain_count {
+                        for key in &cached_keys[retain_count..] {
+                            self.gpu_tile_instances.remove(key);
+                        }
+                    }
+                }
+
                 for (tx, ty) in tiles {
                     let tile_bbox = Rect32 {
                         lx: tx * crate::canvas_gpu::GPU_TILE_SIZE_DBU,
@@ -2886,8 +3093,9 @@ impl LoadedViewer {
                         let tile_visible_ids = self.render_cache.visible_shape_ids_for_layers(&self.db, &query_layer_ids, tile_bbox);
                         if let Some(start) = query_start_tile { query_duration += start.elapsed(); }
 
-                        let mut valid_shapes = Vec::new();
-                        let mut valid_labels = Vec::new();
+                        // Reuse persistent scratch buffers — no heap allocation per tile.
+                        self.frame_valid_shapes.clear();
+                        self.frame_valid_labels.clear();
                         for &shape_id in &tile_visible_ids {
                             let filter_start = collect_stats.then(Instant::now);
                             let Some(shape) = self.db.find_shape(shape_id) else {
@@ -2923,32 +3131,34 @@ impl LoadedViewer {
                                 owner,
                                 owner.and_then(|owner| self.db.owner_name(owner)),
                             ) {
-                                valid_labels.push(label_info);
+                                self.frame_valid_labels.push(label_info);
                             }
                             
-                            valid_shapes.push((geometry, style));
+                            self.frame_valid_shapes.push((geometry, style));
                         }
 
-                        let gpu_instances = crate::canvas_gpu::build_gpu_instances(valid_shapes.into_iter());
+                        let gpu_instances = crate::canvas_gpu::build_gpu_instances(self.frame_valid_shapes.drain(..));
                         let built = std::sync::Arc::new(GpuTileData {
                             instances: std::sync::Arc::new(gpu_instances),
-                            labels: valid_labels,
+                            labels: std::mem::take(&mut self.frame_valid_labels),
                         });
                         self.gpu_tile_instances.insert(buffer_key, std::sync::Arc::clone(&built));
                         built
                     };
 
-                    for label in &tile_instances.labels {
-                        let screen_rect = shape_screen_rect(label.rect, world, canvas, self.zoom, self.pan);
-                        let visible_rect = screen_rect.intersect(canvas);
-                        if screen_rect.is_positive() && visible_rect.is_positive() && visible_rect.width() >= 12.0 && visible_rect.height() >= 8.0 {
-                            label_overlays.insert(ShapeLabelOverlay {
-                                key: label.key.clone(),
-                                rect: screen_rect,
-                                text: label.text.clone(),
-                                kind: label.kind,
-                                rank_area: visible_rect.width() * visible_rect.height(),
-                            });
+                    if !is_interacting {
+                        for label in &tile_instances.labels {
+                            let screen_rect = shape_screen_rect(label.rect, world, canvas, self.zoom, self.pan);
+                            let visible_rect = screen_rect.intersect(canvas);
+                            if screen_rect.is_positive() && visible_rect.is_positive() && visible_rect.width() >= 12.0 && visible_rect.height() >= 8.0 {
+                                self.label_collector.insert(ShapeLabelOverlay {
+                                    key: label.key.clone(),
+                                    rect: screen_rect,
+                                    text: label.text.clone(),
+                                    kind: label.kind,
+                                    rank_area: visible_rect.width() * visible_rect.height(),
+                                });
+                            }
                         }
                     }
 
@@ -3018,16 +3228,18 @@ impl LoadedViewer {
                 if prim_count > 0 {
                     drawn += 1;
                     estimated_primitives += prim_count;
-                    if let Some(label) = shape_label_overlay(
-                        geometry,
-                        owner,
-                        owner.and_then(|owner| self.db.owner_name(owner)),
-                        world,
-                        canvas,
-                        self.zoom,
-                        self.pan,
-                    ) {
-                        label_overlays.insert(label);
+                    if !is_interacting {
+                        if let Some(label) = shape_label_overlay(
+                            geometry,
+                            owner,
+                            owner.and_then(|owner| self.db.owner_name(owner)),
+                            world,
+                            canvas,
+                            self.zoom,
+                            self.pan,
+                        ) {
+                            self.label_collector.insert(label);
+                        }
                     }
                 }
             }
@@ -3056,8 +3268,15 @@ impl LoadedViewer {
             self.pan,
         );
 
-        for label in label_overlays.overlays() {
-            paint_shape_label_overlay(&painter, label, canvas);
+        let mut label_paint_duration = Duration::ZERO;
+        if !is_interacting {
+            let label_paint_start = collect_stats.then(Instant::now);
+            for overlay in self.label_collector.binned_overlays() {
+                paint_shape_label_overlay(&painter, overlay, canvas);
+            }
+            if let Some(start) = label_paint_start {
+                label_paint_duration = start.elapsed();
+            }
         }
 
         let hidden_drc_layer_names: std::collections::HashSet<String> = self
@@ -3181,17 +3400,38 @@ impl LoadedViewer {
             self.db.snapshot().manifest().dbu_per_micron,
         );
 
+
+        let ruler_preview = ruler_snap
+            .or(hover_world_point)
+            .and_then(|point| self.ruler_tool.preview(point));
+        paint_orthogonal_ruler(
+            &painter,
+            &self.ruler_tool.points,
+            ruler_preview,
+            ruler_snap,
+            world,
+            canvas,
+            self.zoom,
+            self.pan,
+            self.coordinate_unit,
+            self.db.snapshot().manifest().dbu_per_micron,
+        );
+
+        // Action 4.2: write into the pre-allocated buffer instead of allocating a new String.
+        self.status_line_buffer.clear();
+        canvas_status_line_into(
+            &mut self.status_line_buffer,
+            drawn,
+            overlay_shape_ids.len(),
+            use_view_tiles,
+            view_lod,
+            self.zoom,
+            viewport,
+        );
         painter.text(
             canvas.left_top() + egui::vec2(10.0, 10.0),
             egui::Align2::LEFT_TOP,
-            canvas_status_line(
-                drawn,
-                overlay_shape_ids.len(),
-                use_view_tiles,
-                view_lod,
-                self.zoom,
-                viewport,
-            ),
+            self.status_line_buffer.as_str(),
             egui::FontId::proportional(13.0),
             ecos_text_secondary(),
         );
@@ -3202,9 +3442,10 @@ impl LoadedViewer {
                 query_time_ms: query_duration.as_secs_f32() * 1000.0,
                 filter_time_ms: filter_duration.as_secs_f32() * 1000.0,
                 paint_time_ms: paint_duration.as_secs_f32() * 1000.0,
+                label_paint_time_ms: label_paint_duration.as_secs_f32() * 1000.0,
                 drawn_shapes: drawn,
                 estimated_primitives,
-                label_count: label_overlays.len(),
+                label_count: self.label_collector.len(),
                 use_view_tiles,
                 zoom: self.zoom,
                 lod: view_lod,
@@ -3215,19 +3456,47 @@ impl LoadedViewer {
         }
 
         if let Some(point) = hover_world_point {
+            self.status_line_buffer.clear();
+            hover_status_line_into(
+                &mut self.status_line_buffer,
+                point,
+                self.coordinate_unit,
+                self.db.snapshot().manifest().dbu_per_micron,
+                hover_nearest,
+            );
             painter.text(
                 canvas.left_top() + egui::vec2(10.0, 28.0),
                 egui::Align2::LEFT_TOP,
-                hover_status_line(
-                    point,
-                    self.coordinate_unit,
-                    self.db.snapshot().manifest().dbu_per_micron,
-                    hover_nearest,
-                ),
+                self.status_line_buffer.as_str(),
                 egui::FontId::monospace(12.0),
                 ecos_text_secondary(),
             );
         }
+        if let Some(status) = ruler_status_line(
+            &self.ruler_tool.points,
+            ruler_preview,
+            self.ruler_tool.active,
+            self.coordinate_unit,
+            self.db.snapshot().manifest().dbu_per_micron,
+        ) {
+            painter.text(
+                canvas.left_top() + egui::vec2(10.0, 46.0),
+                egui::Align2::LEFT_TOP,
+                status,
+                egui::FontId::monospace(12.0),
+                ecos_info_text(),
+            );
+        }
+        paint_coordinate_rulers(
+            &ruler_painter,
+            frame,
+            canvas,
+            world,
+            self.zoom,
+            self.pan,
+            self.coordinate_unit,
+            self.db.snapshot().manifest().dbu_per_micron,
+        );
         self.canvas_info_overlay(ui, canvas);
         self.drc_detail_overlay(ui, canvas);
         self.antenna_detail_overlay(ui, canvas);
@@ -5223,7 +5492,7 @@ enum ScreenShapePrimitive {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum ShapeLabelKind {
     IoPin,
     Pin,
@@ -5232,7 +5501,7 @@ enum ShapeLabelKind {
     Instance,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum ShapeLabelKey {
     Named { kind: ShapeLabelKind, text: String },
     Owner { owner_type: u8, owner_id: u64 },
@@ -5249,7 +5518,7 @@ struct ShapeLabelOverlay {
 
 #[derive(Clone, Debug, Default)]
 struct ShapeLabelCollector {
-    overlays: BTreeMap<ShapeLabelKey, ShapeLabelOverlay>,
+    overlays: std::collections::HashMap<ShapeLabelKey, ShapeLabelOverlay>,
 }
 
 impl ShapeLabelCollector {
@@ -5266,6 +5535,30 @@ impl ShapeLabelCollector {
 
     fn len(&self) -> usize {
         self.overlays.len()
+    }
+
+    fn clear(&mut self) {
+        self.overlays.clear();
+    }
+
+    fn binned_overlays(&self) -> Vec<&ShapeLabelOverlay> {
+        // Bin labels into 32x32 screen-space grid to prevent overlapping
+        let mut bins: std::collections::HashMap<(i32, i32), &ShapeLabelOverlay> = std::collections::HashMap::with_capacity(self.overlays.len());
+        for overlay in self.overlays.values() {
+            let cx = overlay.rect.center().x;
+            let cy = overlay.rect.center().y;
+            let bx = (cx / 32.0).floor() as i32;
+            let by = (cy / 32.0).floor() as i32;
+            
+            bins.entry((bx, by))
+                .and_modify(|current| {
+                    if overlay.rank_area > current.rank_area {
+                        *current = overlay;
+                    }
+                })
+                .or_insert(overlay);
+        }
+        bins.into_values().collect()
     }
 
     fn overlays(&self) -> impl Iterator<Item = &ShapeLabelOverlay> {
@@ -5476,7 +5769,7 @@ fn paint_render_stats_overlay(
     painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0_f32, ecos_border()), egui::StrokeKind::Outside);
 
     let lines = [
-        format!("Frame: {:.2} ms | Paint: {:.2} ms", stats.frame_time_ms, stats.paint_time_ms),
+        format!("Frame: {:.2} ms | Paint: {:.2} ms | Labels: {:.2} ms", stats.frame_time_ms, stats.paint_time_ms, stats.label_paint_time_ms),
         format!("Query: {:.2} ms | Filter: {:.2} ms", stats.query_time_ms, stats.filter_time_ms),
         format!("Mode: {} | Zoom: {:.2} | LOD: {}", if stats.use_view_tiles { "Tiles" } else { "Exact" }, stats.zoom, stats.lod),
         format!("Shapes: {} | Est Primitives: {}", stats.drawn_shapes, stats.estimated_primitives),
@@ -6360,6 +6653,412 @@ fn paint_scale_ruler(
     );
 }
 
+fn layout_canvas_rect(frame: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(
+            (frame.left() + COORDINATE_RULER_THICKNESS).min(frame.right()),
+            frame.top(),
+        ),
+        egui::pos2(
+            frame.right(),
+            (frame.bottom() - COORDINATE_RULER_THICKNESS).max(frame.top()),
+        ),
+    )
+}
+
+fn paint_coordinate_rulers(
+    painter: &egui::Painter,
+    frame: egui::Rect,
+    canvas: egui::Rect,
+    world: Rect32,
+    zoom: f32,
+    pan: egui::Vec2,
+    unit: CoordinateUnit,
+    dbu_per_micron: Option<u32>,
+) {
+    let scale = world_to_screen_scale(world, canvas, zoom);
+    if !scale.is_finite() || scale <= 0.0 || !canvas.is_positive() {
+        return;
+    }
+
+    let horizontal = egui::Rect::from_min_max(
+        egui::pos2(canvas.left(), canvas.bottom()),
+        frame.right_bottom(),
+    );
+    let vertical = egui::Rect::from_min_max(frame.left_top(), canvas.left_bottom());
+    let background = egui::Color32::from_rgb(34, 35, 39);
+    let tick_color = egui::Color32::from_rgb(91, 94, 101);
+    let text_color = ecos_text_secondary();
+    painter.rect_filled(horizontal, 0.0, background);
+    painter.rect_filled(vertical, 0.0, background);
+    painter.rect_filled(
+        egui::Rect::from_min_max(
+            egui::pos2(frame.left(), canvas.bottom()),
+            egui::pos2(canvas.left(), frame.bottom()),
+        ),
+        0.0,
+        background,
+    );
+    painter.line_segment(
+        [canvas.left_top(), canvas.left_bottom()],
+        egui::Stroke::new(1.0, tick_color),
+    );
+    painter.line_segment(
+        [canvas.left_bottom(), canvas.right_bottom()],
+        egui::Stroke::new(1.0, tick_color),
+    );
+
+    let viewport = screen_to_world_rect(canvas, world, canvas, zoom, pan);
+    let major_interval = coordinate_ruler_interval_dbu(scale, unit, dbu_per_micron);
+    let minor_interval = if major_interval >= 10 {
+        major_interval / 10
+    } else {
+        major_interval
+    }
+    .max(1);
+    let font = egui::FontId::monospace(9.0);
+    let tick_stroke = egui::Stroke::new(1.0, tick_color);
+
+    let mut x = floor_div_i64(i64::from(viewport.lx), minor_interval) * minor_interval;
+    let mut last_label_right = f32::NEG_INFINITY;
+    let mut tick_count = 0usize;
+    while x <= i64::from(viewport.hx) && tick_count < MAX_PARAMETERIZED_GRID_LINES_PER_GRID {
+        let point = Point32 {
+            x: saturating_i64_to_i32(x),
+            y: viewport.ly,
+        };
+        let screen_x = world_to_screen_point(point, world, canvas, zoom, pan).x;
+        if screen_x < canvas.left() || screen_x > canvas.right() {
+            x = x.saturating_add(minor_interval);
+            tick_count += 1;
+            continue;
+        }
+        let major = x.rem_euclid(major_interval) == 0;
+        let height = if major {
+            COORDINATE_RULER_THICKNESS * 0.6
+        } else {
+            COORDINATE_RULER_THICKNESS * 0.3
+        };
+        painter.line_segment(
+            [
+                egui::pos2(screen_x, frame.bottom() - height),
+                egui::pos2(screen_x, frame.bottom()),
+            ],
+            tick_stroke,
+        );
+        if major && screen_x >= canvas.left() && screen_x >= last_label_right + 12.0 {
+            let label = format_axis_coordinate(x, unit, dbu_per_micron);
+            let rect = painter.text(
+                egui::pos2(screen_x + 2.0, horizontal.top() + 2.0),
+                egui::Align2::LEFT_TOP,
+                label,
+                font.clone(),
+                text_color,
+            );
+            last_label_right = rect.right();
+        }
+        x = x.saturating_add(minor_interval);
+        tick_count += 1;
+    }
+
+    let mut y = floor_div_i64(i64::from(viewport.ly), minor_interval) * minor_interval;
+    let mut last_label_y = f32::NEG_INFINITY;
+    let mut tick_count = 0usize;
+    while y <= i64::from(viewport.hy) && tick_count < MAX_PARAMETERIZED_GRID_LINES_PER_GRID {
+        let point = Point32 {
+            x: viewport.lx,
+            y: saturating_i64_to_i32(y),
+        };
+        let screen_y = world_to_screen_point(point, world, canvas, zoom, pan).y;
+        if screen_y < canvas.top() || screen_y > canvas.bottom() {
+            y = y.saturating_add(minor_interval);
+            tick_count += 1;
+            continue;
+        }
+        let major = y.rem_euclid(major_interval) == 0;
+        let width = if major {
+            COORDINATE_RULER_THICKNESS * 0.6
+        } else {
+            COORDINATE_RULER_THICKNESS * 0.3
+        };
+        painter.line_segment(
+            [
+                egui::pos2(canvas.left() - width, screen_y),
+                egui::pos2(canvas.left(), screen_y),
+            ],
+            tick_stroke,
+        );
+        if major && screen_y < canvas.bottom() && (screen_y - last_label_y).abs() >= 40.0 {
+            let label = format_axis_coordinate(y, unit, dbu_per_micron);
+            let galley = painter.layout_no_wrap(label, font.clone(), text_color);
+            let position = egui::pos2(vertical.left() + 2.0, screen_y + galley.size().x * 0.5);
+            painter.add(
+                egui::epaint::TextShape::new(position, galley, text_color)
+                    .with_angle(-std::f32::consts::FRAC_PI_2),
+            );
+            last_label_y = screen_y;
+        }
+        y = y.saturating_add(minor_interval);
+        tick_count += 1;
+    }
+}
+
+fn coordinate_ruler_interval_dbu(
+    scale: f32,
+    unit: CoordinateUnit,
+    dbu_per_micron: Option<u32>,
+) -> i64 {
+    let target_dbu = f64::from(COORDINATE_RULER_TARGET_TICK_PX / scale.max(0.001));
+    let interval = match effective_coordinate_unit(unit, dbu_per_micron) {
+        CoordinateUnit::Dbu => nice_ruler_interval(target_dbu),
+        CoordinateUnit::Micron => {
+            let dbu_per_micron = dbu_per_micron.filter(|value| *value > 0).unwrap_or(1);
+            nice_ruler_interval(target_dbu / f64::from(dbu_per_micron)) * f64::from(dbu_per_micron)
+        }
+    };
+    interval.round().clamp(1.0, i32::MAX as f64) as i64
+}
+
+fn format_axis_coordinate(
+    value_dbu: i64,
+    unit: CoordinateUnit,
+    dbu_per_micron: Option<u32>,
+) -> String {
+    let value = match effective_coordinate_unit(unit, dbu_per_micron) {
+        CoordinateUnit::Dbu => value_dbu as f64,
+        CoordinateUnit::Micron => {
+            value_dbu as f64 / f64::from(dbu_per_micron.filter(|value| *value > 0).unwrap_or(1))
+        }
+    };
+    let magnitude = value.abs();
+    if magnitude >= 1_000_000.0 {
+        format_compact_number(value / 1_000_000.0, "M")
+    } else if magnitude >= 10_000.0 {
+        format_compact_number(value / 1_000.0, "K")
+    } else {
+        format_compact_number(value, "")
+    }
+}
+
+fn format_compact_number(value: f64, suffix: &str) -> String {
+    let text = if (value - value.round()).abs() <= 0.000_5 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.3}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    };
+    format!("{text}{suffix}")
+}
+
+fn orthogonal_ruler_point(anchor: Point32, pointer: Point32) -> Point32 {
+    let dx = (i64::from(pointer.x) - i64::from(anchor.x)).abs();
+    let dy = (i64::from(pointer.y) - i64::from(anchor.y)).abs();
+    if dx >= dy {
+        Point32 {
+            x: pointer.x,
+            y: anchor.y,
+        }
+    } else {
+        Point32 {
+            x: anchor.x,
+            y: pointer.y,
+        }
+    }
+}
+
+fn nearest_orthogonal_edge_snap(
+    anchor: Point32,
+    pointer: Point32,
+    rects: &[Rect32],
+    radius: i32,
+) -> Option<Point32> {
+    let locked = orthogonal_ruler_point(anchor, pointer);
+    let horizontal = locked.y == anchor.y;
+    let max_distance_squared = i128::from(radius.max(0)).pow(2);
+    let mut nearest: Option<(i128, Point32)> = None;
+    let mut consider = |point: Point32| {
+        let dx = i128::from(point.x) - i128::from(pointer.x);
+        let dy = i128::from(point.y) - i128::from(pointer.y);
+        let distance_squared = dx * dx + dy * dy;
+        if distance_squared <= max_distance_squared
+            && nearest.is_none_or(|(best, _)| distance_squared < best)
+        {
+            nearest = Some((distance_squared, point));
+        }
+    };
+
+    for rect in rects {
+        if horizontal && (rect.ly..=rect.hy).contains(&anchor.y) {
+            consider(Point32 {
+                x: rect.lx,
+                y: anchor.y,
+            });
+            consider(Point32 {
+                x: rect.hx,
+                y: anchor.y,
+            });
+        } else if !horizontal && (rect.lx..=rect.hx).contains(&anchor.x) {
+            consider(Point32 {
+                x: anchor.x,
+                y: rect.ly,
+            });
+            consider(Point32 {
+                x: anchor.x,
+                y: rect.hy,
+            });
+        }
+    }
+    nearest.map(|(_, point)| point)
+}
+
+fn ruler_distances(points: &[Point32], preview: Option<Point32>) -> (i64, i64) {
+    let mut x_distance = 0i64;
+    let mut y_distance = 0i64;
+    let mut add_segment = |begin: Point32, end: Point32| {
+        x_distance += (i64::from(end.x) - i64::from(begin.x)).abs();
+        y_distance += (i64::from(end.y) - i64::from(begin.y)).abs();
+    };
+    for pair in points.windows(2) {
+        add_segment(pair[0], pair[1]);
+    }
+    if let (Some(begin), Some(end)) = (points.last().copied(), preview) {
+        add_segment(begin, end);
+    }
+    (x_distance, y_distance)
+}
+
+fn ruler_status_line(
+    points: &[Point32],
+    preview: Option<Point32>,
+    active: bool,
+    unit: CoordinateUnit,
+    dbu_per_micron: Option<u32>,
+) -> Option<String> {
+    (!points.is_empty()).then(|| {
+        let (x_distance, y_distance) = ruler_distances(points, preview);
+        format!(
+            "ruler{}: X {}, Y {}",
+            if active { "" } else { " done" },
+            format_distance_i64(x_distance, unit, dbu_per_micron),
+            format_distance_i64(y_distance, unit, dbu_per_micron)
+        )
+    })
+}
+
+fn paint_orthogonal_ruler(
+    painter: &egui::Painter,
+    points: &[Point32],
+    preview: Option<Point32>,
+    snap_point: Option<Point32>,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+    unit: CoordinateUnit,
+    dbu_per_micron: Option<u32>,
+) {
+    if points.is_empty() {
+        return;
+    }
+    let color = egui::Color32::from_rgb(240, 197, 78);
+    let stroke = egui::Stroke::new(1.75, color);
+    let paint_segment = |begin: Point32, end: Point32, pending: bool| {
+        let begin_screen = world_to_screen_point(begin, world, canvas, zoom, pan);
+        let end_screen = world_to_screen_point(end, world, canvas, zoom, pan);
+        if pending {
+            paint_dashed_line(painter, begin_screen, end_screen, stroke, 6.0, 4.0);
+        } else {
+            painter.line_segment([begin_screen, end_screen], stroke);
+        }
+        if begin == end {
+            return;
+        }
+        let horizontal = begin.y == end.y;
+        let distance = if horizontal {
+            (i64::from(end.x) - i64::from(begin.x)).abs()
+        } else {
+            (i64::from(end.y) - i64::from(begin.y)).abs()
+        };
+        let label = format!(
+            "{} {}",
+            if horizontal { "X" } else { "Y" },
+            format_distance_i64(distance, unit, dbu_per_micron)
+        );
+        let midpoint = begin_screen + (end_screen - begin_screen) * 0.5;
+        let (position, align) = if horizontal {
+            (
+                midpoint + egui::vec2(0.0, -5.0),
+                egui::Align2::CENTER_BOTTOM,
+            )
+        } else {
+            (midpoint + egui::vec2(5.0, 0.0), egui::Align2::LEFT_CENTER)
+        };
+        painter.text(
+            position + egui::vec2(1.0, 1.0),
+            align,
+            &label,
+            egui::FontId::monospace(11.0),
+            egui::Color32::from_black_alpha(220),
+        );
+        painter.text(position, align, label, egui::FontId::monospace(11.0), color);
+    };
+
+    for pair in points.windows(2) {
+        paint_segment(pair[0], pair[1], false);
+    }
+    if let (Some(begin), Some(end)) = (points.last().copied(), preview) {
+        paint_segment(begin, end, true);
+    }
+    for point in points {
+        let screen = world_to_screen_point(*point, world, canvas, zoom, pan);
+        painter.circle_filled(screen, 3.25, color);
+        painter.circle_stroke(screen, 4.25, egui::Stroke::new(1.0, ecos_canvas()));
+    }
+    if let Some(point) = preview {
+        let screen = world_to_screen_point(point, world, canvas, zoom, pan);
+        painter.circle_stroke(screen, 3.5, egui::Stroke::new(1.5, color));
+    }
+    if let Some(point) = snap_point {
+        let screen = world_to_screen_point(point, world, canvas, zoom, pan);
+        painter.circle_stroke(screen, 6.5, egui::Stroke::new(1.5, color));
+    }
+}
+
+fn paint_ruler_tool_icon(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let center = rect.center();
+    let left = center.x - 8.0;
+    let right = center.x + 8.0;
+    let top = center.y - 4.0;
+    let bottom = center.y + 4.0;
+    let stroke = egui::Stroke::new(1.5, color);
+    painter.line_segment(
+        [egui::pos2(left, bottom), egui::pos2(right, bottom)],
+        stroke,
+    );
+    for (x, height) in [
+        (left, 8.0),
+        (center.x - 4.0, 4.0),
+        (center.x, 6.0),
+        (center.x + 4.0, 4.0),
+        (right, 8.0),
+    ] {
+        painter.line_segment(
+            [egui::pos2(x, bottom - height), egui::pos2(x, bottom)],
+            stroke,
+        );
+    }
+    painter.line_segment(
+        [egui::pos2(left, top), egui::pos2(left + 2.5, top + 2.5)],
+        stroke,
+    );
+    painter.line_segment(
+        [egui::pos2(right, top), egui::pos2(right - 2.5, top + 2.5)],
+        stroke,
+    );
+}
+
 fn screen_primitive_bounds(primitive: ScreenShapePrimitive) -> egui::Rect {
     match primitive {
         ScreenShapePrimitive::Rect(rect) => rect,
@@ -6526,6 +7225,33 @@ fn cursor_status_line(point: Point32, unit: CoordinateUnit, dbu_per_micron: Opti
     }
 }
 
+/// Zero-allocation version: writes the hover status line into `buf` using fmt::Write.
+fn hover_status_line_into(
+    buf: &mut String,
+    point: Point32,
+    unit: CoordinateUnit,
+    dbu_per_micron: Option<u32>,
+    nearest: Option<NearestShape>,
+) {
+    use std::fmt::Write as _;
+    match effective_coordinate_unit(unit, dbu_per_micron) {
+        CoordinateUnit::Dbu => {
+            let _ = write!(buf, "cursor: {} {} DBU", point.x, point.y);
+        }
+        CoordinateUnit::Micron => {
+            let _ = write!(
+                buf,
+                "cursor: {} {} um",
+                format_micron(point.x, dbu_per_micron),
+                format_micron(point.y, dbu_per_micron)
+            );
+        }
+    }
+    if let Some(nearest) = nearest {
+        let _ = write!(buf, ", nearest: shape {} d2 {}", nearest.shape_id, nearest.distance_squared);
+    }
+}
+
 fn hover_status_line(
     point: Point32,
     unit: CoordinateUnit,
@@ -6550,25 +7276,52 @@ fn hover_nearest_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32
     (HOVER_NEAREST_RADIUS_PX / scale).ceil().max(1.0) as i32
 }
 
+fn ruler_edge_snap_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32 {
+    let scale = world_to_screen_scale(world, canvas, zoom);
+    if !scale.is_finite() || scale <= 0.0 {
+        return 0;
+    }
+    (RULER_EDGE_SNAP_RADIUS_PX / scale).ceil().max(1.0) as i32
+}
+
 fn format_distance(distance_dbu: i32, unit: CoordinateUnit, dbu_per_micron: Option<u32>) -> String {
+    format_distance_i64(i64::from(distance_dbu), unit, dbu_per_micron)
+}
+
+fn format_distance_i64(
+    distance_dbu: i64,
+    unit: CoordinateUnit,
+    dbu_per_micron: Option<u32>,
+) -> String {
     match effective_coordinate_unit(unit, dbu_per_micron) {
         CoordinateUnit::Dbu => format!("{distance_dbu} DBU"),
-        CoordinateUnit::Micron => format!("{} um", format_micron(distance_dbu, dbu_per_micron)),
+        CoordinateUnit::Micron => {
+            format!("{} um", format_micron_i64(distance_dbu, dbu_per_micron))
+        }
     }
 }
 
 fn format_micron(value_dbu: i32, dbu_per_micron: Option<u32>) -> String {
+    format_micron_i64(i64::from(value_dbu), dbu_per_micron)
+}
+
+fn format_micron_i64(value_dbu: i64, dbu_per_micron: Option<u32>) -> String {
     let dbu_per_micron = dbu_per_micron.filter(|value| *value > 0).unwrap_or(1);
     format!("{:.3}", value_dbu as f64 / dbu_per_micron as f64)
 }
 
 fn nice_ruler_distance_dbu(target_dbu: f32) -> i32 {
-    if !target_dbu.is_finite() || target_dbu <= 1.0 {
-        return 1;
-    }
+    nice_ruler_interval(f64::from(target_dbu))
+        .round()
+        .clamp(1.0, i32::MAX as f64) as i32
+}
 
-    let magnitude = 10_f32.powf(target_dbu.log10().floor());
-    let normalized = target_dbu / magnitude;
+fn nice_ruler_interval(target: f64) -> f64 {
+    if !target.is_finite() || target <= 0.0 {
+        return 1.0;
+    }
+    let magnitude = 10_f64.powf(target.log10().floor());
+    let normalized = target / magnitude;
     let nice = if normalized <= 1.0 {
         1.0
     } else if normalized <= 2.0 {
@@ -6578,8 +7331,7 @@ fn nice_ruler_distance_dbu(target_dbu: f32) -> i32 {
     } else {
         10.0
     };
-
-    (nice * magnitude).round().clamp(1.0, i32::MAX as f32) as i32
+    nice * magnitude
 }
 
 fn scroll_zoom_factor(scroll: f32) -> f32 {
@@ -6897,19 +7649,32 @@ fn canvas_status_line(
     zoom: f32,
     viewport: Rect32,
 ) -> String {
-    let draw_source = if use_view_tiles {
-        format!("view tiles, lod: {view_lod}")
+    let mut buf = String::new();
+    canvas_status_line_into(&mut buf, drawn, overlay_count, use_view_tiles, view_lod, zoom, viewport);
+    buf
+}
+
+/// Zero-allocation version: writes canvas status into `buf` using fmt::Write.
+fn canvas_status_line_into(
+    buf: &mut String,
+    drawn: usize,
+    overlay_count: usize,
+    use_view_tiles: bool,
+    view_lod: u8,
+    zoom: f32,
+    viewport: Rect32,
+) {
+    use std::fmt::Write as _;
+    if use_view_tiles {
+        let _ = write!(buf, "drawn: {drawn} view tiles, lod: {view_lod}, zoom: {zoom:.2}x, viewport: {} {} {} {}",
+            viewport.lx, viewport.ly, viewport.hx, viewport.hy);
     } else {
-        "exact".to_string()
-    };
-    let mut line = format!(
-        "drawn: {drawn} {draw_source}, zoom: {zoom:.2}x, viewport: {} {} {} {}",
-        viewport.lx, viewport.ly, viewport.hx, viewport.hy
-    );
-    if overlay_count > 0 {
-        line.push_str(&format!(", overlays: {overlay_count}"));
+        let _ = write!(buf, "drawn: {drawn} exact, zoom: {zoom:.2}x, viewport: {} {} {} {}",
+            viewport.lx, viewport.ly, viewport.hx, viewport.hy);
     }
-    line
+    if overlay_count > 0 {
+        let _ = write!(buf, ", overlays: {overlay_count}");
+    }
 }
 
 fn canvas_cursor_icon(hovered: bool, pan_active: bool) -> Option<egui::CursorIcon> {
@@ -7749,7 +8514,7 @@ mod tests {
 
         assert_eq!(violations.len(), 2);
         assert_eq!(violations[0].drc_type, "MetalShort");
-        assert_eq!(violations[0].layer, "MET1");
+        assert_eq!(violations[0].layer, "met1");
         assert_eq!(
             violations[0].bbox,
             Rect32 {
@@ -7893,6 +8658,30 @@ mod tests {
         assert_eq!(
             screen_to_world_delta(egui::vec2(20.0, -10.0), world, canvas, 1.0),
             (10, 5)
+        );
+    }
+
+    #[test]
+    fn orthogonal_ruler_commits_points_and_calculates_distances() {
+        let mut ruler = OrthogonalRuler::default();
+        ruler.start(Point32 { x: 100, y: 200 });
+        ruler.commit(Point32 { x: 400, y: 200 });
+        ruler.finish();
+
+        let (dx, dy) = ruler_distances(&ruler.points, None);
+        assert_eq!(dx, 300);
+        assert_eq!(dy, 0);
+    }
+
+    #[test]
+    fn format_distance_i64_handles_dbu_and_microns() {
+        assert_eq!(
+            format_distance_i64(2500, CoordinateUnit::Dbu, Some(2000)),
+            "2500 DBU"
+        );
+        assert_eq!(
+            format_distance_i64(2500, CoordinateUnit::Micron, Some(2000)),
+            "1.250 um"
         );
     }
 
@@ -9977,7 +10766,7 @@ mod tests {
         let dir = temp_snapshot_dir("external-refresh-new-delta");
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
-        let mut loaded = LoadedViewer::new(db, false, false, None, None, None, None, None, None, None);
+        let mut loaded = LoadedViewer::new(db, false, false, None, None, None, None, None, None, None, wgpu::TextureFormat::Bgra8Unorm);
         let delta_path = dir.join("geometry.delta.bin");
 
         assert!(!loaded.snapshot_signature.files.contains_key(&delta_path));
@@ -10004,7 +10793,7 @@ mod tests {
         let dir = temp_snapshot_dir("restored-edit-session-dirty");
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
-        let loaded = LoadedViewer::new(db, true, true, None, None, None, None, None, None, None);
+        let loaded = LoadedViewer::new(db, true, true, None, None, None, None, None, None, None, wgpu::TextureFormat::Bgra8Unorm);
 
         assert!(loaded.session_dirty);
 
