@@ -46,7 +46,7 @@
           class="info-report-header-fs-btn info-report-header-fs-btn--sm shrink-0"
           title="查阅"
           aria-label="查阅"
-          @click.stop="openImageLightbox(message.mapData.title, message.mapData.imageUrl)"
+          @click.stop="openImageLightbox(message.mapData.title, mapImageUrl)"
         >
           <i class="ri-fullscreen-fill"></i>
         </button>
@@ -103,7 +103,7 @@
 
           <!-- 图片 -->
           <img
-            :src="message.mapData.imageUrl"
+            :src="mapImageUrl"
             :alt="message.mapData.title"
             :class="[
               'map-image block h-auto w-full max-w-full min-w-0 object-contain',
@@ -443,6 +443,8 @@ import type { Message } from '../types'
 import AgentChoiceCard from './AgentChoiceCard.vue'
 import AgentToolCard from './AgentToolCard.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
+import { readProjectBlobUrl } from '@/utils/projectFiles'
+import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 
 const props = withDefaults(
   defineProps<{
@@ -487,6 +489,9 @@ const handleImageLoad = () => {
 
 // Map 图片加载状态
 const mapImageLoading = ref(true)
+const mapImageUrl = ref(props.message.mapData?.imageUrl ?? '')
+const mapImageRetrying = ref(false)
+const { currentSessionId, isCurrentSession, registerBlobUrl } = useWorkspaceLifecycle()
 
 /** 报告全屏查阅：HTML / JSON / 纯文本（与 HomeView 图表 lightbox 行为一致） */
 const reportLightbox = ref<{
@@ -614,8 +619,24 @@ function handleMapImageLoad() {
   emit('img-load')
 }
 
-function handleMapImageError() {
+async function handleMapImageError() {
   mapImageLoading.value = false
+  const mapData = props.message.mapData
+  if (!mapData?.localPath || mapImageRetrying.value) return
+  mapImageRetrying.value = true
+  const sessionId = currentSessionId.value
+  try {
+    const imageUrl = await readProjectBlobUrl(mapData.localPath, { mimeType: 'image/png' })
+    if (!isCurrentSession(sessionId)) {
+      URL.revokeObjectURL(imageUrl)
+      return
+    }
+    registerBlobUrl(imageUrl, { label: `message layout: ${mapData.step}` })
+    mapImageUrl.value = imageUrl
+    mapImageLoading.value = true
+  } catch {
+    // The artifact may no longer belong to the active workspace.
+  }
 }
 
 // 解析 info 行的 key（冒号前的部分）

@@ -1599,6 +1599,8 @@ export function useHomeData() {
 
       await loadHomeAssetsFromData(homeData, { includeFlowLogs: false, isCurrent })
       if (!isCurrent()) return
+      await ensureFlowLogsLoaded()
+      if (!isCurrent()) return
       _loadedHomeResourceVersionSignature = resourceVersionSignature
 
       console.log('Home data fully loaded')
@@ -1659,6 +1661,8 @@ export function useHomeData() {
       console.log('Loaded home data from runtime event path:', homeData)
 
       await loadHomeAssetsFromData(homeData, { includeFlowLogs: false, isCurrent })
+      if (!isCurrent()) return
+      await ensureFlowLogsLoaded()
       if (!isCurrent()) return
 
       console.log('Home data from runtime event path fully loaded')
