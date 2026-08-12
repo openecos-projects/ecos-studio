@@ -119,6 +119,7 @@ describe('projectManifestRegistration', () => {
       createProjectManifestDraft({
         rootPath: '/projects/gcd',
         name: 'gcd',
+        designName: 'gcd',
         now: '2026-08-04T00:00:00.000Z',
       }),
       {

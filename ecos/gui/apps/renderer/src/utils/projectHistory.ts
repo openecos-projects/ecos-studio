@@ -1,8 +1,11 @@
-import type { DesktopSettingsValue } from '@ecos-studio/shared'
+import { parseProjectManifest, type DesktopSettingsValue } from '@ecos-studio/shared'
 import { waitForDesktopApi } from '@/platform/desktop'
 import type { Project, ProjectStatus } from '@/types'
+import { readProjectManagementManifest } from './projectManagementRead'
 
 const PROJECT_HISTORY_SETTING_KEY = 'project_history'
+const LEGACY_RECENT_PROJECTS_SETTING_KEY = 'recent_projects'
+const LEGACY_PROJECT_ROOT_READ_CONCURRENCY = 2
 
 interface SerializedProjectHistoryEntry {
   id: string
@@ -16,11 +19,19 @@ interface SerializedProjectHistoryEntry {
 
 export async function loadProjectHistory(): Promise<Project[]> {
   const savedProjects = await getSetting<unknown>(PROJECT_HISTORY_SETTING_KEY)
-  if (!Array.isArray(savedProjects)) return []
+  const history = Array.isArray(savedProjects)
+    ? savedProjects
+        .map(deserializeProjectHistoryEntry)
+        .filter((project): project is Project => project !== null)
+    : []
+  if (history.length > 0) return history
 
-  return savedProjects
-    .map(deserializeProjectHistoryEntry)
-    .filter((project): project is Project => project !== null)
+  const legacyProjects = await getSetting<unknown>(LEGACY_RECENT_PROJECTS_SETTING_KEY)
+  if (!Array.isArray(legacyProjects)) return []
+
+  const migratedHistory = await migrateLegacyWorkspaceHistory(legacyProjects)
+  if (migratedHistory.length > 0) await saveProjectHistory(migratedHistory)
+  return migratedHistory
 }
 
 export async function rememberProjectHistoryEntry(project: Project): Promise<Project[]> {
@@ -64,6 +75,100 @@ async function getSetting<T>(key: string): Promise<T | null> {
 async function setSetting(key: string, value: unknown): Promise<void> {
   const desktopApi = await waitForDesktopApi()
   await desktopApi.settings.set(key, value as DesktopSettingsValue)
+}
+
+/**
+ * Older desktop builds only recorded opened workspaces. Recover their enclosing
+ * Project roots through the bounded Project Management IPC, never renderer FS access.
+ */
+async function migrateLegacyWorkspaceHistory(values: unknown[]): Promise<Project[]> {
+  const candidates = values.flatMap((value) => {
+    const workspace = deserializeProjectHistoryEntry(value)
+    if (!workspace) return []
+    return projectRootCandidates(workspace.path).map((projectRoot) => ({
+      projectRoot,
+      workspace,
+    }))
+  })
+
+  const discovered = await mapWithConcurrency(
+    candidates,
+    LEGACY_PROJECT_ROOT_READ_CONCURRENCY,
+    async ({ projectRoot, workspace }) => {
+      try {
+        const manifestText = await readProjectManagementManifest(projectRoot)
+        if (!manifestText) return null
+        const manifest = parseProjectManifest(manifestText)
+        return projectFromLegacyWorkspace(manifest, workspace)
+      } catch {
+        // A stale workspace history entry is expected during migration.
+        return null
+      }
+    },
+  )
+
+  const projectsByPath = new Map<string, Project>()
+  for (const project of discovered) {
+    if (!project) continue
+    const existing = projectsByPath.get(project.path)
+    if (!existing || existing.lastOpened < project.lastOpened) {
+      projectsByPath.set(project.path, project)
+    }
+  }
+  return [...projectsByPath.values()].sort(
+    (left, right) => right.lastOpened.getTime() - left.lastOpened.getTime(),
+  )
+}
+
+function projectRootCandidates(workspacePath: string): string[] {
+  const normalizedPath = normalizePath(workspacePath)
+  const parentPath = parentLocalPath(normalizedPath)
+  return [...new Set([normalizedPath, parentPath].filter(Boolean))]
+}
+
+function parentLocalPath(path: string): string {
+  const separatorIndex = path.lastIndexOf('/')
+  if (separatorIndex < 0) return ''
+  if (separatorIndex === 0) return '/'
+  return path.slice(0, separatorIndex)
+}
+
+function projectFromLegacyWorkspace(
+  manifest: ReturnType<typeof parseProjectManifest>,
+  workspace: Project,
+): Project {
+  const path = normalizePath(manifest.root_path)
+  return {
+    id: path,
+    name: manifest.name,
+    path,
+    lastOpened: workspace.lastOpened,
+    pdk: manifest.base_design.pdk,
+    topModule: manifest.base_design.top_module,
+    status: workspace.status,
+  }
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = []
+  results.length = values.length
+  let nextIndex = 0
+  const workers = Array.from(
+    { length: Math.min(Math.max(concurrency, 1), values.length) },
+    async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex
+        nextIndex += 1
+        results[index] = await mapper(values[index]!)
+      }
+    },
+  )
+  await Promise.all(workers)
+  return results
 }
 
 function normalizeProjectHistoryEntry(project: Project): Project {

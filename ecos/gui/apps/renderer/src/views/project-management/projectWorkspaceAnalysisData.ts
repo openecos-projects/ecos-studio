@@ -1,187 +1,157 @@
 import type {
-  FlowStep,
   ProjectManifest,
   ProjectWorkspaceAnalysisInput,
   ProjectWorkspaceAnalysisInputsById,
   ProjectWorkspaceFlowStatesById,
 } from '@/utils/projectManagement'
+import {
+  projectManagementStaTimingIssuesPath,
+  projectManagementWorkspaceStepAnalysisSpecs,
+  projectManagementWorkspaceSummaryPaths,
+} from '@ecos-studio/shared'
 import { parseWorkspaceFlowStateMap } from '@/utils/projectManagement'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { readProjectManagementWorkspaceTexts } from '@/utils/projectManagementRead'
+import { mapWithConcurrency } from './asyncConcurrency'
 
-const WORKSPACE_STEP_ANALYSIS_SPECS: Array<{
-  step: FlowStep
-  metricsPath: string
-  summaryPath: string
-  hotspotsPath: string
-}> = [
-  {
-    step: 'Synth',
-    metricsPath: 'Synthesis_yosys/analysis/qor_metrics.json',
-    summaryPath: 'Synthesis_yosys/analysis/qor_summary.json',
-    hotspotsPath: 'Synthesis_yosys/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'Floor',
-    metricsPath: 'Floorplan_ecc/analysis/qor_metrics.json',
-    summaryPath: 'Floorplan_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'Floorplan_ecc/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'Fanout',
-    metricsPath: 'fixFanout_ecc/analysis/qor_metrics.json',
-    summaryPath: 'fixFanout_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'fixFanout_ecc/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'Place',
-    metricsPath: 'place_dreamplace/analysis/qor_metrics.json',
-    summaryPath: 'place_dreamplace/analysis/qor_summary.json',
-    hotspotsPath: 'place_dreamplace/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'CTS',
-    metricsPath: 'CTS_ecc/analysis/qor_metrics.json',
-    summaryPath: 'CTS_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'CTS_ecc/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'Legal',
-    metricsPath: 'legalization_dreamplace/analysis/qor_metrics.json',
-    summaryPath: 'legalization_dreamplace/analysis/qor_summary.json',
-    hotspotsPath: 'legalization_dreamplace/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'Route',
-    metricsPath: 'route_ecc/analysis/qor_metrics.json',
-    summaryPath: 'route_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'route_ecc/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'DRC',
-    metricsPath: 'drc_ecc/analysis/qor_metrics.json',
-    summaryPath: 'drc_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'drc_ecc/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'Filler',
-    metricsPath: 'filler_ecc/analysis/qor_metrics.json',
-    summaryPath: 'filler_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'filler_ecc/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'RCX',
-    metricsPath: 'RCX_ecc/analysis/qor_metrics.json',
-    summaryPath: 'RCX_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'RCX_ecc/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'STA',
-    metricsPath: 'sta_ecc/analysis/qor_metrics.json',
-    summaryPath: 'sta_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'sta_ecc/analysis/qor_hotspots.json',
-  },
-  {
-    step: 'Harden',
-    metricsPath: 'Harden_ecc/analysis/qor_metrics.json',
-    summaryPath: 'Harden_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'Harden_ecc/analysis/qor_hotspots.json',
-  },
-]
+const WORKSPACE_STEP_ANALYSIS_SPECS = projectManagementWorkspaceStepAnalysisSpecs
+const STA_TIMING_ISSUES_PATH = projectManagementStaTimingIssuesPath
+const PROJECT_READ_CONCURRENCY = 2
 
-const STA_TIMING_ISSUES_PATH = 'sta_ecc/analysis/sta_timing_issues.json'
-
-export async function readProjectWorkspaceFlowStates(
+export async function readProjectManagementWorkspaceData(
+  projectRoot: string,
   manifest: ProjectManifest,
-): Promise<ProjectWorkspaceFlowStatesById> {
-  const entries = await Promise.all(
-    manifest.workspaces.map(async (workspace) => {
+): Promise<{
+  analysisInputs: ProjectWorkspaceAnalysisInputsById
+  flowStates: ProjectWorkspaceFlowStatesById
+}> {
+  const entries = await mapWithConcurrency(
+    manifest.workspaces,
+    PROJECT_READ_CONCURRENCY,
+    async (workspace) => {
       try {
-        const flowText = await readOptionalProjectTextFile('home/flow.json', {
-          projectPath: workspace.workspace_path,
-        })
+        const { texts: values } = await readProjectManagementWorkspaceTexts(
+          projectRoot,
+          workspace.workspace_path,
+          projectManagementAnalysisPaths(),
+        )
+        const flowText = values['home/flow.json'] ?? null
         return [
           workspace.workspace_id,
-          flowText ? parseWorkspaceFlowStateMap(flowText) : {},
+          {
+            analysis: analysisInputFromValues(values),
+            flow: flowText ? parseWorkspaceFlowStateMap(flowText) : {},
+          },
         ] as const
       } catch (error) {
         console.warn(
-          `Failed to load workspace flow.json: ${workspace.workspace_path}`,
+          `Failed to load Project Management summary: ${workspace.workspace_path}`,
           error,
         )
-        return [workspace.workspace_id, {}] as const
+        return [workspace.workspace_id, { analysis: {}, flow: {} }] as const
       }
-    }),
+    },
   )
-
-  return Object.fromEntries(entries)
-}
-
-export async function readProjectWorkspaceAnalysisInputs(
-  manifest: ProjectManifest,
-): Promise<ProjectWorkspaceAnalysisInputsById> {
-  const entries = await Promise.all(
-    manifest.workspaces.map(async (workspace) => {
-      try {
-        return [
-          workspace.workspace_id,
-          await readWorkspaceAnalysisInput(workspace.workspace_path),
-        ] as const
-      } catch (error) {
-        console.warn(
-          `Failed to load workspace feature summary: ${workspace.workspace_path}`,
-          error,
-        )
-        return [workspace.workspace_id, {}] as const
-      }
-    }),
-  )
-
-  return Object.fromEntries(entries)
-}
-
-async function readWorkspaceAnalysisInput(
-  workspacePath: string,
-): Promise<ProjectWorkspaceAnalysisInput> {
-  const [
-    stepMetricEntries,
-    stepSummaryEntries,
-    stepHotspotEntries,
-    staTimingIssuesText,
-    flowText,
-  ] = await Promise.all([
-    Promise.all(
-      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
-        const content = await readOptionalProjectTextFile(spec.metricsPath, {
-          projectPath: workspacePath,
-        })
-        return [spec.step, content] as const
-      }),
-    ),
-    Promise.all(
-      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
-        const content = await readOptionalProjectTextFile(spec.summaryPath, {
-          projectPath: workspacePath,
-        })
-        return [spec.step, content] as const
-      }),
-    ),
-    Promise.all(
-      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
-        const content = await readOptionalProjectTextFile(spec.hotspotsPath, {
-          projectPath: workspacePath,
-        })
-        return [spec.step, content] as const
-      }),
-    ),
-    readOptionalProjectTextFile(STA_TIMING_ISSUES_PATH, { projectPath: workspacePath }),
-    readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
-  ])
 
   return {
-    stepMetricTexts: Object.fromEntries(stepMetricEntries),
-    stepSummaryTexts: Object.fromEntries(stepSummaryEntries),
-    stepHotspotTexts: Object.fromEntries(stepHotspotEntries),
-    staTimingIssuesText,
-    flowText,
+    analysisInputs: Object.fromEntries(
+      entries.map(([workspaceId, data]) => [workspaceId, data.analysis]),
+    ),
+    flowStates: Object.fromEntries(
+      entries.map(([workspaceId, data]) => [workspaceId, data.flow]),
+    ),
+  }
+}
+
+/**
+ * Reads only the current/baseline workspaces used by Dashboard QoR. This keeps
+ * GUI commit rendering off the renderer filesystem path and avoids a Project-
+ * wide NFS fan-out for every completed step.
+ */
+export async function readProjectQorWorkspaceData(
+  projectRoot: string,
+  manifest: ProjectManifest,
+  workspaceIds: readonly string[],
+): Promise<{
+  analysisInputs: ProjectWorkspaceAnalysisInputsById
+  flowStates: ProjectWorkspaceFlowStatesById
+  unavailableWorkspaceIds: string[]
+}> {
+  const requestedIds = new Set(workspaceIds)
+  const workspaces = manifest.workspaces.filter((workspace) =>
+    requestedIds.has(workspace.workspace_id),
+  )
+  const entries = await mapWithConcurrency(
+    workspaces,
+    PROJECT_READ_CONCURRENCY,
+    async (workspace) => {
+      try {
+        const { texts: values } = await readProjectManagementWorkspaceTexts(
+          projectRoot,
+          workspace.workspace_path,
+          projectManagementAnalysisPaths(),
+        )
+        const flowText = values['home/flow.json'] ?? null
+        return [
+          workspace.workspace_id,
+          {
+            analysis: analysisInputFromValues(values),
+            flow: flowText ? parseWorkspaceFlowStateMap(flowText) : {},
+            unavailable: false,
+          },
+        ] as const
+      } catch (error) {
+        console.warn(
+          `Failed to load Dashboard QoR input: ${workspace.workspace_path}`,
+          error,
+        )
+        return [
+          workspace.workspace_id,
+          { analysis: {}, flow: {}, unavailable: true },
+        ] as const
+      }
+    },
+  )
+
+  return {
+    analysisInputs: Object.fromEntries(
+      entries.map(([workspaceId, data]) => [workspaceId, data.analysis]),
+    ),
+    flowStates: Object.fromEntries(
+      entries.map(([workspaceId, data]) => [workspaceId, data.flow]),
+    ),
+    unavailableWorkspaceIds: entries
+      .filter(([, data]) => data.unavailable)
+      .map(([workspaceId]) => workspaceId),
+  }
+}
+
+function projectManagementAnalysisPaths(): string[] {
+  return [...projectManagementWorkspaceSummaryPaths]
+}
+
+function analysisInputFromValues(
+  values: Record<string, string | null>,
+): ProjectWorkspaceAnalysisInput {
+  return {
+    stepMetricTexts: Object.fromEntries(
+      WORKSPACE_STEP_ANALYSIS_SPECS.map((spec) => [
+        spec.step,
+        values[spec.metricsPath] ?? null,
+      ]),
+    ),
+    stepSummaryTexts: Object.fromEntries(
+      WORKSPACE_STEP_ANALYSIS_SPECS.map((spec) => [
+        spec.step,
+        values[spec.summaryPath] ?? null,
+      ]),
+    ),
+    stepHotspotTexts: Object.fromEntries(
+      WORKSPACE_STEP_ANALYSIS_SPECS.map((spec) => [
+        spec.step,
+        values[spec.hotspotsPath] ?? null,
+      ]),
+    ),
+    staTimingIssuesText: values[STA_TIMING_ISSUES_PATH] ?? null,
+    flowText: values['home/flow.json'] ?? null,
   }
 }

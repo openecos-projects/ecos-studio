@@ -21,4 +21,12 @@ describe('agent workspace creation', () => {
     expect(source).toContain('projectRoot: contract.project_context.project_root')
     expect(source).toContain('projectName: contract.project_context.project_name')
   })
+
+  it('hosts the flow-scoped step configuration editor in a top-level dialog', () => {
+    expect(source).toContain('@step-config="showStepConfigDialog = true"')
+    expect(source).toContain(':visible="showStepConfigDialog"')
+    expect(source).toContain('@update:visible="updateStepConfigDialogVisibility"')
+    expect(source).toContain('<WorkspaceStepConfigDialog')
+    expect(source).toContain('>\n          Cancel\n        </button>')
+  })
 })

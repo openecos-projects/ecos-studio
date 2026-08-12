@@ -82,6 +82,62 @@ describe('createRuntimeEventClient desktop ECC events', () => {
     expect(client.getState()).toBe('disconnected')
   })
 
+  it('maps bounded step log chunks from the runtime protocol', async () => {
+    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    setWindow({
+      ecosDesktop: {
+        ecc: {
+          events: {
+            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+              listeners.push(listener)
+              return () => undefined
+            },
+          },
+        },
+      },
+    })
+
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const logHandler = vi.fn()
+    client.on('log', logHandler)
+    client.connect()
+
+    listeners[0]({
+      event: {
+        eventId: 'workspace-1:4',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: {
+          chunk: 'live synthesis log\\n',
+          cursor: 19,
+          step: 'Synthesis',
+          tool: 'yosys',
+        },
+        sequence: 4,
+        timestamp: 1,
+        type: 'step.log',
+        workspaceId: 'workspace-1',
+      },
+      type: 'runtime.protocol',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(logHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          logChunk: 'live synthesis log\\n',
+          logCursor: 19,
+          runtimeEventId: 'workspace-1:4',
+          runtimeProtocolType: 'step.log',
+          step: 'Synthesis',
+          type: 'log',
+        }),
+      }),
+    )
+  })
+
   it('maps single-step candidate.rerun completion onto run_step step_complete', async () => {
     const listeners: Array<(event: EccRuntimeEvent) => void> = []
     setWindow({
@@ -165,6 +221,69 @@ describe('createRuntimeEventClient desktop ECC events', () => {
           rerun: true,
           type: 'message',
           workspaceId: 'workspace-handle-1',
+        }),
+      }),
+    )
+  })
+
+  it('maps prepared single-step rerun scope and affected steps to the renderer', async () => {
+    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    setWindow({
+      ecosDesktop: {
+        ecc: {
+          events: {
+            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+              listeners.push(listener)
+              return () => undefined
+            },
+          },
+        },
+      },
+    })
+
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+
+    listeners[0]({
+      event: {
+        eventId: 'workspace-1:5',
+        kind: 'step',
+        operationId: 'operation-rerun-step',
+        origin: 'gui',
+        payload: {
+          affectedSteps: ['Floorplan', 'route'],
+          scope: 'step',
+          targetStep: 'Floorplan',
+        },
+        rerun: true,
+        runSessionId: 'run-session-2',
+        runtimeInstanceId: 'runtime-2',
+        sequence: 5,
+        timestamp: 5,
+        type: 'operation.rerun_prepared',
+        workspaceId: 'workspace-1',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          affectedSteps: ['Floorplan', 'route'],
+          cmd: 'run_step',
+          directory: '/work/demo',
+          rerun: true,
+          rerunScope: 'step',
+          runSessionId: 'run-session-2',
+          runtimeInstanceId: 'runtime-2',
+          runtimeProtocolType: 'operation.rerun_prepared',
+          targetStep: 'Floorplan',
+          type: 'message',
         }),
       }),
     )

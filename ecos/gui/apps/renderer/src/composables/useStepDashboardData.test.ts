@@ -46,6 +46,8 @@ vi.mock('@/utils/projectFs', () => ({
 }))
 
 import { clearStepDashboardDataCache, useStepDashboardData } from './useStepDashboardData'
+import { notifyWorkspaceRerunPrepared } from './homeRunArtifacts'
+import { finishRuntimeStepRender } from './runtimeStepRenderSync'
 
 const workspaceResourceIndex = {
   flow: {
@@ -174,6 +176,39 @@ describe('useStepDashboardData cache', () => {
     const restored = scope.run(() => useStepDashboardData())!
     expect(restored.data.value).toBeTruthy()
     expect(restored.data.value?.step).toBe('synthesis')
+  })
+
+  it('drops the affected step dashboard immediately when ECC prepares a rerun', async () => {
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => {
+      expect(dashboard.data.value?.step).toBe('synthesis')
+    })
+
+    notifyWorkspaceRerunPrepared({
+      affectedSteps: ['synthesis'],
+      projectPath: '/projects/gcd/ws_0004',
+      scope: 'step',
+      targetStep: 'synthesis',
+    })
+
+    expect(dashboard.data.value).toBeNull()
+  })
+
+  it('refreshes the current dashboard through the step render gate', async () => {
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => {
+      expect(dashboard.data.value?.step).toBe('synthesis')
+    })
+    expect(testState.getWorkspaceResourceIndexApi).toHaveBeenCalledTimes(1)
+
+    await finishRuntimeStepRender({
+      eventId: 'workspace-demo:1',
+      operationId: 'operation-1',
+      step: 'synthesis',
+      stepCommitId: 'operation-1:step:1',
+    })
+
+    expect(testState.getWorkspaceResourceIndexApi).toHaveBeenCalledTimes(2)
   })
 })
 

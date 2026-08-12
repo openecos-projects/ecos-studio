@@ -15,6 +15,7 @@ import type {
   DesktopProjectFileChangedEvent,
   DesktopProjectFileChangeEventType,
   DesktopProjectDirectoryEntry,
+  DesktopProjectTextFileChunk,
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   ScannedPdkDirectory,
@@ -22,6 +23,7 @@ import type {
   WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
 import { LogTailService } from './logTailService'
+import { isPathWithinRoot, isSameOrAncestorPath } from './pathScope'
 import { scanRtlDirectory as scanRtlDirectoryFiles } from './rtlDirectoryScanner'
 import {
   addWorkspaceDesignFiles,
@@ -111,28 +113,51 @@ function boundedTextCharCount(maxChars: number): number {
   return Math.max(1, Math.min(Math.floor(maxChars), 2 * 1024 * 1024))
 }
 
+const MAX_PROJECT_TEXT_CHUNK_BYTES = 256 * 1024
+
+function boundedTextChunkBytes(maxBytes: number): number {
+  const requestedBytes = Number.isFinite(maxBytes)
+    ? Math.floor(maxBytes)
+    : MAX_PROJECT_TEXT_CHUNK_BYTES
+  return Math.max(4, Math.min(requestedBytes, MAX_PROJECT_TEXT_CHUNK_BYTES))
+}
+
+function completeUtf8PrefixLength(buffer: Buffer): number {
+  const end = buffer.length
+  if (end === 0) return 0
+
+  let continuationBytes = 0
+  while (
+    continuationBytes < end &&
+    (buffer[end - continuationBytes - 1]! & 0b1100_0000) === 0b1000_0000
+  ) {
+    continuationBytes += 1
+  }
+  const start = end - continuationBytes - 1
+  if (start < 0) return end
+
+  const leadingByte = buffer[start]!
+  const expectedLength =
+    (leadingByte & 0b1000_0000) === 0
+      ? 1
+      : (leadingByte & 0b1110_0000) === 0b1100_0000
+        ? 2
+        : (leadingByte & 0b1111_0000) === 0b1110_0000
+          ? 3
+          : (leadingByte & 0b1111_1000) === 0b1111_0000
+            ? 4
+            : 1
+  return end - start < expectedLength ? start : end
+}
+
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
     typeof error === 'object' && error !== null && 'code' in error && error.code === code
   )
 }
 
-function isWithinRoot(candidatePath: string, rootPath: string): boolean {
-  const relativePath = relative(rootPath, candidatePath)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
-}
-
 function isSamePath(path: string, otherPath: string): boolean {
   return relative(path, otherPath) === ''
-}
-
-function isSameOrAncestorPath(path: string, descendantPath: string): boolean {
-  const relativePath = relative(path, descendantPath)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
 }
 
 function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
@@ -205,7 +230,7 @@ async function findProjectFileWatchDirectory(
 ): Promise<string> {
   let candidate = dirname(path)
 
-  while (candidate && isWithinRoot(candidate, rootPath)) {
+  while (candidate && isPathWithinRoot(candidate, rootPath)) {
     try {
       const candidateStats = await stat(candidate)
       if (candidateStats.isDirectory()) return candidate
@@ -491,6 +516,57 @@ export class WorkspaceService {
     }
   }
 
+  /**
+   * Reads one bounded, UTF-8-safe chunk without materializing a complete NFS
+   * log in Electron main or sending an unbounded IPC payload to the renderer.
+   */
+  async readOptionalProjectTextFileChunk(
+    path: string,
+    fromOffsetBytes: number,
+    maxBytes: number,
+  ): Promise<DesktopProjectTextFileChunk | null> {
+    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    const normalizedOffset = Math.max(0, Math.floor(fromOffsetBytes))
+    const chunkBytes = boundedTextChunkBytes(maxBytes)
+
+    let handle: Awaited<ReturnType<typeof open>> | null = null
+    try {
+      handle = await open(canonicalPath, 'r')
+      const fileStats = await handle.stat()
+      const start = Math.min(normalizedOffset, fileStats.size)
+      const length = Math.min(chunkBytes, fileStats.size - start)
+      if (length === 0) {
+        return {
+          content: '',
+          eof: true,
+          nextOffsetBytes: start,
+          sizeBytes: fileStats.size,
+        }
+      }
+
+      const buffer = Buffer.alloc(length)
+      const result = await handle.read(buffer, 0, length, start)
+      const bytes = buffer.subarray(0, result.bytesRead)
+      // Do not split the final UTF-8 code point across separate IPC responses.
+      const reachesEof = start + bytes.length >= fileStats.size
+      const consumedBytes = reachesEof ? bytes.length : completeUtf8PrefixLength(bytes)
+      const content = bytes.subarray(0, consumedBytes).toString('utf8')
+      const nextOffsetBytes = start + consumedBytes
+      return {
+        content,
+        eof: reachesEof,
+        nextOffsetBytes,
+        sizeBytes: fileStats.size,
+      }
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return null
+
+      throw error
+    } finally {
+      await handle?.close()
+    }
+  }
+
   async subscribeProjectLogTail(
     path: string,
     options: {
@@ -568,7 +644,7 @@ export class WorkspaceService {
     }
     const expectedTargetPath = join(canonicalProjectRoot, workspaceId)
     if (
-      !isWithinRoot(targetPath, canonicalProjectRoot) ||
+      !isPathWithinRoot(targetPath, canonicalProjectRoot) ||
       !isSamePath(targetPath, expectedTargetPath)
     ) {
       throw new Error('Workspace manifest path is not a direct child of the project root')
@@ -764,8 +840,8 @@ export class WorkspaceService {
     }
 
     if (
-      !isWithinRoot(replacement.targetPath, replacement.projectRoot) ||
-      !isWithinRoot(replacement.backupPath, replacement.projectRoot)
+      !isPathWithinRoot(replacement.targetPath, replacement.projectRoot) ||
+      !isPathWithinRoot(replacement.backupPath, replacement.projectRoot)
     ) {
       this.directoryReplacements.delete(replacementId)
       throw new Error(
@@ -866,8 +942,8 @@ export class WorkspaceService {
       !isAbsolute(journal.targetPath) ||
       !isAbsolute(journal.backupPath) ||
       isSamePath(journal.targetPath, journal.projectRoot) ||
-      !isWithinRoot(journal.targetPath, journal.projectRoot) ||
-      !isWithinRoot(journal.backupPath, journal.projectRoot)
+      !isPathWithinRoot(journal.targetPath, journal.projectRoot) ||
+      !isPathWithinRoot(journal.backupPath, journal.projectRoot)
     ) {
       throw new Error('Workspace replacement journal paths are outside the project root')
     }

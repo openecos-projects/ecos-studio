@@ -254,7 +254,13 @@ const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 const router = useRouter()
 const route = useRoute()
-const { openProject, invalidateWorkspaceResources, currentProject } = useWorkspace()
+const {
+  openProject,
+  invalidateWorkspaceResources,
+  currentProject,
+  runtimeEvents,
+  waitForRuntimeOperation,
+} = useWorkspace()
 const workspaceLifecycle = useWorkspaceLifecycle()
 const { runAllFlow } = useFlowRunner()
 const agentFlowProgress = useAgentFlowProgress(
@@ -267,9 +273,10 @@ const agentFlowProgress = useAgentFlowProgress(
     messageStore.appendToolProgress(message, sessionId ?? undefined)
   },
   () => {
-    // Keep Step/Analysis/maps in sync with flow.json while Agent rerun runs.
+    // ECC terminal events are the only source of runtime-driven refreshes.
     invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])
   },
+  runtimeEvents,
 )
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
@@ -913,6 +920,7 @@ async function maybeRunPostCreateFlow(): Promise<void> {
       if (flowResult === null) {
         throw new Error('Flow execution did not complete successfully.')
       }
+      await waitForRuntimeOperation(flowResult.operationId)
       await reportWorkspaceCreationResult(
         handoff.setupId,
         'succeeded',
@@ -1645,6 +1653,7 @@ async function executeWorkspaceContinue(
     if (flowResult === null) {
       throw new Error('Flow execution did not complete successfully.')
     }
+    await waitForRuntimeOperation(flowResult.operationId)
     await reportWorkspaceContinueResult(
       contract.continue_id,
       'succeeded',
@@ -1710,6 +1719,7 @@ async function executeWorkspaceParameterUpdate(
     }
     await applyWorkspaceParameterWrites(workspaceRoot, contract.writes)
     await syncWorkspaceParameterWrites(workspaceRoot, contract.writes)
+    invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'])
     await reportWorkspaceParameterUpdateResult(
       contract.update_id,
       'succeeded',

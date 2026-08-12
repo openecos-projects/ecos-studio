@@ -178,11 +178,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, toRef } from 'vue'
 import Textarea from 'primevue/textarea'
-import { getStepMetadata } from '@/api/type'
+import { getStepMetadata, type StepEnum } from '@/api/type'
 import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
 import StepConfigDynamicView from '@/components/step-config/StepConfigDynamicView.vue'
+
+const props = defineProps<{
+  step?: StepEnum
+}>()
 
 const {
   currentStep,
@@ -205,7 +209,7 @@ const {
   saveStepConfig,
   resetStepConfig,
   reloadStepConfigFiles,
-} = useStepConfigInfo()
+} = useStepConfigInfo(toRef(props, 'step'))
 
 const stepTitle = computed(() => {
   const s = currentStep.value
@@ -231,6 +235,10 @@ function fileBasename(absPath: string): string {
 async function onSaveStepConfig(): Promise<void> {
   await saveStepConfig()
 }
+
+defineExpose({
+  hasUnsavedChanges: hasStepConfigChanges,
+})
 </script>
 
 <style src="./step-config/stepConfigEditor.css"></style>

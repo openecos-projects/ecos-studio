@@ -44,6 +44,8 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   type?: 'text' | 'image' | 'info' | 'map' | 'choice' | 'tool'
+  /** Ephemeral report/layout content rendered by the workspace GUI. */
+  isGuiArtifact?: boolean
   status?: 'loading' | 'done' | 'error'
   image?: {
     url: string
@@ -94,6 +96,12 @@ export interface ImportedPdk {
     directories: string[]
     files: string[]
   }
+  source?: string
+  version?: string
+  active?: boolean
+  status?: string
+  valid?: boolean
+  knownLayout?: boolean
 }
 
 export interface DesignFile {

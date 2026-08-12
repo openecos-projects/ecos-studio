@@ -161,6 +161,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('applyParameterPatchToParametersJson')
     expect(source).not.toContain("'place.target_density': 'Target density'")
     expect(source).toContain(
+      "invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'])",
+    )
+    expect(source).toContain(
       'applyWorkspaceParameterWrites(workspaceRoot, contract.writes)',
     )
     expect(source).toContain('for (const write of fileWrites)')

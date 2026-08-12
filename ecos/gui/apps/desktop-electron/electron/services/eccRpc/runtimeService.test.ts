@@ -6,7 +6,9 @@ import {
   type EccRpcRuntimeClient,
   type EccRpcRuntimeSidecar,
 } from './runtimeService'
+import { EccRpcShutdownDeferredError } from './sidecarProcess'
 import { WorkspaceSessionNotFoundError } from './workspaceSessions'
+import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 
 interface RpcCall {
   method: string
@@ -93,6 +95,7 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
   logFile: string | null = '/tmp/ecc-rpc-runtime.log'
   shutdownCount = 0
   startCount = 0
+  shutdownError: Error | null = null
   private started = false
   readonly directory: string | null
 
@@ -103,6 +106,7 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
 
   async shutdown(): Promise<void> {
     this.shutdownCount += 1
+    if (this.shutdownError) throw this.shutdownError
     this.started = false
   }
 
@@ -120,16 +124,21 @@ function createPool() {
   const sidecars = new Map<string | null, FakeSidecar>()
   const clients = new Map<string | null, FakeRpcClient>()
   const sidecarEvents = new Map<string | null, (event: EccRuntimeEvent) => void>()
+  const sidecarNotifications = new Map<
+    string | null,
+    (notification: JsonRpcNotificationPayload) => void
+  >()
   let createCount = 0
 
   const service = new EccRpcRuntimeService({
-    createSidecar: (directory, onEvent) => {
+    createSidecar: (directory, onEvent, onNotification) => {
       createCount += 1
       const client = new FakeRpcClient(directory, `id-${directory ?? 'control'}`)
       const sidecar = new FakeSidecar(client, directory)
       clients.set(directory, client)
       sidecars.set(directory, sidecar)
       sidecarEvents.set(directory, onEvent)
+      sidecarNotifications.set(directory, onNotification)
       return sidecar
     },
     onEvent: (event) => events.push(event),
@@ -141,6 +150,12 @@ function createPool() {
     service,
     sidecarEvent: (directory: string | null, event: EccRuntimeEvent) => {
       sidecarEvents.get(directory)?.(event)
+    },
+    sidecarNotification: (
+      directory: string | null,
+      notification: JsonRpcNotificationPayload,
+    ) => {
+      sidecarNotifications.get(directory)?.(notification)
     },
     sidecars,
     clientFor(directory: string | null): FakeRpcClient {
@@ -161,6 +176,15 @@ function createPool() {
 }
 
 describe('EccRpcRuntimeService pool', () => {
+  it('releases the one-shot workspace creation sidecar after the session is registered', async () => {
+    const pool = createPool()
+
+    const workspace = await pool.service.createWorkspace({ directory: '/work/new' })
+
+    expect(workspace.directory).toBe('/work/new')
+    expect(pool.sidecarFor('/work/new').shutdownCount).toBe(1)
+  })
+
   it('runs flow operations for different directories in parallel', async () => {
     const pool = createPool()
     const workspaceA = await pool.service.openWorkspace({ directory: '/work/a' })
@@ -333,6 +357,49 @@ describe('EccRpcRuntimeService pool', () => {
     expect(pool.sidecarFor('/work/a').shutdownCount).toBe(1)
     expect(pool.sidecarFor('/work/b').shutdownCount).toBe(1)
     expect(pool.sidecarFor(null).shutdownCount).toBe(1)
+  })
+
+  it('requests ECC cancellation when GUI quit reaches a rendered-step safe boundary', async () => {
+    const pool = createPool()
+    await pool.service.openWorkspace({ directory: '/work/demo' })
+    const sidecar = pool.sidecarFor('/work/demo')
+    sidecar.shutdownError = new EccRpcShutdownDeferredError({
+      operationId: 'operation-1',
+      safeToStop: true,
+      state: 'waiting_for_gui_ack',
+      step: 'Synthesis',
+      workspaceId: 'id-/work/demo',
+    })
+    pool.clientFor('/work/demo').responses.push({
+      accepted: true,
+      operationId: 'operation-1',
+      state: 'running',
+    })
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'id-/work/demo:2',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'Success', step: 'Synthesis', tool: 'yosys' },
+        sequence: 2,
+        timestamp: 2,
+        type: 'step.completed',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+
+    await expect(pool.service.rpcShutdown()).resolves.toEqual({
+      deferred: true,
+      ok: false,
+      shutdownBarrier: expect.objectContaining({ operationId: 'operation-1' }),
+    })
+    expect(pool.clientFor('/work/demo').calls).toContainEqual({
+      method: 'operation.cancel',
+      params: { operationId: 'operation-1' },
+    })
   })
 
   it('aggregates onEvent listeners and supports unsubscribe', async () => {

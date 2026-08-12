@@ -1,5 +1,5 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
+import { dirname, join, relative, resolve, win32 } from 'node:path'
 import {
   parseProjectManifest,
   type PdkDetectedFiles,
@@ -7,6 +7,7 @@ import {
   type ScannedPdkDirectory,
 } from '@ecos-studio/shared'
 import { requireWindowScopeId } from './windowScopeContext'
+import { isPathWithinRoot } from './pathScope'
 
 const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
@@ -37,13 +38,6 @@ function isNodeErrorWithCode(error: unknown, code: string): boolean {
   )
 }
 
-function isWithinRoot(candidatePath: string, rootPath: string): boolean {
-  const relativePath = relative(rootPath, candidatePath)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
-}
-
 function pathsEqual(leftPath: string, rightPath: string): boolean {
   return relative(resolve(leftPath), resolve(rightPath)) === ''
 }
@@ -54,7 +48,7 @@ async function canonicalizePotentialPathWithinRoot(
 ): Promise<string> {
   const candidatePath = resolve(path)
 
-  if (!isWithinRoot(candidatePath, rootPath)) {
+  if (!isPathWithinRoot(candidatePath, rootPath)) {
     throw new Error(
       `Refusing to grant access outside current project root: ${candidatePath}`,
     )
@@ -285,9 +279,9 @@ export class ProjectScopeService {
     }
 
     for (const root of roots) {
-      if (!isWithinRoot(candidatePath, root)) continue
+      if (!isPathWithinRoot(candidatePath, root)) continue
       const canonicalPath = await canonicalizePotentialPathWithinRoot(path, root)
-      if (isWithinRoot(canonicalPath, root)) return canonicalPath
+      if (isPathWithinRoot(canonicalPath, root)) return canonicalPath
     }
 
     throw new Error(
@@ -302,7 +296,7 @@ export class ProjectScopeService {
   async requestWritableProjectPathAccess(path: string): Promise<string> {
     const activeProjectRoot = await this.getProjectRoot()
     const candidatePath = resolve(path)
-    if (!isWithinRoot(candidatePath, activeProjectRoot)) {
+    if (!isPathWithinRoot(candidatePath, activeProjectRoot)) {
       throw new Error(
         `Refusing to grant access outside current project root: ${candidatePath}`,
       )
@@ -312,7 +306,7 @@ export class ProjectScopeService {
       path,
       activeProjectRoot,
     )
-    if (!isWithinRoot(canonicalPath, activeProjectRoot)) {
+    if (!isPathWithinRoot(canonicalPath, activeProjectRoot)) {
       throw new Error(
         `Refusing to grant access outside current project root: ${candidatePath}`,
       )

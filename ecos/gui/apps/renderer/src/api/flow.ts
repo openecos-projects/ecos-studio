@@ -9,6 +9,11 @@ import {
   ResponseEnum,
 } from './type'
 import { getDesktopApi } from '@/platform/desktop'
+import type {
+  EccRuntimeOperation,
+  EccRuntimeStartFlowRequest,
+  EccRuntimeStartStepRequest,
+} from '@ecos-studio/shared'
 
 function workspaceHandleFromData(data: Record<string, unknown>): string {
   return String(data.workspaceHandle ?? data.workspace_handle ?? data.directory ?? '')
@@ -97,6 +102,20 @@ export function runStepApi(request: RequestData<RunStepRequest>) {
     ResponseData<RunStepResponse>
   >
 }
+
+export function startFlowOperationApi(request: EccRuntimeStartFlowRequest) {
+  const runtime = getDesktopApi().ecc.runtime
+  if (!runtime) throw new Error('ECC runtime operation API is unavailable.')
+  return runtime.startFlow(request)
+}
+
+export function startStepOperationApi(request: EccRuntimeStartStepRequest) {
+  const runtime = getDesktopApi().ecc.runtime
+  if (!runtime) throw new Error('ECC runtime operation API is unavailable.')
+  return runtime.startStep(request)
+}
+
+export type { EccRuntimeOperation }
 
 export interface RefreshConfigRequest {
   directory: string

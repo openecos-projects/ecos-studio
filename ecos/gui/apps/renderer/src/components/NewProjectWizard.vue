@@ -783,20 +783,23 @@
                     </div>
 
                     <div
-                      v-if="importedPdks.length > 0"
+                      v-if="pdkOptions.length > 0"
                       class="custom-scrollbar grid max-h-[132px] gap-2 overflow-y-auto pr-1 md:grid-cols-2"
                     >
                       <button
-                        v-for="pdk in importedPdks"
+                        v-for="pdk in pdkOptions"
                         :key="pdk.id"
                         type="button"
-                        class="relative cursor-pointer rounded-lg border p-3 text-left transition-colors duration-200"
+                        class="relative rounded-lg border p-3 text-left transition-colors duration-200"
                         :class="
                           selectedPdkId === pdk.id
                             ? 'border-(--accent-color) bg-(--accent-color)/10'
-                            : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                            : pdk.valid
+                              ? 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                              : 'cursor-not-allowed border-(--border-color) bg-(--bg-primary)/40 opacity-65'
                         "
-                        @click="selectPdk(pdk)"
+                        :disabled="!pdk.valid"
+                        @click="pdk.valid && selectPdk(pdk)"
                       >
                         <span class="mb-1 flex items-start justify-between gap-3">
                           <span>
@@ -807,6 +810,21 @@
                               v-if="pdk.techNode"
                               class="mt-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
                               >{{ pdk.techNode }}</span
+                            >
+                            <span
+                              class="mt-1 ml-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
+                              >{{
+                                pdk.source === 'registry'
+                                  ? 'Resource Manager'
+                                  : pdk.source === 'project'
+                                    ? 'Project Pinned'
+                                    : 'Local'
+                              }}</span
+                            >
+                            <span
+                              v-if="pdk.version"
+                              class="mt-1 ml-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
+                              >{{ pdk.version }}</span
                             >
                           </span>
                           <i
@@ -820,7 +838,7 @@
                           >{{ pdk.path }}</span
                         >
                         <button
-                          v-if="selectedPdkId !== pdk.id"
+                          v-if="pdk.source === 'local' && selectedPdkId !== pdk.id"
                           type="button"
                           class="absolute top-3 right-3 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-(--text-secondary) opacity-0 transition-colors duration-200 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-500"
                           title="Remove PDK"
@@ -858,19 +876,22 @@
                     <div class="mb-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Config Mode</h3>
                       <p class="mt-1 text-xs text-(--text-secondary)">
-                        Default Config uses ECC default PDK config. Manual Config lets you
-                        choose Tech LEF, Cell LEF, and Liberty.
+                        Default Config requires a validated known PDK. Manual Config lets
+                        you choose Tech LEF, Cell LEF, and Liberty.
                       </p>
                     </div>
                     <div class="grid gap-2 md:grid-cols-2">
                       <button
                         type="button"
-                        class="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors duration-200"
+                        class="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors duration-200"
                         :class="
                           pdkConfigMode === 'default'
                             ? 'border-(--accent-color) bg-(--accent-color)/10'
-                            : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                            : defaultConfigAvailable
+                              ? 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                              : 'cursor-not-allowed border-(--border-color) bg-(--bg-primary)/40 opacity-65'
                         "
+                        :disabled="!defaultConfigAvailable"
                         @click="pdkConfigMode = 'default'"
                       >
                         <span
@@ -1132,8 +1153,9 @@
                         v-model="config.parameters.design"
                         type="text"
                         placeholder="gcd"
+                        :readonly="projectDesignName !== ''"
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
-                        @input="designNameTouched = true"
+                        @input="!projectDesignName && (designNameTouched = true)"
                       />
                     </div>
                     <div>
@@ -1645,6 +1667,9 @@ const projectContext = ref<ProjectContext>(
 )
 
 const config = ref<WorkspaceConfig>(createInitialConfig(props.initialConfig))
+const projectDesignName = ref(
+  String(props.initialConfig?.parameters?.design ?? '').trim(),
+)
 const projectMpc = ref<ProjectManifestMpc | null>(null)
 const projectManifestError = ref('')
 const isLoadingProjectManifest = ref(false)
@@ -1734,8 +1759,8 @@ function createInitialConfig(
       die_area_mode: dieAreaMode.value,
       die_width: 100,
       die_height: 100,
-      utilitization: 0.6,
-      margin: 0,
+      utilitization: 0.3,
+      margin: 2,
       target_density: 0.2,
       target_overflow: 0.1,
       ...source_config?.parameters,
@@ -1948,6 +1973,20 @@ const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
 const HAS_SPACE_RE = /\s/
 const DIRECTORY_UPLOAD_FAILURE_MESSAGE =
   'Folders cannot be uploaded from Select RTL files. Use Select design folder to scan a folder.'
+const ICS55_REQUIRED_PDK_FILES = [
+  'prtech/techLEF/N551P6M_ecos.lef',
+  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
+  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
+  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+]
+
+function hasValidKnownPdkLayout(pdkId: string, detectedFiles: PdkDetectedFiles): boolean {
+  return (
+    pdkId !== 'ics55' ||
+    ICS55_REQUIRED_PDK_FILES.every((file) => detectedFiles.files.includes(file))
+  )
+}
 
 const projectNameError = computed(() =>
   validateName(projectContext.value.project_name, 'Project name'),
@@ -1994,8 +2033,8 @@ const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
 const startsFromFloorplan = computed(() => flowStartStep.value === 'Floorplan')
 const hasSelectedPdkConfig = computed(
   () =>
-    selectedPdkId.value.trim() !== '' ||
-    config.value.pdk.trim() !== '' ||
+    selectedPdk.value?.valid === true &&
+    config.value.pdk.trim() !== '' &&
     config.value.pdk_root.trim() !== '',
 )
 
@@ -2069,8 +2108,16 @@ const activeDesignInput = computed(() =>
 const activePdkStep = computed(() =>
   pdkWizardSteps.find((item) => item.key === activePdkWizardStep.value),
 )
+const projectPinnedPdk = ref<import('../types').ImportedPdk | null>(null)
+const pdkOptions = computed(() => [
+  ...importedPdks.value,
+  ...(projectPinnedPdk.value ? [projectPinnedPdk.value] : []),
+])
 const selectedPdk = computed(() =>
-  importedPdks.value.find((pdk) => pdk.id === selectedPdkId.value),
+  pdkOptions.value.find((pdk) => pdk.id === selectedPdkId.value),
+)
+const defaultConfigAvailable = computed(
+  () => selectedPdk.value?.valid === true && selectedPdk.value.knownLayout === true,
 )
 const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
 const currentPdkDetectedFiles = computed<PdkDetectedFiles>(
@@ -2187,6 +2234,9 @@ watch(dieAreaMode, (mode) => {
 })
 
 watch(pdkConfigMode, syncWorkspaceConfig)
+watch(defaultConfigAvailable, (available) => {
+  if (!available && pdkConfigMode.value === 'default') pdkConfigMode.value = 'manual'
+})
 watch(pdkSelections, syncWorkspaceConfig, { deep: true })
 
 function validateName(name: string, label: string) {
@@ -2292,6 +2342,9 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
 }
 
 function applyProjectManifestDefaults(manifest: ProjectManifest) {
+  projectDesignName.value = manifest.design_name
+  config.value.parameters.design = manifest.design_name
+  designNameTouched.value = true
   const baseDesign = manifest.base_design
   const baseDesignRecord = baseDesign as ProjectManifest['base_design'] &
     Record<string, unknown>
@@ -2410,10 +2463,7 @@ function applyProjectParameterDefaults(
     'clock',
     firstString(parameters.clock, parameters.Clock, manifest.base_design.clock),
   )
-  setStringParameterDefault(
-    'design',
-    firstString(parameters.design, parameters.Design, manifest.name),
-  )
+  setStringParameterDefault('design', manifest.design_name)
 
   setNumberParameterDefault(
     'frequency_max',
@@ -2603,21 +2653,59 @@ function setFlowBoundary(stepName: FlowStepName) {
 async function ensurePdksLoaded() {
   if (hasLoadedPdks.value) return
   hasLoadedPdks.value = true
-  await loadPdks()
+  await loadPdks(true)
   if (config.value.pdk || config.value.pdk_root) {
-    const matchedPdk = importedPdks.value.find(
-      (pdk) =>
-        pdk.id === selectedPdkId.value ||
-        pdk.pdkId === config.value.pdk ||
-        pdk.path === config.value.pdk_root,
-    )
+    const matchedPdk = config.value.pdk_root
+      ? importedPdks.value.find((pdk) => pdk.path === config.value.pdk_root)
+      : importedPdks.value.find(
+          (pdk) => pdk.id === selectedPdkId.value || pdk.pdkId === config.value.pdk,
+        )
     if (matchedPdk) {
       selectPdk(matchedPdk)
       return
     }
+    try {
+      const scanned = await getDesktopApi().workspace.scanPdkDirectory(
+        config.value.pdk_root,
+      )
+      const valid = hasValidKnownPdkLayout(scanned.pdkId, scanned.detectedFiles)
+      projectPinnedPdk.value = {
+        id: `project-pinned:${scanned.canonicalPath}`,
+        name: scanned.name || config.value.pdk,
+        path: scanned.canonicalPath,
+        description: valid
+          ? 'PDK path pinned by the source project.'
+          : 'The source project PDK path is incomplete.',
+        techNode: scanned.techNode,
+        pdkId: scanned.pdkId || config.value.pdk,
+        importedAt: '',
+        detectedFiles: scanned.detectedFiles,
+        source: 'project',
+        status: valid ? 'installed' : 'invalid',
+        valid,
+        knownLayout: scanned.pdkId === 'ics55' && valid,
+      }
+      selectPdk(projectPinnedPdk.value)
+      return
+    } catch {
+      projectPinnedPdk.value = {
+        id: `project-pinned:${config.value.pdk_root}`,
+        name: config.value.pdk || 'Project Pinned PDK',
+        path: config.value.pdk_root,
+        description: 'The source project PDK path is unavailable.',
+        techNode: '',
+        pdkId: config.value.pdk,
+        importedAt: '',
+        source: 'project',
+        status: 'missing',
+        valid: false,
+        knownLayout: false,
+      }
+    }
   }
-  if (importedPdks.value.length === 1) {
-    selectPdk(importedPdks.value[0])
+  const activeValidPdks = importedPdks.value.filter((pdk) => pdk.active && pdk.valid)
+  if (activeValidPdks.length === 1) {
+    selectPdk(activeValidPdks[0])
   }
 }
 
@@ -2902,10 +2990,12 @@ function designFilesReady() {
 }
 
 function selectPdk(pdk: import('../types').ImportedPdk) {
+  if (!pdk.valid) return
   selectedPdkId.value = pdk.id
   config.value.pdk = pdk.pdkId
   config.value.pdk_root = pdk.path
   manualPdkDetectedFiles.value = pdk.detectedFiles ?? null
+  if (!pdk.knownLayout) pdkConfigMode.value = 'manual'
   syncWorkspaceConfig()
 }
 
@@ -2999,6 +3089,9 @@ function syncWorkspaceConfig() {
   config.value.sdc = sdcPath.value
   config.value.pdk_config_mode = pdkConfigMode.value
   config.value.parameters.die_area_mode = dieAreaMode.value
+  if (projectDesignName.value) {
+    config.value.parameters.design = projectDesignName.value
+  }
   config.value.flow_config = {
     start_step: flowStartStep.value,
     end_step: flowEndStep.value,

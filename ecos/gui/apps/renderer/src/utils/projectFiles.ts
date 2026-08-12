@@ -3,6 +3,7 @@ import {
   joinLocalPath,
   type DesktopProjectLogTailEvent,
   type DesktopProjectLogTailSubscriptionOptions,
+  type DesktopProjectTextFileChunk,
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopEventUnsubscribe,
@@ -175,6 +176,20 @@ export async function readOptionalProjectTextFileUpdate(
     reset,
     truncated: reset || content.length >= maxChars,
   }
+}
+
+/** Reads one Electron-main bounded chunk of a project-scoped text file. */
+export async function readOptionalProjectTextFileChunk(
+  path: string,
+  fromOffsetBytes: number,
+  maxBytes: number,
+  options: ProjectFilePathOptions = {},
+): Promise<DesktopProjectTextFileChunk | null> {
+  const resolvedPath = resolveProjectFilePath(path, options.projectPath)
+  const workspace = getDesktopApi().workspace
+  const readChunk = workspace.readOptionalProjectTextFileChunk
+  if (typeof readChunk !== 'function') return null
+  return await readChunk.call(workspace, resolvedPath, fromOffsetBytes, maxBytes)
 }
 
 export async function readProjectJsonFile<T>(

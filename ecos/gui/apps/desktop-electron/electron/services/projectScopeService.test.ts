@@ -21,6 +21,7 @@ async function writeProjectManifest(
     join(projectRoot, 'project.json'),
     JSON.stringify({
       schema_version: 1,
+      design_name: 'gcd',
       root_path: projectRoot,
       workspaces: workspacePaths.map((workspacePath, index) => ({
         workspace_id: `ws_${String(index + 1).padStart(4, '0')}`,
@@ -115,6 +116,27 @@ describe('ProjectScopeService', () => {
           join(workspaceRoot, 'home', 'parameters.json'),
         ),
       ).resolves.toBe(join(workspaceRoot, 'home', 'parameters.json'))
+    })
+  })
+
+  it('allows a declared workspace whose directory name begins with two dots', async () => {
+    const projectRoot = await createTempDir('ecos-parent-project-root-')
+    const workspaceRoot = join(projectRoot, '.ws_0004')
+    const backupWorkspace = join(projectRoot, '..ws_0004.replace-backup-1')
+    const backupFlowPath = join(backupWorkspace, 'home', 'flow.json')
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    await mkdir(join(backupWorkspace, 'home'), { recursive: true })
+    await writeProjectManifest(projectRoot, [workspaceRoot, backupWorkspace])
+    await writeFile(backupFlowPath, '{"steps":[]}')
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(workspaceRoot)
+      await service.registerProjectReadRoot(projectRoot)
+
+      await expect(service.requestProjectPathAccess(backupFlowPath)).resolves.toBe(
+        backupFlowPath,
+      )
     })
   })
 

@@ -49,6 +49,63 @@ describe('messageStore', () => {
     expect(messages.value).toEqual([])
   })
 
+  it('clears only GUI report and layout cards from the requested session', () => {
+    const store = useMessageStore()
+    store.addMessage('Keep this conversation')
+    store.addExecutionContract({
+      fields: [{ label: 'Design', value: 'gcd' }],
+      schema_version: 'flow-agent.resolved_execution_contract.v1',
+      title: 'Resolved execution contract',
+    })
+    store.addInfoMessage({
+      title: 'place.log',
+      step: 'Placement',
+      items: [{ content: 'report', format: 'text', label: 'place.log' }],
+    })
+    store.addMapMessage({
+      imageUrl: 'blob:layout',
+      info: [],
+      localPath: '/tmp/layout.png',
+      step: 'Placement',
+      title: 'Layout preview',
+    })
+    store.setActiveSessionId('session-b')
+    store.addInfoMessage({
+      title: 'route.log',
+      step: 'Routing',
+      items: [{ content: 'report', format: 'text', label: 'route.log' }],
+    })
+
+    expect(store.hasSessionGuiArtifacts('session-test')).toBe(true)
+    expect(store.clearSessionGuiArtifacts('session-test')).toBe(true)
+    expect(store.hasSessionGuiArtifacts('session-test')).toBe(false)
+    expect(store.clearSessionGuiArtifacts('session-test')).toBe(false)
+    expect(store.messagesBySessionId['session-test']).toMatchObject([
+      { content: 'Keep this conversation', type: 'text' },
+      { type: 'info', infoData: { step: 'Execution contract' } },
+    ])
+    expect(store.messagesBySessionId['session-b']).toHaveLength(1)
+  })
+
+  it('clears GUI artifacts only for rerun-affected steps', () => {
+    const store = useMessageStore()
+    store.addInfoMessage({
+      title: 'floorplan.log',
+      step: 'Floorplan',
+      items: [{ content: 'report', format: 'text', label: 'floorplan.log' }],
+    })
+    store.addMapMessage({
+      imageUrl: 'blob:place',
+      info: [],
+      localPath: '/tmp/place.png',
+      step: 'Placement',
+      title: 'Layout preview',
+    })
+
+    expect(store.clearSessionGuiArtifactsForSteps(['Floorplan'])).toBe(true)
+    expect(store.messages).toMatchObject([{ mapData: { step: 'Placement' } }])
+  })
+
   it('renders a provider contract as a structured assistant message', () => {
     const store = useMessageStore()
 

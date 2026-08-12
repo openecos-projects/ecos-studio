@@ -8,6 +8,7 @@
         :has-workspace="Boolean(currentProject?.path)"
         :signoff-package-export-enabled="signoffPackageExportEnabled"
         @menu-action="handleMenuAction"
+        @step-config="showStepConfigDialog = true"
       />
       <!-- 页面内容 -->
       <div
@@ -113,6 +114,32 @@
 
     <DesignFilesManageDialog v-model="showManageDialog" />
 
+    <Dialog
+      :visible="showStepConfigDialog"
+      modal
+      maximizable
+      header="Step Configuration"
+      :style="{ width: 'min(1120px, calc(100vw - 32px))' }"
+      :draggable="false"
+      @update:visible="updateStepConfigDialogVisibility"
+    >
+      <div class="step-config-dialog">
+        <WorkspaceStepConfigDialog
+          v-if="showStepConfigDialog"
+          ref="stepConfigDialogRef"
+        />
+      </div>
+      <template #footer>
+        <button
+          type="button"
+          class="rounded border border-(--border-color) px-3 py-1.5 text-xs text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
+          @click="closeStepConfigDialog"
+        >
+          Cancel
+        </button>
+      </template>
+    </Dialog>
+
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
     <Teleport to="body">
       <Transition name="runtime-backend-overlay">
@@ -147,7 +174,6 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
-import { registerHomeWorkspaceRerun } from '@/composables/homeFlowRerun'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
@@ -164,8 +190,10 @@ import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
 import SignoffPackageReviewDialog from '@/components/SignoffPackageReviewDialog.vue'
 import Toast from 'primevue/toast'
+import Dialog from 'primevue/dialog'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
+import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
@@ -244,9 +272,29 @@ const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
+const showStepConfigDialog = ref(false)
+const stepConfigDialogRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
+
+function closeStepConfigDialog(): void {
+  if (
+    stepConfigDialogRef.value?.hasUnsavedChanges &&
+    !confirm('Discard unsaved configuration changes?')
+  ) {
+    return
+  }
+  showStepConfigDialog.value = false
+}
+
+function updateStepConfigDialogVisibility(visible: boolean): void {
+  if (visible) {
+    showStepConfigDialog.value = true
+    return
+  }
+  closeStepConfigDialog()
+}
 const pendingWorkspaceUpdatePath = ref('')
 const showWorkspaceUpdateBackupDialog = ref(false)
 const workspaceWizardTitle = computed(() => {
@@ -384,64 +432,6 @@ async function runWorkspaceUpdate(keepReplacementBackup: boolean) {
     })
   }
 }
-
-async function rebuildCurrentWorkspaceForHomeRerun(): Promise<boolean> {
-  const workspacePath = currentProject.value?.path
-  if (!workspacePath) {
-    showToast({
-      severity: 'warn',
-      summary: 'Workspace Required',
-      detail: 'Open a workspace before running the full flow again.',
-      life: 3000,
-    })
-    return false
-  }
-
-  try {
-    const targetWorkspacePath = normalizeLocalPath(workspacePath)
-    const initialConfig = await buildReconfigureWizardInitialConfig(targetWorkspacePath)
-    const config: WorkspaceConfig = {
-      directory: targetWorkspacePath,
-      pdk: initialConfig.pdk ?? 'ics55',
-      pdk_root: initialConfig.pdk_root ?? '',
-      parameters: initialConfig.parameters ?? {},
-      origin_def: initialConfig.origin_def ?? '',
-      origin_verilog: initialConfig.origin_verilog ?? '',
-      rtl_list: initialConfig.rtl_list ?? [],
-      filelist: initialConfig.filelist,
-      design_input_mode: initialConfig.design_input_mode,
-      sdc: initialConfig.sdc,
-      pdk_config_mode: initialConfig.pdk_config_mode,
-      pdk_config: initialConfig.pdk_config,
-      pdk_json: initialConfig.pdk_json,
-      project_context: initialConfig.project_context,
-      replaceExistingWorkspace: true,
-      keepReplacementBackup: false,
-    }
-    const success = await newProject(config)
-    if (!success) return false
-
-    await syncProjectManagedWorkspace(config, targetWorkspacePath)
-    await router.push({
-      path: route.path.startsWith('/workspace') ? route.path : '/workspace',
-      query: route.query,
-    })
-    return true
-  } catch (error) {
-    console.error('Failed to rebuild workspace for full-flow rerun:', error)
-    showToast({
-      severity: 'error',
-      summary: 'Failed to Rebuild Workspace',
-      detail: error instanceof Error ? error.message : String(error),
-      life: 5000,
-    })
-    return false
-  }
-}
-
-const unregisterHomeWorkspaceRerun = registerHomeWorkspaceRerun(
-  rebuildCurrentWorkspaceForHomeRerun,
-)
 
 async function syncProjectManagedWorkspace(
   config: WorkspaceConfig,
@@ -1075,7 +1065,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  unregisterHomeWorkspaceRerun()
   document.removeEventListener('selectstart', handleSelectStart)
   if (resizeIdleTimer) {
     clearTimeout(resizeIdleTimer)
@@ -1313,6 +1302,11 @@ body.window-maximized .app-container {
   display: block;
   height: var(--terminal-panel-height);
   pointer-events: none;
+}
+
+.step-config-dialog {
+  height: min(72vh, 720px);
+  min-height: 420px;
 }
 
 .workspace-update-backup-overlay {

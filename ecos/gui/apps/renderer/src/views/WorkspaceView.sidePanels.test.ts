@@ -43,6 +43,7 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).toContain('getStepMetadata(stepKey)')
     expect(source).toContain('<template #right-log>')
     expect(source).toContain(':selected-node="currentStepLogNode"')
+    expect(source).toContain(':selected-node-pinned="true"')
     expect(source).toContain(':ensure-content="ensureFlowLogSegmentContentLoaded"')
   })
 

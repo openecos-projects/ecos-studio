@@ -17,15 +17,26 @@ import {
   type DesktopAgentWorkspaceParameterWrite,
   type DesktopAgentWorkspaceRerunContract,
 } from '@ecos-studio/shared'
+import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
-  runStep(request: {
+  startFlowOperation(request: {
+    idempotencyKey: string
+    rerun: boolean
+    workspaceHandle: string
+  }): Promise<{ operationId: string }>
+  startStepOperation(request: {
+    idempotencyKey: string
     rerun: boolean
     step: string
     workspaceHandle: string
-  }): Promise<unknown>
+  }): Promise<{ operationId: string }>
   syncConfig(request: { configPath: string; workspaceHandle: string }): Promise<unknown>
+  waitForOperation(request: {
+    operationId: string
+    workspaceHandle: string
+  }): Promise<{ error: { message: string } | null; state: string }>
 }
 
 const FLOW_STEP_SEQUENCE = [
@@ -209,8 +220,35 @@ export async function executeWorkspaceRerun(
     })
   }
   if (writes.length > 0) await runtime.refreshConfig({ workspaceHandle })
-  for (const step of workspaceRerunExecutionSteps(contract)) {
-    await runtime.runStep({ rerun: false, step, workspaceHandle })
+  if (contract.execution_scope === 'full_flow') {
+    const operation = await runtime.startFlowOperation({
+      idempotencyKey: randomUUID(),
+      rerun: false,
+      workspaceHandle,
+    })
+    const completed = await runtime.waitForOperation({
+      operationId: operation.operationId,
+      workspaceHandle,
+    })
+    if (completed.state !== 'succeeded') {
+      throw new Error(completed.error?.message || 'Rerun flow failed')
+    }
+    return
+  }
+
+  const step = contract.target_step
+  const operation = await runtime.startStepOperation({
+    idempotencyKey: randomUUID(),
+    rerun: false,
+    step,
+    workspaceHandle,
+  })
+  const completed = await runtime.waitForOperation({
+    operationId: operation.operationId,
+    workspaceHandle,
+  })
+  if (completed.state !== 'succeeded') {
+    throw new Error(completed.error?.message || `Rerun step failed: ${step}`)
   }
 }
 
@@ -254,7 +292,7 @@ async function verifyWorkspaceRerunContract(
     !targetWorkspace.startsWith(expectedTarget) ||
     (targetSuffix && !/^_\d{4}$/.test(targetSuffix)) ||
     contract.rerun_id !== basename(targetWorkspace) ||
-    relative(dirname(sourceWorkspace), targetWorkspace).startsWith('..')
+    isRelativePathOutsideRoot(relative(dirname(sourceWorkspace), targetWorkspace))
   ) {
     throw new Error('Workspace rerun target is outside the source workspace parent.')
   }
@@ -379,10 +417,7 @@ async function resolvePathWithinWorkspace(
 }
 
 function isWithinWorkspace(workspace: string, path: string): boolean {
-  const relativePath = relative(workspace, path)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
+  return isPathWithinRoot(path, workspace)
 }
 
 async function assertMissing(path: string): Promise<void> {
@@ -537,22 +572,6 @@ function isSafeParameterString(value: string): boolean {
     !value.split('').some((character) => character.charCodeAt(0) < 32) &&
     !/[;&|]|\$\(/.test(value)
   )
-}
-
-function workspaceRerunExecutionSteps(
-  contract: DesktopAgentWorkspaceRerunContract,
-): string[] {
-  if (contract.execution_scope === 'single_step') return [contract.target_step]
-  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
-    contract.target_step as (typeof FLOW_STEP_SEQUENCE)[number],
-  )
-  const endIndex = FLOW_STEP_SEQUENCE.indexOf(
-    contract.end_step as (typeof FLOW_STEP_SEQUENCE)[number],
-  )
-  if (targetIndex < 0 || endIndex < targetIndex) {
-    throw new Error('Workspace rerun flow range is invalid.')
-  }
-  return FLOW_STEP_SEQUENCE.slice(targetIndex, endIndex + 1)
 }
 
 async function materializeWorkspaceRerunParameterWrites(
