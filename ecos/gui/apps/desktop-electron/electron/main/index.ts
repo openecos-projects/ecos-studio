@@ -5,6 +5,7 @@ import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
+import { installRuntimeQuitGuard } from './runtimeQuitGuard'
 import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
@@ -16,6 +17,7 @@ import {
 } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
+import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
 import { ChipViewerService } from '../services/chipViewerService'
@@ -27,6 +29,7 @@ import {
 } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectManifestService } from '../services/projectManifestService'
+import { ProjectManagementReadService } from '../services/projectManagementReadService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
@@ -51,6 +54,7 @@ let services: {
   appInfoService: AppInfoService
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
+  projectManagementReadService: ProjectManagementReadService
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
@@ -130,14 +134,24 @@ function getDesktopServices() {
       platform: process.platform,
     })
   const eccRuntimeService = new EccRpcRuntimeService({
-    createSidecar: (_directory, onEvent) =>
+    createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () =>
           resolveEccSidecarLogDirectory(getLogSessionDirectory()),
         onEvent,
+        onNotification,
       }),
+    lazyWorkspaceOpen: true,
+    snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
+  })
+  installRuntimeQuitGuard({
+    app,
+    onShutdownError: (error) => {
+      electronLogger.error('[runtime] Failed to shut down ECC sidecars', error)
+    },
+    runtime: eccRuntimeService,
   })
   const workspaceService = new WorkspaceService({
     projectScopeProvider: projectScopeService,
@@ -148,6 +162,7 @@ function getDesktopServices() {
     projectScopeService,
     workspaceService,
   )
+  const projectManagementReadService = new ProjectManagementReadService()
   const shellService = new ShellPtyService({
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
@@ -177,6 +192,7 @@ function getDesktopServices() {
     chipViewerService,
     codexDependencyService,
     eccRuntimeService,
+    projectManagementReadService,
     projectManifestService,
     resourceManagerService,
     settingsStore,
@@ -218,6 +234,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
         })
       },
       eccRuntimeService: desktopServices.eccRuntimeService,
+      projectManagementReadService: desktopServices.projectManagementReadService,
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
       chipViewerService: desktopServices.chipViewerService,

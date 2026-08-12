@@ -49,7 +49,7 @@ function step(
   name: string,
   state: string,
   directory: string,
-  options: { db?: string; drcCsv?: string; image?: string } = {},
+  options: { db?: string; drcCsv?: string; geometry?: string; image?: string } = {},
 ) {
   return {
     name,
@@ -59,7 +59,10 @@ function step(
     directory,
     info: {},
     resources: {
-      output: options.image ? { image: resource(options.image) } : {},
+      output: {
+        ...(options.image ? { image: resource(options.image) } : {}),
+        ...(options.geometry ? { geometryManifest: resource(options.geometry) } : {}),
+      },
       data: {},
       feature: options.db ? { db: resource(options.db) } : {},
       report: {},
@@ -114,10 +117,13 @@ describe('useHomeSnapshots', () => {
           step('Synthesis', 'Success', '/workspace/demo/Synthesis_yosys'),
           step('Floorplan', 'Success', '/workspace/demo/Floorplan_ecc', {
             db: '/workspace/demo/Floorplan_ecc/feature/Floorplan.db.json',
+            geometry: '/workspace/demo/Floorplan_ecc/output/geometry/geometry.manifest',
             image: '/workspace/demo/Floorplan_ecc/output/floorplan.png',
           }),
           step('place', 'Success', '/workspace/demo/place_dreamplace', {
             db: '/workspace/demo/place_dreamplace/feature/place.db.json',
+            geometry:
+              '/workspace/demo/place_dreamplace/output/geometry/geometry.manifest',
             image: '/workspace/demo/place_dreamplace/output/place.png',
           }),
           step('drc', 'Success', '/workspace/demo/drc_ecc', {
@@ -132,19 +138,38 @@ describe('useHomeSnapshots', () => {
     })
   })
 
-  it('collects successful layouts with the newest physical data and DRC snapshots', async () => {
+  it('separates ordered layouts from insight snapshots and exposes geometry availability', async () => {
     const scope = effectScope()
     const snapshots = scope.run(() => useHomeSnapshots())!
 
     await vi.waitFor(() => {
-      expect(snapshots.items.value).toHaveLength(11)
+      expect(snapshots.layoutThumbnails.value).toHaveLength(4)
+      expect(snapshots.insightSnapshots.value).toHaveLength(7)
     })
 
-    expect(snapshots.items.value.map((item) => item.label)).toEqual([
-      'Floorplan Layout',
-      'place Layout',
-      'drc Layout',
-      'Harden Layout',
+    expect(snapshots.layoutThumbnails.value).toEqual([
+      expect.objectContaining({
+        hasGeometry: true,
+        label: 'Floorplan Layout',
+        step: 'Floorplan',
+      }),
+      expect.objectContaining({
+        hasGeometry: true,
+        label: 'place Layout',
+        step: 'place',
+      }),
+      expect.objectContaining({
+        hasGeometry: false,
+        label: 'drc Layout',
+        step: 'drc',
+      }),
+      expect.objectContaining({
+        hasGeometry: false,
+        label: 'Harden Layout',
+        step: 'Harden',
+      }),
+    ])
+    expect(snapshots.insightSnapshots.value.map((item) => item.label)).toEqual([
       'place Instance Distribution',
       'Net Pin Bins',
       'Cut Layer Vias',
@@ -154,12 +179,16 @@ describe('useHomeSnapshots', () => {
       'Type Totals',
     ])
     expect(
-      snapshots.items.value.find((item) => item.id === 'physical-instance-distribution'),
+      snapshots.insightSnapshots.value.find(
+        (item) => item.id === 'physical-instance-distribution',
+      ),
     ).toMatchObject({
       path: '/workspace/demo/place_dreamplace/feature/place.db.inst_dist.png',
     })
     expect(
-      snapshots.items.value.find((item) => item.id === 'place-pin-distribution-net_num'),
+      snapshots.insightSnapshots.value.find(
+        (item) => item.id === 'place-pin-distribution-net_num',
+      ),
     ).toMatchObject({ kind: 'distribution', sourceStep: 'place' })
 
     scope.stop()
@@ -170,7 +199,7 @@ describe('useHomeSnapshots', () => {
     const snapshots = scope.run(() => useHomeSnapshots())!
 
     await vi.waitFor(() => {
-      expect(snapshots.items.value).not.toHaveLength(0)
+      expect(snapshots.layoutThumbnails.value).not.toHaveLength(0)
     })
     const imageReadCount = testState.readProjectBlobUrl.mock.calls.length
     testState.resourceVersions!.value = {

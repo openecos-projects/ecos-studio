@@ -10,13 +10,17 @@
           :loading="loading"
           :nodes="nodes"
           :title="flowTitle"
-          @select="selectedFlowNode = $event"
+          @select="selectFlowNode"
         >
           <template #actions>
             <FlowRunControl />
           </template>
         </FlowStatusStrip>
-        <slot name="right-log" :selected-node="selectedFlowNode" />
+        <slot
+          name="right-log"
+          :selected-node="selectedLogNode"
+          :selected-node-pinned="logSelectionPinned"
+        />
         <ChatInspectorPanel class="workspace-workbench-inspector" />
       </SplitterPanel>
     </Splitter>
@@ -41,12 +45,15 @@ const props = withDefaults(
   defineProps<{
     flowTitle: string
     loading?: boolean
+    logRerunAffectedSteps?: readonly string[]
     nodes: FlowStatusNode[]
   }>(),
   { loading: false },
 )
 
 const selectedFlowNode = ref<FlowStatusNode | null>(findInitialNode(props.nodes))
+const selectedLogNode = ref<FlowStatusNode | null>(selectedFlowNode.value)
+const logSelectionPinned = ref(false)
 let lastRunningNodeId = runningFlowNodeId(props.nodes)
 
 watch(
@@ -60,9 +67,37 @@ watch(
     lastRunningNodeId = selection.runningNodeId
     selectedFlowNode.value =
       nodes.find((node) => node.id === selection.selectedNodeId) ?? findInitialNode(nodes)
+    if (
+      logSelectionPinned.value &&
+      !nodes.some((node) => node.id === selectedLogNode.value?.id)
+    ) {
+      logSelectionPinned.value = false
+    }
+    if (!logSelectionPinned.value) selectedLogNode.value = selectedFlowNode.value
   },
   { deep: true },
 )
+
+watch(
+  () => props.logRerunAffectedSteps,
+  (affectedSteps) => {
+    if (!logSelectionPinned.value || !selectedLogNode.value) return
+    const affectedLabels = new Set(
+      (affectedSteps ?? []).map((step) => step.trim().toLowerCase()).filter(Boolean),
+    )
+    if (!affectedLabels.has(selectedLogNode.value.label.trim().toLowerCase())) return
+
+    logSelectionPinned.value = false
+    selectedLogNode.value = selectedFlowNode.value
+  },
+  { immediate: true },
+)
+
+function selectFlowNode(node: FlowStatusNode): void {
+  selectedFlowNode.value = node
+  selectedLogNode.value = node
+  logSelectionPinned.value = true
+}
 
 function findInitialNode(nodes: readonly FlowStatusNode[]): FlowStatusNode | null {
   const id = initialSelectedNodeId(nodes)
@@ -71,7 +106,10 @@ function findInitialNode(nodes: readonly FlowStatusNode[]): FlowStatusNode | nul
 
 defineSlots<{
   left(): unknown
-  'right-log'(props: { selectedNode: FlowStatusNode | null }): unknown
+  'right-log'(props: {
+    selectedNode: FlowStatusNode | null
+    selectedNodePinned: boolean
+  }): unknown
 }>()
 </script>
 

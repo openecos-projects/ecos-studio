@@ -15,10 +15,17 @@ import {
   type DesktopProjectFileChangedEvent,
   type DesktopProjectLogTailEvent,
   type DesktopProjectDirectoryEntry,
+  type DesktopProjectManagementWorkspaceTextsRequest,
+  type DesktopProjectManagementWorkspaceTextsResult,
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
   type EccFlowRunStepRequest,
   type EccRuntimeEvent,
+  type EccRuntimeOperation,
+  type EccRuntimeOperationRequest,
+  type EccRuntimeStartFlowRequest,
+  type EccRuntimeStartStepRequest,
+  type EccRuntimeStepRenderedAckRequest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceExportSignoffRequest,
   type EccWorkspaceHandleRequest,
@@ -32,6 +39,7 @@ import {
   type PickedRtlSources,
   type ProjectManifestMutationRequest,
   type ProjectManifestMutationResult,
+  type DesktopProjectTextFileChunk,
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
@@ -134,6 +142,13 @@ export interface DesktopBridgeServices {
       request: ProjectManifestMutationRequest,
     ): Promise<ProjectManifestMutationResult>
   }
+  projectManagementReadService?: {
+    readManifest(projectRoot: string): Promise<string | null>
+    listProjectEntries(projectRoot: string): Promise<string[]>
+    readWorkspaceTexts(
+      request: DesktopProjectManagementWorkspaceTextsRequest,
+    ): Promise<DesktopProjectManagementWorkspaceTextsResult>
+  }
   workspaceService: {
     clearProjectRoot(): Promise<void>
     isProjectDirectory(path: string): Promise<boolean>
@@ -150,6 +165,11 @@ export interface DesktopBridgeServices {
       fromOffsetBytes: number,
       maxChars: number,
     ): Promise<DesktopProjectTextFileUpdate | null>
+    readOptionalProjectTextFileChunk(
+      path: string,
+      fromOffsetBytes: number,
+      maxBytes: number,
+    ): Promise<DesktopProjectTextFileChunk | null>
     subscribeProjectLogTail(
       path: string,
       options: {
@@ -224,11 +244,18 @@ export interface DesktopBridgeServices {
     refreshRegistry(): Promise<unknown>
   }
   eccRuntimeService: {
+    acknowledgeDetachedStepRendered(
+      request: EccRuntimeStepRenderedAckRequest,
+    ): Promise<unknown>
+    acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<unknown>
+    cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
+    operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
+    waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     openWorkspace(
       request: EccWorkspaceOpenRequest,
     ): Promise<{ directory: string; workspaceHandle: string }>
@@ -239,9 +266,12 @@ export interface DesktopBridgeServices {
     rpcShutdown(): Promise<unknown>
     runFlow(request: EccFlowRunRequest): Promise<unknown>
     runStep(request: EccFlowRunStepRequest): Promise<unknown>
+    startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
+    startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
     syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
     workspaceInfo(request: EccWorkspaceInfoRequest): Promise<unknown>
+    workspaceSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
   }
   shellService: {
     createSession(
@@ -613,14 +643,14 @@ export function registerIpc(
     }
   }
 
-  const deliverDirectoryScopedEvent = (payload: EccRuntimeEvent): void => {
+  const deliverDirectoryScopedEvent = (payload: EccRuntimeEvent): number => {
     const workspaceDirectory = readWorkspaceDirectoryFromEvent(payload)
     if (!workspaceDirectory) {
-      return
+      return 0
     }
     const normalizedDirectory = normalizeWorkspacePath(workspaceDirectory)
     if (!normalizedDirectory) {
-      return
+      return 0
     }
 
     if (payload.type === 'runtime.ready') {
@@ -642,14 +672,43 @@ export function registerIpc(
         workspaceDirectory: normalizedDirectory,
       })
     }
+    return deliveredSenders.size
+  }
+
+  const isSuccessfulDetachedStepCommit = (
+    payload: EccRuntimeEvent,
+  ): payload is Extract<EccRuntimeEvent, { type: 'runtime.protocol' }> => {
+    if (payload.type !== 'runtime.protocol') return false
+    if (payload.event.type !== 'step.completed') return false
+    return String(payload.event.payload.state).toLowerCase() === 'success'
+  }
+
+  const acknowledgeDetachedStepCommit = (payload: EccRuntimeEvent): void => {
+    if (!isSuccessfulDetachedStepCommit(payload) || !payload.workspaceHandle) return
+    const stepCommitId = payload.event.payload.stepCommitId
+    const workspaceRevision = payload.event.payload.workspaceRevision
+    void services.eccRuntimeService
+      .acknowledgeDetachedStepRendered({
+        eventId: payload.event.eventId,
+        operationId: payload.event.operationId,
+        workspaceHandle: payload.workspaceHandle,
+        ...(typeof stepCommitId === 'string' ? { stepCommitId } : {}),
+        ...(typeof workspaceRevision === 'number' ? { workspaceRevision } : {}),
+      })
+      .catch((error: unknown) => {
+        console.warn('Failed to persist a detached GUI step commit:', error)
+      })
   }
 
   services.eccRuntimeService.onEvent((payload) => {
     const workspaceHandle = readWorkspaceHandleFromEvent(payload)
     if (workspaceHandle) {
       const subscription = workspaceHandleSubscriptions.get(workspaceHandle)
-      if (!subscription) return
-      sendEccEventToSender(subscription.sender, payload)
+      if (subscription) {
+        sendEccEventToSender(subscription.sender, payload)
+      } else {
+        acknowledgeDetachedStepCommit(payload)
+      }
       return
     }
 
@@ -657,7 +716,8 @@ export function registerIpc(
       return
     }
 
-    deliverDirectoryScopedEvent(payload)
+    const delivered = deliverDirectoryScopedEvent(payload)
+    if (delivered === 0) acknowledgeDetachedStepCommit(payload)
   })
 
   services.agentRuntimeService?.onEvent((payload) => {
@@ -723,7 +783,7 @@ export function registerIpc(
     await services.shellService.kill(sessionId)
   }
 
-  const closeTrackedWorkspaceHandle = async (
+  const detachTrackedWorkspaceHandle = async (
     workspaceHandle: string,
   ): Promise<unknown> => {
     const existingClose = workspaceHandleClosePromises.get(workspaceHandle)
@@ -739,9 +799,9 @@ export function registerIpc(
       }
     }
 
-    const closePromise = Promise.resolve().then(() =>
-      services.eccRuntimeService.closeWorkspace({ workspaceHandle }),
-    )
+    // A renderer/page only owns a subscription lease. Releasing that lease
+    // must not close a running ECC operation or its sidecar.
+    const closePromise = Promise.resolve({ ok: true })
     const trackedClosePromise = closePromise.finally(() => {
       workspaceHandleClosePromises.delete(workspaceHandle)
     })
@@ -773,7 +833,7 @@ export function registerIpc(
     }
 
     const onDestroyed = (): void => {
-      void closeTrackedWorkspaceHandle(workspaceHandle)
+      void detachTrackedWorkspaceHandle(workspaceHandle)
     }
     const directories = previous?.directories ?? new Set<string>()
     directories.add(normalizedDirectory)
@@ -1045,6 +1105,53 @@ export function registerIpc(
     )
   })
 
+  handle(
+    desktopApiIpcChannels.projectManagementReadManifest,
+    async (_event, projectRoot) => {
+      if (!services.projectManagementReadService) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (typeof projectRoot !== 'string') {
+        throw new Error('Project management projectRoot must be a string.')
+      }
+      return await services.projectManagementReadService.readManifest(projectRoot)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementListEntries,
+    async (_event, projectRoot) => {
+      if (!services.projectManagementReadService) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (typeof projectRoot !== 'string') {
+        throw new Error('Project management projectRoot must be a string.')
+      }
+      return await services.projectManagementReadService.listProjectEntries(projectRoot)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementReadWorkspaceTexts,
+    async (_event, request) => {
+      if (!services.projectManagementReadService) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (
+        !isRecord(request) ||
+        typeof request.projectRoot !== 'string' ||
+        typeof request.workspacePath !== 'string' ||
+        !Array.isArray(request.paths) ||
+        !request.paths.every((path) => typeof path === 'string')
+      ) {
+        throw new Error('Project management workspace read request is invalid.')
+      }
+      return await services.projectManagementReadService.readWorkspaceTexts(
+        request as unknown as DesktopProjectManagementWorkspaceTextsRequest,
+      )
+    },
+  )
+
   handle(desktopApiIpcChannels.dialogPickDirectory, async (_event, options) => {
     return await pickDirectory(options as DesktopDirectoryDialogOptions | undefined)
   })
@@ -1136,6 +1243,17 @@ export function registerIpc(
         path as string,
         fromOffsetBytes as number,
         maxChars as number,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk,
+    async (_event, path, fromOffsetBytes, maxBytes) => {
+      return await services.workspaceService.readOptionalProjectTextFileChunk(
+        path as string,
+        fromOffsetBytes as number,
+        maxBytes as number,
       )
     },
   )
@@ -1496,7 +1614,7 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccWorkspaceClose, async (_event, request) => {
     const closeRequest = request as EccWorkspaceHandleRequest
-    return await closeTrackedWorkspaceHandle(closeRequest.workspaceHandle)
+    return await detachTrackedWorkspaceHandle(closeRequest.workspaceHandle)
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceHome, async (_event, request) => {
@@ -1547,6 +1665,51 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccFlowRunStep, async (_event, request) => {
     return await services.eccRuntimeService.runStep(request as EccFlowRunStepRequest)
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeStartFlow, async (_event, request) => {
+    return await services.eccRuntimeService.startFlowOperation(
+      request as EccRuntimeStartFlowRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeStartStep, async (_event, request) => {
+    return await services.eccRuntimeService.startStepOperation(
+      request as EccRuntimeStartStepRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeOperationStatus, async (_event, request) => {
+    return await services.eccRuntimeService.operationStatus(
+      request as EccRuntimeOperationRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeWaitForOperation, async (_event, request) => {
+    return await services.eccRuntimeService.waitForOperation(
+      request as EccRuntimeOperationRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeOperationCancel, async (_event, request) => {
+    return await services.eccRuntimeService.cancelOperation(
+      request as EccRuntimeOperationRequest,
+    )
+  })
+
+  handle(
+    desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered,
+    async (_event, request) => {
+      return await services.eccRuntimeService.acknowledgeStepRendered(
+        request as EccRuntimeStepRenderedAckRequest,
+      )
+    },
+  )
+
+  handle(desktopApiIpcChannels.eccRuntimeSnapshot, async (_event, request) => {
+    return await services.eccRuntimeService.workspaceSnapshot(
+      request as EccWorkspaceHandleRequest,
+    )
   })
 
   handle(desktopApiIpcChannels.agentStart, async (_event, request) => {

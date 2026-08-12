@@ -7,6 +7,7 @@ import type {
   DesktopProjectTextFileUpdate,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
+import { isPathWithinRoot, isSameOrAncestorPath } from './pathScope'
 
 export interface LogTailTextReader {
   readOptionalProjectTextFileUpdate(
@@ -42,22 +43,8 @@ function isNodeErrorWithCode(error: unknown, code: string): boolean {
   )
 }
 
-function isWithinRoot(candidatePath: string, rootPath: string): boolean {
-  const relativePath = relative(rootPath, candidatePath)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
-}
-
 function isSamePath(path: string, otherPath: string): boolean {
   return relative(path, otherPath) === ''
-}
-
-function isSameOrAncestorPath(path: string, descendantPath: string): boolean {
-  const relativePath = relative(path, descendantPath)
-  return (
-    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
-  )
 }
 
 function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
@@ -70,7 +57,7 @@ async function findProjectFileWatchDirectory(
 ): Promise<string> {
   let candidate = dirname(path)
 
-  while (candidate && isWithinRoot(candidate, rootPath)) {
+  while (candidate && isPathWithinRoot(candidate, rootPath)) {
     try {
       const candidateStats = await stat(candidate)
       if (candidateStats.isDirectory()) return candidate

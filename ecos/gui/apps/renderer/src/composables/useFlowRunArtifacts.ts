@@ -1,19 +1,24 @@
-import { getCurrentInstance, onBeforeUnmount } from 'vue'
-import type { WorkspaceStepResource } from '@ecos-studio/shared'
+import { getCurrentInstance, onBeforeUnmount, watch } from 'vue'
+import type { WorkspaceResourceIndex, WorkspaceStepResource } from '@ecos-studio/shared'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
+import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { useMessageStore } from '@/stores/messageStore'
-import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
+import { readOptionalProjectTextFileTail, readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import {
-  flowStepArtifactFingerprint,
   flowStepKey,
   flowStepRunArtifacts,
   isSuccessfulFlowStep,
 } from './flowRunArtifacts'
+import {
+  normalizeWorkspaceProjectPath,
+  onWorkspaceRerunPrepared,
+} from './homeRunArtifacts'
+import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
 
-const RUN_ARTIFACT_POLL_INTERVAL_MS = 600
-const RUN_ARTIFACT_SETTLE_POLLS = 3
+const MAX_STEP_REPORTS = 8
+const MAX_LAYOUT_PREVIEW_BYTES = 8 * 1024 * 1024
 
 export interface FlowRunArtifactCaptureOptions {
   stepNames?: readonly string[]
@@ -28,56 +33,50 @@ export interface FlowRunArtifactCapture {
   stop(): void
 }
 
-interface CapturedStepState {
-  baselineFingerprint: string
-  baselineSucceeded: boolean
-  sawNonSuccess: boolean
-  published: boolean
-}
-
-function waitForNextPoll(): Promise<void> {
-  return new Promise((resolve) =>
-    window.setTimeout(resolve, RUN_ARTIFACT_POLL_INTERVAL_MS),
-  )
-}
-
 function filename(path: string): string {
   return path.split(/[\\/]/).pop() || path
 }
 
 /**
- * Watches the resource index while a user-initiated run is active. Existing
- * artifacts are baselined first, so opening an already completed workspace does
- * not fill the information panel with historical output.
+ * Captures the bounded report/layout view for every successful GUI step. The
+ * capture runs through Electron IPC and is awaited by the workspace render
+ * gate, so the next ECC step cannot overlap this NFS work with a stale UI.
  */
 export function useFlowRunArtifacts() {
   const messageStore = useMessageStore()
+  const { currentProject, runtimeEvents } = useWorkspace()
   const { registerBlobUrl } = useWorkspaceLifecycle()
   const activeCaptures = new Set<FlowRunArtifactCapture>()
 
-  async function startFlowRunArtifactCapture(
+  function startFlowRunArtifactCapture(
     options: FlowRunArtifactCaptureOptions = {},
-  ): Promise<FlowRunArtifactCapture> {
+  ): FlowRunArtifactCapture {
     const targetSteps = new Set(
       (options.stepNames ?? []).map(flowStepKey).filter((name) => name.length > 0),
     )
-    const capturedSteps = new Map<string, CapturedStepState>()
+    const publishedSteps = new Set<string>()
+    const completedSteps = new Set<string>()
+    const forcedSteps = new Set<string>()
+    const existingRuntimeEvents = new WeakSet<object>()
+    const handledRuntimeEvents = new WeakSet<object>()
+    for (const event of runtimeEvents.value) {
+      if (event && typeof event === 'object') existingRuntimeEvents.add(event)
+    }
     let stopped = false
-    let pollTimer: ReturnType<typeof setInterval> | null = null
-    let pendingPoll: Promise<void> | null = null
+    let inspectionQueue = Promise.resolve()
 
-    const matchesTarget = (step: WorkspaceStepResource): boolean =>
-      targetSteps.size === 0 || targetSteps.has(flowStepKey(step.name))
+    const matchesTarget = (stepName: string): boolean =>
+      targetSteps.size === 0 || targetSteps.has(flowStepKey(stepName))
 
     async function publishStepArtifacts(step: WorkspaceStepResource): Promise<void> {
       const artifacts = flowStepRunArtifacts(step)
 
-      for (const report of artifacts.reports) {
+      for (const report of artifacts.reports.slice(0, MAX_STEP_REPORTS)) {
         try {
           const authorizedPath = await resolveProjectPathAccess(report.path)
           if (!authorizedPath) continue
-          const content = await readOptionalProjectTextFile(authorizedPath)
-          if (content === null) continue
+          const tail = await readOptionalProjectTextFileTail(authorizedPath, 64 * 1024)
+          if (tail === null) continue
 
           messageStore.addInfoMessage({
             title: filename(report.path),
@@ -86,7 +85,7 @@ export function useFlowRunArtifacts() {
             items: [
               {
                 label: filename(report.path),
-                content,
+                content: tail.content,
                 format: 'text',
               },
             ],
@@ -96,8 +95,12 @@ export function useFlowRunArtifacts() {
         }
       }
 
-      if (!artifacts.layout) return
-
+      if (
+        !artifacts.layout ||
+        (artifacts.layout.sizeBytes ?? 0) > MAX_LAYOUT_PREVIEW_BYTES
+      ) {
+        return
+      }
       try {
         const authorizedPath = await resolveProjectPathAccess(artifacts.layout.path)
         if (!authorizedPath) return
@@ -120,93 +123,130 @@ export function useFlowRunArtifacts() {
       }
     }
 
-    async function inspectIndex(
-      mode: 'baseline' | 'watch',
-      forcedStepNames: ReadonlySet<string> = new Set(),
+    async function inspectCompletedSteps(
+      stepNames?: Iterable<string>,
+      resourceIndex?: WorkspaceResourceIndex,
     ): Promise<void> {
       if (stopped) return
-
       try {
-        const index = await getWorkspaceResourceIndexApi()
-        for (const step of index.flow.steps) {
-          if (!matchesTarget(step)) continue
-
-          const key = flowStepKey(step.name)
-          const fingerprint = flowStepArtifactFingerprint(step)
-          const isSucceeded = isSuccessfulFlowStep(step)
-          const captured = capturedSteps.get(key)
-
-          if (!captured) {
-            capturedSteps.set(key, {
-              baselineFingerprint: fingerprint,
-              baselineSucceeded: isSucceeded,
-              sawNonSuccess: !isSucceeded,
-              published: false,
-            })
-            continue
-          }
-
-          if (mode === 'baseline') continue
-          if (!isSucceeded) {
-            captured.sawNonSuccess = true
-            captured.published = false
-            continue
-          }
-
-          const shouldPublish =
-            forcedStepNames.has(key) ||
-            !captured.baselineSucceeded ||
-            captured.sawNonSuccess ||
-            captured.baselineFingerprint !== fingerprint
-
-          if (!shouldPublish || captured.published) continue
-
+        const index = resourceIndex ?? (await getWorkspaceResourceIndexApi())
+        if (stopped) return
+        for (const stepName of new Set(
+          stepNames ?? [...completedSteps, ...forcedSteps],
+        )) {
+          if (!matchesTarget(stepName)) continue
+          const key = flowStepKey(stepName)
+          if (publishedSteps.has(key) && !forcedSteps.has(key)) continue
+          const step = index.flow.steps.find(
+            (candidate) => flowStepKey(candidate.name) === key,
+          )
+          if (!step || !isSuccessfulFlowStep(step) || stopped) continue
           await publishStepArtifacts(step)
-          captured.published = true
+          publishedSteps.add(key)
         }
       } catch (error) {
-        console.warn('Failed to inspect flow run artifacts:', error)
+        console.warn('Failed to capture completed flow artifacts:', error)
       }
     }
 
-    function poll(
-      mode: 'baseline' | 'watch' = 'watch',
-      forcedStepNames: ReadonlySet<string> = new Set(),
+    function enqueueInspection(
+      stepNames?: Iterable<string>,
+      resourceIndex?: WorkspaceResourceIndex,
     ): Promise<void> {
-      if (pendingPoll) return pendingPoll
-      pendingPoll = inspectIndex(mode, forcedStepNames).finally(() => {
-        pendingPoll = null
-      })
-      return pendingPoll
+      inspectionQueue = inspectionQueue.then(() =>
+        inspectCompletedSteps(stepNames, resourceIndex),
+      )
+      return inspectionQueue
     }
 
+    function enqueueFinalInspection(): void {
+      void enqueueInspection()
+    }
+
+    let stopWatchingRuntimeEvents: (() => void) | null = null
+    let unregisterWorkspaceRerunPrepared: (() => void) | null = null
     const capture: FlowRunArtifactCapture = {
       async settle(settleOptions: FlowRunArtifactSettleOptions = {}): Promise<void> {
-        const forcedStepNames = new Set(
-          (settleOptions.forceStepNames ?? []).map(flowStepKey),
-        )
-        for (let attempt = 0; attempt < RUN_ARTIFACT_SETTLE_POLLS; attempt += 1) {
-          await poll('watch', forcedStepNames)
-          if (attempt < RUN_ARTIFACT_SETTLE_POLLS - 1) await waitForNextPoll()
+        for (const stepName of settleOptions.forceStepNames ?? []) {
+          forcedSteps.add(flowStepKey(stepName))
         }
+        await enqueueInspection()
         capture.stop()
       },
       stop(): void {
         if (stopped) return
         stopped = true
-        if (pollTimer) clearInterval(pollTimer)
-        pollTimer = null
+        stopWatchingRuntimeEvents?.()
+        stopWatchingRuntimeEvents = null
+        unregisterStepRenderTask()
+        unregisterWorkspaceRerunPrepared?.()
+        unregisterWorkspaceRerunPrepared = null
         activeCaptures.delete(capture)
       },
     }
 
-    activeCaptures.add(capture)
-    await poll('baseline')
-    if (!stopped) {
-      pollTimer = setInterval(() => {
-        void poll('watch')
-      }, RUN_ARTIFACT_POLL_INTERVAL_MS)
+    const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
+      if (stopped || !commit.step || !matchesTarget(commit.step)) return
+      completedSteps.add(flowStepKey(commit.step))
+      await enqueueInspection([flowStepKey(commit.step)], await commit.resourceIndex())
+    })
+
+    unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
+      const projectPath = currentProject.value?.path
+      if (
+        !projectPath ||
+        normalizeWorkspaceProjectPath(event.projectPath) !==
+          normalizeWorkspaceProjectPath(projectPath)
+      ) {
+        return
+      }
+      const affected = event.affectedSteps.filter(matchesTarget)
+      if (affected.length > 0) {
+        messageStore.clearSessionGuiArtifactsForSteps(affected)
+      }
+    })
+
+    function consumeRuntimeEvent(event: unknown): void {
+      if (
+        stopped ||
+        !event ||
+        typeof event !== 'object' ||
+        existingRuntimeEvents.has(event) ||
+        handledRuntimeEvents.has(event)
+      ) {
+        return
+      }
+      handledRuntimeEvents.add(event)
+      const data = (event as { data?: unknown }).data
+      if (!data || typeof data !== 'object') return
+      const eventData = data as Record<string, unknown>
+      const protocolType = eventData.runtimeProtocolType
+      const step = typeof eventData.step === 'string' ? eventData.step : ''
+      if (protocolType === 'step.completed' && step) {
+        const state =
+          typeof eventData.state === 'string' ? eventData.state.toLowerCase() : ''
+        if (state === 'success') completedSteps.add(flowStepKey(step))
+        return
+      }
+      if (
+        ['operation.completed', 'operation.failed', 'operation.cancelled'].includes(
+          String(protocolType),
+        )
+      ) {
+        enqueueFinalInspection()
+        void inspectionQueue.finally(() => capture.stop())
+      }
     }
+
+    stopWatchingRuntimeEvents = watch(
+      runtimeEvents,
+      (events) => {
+        for (const event of events) consumeRuntimeEvent(event)
+      },
+      { deep: true, flush: 'sync' },
+    )
+
+    activeCaptures.add(capture)
     return capture
   }
 

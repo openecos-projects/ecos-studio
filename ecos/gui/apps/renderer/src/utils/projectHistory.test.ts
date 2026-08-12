@@ -11,12 +11,33 @@ const settingsGet = vi.fn(async (key: string) => settings.get(key) ?? null)
 const settingsSet = vi.fn(async (key: string, value: unknown) => {
   settings.set(key, value)
 })
+const readManifest = vi.fn(async (projectRoot: string) => {
+  if (projectRoot !== '/projects/gcd') return null
+  return JSON.stringify({
+    schema_version: 1,
+    project_id: 'proj_gcd',
+    name: 'gcd',
+    design_name: 'gcd',
+    root_path: '/projects/gcd',
+    created_at: '2026-07-02T07:00:00.000Z',
+    updated_at: '2026-07-02T07:00:00.000Z',
+    base_design: { pdk: 'ics55', top_module: 'gcd', parameters: { design: 'gcd' } },
+    objectives: { primary: 'timing', directions: {} },
+    workspaces: [],
+    mpc: null,
+    best_workspace: null,
+    qor_baseline: null,
+  })
+})
 
 vi.mock('@/platform/desktop', () => ({
   waitForDesktopApi: vi.fn(async () => ({
     settings: {
       get: settingsGet,
       set: settingsSet,
+    },
+    projectManagement: {
+      readManifest,
     },
   })),
 }))
@@ -38,9 +59,10 @@ describe('project history', () => {
     settings.clear()
     settingsGet.mockClear()
     settingsSet.mockClear()
+    readManifest.mockClear()
   })
 
-  it('loads project roots from project_history rather than workspace recent_projects', async () => {
+  it('loads stored project roots without re-reading workspace recent_projects', async () => {
     settings.set('recent_projects', [
       {
         id: '/work/ws_0001',
@@ -72,6 +94,45 @@ describe('project history', () => {
         lastOpened: new Date('2026-07-02T08:00:00.000Z'),
         pdk: 'ics55',
         topModule: 'gcd',
+      }),
+    ])
+  })
+
+  it('migrates legacy recent workspace paths to their validated Project root', async () => {
+    settings.set('recent_projects', [
+      {
+        id: '/projects/gcd/ws_0001',
+        name: 'gcd/ws_0001',
+        path: '/projects/gcd/ws_0001',
+        lastOpened: '2026-07-02T08:00:00.000Z',
+        status: 'success',
+      },
+      {
+        id: '/projects/gcd/ws_0002',
+        name: 'gcd/ws_0002',
+        path: '/projects/gcd/ws_0002',
+        lastOpened: '2026-07-02T09:00:00.000Z',
+      },
+    ])
+
+    const history = await loadProjectHistory()
+
+    expect(readManifest).toHaveBeenCalledWith('/projects/gcd')
+    expect(history).toEqual([
+      expect.objectContaining({
+        id: '/projects/gcd',
+        name: 'gcd',
+        path: '/projects/gcd',
+        lastOpened: new Date('2026-07-02T09:00:00.000Z'),
+        pdk: 'ics55',
+        topModule: 'gcd',
+      }),
+    ])
+    expect(settings.get('project_history')).toEqual([
+      expect.objectContaining({
+        id: '/projects/gcd',
+        path: '/projects/gcd',
+        lastOpened: '2026-07-02T09:00:00.000Z',
       }),
     ])
   })

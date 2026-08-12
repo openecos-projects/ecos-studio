@@ -10,6 +10,7 @@ import {
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
 import { EccJsonRpcError } from './jsonRpcClient'
+import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 
 interface RpcCall {
   method: string
@@ -75,18 +76,28 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
   }
 }
 
-function createService(directory = '/work/demo') {
+function createService(
+  directory = '/work/demo',
+  options: Pick<
+    ConstructorParameters<typeof EccWorkspaceRuntime>[0],
+    'diagnosticIdleTimeoutMs' | 'lazyWorkspaceOpen' | 'snapshotLoader'
+  > = {},
+) {
   const client = new FakeRpcClient()
   const events: EccRuntimeEvent[] = []
   let sidecarEvent: ((event: EccRuntimeEvent) => void) | null = null
+  let sidecarNotification: ((notification: JsonRpcNotificationPayload) => void) | null =
+    null
   const sidecar = new FakeSidecar(client)
   const service = new EccWorkspaceRuntime({
-    createSidecar: (onEvent) => {
+    createSidecar: (onEvent, onNotification) => {
       sidecarEvent = onEvent
+      sidecarNotification = onNotification
       return sidecar
     },
     directory,
     onEvent: (event) => events.push(event),
+    ...options,
   })
   return {
     client,
@@ -94,10 +105,453 @@ function createService(directory = '/work/demo') {
     service,
     sidecar,
     sidecarEvent: (event: EccRuntimeEvent) => sidecarEvent?.(event),
+    sidecarNotification: (notification: JsonRpcNotificationPayload) =>
+      sidecarNotification?.(notification),
   }
 }
 
 describe('EccWorkspaceRuntime', () => {
+  it('opens an idle workspace from a bounded snapshot without spawning ECC', async () => {
+    let loaderCalls = 0
+    const { service, sidecar } = createService('/work/demo', {
+      lazyWorkspaceOpen: true,
+      snapshotLoader: async (directory) => {
+        loaderCalls += 1
+        return {
+          directory,
+          flow: { steps: [] },
+          home: { flow: '/work/demo/home/flow.json' },
+          lastEventId: 'disk:1',
+          operations: [],
+          parameters: {},
+        }
+      },
+    })
+
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    await expect(
+      service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle }),
+    ).resolves.toMatchObject({
+      directory: '/work/demo',
+      lastEventId: 'disk:1',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    expect(loaderCalls).toBe(1)
+    expect(sidecar.startCount).toBe(0)
+  })
+
+  it('shares one idle snapshot read across concurrent renderer requests', async () => {
+    const pending = deferred<{
+      directory: string
+      flow: { steps: [] }
+      home: Record<string, never>
+      lastEventId: string
+      operations: []
+      parameters: Record<string, never>
+    }>()
+    let loaderCalls = 0
+    const { service } = createService('/nfs/demo', {
+      lazyWorkspaceOpen: true,
+      snapshotLoader: async () => {
+        loaderCalls += 1
+        return await pending.promise
+      },
+    })
+    const workspace = await service.openWorkspace({ directory: '/nfs/demo' })
+
+    const first = service.workspaceSnapshot({
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    const second = service.workspaceSnapshot({
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    expect(loaderCalls).toBe(1)
+
+    pending.resolve({
+      directory: '/nfs/demo',
+      flow: { steps: [] },
+      home: {},
+      lastEventId: 'disk:1',
+      operations: [],
+      parameters: {},
+    })
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ lastEventId: 'disk:1' }),
+      expect.objectContaining({ lastEventId: 'disk:1' }),
+    ])
+  })
+
+  it('maps protocol notifications to the matching GUI workspace handle', async () => {
+    const { client, events, service, sidecarNotification } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:1',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { step: 'Synthesis', tool: 'yosys' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'step.started',
+        workspaceId: 'workspace-1',
+      },
+    })
+
+    expect(events).toContainEqual({
+      event: expect.objectContaining({ type: 'step.started' }),
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+  })
+
+  it('starts GUI flow operations without waiting for the long-running result', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        awaitingEventId: null,
+        createdAt: 1,
+        currentStep: '',
+        currentTool: '',
+        error: null,
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        rerun: false,
+        result: null,
+        state: 'queued',
+        step: '',
+        updatedAt: 1,
+        workspaceId: 'workspace-1',
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(
+      service.startFlowOperation({
+        idempotencyKey: 'request-1',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ operationId: 'operation-1', state: 'queued' })
+    expect(client.calls.at(-1)).toEqual({
+      method: 'operation.start_flow',
+      params: {
+        idempotencyKey: 'request-1',
+        origin: 'gui',
+        rerun: false,
+        workspaceId: 'workspace-1',
+      },
+    })
+  })
+
+  it('forwards GUI single-step rerun reset intent to ECC', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        awaitingEventId: null,
+        createdAt: 1,
+        currentStep: 'Floorplan',
+        currentTool: '',
+        error: null,
+        kind: 'step',
+        operationId: 'operation-2',
+        origin: 'gui',
+        rerun: true,
+        result: null,
+        state: 'queued',
+        step: 'Floorplan',
+        updatedAt: 1,
+        workspaceId: 'workspace-1',
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(
+      service.startStepOperation({
+        idempotencyKey: 'request-2',
+        rerun: true,
+        resetDependents: true,
+        step: 'Floorplan',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ operationId: 'operation-2', state: 'queued' })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'operation.start_step',
+      params: {
+        idempotencyKey: 'request-2',
+        origin: 'gui',
+        rerun: true,
+        resetDependents: true,
+        step: 'Floorplan',
+        workspaceId: 'workspace-1',
+      },
+    })
+  })
+
+  it('resolves an operation waiter from its terminal protocol event', async () => {
+    const { client, service, sidecarNotification } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    const completed = service.waitForOperation({
+      operationId: 'operation-1',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:2',
+        kind: 'step',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { result: { state: 'Success' }, step: 'place', tool: 'dreamplace' },
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.completed',
+        workspaceId: 'workspace-1',
+      },
+    })
+
+    await expect(completed).resolves.toMatchObject({
+      currentStep: 'place',
+      operationId: 'operation-1',
+      state: 'succeeded',
+    })
+  })
+
+  it('persists the terminal snapshot before releasing a successful flow sidecar', async () => {
+    const { client, service, sidecar, sidecarNotification } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push({
+      directory: '/work/demo',
+      flow: { steps: [] },
+      home: {},
+      lastEventId: 'workspace-1:2',
+      operations: [],
+      parameters: {},
+    })
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:2',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { result: { rerun: false } },
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.completed',
+        workspaceId: 'workspace-1',
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(sidecar.shutdownCount).toBe(1)
+    })
+    await expect(
+      service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle }),
+    ).resolves.toMatchObject({
+      lastEventId: 'workspace-1:2',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.snapshot'),
+    ).toHaveLength(1)
+  })
+
+  it('waits for the terminal snapshot instead of returning an Ongoing cache to a remounted page', async () => {
+    const { client, service, sidecarNotification } = createService()
+    const finalSnapshot = deferred<{
+      directory: string
+      flow: {
+        steps: Array<{ name: string; runtime: string; state: string; tool: string }>
+      }
+      home: Record<string, never>
+      lastEventId: string
+      operations: []
+      parameters: Record<string, never>
+    }>()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        directory: '/work/demo',
+        flow: {
+          steps: [{ name: 'Harden', runtime: '', state: 'Ongoing', tool: 'ecc' }],
+        },
+        home: {},
+        lastEventId: 'workspace-1:ongoing',
+        operations: [],
+        parameters: {},
+      },
+      finalSnapshot.promise,
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:1',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { step: 'Harden', tool: 'ecc' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'step.started',
+        workspaceId: 'workspace-1',
+      },
+    })
+    await expect(
+      service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle }),
+    ).resolves.toMatchObject({ lastEventId: 'workspace-1:ongoing' })
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:2',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { result: { state: 'Success' }, step: 'Harden', tool: 'ecc' },
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.completed',
+        workspaceId: 'workspace-1',
+      },
+    })
+
+    const remountedPageSnapshot = service.workspaceSnapshot({
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    let resolved = false
+    void remountedPageSnapshot.then(() => {
+      resolved = true
+    })
+    await waitForQueuedOperation()
+    expect(resolved).toBe(false)
+
+    finalSnapshot.resolve({
+      directory: '/work/demo',
+      flow: {
+        steps: [{ name: 'Harden', runtime: '0:0:10', state: 'Success', tool: 'ecc' }],
+      },
+      home: {},
+      lastEventId: 'workspace-1:completed',
+      operations: [],
+      parameters: {},
+    })
+
+    await expect(remountedPageSnapshot).resolves.toMatchObject({
+      flow: { steps: [expect.objectContaining({ state: 'Success' })] },
+      lastEventId: 'workspace-1:completed',
+    })
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.snapshot'),
+    ).toHaveLength(2)
+  })
+
+  it('persists a detached step snapshot before releasing its GUI ACK gate', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        directory: '/work/demo',
+        flow: { steps: [] },
+        home: {},
+        lastEventId: 'workspace-1:3',
+        operations: [],
+        parameters: {},
+      },
+      {
+        accepted: true,
+        duplicate: false,
+        eventId: 'workspace-1:3',
+        operationId: 'operation-1',
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(
+      service.acknowledgeDetachedStepRendered({
+        eventId: 'workspace-1:3',
+        operationId: 'operation-1',
+        stepCommitId: 'operation-1:step:1',
+        workspaceHandle: workspace.workspaceHandle,
+        workspaceRevision: 1,
+      }),
+    ).resolves.toMatchObject({ accepted: true })
+
+    expect(client.calls.slice(-2)).toEqual([
+      { method: 'workspace.snapshot', params: { workspaceId: 'workspace-1' } },
+      {
+        method: 'operation.ack_step_rendered',
+        params: {
+          eventId: 'workspace-1:3',
+          operationId: 'operation-1',
+          stepCommitId: 'operation-1:step:1',
+          workspaceRevision: 1,
+        },
+      },
+    ])
+  })
+
+  it('releases a failed operation sidecar after the diagnostic idle timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const { sidecar, sidecarNotification } = createService('/work/demo', {
+        diagnosticIdleTimeoutMs: 25,
+      })
+
+      sidecarNotification({
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: {
+          eventId: 'workspace-1:2',
+          kind: 'flow',
+          operationId: 'operation-1',
+          origin: 'gui',
+          payload: { error: { code: 'command_failed', message: 'failed' } },
+          sequence: 2,
+          timestamp: 2,
+          type: 'operation.failed',
+          workspaceId: 'workspace-1',
+        },
+      })
+
+      await vi.advanceTimersByTimeAsync(25)
+      expect(sidecar.shutdownCount).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('forwards the wizard flow range when creating a workspace', async () => {
     const { client, service } = createService()
     client.responses.push(

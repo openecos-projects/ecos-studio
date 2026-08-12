@@ -14,6 +14,9 @@ export type {
   PickedRtlSources,
   DesktopProjectLogTailSubscriptionOptions,
   DesktopProjectDirectoryEntry,
+  DesktopProjectManagementWorkspaceTextsRequest,
+  DesktopProjectManagementWorkspaceTextsResult,
+  DesktopProjectTextFileChunk,
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,
@@ -46,6 +49,17 @@ export type {
   EccRuntimeApi,
   EccRuntimeError,
   EccRuntimeEvent,
+  EccRuntimeInterruptibility,
+  EccRuntimeOperation,
+  EccRuntimeOperationKind,
+  EccRuntimeOperationRequest,
+  EccRuntimeOperationState,
+  EccRuntimeProtocolEvent,
+  EccRuntimeProtocolPayload,
+  EccRuntimeStartFlowRequest,
+  EccRuntimeStartStepRequest,
+  EccRuntimeStepRenderedAckRequest,
+  EccRuntimeStepSnapshot,
   EccSignoffReviewDetail,
   EccSignoffReviewDetailKind,
   EccSignoffReviewGroup,
@@ -67,6 +81,7 @@ export type {
   EccWorkspaceResetFlowResult,
   EccWorkspaceSyncConfigRequest,
   EccWorkspaceSyncConfigResult,
+  EccWorkspaceRuntimeSnapshot,
 } from './contracts/eccRuntime.ts'
 export type {
   ResourceAction,
@@ -183,6 +198,11 @@ export {
   resolveProjectFileAbsolutePath,
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
+export {
+  projectManagementStaTimingIssuesPath,
+  projectManagementWorkspaceStepAnalysisSpecs,
+  projectManagementWorkspaceSummaryPaths,
+} from './utils/projectManagementSummary.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'
 export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'
 export {
@@ -196,10 +216,12 @@ export {
   recordReplacementBackupInManifest,
   registerWorkspaceInManifest,
   serializeProjectManifest,
+  synchronizeProjectBaseline,
 } from './utils/projectManifest.ts'
 export type {
   ProjectManifest,
   ProjectManifestBaseDesign,
+  ProjectManifestBaselineSyncInput,
   ProjectManifestDraftInput,
   ProjectManifestFlowStep,
   ProjectManifestMetricSummary,

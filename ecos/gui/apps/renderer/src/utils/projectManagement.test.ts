@@ -124,6 +124,7 @@ function manifestWithWorkspace(workspaceId = 'ws_0004') {
     createProjectManifestDraft({
       rootPath: '/projects/gcd',
       name: 'gcd',
+      designName: 'gcd',
       now: '2026-07-20T00:00:00.000Z',
     }),
     {
@@ -329,6 +330,7 @@ describe('project management V3 model', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/projects/gcd',
       name: 'gcd',
+      designName: 'gcd',
       mpc: {
         resource_id: 'mpc:mpc-frame',
         display_name: 'MPC Frame',

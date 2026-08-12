@@ -128,6 +128,7 @@ export interface ProjectManifest {
   schema_version: 1
   project_id: string
   name: string
+  design_name: string
   description: string
   root_path: string
   created_at: string
@@ -337,6 +338,7 @@ export interface ProjectDashboardSummary {
 export interface ProjectManagementProject {
   id: string
   name: string
+  designName: string
   path: string
   pdk?: string
   topModule?: string
@@ -360,6 +362,7 @@ export interface ProjectSelectionState {
 export interface ProjectManifestDraftInput {
   rootPath: string
   name: string
+  designName: string
   mpc?: ProjectManifestMpc | null
   now?: string
 }
@@ -527,6 +530,7 @@ export function buildProjectManagementProject(
 ): ProjectManagementProject {
   const path = manifest?.root_path ?? project?.path ?? ''
   const name = manifest?.name ?? project?.name ?? 'No Project Selected'
+  const designName = manifest?.design_name ?? ''
   const topModule = manifest?.base_design.top_module ?? project?.topModule
   const pdk = manifest?.base_design.pdk ?? project?.pdk
   const manifestWorkspaces = manifest?.workspaces ?? []
@@ -544,7 +548,7 @@ export function buildProjectManagementProject(
       workspaceArtifactDesignName(
         workspace,
         manifest?.base_design,
-        projectArtifactDesignName(project?.name ?? name, topModule),
+        designName || projectArtifactDesignName(project?.name ?? name, topModule),
       ),
     )
   })
@@ -575,6 +579,7 @@ export function buildProjectManagementProject(
   return {
     id: path,
     name,
+    designName,
     path,
     pdk,
     topModule,
@@ -955,16 +960,19 @@ export function createProjectManifestDraft(
   input: ProjectManifestDraftInput,
 ): ProjectManifest {
   const now = input.now ?? new Date().toISOString()
+  const designName = input.designName.trim()
+  if (!designName) throw new Error('Project manifest design_name is required.')
   return {
     schema_version: 1,
     project_id: `proj_${slugify(input.name || basenamePath(input.rootPath) || 'project')}`,
     name: input.name || basenamePath(input.rootPath) || 'project',
+    design_name: designName,
     description: '',
     root_path: normalizePath(input.rootPath),
     created_at: now,
     updated_at: now,
     base_design: {
-      parameters: {},
+      parameters: { design: designName },
       rtl_list: [],
     },
     objectives: {
@@ -990,11 +998,23 @@ export function serializeProjectManifest(manifest: ProjectManifest): string {
 
 export function parseProjectManifest(content: string): ProjectManifest {
   const parsed = JSON.parse(content) as ProjectManifest
-  if (parsed.schema_version !== 1 || !Array.isArray(parsed.workspaces)) {
+  if (
+    parsed.schema_version !== 1 ||
+    !Array.isArray(parsed.workspaces) ||
+    !optionalString(parsed.design_name)
+  ) {
     throw new Error('Invalid project manifest.')
   }
   return {
     ...parsed,
+    design_name: optionalString(parsed.design_name),
+    base_design: {
+      ...parsed.base_design,
+      parameters: {
+        ...parsed.base_design.parameters,
+        design: optionalString(parsed.design_name),
+      },
+    },
     mpc: normalizeProjectManifestMpc(parsed.mpc),
     qor_baseline: parsed.qor_baseline ?? null,
   }
@@ -1202,17 +1222,20 @@ export function registerWorkspaceInManifest(
   const endStep = input.endStep
     ? normalizeFlowStep(input.endStep)
     : normalizeFlowStep(existingWorkspace?.end_step ?? 'Harden')
-  const workspaceName =
-    basenamePath(workspacePath) || existingWorkspace?.name || workspaceId
-  const parameterPatch = input.config?.parameters
+  const workspaceName = manifest.design_name
+  const workspaceParameters = {
+    ...input.config?.parameters,
+    design: manifest.design_name,
+  }
+  const parameterPatch = input.config
     ? {
         ...existingWorkspace?.parameter_patch,
         ...buildParameterPatch(
           manifest.base_design.parameters ?? {},
-          input.config.parameters,
+          workspaceParameters,
         ),
       }
-    : (existingWorkspace?.parameter_patch ?? {})
+    : { ...existingWorkspace?.parameter_patch }
 
   const workspace: ProjectWorkspaceManifest = {
     workspace_id: workspaceId,
@@ -1240,9 +1263,15 @@ export function registerWorkspaceInManifest(
     name: input.projectName || manifest.name,
     root_path: normalizePath(input.projectRoot || manifest.root_path),
     updated_at: now,
-    base_design: mergeBaseDesignConfig(manifest.base_design, input.config, {
-      includeDesignParameter: !sourceWorkspaceId && !branchFrom,
-    }),
+    base_design: withProjectDesignName(
+      manifest.qor_baseline === null || manifest.qor_baseline.workspace_id === workspaceId
+        ? mergeBaseDesignConfig(manifest.base_design, {
+            ...input.config,
+            parameters: workspaceParameters,
+          })
+        : manifest.base_design,
+      manifest.design_name,
+    ),
     workspaces,
     qor_baseline: qorBaseline,
   }
@@ -2069,21 +2098,15 @@ function nextManifestWorkspaceId(manifest: ProjectManifest): string {
 function mergeBaseDesignConfig(
   baseDesign: ProjectManifestBaseDesign,
   config: ProjectWorkspaceRegistrationInput['config'],
-  options: { includeDesignParameter?: boolean } = {},
 ): ProjectManifestBaseDesign {
   if (!config) return baseDesign
 
   const parameters = config.parameters ?? {}
-  const baseDesignParameters = Object.fromEntries(
-    Object.entries(parameters).filter(
-      ([key]) => options.includeDesignParameter !== false || key !== 'design',
-    ),
-  )
   const next: ProjectManifestBaseDesign = {
     ...baseDesign,
     parameters: {
       ...baseDesign.parameters,
-      ...baseDesignParameters,
+      ...parameters,
     },
   }
   const pdk = optionalString(config.pdk)
@@ -2102,6 +2125,19 @@ function mergeBaseDesignConfig(
   if (config.rtl_list && config.rtl_list.length > 0) next.rtl_list = [...config.rtl_list]
 
   return next
+}
+
+function withProjectDesignName(
+  baseDesign: ProjectManifestBaseDesign,
+  designName: string,
+): ProjectManifestBaseDesign {
+  return {
+    ...baseDesign,
+    parameters: {
+      ...baseDesign.parameters,
+      design: designName,
+    },
+  }
 }
 
 function formatRuntimeLabel(seconds: number): string {

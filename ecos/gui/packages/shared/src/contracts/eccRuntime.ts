@@ -12,6 +12,16 @@ export interface EccRpcPingResult {
 
 export interface EccRpcShutdownResult {
   ok: boolean
+  deferred?: boolean
+  shutdownBarrier?: {
+    cancelRequested?: boolean
+    interruptibility?: EccRuntimeInterruptibility
+    operationId: string
+    safeToStop?: boolean
+    state: string
+    step: string
+    workspaceId: string
+  }
 }
 
 export interface EccWorkspaceCreateRequest {
@@ -217,6 +227,126 @@ export interface EccFlowRunStepResult {
   step: string
 }
 
+export type EccRuntimeOperationKind = 'flow' | 'step'
+export type EccRuntimeOperationState =
+  | 'queued'
+  | 'running'
+  | 'waiting_for_gui_sync'
+  | 'paused_for_gui_recovery'
+  | 'gui_sync_degraded'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+export type EccRuntimeInterruptibility = 'safe' | 'deferred' | 'forbidden'
+
+export interface EccRuntimeOperation {
+  awaitingEventId: string | null
+  awaitingStepCommitId?: string | null
+  cancelRequested?: boolean
+  createdAt: number
+  currentStep: string
+  currentTool: string
+  error: { code: string; message: string } | null
+  interruptibility?: EccRuntimeInterruptibility
+  kind: EccRuntimeOperationKind
+  operationId: string
+  origin: 'gui' | 'cli'
+  rerun: boolean
+  runSessionId?: string
+  runtimeInstanceId?: string
+  result: Record<string, unknown> | null
+  state: EccRuntimeOperationState
+  step: string
+  safeToStop?: boolean
+  workspaceRevision?: number
+  renderSyncState?:
+    | 'idle'
+    | 'waiting_for_gui_sync'
+    | 'paused_for_gui_recovery'
+    | 'gui_sync_degraded'
+    | 'timed_out'
+  renderRetryCount?: number
+  lastRenderAckAt?: number | null
+  shutdownBarrier?: boolean
+  updatedAt: number
+  workspaceId: string
+  deduplicated?: boolean
+}
+
+export interface EccRuntimeStartFlowRequest extends EccWorkspaceHandleRequest {
+  idempotencyKey: string
+  rerun?: boolean
+}
+
+export interface EccRuntimeStartStepRequest extends EccRuntimeStartFlowRequest {
+  /** GUI-only reruns invalidate the selected step and its downstream closure. */
+  resetDependents?: boolean
+  step: string
+}
+
+export interface EccRuntimeOperationRequest extends EccWorkspaceHandleRequest {
+  operationId: string
+}
+
+export interface EccRuntimeStepRenderedAckRequest extends EccRuntimeOperationRequest {
+  eventId: string
+  stepCommitId?: string
+  workspaceRevision?: number
+}
+
+export interface EccRuntimeStepSnapshot {
+  name: string
+  peakMemory: number
+  runtime: string
+  state: string
+  tool: string
+}
+
+export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
+  directory: string
+  flow: { steps: EccRuntimeStepSnapshot[] }
+  home: Record<string, unknown>
+  lastEventId: string
+  operations: EccRuntimeOperation[]
+  parameters: Record<string, unknown>
+  runtimeInstanceId?: string
+}
+
+export interface EccRuntimeProtocolPayload {
+  eventId: string
+  kind?: EccRuntimeOperationKind
+  operationId: string
+  origin: 'gui' | 'cli'
+  payload: Record<string, unknown>
+  runSessionId?: string
+  runtimeInstanceId?: string
+  sequence: number
+  timestamp: number
+  type:
+    | 'operation.queued'
+    | 'operation.started'
+    | 'operation.completed'
+    | 'operation.failed'
+    | 'operation.cancelled'
+    | 'operation.cancel_requested'
+    | 'operation.gui_sync_paused'
+    | 'operation.gui_sync_degraded'
+    | 'operation.rerun_prepared'
+    | 'step.started'
+    | 'step.log'
+    | 'step.completed'
+    | 'subflow.stage'
+  workspaceId: string
+  rerun?: boolean
+}
+
+export interface EccRuntimeProtocolEvent {
+  event: EccRuntimeProtocolPayload
+  type: 'runtime.protocol'
+  workspaceDirectory?: string
+  workspaceHandle?: string
+}
+
 export interface EccRuntimeError {
   code: string
   details?: unknown
@@ -230,6 +360,10 @@ export interface EccRuntimeError {
 export type EccRuntimeEvent =
   | {
       type: 'runtime.ready'
+      workspaceDirectory?: string
+    }
+  | {
+      type: 'runtime.idle'
       workspaceDirectory?: string
     }
   | {
@@ -249,6 +383,7 @@ export type EccRuntimeEvent =
       workspaceDirectory?: string
       workspaceHandle?: string
     }
+  | EccRuntimeProtocolEvent
   | {
       executionScope?: 'single_step' | 'full_flow'
       logFile?: string
@@ -293,6 +428,22 @@ export interface EccRuntimeApi {
     hello(): Promise<EccRpcHelloResult>
     ping(): Promise<EccRpcPingResult>
     shutdown(): Promise<EccRpcShutdownResult>
+  }
+  runtime?: {
+    acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
+      accepted: boolean
+      duplicate: boolean
+      eventId: string
+      operationId: string
+    }>
+    cancel(
+      request: EccRuntimeOperationRequest,
+    ): Promise<{ accepted: boolean; operationId: string; state: string }>
+    snapshot(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRuntimeSnapshot>
+    startFlow(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
+    startStep(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
+    status(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
+    waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
   }
   workspace: {
     close(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult>

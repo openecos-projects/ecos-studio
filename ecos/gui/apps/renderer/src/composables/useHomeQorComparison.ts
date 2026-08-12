@@ -10,14 +10,16 @@ import {
   buildProjectQorWorkspaceComparison,
   type ProjectQorWorkspaceComparison,
 } from '@/utils/projectQorTrend'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
-import {
-  readProjectWorkspaceAnalysisInputs,
-  readProjectWorkspaceFlowStates,
-} from '@/views/project-management/projectWorkspaceAnalysisData'
+import { readProjectQorWorkspaceData } from '@/views/project-management/projectWorkspaceAnalysisData'
 import { getDesktopApi } from '@/platform/desktop'
+import { onWorkspaceRerunPrepared } from './homeRunArtifacts'
 import { useWorkspace } from './useWorkspace'
+import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
+import type {
+  ProjectWorkspaceAnalysisInput,
+  ProjectWorkspaceFlowStateMap,
+} from '@/utils/projectManagement'
 
 export type HomeQorComparisonStatus =
   | 'loading'
@@ -44,6 +46,14 @@ const EMPTY_STATE: HomeQorComparisonState = {
 }
 
 const homeQorComparisonCache = new Map<string, HomeQorComparisonState>()
+const homeQorWorkspaceCache = new Map<
+  string,
+  {
+    analysis: ProjectWorkspaceAnalysisInput
+    flow: ProjectWorkspaceFlowStateMap
+  }
+>()
+const QOR_READ_TIMEOUT_MS = 12_000
 
 function homeQorComparisonCacheKey(workspacePath: string, projectRoot: string): string {
   return `${workspacePath.trim()}\u0000${projectRoot.trim()}`
@@ -52,6 +62,17 @@ function homeQorComparisonCacheKey(workspacePath: string, projectRoot: string): 
 /** Clears route-scoped QoR comparison snapshots when the workspace is closed. */
 export function clearHomeQorComparisonCache(): void {
   homeQorComparisonCache.clear()
+  homeQorWorkspaceCache.clear()
+}
+
+function clearHomeQorComparisonCacheForWorkspace(workspacePath: string): void {
+  const normalizedWorkspacePath = normalizePath(workspacePath)
+  for (const cacheKey of homeQorComparisonCache.keys()) {
+    const [cachedWorkspacePath] = cacheKey.split('\u0000')
+    if (normalizePath(cachedWorkspacePath ?? '') === normalizedWorkspacePath) {
+      homeQorComparisonCache.delete(cacheKey)
+    }
+  }
 }
 
 /**
@@ -74,8 +95,45 @@ export function useHomeQorComparison() {
       : EMPTY_STATE,
   )
   let requestToken = 0
+  let disposed = false
+  let refreshPromise: Promise<void> | null = null
+  let refreshRequests = 0
 
-  async function refresh(): Promise<void> {
+  const unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
+    const workspacePath = currentProject.value?.path
+    if (!workspacePath || !samePath(event.projectPath, workspacePath)) return
+    requestToken += 1
+    clearHomeQorComparisonCacheForWorkspace(workspacePath)
+    state.value = {
+      status: 'loading',
+      projectName: null,
+      baselineWorkspaceName: null,
+      baselineSource: null,
+      comparison: null,
+    }
+  })
+
+  function refresh(): Promise<void> {
+    refreshRequests += 1
+    if (!refreshPromise) {
+      refreshPromise = drainRefreshRequests()
+    }
+    return refreshPromise
+  }
+
+  async function drainRefreshRequests(): Promise<void> {
+    let completedRequests = 0
+    try {
+      while (!disposed && completedRequests < refreshRequests) {
+        completedRequests = refreshRequests
+        await refreshOnce()
+      }
+    } finally {
+      refreshPromise = null
+    }
+  }
+
+  async function refreshOnce(): Promise<void> {
     const token = ++requestToken
     const workspacePath = currentProject.value?.path
     if (!workspacePath) {
@@ -83,11 +141,33 @@ export function useHomeQorComparison() {
       return
     }
 
-    const projectRoot =
-      routeString(route.query.projectRoot) ??
-      (await resolveProjectRouteContextForWorkspace(workspacePath))?.projectRoot
-    if (token !== requestToken || !projectRoot) {
-      if (token === requestToken) state.value = EMPTY_STATE
+    let projectRoot: string | null
+    try {
+      projectRoot =
+        routeString(route.query.projectRoot) ??
+        (
+          await withQorReadDeadline(
+            resolveProjectRouteContextForWorkspace(workspacePath),
+            'project context',
+          )
+        )?.projectRoot ??
+        null
+    } catch (error) {
+      if (disposed || token !== requestToken) return
+      console.warn('Failed to resolve project context for Home QoR:', error)
+      if (!state.value.comparison) {
+        state.value = {
+          status: 'unavailable',
+          projectName: null,
+          baselineWorkspaceName: null,
+          baselineSource: null,
+          comparison: null,
+        }
+      }
+      return
+    }
+    if (disposed || token !== requestToken || !projectRoot) {
+      if (!disposed && token === requestToken) state.value = EMPTY_STATE
       return
     }
 
@@ -106,17 +186,18 @@ export function useHomeQorComparison() {
     }
 
     function updateState(nextState: HomeQorComparisonState): void {
-      if (token !== requestToken) return
+      if (disposed || token !== requestToken) return
       state.value = nextState
       homeQorComparisonCache.set(cacheKey, nextState)
     }
 
     try {
-      const registeredRoot =
-        await getDesktopApi().workspace.registerProjectReadRoot(projectRoot)
-      const manifestText = await readOptionalProjectTextFile('project.json', {
-        projectPath: registeredRoot,
-      })
+      const projectManagement = getDesktopApi().projectManagement
+      if (!projectManagement) throw new Error('Project QoR reads are unavailable.')
+      const manifestText = await withQorReadDeadline(
+        projectManagement.readManifest(projectRoot),
+        'project manifest',
+      )
       if (!manifestText) {
         updateState(EMPTY_STATE)
         return
@@ -145,11 +226,47 @@ export function useHomeQorComparison() {
         })
         return
       }
-      const [flowStates, analysisInputs] = await Promise.all([
-        readProjectWorkspaceFlowStates(manifest),
-        readProjectWorkspaceAnalysisInputs(manifest),
-      ])
-      if (token !== requestToken) return
+      const currentWorkspaceId = currentWorkspace.workspace_id
+      const workspaceCacheKey = (workspaceId: string) =>
+        `${projectRoot}\u0000${workspaceId}`
+      const loadWorkspaceIds = [currentWorkspaceId]
+      if (
+        baseline.workspaceId !== currentWorkspaceId &&
+        !homeQorWorkspaceCache.has(workspaceCacheKey(baseline.workspaceId))
+      ) {
+        loadWorkspaceIds.push(baseline.workspaceId)
+      }
+      const loaded = await withQorReadDeadline(
+        readProjectQorWorkspaceData(projectRoot, manifest, loadWorkspaceIds),
+        'Dashboard QoR inputs',
+      )
+      if (disposed || token !== requestToken) return
+
+      const unavailableWorkspaceIds = new Set(loaded.unavailableWorkspaceIds ?? [])
+      const hasUncachedUnavailableWorkspace = loadWorkspaceIds.some(
+        (workspaceId) =>
+          unavailableWorkspaceIds.has(workspaceId) &&
+          !homeQorWorkspaceCache.has(workspaceCacheKey(workspaceId)),
+      )
+      for (const workspaceId of loadWorkspaceIds) {
+        if (unavailableWorkspaceIds.has(workspaceId)) continue
+        homeQorWorkspaceCache.set(workspaceCacheKey(workspaceId), {
+          analysis: loaded.analysisInputs[workspaceId] ?? {},
+          flow: loaded.flowStates[workspaceId] ?? {},
+        })
+      }
+      const flowStates = Object.fromEntries(
+        [currentWorkspaceId, baseline.workspaceId].map((workspaceId) => [
+          workspaceId,
+          homeQorWorkspaceCache.get(workspaceCacheKey(workspaceId))?.flow ?? {},
+        ]),
+      )
+      const analysisInputs = Object.fromEntries(
+        [currentWorkspaceId, baseline.workspaceId].map((workspaceId) => [
+          workspaceId,
+          homeQorWorkspaceCache.get(workspaceCacheKey(workspaceId))?.analysis ?? {},
+        ]),
+      )
 
       const trend = buildProjectQorTrendForManifest(
         manifest,
@@ -163,11 +280,13 @@ export function useHomeQorComparison() {
         trend,
         currentWorkspace.workspace_id,
       )
-      const status: HomeQorComparisonStatus = comparison.isBaselineWorkspace
-        ? 'baseline'
-        : comparison.available
-          ? 'available'
-          : 'unavailable'
+      const status: HomeQorComparisonStatus = hasUncachedUnavailableWorkspace
+        ? 'unavailable'
+        : comparison.isBaselineWorkspace
+          ? 'baseline'
+          : comparison.available
+            ? 'available'
+            : 'unavailable'
 
       updateState({
         status,
@@ -177,7 +296,7 @@ export function useHomeQorComparison() {
         comparison,
       })
     } catch (error) {
-      if (token !== requestToken) return
+      if (disposed || token !== requestToken) return
       console.warn('Failed to load project QoR comparison for Home:', error)
       if (cachedState) {
         state.value = cachedState
@@ -207,8 +326,15 @@ export function useHomeQorComparison() {
     { immediate: true },
   )
 
+  const unregisterStepRenderTask = registerRuntimeStepRenderTask(async () => {
+    await refresh()
+  })
+
   onScopeDispose(() => {
+    disposed = true
     requestToken += 1
+    unregisterWorkspaceRerunPrepared()
+    unregisterStepRenderTask()
   })
 
   return { state, refresh }
@@ -225,4 +351,28 @@ function samePath(left: string, right: string): boolean {
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/g, '')
+}
+
+/**
+ * QoR is an optional Dashboard surface. A slow NFS read must not keep the
+ * step-render gate open and stall the ECC operation waiting for its GUI ACK.
+ */
+function withQorReadDeadline<T>(request: Promise<T>, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(
+        new Error(`Timed out after ${QOR_READ_TIMEOUT_MS}ms while reading ${label}.`),
+      )
+    }, QOR_READ_TIMEOUT_MS)
+    request.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
 }

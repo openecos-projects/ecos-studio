@@ -38,45 +38,39 @@ describe('HomeView workspace dashboard layout', () => {
     )
   })
 
-  it('keeps layout and data snapshot previews accessible through modal dialogs', () => {
-    expect(homeViewSource).toContain("preview = { label: 'Layout preview'")
+  it('keeps insight snapshot previews accessible through modal dialogs', () => {
+    expect(homeViewSource).toContain('openHomeSnapshotDetail(snapshot)')
     expect(homeViewSource).toContain('maximizable')
     expect(homeViewSource).toContain('class="dashboard-image-preview"')
   })
 
-  it('labels the layout output and opens its matching ChipView step', () => {
-    expect(homeViewSource).toContain("ChipView - ${stage?.label ?? '--'} -")
-    expect(homeViewSource).not.toContain('Latest output')
-    expect(homeViewSource).toContain('openLayoutChipViewer')
+  it('opens the ChipView data for the clicked layout thumbnail step', () => {
+    expect(homeViewSource).toContain('<h2>LayoutView</h2>')
+    expect(homeViewSource).toContain('const layoutThumbnailCells = computed')
+    expect(homeViewSource).toContain('canOpenLayoutThumbnail(thumbnail)')
+    expect(homeViewSource).toContain('void openLayoutThumbnail(thumbnail)')
     expect(homeViewSource).toContain('desktopApi.chipViewer.open')
     expect(homeViewSource).toContain(
-      "buildChipViewerOpenRequest(projectPath, stage.path, 'view')",
+      "buildChipViewerOpenRequest(projectPath, thumbnail.step, 'view')",
     )
+    expect(homeViewSource).toContain('thumbnail.hasGeometry')
+    expect(homeViewSource).toContain('openingLayoutStep')
+    expect(homeViewSource).not.toContain('openLayoutChipViewer')
+    expect(homeViewSource).not.toContain('layoutRenderStage')
   })
 
-  it('keeps Harden preview output while using STA for its ChipView render data', () => {
-    expect(homeViewSource).toContain('const layoutOutputStage = computed')
-    expect(homeViewSource).toContain('const layoutRenderStage = computed')
-    expect(homeViewSource).toContain(
-      "outputStage.label.trim().toLowerCase() !== 'harden'",
-    )
-    expect(homeViewSource).toContain("stage.path.trim().toLowerCase() === 'sta'")
-    expect(homeViewSource).toContain('const stage = layoutRenderStage.value')
-    expect(homeViewSource).not.toContain('latestSuccessfulGeometryStep')
+  it('lays LayoutView out as a four-by-four thumbnail grid', () => {
+    expect(homeViewSource).toContain('const LAYOUT_THUMBNAIL_ROWS = 4')
+    expect(homeViewSource).toContain('const LAYOUT_THUMBNAIL_COLUMNS = 4')
+    expect(homeViewSource).toContain('class="layout-thumbnail-grid"')
+    expect(homeViewSource).toContain('class="layout-thumbnail-cell"')
+    expect(homeViewSource).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))')
+    expect(homeViewSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
   })
 
-  it('loads the preview image from the latest successful step output', () => {
-    expect(homeViewSource).toContain('const layoutPreviewImage = computed')
-    expect(homeViewSource).toContain('resources.output.image')
-    expect(homeViewSource).toContain('const layoutPreviewUrl = computed')
-    expect(homeViewSource).toContain('readProjectBlobUrl(authorizedPath')
-    expect(homeViewSource).toContain('v-if="layoutPreviewUrl"')
-    expect(homeViewSource).toContain(':src="layoutPreviewUrl"')
-  })
-
-  it('lays Data Snapshot out as a responsive 4-by-5 thumbnail grid', () => {
-    expect(homeViewSource).toContain('const DATA_SNAPSHOT_ROWS = 4')
-    expect(homeViewSource).toContain('const DATA_SNAPSHOT_COLUMNS = 5')
+  it('lays Data Snapshot out as a responsive 4-by-5 insight grid', () => {
+    expect(homeViewSource).toContain('const INSIGHT_SNAPSHOT_ROWS = 4')
+    expect(homeViewSource).toContain('const INSIGHT_SNAPSHOT_COLUMNS = 5')
     expect(homeViewSource).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
     expect(homeViewSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
     expect(homeViewSource).toContain(
@@ -88,9 +82,10 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('object-fit: contain')
   })
 
-  it('uses successful flow artifacts for image and distribution snapshots', () => {
+  it('keeps layout and insight snapshot data separated', () => {
     expect(homeViewSource).toContain('useHomeSnapshots')
-    expect(homeViewSource).toContain('homeSnapshots.length')
+    expect(homeViewSource).toContain('layoutThumbnails.length')
+    expect(homeViewSource).toContain('insightSnapshots.length')
     expect(homeViewSource).toContain("snapshot.kind === 'image'")
     expect(homeViewSource).toContain('openHomeSnapshotDetail(snapshot)')
     expect(homeViewSource).toContain('class="home-snapshot-pie"')
@@ -157,7 +152,8 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('qorUncomparedCount')
     expect(homeViewSource).not.toContain('qorStepSummary.passCount')
     expect(homeViewSource).not.toContain('qor-step-runtime')
-    expect(homeViewSource).not.toContain('step.metricCount')
+    expect(homeViewSource).toContain('step.summaryMetricCount')
+    expect(homeViewSource).toContain("step.displayMode === 'summary'")
     expect(homeViewSource).not.toContain('qor-step-counts')
     expect(homeViewSource).toContain('class="qor-step-trend"')
     expect(homeViewSource).toContain('class="qor-step-trend-bar"')

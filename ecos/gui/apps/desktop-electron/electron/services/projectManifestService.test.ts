@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { parseProjectManifest } from '@ecos-studio/shared'
 import {
   ProjectManifestService,
+  type ProjectManifestBaselineSnapshotProvider,
   type ProjectManifestReplacementProvider,
 } from './projectManifestService'
 
@@ -19,6 +20,7 @@ async function createTemporaryProject(): Promise<string> {
 function createService(
   projectRoot: string,
   replacementProvider?: ProjectManifestReplacementProvider,
+  baselineSnapshotProvider?: ProjectManifestBaselineSnapshotProvider,
 ): ProjectManifestService {
   return new ProjectManifestService(
     {
@@ -28,6 +30,7 @@ function createService(
       },
     },
     replacementProvider,
+    baselineSnapshotProvider,
   )
 }
 
@@ -43,6 +46,11 @@ describe('ProjectManifestService', () => {
   it('serializes concurrent workspace registrations for the same project', async () => {
     const projectRoot = await createTemporaryProject()
     const service = createService(projectRoot)
+
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
+    })
 
     await Promise.all([
       service.mutate({
@@ -83,13 +91,13 @@ describe('ProjectManifestService', () => {
 
     await service.mutate({
       projectRoot,
-      mutation: { type: 'create', name: 'gcd' },
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
     })
 
     await expect(
       service.mutate({
         projectRoot,
-        mutation: { type: 'create', name: 'replacement' },
+        mutation: { type: 'create', name: 'replacement', designName: 'replacement' },
       }),
     ).rejects.toThrow('Project manifest already exists')
 
@@ -112,6 +120,7 @@ describe('ProjectManifestService', () => {
       mutation: {
         type: 'create',
         name: 'gcd',
+        designName: 'gcd',
         mpc: {
           resource_id: 'mpc:mpc-frame',
           display_name: 'MPC Frame',
@@ -133,6 +142,119 @@ describe('ProjectManifestService', () => {
       design: { index: 0, design_name: 'frame' },
       core_template: { minimum_area: 100, maximum_area: 500 },
     })
+  })
+
+  it('atomically synchronizes the selected baseline without replacing project design_name', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspaceOne = join(projectRoot, 'ws_0001')
+    const workspaceTwo = join(projectRoot, 'ws_0002')
+    const snapshots: string[] = []
+    const service = createService(projectRoot, undefined, {
+      loadBaselineSnapshot: async (workspacePath) => {
+        snapshots.push(workspacePath)
+        return {
+          parameters: {
+            PDK: 'ics55-baseline',
+            'PDK Root': '/pdks/ics55-baseline',
+            Design: 'workspace_specific_design',
+            'Top module': 'baseline_top',
+            Clock: 'baseline_clk',
+            'Frequency max [MHz]': 123,
+            'Max fanout': 17,
+          },
+          pdk: {},
+          db: {
+            INPUT: {
+              rtl_list: ['/sources/baseline.sv'],
+              origin_def: '/sources/baseline.def',
+              origin_verilog: '/sources/baseline.v',
+            },
+          },
+        }
+      },
+    })
+
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'project label', designName: 'project_design' },
+    })
+    for (const workspacePath of [workspaceOne, workspaceTwo]) {
+      await service.mutate({
+        projectRoot,
+        mutation: {
+          type: 'register-workspace',
+          input: { projectRoot, workspacePath },
+        },
+      })
+    }
+
+    const result = await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'select-qor-baseline',
+        workspaceId: 'ws_0002',
+        reason: 'Selected from Dashboard QoR Overview',
+      },
+    })
+
+    const manifest = parseProjectManifest(result.content)
+    expect(snapshots).toEqual([workspaceTwo])
+    expect(manifest.design_name).toBe('project_design')
+    expect(manifest.qor_baseline).toEqual({
+      workspace_id: 'ws_0002',
+      reason: 'Selected from Dashboard QoR Overview',
+    })
+    expect(manifest.base_design).toMatchObject({
+      pdk: 'ics55-baseline',
+      pdk_root: '/pdks/ics55-baseline',
+      top_module: 'baseline_top',
+      clock: 'baseline_clk',
+      rtl_list: ['/sources/baseline.sv'],
+      origin_def: '/sources/baseline.def',
+      origin_verilog: '/sources/baseline.v',
+      parameters: {
+        design: 'project_design',
+        frequency_max: 123,
+        max_fanout: 17,
+      },
+    })
+    await expect(readFile(join(projectRoot, 'project.json'), 'utf8')).resolves.toBe(
+      result.content,
+    )
+  })
+
+  it('does not write a partial baseline mutation when its snapshot is incomplete', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspacePath = join(projectRoot, 'ws_0001')
+    const service = createService(projectRoot, undefined, {
+      loadBaselineSnapshot: async () => ({
+        parameters: { PDK: 'ics55' },
+        pdk: {},
+        db: {},
+      }),
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'register-workspace',
+        input: { projectRoot, workspacePath },
+      },
+    })
+    const manifestPath = join(projectRoot, 'project.json')
+    const before = await readFile(manifestPath, 'utf8')
+
+    await expect(
+      service.mutate({
+        projectRoot,
+        mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
+      }),
+    ).rejects.toThrow('Baseline workspace snapshot is incomplete')
+
+    await expect(readFile(manifestPath, 'utf8')).resolves.toBe(before)
   })
 
   it('does not overwrite a malformed manifest when a mutation cannot be parsed', async () => {
@@ -159,7 +281,7 @@ describe('ProjectManifestService', () => {
     await expect(
       service.mutate({
         projectRoot,
-        mutation: { type: 'create', name: 'gcd' },
+        mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
       }),
     ).rejects.toThrow('Invalid project manifest JSON')
     await expect(readFile(manifestPath, 'utf8')).resolves.toBe('')
@@ -184,6 +306,7 @@ describe('ProjectManifestService', () => {
         mutation: {
           type: 'create',
           name: 'gcd',
+          designName: 'gcd',
           mpc: {
             resource_id: 'mpc:mpc-frame',
             display_name: 'MPC Frame',
@@ -212,6 +335,7 @@ describe('ProjectManifestService', () => {
       schema_version: 1,
       project_id: 'proj_gcd',
       name: 'gcd',
+      design_name: 'gcd',
       root_path: otherProjectRoot,
       created_at: '2026-07-01T00:00:00.000Z',
       updated_at: '2026-07-01T00:00:00.000Z',
@@ -267,6 +391,11 @@ describe('ProjectManifestService', () => {
       setProjectDirectoryReplacementRecoveryMode: async (replacementId, mode) => {
         calls.push(`mode:${replacementId}:${mode}`)
       },
+    })
+
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
     })
 
     await service.mutate({
@@ -327,7 +456,7 @@ describe('ProjectManifestService', () => {
 
     await service.mutate({
       projectRoot,
-      mutation: { type: 'create', name: 'gcd' },
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
     })
     const result = await service.mutate({
       projectRoot,
@@ -374,7 +503,7 @@ describe('ProjectManifestService', () => {
 
     await service.mutate({
       projectRoot,
-      mutation: { type: 'create', name: 'gcd' },
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
     })
     const result = await service.mutate({
       projectRoot,
@@ -414,7 +543,7 @@ describe('ProjectManifestService', () => {
 
     await service.mutate({
       projectRoot,
-      mutation: { type: 'create', name: 'gcd' },
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
     })
     const manifestPath = join(projectRoot, 'project.json')
     const before = await readFile(manifestPath, 'utf8')

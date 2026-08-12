@@ -311,6 +311,7 @@ const prefillWorkspaceDirectory = async () => {
 
   const projectRoot = queryString(route.query.projectRoot)
   const projectName = queryString(route.query.projectName)
+  const designName = queryString(route.query.designName)
   const sourceWorkspace = queryString(route.query.sourceWorkspace)
   const sourceWorkspacePath = queryString(route.query.sourceWorkspacePath)
   const sourceStep = queryString(route.query.sourceStep)
@@ -355,12 +356,13 @@ const prefillWorkspaceDirectory = async () => {
         startStep,
       },
       parameters: {
-        design: projectName ? `${projectName}_${workspaceName}` : workspaceName,
+        ...sourceWorkspaceConfig?.parameters,
+        design:
+          designName || (projectName ? `${projectName}_${workspaceName}` : workspaceName),
         description:
           sourceWorkspace && sourceStep
             ? `Created from ${sourceWorkspace} ${sourceStep} output`
             : 'Created from Project Management',
-        ...sourceWorkspaceConfig?.parameters,
         source_output_path: sourceOutputPath,
         source_output_type: sourceOutputType,
         start_step: startStep,
@@ -558,6 +560,7 @@ function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | un
     deriveDirectoryFromDesign: true,
     parameters: {
       description: 'Created from Project Management',
+      design: queryString(route.query.designName),
     },
   }
 }

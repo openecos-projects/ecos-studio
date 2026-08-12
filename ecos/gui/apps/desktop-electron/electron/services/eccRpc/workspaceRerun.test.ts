@@ -287,13 +287,15 @@ describe('prepareWorkspaceRerun', () => {
     )
   })
 
-  it('executes the frozen contract through standard ECC step RPCs', async () => {
+  it('executes the frozen contract through acknowledged ECC runtime operations', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
     const runtime = {
       refreshConfig: vi.fn().mockResolvedValue({}),
-      runStep: vi.fn().mockResolvedValue({ state: 'Success' }),
+      startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'operation-flow' }),
+      startStepOperation: vi.fn().mockResolvedValue({ operationId: 'operation-place' }),
       syncConfig: vi.fn().mockResolvedValue({}),
+      waitForOperation: vi.fn().mockResolvedValue({ error: null, state: 'succeeded' }),
     }
 
     await executeWorkspaceRerun(contract, runtime, 'target-gui-handle')
@@ -302,9 +304,15 @@ describe('prepareWorkspaceRerun', () => {
     expect(runtime.refreshConfig).toHaveBeenCalledWith({
       workspaceHandle: 'target-gui-handle',
     })
-    expect(runtime.runStep).toHaveBeenCalledWith({
-      rerun: false,
-      step: 'place',
+    expect(runtime.startStepOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rerun: false,
+        step: 'place',
+        workspaceHandle: 'target-gui-handle',
+      }),
+    )
+    expect(runtime.waitForOperation).toHaveBeenCalledWith({
+      operationId: 'operation-place',
       workspaceHandle: 'target-gui-handle',
     })
   })
@@ -347,8 +355,14 @@ describe('prepareWorkspaceRerun', () => {
     ]
     const runtime = {
       refreshConfig: vi.fn().mockResolvedValue({}),
-      runStep: vi.fn().mockResolvedValue({ state: 'Success' }),
+      startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'operation-flow' }),
+      startStepOperation: vi
+        .fn()
+        .mockImplementation(async (request: { step: string }) => ({
+          operationId: `operation-${request.step}`,
+        })),
       syncConfig: vi.fn().mockResolvedValue({}),
+      waitForOperation: vi.fn().mockResolvedValue({ error: null, state: 'succeeded' }),
     }
 
     await executeWorkspaceRerun(contract, runtime, 'target-gui-handle')
@@ -357,17 +371,16 @@ describe('prepareWorkspaceRerun', () => {
       configPath: `${contract.target_workspace}/config/dreamplace.json`,
       workspaceHandle: 'target-gui-handle',
     })
-    expect(runtime.runStep.mock.calls.map(([request]) => request.step)).toEqual([
-      'place',
-      'CTS',
-      'legalization',
-      'route',
-      'drc',
-      'filler',
-      'RCX',
-      'sta',
-      'Harden',
-    ])
+    expect(runtime.startStepOperation).not.toHaveBeenCalled()
+    expect(runtime.startFlowOperation).toHaveBeenCalledWith({
+      idempotencyKey: expect.any(String),
+      rerun: false,
+      workspaceHandle: 'target-gui-handle',
+    })
+    expect(runtime.waitForOperation).toHaveBeenCalledWith({
+      operationId: 'operation-flow',
+      workspaceHandle: 'target-gui-handle',
+    })
   })
 
   it('rejects a nonempty patch without resolved workspace writes', async () => {

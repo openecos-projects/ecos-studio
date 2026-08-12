@@ -122,6 +122,7 @@ describe('useDashboardOverview db feature metrics', () => {
         return JSON.stringify({
           schema_version: 4,
           quality_status: 'pass',
+          metric_count: 10,
           gates: [],
         })
       }
@@ -160,6 +161,7 @@ describe('useDashboardOverview db feature metrics', () => {
     expect(overview.qorSteps.value[0]).toMatchObject({
       blockedCount: 0,
       passCount: 1,
+      summaryMetricCount: 10,
       totalCount: 1,
     })
     expect(testState.readOptionalProjectTextFile).toHaveBeenCalledWith(DB_FEATURE_PATH)

@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import { PassThrough, Writable } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { EccRpcSidecarProcess, type SpawnedEccRpcSidecar } from './sidecarProcess'
+import {
+  EccRpcShutdownDeferredError,
+  EccRpcSidecarProcess,
+  type SpawnedEccRpcSidecar,
+} from './sidecarProcess'
 import { encodeContentLengthFrame } from './transport'
 
 class FakeWritable extends Writable {
@@ -223,6 +227,97 @@ describe('EccRpcSidecarProcess', () => {
     await expect(promise).resolves.toEqual({ ok: true })
   })
 
+  it('recovers a response after malformed tool output leaks to stdout', async () => {
+    const child = new FakeChild()
+    const events: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      onEvent: (event) => events.push(event),
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+
+    const promise = client.call<{ ok: boolean }>('rpc.ping')
+    child.stdout.write(
+      Buffer.concat([
+        Buffer.from('tool output before protocol frame\r\n\r\n'),
+        encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+      ]),
+    )
+
+    await expect(promise).resolves.toEqual({ ok: true })
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining('discarded malformed stdout'),
+        type: 'runtime.stderr',
+      }),
+    )
+  })
+
+  it('does not signal a sidecar when ECC defers shutdown for an active operation', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    await sidecar.start()
+
+    const shutdown = sidecar.shutdown()
+    await vi.waitFor(() => {
+      expect(child.stdin.chunks).toHaveLength(1)
+    })
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","id":1,"result":{"ok":false,"deferred":true,"shutdownBarrier":{"operationId":"operation-1"}}}',
+      ),
+    )
+
+    await expect(shutdown).rejects.toBeInstanceOf(EccRpcShutdownDeferredError)
+    expect(child.signals).toEqual([])
+  })
+
+  it('waits for the sidecar process to exit after rpc.shutdown is acknowledged', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    await sidecar.start()
+
+    let settled = false
+    const shutdown = sidecar.shutdown().then(() => {
+      settled = true
+    })
+    await vi.waitFor(() => {
+      expect(child.stdin.chunks).toHaveLength(1)
+    })
+    child.stdout.write(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(settled).toBe(false)
+    child.emit('close', 0, null)
+    await expect(shutdown).resolves.toBeUndefined()
+  })
+
+  it('forwards sidecar JSON-RPC notifications to the runtime owner', async () => {
+    const child = new FakeChild()
+    const notifications: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      onNotification: (notification) => notifications.push(notification),
+      spawn: () => child,
+    })
+
+    await sidecar.start()
+    child.stdout.write(
+      encodeContentLengthFrame(
+        '{"jsonrpc":"2.0","method":"runtime.event","params":{"eventId":"workspace-1:1"}}',
+      ),
+    )
+
+    expect(notifications).toEqual([
+      {
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: { eventId: 'workspace-1:1' },
+      },
+    ])
+  })
+
   it('writes stderr to a runtime log file and emits stderr events', async () => {
     const child = new FakeChild()
     const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
@@ -316,7 +411,7 @@ describe('EccRpcSidecarProcess', () => {
     )
   })
 
-  it('sends SIGTERM and then SIGKILL when rpc.shutdown times out', async () => {
+  it('fails shutdown after bounded signal escalation when rpc.shutdown times out', async () => {
     vi.useFakeTimers()
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
@@ -325,13 +420,16 @@ describe('EccRpcSidecarProcess', () => {
     })
 
     await sidecar.start()
-    const shutdown = sidecar.shutdown()
+    const shutdown = sidecar.shutdown().catch((error: unknown) => error)
 
     await vi.advanceTimersByTimeAsync(25)
-    await shutdown
     expect(child.signals).toEqual(['SIGTERM'])
 
     await vi.advanceTimersByTimeAsync(1000)
     expect(child.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    await vi.advanceTimersByTimeAsync(25)
+    await expect(shutdown).resolves.toMatchObject({
+      message: 'ECC RPC sidecar did not exit after SIGKILL.',
+    })
   })
 })

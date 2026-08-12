@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import {
   joinLocalPath,
   type WorkspaceResourceIndex,
@@ -23,6 +23,7 @@ import {
 import { useWorkspace } from '@/composables/useWorkspace'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
+import { registerRuntimeStepRenderTask } from '@/composables/runtimeStepRenderSync'
 
 function siblingSummaryPath(metricsPath: string): string | null {
   return metricsPath.endsWith('/qor_metrics.json')
@@ -119,7 +120,7 @@ export function useDashboardOverview() {
   const mpcConstraints = computed(() => mpcConstraintsFromParameters(parameters.value))
   const keyMetrics = computed(() => dashboardMetrics(metricValues.value))
 
-  async function load(): Promise<void> {
+  async function load(resourceIndex?: WorkspaceResourceIndex): Promise<void> {
     const projectPath = currentProject.value?.path
     const token = ++loadToken
     if (!projectPath) {
@@ -134,7 +135,7 @@ export function useDashboardOverview() {
     loading.value = true
     error.value = null
     try {
-      const nextIndex = await getWorkspaceResourceIndexApi()
+      const nextIndex = resourceIndex ?? (await getWorkspaceResourceIndexApi())
       if (token !== loadToken || currentProject.value?.path !== projectPath) return
 
       const nextSteps = qorStepsFromIndex(nextIndex)
@@ -210,6 +211,11 @@ export function useDashboardOverview() {
       if (token === loadToken) loading.value = false
     }
   }
+
+  const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
+    await load(await commit.resourceIndex())
+  })
+  onScopeDispose(unregisterStepRenderTask)
 
   watch(
     () => [

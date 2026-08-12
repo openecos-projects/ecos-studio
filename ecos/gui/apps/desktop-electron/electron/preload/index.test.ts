@@ -40,6 +40,9 @@ async function loadDesktopBridge() {
       flow: {
         runStep(request: unknown): Promise<unknown>
       }
+      runtime: {
+        waitForOperation(request: unknown): Promise<unknown>
+      }
       workspace: {
         exportSignoff(request: unknown): Promise<unknown>
         inspectSignoff(request: unknown): Promise<unknown>
@@ -204,6 +207,24 @@ describe('preload desktop bridge contract', () => {
     })
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccFlowRunStep,
+      request,
+    )
+  })
+
+  it('routes runtime operation waits through the shared IPC channel constant', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = { operationId: 'operation-1', workspaceHandle: 'workspace-handle-1' }
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      operationId: 'operation-1',
+      state: 'succeeded',
+    })
+
+    await expect(bridge.ecc.runtime.waitForOperation(request)).resolves.toMatchObject({
+      operationId: 'operation-1',
+      state: 'succeeded',
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccRuntimeWaitForOperation,
       request,
     )
   })

@@ -9,6 +9,8 @@ export interface FlowLogSegmentLike {
   totalSize?: number
   lastReadOffsetBytes?: number
   logPath?: string
+  contentComplete?: boolean
+  contentLoading?: boolean
 }
 
 export interface PlannedFlowLogTask<T extends FlowLogSegmentLike> {
@@ -44,6 +46,8 @@ export function mergePlannedFlowLogSegments<T extends FlowLogSegmentLike>(
       truncated: prior.truncated,
       totalSize: prior.totalSize,
       lastReadOffsetBytes: prior.lastReadOffsetBytes,
+      contentComplete: prior.contentComplete,
+      contentLoading: prior.contentLoading,
       logPath,
     }
   })
