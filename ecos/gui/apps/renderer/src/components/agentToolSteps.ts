@@ -14,6 +14,7 @@ const FAILED_RE = /^Failed\s+(.+?)\.?$/i
 const COMPLETED_SAVED_RE = /^Completed\s+(.+?)\.\s*Saved:\s*(.+)$/i
 const COMPLETED_RE = /^Completed\s+(.+?)\.?$/i
 const SUBFLOW_RE = /^(.+?)\s+[›>]\s+(.+)$/
+const EPHEMERAL_PROGRESS_RE = /^(Thinking…|Searching the web(?: for “.*”)?…|Finished web search\.|Searching workspace…|Reading workspace files…|Finished workspace inspection\.|Retrying…)$/
 
 function basename(path: string): string {
   const trimmed = path.trim()
@@ -49,12 +50,7 @@ export function isEphemeralToolContent(content: string): boolean {
   const lines = parseToolContentLines(content)
   if (lines.length === 0) return true
   return lines.every(
-    (line) =>
-      !RUNNING_RE.test(line) &&
-      !FAILED_RE.test(line) &&
-      !COMPLETED_SAVED_RE.test(line) &&
-      !COMPLETED_RE.test(line) &&
-      !SUBFLOW_RE.test(line),
+    (line) => EPHEMERAL_PROGRESS_RE.test(line),
   )
 }
 

@@ -124,8 +124,9 @@ def test_timeout_closes_the_app_server_before_the_next_proposal(tmp_path: Path) 
         def __init__(self) -> None:
             self.closed = 0
 
-        def request(self, method: str, _params: dict[str, object]) -> dict[str, object]:
+        def request(self, method: str, params: dict[str, object]) -> dict[str, object]:
             assert method == "turn/start"
+            assert params["summary"] == "detailed"
             return {"turn": {"id": "turn-1"}}
 
         def wait_for_turn_details(

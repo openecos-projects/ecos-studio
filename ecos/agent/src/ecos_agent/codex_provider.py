@@ -301,7 +301,7 @@ class CodexAppServerProposalProvider:
                 "model": None,
                 "serviceTier": None,
                 "effort": None,
-                "summary": None,
+                "summary": "detailed",
                 "personality": None,
                 "outputSchema": output_schema,
                 "collaborationMode": None,

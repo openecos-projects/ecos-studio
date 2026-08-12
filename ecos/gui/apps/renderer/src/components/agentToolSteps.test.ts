@@ -20,6 +20,7 @@ describe('agentToolSteps', () => {
     expect(isEphemeralToolContent('Thinking…\nSearching workspace…\n')).toBe(true)
     expect(isEphemeralToolContent('Running place.\nCompleted place.\n')).toBe(false)
     expect(isEphemeralToolContent('place › load data\n')).toBe(false)
+    expect(isEphemeralToolContent('Thinking…\nInspecting the flow inputs.\n')).toBe(false)
   })
 
   it('collapses Running/Completed flow lines and demotes artifact paths', () => {
