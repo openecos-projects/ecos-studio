@@ -626,7 +626,9 @@ async function handleMapImageError() {
   mapImageRetrying.value = true
   const sessionId = currentSessionId.value
   try {
-    const imageUrl = await readProjectBlobUrl(mapData.localPath, { mimeType: 'image/png' })
+    const imageUrl = await readProjectBlobUrl(mapData.localPath, {
+      mimeType: 'image/png',
+    })
     if (!isCurrentSession(sessionId)) {
       URL.revokeObjectURL(imageUrl)
       return
