@@ -67,6 +67,21 @@ describe('useFlowStages runtime updates', () => {
     scope.stop()
   })
 
+  it('normalizes runtime snapshot states for the sidebar', async () => {
+    testState.runtimeEvents = ref([])
+    testState.readWorkspaceFlowResourceApi.mockResolvedValueOnce({
+      steps: [{ name: 'CTS', state: 'succeeded', tool: 'ecc' }],
+    })
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const stages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value[0]?.state).toBe('Success')
+    })
+    scope.stop()
+  })
+
   it('applies a step start even when a terminal event is delivered in the same batch', async () => {
     testState.runtimeEvents = ref([])
     testState.readWorkspaceFlowResourceApi.mockResolvedValueOnce({

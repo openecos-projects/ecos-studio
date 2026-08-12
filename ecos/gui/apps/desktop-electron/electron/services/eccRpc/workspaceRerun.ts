@@ -21,6 +21,11 @@ import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
+  startFlowOperation(request: {
+    idempotencyKey: string
+    rerun: boolean
+    workspaceHandle: string
+  }): Promise<{ operationId: string }>
   startStepOperation(request: {
     idempotencyKey: string
     rerun: boolean
@@ -215,11 +220,10 @@ export async function executeWorkspaceRerun(
     })
   }
   if (writes.length > 0) await runtime.refreshConfig({ workspaceHandle })
-  for (const step of workspaceRerunExecutionSteps(contract)) {
-    const operation = await runtime.startStepOperation({
+  if (contract.execution_scope === 'full_flow') {
+    const operation = await runtime.startFlowOperation({
       idempotencyKey: randomUUID(),
       rerun: false,
-      step,
       workspaceHandle,
     })
     const completed = await runtime.waitForOperation({
@@ -227,8 +231,24 @@ export async function executeWorkspaceRerun(
       workspaceHandle,
     })
     if (completed.state !== 'succeeded') {
-      throw new Error(completed.error?.message || `Rerun step failed: ${step}`)
+      throw new Error(completed.error?.message || 'Rerun flow failed')
     }
+    return
+  }
+
+  const step = contract.target_step
+  const operation = await runtime.startStepOperation({
+    idempotencyKey: randomUUID(),
+    rerun: false,
+    step,
+    workspaceHandle,
+  })
+  const completed = await runtime.waitForOperation({
+    operationId: operation.operationId,
+    workspaceHandle,
+  })
+  if (completed.state !== 'succeeded') {
+    throw new Error(completed.error?.message || `Rerun step failed: ${step}`)
   }
 }
 
@@ -552,22 +572,6 @@ function isSafeParameterString(value: string): boolean {
     !value.split('').some((character) => character.charCodeAt(0) < 32) &&
     !/[;&|]|\$\(/.test(value)
   )
-}
-
-function workspaceRerunExecutionSteps(
-  contract: DesktopAgentWorkspaceRerunContract,
-): string[] {
-  if (contract.execution_scope === 'single_step') return [contract.target_step]
-  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
-    contract.target_step as (typeof FLOW_STEP_SEQUENCE)[number],
-  )
-  const endIndex = FLOW_STEP_SEQUENCE.indexOf(
-    contract.end_step as (typeof FLOW_STEP_SEQUENCE)[number],
-  )
-  if (targetIndex < 0 || endIndex < targetIndex) {
-    throw new Error('Workspace rerun flow range is invalid.')
-  }
-  return FLOW_STEP_SEQUENCE.slice(targetIndex, endIndex + 1)
 }
 
 async function materializeWorkspaceRerunParameterWrites(

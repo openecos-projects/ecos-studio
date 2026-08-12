@@ -1709,6 +1709,7 @@ async function executeWorkspaceParameterUpdate(
     }
     await applyWorkspaceParameterWrites(workspaceRoot, contract.writes)
     await syncWorkspaceParameterWrites(workspaceRoot, contract.writes)
+    invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'])
     await reportWorkspaceParameterUpdateResult(
       contract.update_id,
       'succeeded',

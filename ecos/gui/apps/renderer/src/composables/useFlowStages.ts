@@ -67,7 +67,6 @@ const FIXED_SETUP_STAGES: FlowStage[] = Object.entries(STEP_METADATA)
  */
 function transformFlowData(flowData: FlowData): FlowStage[] {
   const stages: FlowStage[] = []
-  console.log('flowData.steps:', flowData.steps)
   for (const step of flowData.steps) {
     const metadata = getStepMetadata(step.name)
     stages.push({
@@ -76,12 +75,36 @@ function transformFlowData(flowData: FlowData): FlowStage[] {
       icon: metadata?.icon ?? 'ri-checkbox-blank-circle-line',
       group: 'run',
       tool: step.tool,
-      state: step.state,
+      state: normalizeFlowStageState(step.state),
       runtime: step.runtime || '',
       'peak memory (mb)': step['peak memory (mb)'] || 0,
     })
   }
   return stages
+}
+
+function normalizeFlowStageState(value: string | null | undefined): string {
+  switch (value?.trim().toLowerCase()) {
+    case 'success':
+    case 'succeeded':
+    case 'completed':
+    case 'complete':
+      return 'Success'
+    case 'ongoing':
+    case 'running':
+      return 'Ongoing'
+    case 'incomplete':
+      return 'Incomplete'
+    case 'invalid':
+    case 'failed':
+    case 'failure':
+    case 'error':
+      return 'Invalid'
+    case 'pending':
+      return 'Pending'
+    default:
+      return value || 'Unstart'
+  }
 }
 
 /**
@@ -179,7 +202,11 @@ export function useFlowStages() {
 
     dynamicFlowStages.value = dynamicFlowStages.value.map((stage, index) => {
       if (index === matchingIndex) {
-        return { ...runtimeStage, state, tool: tool || runtimeStage.tool }
+        return {
+          ...runtimeStage,
+          state: normalizeFlowStageState(state),
+          tool: tool || runtimeStage.tool,
+        }
       }
       // A flow has one active step. Keep a stale delayed start event from
       // rendering two Ongoing states at the same time.
@@ -188,7 +215,10 @@ export function useFlowStages() {
         : stage
     })
     if (matchingIndex < 0) {
-      dynamicFlowStages.value = [...dynamicFlowStages.value, { ...runtimeStage, state }]
+      dynamicFlowStages.value = [
+        ...dynamicFlowStages.value,
+        { ...runtimeStage, state: normalizeFlowStageState(state) },
+      ]
     }
   }
 
