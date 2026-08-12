@@ -134,12 +134,12 @@ describe('messageStore', () => {
     const store = useMessageStore()
 
     store.upsertAgentEvent({
-      delta: 'Thinking…\n',
+      delta: '**Thinking…**\n',
       messageId: 'turn-1-tool',
       type: 'tool',
     })
     store.upsertAgentEvent({
-      delta: 'Searching workspace…\n',
+      delta: '**Searching workspace…**\n',
       messageId: 'turn-1-tool',
       type: 'tool',
     })

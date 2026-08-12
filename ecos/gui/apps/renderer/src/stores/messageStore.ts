@@ -14,6 +14,8 @@ const generateId = (): string => {
   return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 }
 
+const stripToolMarkdown = (text: string): string => text.replace(/\*/g, '')
+
 /** Marks a choice as closed without selecting a concrete option (free-text / superseded). */
 export const DISMISSED_CHOICE_OPTION_ID = '__dismissed__'
 
@@ -252,8 +254,8 @@ export const useMessageStore = defineStore('messages', () => {
     const id = event.messageId ?? generateId()
     const existing = bucket.find((message) => message.id === id)
     if (existing) {
-      if (event.delta) existing.content += event.delta
-      else if (event.text) existing.content = event.text
+      if (event.delta) existing.content += stripToolMarkdown(event.delta)
+      else if (event.text) existing.content = stripToolMarkdown(event.text)
       existing.status =
         event.type === 'error' ? 'error' : event.delta ? 'loading' : 'done'
       return id
@@ -261,7 +263,7 @@ export const useMessageStore = defineStore('messages', () => {
     bucket.push({
       id,
       role: 'assistant',
-      content: event.delta ?? event.text ?? '',
+      content: stripToolMarkdown(event.delta ?? event.text ?? ''),
       type: event.type === 'tool' ? 'tool' : 'text',
       status: event.type === 'error' ? 'error' : event.delta ? 'loading' : 'done',
     })
@@ -298,7 +300,8 @@ export const useMessageStore = defineStore('messages', () => {
    * Append a local progress line into the active tool timeline (flow / rerun prep).
    */
   const appendToolProgress = (text: string, sessionId?: string): string => {
-    const line = text.endsWith('\n') ? text : `${text}\n`
+    const normalized = stripToolMarkdown(text)
+    const line = normalized.endsWith('\n') ? normalized : `${normalized}\n`
     const bucket = sessionId ? sessionMessages(sessionId) : requireActiveMessages()
     const existing = [...bucket]
       .reverse()
