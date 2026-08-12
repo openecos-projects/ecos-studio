@@ -22,7 +22,7 @@ GUI_WORKSPACE_FLOW_STEPS = (
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _MAX_STAGE_ROUTING_CANDIDATES = 3
 SOURCE_ROOT_IDS = ("ecc", "ecos", "pdk", "ip")
-_MAX_SOURCE_SEARCH_QUERIES = 3
+_MAX_SOURCE_SEARCH_QUERIES = 5
 
 
 class GuiWorkspaceSetupProposal(BaseModel):
@@ -170,7 +170,7 @@ class GuiChatResponseProposal(BaseModel):
     @field_validator("evidence_ids")
     @classmethod
     def validate_evidence_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(value) > 6 or len(set(value)) != len(value) or any(
+        if len(value) > 12 or len(set(value)) != len(value) or any(
             not re.fullmatch(r"source-[1-9][0-9]*", item) for item in value
         ):
             raise ValueError("chat evidence ids are invalid")

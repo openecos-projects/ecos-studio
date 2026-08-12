@@ -48,9 +48,9 @@ _SKIPPED_DIRECTORIES = frozenset(
     {".codegraph", ".git", ".pytest_cache", ".venv", "__pycache__", "build", "dist", "node_modules", "out"}
 )
 _SENSITIVE_SUFFIXES = frozenset({".cer", ".crt", ".der", ".key", ".p12", ".pem"})
-_MAX_EVIDENCE = 6
+_MAX_EVIDENCE = 12
 _MAX_FILE_BYTES = 1_000_000
-_CONTEXT_LINES = 1
+_CONTEXT_LINES = 4
 
 
 @dataclass(frozen=True)

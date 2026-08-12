@@ -157,13 +157,6 @@ _CHAT_QUESTION_PREFIXES = (
     "如何",
     "怎么",
 )
-_SOURCE_EVIDENCE_PATTERN = re.compile(
-    r"\b(?:source\s+code|implementation|implemented|code\s+(?:path|location)|"
-    r"where\s+(?:is|are).{0,80}\b(?:defined|implemented))\b|"
-    r"(?:源码|源代码|代码).{0,24}(?:实现|定义|位置)|"
-    r"(?:实现|定义).{0,24}(?:源码|源代码|代码)",
-    re.IGNORECASE,
-)
 
 
 def _project_root_for_workspace(workspace: str) -> str | None:
@@ -184,10 +177,6 @@ def _is_conversational_input(message: str) -> bool:
 
 def _is_greeting(message: str) -> bool:
     return bool(_GREETING_PATTERN.fullmatch(message))
-
-
-def _source_evidence_requested(message: str) -> bool:
-    return bool(_SOURCE_EVIDENCE_PATTERN.search(message))
 
 
 def _proposal_sha256(proposal: StageRoutingProposal) -> str:
@@ -552,7 +541,7 @@ class EcosAgentProvider:
         self, session: _Session, message: str, knowledge_answer: KnowledgeAnswer | None
     ) -> SourceSearchResult | None:
         if (
-            not _source_evidence_requested(message)
+            _is_greeting(message)
             or not self.source_retriever.available_root_ids
             or (self._uses_default_source_retrieval and not self._started)
         ):

@@ -526,6 +526,7 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     assert "Use retrieved_knowledge and retrieved_code only as read-only factual context" in str(captured["prompt"])
     assert "Audited target-overflow knowledge." in str(captured["prompt"])
     assert "def route(): ..." in str(captured["prompt"])
+    assert captured["schema"]["properties"]["evidence_ids"]["maxItems"] == 12
     assert captured["schema"]["required"] == [
         "schema_version",
         "operation",
@@ -610,8 +611,9 @@ def test_source_search_prompt_is_bounded_and_structured(tmp_path: Path, monkeypa
     )
 
     assert response["queries"] == [{"root_id": "ecc", "query": "stop_overflow"}]
-    assert "Return zero to three literal source-search queries" in str(captured["prompt"])
+    assert "Return zero to five literal source-search queries" in str(captured["prompt"])
     assert captured["schema"]["required"] == ["schema_version", "queries", "rationale"]
+    assert captured["schema"]["properties"]["queries"]["maxItems"] == 5
     assert captured["schema"]["properties"]["queries"]["items"]["properties"]["root_id"]["enum"] == [
         "ecc",
         "ecos",
@@ -1721,7 +1723,7 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
         ("what is place target density", "parameter.dreamplace.target_density"),
     ],
 )
-def test_known_concepts_skip_source_search_planning(
+def test_known_concepts_still_use_source_search_planning_by_default(
     tmp_path: Path, monkeypatch, message: str, entity_id_fragment: str
 ) -> None:
     repository = tmp_path / "ecos-studio"
@@ -1753,12 +1755,12 @@ def test_known_concepts_skip_source_search_planning(
 
     _send(provider, session_id, message)
 
-    assert source_contexts == []
+    assert len(source_contexts) == 1
     assert any(
         entity_id_fragment in entity_id
         for entity_id in chat_contexts[0]["retrieved_knowledge"]["entity_ids"]
     )
-    assert "retrieved_code" not in chat_contexts[0]
+    assert chat_contexts[0]["retrieved_code"]["evidence"] == []
     assert _last_event(events, "message")["text"] == "Codex-organized knowledge answer."
 
 
@@ -1857,8 +1859,8 @@ def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp
     answer = _last_event(events, "message")
     assert "acceptable global-placement overflow threshold" in str(answer["text"])
     assert answer["contract"]["schema_version"] == "ecos-knowledge-answer.v2"
-    assert "source_evidence_ids" not in answer["contract"]
-    assert "source_retrieval" not in answer["contract"]
+    assert answer["contract"]["source_evidence_ids"] == []
+    assert answer["contract"]["source_retrieval"]["evidence"][0]["path"] == "ecc/route.py"
     assert not any(event["type"] == "error" for event in events)
 
 

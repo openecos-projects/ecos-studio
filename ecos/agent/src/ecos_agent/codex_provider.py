@@ -185,7 +185,7 @@ class CodexAppServerProposalProvider:
             payload,
             (
                 "Return one JSON object matching flow-agent.source_search_proposal.v1. "
-                "Return zero to three literal source-search queries only when source evidence would improve the answer. "
+                "Return zero to five literal source-search queries when source evidence could improve the answer. "
                 "Use only root_id values from available_source_roots. Queries are fixed text, not paths, globs, "
                 "regular expressions, shell commands, or tool calls. Do not answer the question or describe execution."
             ),
@@ -617,7 +617,7 @@ def _gui_chat_response_output_schema(allowed_ids: list[str]) -> dict[str, Any]:
             "answer": {"type": ["string", "null"], "maxLength": 4096},
             "evidence_ids": {
                 "type": "array",
-                "maxItems": 6,
+                "maxItems": 12,
                 "items": {"type": "string", "pattern": "^source-[1-9][0-9]*$"},
             },
         },
@@ -633,7 +633,7 @@ def _source_search_output_schema(roots: list[str]) -> dict[str, Any]:
             "schema_version": {"type": "string", "const": "flow-agent.source_search_proposal.v1"},
             "queries": {
                 "type": "array",
-                "maxItems": 3,
+                "maxItems": 5,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
