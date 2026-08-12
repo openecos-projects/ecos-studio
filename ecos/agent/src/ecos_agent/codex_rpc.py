@@ -207,6 +207,10 @@ class _JsonLineRpcProcessClient:
             activity = self._readonly_activity(method, params)
             if activity:
                 self._report_progress(activity_callback, activity)
+            if method == "item/reasoning/summaryTextDelta":
+                reasoning_delta = self._agent_delta_text(params)
+                if reasoning_delta:
+                    self._report_progress(activity_callback, reasoning_delta)
             if method == "error":
                 will_retry = params.get("willRetry") is True
                 self._record(

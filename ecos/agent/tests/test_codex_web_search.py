@@ -108,6 +108,35 @@ def test_command_activity_reporting_is_unchanged() -> None:
     )
 
 
+def test_reasoning_summary_deltas_stream_as_user_visible_progress(tmp_path) -> None:
+    client = _JsonLineRpcProcessClient(
+        command="codex",
+        args=[],
+        cwd=tmp_path,
+        env={},
+        timeout_seconds=1,
+    )
+    progress: list[str] = []
+    client._notifications.put(
+        {
+            "method": "item/reasoning/summaryTextDelta",
+            "params": {"turnId": "turn-1", "delta": "Inspecting the flow."},
+        }
+    )
+    client._notifications.put(
+        {"method": "item/agentMessage/delta", "params": {"turnId": "turn-1", "delta": "{}"}}
+    )
+    client._notifications.put(
+        {"method": "turn/completed", "params": {"turn": {"id": "turn-1"}}}
+    )
+
+    assert (
+        client.wait_for_turn_details("turn-1", activity_callback=progress.append)[0]
+        == "{}"
+    )
+    assert progress == ["Inspecting the flow."]
+
+
 def test_retriable_turn_error_keeps_waiting_for_completion(tmp_path) -> None:
     client = _JsonLineRpcProcessClient(
         command="codex",
