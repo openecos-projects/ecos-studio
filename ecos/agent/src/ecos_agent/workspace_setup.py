@@ -288,6 +288,7 @@ def workspace_setup_contract(
     inputs: WorkspaceInputs,
     language: str,
     setup_id: str,
+    mpc_enabled: bool | None = None,
 ) -> dict[str, Any]:
     proposal = resolve_gui_workspace_setup(proposal)
     inputs = _validated_workspace_inputs(inputs)
@@ -297,12 +298,14 @@ def workspace_setup_contract(
     if start_index > end_index:
         raise ValueError("workspace flow start must not follow its end")
     workspace_directory = _workspace_directory(inputs, proposal)
-    mpc = _project_mpc_snapshot(inputs.project_root)
+    mpc = _project_mpc_snapshot(inputs.project_root) if mpc_enabled is not False else None
+    resolved_mpc_enabled = mpc_enabled if mpc_enabled is not None else mpc is not None
     contract = {
         "schema_version": "flow-agent.workspace_setup_contract.v2",
         "title": "Workspace 运行方案" if language == "zh" else "Workspace run plan",
         "setup_id": setup_id,
         "requires_gui_review": True,
+        "mpc_enabled": resolved_mpc_enabled,
         "directory": workspace_directory,
         "pdk": "ics55",
         "pdk_root": inputs.pdk_root,

@@ -136,6 +136,31 @@ def test_workspace_setup_contract_carries_project_mpc_snapshot(tmp_path: Path) -
 
     assert contract["mpc"] == mpc
     assert contract["parameters"]["MPC"] == mpc
+    assert contract["mpc_enabled"] is True
+
+    skipped = workspace_setup_contract(
+        _proposal(
+            workspace_name="ws_0001",
+            design_name="gcd",
+            top_module="gcd",
+            clock_name="clk",
+            flow_start="Synthesis",
+            flow_end="Harden",
+        ),
+        WorkspaceInputs(
+            project_root=str(tmp_path),
+            rtl_path=str(rtl),
+            filelist_path=str(filelist),
+            sdc_path=str(sdc),
+            pdk_root=str(pdk),
+        ),
+        "en",
+        "setup-no-mpc",
+        mpc_enabled=False,
+    )
+    assert "mpc" not in skipped
+    assert "MPC" not in skipped["parameters"]
+    assert skipped["mpc_enabled"] is False
 
 
 def test_new_ephemeral_thread_discards_prior_case_context(tmp_path: Path) -> None:
@@ -273,9 +298,10 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
         "4",
         str(rtl),
         str(filelist),
-        str(sdc),
-        str(pdk),
-        "",
+            str(sdc),
+            str(pdk),
+            "2",
+            "",
         "",
         "",
         "",
@@ -1268,6 +1294,13 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path
     assert pdk_choice["options"][0]["value"] == display_path(str(pdk))
 
     _send(provider, session_id, pdk_choice["options"][0]["value"])
+    assert session.phase == "workspace_mpc"
+    mpc_choice = _last_event(events, "choice")["choice"]
+    assert [option["label"] for option in mpc_choice["options"]] == [
+        "Use a SoC-MPC template",
+        "Do not use a SoC-MPC template",
+    ]
+    _send(provider, session_id, "2")
     assert session.phase == "workspace_top"
     top_choice = _last_event(events, "choice")["choice"]
     assert top_choice["options"][0]["label"].startswith("Use default:")

@@ -2,54 +2,55 @@
   <AgentExecutionContractPanel
     :answered-option-id="answeredOptionId"
     :choice="choice"
-    :choice-disabled="choiceDisabled"
+    :choice-disabled="choiceDisabled || mpcSelectionInvalid"
     :confirmation-text="confirmationText"
     :execution-state="executionState"
     :rows="specRows"
     :summary="committedSummary"
     :title="displayTitle"
     @select="emit('select', $event)"
-  />
-  <div v-if="contract" class="agent-mpc-choice">
-    <label class="agent-mpc-choice__label">
-      <input
-        v-model="useMpc"
-        type="checkbox"
-        :disabled="mpcLoading || Boolean(createSetupId) || !selectedMpc"
-      />
-      Use a SoC-MPC template for this workspace
-    </label>
-    <p v-if="mpcLoading" class="agent-mpc-choice__status">
-      Loading available templates...
-    </p>
-    <p v-else-if="!selectedMpc" class="agent-mpc-choice__status">
-      No usable SoC-MPC template is selected.
-    </p>
-    <label v-if="mpcCandidates.length" class="agent-mpc-choice__select">
-      <span>Template</span>
-      <select v-model="selectedMpcResourceId" :disabled="Boolean(createSetupId)">
-        <option
-          v-for="candidate in mpcCandidates"
-          :key="candidate.resource_id"
-          :value="candidate.resource_id"
-        >
-          {{ candidate.display_name }} ({{ candidate.installed_version }})
-        </option>
-      </select>
-    </label>
-    <label v-if="mpcDesigns.length > 1" class="agent-mpc-choice__select">
-      <span>Design</span>
-      <select v-model="selectedMpcDesignIndex" :disabled="Boolean(createSetupId)">
-        <option v-for="design in mpcDesigns" :key="design.index" :value="design.index">
-          {{ design.designName }}
-        </option>
-      </select>
-    </label>
-    <p v-if="useMpc && selectedMpc" class="agent-mpc-choice__summary">
-      {{ selectedMpc.display_name }} / {{ selectedMpc.design.design_name }}
-      <span>{{ selectedMpc.spec_path }}</span>
-    </p>
-  </div>
+  >
+    <template #review-extra>
+      <div v-if="contract" class="agent-mpc-choice">
+        <label class="agent-mpc-choice__label">
+          <input
+            v-model="useMpc"
+            type="checkbox"
+            :disabled="mpcLoading || Boolean(createSetupId) || !selectedMpc"
+          />
+          Use a SoC-MPC template for this workspace
+        </label>
+        <label v-if="mpcCandidates.length" class="agent-mpc-choice__select">
+          <span>Template</span>
+          <select v-model="selectedMpcResourceId" :disabled="Boolean(createSetupId)">
+            <option
+              v-for="candidate in mpcCandidates"
+              :key="candidate.resource_id"
+              :value="candidate.resource_id"
+            >
+              {{ candidate.display_name }} ({{ candidate.installed_version }})
+            </option>
+          </select>
+        </label>
+        <label v-if="mpcDesigns.length > 1" class="agent-mpc-choice__select">
+          <span>Design</span>
+          <select v-model="selectedMpcDesignIndex" :disabled="Boolean(createSetupId)">
+            <option
+              v-for="design in mpcDesigns"
+              :key="design.index"
+              :value="design.index"
+            >
+              {{ design.designName }}
+            </option>
+          </select>
+        </label>
+        <p v-if="useMpc && selectedMpc" class="agent-mpc-choice__summary">
+          {{ selectedMpc.display_name }} / {{ selectedMpc.design.design_name }}
+          <span>{{ selectedMpc.spec_path }}</span>
+        </p>
+      </div>
+    </template>
+  </AgentExecutionContractPanel>
 </template>
 
 <script setup lang="ts">
@@ -97,6 +98,9 @@ const mpcDesigns = ref<MpcSpecDesign[]>([])
 const selectedMpcDesignIndex = ref<number | null>(null)
 const useMpc = ref(false)
 const mpcLoading = ref(false)
+const mpcSelectionInvalid = computed(
+  () => useMpc.value && !selectedMpc.value && !mpcLoading.value,
+)
 const displayTitle = computed(() =>
   displayAgentContractTitle(props.contract?.title ?? ''),
 )
@@ -151,6 +155,31 @@ const specRows = computed<[string, string][]>(() => {
     ['Margin', String(parameters.margin)],
     ['Target Density', String(parameters.target_density)],
     ['Target Overflow', String(parameters.target_overflow)],
+    ['Use SoC-MPC', mpcLoading.value ? 'Loading...' : useMpc ? 'Yes' : 'No'],
+    [
+      'SoC-MPC Template',
+      useMpc && selectedMpc.value
+        ? selectedMpc.value.display_name
+        : useMpc
+          ? 'Unavailable'
+          : '-',
+    ],
+    [
+      'SoC-MPC Design',
+      useMpc && selectedMpc.value
+        ? selectedMpc.value.design.design_name
+        : useMpc
+          ? 'Unavailable'
+          : '-',
+    ],
+    [
+      'SoC-MPC Spec',
+      useMpc && selectedMpc.value
+        ? selectedMpc.value.spec_path
+        : useMpc
+          ? 'Unavailable'
+          : '-',
+    ],
     ['Description', optionalValue(parameters.description)],
     ['Requires GUI Review', String(contract.requires_gui_review)],
     ['Setup ID', contract.setup_id],
@@ -162,7 +191,7 @@ watch(
   () => props.contract?.project_context.project_root,
   async (projectRoot) => {
     selectedMpc.value = props.contract?.mpc ?? null
-    useMpc.value = Boolean(selectedMpc.value)
+    useMpc.value = props.contract?.mpc_enabled ?? Boolean(selectedMpc.value)
     mpcCandidates.value = []
     mpcDesigns.value = []
     selectedMpcResourceId.value = selectedMpc.value?.resource_id ?? ''
@@ -176,10 +205,9 @@ watch(
       } catch {
         // A new project has no manifest yet; installed MPC resources are still selectable.
       }
-      if (content && !props.contract?.mpc) {
+      if (content && !props.contract?.mpc && useMpc.value) {
         try {
           selectedMpc.value = parseProjectManifest(content).mpc
-          useMpc.value = Boolean(selectedMpc.value)
         } catch {
           // An invalid project manifest must not hide otherwise usable MPC resources.
         }
@@ -202,7 +230,7 @@ watch(
       }
     } catch {
       selectedMpc.value = props.contract?.mpc ?? null
-      useMpc.value = Boolean(selectedMpc.value)
+      useMpc.value = props.contract?.mpc_enabled ?? Boolean(selectedMpc.value)
     } finally {
       mpcLoading.value = false
     }
@@ -263,6 +291,7 @@ watch(
     const selectedContract = {
       ...contract,
       mpc: selectedMpcValue,
+      mpc_enabled: Boolean(selectedMpcValue),
       parameters: selectedParameters,
     }
     const config = workspaceConfig(selectedContract)

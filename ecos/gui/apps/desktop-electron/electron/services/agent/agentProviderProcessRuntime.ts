@@ -589,6 +589,7 @@ function readWorkspaceSetupContract(
   const pdkConfig = readWorkspaceSetupPdkConfig(record.pdk_config)
   const projectContext = readWorkspaceSetupProjectContext(record.project_context)
   const mpc = readWorkspaceSetupMpc(record.mpc)
+  const mpcEnabled = typeof record.mpc_enabled === 'boolean' ? record.mpc_enabled : Boolean(mpc)
   if (
     !parameters ||
     !flowConfig ||
@@ -622,6 +623,7 @@ function readWorkspaceSetupContract(
     setup_id: setupId,
     ...(sdc ? { sdc } : {}),
     title: readEventText(record.title) as string,
+    mpc_enabled: mpcEnabled,
     mpc,
   }
 }

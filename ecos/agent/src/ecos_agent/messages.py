@@ -197,6 +197,14 @@ def pdk_prompt(language: str, recommendation: str = "") -> str:
     )
 
 
+def mpc_prompt(language: str) -> str:
+    return _prompt(
+        language,
+        "是否使用 SoC-MPC 模板？请选择使用或不使用。",
+        "Use a SoC-MPC template? Choose whether to use one.",
+    )
+
+
 def default_value_prompt(language: str, label: str, value: object) -> str:
     return _prompt(
         language,
@@ -584,6 +592,18 @@ def optional_file_choice(
         variant="buttons",
         allow_free_text=True,
         labeled_values=tuple(options),
+    )
+
+
+def mpc_choice(language: str, prompt_id: str) -> dict[str, Any]:
+    return _choice(
+        prompt_id,
+        _prompt(language, "SoC-MPC 模板", "SoC-MPC template"),
+        (
+            _prompt(language, "使用 SoC-MPC 模板", "Use a SoC-MPC template"),
+            _prompt(language, "不使用 SoC-MPC 模板", "Do not use a SoC-MPC template"),
+        ),
+        variant="buttons",
     )
 
 

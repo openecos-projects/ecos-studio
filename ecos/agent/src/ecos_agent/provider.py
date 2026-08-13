@@ -39,6 +39,8 @@ from ecos_agent.messages import (
     language_for_text,
     number_default_choice,
     number_prompt,
+    mpc_choice,
+    mpc_prompt,
     numbered_choice,
     operation_choice,
     operation_prompt,
@@ -256,6 +258,7 @@ class _Session:
     workspace_inputs: WorkspaceInputs = field(default_factory=WorkspaceInputs)
     path_recommendations: dict[str, str] = field(default_factory=dict)
     workspace_setup_id: str | None = None
+    mpc_selection: bool | None = None
     workspace_contract: dict[str, Any] | None = None
     workspace_continue_id: str | None = None
     workspace_parameter_update: dict[str, Any] | None = None
@@ -435,6 +438,7 @@ class EcosAgentProvider:
             "workspace_filelist": self._select_filelist,
             "workspace_sdc": self._select_sdc,
             "workspace_pdk": self._select_pdk,
+            "workspace_mpc": self._select_mpc,
             "workspace_top": self._select_top_module,
             "workspace_clock": self._select_clock,
             "workspace_frequency": self._select_frequency,
@@ -1292,6 +1296,28 @@ class EcosAgentProvider:
                 lambda language: pdk_prompt(language, _recommended_path(session, "pdk")),
             )
             return
+        session.phase = "workspace_mpc"
+        self._emit(
+            session,
+            "message",
+            mpc_prompt(session.language),
+        )
+        self._emit_phase_choice(session)
+
+    def _select_mpc(self, session: _Session, message: str) -> None:
+        choice = numbered_choice(message, ("use", "skip"))
+        if choice is None:
+            text = message.casefold()
+            if any(token in text for token in ("不使用", "不用", "without", "skip", "no")):
+                choice = "skip"
+            elif any(token in text for token in ("使用", "使用", "use", "yes")):
+                choice = "use"
+        if choice is None:
+            self._emit(session, "message", invalid_choice(session.language))
+            self._emit(session, "message", mpc_prompt(session.language))
+            self._emit_phase_choice(session)
+            return
+        session.mpc_selection = choice == "use"
         session.phase = "workspace_top"
         self._emit(
             session,
@@ -1647,6 +1673,7 @@ class EcosAgentProvider:
                 session.workspace_inputs,
                 session.language,
                 session.workspace_setup_id,
+                mpc_enabled=session.mpc_selection,
             )
         except ValueError as exc:
             self._emit(session, "message", invalid_value(session.language, "Workspace specification", str(exc)))
@@ -2014,6 +2041,8 @@ class EcosAgentProvider:
                     recommendation,
                     field="PDK",
                 )
+        elif session.phase == "workspace_mpc":
+            choice = mpc_choice(session.language, prompt_id)
         elif session.phase == "workspace_top":
             choice = default_value_choice(
                 session.language,
@@ -2138,6 +2167,7 @@ class EcosAgentProvider:
                 "workspace_filelist",
                 "workspace_sdc",
                 "workspace_pdk",
+                "workspace_mpc",
                 "workspace_top",
                 "workspace_clock",
                 "workspace_frequency",
@@ -2181,6 +2211,7 @@ class EcosAgentProvider:
         session.workspace_inputs = WorkspaceInputs()
         session.path_recommendations = {}
         session.workspace_setup_id = None
+        session.mpc_selection = None
         session.workspace_contract = None
         session.workspace_continue_id = None
         session.workspace_parameter_update = None

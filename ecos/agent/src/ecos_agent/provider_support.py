@@ -27,6 +27,7 @@ from ecos_agent.messages import (
     operation_choice,
     operation_prompt,
     optional_file_prompt,
+    mpc_prompt,
     pdk_prompt,
     project_mode_prompt,
     project_root_prompt,
@@ -643,6 +644,7 @@ def _prompt_for_phase(session: Any) -> str:
             session.language, "SDC", ".sdc", _recommended_path(session, "sdc")
         ),
         "workspace_pdk": pdk_prompt(session.language, _recommended_path(session, "pdk")),
+        "workspace_mpc": mpc_prompt(session.language),
         "workspace_top": default_value_prompt(session.language, "Top Module Name", session.workspace_setup.top_module),
         "workspace_clock": default_value_prompt(session.language, "Clock Signal Name", session.workspace_setup.clock_name),
         "workspace_frequency": number_prompt(session.language, "Frequency Max (MHz)", session.workspace_setup.frequency_mhz, 1, 10_000),

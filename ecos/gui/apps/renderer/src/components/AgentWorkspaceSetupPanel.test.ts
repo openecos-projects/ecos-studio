@@ -12,6 +12,7 @@ describe('AgentWorkspaceSetupPanel', () => {
   it('lets the reviewer keep or remove the project MPC snapshot before creation', () => {
     expect(source).toContain('Use a SoC-MPC template')
     expect(source).toContain('v-model="useMpc"')
+    expect(source).toContain('mpc_enabled')
     expect(source).toContain(
       'const selectedMpcValue = useMpc.value ? selectedMpc.value : null',
     )
@@ -32,9 +33,23 @@ describe('AgentWorkspaceSetupPanel', () => {
       'SDC',
       'PDK Root',
       'Top Module',
+      'Use SoC-MPC',
+      'SoC-MPC Template',
+      'SoC-MPC Design',
+      'SoC-MPC Spec',
     ])
-      expect(source).toContain(`['${field}'`)
+      expect(source).toContain(field)
     expect(source).not.toContain('<dl')
+  })
+
+  it('keeps MPC review controls inside the contract panel', () => {
+    expect(source).toContain('<template #review-extra>')
+    expect(source).not.toContain('No usable SoC-MPC template is selected.')
+  })
+
+  it('blocks confirmation when a requested MPC template is unavailable', () => {
+    expect(source).toContain('mpcSelectionInvalid')
+    expect(source).toContain("'Unavailable'")
   })
 
   it('shows Workspace Name from the directory leaf and Design Name separately', () => {
@@ -58,7 +73,7 @@ describe('AgentWorkspaceSetupPanel', () => {
     expect(source).toContain('confirmationText?: string')
     expect(source).toContain(':confirmation-text="confirmationText"')
     expect(source).toContain(':choice="choice"')
-    expect(source).toContain(':choice-disabled="choiceDisabled"')
+    expect(source).toContain(':choice-disabled="choiceDisabled || mpcSelectionInvalid"')
   })
 
   it('collapses committed setups into a short summary with progressive status', () => {
