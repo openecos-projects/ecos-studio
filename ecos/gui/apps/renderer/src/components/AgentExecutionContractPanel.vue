@@ -100,7 +100,6 @@
           </tbody>
         </table>
       </div>
-      <slot name="review-extra" />
       <p
         v-if="confirmationText"
         class="selectable text-xs leading-5 whitespace-pre-line text-(--text-primary)"

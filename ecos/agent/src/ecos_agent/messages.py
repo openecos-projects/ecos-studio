@@ -200,8 +200,8 @@ def pdk_prompt(language: str, recommendation: str = "") -> str:
 def mpc_prompt(language: str) -> str:
     return _prompt(
         language,
-        "是否使用 SoC-MPC 模板？请选择使用或不使用。",
-        "Use a SoC-MPC template? Choose whether to use one.",
+        "是否使用当前 Project 已选择的 SoC-MPC 模板？请选择使用或不使用。",
+        "Use the SoC-MPC template selected for this Project? Choose whether to use it.",
     )
 
 

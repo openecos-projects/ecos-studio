@@ -136,7 +136,6 @@ def test_workspace_setup_contract_carries_project_mpc_snapshot(tmp_path: Path) -
 
     assert contract["mpc"] == mpc
     assert contract["parameters"]["MPC"] == mpc
-    assert contract["mpc_enabled"] is True
 
     skipped = workspace_setup_contract(
         _proposal(
@@ -160,7 +159,6 @@ def test_workspace_setup_contract_carries_project_mpc_snapshot(tmp_path: Path) -
     )
     assert "mpc" not in skipped
     assert "MPC" not in skipped["parameters"]
-    assert skipped["mpc_enabled"] is False
 
 
 def test_new_ephemeral_thread_discards_prior_case_context(tmp_path: Path) -> None:
