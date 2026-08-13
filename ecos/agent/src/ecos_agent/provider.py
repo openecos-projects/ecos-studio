@@ -287,6 +287,7 @@ class EcosAgentProvider:
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
+        self._uses_default_workspace_path_discovery = workspace_path_recommender is None
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.knowledge = knowledge or load_default_step_knowledge()
@@ -1851,6 +1852,14 @@ class EcosAgentProvider:
     def _discover_design_paths(self, session: _Session) -> None:
         roots = workspace_search_roots(session.workspace_inputs.project_root)
         candidates = discover_design_file_candidates(session.workspace_setup.design_name or "", roots)
+        local_recommendations = {
+            field: paths[0]
+            for field, paths in candidates.items()
+            if paths
+        }
+        if self._uses_default_workspace_path_discovery:
+            session.path_recommendations.update(local_recommendations)
+            return
         try:
             proposal = GuiWorkspaceSetupProposal.model_validate(
                 self.workspace_path_recommender(
@@ -1871,9 +1880,13 @@ class EcosAgentProvider:
             self._check_interrupted(session)
             self._raise_if_interrupted(exc)
             session.path_recommendations = {
-                field: path for field, path in session.path_recommendations.items() if field == "pdk"
+                **{
+                    field: path
+                    for field, path in session.path_recommendations.items()
+                    if field == "pdk"
+                },
+                **local_recommendations,
             }
-            self._emit(session, "error", f"Unable to discover local design files: {exc}")
 
     def _update_workspace_setup(self, session: _Session, **updates: Any) -> None:
         payload = session.workspace_setup.model_dump(mode="json")

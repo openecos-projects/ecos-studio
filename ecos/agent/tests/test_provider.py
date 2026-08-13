@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 import ecos_agent.provider_support as provider_support
+import ecos_agent.provider as provider_module
 from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
 from ecos_agent.contracts import GuiWorkspaceSetupProposal, StageRoutingProposal
 from ecos_agent.ecc_contracts import ECCStepName
@@ -1576,6 +1577,54 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     _send(provider, session_id, "4")
     assert provider.sessions[session_id].phase == "workspace_rtl"
     assert provider.sessions[session_id].workspace_setup.flow_end == "place"
+
+
+def test_design_name_uses_local_file_candidates_without_codex(tmp_path: Path, monkeypatch) -> None:
+    project_root = tmp_path / "projects"
+    project_root.mkdir()
+    rtl, filelist, sdc, _pdk = _write_workspace_inputs(project_root)
+    events: list[dict[str, object]] = []
+
+    def fail_if_called(_context: dict[str, object]) -> GuiWorkspaceSetupProposal:
+        raise AssertionError("design name input must not start Codex discovery")
+
+    monkeypatch.setattr(provider_module, "_propose_gui_workspace_path_discovery", fail_if_called)
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    for message in ("1", "2", str(project_root), "ws_0001", "gcd"):
+        _send(provider, session_id, message)
+
+    session = provider.sessions[session_id]
+    assert session.phase == "workspace_flow_end"
+    assert session.path_recommendations == {
+        "rtl": str(rtl),
+        "filelist": str(filelist),
+        "sdc": str(sdc),
+    }
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_path_discovery_parse_error_falls_back_to_local_candidates(tmp_path: Path) -> None:
+    project_root = tmp_path / "projects"
+    project_root.mkdir()
+    rtl, _filelist, _sdc, _pdk = _write_workspace_inputs(project_root)
+    events: list[dict[str, object]] = []
+
+    def invalid_codex_response(_context: dict[str, object]) -> GuiWorkspaceSetupProposal:
+        raise CodexProviderError("Codex assistant content is not valid JSON", failure_class="parse_error")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        workspace_path_recommender=invalid_codex_response,
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    for message in ("1", "2", str(project_root), "ws_0001", "gcd"):
+        _send(provider, session_id, message)
+
+    session = provider.sessions[session_id]
+    assert session.phase == "workspace_flow_end"
+    assert session.path_recommendations["rtl"] == str(rtl)
+    assert not any(event["type"] == "error" for event in events)
 
 
 def test_rtl_recommendation_emits_a_path_choice_without_embedding_the_path(
