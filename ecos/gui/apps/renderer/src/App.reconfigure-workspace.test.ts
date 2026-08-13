@@ -3,7 +3,10 @@ import appSource from './App.vue?raw'
 
 describe('App workspace reconfiguration wizard wiring', () => {
   it('does not let a failed zoom setting restore block app startup', () => {
-    const restoreStart = appSource.indexOf('if (desktopApi.value) {', appSource.indexOf('onMounted(async () =>'))
+    const restoreStart = appSource.indexOf(
+      'if (desktopApi.value) {',
+      appSource.indexOf('onMounted(async () =>'),
+    )
     const restoreEnd = appSource.indexOf('themeStore.initTheme()', restoreStart)
     const restoreSource = appSource.slice(restoreStart, restoreEnd)
 

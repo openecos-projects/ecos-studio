@@ -96,9 +96,7 @@ describe('StepDashboard', () => {
       '.harden-output-table th,\n.harden-output-table td {\n  font-size: 12px;',
     )
     expect(componentSource).toContain('is-sta-report-card')
-    expect(componentSource).toContain(
-      'grid-template-rows: repeat(6, minmax(54px, 1fr))',
-    )
+    expect(componentSource).toContain('grid-template-rows: repeat(6, minmax(54px, 1fr))')
     expect(componentSource).toContain('white-space: normal')
   })
 

@@ -936,7 +936,9 @@ async function adjustZoom(action: AppMenuAction): Promise<void> {
     return
   }
   const nextIndex = action === appMenuActionIds.zoomIn ? index + 1 : index - 1
-  await setZoomFactor(zoomFactors[Math.max(0, Math.min(zoomFactors.length - 1, nextIndex))])
+  await setZoomFactor(
+    zoomFactors[Math.max(0, Math.min(zoomFactors.length - 1, nextIndex))],
+  )
 }
 
 const { handleMenuAction } = useAppMenuActions({

@@ -2404,5 +2404,4 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
     font-size: 11px;
   }
 }
-
 </style>

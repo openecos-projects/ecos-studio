@@ -112,7 +112,9 @@ describe('ProjectsView project management surface', () => {
     expect(projectListStyles).toContain('overflow-y: auto;')
     expect(projectListStyles).toContain('overflow-x: hidden;')
     expect(projectListStyles).toContain('scrollbar-gutter: stable;')
-    expect(source).not.toContain("'project-list--popover-open': Boolean(popoverWorkspaceId)")
+    expect(source).not.toContain(
+      "'project-list--popover-open': Boolean(popoverWorkspaceId)",
+    )
     expect(source).not.toContain('popoverWorkspaceId || projectActionMenuId')
     expect(projectStyles).not.toContain('.project-list--popover-open {')
   })
@@ -310,9 +312,15 @@ describe('ProjectsView project management surface', () => {
     expect(source).not.toContain("'project-list--popover-open'")
     expect(projectStyles).not.toContain('.project-list--popover-open')
     expect(source).toContain('updateWorkspaceFlowPopoverPosition')
-    expect(source).toContain("window.addEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)")
-    expect(source).toContain("window.removeEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)")
-    expect(source).toContain('`[data-workspace-id="${cssEscape(popoverWorkspaceId.value)}"]`')
+    expect(source).toContain(
+      "window.addEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)",
+    )
+    expect(source).toContain(
+      "window.removeEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)",
+    )
+    expect(source).toContain(
+      '`[data-workspace-id="${cssEscape(popoverWorkspaceId.value)}"]`',
+    )
   })
 
   it('closes the workspace flow popover from outside clicks or Escape', () => {

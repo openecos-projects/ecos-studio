@@ -76,10 +76,7 @@
               </div>
             </div>
 
-            <div
-              class="project-list"
-              aria-label="Project list"
-            >
+            <div class="project-list" aria-label="Project list">
               <article
                 v-for="project in visibleProjectCards"
                 :key="project.source.id"
@@ -1908,9 +1905,7 @@ function flowStatusHintClass(state: ProjectFlowStatusHint['state']): string {
 function workspacePopoverPlacementClass(workspaceId: string): string {
   const workspaces = visibleProjectWorkspaces(selectedProject.value)
   const index = workspaces.findIndex((workspace) => workspace.id === workspaceId)
-  return index >= Math.ceil(workspaces.length / 2)
-    ? 'workspace-flow-popover--above'
-    : ''
+  return index >= Math.ceil(workspaces.length / 2) ? 'workspace-flow-popover--above' : ''
 }
 
 function stepStatusClass(status: ProjectStepStatus): string {
