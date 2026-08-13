@@ -166,4 +166,101 @@ describe('useFlowStages runtime updates', () => {
     })
     scope.stop()
   })
+
+  it('tracks legacy frontend progress events during a full rerun', async () => {
+    testState.currentProject = ref({
+      path: '/workspace/frontend',
+      designTool: 'frontend',
+    })
+    testState.workspaceSession = ref({ workspaceId: 'frontend-runtime-handle' })
+    testState.runtimeEvents = ref([])
+    testState.readWorkspaceFlowResourceApi.mockResolvedValueOnce({
+      steps: [
+        { name: 'prepare', state: 'Success', tool: 'fe' },
+        { name: 'review', state: 'Success', tool: 'fe' },
+        { name: 'elab', state: 'Success', tool: 'slang' },
+        { name: 'lint', state: 'Success', tool: 'verilator' },
+        { name: 'sim', state: 'Success', tool: 'verilator' },
+      ],
+    })
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const stages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value).toHaveLength(5)
+    })
+
+    stages.setFirstRunStepOngoing({ resetAll: true })
+    expect(stages.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+      'Ongoing',
+      'Unstart',
+      'Unstart',
+      'Unstart',
+      'Unstart',
+    ])
+
+    testState.runtimeEvents.value.push({
+      data: {
+        type: 'step_start',
+        step: 'prepare',
+        tool: 'fe',
+      },
+    })
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value[0]?.state).toBe('Ongoing')
+    })
+
+    testState.runtimeEvents.value.push({
+      data: {
+        type: 'step_complete',
+        state: 'Success',
+        step: 'prepare',
+        tool: 'fe',
+      },
+    })
+    testState.runtimeEvents.value.push({
+      data: {
+        type: 'step_start',
+        step: 'review',
+        tool: 'fe',
+      },
+    })
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+        'Success',
+        'Ongoing',
+        'Unstart',
+        'Unstart',
+        'Unstart',
+      ])
+    })
+
+    testState.runtimeEvents.value.push({
+      data: {
+        type: 'step_complete',
+        phase: 'failed',
+        state: 'Incomplete',
+        step: 'review',
+        tool: 'fe',
+      },
+      response: 'failed',
+    })
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value[1]?.state).toBe('Incomplete')
+    })
+
+    testState.runtimeEvents.value.push({
+      data: {
+        cmd: 'rtl2gds',
+        type: 'cancelled',
+      },
+    })
+    await vi.waitFor(() => {
+      expect(
+        stages.dynamicFlowStages.value.every((stage) => stage.state !== 'Ongoing'),
+      ).toBe(true)
+    })
+    scope.stop()
+  })
 })

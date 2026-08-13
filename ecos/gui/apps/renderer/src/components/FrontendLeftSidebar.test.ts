@@ -24,6 +24,7 @@ describe('FrontendLeftSidebar', () => {
 
   it('runs frontend full flow without the backend workspace rebuild control', () => {
     expect(source).toContain("computed(() => 'Frontend Flow')")
+    expect(source).toContain('setFirstRunStepOngoing({ resetAll: isRerun.value })')
     expect(source).toContain('await runAllFlow({ rerun: isRerun.value })')
     expect(source).not.toContain('FlowRunControl')
     expect(source).not.toContain('rerunHomeWorkspace')

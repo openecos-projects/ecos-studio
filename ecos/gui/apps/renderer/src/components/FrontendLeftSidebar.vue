@@ -441,7 +441,7 @@ async function handleRunFlow(): Promise<void> {
     return
   }
 
-  setFirstRunStepOngoing()
+  setFirstRunStepOngoing({ resetAll: isRerun.value })
   await runAllFlow({ rerun: isRerun.value })
   await refreshFlowStages()
 }

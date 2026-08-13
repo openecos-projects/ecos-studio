@@ -211,7 +211,7 @@ export function useFlowStages() {
       }
       // A flow has one active step. Keep a stale delayed start event from
       // rendering two Ongoing states at the same time.
-      return isStarted && stage.state === 'Ongoing'
+      return isStarted && normalizeFlowStageState(stage.state) === 'Ongoing'
         ? { ...stage, state: 'Unstart' }
         : stage
     })
@@ -221,6 +221,14 @@ export function useFlowStages() {
         { ...runtimeStage, state: normalizeFlowStageState(state) },
       ]
     }
+  }
+
+  function markOngoingRunStagesIncomplete(): void {
+    dynamicFlowStages.value = dynamicFlowStages.value.map((stage) =>
+      normalizeFlowStageState(stage.state) === 'Ongoing'
+        ? { ...stage, state: 'Incomplete' }
+        : stage,
+    )
   }
 
   // 合并后的完整流程步骤
@@ -395,18 +403,46 @@ export function useFlowStages() {
       typeof eventData.runtimeProtocolType === 'string'
         ? eventData.runtimeProtocolType
         : ''
-    if (protocolType !== 'step.started' && protocolType !== 'step.completed') return
+    const legacyType = typeof eventData.type === 'string' ? eventData.type : ''
+    const isProtocolStart = protocolType === 'step.started'
+    const isProtocolComplete = protocolType === 'step.completed'
+    const isTerminalFailure =
+      protocolType === 'operation.failed' ||
+      protocolType === 'operation.cancelled' ||
+      (!protocolType && (legacyType === 'error' || legacyType === 'cancelled'))
+    if (isTerminalFailure) {
+      const command = typeof eventData.cmd === 'string' ? eventData.cmd : ''
+      if (command && command !== 'rtl2gds' && command !== 'run_step') return
+      markOngoingRunStagesIncomplete()
+      return
+    }
+    // ECC-FE currently emits legacy operation.progress notifications for its
+    // synchronous rtl2gds flow. They are normalized to step_start/step_complete
+    // by the runtime event client and do not carry runtimeProtocolType.
+    const isLegacyStart = !protocolType && legacyType === 'step_start'
+    const isLegacyComplete = !protocolType && legacyType === 'step_complete'
+    if (!isProtocolStart && !isProtocolComplete && !isLegacyStart && !isLegacyComplete) {
+      return
+    }
     const stepName = typeof eventData.step === 'string' ? eventData.step : ''
     if (!stepName) return
+    const eventResponse = (event as { response?: unknown }).response
+    const phase = typeof eventData.phase === 'string' ? eventData.phase : ''
+    const state =
+      typeof eventData.state === 'string'
+        ? eventData.state
+        : isProtocolStart || isLegacyStart
+          ? 'Ongoing'
+          : eventResponse === 'failed' || phase === 'failed'
+            ? 'Incomplete'
+            : eventResponse === 'error'
+              ? 'Invalid'
+              : 'Success'
     applyRuntimeStepState(
       stepName,
       typeof eventData.tool === 'string' ? eventData.tool : '',
-      typeof eventData.state === 'string'
-        ? eventData.state
-        : protocolType === 'step.started'
-          ? 'Ongoing'
-          : 'Success',
-      protocolType === 'step.started',
+      state,
+      isProtocolStart || isLegacyStart,
     )
   }
 
@@ -438,7 +474,8 @@ export function useFlowStages() {
    * 乐观更新：将第一个非 Success 的 run 步骤设为 Ongoing
    * 在用户点击 Run RTL2GDS 时调用，立即反映运行状态
    */
-  function setFirstRunStepOngoing(): void {
+  function setFirstRunStepOngoing(options: { resetAll?: boolean } = {}): void {
+    if (options.resetAll) resetRunStagesForRerun()
     const idx = dynamicFlowStages.value.findIndex((s) => s.state !== 'Success')
     if (idx !== -1) {
       dynamicFlowStages.value[idx] = {
