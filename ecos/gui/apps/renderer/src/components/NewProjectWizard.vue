@@ -2756,7 +2756,7 @@ function showDirectoryUploadFailurePrompt() {
     severity: 'warn',
     summary: 'Folder Upload Failed',
     detail: DIRECTORY_UPLOAD_FAILURE_MESSAGE,
-    life: 5000,
+    life: 15000,
   })
 }
 
@@ -3033,7 +3033,7 @@ async function scanManualPdkResources() {
       summary: 'PDK Scan Failed',
       detail:
         error instanceof Error ? error.message : 'Failed to scan the current PDK folder.',
-      life: 5000,
+      life: 15000,
     })
   }
 }

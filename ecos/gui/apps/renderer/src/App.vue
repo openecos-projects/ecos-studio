@@ -462,7 +462,7 @@ async function openWorkspaceReconfigureWizard() {
       severity: 'warn',
       summary: 'Workspace Required',
       detail: 'Open a workspace before updating it.',
-      life: 3000,
+      life: 15000,
     })
     return
   }
@@ -487,7 +487,7 @@ async function openWorkspaceReconfigureWizard() {
       severity: 'error',
       summary: 'Failed to Update Workspace',
       detail: error instanceof Error ? error.message : String(error),
-      life: 5000,
+      life: 15000,
     })
   }
 }
@@ -905,7 +905,7 @@ const openDocumentation = async () => {
       severity: 'error',
       summary: 'Error',
       detail: `Failed to open documentation because of ${error instanceof Error ? error.message : String(error)}`,
-      life: 3000,
+      life: 15000,
     })
   }
 }

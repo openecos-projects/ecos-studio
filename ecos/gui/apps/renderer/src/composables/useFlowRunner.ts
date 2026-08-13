@@ -92,7 +92,7 @@ export function useFlowRunner() {
       severity: 'warn',
       summary: 'Desktop App Required',
       detail: 'Flow execution is only available in the desktop app.',
-      life: 5000,
+      life: 15000,
     })
   }
 
@@ -160,7 +160,7 @@ export function useFlowRunner() {
         severity: 'error',
         summary: 'No Workspace Open',
         detail: 'Open a workspace before running a flow step.',
-        life: 5000,
+        life: 15000,
       })
       return { step: step as StepEnum, state: StateEnum.Invalid }
     }
@@ -188,7 +188,7 @@ export function useFlowRunner() {
         severity: 'info',
         summary: 'Step Started',
         detail: `${step} is running`,
-        life: 3000,
+        life: 15000,
       })
       void operation
       return lastRunResult.value
@@ -199,7 +199,7 @@ export function useFlowRunner() {
         severity: 'error',
         summary: 'Step Error',
         detail: err instanceof Error ? err.message : String(err),
-        life: 6000,
+        life: 15000,
       })
     } finally {
       clearTransientInteractionLocks()
@@ -235,7 +235,7 @@ export function useFlowRunner() {
         severity: 'error',
         summary: 'No Workspace Open',
         detail: 'Open a workspace before running the flow.',
-        life: 5000,
+        life: 15000,
       })
       return null
     }
@@ -264,7 +264,7 @@ export function useFlowRunner() {
         severity: 'info',
         summary: 'RTL2GDS Started',
         detail: 'Flow is running in ECC.',
-        life: 3000,
+        life: 15000,
       })
       return operation
     } catch (err) {
@@ -276,7 +276,7 @@ export function useFlowRunner() {
         severity: 'error',
         summary: 'RTL2GDS Error',
         detail: error.value ?? 'Unknown error',
-        life: 8000,
+        life: 15000,
       })
     } finally {
       clearTransientInteractionLocks()

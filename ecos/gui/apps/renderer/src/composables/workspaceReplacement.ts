@@ -105,7 +105,7 @@ export async function recordWorkspaceReplacementBackup(
       summary: 'Backup manifest not updated',
       detail:
         'The original workspace backup was kept, but project.json could not be updated.',
-      life: 5000,
+      life: 15000,
     })
   }
 }

@@ -245,7 +245,7 @@ export function useWorkspace() {
         severity: options.severity ?? 'info',
         summary: options.summary,
         detail: options.detail,
-        life: options.life ?? 4000,
+        life: options.life ?? 15000,
       })
     } else {
       console.warn(
@@ -283,7 +283,7 @@ export function useWorkspace() {
           summary: 'Desktop runtime unavailable',
           detail:
             'The desktop runtime bridge is not available. Restart the application and try again.',
-          life: 8000,
+          life: 15000,
         })
       }
       return false

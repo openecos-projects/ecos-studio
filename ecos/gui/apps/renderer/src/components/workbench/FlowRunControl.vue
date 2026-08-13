@@ -125,7 +125,7 @@ async function executeRun(rerun: boolean): Promise<void> {
         severity: 'error',
         summary: 'Unable to Prepare Rerun',
         detail: error instanceof Error ? error.message : String(error),
-        life: 5000,
+        life: 15000,
       })
       return
     } finally {
@@ -163,7 +163,7 @@ async function canRerunCurrentStep(): Promise<boolean> {
     severity: 'warn',
     summary: 'Close Chip Viewer First',
     detail: 'Close the rendered layout for this step before rerunning it.',
-    life: 6000,
+    life: 15000,
   })
   return false
 }

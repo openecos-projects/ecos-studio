@@ -363,7 +363,7 @@ function showDirectoryUploadFailurePrompt() {
     severity: 'warn',
     summary: 'Folder Upload Failed',
     detail: DIRECTORY_UPLOAD_FAILURE_MESSAGE,
-    life: 5000,
+    life: 15000,
   })
 }
 
@@ -511,7 +511,7 @@ async function handleClearRunResults() {
       severity: 'success',
       summary: 'Workspace Reset',
       detail: 'Previous flow run results were cleared.',
-      life: 3000,
+      life: 15000,
     })
     closeDialog()
   } catch (error) {
@@ -520,7 +520,7 @@ async function handleClearRunResults() {
       summary: 'Reset Failed',
       detail:
         error instanceof Error ? error.message : 'Failed to clear workspace run results.',
-      life: 4000,
+      life: 15000,
     })
   } finally {
     clearingRunResults.value = false
@@ -559,7 +559,7 @@ async function handleSave() {
           detail: result.skipped
             .map((entry) => `${entry.path}: ${entry.reason}`)
             .join('\n'),
-          life: 5000,
+          life: 15000,
         })
       }
     }
@@ -568,7 +568,7 @@ async function handleSave() {
       severity: 'success',
       summary: 'RTL Files Updated',
       detail: `${toAdd.length} added, ${toRemove.length} removed.`,
-      life: 3000,
+      life: 15000,
     })
     showRunResultsConfirm.value = true
   } catch (error) {
@@ -577,7 +577,7 @@ async function handleSave() {
       summary: 'Save RTL Files Failed',
       detail:
         error instanceof Error ? error.message : 'Failed to update workspace filelist.',
-      life: 4000,
+      life: 15000,
     })
   } finally {
     saving.value = false

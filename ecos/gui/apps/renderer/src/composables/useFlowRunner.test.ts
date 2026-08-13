@@ -136,7 +136,7 @@ describe('useFlowRunner desktop-only guard', () => {
       severity: 'warn',
       summary: 'Desktop App Required',
       detail: 'Flow execution is only available in the desktop app.',
-      life: 5000,
+      life: 15000,
     })
     expect(startStepOperationApi).not.toHaveBeenCalled()
     expect(ensureApiReady).not.toHaveBeenCalled()
@@ -156,7 +156,7 @@ describe('useFlowRunner desktop-only guard', () => {
       severity: 'warn',
       summary: 'Desktop App Required',
       detail: 'Flow execution is only available in the desktop app.',
-      life: 5000,
+      life: 15000,
     })
     expect(startFlowOperationApi).not.toHaveBeenCalled()
     expect(ensureApiReady).not.toHaveBeenCalled()

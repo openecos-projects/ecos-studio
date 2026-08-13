@@ -14,7 +14,7 @@ export function useDesignFiles() {
       severity: 'warn',
       summary: 'No Workspace Open',
       detail: 'Open a workspace before managing RTL design files.',
-      life: 3000,
+      life: 15000,
     })
     return false
   }
