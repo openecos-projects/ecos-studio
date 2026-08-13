@@ -64,7 +64,9 @@ pub struct GpuBufferKey {
 }
 
 impl GpuBufferKey {
-    pub fn compute_layer_visibility_hash(visible_layers: &BTreeMap<chipgeom_format::LayerId, bool>) -> u64 {
+    pub fn compute_layer_visibility_hash(
+        visible_layers: &BTreeMap<chipgeom_format::LayerId, bool>,
+    ) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         for (layer_id, visible) in visible_layers {
             layer_id.hash(&mut hasher);
@@ -74,7 +76,11 @@ impl GpuBufferKey {
     }
 
     pub fn zoom_tier(zoom: f32) -> u8 {
-        if zoom > 1.25 { 1 } else { 0 }
+        if zoom > 1.25 {
+            1
+        } else {
+            0
+        }
     }
 }
 
@@ -422,21 +428,36 @@ mod tests {
 
     #[test]
     fn test_tile_coords_single_tile() {
-        let bbox = chipgeom_format::Rect32 { lx: 100, ly: 100, hx: 500, hy: 500 };
+        let bbox = chipgeom_format::Rect32 {
+            lx: 100,
+            ly: 100,
+            hx: 500,
+            hy: 500,
+        };
         let tiles = tile_coords_for_bbox(bbox, 1000);
         assert_eq!(tiles, vec![(0, 0)]);
     }
 
     #[test]
     fn test_tile_coords_straddle_boundary() {
-        let bbox = chipgeom_format::Rect32 { lx: 800, ly: 800, hx: 1200, hy: 1200 };
+        let bbox = chipgeom_format::Rect32 {
+            lx: 800,
+            ly: 800,
+            hx: 1200,
+            hy: 1200,
+        };
         let tiles = tile_coords_for_bbox(bbox, 1000);
         assert_eq!(tiles, vec![(0, 0), (0, 1), (1, 0), (1, 1)]);
     }
 
     #[test]
     fn test_tile_coords_large_bbox() {
-        let bbox = chipgeom_format::Rect32 { lx: 0, ly: 0, hx: 2500, hy: 1500 };
+        let bbox = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 2500,
+            hy: 1500,
+        };
         let tiles = tile_coords_for_bbox(bbox, 1000);
         assert_eq!(tiles.len(), 6); // 3 x 2
     }
@@ -449,7 +470,10 @@ mod tests {
         assert_eq!(fill_pattern_id(chip_display::FillPattern::DenseDots), 3);
         assert_eq!(fill_pattern_id(chip_display::FillPattern::DiagonalHatch), 4);
         assert_eq!(fill_pattern_id(chip_display::FillPattern::CrossHatch), 5);
-        assert_eq!(fill_pattern_id(chip_display::FillPattern::HorizontalHatch), 6);
+        assert_eq!(
+            fill_pattern_id(chip_display::FillPattern::HorizontalHatch),
+            6
+        );
         assert_eq!(fill_pattern_id(chip_display::FillPattern::VerticalHatch), 7);
         assert_eq!(fill_pattern_id(chip_display::FillPattern::Grid), 8);
         assert_eq!(fill_pattern_id(chip_display::FillPattern::XMark), 9);
@@ -462,7 +486,6 @@ mod tests {
         assert_eq!(packed.to_le_bytes(), rgba);
     }
 }
-
 
 use wgpu::util::DeviceExt;
 
@@ -598,22 +621,30 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
         }
         let resources: &mut CanvasGpuResources = callback_resources.get_mut().unwrap();
 
-        queue.write_buffer(&resources.uniform_buffer, 0, bytemuck::bytes_of(&self.uniform));
+        queue.write_buffer(
+            &resources.uniform_buffer,
+            0,
+            bytemuck::bytes_of(&self.uniform),
+        );
 
         if self.instances.is_empty() {
             return Vec::new();
         }
 
         // Evict buffers from old geometry epochs
-        resources.instance_buffers.retain(|key, _| key.geometry_epoch == self.buffer_key.geometry_epoch);
+        resources
+            .instance_buffers
+            .retain(|key, _| key.geometry_epoch == self.buffer_key.geometry_epoch);
 
         if !resources.instance_buffers.contains_key(&self.buffer_key) {
             // LRU eviction if too many tiles are cached (skipping tiles used in the current frame)
             if resources.instance_buffers.len() >= MAX_CACHED_TILE_BUFFERS {
-                if let Some(oldest_key) = resources.instance_buffers.iter()
+                if let Some(oldest_key) = resources
+                    .instance_buffers
+                    .iter()
                     .filter(|(_, entry)| entry.last_used_frame < self.frame_counter)
                     .min_by_key(|(_, entry)| entry.last_used_frame)
-                    .map(|(k, _)| *k) 
+                    .map(|(k, _)| *k)
                 {
                     resources.instance_buffers.remove(&oldest_key);
                 }
@@ -640,12 +671,15 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
                 ],
             });
 
-            resources.instance_buffers.insert(self.buffer_key, GpuBufferCacheEntry {
-                instance_buffer: buffer,
-                count: self.instances.len() as u32,
-                bind_group,
-                last_used_frame: self.frame_counter,
-            });
+            resources.instance_buffers.insert(
+                self.buffer_key,
+                GpuBufferCacheEntry {
+                    instance_buffer: buffer,
+                    count: self.instances.len() as u32,
+                    bind_group,
+                    last_used_frame: self.frame_counter,
+                },
+            );
         } else {
             if let Some(entry) = resources.instance_buffers.get_mut(&self.buffer_key) {
                 entry.last_used_frame = self.frame_counter;
@@ -663,7 +697,9 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
     ) {
         let resources: &CanvasGpuResources = callback_resources.get().unwrap();
         if let Some(entry) = resources.instance_buffers.get(&self.buffer_key) {
-            if entry.count == 0 { return; }
+            if entry.count == 0 {
+                return;
+            }
 
             let clip = info.clip_rect_in_pixels();
             let clip_min_x = clip.left_px.max(0) as u32;
@@ -689,13 +725,17 @@ pub fn build_gpu_instances(
     for (geometry, style) in shapes {
         let (rect_dbu, shape_type) = match geometry {
             chip_view_db::ShapeGeometry::Rect(rect) => ([rect.lx, rect.ly, rect.hx, rect.hy], 0u32),
-            chip_view_db::ShapeGeometry::Line(line) => ([line.begin.x, line.begin.y, line.end.x, line.end.y], 1u32),
-            chip_view_db::ShapeGeometry::Point(point) => ([point.point.x, point.point.y, 0, 0], 2u32),
+            chip_view_db::ShapeGeometry::Line(line) => {
+                ([line.begin.x, line.begin.y, line.end.x, line.end.y], 1u32)
+            }
+            chip_view_db::ShapeGeometry::Point(point) => {
+                ([point.point.x, point.point.y, 0, 0], 2u32)
+            }
         };
-        
+
         let mut fill_rgba = style.rgba;
         fill_rgba[3] = style.fill_alpha;
-        
+
         let mut frame_rgba = style.frame_rgba;
         frame_rgba[3] = style.frame_alpha;
 

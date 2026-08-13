@@ -66,7 +66,10 @@ fn main() -> Result<()> {
                 args.antenna_data.clone(),
                 args.antenna_statis.clone(),
                 args.map_root.clone(),
-                _cc.wgpu_render_state.as_ref().map(|s| s.target_format).unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb),
+                _cc.wgpu_render_state
+                    .as_ref()
+                    .map(|s| s.target_format)
+                    .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb),
             )))
         }),
     )

@@ -160,7 +160,8 @@ struct LoadedViewer {
     visibility_rules_cache: VisibilityRulesCache,
     gpu_canvas: crate::canvas_gpu::GpuCanvasState,
     gpu_frame_counter: u64,
-    gpu_tile_instances: std::collections::HashMap<crate::canvas_gpu::GpuBufferKey, std::sync::Arc<GpuTileData>>,
+    gpu_tile_instances:
+        std::collections::HashMap<crate::canvas_gpu::GpuBufferKey, std::sync::Arc<GpuTileData>>,
     label_collector: ShapeLabelCollector,
     /// Persistent scratch buffer for shape geometry + style pairs, cleared each tile.
     /// Avoids per-tile Vec::new() allocations in the GPU tile build loop.
@@ -619,20 +620,48 @@ struct ObjectVisibility {
 impl ObjectVisibility {
     pub fn bits(&self) -> u32 {
         let mut b = 0;
-        if self.instances { b |= 1 << 0; }
-        if self.net_signal { b |= 1 << 1; }
-        if self.net_clock { b |= 1 << 2; }
-        if self.net_other { b |= 1 << 3; }
-        if self.pdn { b |= 1 << 4; }
-        if self.vias { b |= 1 << 5; }
-        if self.io_pin { b |= 1 << 6; }
-        if self.placement { b |= 1 << 7; }
-        if self.tracks { b |= 1 << 8; }
-        if self.gcells { b |= 1 << 9; }
-        if self.obstructions { b |= 1 << 10; }
-        if self.boundaries { b |= 1 << 11; }
-        if self.fill { b |= 1 << 12; }
-        if self.regions { b |= 1 << 13; }
+        if self.instances {
+            b |= 1 << 0;
+        }
+        if self.net_signal {
+            b |= 1 << 1;
+        }
+        if self.net_clock {
+            b |= 1 << 2;
+        }
+        if self.net_other {
+            b |= 1 << 3;
+        }
+        if self.pdn {
+            b |= 1 << 4;
+        }
+        if self.vias {
+            b |= 1 << 5;
+        }
+        if self.io_pin {
+            b |= 1 << 6;
+        }
+        if self.placement {
+            b |= 1 << 7;
+        }
+        if self.tracks {
+            b |= 1 << 8;
+        }
+        if self.gcells {
+            b |= 1 << 9;
+        }
+        if self.obstructions {
+            b |= 1 << 10;
+        }
+        if self.boundaries {
+            b |= 1 << 11;
+        }
+        if self.fill {
+            b |= 1 << 12;
+        }
+        if self.regions {
+            b |= 1 << 13;
+        }
         b
     }
 }
@@ -972,7 +1001,10 @@ impl LayerRenderIndex {
 
     #[inline]
     fn is_layer_visible(&self, layer_id: LayerId) -> bool {
-        self.visible_layer_map.get(&layer_id).copied().unwrap_or(false)
+        self.visible_layer_map
+            .get(&layer_id)
+            .copied()
+            .unwrap_or(false)
     }
 
     #[inline]
@@ -1268,10 +1300,14 @@ impl DrcOverlay {
         merge_drc_counts(&mut counts, drc_counts_from_violations(&violations));
         let type_states = drc_type_states_from_counts(counts);
 
-        let rtree_nodes: Vec<_> = violations.iter().enumerate().map(|(i, v)| DrcViolationRTreeNode {
-            bbox: rstar::AABB::from_corners([v.bbox.lx, v.bbox.ly], [v.bbox.hx, v.bbox.hy]),
-            index: i,
-        }).collect();
+        let rtree_nodes: Vec<_> = violations
+            .iter()
+            .enumerate()
+            .map(|(i, v)| DrcViolationRTreeNode {
+                bbox: rstar::AABB::from_corners([v.bbox.lx, v.bbox.ly], [v.bbox.hx, v.bbox.hy]),
+                index: i,
+            })
+            .collect();
         let rtree = rstar::RTree::bulk_load(rtree_nodes);
 
         Some(Self {
@@ -1517,10 +1553,14 @@ impl AntennaOverlay {
         merge_antenna_counts(&mut counts, antenna_counts_from_violations(&violations));
         let type_states = antenna_type_states_from_counts(counts);
 
-        let rtree_nodes: Vec<_> = violations.iter().enumerate().map(|(i, v)| AntennaViolationRTreeNode {
-            bbox: rstar::AABB::from_corners([v.bbox.lx, v.bbox.ly], [v.bbox.hx, v.bbox.hy]),
-            index: i,
-        }).collect();
+        let rtree_nodes: Vec<_> = violations
+            .iter()
+            .enumerate()
+            .map(|(i, v)| AntennaViolationRTreeNode {
+                bbox: rstar::AABB::from_corners([v.bbox.lx, v.bbox.ly], [v.bbox.hx, v.bbox.hy]),
+                index: i,
+            })
+            .collect();
         let rtree = rstar::RTree::bulk_load(rtree_nodes);
 
         Some(Self {
@@ -2979,8 +3019,12 @@ impl LoadedViewer {
         };
         let overlay_shape_ids = overlay_shape_ids(self.selected, &self.highlighted);
         self.label_collector.clear();
-        
-        let is_interacting = (response.dragged() || response.drag_started() || (ui.ctx().input(|i| i.zoom_delta()) - 1.0).abs() > 1e-5 || self.focus_animation.is_some()) && !pointer_over_heatmap;
+
+        let is_interacting = (response.dragged()
+            || response.drag_started()
+            || (ui.ctx().input(|i| i.zoom_delta()) - 1.0).abs() > 1e-5
+            || self.focus_animation.is_some())
+            && !pointer_over_heatmap;
 
         if use_view_tiles {
             for (layer_id, style) in &visible_layers {
@@ -3000,7 +3044,9 @@ impl LoadedViewer {
             }
         } else {
             let visibility_hash = layers_visibility_hash(&self.layers);
-            if self.visibility_rules_cache.epoch != self.geometry_epoch || self.visibility_rules_cache.layer_visibility_hash != visibility_hash {
+            if self.visibility_rules_cache.epoch != self.geometry_epoch
+                || self.visibility_rules_cache.layer_visibility_hash != visibility_hash
+            {
                 self.visibility_rules_cache = VisibilityRulesCache {
                     epoch: self.geometry_epoch,
                     layer_visibility_hash: visibility_hash,
@@ -3013,18 +3059,21 @@ impl LoadedViewer {
             let mut visible_ids = Vec::new();
             if !self.gpu_canvas.enabled {
                 let query_start = Instant::now();
-                visible_ids = self
-                    .render_cache
-                    .visible_shape_ids_for_layers(&self.db, &query_layer_ids, viewport);
+                visible_ids = self.render_cache.visible_shape_ids_for_layers(
+                    &self.db,
+                    &query_layer_ids,
+                    viewport,
+                );
                 query_duration += query_start.elapsed();
             }
 
             if self.gpu_canvas.enabled {
                 let gpu_start = Instant::now();
-                
+
                 self.gpu_tile_instances.retain(|key, _| {
                     key.geometry_epoch == self.geometry_epoch
-                        && key.layer_visibility_hash == self.visibility_rules_cache.layer_visibility_hash
+                        && key.layer_visibility_hash
+                            == self.visibility_rules_cache.layer_visibility_hash
                         && key.object_visibility_bits == self.object_visibility.bits()
                 });
 
@@ -3035,7 +3084,10 @@ impl LoadedViewer {
 
                 let uniform = crate::canvas_gpu::CanvasUniform {
                     world_center_dbu: [world_cx, world_cy],
-                    canvas_center_px: [canvas.width() * 0.5 + self.pan.x, canvas.height() * 0.5 + self.pan.y],
+                    canvas_center_px: [
+                        canvas.width() * 0.5 + self.pan.x,
+                        canvas.height() * 0.5 + self.pan.y,
+                    ],
                     scale_px_per_dbu: gpu_scale,
                     pixels_per_point: ui.ctx().pixels_per_point(),
                     pattern_min_size_px: crate::canvas_gpu::PATTERN_MIN_SIZE_PX,
@@ -3045,13 +3097,16 @@ impl LoadedViewer {
                     pad: 0.0,
                 };
 
-                let tiles = crate::canvas_gpu::tile_coords_for_bbox(viewport, crate::canvas_gpu::GPU_TILE_SIZE_DBU);
-                
+                let tiles = crate::canvas_gpu::tile_coords_for_bbox(
+                    viewport,
+                    crate::canvas_gpu::GPU_TILE_SIZE_DBU,
+                );
+
                 if self.gpu_tile_instances.len() > crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS {
                     let vx = (viewport.lx as i64 + viewport.hx as i64) / 2;
                     let vy = (viewport.ly as i64 + viewport.hy as i64) / 2;
                     let ts = crate::canvas_gpu::GPU_TILE_SIZE_DBU as i64;
-                    
+
                     let mut cached_keys: Vec<_> = self.gpu_tile_instances.keys().copied().collect();
                     cached_keys.sort_by_key(|k| {
                         let tx = k.tile_x as i64 * ts + ts / 2;
@@ -3060,7 +3115,7 @@ impl LoadedViewer {
                         let dy = ty - vy;
                         dx * dx + dy * dy
                     });
-                    
+
                     // Evict down to 96 (3/4 of max) to avoid thrashing every frame
                     let retain_count = crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS * 3 / 4;
                     if cached_keys.len() > retain_count {
@@ -3086,12 +3141,20 @@ impl LoadedViewer {
                         object_visibility_bits: self.object_visibility.bits(),
                     };
 
-                    let tile_instances = if let Some(cached) = self.gpu_tile_instances.get(&buffer_key) {
+                    let tile_instances = if let Some(cached) =
+                        self.gpu_tile_instances.get(&buffer_key)
+                    {
                         std::sync::Arc::clone(cached)
                     } else {
                         let query_start_tile = collect_stats.then(Instant::now);
-                        let tile_visible_ids = self.render_cache.visible_shape_ids_for_layers(&self.db, &query_layer_ids, tile_bbox);
-                        if let Some(start) = query_start_tile { query_duration += start.elapsed(); }
+                        let tile_visible_ids = self.render_cache.visible_shape_ids_for_layers(
+                            &self.db,
+                            &query_layer_ids,
+                            tile_bbox,
+                        );
+                        if let Some(start) = query_start_tile {
+                            query_duration += start.elapsed();
+                        }
 
                         // Reuse persistent scratch buffers — no heap allocation per tile.
                         self.frame_valid_shapes.clear();
@@ -3099,33 +3162,58 @@ impl LoadedViewer {
                         for &shape_id in &tile_visible_ids {
                             let filter_start = collect_stats.then(Instant::now);
                             let Some(shape) = self.db.find_shape(shape_id) else {
-                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                                if let Some(start) = filter_start {
+                                    filter_duration += start.elapsed();
+                                }
                                 continue;
                             };
                             if !is_renderable_shape(shape) {
-                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                                if let Some(start) = filter_start {
+                                    filter_duration += start.elapsed();
+                                }
                                 continue;
                             }
                             let owner = self.db.owner_for_shape(shape);
-                            let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+                            let owner_type =
+                                owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
                             if !zoom_rules.is_drawn_at_zoom(owner_type, self.zoom) {
-                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                                if let Some(start) = filter_start {
+                                    filter_duration += start.elapsed();
+                                }
                                 continue;
                             }
                             let owner_category = owner.and_then(|owner| {
-                                self.owner_category_cache.get(self.geometry_epoch, &self.db, owner)
+                                self.owner_category_cache
+                                    .get(self.geometry_epoch, &self.db, owner)
                             });
-                            if !shape_is_visible_fast(shape, owner_type, owner_category, &layer_index, &self.object_visibility) {
-                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                            if !shape_is_visible_fast(
+                                shape,
+                                owner_type,
+                                owner_category,
+                                &layer_index,
+                                &self.object_visibility,
+                            ) {
+                                if let Some(start) = filter_start {
+                                    filter_duration += start.elapsed();
+                                }
                                 continue;
                             }
-                            let Some(style) = visible_style_for_shape_fast(shape, owner, owner_type, &layer_index) else {
-                                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                            let Some(style) = visible_style_for_shape_fast(
+                                shape,
+                                owner,
+                                owner_type,
+                                &layer_index,
+                            ) else {
+                                if let Some(start) = filter_start {
+                                    filter_duration += start.elapsed();
+                                }
                                 continue;
                             };
                             let geometry = self.db.shape_geometry(shape);
-                            if let Some(start) = filter_start { filter_duration += start.elapsed(); }
-                            
+                            if let Some(start) = filter_start {
+                                filter_duration += start.elapsed();
+                            }
+
                             if let Some(label_info) = shape_label_info(
                                 &geometry,
                                 owner,
@@ -3133,24 +3221,32 @@ impl LoadedViewer {
                             ) {
                                 self.frame_valid_labels.push(label_info);
                             }
-                            
+
                             self.frame_valid_shapes.push((geometry, style));
                         }
 
-                        let gpu_instances = crate::canvas_gpu::build_gpu_instances(self.frame_valid_shapes.drain(..));
+                        let gpu_instances = crate::canvas_gpu::build_gpu_instances(
+                            self.frame_valid_shapes.drain(..),
+                        );
                         let built = std::sync::Arc::new(GpuTileData {
                             instances: std::sync::Arc::new(gpu_instances),
                             labels: std::mem::take(&mut self.frame_valid_labels),
                         });
-                        self.gpu_tile_instances.insert(buffer_key, std::sync::Arc::clone(&built));
+                        self.gpu_tile_instances
+                            .insert(buffer_key, std::sync::Arc::clone(&built));
                         built
                     };
 
                     if !is_interacting {
                         for label in &tile_instances.labels {
-                            let screen_rect = shape_screen_rect(label.rect, world, canvas, self.zoom, self.pan);
+                            let screen_rect =
+                                shape_screen_rect(label.rect, world, canvas, self.zoom, self.pan);
                             let visible_rect = screen_rect.intersect(canvas);
-                            if screen_rect.is_positive() && visible_rect.is_positive() && visible_rect.width() >= 12.0 && visible_rect.height() >= 8.0 {
+                            if screen_rect.is_positive()
+                                && visible_rect.is_positive()
+                                && visible_rect.width() >= 12.0
+                                && visible_rect.height() >= 8.0
+                            {
                                 self.label_collector.insert(ShapeLabelOverlay {
                                     key: label.key.clone(),
                                     rect: screen_rect,
@@ -3172,77 +3268,91 @@ impl LoadedViewer {
                         target_format: self.gpu_canvas.target_format,
                     };
 
-                    ui.painter().add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
+                    ui.painter()
+                        .add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
                 }
 
                 paint_duration += gpu_start.elapsed();
             } else {
-            for shape_id in visible_ids {
-                let filter_start = collect_stats.then(Instant::now);
-                let Some(shape) = self.db.find_shape(shape_id) else {
-                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
-                    continue;
-                };
-                if !is_renderable_shape(shape) {
-                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
-                    continue;
-                }
+                for shape_id in visible_ids {
+                    let filter_start = collect_stats.then(Instant::now);
+                    let Some(shape) = self.db.find_shape(shape_id) else {
+                        if let Some(start) = filter_start {
+                            filter_duration += start.elapsed();
+                        }
+                        continue;
+                    };
+                    if !is_renderable_shape(shape) {
+                        if let Some(start) = filter_start {
+                            filter_duration += start.elapsed();
+                        }
+                        continue;
+                    }
 
-                let owner = self.db.owner_for_shape(shape);
-                let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+                    let owner = self.db.owner_for_shape(shape);
+                    let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
 
-                if !zoom_rules.is_drawn_at_zoom(owner_type, self.zoom) {
-                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
-                    continue;
-                }
+                    if !zoom_rules.is_drawn_at_zoom(owner_type, self.zoom) {
+                        if let Some(start) = filter_start {
+                            filter_duration += start.elapsed();
+                        }
+                        continue;
+                    }
 
-                let owner_category = owner.and_then(|owner| {
-                    self.owner_category_cache
-                        .get(self.geometry_epoch, &self.db, owner)
-                });
-                if !shape_is_visible_fast(
-                    shape,
-                    owner_type,
-                    owner_category,
-                    &layer_index,
-                    &self.object_visibility,
-                ) {
-                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
-                    continue;
-                }
+                    let owner_category = owner.and_then(|owner| {
+                        self.owner_category_cache
+                            .get(self.geometry_epoch, &self.db, owner)
+                    });
+                    if !shape_is_visible_fast(
+                        shape,
+                        owner_type,
+                        owner_category,
+                        &layer_index,
+                        &self.object_visibility,
+                    ) {
+                        if let Some(start) = filter_start {
+                            filter_duration += start.elapsed();
+                        }
+                        continue;
+                    }
 
-                let Some(style) = visible_style_for_shape_fast(shape, owner, owner_type, &layer_index)
-                else {
-                    if let Some(start) = filter_start { filter_duration += start.elapsed(); }
-                    continue;
-                };
-                let geometry = self.db.shape_geometry(shape);
-                if let Some(start) = filter_start { filter_duration += start.elapsed(); }
+                    let Some(style) =
+                        visible_style_for_shape_fast(shape, owner, owner_type, &layer_index)
+                    else {
+                        if let Some(start) = filter_start {
+                            filter_duration += start.elapsed();
+                        }
+                        continue;
+                    };
+                    let geometry = self.db.shape_geometry(shape);
+                    if let Some(start) = filter_start {
+                        filter_duration += start.elapsed();
+                    }
 
-                let paint_start = Instant::now();
-                let prim_count = paint_styled_shape_geometry(
-                    &painter, geometry, world, canvas, self.zoom, self.pan, &style,
-                );
-                paint_duration += paint_start.elapsed();
+                    let paint_start = Instant::now();
+                    let prim_count = paint_styled_shape_geometry(
+                        &painter, geometry, world, canvas, self.zoom, self.pan, &style,
+                    );
+                    paint_duration += paint_start.elapsed();
 
-                if prim_count > 0 {
-                    drawn += 1;
-                    estimated_primitives += prim_count;
-                    if !is_interacting {
-                        if let Some(label) = shape_label_overlay(
-                            geometry,
-                            owner,
-                            owner.and_then(|owner| self.db.owner_name(owner)),
-                            world,
-                            canvas,
-                            self.zoom,
-                            self.pan,
-                        ) {
-                            self.label_collector.insert(label);
+                    if prim_count > 0 {
+                        drawn += 1;
+                        estimated_primitives += prim_count;
+                        if !is_interacting {
+                            if let Some(label) = shape_label_overlay(
+                                geometry,
+                                owner,
+                                owner.and_then(|owner| self.db.owner_name(owner)),
+                                world,
+                                canvas,
+                                self.zoom,
+                                self.pan,
+                            ) {
+                                self.label_collector.insert(label);
+                            }
                         }
                     }
                 }
-            }
             }
         }
         drawn += paint_parameterized_grid_overlay(
@@ -3286,17 +3396,32 @@ impl LoadedViewer {
             .map(|l| l.name.to_ascii_lowercase())
             .collect();
 
-        let visible_drc_types: std::collections::HashSet<&str> = self.drc_overlay
+        let visible_drc_types: std::collections::HashSet<&str> = self
+            .drc_overlay
             .as_ref()
-            .map(|o| o.type_states.iter().filter(|s| s.visible).map(|s| s.name.as_str()).collect())
+            .map(|o| {
+                o.type_states
+                    .iter()
+                    .filter(|s| s.visible)
+                    .map(|s| s.name.as_str())
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let visible_antenna_types: std::collections::HashSet<&str> = self.antenna_overlay
+        let visible_antenna_types: std::collections::HashSet<&str> = self
+            .antenna_overlay
             .as_ref()
-            .map(|o| o.type_states.iter().filter(|s| s.visible).map(|s| s.name.as_str()).collect())
+            .map(|o| {
+                o.type_states
+                    .iter()
+                    .filter(|s| s.visible)
+                    .map(|s| s.name.as_str())
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let viewport_aabb = rstar::AABB::from_corners([viewport.lx, viewport.ly], [viewport.hx, viewport.hy]);
+        let viewport_aabb =
+            rstar::AABB::from_corners([viewport.lx, viewport.ly], [viewport.hx, viewport.hy]);
 
         if let Some(overlay) = &self.drc_overlay {
             for node in overlay.rtree.locate_in_envelope_intersecting(viewport_aabb) {
@@ -3399,7 +3524,6 @@ impl LoadedViewer {
             self.coordinate_unit,
             self.db.snapshot().manifest().dbu_per_micron,
         );
-
 
         let ruler_preview = ruler_snap
             .or(hover_world_point)
@@ -4368,17 +4492,31 @@ impl LoadedViewer {
     }
 
     fn visible_drc_violation_count(&self, viewport: Option<Rect32>) -> usize {
-        let Some(overlay) = &self.drc_overlay else { return 0; };
-        let hidden_layers: std::collections::HashSet<&str> = self.layers.iter().filter(|l| !l.visible).map(|l| l.name.as_str()).collect();
-        let visible_types: std::collections::HashSet<&str> = overlay.type_states.iter().filter(|s| s.visible).map(|s| s.name.as_str()).collect();
-        
+        let Some(overlay) = &self.drc_overlay else {
+            return 0;
+        };
+        let hidden_layers: std::collections::HashSet<&str> = self
+            .layers
+            .iter()
+            .filter(|l| !l.visible)
+            .map(|l| l.name.as_str())
+            .collect();
+        let visible_types: std::collections::HashSet<&str> = overlay
+            .type_states
+            .iter()
+            .filter(|s| s.visible)
+            .map(|s| s.name.as_str())
+            .collect();
+
         let is_visible = |v: &DrcViolation| {
             !hidden_layers.contains(v.layer.as_str()) && visible_types.contains(v.drc_type.as_str())
         };
 
         if let Some(vp) = viewport {
             let vp_aabb = rstar::AABB::from_corners([vp.lx, vp.ly], [vp.hx, vp.hy]);
-            overlay.rtree.locate_in_envelope_intersecting(vp_aabb)
+            overlay
+                .rtree
+                .locate_in_envelope_intersecting(vp_aabb)
                 .filter(|node| is_visible(&overlay.violations[node.index]))
                 .count()
         } else {
@@ -4387,17 +4525,32 @@ impl LoadedViewer {
     }
 
     fn visible_antenna_violation_count(&self, viewport: Option<Rect32>) -> usize {
-        let Some(overlay) = &self.antenna_overlay else { return 0; };
-        let hidden_layers: std::collections::HashSet<&str> = self.layers.iter().filter(|l| !l.visible).map(|l| l.name.as_str()).collect();
-        let visible_types: std::collections::HashSet<&str> = overlay.type_states.iter().filter(|s| s.visible).map(|s| s.name.as_str()).collect();
-        
+        let Some(overlay) = &self.antenna_overlay else {
+            return 0;
+        };
+        let hidden_layers: std::collections::HashSet<&str> = self
+            .layers
+            .iter()
+            .filter(|l| !l.visible)
+            .map(|l| l.name.as_str())
+            .collect();
+        let visible_types: std::collections::HashSet<&str> = overlay
+            .type_states
+            .iter()
+            .filter(|s| s.visible)
+            .map(|s| s.name.as_str())
+            .collect();
+
         let is_visible = |v: &AntennaViolation| {
-            !hidden_layers.contains(v.layer.as_str()) && visible_types.contains(v.antenna_type.as_str())
+            !hidden_layers.contains(v.layer.as_str())
+                && visible_types.contains(v.antenna_type.as_str())
         };
 
         if let Some(vp) = viewport {
             let vp_aabb = rstar::AABB::from_corners([vp.lx, vp.ly], [vp.hx, vp.hy]);
-            overlay.rtree.locate_in_envelope_intersecting(vp_aabb)
+            overlay
+                .rtree
+                .locate_in_envelope_intersecting(vp_aabb)
                 .filter(|node| is_visible(&overlay.violations[node.index]))
                 .count()
         } else {
@@ -4500,7 +4653,7 @@ impl LoadedViewer {
         viewport: Rect32,
     ) -> Option<usize> {
         let overlay = self.drc_overlay.as_ref()?;
-        
+
         let hidden_drc_layer_names: std::collections::HashSet<&str> = self
             .layers
             .iter()
@@ -4508,21 +4661,24 @@ impl LoadedViewer {
             .map(|l| l.name.as_str())
             .collect();
 
-        let visible_drc_types: std::collections::HashSet<&str> = overlay.type_states
+        let visible_drc_types: std::collections::HashSet<&str> = overlay
+            .type_states
             .iter()
             .filter(|s| s.visible)
             .map(|s| s.name.as_str())
             .collect();
 
-        let vp_aabb = rstar::AABB::from_corners([viewport.lx, viewport.ly], [viewport.hx, viewport.hy]);
-        
+        let vp_aabb =
+            rstar::AABB::from_corners([viewport.lx, viewport.ly], [viewport.hx, viewport.hy]);
+
         let mut best_match: Option<usize> = None;
         for node in overlay.rtree.locate_in_envelope_intersecting(vp_aabb) {
             let violation = &overlay.violations[node.index];
             if !hidden_drc_layer_names.contains(violation.layer.as_str())
                 && visible_drc_types.contains(violation.drc_type.as_str())
             {
-                let screen = drc_violation_screen_rect(violation, world, canvas, self.zoom, self.pan);
+                let screen =
+                    drc_violation_screen_rect(violation, world, canvas, self.zoom, self.pan);
                 if screen.expand(5.0).contains(pos) {
                     if let Some(current_best) = best_match {
                         if violation.id > current_best {
@@ -5543,13 +5699,14 @@ impl ShapeLabelCollector {
 
     fn binned_overlays(&self) -> Vec<&ShapeLabelOverlay> {
         // Bin labels into 32x32 screen-space grid to prevent overlapping
-        let mut bins: std::collections::HashMap<(i32, i32), &ShapeLabelOverlay> = std::collections::HashMap::with_capacity(self.overlays.len());
+        let mut bins: std::collections::HashMap<(i32, i32), &ShapeLabelOverlay> =
+            std::collections::HashMap::with_capacity(self.overlays.len());
         for overlay in self.overlays.values() {
             let cx = overlay.rect.center().x;
             let cy = overlay.rect.center().y;
             let bx = (cx / 32.0).floor() as i32;
             let by = (cy / 32.0).floor() as i32;
-            
+
             bins.entry((bx, by))
                 .and_modify(|current| {
                     if overlay.rank_area > current.rank_area {
@@ -5692,7 +5849,12 @@ fn draw_pattern_dots(
     count
 }
 
-fn draw_hatch(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32, cross: bool) -> usize {
+fn draw_hatch(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    color: egui::Color32,
+    cross: bool,
+) -> usize {
     let mut count = draw_hatch_direction(painter, rect, color, false);
     if cross && count < MAX_PATTERN_OPS_PER_SHAPE {
         count += draw_hatch_direction(painter, rect, color, true);
@@ -5742,7 +5904,12 @@ fn draw_axis_hatch(
     count
 }
 
-fn draw_x_mark(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32, width: f32) -> usize {
+fn draw_x_mark(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    color: egui::Color32,
+    width: f32,
+) -> usize {
     let inset = 1.5_f32.min(rect.width() * 0.2).min(rect.height() * 0.2);
     let rect = rect.shrink(inset);
     if !rect.is_positive() {
@@ -5762,18 +5929,47 @@ fn paint_render_stats_overlay(
     let margin = 10.0;
     let overlay_width = 320.0;
     let overlay_height = 110.0;
-    let top_right = egui::pos2(canvas.right() - margin - overlay_width, canvas.top() + margin);
+    let top_right = egui::pos2(
+        canvas.right() - margin - overlay_width,
+        canvas.top() + margin,
+    );
     let rect = egui::Rect::from_min_size(top_right, egui::vec2(overlay_width, overlay_height));
 
     painter.rect_filled(rect, 6.0, egui::Color32::from_black_alpha(200));
-    painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0_f32, ecos_border()), egui::StrokeKind::Outside);
+    painter.rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(1.0_f32, ecos_border()),
+        egui::StrokeKind::Outside,
+    );
 
     let lines = [
-        format!("Frame: {:.2} ms | Paint: {:.2} ms | Labels: {:.2} ms", stats.frame_time_ms, stats.paint_time_ms, stats.label_paint_time_ms),
-        format!("Query: {:.2} ms | Filter: {:.2} ms", stats.query_time_ms, stats.filter_time_ms),
-        format!("Mode: {} | Zoom: {:.2} | LOD: {}", if stats.use_view_tiles { "Tiles" } else { "Exact" }, stats.zoom, stats.lod),
-        format!("Shapes: {} | Est Primitives: {}", stats.drawn_shapes, stats.estimated_primitives),
-        format!("Labels: {} | DRC: {} | Antenna: {}", stats.label_count, stats.visible_drc_count, stats.visible_antenna_count),
+        format!(
+            "Frame: {:.2} ms | Paint: {:.2} ms | Labels: {:.2} ms",
+            stats.frame_time_ms, stats.paint_time_ms, stats.label_paint_time_ms
+        ),
+        format!(
+            "Query: {:.2} ms | Filter: {:.2} ms",
+            stats.query_time_ms, stats.filter_time_ms
+        ),
+        format!(
+            "Mode: {} | Zoom: {:.2} | LOD: {}",
+            if stats.use_view_tiles {
+                "Tiles"
+            } else {
+                "Exact"
+            },
+            stats.zoom,
+            stats.lod
+        ),
+        format!(
+            "Shapes: {} | Est Primitives: {}",
+            stats.drawn_shapes, stats.estimated_primitives
+        ),
+        format!(
+            "Labels: {} | DRC: {} | Antenna: {}",
+            stats.label_count, stats.visible_drc_count, stats.visible_antenna_count
+        ),
     ];
 
     let font_id = egui::FontId::monospace(11.0);
@@ -7248,7 +7444,11 @@ fn hover_status_line_into(
         }
     }
     if let Some(nearest) = nearest {
-        let _ = write!(buf, ", nearest: shape {} d2 {}", nearest.shape_id, nearest.distance_squared);
+        let _ = write!(
+            buf,
+            ", nearest: shape {} d2 {}",
+            nearest.shape_id, nearest.distance_squared
+        );
     }
 }
 
@@ -7650,7 +7850,15 @@ fn canvas_status_line(
     viewport: Rect32,
 ) -> String {
     let mut buf = String::new();
-    canvas_status_line_into(&mut buf, drawn, overlay_count, use_view_tiles, view_lod, zoom, viewport);
+    canvas_status_line_into(
+        &mut buf,
+        drawn,
+        overlay_count,
+        use_view_tiles,
+        view_lod,
+        zoom,
+        viewport,
+    );
     buf
 }
 
@@ -7666,11 +7874,17 @@ fn canvas_status_line_into(
 ) {
     use std::fmt::Write as _;
     if use_view_tiles {
-        let _ = write!(buf, "drawn: {drawn} view tiles, lod: {view_lod}, zoom: {zoom:.2}x, viewport: {} {} {} {}",
-            viewport.lx, viewport.ly, viewport.hx, viewport.hy);
+        let _ = write!(
+            buf,
+            "drawn: {drawn} view tiles, lod: {view_lod}, zoom: {zoom:.2}x, viewport: {} {} {} {}",
+            viewport.lx, viewport.ly, viewport.hx, viewport.hy
+        );
     } else {
-        let _ = write!(buf, "drawn: {drawn} exact, zoom: {zoom:.2}x, viewport: {} {} {} {}",
-            viewport.lx, viewport.ly, viewport.hx, viewport.hy);
+        let _ = write!(
+            buf,
+            "drawn: {drawn} exact, zoom: {zoom:.2}x, viewport: {} {} {} {}",
+            viewport.lx, viewport.ly, viewport.hx, viewport.hy
+        );
     }
     if overlay_count > 0 {
         let _ = write!(buf, ", overlays: {overlay_count}");
@@ -10766,7 +10980,19 @@ mod tests {
         let dir = temp_snapshot_dir("external-refresh-new-delta");
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
-        let mut loaded = LoadedViewer::new(db, false, false, None, None, None, None, None, None, None, wgpu::TextureFormat::Bgra8Unorm);
+        let mut loaded = LoadedViewer::new(
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+        );
         let delta_path = dir.join("geometry.delta.bin");
 
         assert!(!loaded.snapshot_signature.files.contains_key(&delta_path));
@@ -10793,7 +11019,19 @@ mod tests {
         let dir = temp_snapshot_dir("restored-edit-session-dirty");
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
-        let loaded = LoadedViewer::new(db, true, true, None, None, None, None, None, None, None, wgpu::TextureFormat::Bgra8Unorm);
+        let loaded = LoadedViewer::new(
+            db,
+            true,
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+        );
 
         assert!(loaded.session_dirty);
 
