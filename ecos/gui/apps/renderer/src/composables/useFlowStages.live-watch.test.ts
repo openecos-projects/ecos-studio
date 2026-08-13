@@ -263,4 +263,58 @@ describe('useFlowStages runtime updates', () => {
     })
     scope.stop()
   })
+
+  it('does not let an older flow read roll back a runtime completion', async () => {
+    testState.currentProject = ref({
+      path: '/workspace/frontend',
+      designTool: 'frontend',
+    })
+    testState.workspaceSession = ref({ workspaceId: 'frontend-runtime-handle' })
+    testState.runtimeEvents = ref([])
+    type FlowResource = {
+      steps: Array<{ name: string; state: string; tool: string }>
+    }
+    let resolveStaleRead: (value: FlowResource) => void = () => undefined
+    testState.readWorkspaceFlowResourceApi.mockImplementationOnce(
+      () =>
+        new Promise<FlowResource>((resolve) => {
+          resolveStaleRead = resolve
+        }),
+    )
+
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const stages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() =>
+      expect(testState.readWorkspaceFlowResourceApi).toHaveBeenCalled(),
+    )
+    testState.runtimeEvents.value.push(
+      {
+        data: {
+          type: 'step_start',
+          step: 'prepare',
+          tool: 'fe',
+        },
+      },
+      {
+        data: {
+          type: 'step_complete',
+          state: 'Success',
+          step: 'prepare',
+          tool: 'fe',
+        },
+      },
+    )
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value[0]?.state).toBe('Success')
+    })
+
+    resolveStaleRead?.({
+      steps: [{ name: 'prepare', state: 'Unstart', tool: 'fe' }],
+    })
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+    expect(stages.dynamicFlowStages.value[0]?.state).toBe('Success')
+    scope.stop()
+  })
 })

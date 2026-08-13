@@ -2476,6 +2476,9 @@ let consoleResizeStartY = 0
 let consoleResizeStartHeight = 0
 let splitterResizing = false
 let runClockTimer: number | null = null
+let refreshGeneration = 0
+let detailLoadGeneration = 0
+let logLoadGeneration = 0
 
 const isHomeView = computed(() => route.path.endsWith('/home'))
 const isGlobalSrcView = computed(
@@ -3741,27 +3744,61 @@ const waveStatusMessage = computed(() => {
 })
 
 async function refresh(): Promise<void> {
+  const requestGeneration = ++refreshGeneration
+  const requestSessionId = workspaceSession.value.sessionId
+  const requestProjectPath = currentProject.value?.path || ''
+  const isCurrentRequest = () =>
+    requestGeneration === refreshGeneration &&
+    requestSessionId === workspaceSession.value.sessionId &&
+    requestProjectPath === (currentProject.value?.path || '')
+
   loading.value = true
   error.value = ''
   try {
     const index = await getWorkspaceResourceIndexApi()
+    if (!isCurrentRequest()) return
     steps.value = index.flow.steps
     if (!isHomeView.value) {
-      await loadDetail()
+      await loadDetail({
+        refreshGeneration: requestGeneration,
+        sessionId: requestSessionId,
+        projectPath: requestProjectPath,
+      })
     } else {
       detail.value = null
     }
+    if (!isCurrentRequest()) return
   } catch (err) {
+    if (!isCurrentRequest()) return
     error.value = err instanceof Error ? err.message : String(err)
     steps.value = []
     detail.value = null
   } finally {
-    loading.value = false
-    if (disassemblyPanelOpen.value) disassemblyReloadToken.value += 1
+    if (isCurrentRequest()) {
+      loading.value = false
+      if (disassemblyPanelOpen.value) disassemblyReloadToken.value += 1
+    }
   }
 }
 
-async function loadDetail(): Promise<void> {
+interface DetailLoadContext {
+  refreshGeneration?: number
+  sessionId: string
+  projectPath: string
+}
+
+async function loadDetail(context?: DetailLoadContext): Promise<void> {
+  const requestGeneration = ++detailLoadGeneration
+  const requestSessionId = context?.sessionId ?? workspaceSession.value.sessionId
+  const requestProjectPath = context?.projectPath ?? currentProject.value?.path ?? ''
+  const expectedRefreshGeneration = context?.refreshGeneration
+  const isCurrentRequest = () =>
+    requestGeneration === detailLoadGeneration &&
+    requestSessionId === workspaceSession.value.sessionId &&
+    requestProjectPath === (currentProject.value?.path || '') &&
+    (expectedRefreshGeneration === undefined ||
+      expectedRefreshGeneration === refreshGeneration)
+
   if (!detailRequestStepName.value) return
   try {
     const directory = currentProject.value?.path || ''
@@ -3772,12 +3809,14 @@ async function loadDetail(): Promise<void> {
       workspaceHandle: workspaceSession.value.workspaceId,
       step: detailRequestStepName.value,
     })
+    if (!isCurrentRequest()) return
     if (!info) {
       detail.value = null
       return
     }
     detail.value = info as unknown as FrontendStepDetail
     await hydrateWaveCasesFromWorkspaceResources()
+    if (!isCurrentRequest()) return
     const previousCaseName = selectedCase.value?.name || ''
     selectedCase.value =
       cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
@@ -3808,12 +3847,15 @@ async function loadDetail(): Promise<void> {
     }
     await loadSelectedLog()
   } catch (err) {
+    if (!isCurrentRequest()) return
     detail.value = null
     logContent.value = err instanceof Error ? err.message : String(err)
   }
 }
 
 async function loadSelectedLog(): Promise<void> {
+  const requestGeneration = ++logLoadGeneration
+  const isCurrentRequest = () => requestGeneration === logLoadGeneration
   logContent.value = ''
   if (!selectedLogPath.value) return
   logLoading.value = true
@@ -3825,11 +3867,13 @@ async function loadSelectedLog(): Promise<void> {
         projectPath: currentProject.value?.path,
       },
     )
+    if (!isCurrentRequest()) return
     logContent.value = content?.content || 'No readable log content.'
   } catch (err) {
+    if (!isCurrentRequest()) return
     logContent.value = err instanceof Error ? err.message : String(err)
   } finally {
-    logLoading.value = false
+    if (isCurrentRequest()) logLoading.value = false
   }
 }
 

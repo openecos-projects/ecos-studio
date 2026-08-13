@@ -210,6 +210,24 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     expect(startStepOperationApi).not.toHaveBeenCalled()
   })
 
+  it('does not use the backend rerun snapshot guard for synchronous frontend reruns', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+    rtl2gdsApi.mockResolvedValue({
+      response: 'success',
+      data: { rerun: true },
+      message: [],
+    })
+
+    const runner = useFlowRunner()
+    await expect(runner.runAllFlow({ rerun: true })).resolves.toEqual({ rerun: true })
+
+    expect(markHomeRunArtifactResetAwaitingBackendStart).not.toHaveBeenCalled()
+    expect(clearHomeRunArtifactResetAwaitingBackendStart).toHaveBeenCalledWith(
+      '/work/frontend-demo',
+    )
+  })
+
   it('keeps the backend run lock until the operation waiter reaches a terminal state', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }

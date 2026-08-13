@@ -303,6 +303,7 @@ export function useFlowRunner() {
     }
 
     const directory = getCurrentWorkspacePath()
+    const designTool = getCurrentDesignTool()
     const requestScope = directory ? runtimeRequestScope(directory) : null
     if (!directory || !requestScope) {
       showToast({
@@ -319,7 +320,11 @@ export function useFlowRunner() {
     }
 
     clearTransientInteractionLocks()
-    if (options.rerun) {
+    // Frontend RPC runs the complete flow synchronously and has no backend
+    // rerun-prepared boundary. The awaiting marker is only meaningful for the
+    // asynchronous ECC operation, where a stale Home snapshot can arrive
+    // before the first authoritative step event.
+    if (options.rerun && designTool !== 'frontend') {
       markHomeRunArtifactResetAwaitingBackendStart(directory)
     }
     markFlowExecutionActiveForWorkspace(directory)
@@ -327,7 +332,6 @@ export function useFlowRunner() {
     error.value = null
 
     try {
-      const designTool = getCurrentDesignTool()
       const flowLabel = designTool === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'
       console.log(`Starting ${flowLabel}...`)
       const runSessionId = workspaceSession.value.sessionId
@@ -388,7 +392,7 @@ export function useFlowRunner() {
       state.value = StateEnum.Imcomplete
       showToast({
         severity: 'error',
-        summary: `${getCurrentDesignTool() === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'} Error`,
+        summary: `${designTool === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'} Error`,
         detail: error.value ?? 'Unknown error',
         life: 8000,
       })
@@ -397,7 +401,7 @@ export function useFlowRunner() {
       // Frontend RPC completes synchronously and has no backend rerun-prepared
       // event to consume the marker. Backend operations consume it from the
       // runtime protocol (or the catch path when startFlow fails).
-      if (getCurrentDesignTool() === 'frontend') {
+      if (designTool === 'frontend') {
         clearHomeRunArtifactResetAwaitingBackendStart(directory)
         clearFlowExecutionActiveForWorkspace(directory)
       }

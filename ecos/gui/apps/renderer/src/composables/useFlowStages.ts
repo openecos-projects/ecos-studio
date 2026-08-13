@@ -167,8 +167,19 @@ export function useFlowStages() {
   let unregisterFlowJsonLifecycleCleanup: (() => void) | null = null
   let unregisterHomeRunArtifactReset: (() => void) | null = null
   let unregisterWorkspaceRerunPrepared: (() => void) | null = null
+  // Resource invalidations can arrive in bursts during a frontend rerun. Keep
+  // only the result of the newest read; an older NFS response must not roll a
+  // completed step back to its pre-rerun state.
+  let flowLoadGeneration = 0
   let pendingRerunFlowStartProjectPath = ''
   const handledRuntimeEventObjects = new WeakSet<object>()
+
+  function invalidateFlowStageLoads(): void {
+    flowLoadGeneration += 1
+    // Runtime events are already authoritative for the visible stage state.
+    // Do not leave a superseded resource read showing a permanent spinner.
+    isLoading.value = false
+  }
 
   function stageMatchesRuntimeStep(stage: FlowStage, stepName: string): boolean {
     const key = stepName.trim().toLowerCase()
@@ -253,13 +264,16 @@ export function useFlowStages() {
    * 从指定的 flow.json 路径加载流程步骤
    */
   async function loadFlowStagesFromPath(flowJsonPath: string): Promise<void> {
+    const loadGeneration = ++flowLoadGeneration
     if (!isDesktopRuntimeAvailable || !flowJsonPath) {
       console.warn('Cannot load flow.json: desktop bridge unavailable or path is empty')
       return
     }
 
     const sessionId = workspaceLifecycle.currentSessionId.value
-    const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
+    const isCurrent = () =>
+      workspaceLifecycle.isCurrentSession(sessionId) &&
+      loadGeneration === flowLoadGeneration
     isLoading.value = true
     error.value = null
 
@@ -300,6 +314,7 @@ export function useFlowStages() {
    * 通过共享缓存获取 home.json 数据（不重复调用 API），从中提取 flow 路径
    */
   async function loadFlowStages(): Promise<void> {
+    const loadGeneration = ++flowLoadGeneration
     if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
       console.warn(
         'Cannot load flow.json: desktop bridge unavailable or no project is open',
@@ -309,7 +324,9 @@ export function useFlowStages() {
     }
 
     const sessionId = workspaceLifecycle.currentSessionId.value
-    const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
+    const isCurrent = () =>
+      workspaceLifecycle.isCurrentSession(sessionId) &&
+      loadGeneration === flowLoadGeneration
     isLoading.value = true
     error.value = null
 
@@ -373,6 +390,7 @@ export function useFlowStages() {
   }
 
   function resetRunStagesForRerun(affectedSteps: readonly string[] = []): void {
+    invalidateFlowStageLoads()
     if (dynamicFlowStages.value.length === 0) return
     const affectedStepNames = new Set(
       affectedSteps.map((step) => step.trim().toLowerCase()).filter(Boolean),
@@ -413,6 +431,7 @@ export function useFlowStages() {
     if (isTerminalFailure) {
       const command = typeof eventData.cmd === 'string' ? eventData.cmd : ''
       if (command && command !== 'rtl2gds' && command !== 'run_step') return
+      invalidateFlowStageLoads()
       markOngoingRunStagesIncomplete()
       return
     }
@@ -426,6 +445,9 @@ export function useFlowStages() {
     }
     const stepName = typeof eventData.step === 'string' ? eventData.step : ''
     if (!stepName) return
+    // Runtime notifications are newer than any resource read that was
+    // already in flight when the step event arrived.
+    invalidateFlowStageLoads()
     const eventResponse = (event as { response?: unknown }).response
     const phase = typeof eventData.phase === 'string' ? eventData.phase : ''
     const state =
@@ -512,6 +534,7 @@ export function useFlowStages() {
    * 清空流程步骤
    */
   function clearFlowStages(): void {
+    invalidateFlowStageLoads()
     dynamicFlowStages.value = []
     error.value = null
   }
