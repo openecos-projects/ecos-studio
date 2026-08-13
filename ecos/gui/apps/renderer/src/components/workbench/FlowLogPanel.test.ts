@@ -22,6 +22,13 @@ describe('FlowLogPanel embedded controls', () => {
     expect(source).not.toContain('aria-label="Select a flow step log"')
     expect(source).not.toContain('v-model="selectedKey"')
     expect(source).toContain(':channel-key="keyFor(selectedSegment)"')
+    expect(source).toContain('selectionPinned')
+    expect(source).toContain('selectedNodePinned?: boolean')
+    expect(source).toContain("selectedKey.value = ''")
+    expect(source).toContain('if (selectionPinned.value)')
+    expect(source).toContain('followRuntimeSegment')
+    expect(source).not.toContain('props.executionActive || props.segments.length > 0')
+    expect(source).not.toContain('if (active) expanded.value = true')
   })
 
   it('keeps the embedded viewer constrained so its log text can scroll', () => {

@@ -127,6 +127,14 @@ const desktopApi: DesktopApi = {
     mutate: (request: ProjectManifestMutationRequest) =>
       invokeDesktop(desktopApiIpcChannels.projectManifestMutate, request),
   },
+  projectManagement: {
+    readManifest: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementReadManifest, projectRoot),
+    listProjectEntries: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementListEntries, projectRoot),
+    readWorkspaceTexts: (request) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementReadWorkspaceTexts, request),
+  },
   dialog: {
     pickDirectory: (options?: DesktopDirectoryDialogOptions) =>
       invokeDesktop(desktopApiIpcChannels.dialogPickDirectory, options),
@@ -181,6 +189,13 @@ const desktopApi: DesktopApi = {
         path,
         fromOffsetBytes,
         maxChars,
+      ),
+    readOptionalProjectTextFileChunk: (path, fromOffsetBytes, maxBytes) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk,
+        path,
+        fromOffsetBytes,
+        maxBytes,
       ),
     subscribeProjectLogTail: async (path, options, listener) => {
       const subscriptionId = (await ipcRenderer.invoke(
@@ -389,6 +404,22 @@ const desktopApi: DesktopApi = {
       hello: () => invokeDesktop(desktopApiIpcChannels.eccRpcHello),
       ping: () => invokeDesktop(desktopApiIpcChannels.eccRpcPing),
       shutdown: () => invokeDesktop(desktopApiIpcChannels.eccRpcShutdown),
+    },
+    runtime: {
+      acknowledgeStepRendered: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered, request),
+      cancel: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationCancel, request),
+      snapshot: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
+      startFlow: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeStartFlow, request),
+      startStep: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeStartStep, request),
+      status: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationStatus, request),
+      waitForOperation: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeWaitForOperation, request),
     },
     workspace: {
       close: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceClose, request),

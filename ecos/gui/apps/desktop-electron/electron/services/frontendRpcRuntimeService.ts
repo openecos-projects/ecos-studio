@@ -52,10 +52,10 @@ export class FrontendRpcRuntimeService {
     return this.runtime.rpcShutdown()
   }
 
-  cancelOperation(
+  cancelOperationLegacy(
     operationId?: string,
   ): Promise<{ cancelled: boolean; operationId?: string }> {
-    return this.runtime.cancelOperation(operationId)
+    return this.runtime.cancelOperationLegacy(operationId)
   }
 
   catalogList(): Promise<Record<string, unknown>> {

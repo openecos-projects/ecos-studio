@@ -1,4 +1,5 @@
 import type {
+  EccWorkspaceRuntimeSnapshot,
   WorkspaceResourceIndex,
   WorkspaceStepInfoRequest,
   WorkspaceStepInfoResult,
@@ -22,6 +23,14 @@ export function readWorkspaceParametersResourceApi(): Promise<Record<
   unknown
 > | null> {
   return getDesktopApi().workspaceResources.readParameters()
+}
+
+export function getWorkspaceRuntimeSnapshotApi(
+  workspaceHandle: string,
+): Promise<EccWorkspaceRuntimeSnapshot> {
+  const runtime = getDesktopApi().ecc.runtime
+  if (!runtime) throw new Error('ECC runtime snapshot API is unavailable.')
+  return runtime.snapshot({ workspaceHandle })
 }
 
 export function resolveWorkspaceStepInfoApi(

@@ -1,5 +1,10 @@
 <template>
-  <WorkspaceWorkbench flow-title="Flow status" :loading="flowLoading" :nodes="flowNodes">
+  <WorkspaceWorkbench
+    flow-title="Flow status"
+    :loading="flowLoading"
+    :log-rerun-affected-steps="flowLogRerunAffectedSteps"
+    :nodes="flowNodes"
+  >
     <template #left>
       <main class="home-dashboard" aria-label="Workspace dashboard">
         <div class="home-dashboard-row home-dashboard-top">
@@ -239,31 +244,40 @@
                   </button>
                   <div
                     class="qor-step-trend"
-                    :aria-label="`${step.label}: ${step.improvedCount} improved, ${step.regressedCount} regressed, ${step.unchangedCount} unchanged, ${step.comparableCount} compared`"
+                    :aria-label="
+                      step.displayMode === 'summary'
+                        ? `${step.label}: ${step.summaryMetricCount} reported metrics, ${step.status}`
+                        : `${step.label}: ${step.improvedCount} improved, ${step.regressedCount} regressed, ${step.unchangedCount} unchanged, ${step.comparableCount} compared`
+                    "
                   >
                     <div class="qor-step-trend-bar" aria-hidden="true">
                       <span
-                        v-if="step.improvedCount"
+                        v-if="step.displayMode === 'summary'"
+                        :class="`is-${step.status}`"
+                        :style="{ flexGrow: 1 }"
+                      />
+                      <span
+                        v-if="step.displayMode === 'comparison' && step.improvedCount"
                         class="is-improved"
                         :style="{ flexGrow: step.improvedCount }"
                       />
                       <span
-                        v-if="step.regressedCount"
+                        v-if="step.displayMode === 'comparison' && step.regressedCount"
                         class="is-regressed"
                         :style="{ flexGrow: step.regressedCount }"
                       />
                       <span
-                        v-if="step.unchangedCount"
+                        v-if="step.displayMode === 'comparison' && step.unchangedCount"
                         class="is-neutral"
                         :style="{ flexGrow: step.unchangedCount }"
                       />
                       <span
-                        v-if="!step.comparableCount"
+                        v-if="step.displayMode === 'comparison' && !step.comparableCount"
                         class="is-unavailable"
                         :style="{ flexGrow: 1 }"
                       />
                     </div>
-                    <strong class="qor-step-total">{{ step.comparableCount }}</strong>
+                    <strong class="qor-step-total">{{ step.displayCount }}</strong>
                   </div>
                 </section>
                 <div v-if="!qorDashboardSteps.length" class="dashboard-empty compact">
@@ -277,32 +291,41 @@
             <header class="dashboard-section-header">
               <div>
                 <i class="ri-layout-masonry-line" aria-hidden="true" />
-                <h2>{{ layoutTitle }}</h2>
+                <h2>LayoutView</h2>
               </div>
-              <button
-                type="button"
-                class="dashboard-icon-button"
-                :disabled="!canOpenLayoutChipViewer"
-                title="Open ChipView"
-                aria-label="Open ChipView"
-                @click="openLayoutChipViewer"
-              >
-                <i
-                  class="ri-cpu-line"
-                  :class="{ 'animate-pulse': layoutChipViewerBusy }"
-                  aria-hidden="true"
-                />
-              </button>
+              <span class="dashboard-muted">{{ layoutThumbnails.length }} layouts</span>
             </header>
-            <button
-              v-if="layoutPreviewUrl"
-              type="button"
-              class="layout-preview"
-              title="Open layout preview"
-              @click="preview = { label: 'Layout preview', url: layoutPreviewUrl }"
+            <div
+              v-if="layoutThumbnails.length"
+              class="layout-thumbnail-grid"
+              aria-label="Layout thumbnails"
             >
-              <img :src="layoutPreviewUrl" alt="Latest layout preview" />
-            </button>
+              <div
+                v-for="(thumbnail, index) in layoutThumbnailCells"
+                :key="thumbnail?.id ?? `layout-empty-${index}`"
+                class="layout-thumbnail-cell"
+                :class="{
+                  'is-empty': !thumbnail,
+                  'is-opening': thumbnail?.step === openingLayoutStep,
+                }"
+              >
+                <button
+                  v-if="thumbnail"
+                  type="button"
+                  :disabled="!canOpenLayoutThumbnail(thumbnail)"
+                  :title="layoutThumbnailTitle(thumbnail)"
+                  @click="void openLayoutThumbnail(thumbnail)"
+                >
+                  <img :src="thumbnail.url" :alt="thumbnail.label" />
+                  <i
+                    v-if="thumbnail.step === openingLayoutStep"
+                    class="ri-loader-4-line spin"
+                    aria-hidden="true"
+                  />
+                  <span>{{ thumbnail.label }}</span>
+                </button>
+              </div>
+            </div>
             <div v-else class="dashboard-empty">
               <i class="ri-image-2-line" /><span>Waiting for layout data</span>
             </div>
@@ -331,15 +354,15 @@
                 <i class="ri-gallery-line" aria-hidden="true" />
                 <h2>Data Snapshot</h2>
               </div>
-              <span class="dashboard-muted">{{ homeSnapshots.length }} snapshots</span>
+              <span class="dashboard-muted">{{ insightSnapshots.length }} snapshots</span>
             </header>
             <div
-              v-if="homeSnapshots.length"
+              v-if="insightSnapshots.length"
               class="snapshot-grid"
               aria-label="Flow snapshots"
             >
               <div
-                v-for="(snapshot, index) in homeSnapshotCells"
+                v-for="(snapshot, index) in insightSnapshotCells"
                 :key="snapshot?.id ?? `snapshot-empty-${index}`"
                 class="snapshot-grid-cell"
                 :class="{ 'is-empty': !snapshot }"
@@ -379,14 +402,16 @@
       </main>
     </template>
 
-    <template #right-log="{ selectedNode }">
+    <template #right-log="{ selectedNode, selectedNodePinned }">
       <FlowLogPanel
+        :active-step-name="flowLogStepName"
         :content-by-key="flowLogContentByKey"
         :ensure-content="ensureFlowLogSegmentContentLoaded"
         :error="flowLogError"
         :execution-active="currentWorkspaceFlowExecutionActive"
         :loading="flowLogLoading"
         :selected-node="selectedNode"
+        :selected-node-pinned="selectedNodePinned"
         :segments="flowLogSegments"
       />
     </template>
@@ -603,7 +628,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import Dialog from 'primevue/dialog'
 import { useRoute, useRouter } from 'vue-router'
 import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
@@ -625,6 +650,7 @@ import { useFlowStages } from '@/composables/useFlowStages'
 import { useHomeData } from '@/composables/useHomeData'
 import {
   useHomeSnapshots,
+  type HomeLayoutThumbnail,
   type HomeSnapshotDistribution,
 } from '@/composables/useHomeSnapshots'
 import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
@@ -632,8 +658,6 @@ import { useParameters } from '@/composables/useParameters'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
-import { readProjectBlobUrl } from '@/utils/projectFiles'
-import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { QOR_SCORE_THRESHOLD } from '@/utils/projectQorTrend'
 import {
   buildChipViewerOpenRequest,
@@ -652,18 +676,13 @@ const {
   flowLogContentByKey,
   flowLogError,
   flowLogLoading,
+  flowLogRerunAffectedSteps,
   flowLogSegments,
-  layoutBlobUrl,
+  flowLogStepName,
 } = useHomeData()
-const { items: homeSnapshots } = useHomeSnapshots()
-const {
-  index: dashboardResourceIndex,
-  keyMetrics,
-  maxFanout,
-  mpcDisplayName,
-  mpcConstraints,
-  qorSteps,
-} = useDashboardOverview()
+const { insightSnapshots, layoutThumbnails } = useHomeSnapshots()
+const { keyMetrics, maxFanout, mpcDisplayName, mpcConstraints, qorSteps } =
+  useDashboardOverview()
 const { state: qorComparisonState, refresh: refreshQorComparison } =
   useHomeQorComparison()
 
@@ -672,16 +691,21 @@ const showChecklist = ref(false)
 const showQor = ref(false)
 const preview = ref<{ label: string; url: string } | null>(null)
 const selectedHomeSnapshot = ref<HomeSnapshotDistribution | null>(null)
-const layoutChipViewerBusy = ref(false)
-const layoutPreviewBlobUrl = ref('')
-const DATA_SNAPSHOT_ROWS = 4
-const DATA_SNAPSHOT_COLUMNS = 5
-let layoutPreviewLoadToken = 0
-let loadedLayoutPreviewSignature = ''
-const homeSnapshotCells = computed(() =>
+const openingLayoutStep = ref<string | null>(null)
+const LAYOUT_THUMBNAIL_ROWS = 4
+const LAYOUT_THUMBNAIL_COLUMNS = 4
+const INSIGHT_SNAPSHOT_ROWS = 4
+const INSIGHT_SNAPSHOT_COLUMNS = 5
+const layoutThumbnailCells = computed(() =>
   Array.from(
-    { length: DATA_SNAPSHOT_ROWS * DATA_SNAPSHOT_COLUMNS },
-    (_, index) => homeSnapshots.value[index] ?? null,
+    { length: LAYOUT_THUMBNAIL_ROWS * LAYOUT_THUMBNAIL_COLUMNS },
+    (_, index) => layoutThumbnails.value[index] ?? null,
+  ),
+)
+const insightSnapshotCells = computed(() =>
+  Array.from(
+    { length: INSIGHT_SNAPSHOT_ROWS * INSIGHT_SNAPSHOT_COLUMNS },
+    (_, index) => insightSnapshots.value[index] ?? null,
   ),
 )
 const previewVisible = computed({
@@ -721,119 +745,6 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
         : null,
     })),
 )
-const layoutOutputStage = computed(() => {
-  return (
-    [...flowStages.value]
-      .reverse()
-      .find(
-        (stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded',
-      ) ?? null
-  )
-})
-const layoutRenderStage = computed(() => {
-  const outputStage = layoutOutputStage.value
-  if (!outputStage || outputStage.label.trim().toLowerCase() !== 'harden') {
-    return outputStage
-  }
-
-  return (
-    [...flowStages.value]
-      .reverse()
-      .find(
-        (stage) =>
-          stage.group === 'run' &&
-          stage.path.trim().toLowerCase() === 'sta' &&
-          flowNodeStatus(stage.state) === 'succeeded',
-      ) ?? null
-  )
-})
-const layoutPreviewImage = computed(() => {
-  const projectPath = currentProject.value?.path
-  const outputStage = layoutOutputStage.value
-  const resourceIndex = dashboardResourceIndex.value
-  if (!projectPath || resourceIndex?.root !== projectPath || !outputStage) return null
-
-  const stageKeys = new Set(
-    [outputStage.path, outputStage.label].map((value) => value.trim().toLowerCase()),
-  )
-  const image = resourceIndex.flow.steps.find((step) =>
-    stageKeys.has(step.name.trim().toLowerCase()),
-  )?.resources.output.image
-  return image?.exists ? image : null
-})
-const layoutPreviewUrl = computed(() =>
-  layoutPreviewImage.value ? layoutPreviewBlobUrl.value : layoutBlobUrl.value,
-)
-const layoutTitle = computed(() => {
-  const stage = layoutOutputStage.value
-  return `ChipView - ${stage?.label ?? '--'} - ${stage?.tool || '--'}`
-})
-const canOpenLayoutChipViewer = computed(() => {
-  const stage = layoutRenderStage.value
-  if (!stage || !layoutPreviewUrl.value) return false
-  return canOpenChipViewer({
-    chipViewerBusy: layoutChipViewerBusy.value,
-    chipViewerEditBusy: false,
-    isDesktopRuntime: isDesktopRuntime(),
-    projectPath: currentProject.value?.path,
-    step: stage.path,
-  })
-})
-
-function clearLayoutPreviewBlobUrl(): void {
-  const previousUrl = layoutPreviewBlobUrl.value
-  layoutPreviewBlobUrl.value = ''
-  loadedLayoutPreviewSignature = ''
-  if (previousUrl.startsWith('blob:')) URL.revokeObjectURL(previousUrl)
-}
-
-async function loadLayoutPreviewImage(
-  image: { path: string; mtimeMs?: number; sizeBytes?: number } | null,
-): Promise<void> {
-  const projectPath = currentProject.value?.path
-  const token = ++layoutPreviewLoadToken
-  if (!image || !projectPath) {
-    clearLayoutPreviewBlobUrl()
-    return
-  }
-
-  const signature = `${image.path}:${image.mtimeMs ?? 0}:${image.sizeBytes ?? 0}`
-  if (signature === loadedLayoutPreviewSignature && layoutPreviewBlobUrl.value) return
-
-  try {
-    const authorizedPath = await resolveProjectPathAccess(image.path)
-    if (!authorizedPath) throw new Error(`Cannot access layout preview: ${image.path}`)
-    const nextBlobUrl = await readProjectBlobUrl(authorizedPath, {
-      mimeType: 'image/png',
-    })
-    if (token !== layoutPreviewLoadToken) {
-      if (nextBlobUrl.startsWith('blob:')) URL.revokeObjectURL(nextBlobUrl)
-      return
-    }
-
-    const previousUrl = layoutPreviewBlobUrl.value
-    layoutPreviewBlobUrl.value = nextBlobUrl
-    loadedLayoutPreviewSignature = signature
-    if (previousUrl.startsWith('blob:')) URL.revokeObjectURL(previousUrl)
-  } catch (error) {
-    if (token !== layoutPreviewLoadToken) return
-    console.error('Failed to load the selected layout preview:', error)
-    clearLayoutPreviewBlobUrl()
-  }
-}
-
-watch(
-  () => layoutPreviewImage.value,
-  (image) => {
-    void loadLayoutPreviewImage(image)
-  },
-  { immediate: true },
-)
-
-onBeforeUnmount(() => {
-  layoutPreviewLoadToken += 1
-  clearLayoutPreviewBlobUrl()
-})
 const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
 const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
 const qorComparisonSummary = computed(() =>
@@ -850,7 +761,14 @@ async function openQorDetails(): Promise<void> {
 
 const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
 const qorStatusTone = computed<'pass' | 'warning' | 'blocked' | 'unavailable'>(() => {
-  if (qorComparisonState.value.status !== 'available') return 'unavailable'
+  if (
+    qorComparisonState.value.status !== 'available' &&
+    qorComparisonState.value.status !== 'baseline'
+  ) {
+    return 'unavailable'
+  }
+  if (qorComparisonState.value.comparison?.score === null) return 'unavailable'
+  if (qorComparisonState.value.status === 'baseline') return 'pass'
   return qorComparisonSummary.value.regressedCount > 0 ? 'blocked' : 'pass'
 })
 const checklistCenterPrimary = computed(() =>
@@ -940,6 +858,10 @@ const qorDashboardSteps = computed(() => {
     qorComparisonSummary.value.steps.map((step) => [step.step, step]),
   )
   const comparisonReady = qorComparisonState.value.status === 'available'
+  const showBaselineSummary = qorComparisonState.value.status === 'baseline'
+  const currentQorReady =
+    qorComparisonState.value.status === 'available' ||
+    qorComparisonState.value.status === 'baseline'
   return qorSteps.value.map((step) => {
     const comparisonStep = homeQorFlowStepForLabel(step.label)
       ? comparisonByStep.get(homeQorFlowStepForLabel(step.label)!)
@@ -948,19 +870,28 @@ const qorDashboardSteps = computed(() => {
     const regressedCount = comparisonReady ? (comparisonStep?.regressedCount ?? 0) : 0
     const unchangedCount = comparisonReady ? (comparisonStep?.unchangedCount ?? 0) : 0
     const comparableCount = comparisonReady ? (comparisonStep?.comparableCount ?? 0) : 0
+    const displayMode =
+      showBaselineSummary && step.status !== 'unavailable' ? 'summary' : 'comparison'
     return {
       ...step,
+      displayCount: displayMode === 'summary' ? step.summaryMetricCount : comparableCount,
+      displayMode,
       improvedCount,
       regressedCount,
       unchangedCount,
       comparableCount,
-      comparisonState: !comparisonReady
-        ? 'unavailable'
-        : regressedCount > 0
-          ? 'regressed'
-          : improvedCount > 0
-            ? 'improved'
-            : 'neutral',
+      comparisonState:
+        displayMode === 'summary'
+          ? step.status
+          : !comparisonReady
+            ? currentQorReady
+              ? 'available'
+              : 'unavailable'
+            : regressedCount > 0
+              ? 'regressed'
+              : improvedCount > 0
+                ? 'improved'
+                : 'neutral',
     }
   })
 })
@@ -1096,21 +1027,40 @@ function openStepQorAnalysis(step: string): void {
   })
 }
 
-async function openLayoutChipViewer(): Promise<void> {
-  const stage = layoutRenderStage.value
-  const projectPath = currentProject.value?.path
-  if (!stage || !projectPath || !canOpenLayoutChipViewer.value) return
+function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
+  if (!thumbnail.hasGeometry) return false
+  return canOpenChipViewer({
+    chipViewerBusy: openingLayoutStep.value !== null,
+    chipViewerEditBusy: false,
+    isDesktopRuntime: isDesktopRuntime(),
+    projectPath: currentProject.value?.path,
+    step: thumbnail.step,
+  })
+}
 
-  layoutChipViewerBusy.value = true
+function layoutThumbnailTitle(thumbnail: HomeLayoutThumbnail): string {
+  if (!thumbnail.hasGeometry) {
+    return `${thumbnail.label}: saved layout data is unavailable.`
+  }
+  return `Open ${thumbnail.label} in Chip Viewer`
+}
+
+async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void> {
+  const projectPath = currentProject.value?.path
+  if (!projectPath || !canOpenLayoutThumbnail(thumbnail)) return
+
+  openingLayoutStep.value = thumbnail.step
   try {
     const desktopApi = getDesktopApi()
     await desktopApi.chipViewer.open(
-      buildChipViewerOpenRequest(projectPath, stage.path, 'view'),
+      buildChipViewerOpenRequest(projectPath, thumbnail.step, 'view'),
     )
   } catch (error) {
-    console.error('Failed to open ChipView from Home:', error)
+    console.error(`Failed to open ChipView for ${thumbnail.step} from Home:`, error)
   } finally {
-    layoutChipViewerBusy.value = false
+    if (openingLayoutStep.value === thumbnail.step) {
+      openingLayoutStep.value = null
+    }
   }
 }
 </script>
@@ -1357,20 +1307,97 @@ async function openLayoutChipViewer(): Promise<void> {
   width: fit-content;
 }
 
-.layout-preview {
-  background: var(--dashboard-soft-surface);
-  border: 0;
-  cursor: zoom-in;
+.layout-thumbnail-grid {
+  display: grid;
   flex: 1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
   min-height: 0;
-  overflow: hidden;
-  padding: 0;
+  padding: 7px;
 }
-.layout-preview img {
+
+.layout-thumbnail-cell {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  min-height: 0;
+  min-width: 0;
+}
+
+.layout-thumbnail-cell:nth-child(4n) {
+  border-right: 0;
+}
+
+.layout-thumbnail-cell:nth-child(n + 13) {
+  border-bottom: 0;
+}
+
+.layout-thumbnail-cell button {
+  align-items: stretch;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6% 7% 4%;
+  position: relative;
+  width: 100%;
+}
+
+.layout-thumbnail-cell button:hover:not(:disabled),
+.layout-thumbnail-cell button:focus-visible:not(:disabled) {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+  outline: none;
+}
+
+.layout-thumbnail-cell button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.layout-thumbnail-cell img {
+  align-self: stretch;
+  background: var(--dashboard-soft-surface);
+  border: 1px solid var(--dashboard-border);
+  border-radius: 3px;
   display: block;
   height: 100%;
+  min-height: 0;
   object-fit: contain;
   width: 100%;
+}
+
+.layout-thumbnail-cell i {
+  animation: layout-thumbnail-spin 0.8s linear infinite;
+  align-self: center;
+  background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
+  border-radius: 50%;
+  color: var(--accent-color);
+  font-size: 16px;
+  justify-self: center;
+  padding: 3px;
+  position: absolute;
+}
+
+.layout-thumbnail-cell span {
+  align-self: end;
+  font-size: 8px;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  padding-top: 4%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes layout-thumbnail-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .dashboard-empty {
@@ -1623,6 +1650,15 @@ async function openLayoutChipViewer(): Promise<void> {
 .qor-step-status.is-regressed {
   background: var(--danger-color);
 }
+.qor-step-status.is-pass {
+  background: var(--success-color);
+}
+.qor-step-status.is-blocked {
+  background: var(--danger-color);
+}
+.qor-step-status.is-incomplete {
+  background: var(--warning-color);
+}
 
 .qor-overview {
   grid-template-columns: minmax(112px, 0.34fr) minmax(160px, 0.62fr) minmax(0, 1fr);
@@ -1725,6 +1761,18 @@ async function openLayoutChipViewer(): Promise<void> {
 
 .qor-step-trend-bar > .is-neutral {
   background: var(--text-secondary);
+}
+
+.qor-step-trend-bar > .is-pass {
+  background: var(--success-color);
+}
+
+.qor-step-trend-bar > .is-blocked {
+  background: var(--danger-color);
+}
+
+.qor-step-trend-bar > .is-incomplete {
+  background: var(--warning-color);
 }
 
 .qor-step-trend-bar > .is-unavailable {

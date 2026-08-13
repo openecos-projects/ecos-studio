@@ -15,6 +15,11 @@ import type {
   EccRpcPingResult,
   EccRpcShutdownResult,
   EccRuntimeEvent,
+  EccRuntimeOperation,
+  EccRuntimeOperationRequest,
+  EccRuntimeStartFlowRequest,
+  EccRuntimeStartStepRequest,
+  EccRuntimeStepRenderedAckRequest,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
@@ -29,6 +34,7 @@ import type {
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
+  EccWorkspaceRuntimeSnapshot,
   EccWorkspaceSyncConfigRequest,
   EccWorkspaceSyncConfigResult,
 } from '@ecos-studio/shared'
@@ -40,6 +46,7 @@ import {
   type EccRpcRuntimeClient,
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
+import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
@@ -47,8 +54,13 @@ export interface EccRpcRuntimeServiceOptions {
   createSidecar(
     directory: string | null,
     onEvent: (event: EccRuntimeEvent) => void,
+    onNotification: (notification: JsonRpcNotificationPayload) => void,
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
+  lazyWorkspaceOpen?: boolean
+  snapshotLoader?: (
+    directory: string,
+  ) => Promise<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>
 }
 
 /**
@@ -68,6 +80,42 @@ export class EccRpcRuntimeService {
     return this.handleToDirectory.values().next().value ?? null
   }
 
+  callRuntime<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    options: { timeoutMs?: number } = {},
+  ): Promise<T> {
+    return this.getOrCreateControlRuntime().callRuntime(method, params, options)
+  }
+
+  async cancelOperationLegacy(
+    operationId?: string,
+  ): Promise<{ cancelled: boolean; operationId?: string }> {
+    const runtime = this.uniqueRuntimes().find((candidate) =>
+      candidate.hasInFlightOperation(operationId),
+    )
+    if (!runtime) return { cancelled: false, ...(operationId ? { operationId } : {}) }
+    return await runtime.cancelOperationLegacy(operationId)
+  }
+
+  createWorkspacePayload(
+    payload: Record<string, unknown> & { directory: string },
+  ): Promise<EccWorkspaceCreateResult> {
+    const requestKey = normalizeWorkspacePath(payload.directory)
+    const runtime = this.getOrCreateRuntime(payload.directory)
+    return runtime.createWorkspacePayload(payload).then((result) => {
+      this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+      return result
+    })
+  }
+
+  runStepPayload(
+    workspaceHandle: string,
+    payload: Record<string, unknown> & { step: string },
+  ): Promise<EccFlowRunStepResult> {
+    return this.runtimeForHandle(workspaceHandle).runStepPayload(workspaceHandle, payload)
+  }
+
   onEvent(listener: (event: EccRuntimeEvent) => void): () => void {
     this.eventListeners.add(listener)
     return () => {
@@ -80,6 +128,14 @@ export class EccRpcRuntimeService {
     return this.runtimes.get(key)?.isActive() ?? false
   }
 
+  hasActiveOperations(): boolean {
+    return this.uniqueRuntimes().some((runtime) => runtime.isActive())
+  }
+
+  hasPendingRuntimeWork(): boolean {
+    return this.uniqueRuntimes().some((runtime) => runtime.hasPendingRuntimeWork())
+  }
+
   rpcHello(): Promise<EccRpcHelloResult> {
     return this.getOrCreateControlRuntime().rpcHello()
   }
@@ -88,52 +144,38 @@ export class EccRpcRuntimeService {
     return this.getOrCreateControlRuntime().rpcPing()
   }
 
-  callRuntime<T>(
-    method: string,
-    params: Record<string, unknown> = {},
-    options: { timeoutMs?: number } = {},
-  ): Promise<T> {
-    return this.getOrCreateControlRuntime().callRuntime(method, params, options)
-  }
-
   async rpcShutdown(): Promise<EccRpcShutdownResult> {
-    const runtimes = this.allRuntimes()
+    const runtimes = this.uniqueRuntimes()
+    const blockingRuntime = runtimes.find((runtime) => runtime.hasPendingRuntimeWork())
+    if (blockingRuntime) {
+      if (blockingRuntime.isActive()) {
+        const result = await blockingRuntime.shutdown()
+        if (result.deferred && result.shutdownBarrier?.safeToStop) {
+          await blockingRuntime.cancelAtSafeShutdownBoundary(result.shutdownBarrier)
+        }
+        if (result.deferred) return result
+      }
+      if (blockingRuntime.hasPendingRuntimeWork()) {
+        return {
+          ok: false,
+          deferred: true,
+          shutdownBarrier: blockingRuntime.shutdownBarrier() ?? undefined,
+        }
+      }
+    }
+    await Promise.all(runtimes.map((runtime) => runtime.shutdown()))
     this.runtimes.clear()
     this.handleToDirectory.clear()
     this.controlRuntime = null
-    await Promise.all(runtimes.map((runtime) => runtime.shutdown()))
     return { ok: true }
-  }
-
-  async cancelOperation(
-    operationId?: string,
-  ): Promise<{ cancelled: boolean; operationId?: string }> {
-    const runtime = this.allRuntimes().find((candidate) =>
-      candidate.hasInFlightOperation(operationId),
-    )
-    if (!runtime) {
-      return { cancelled: false, ...(operationId ? { operationId } : {}) }
-    }
-    return await runtime.cancelOperation(operationId)
   }
 
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
     const requestKey = normalizeWorkspacePath(request.directory)
     const runtime = this.getOrCreateRuntime(request.directory)
-    return runtime.createWorkspace(request).then((result) => {
+    return runtime.createWorkspace(request).then(async (result) => {
       this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
-      return result
-    })
-  }
-
-  createWorkspacePayload(
-    payload: Record<string, unknown>,
-  ): Promise<EccWorkspaceCreateResult> {
-    const directory = typeof payload.directory === 'string' ? payload.directory : ''
-    const requestKey = normalizeWorkspacePath(directory)
-    const runtime = this.getOrCreateRuntime(directory)
-    return runtime.createWorkspacePayload(payload).then((result) => {
-      this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+      await runtime.releaseIdleSidecar()
       return result
     })
   }
@@ -229,20 +271,52 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).runStep(request)
   }
 
-  async runStepPayload(
-    workspaceHandle: string,
-    payload: Record<string, unknown>,
-  ): Promise<EccFlowRunStepResult> {
-    return this.runtimeForHandle(workspaceHandle).runStepPayload(workspaceHandle, payload)
+  startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation> {
+    return this.runtimeForHandle(request.workspaceHandle).startFlowOperation(request)
   }
 
-  private allRuntimes(): EccWorkspaceRuntime[] {
-    return [
-      ...new Set([
-        ...this.runtimes.values(),
-        ...(this.controlRuntime ? [this.controlRuntime] : []),
-      ]),
-    ]
+  startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation> {
+    return this.runtimeForHandle(request.workspaceHandle).startStepOperation(request)
+  }
+
+  operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
+    return this.runtimeForHandle(request.workspaceHandle).operationStatus(request)
+  }
+
+  waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
+    return this.runtimeForHandle(request.workspaceHandle).waitForOperation(request)
+  }
+
+  cancelOperation(
+    request: EccRuntimeOperationRequest,
+  ): Promise<{ accepted: boolean; operationId: string; state: string }> {
+    return this.runtimeForHandle(request.workspaceHandle).cancelOperation(request)
+  }
+
+  acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
+    accepted: boolean
+    duplicate: boolean
+    eventId: string
+    operationId: string
+  }> {
+    return this.runtimeForHandle(request.workspaceHandle).acknowledgeStepRendered(request)
+  }
+
+  acknowledgeDetachedStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
+    accepted: boolean
+    duplicate: boolean
+    eventId: string
+    operationId: string
+  }> {
+    return this.runtimeForHandle(request.workspaceHandle).acknowledgeDetachedStepRendered(
+      request,
+    )
+  }
+
+  workspaceSnapshot(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceRuntimeSnapshot> {
+    return this.runtimeForHandle(request.workspaceHandle).workspaceSnapshot(request)
   }
 
   private getOrCreateRuntime(directory: string): EccWorkspaceRuntime {
@@ -253,19 +327,32 @@ export class EccRpcRuntimeService {
     let runtime = this.runtimes.get(key)
     if (!runtime) {
       runtime = new EccWorkspaceRuntime({
-        createSidecar: (onEvent) => this.options.createSidecar(key, onEvent),
+        createSidecar: (onEvent, onNotification) =>
+          this.options.createSidecar(key, onEvent, onNotification),
         directory: key,
+        lazyWorkspaceOpen: this.options.lazyWorkspaceOpen,
         onEvent: (event) => this.emit(event),
+        snapshotLoader: this.options.snapshotLoader,
       })
       this.runtimes.set(key, runtime)
     }
     return runtime
   }
 
+  private uniqueRuntimes(): EccWorkspaceRuntime[] {
+    return Array.from(
+      new Set([
+        ...this.runtimes.values(),
+        ...(this.controlRuntime ? [this.controlRuntime] : []),
+      ]),
+    )
+  }
+
   private getOrCreateControlRuntime(): EccWorkspaceRuntime {
     if (!this.controlRuntime) {
       this.controlRuntime = new EccWorkspaceRuntime({
-        createSidecar: (onEvent) => this.options.createSidecar(null, onEvent),
+        createSidecar: (onEvent, onNotification) =>
+          this.options.createSidecar(null, onEvent, onNotification),
         directory: null,
         onEvent: (event) => this.emit(event),
       })
@@ -296,10 +383,13 @@ export class EccRpcRuntimeService {
 
     const existing = this.runtimes.get(resultKey)
     if (existing && existing !== runtime) {
+      // Canonical key already owned by another runtime. Keep this handle on the
+      // runtime that created the session so subsequent RPC still routes.
       this.handleToDirectory.set(workspaceHandle, requestKey)
       return
     }
 
+    // Alias both keys to one runtime; events use the ECC-canonical directory.
     this.runtimes.set(resultKey, runtime)
     this.runtimes.set(requestKey, runtime)
     runtime.rebindDirectory(resultKey)

@@ -10,7 +10,7 @@ import {
   watch as watchFsDirectoryCallback,
 } from 'node:fs'
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import {
   normalizeLocalPath,
   type ChipViewerOpenRequest,
@@ -27,6 +27,7 @@ import {
   type EccWorkspaceOpenResult,
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
+import { isPathWithinRoot } from './pathScope'
 
 const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build the ECC CLI package.'
@@ -400,8 +401,7 @@ function savedGeometrySourcePaths(snapshotInputs: SnapshotInputs): SnapshotSourc
 function isPathInside(rootPath: string, targetPath: string): boolean {
   const normalizedRoot = normalizeLocalPath(rootPath).replace(/[\\/]+$/, '')
   const normalizedTarget = normalizeLocalPath(targetPath)
-  const delta = relative(normalizedRoot, normalizedTarget)
-  return delta === '' || (!delta.startsWith('..') && !isAbsolute(delta))
+  return isPathWithinRoot(normalizedTarget, normalizedRoot)
 }
 
 function readStringInfo(result: WorkspaceStepInfoResult, key: string): string | null {

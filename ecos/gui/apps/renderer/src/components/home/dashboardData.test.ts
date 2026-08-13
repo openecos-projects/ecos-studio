@@ -88,6 +88,7 @@ describe('dashboard data presentation', () => {
           passCount: 0,
           reportCount: 1,
           runtime: '0:00:01',
+          summaryMetricCount: 0,
           status: 'pass',
           totalCount: 0,
         },
@@ -100,6 +101,7 @@ describe('dashboard data presentation', () => {
           passCount: 0,
           reportCount: 1,
           runtime: '0:00:01',
+          summaryMetricCount: 0,
           status: 'incomplete',
           totalCount: 0,
         },
@@ -209,25 +211,34 @@ describe('dashboard data presentation', () => {
 
   it('counts each declared QoR summary status as one analyzed step', () => {
     expect(
-      qorSummaryCounts({ schema_version: 4, quality_status: 'pass', gates: [] }),
+      qorSummaryCounts({
+        schema_version: 4,
+        quality_status: 'pass',
+        metric_count: 12,
+        gates: [],
+      }),
     ).toEqual({
       blockedCount: 0,
       passCount: 1,
+      summaryMetricCount: 12,
       totalCount: 1,
     })
     expect(qorSummaryCounts({ schema_version: 4, quality_status: 'blocked' })).toEqual({
       blockedCount: 1,
       passCount: 0,
+      summaryMetricCount: 0,
       totalCount: 1,
     })
     expect(qorSummaryCounts({ schema_version: 3, status: 'pass' })).toEqual({
       blockedCount: 0,
       passCount: 1,
+      summaryMetricCount: 0,
       totalCount: 1,
     })
     expect(qorSummaryCounts({ schema_version: 4, gates: [] })).toEqual({
       blockedCount: 0,
       passCount: 0,
+      summaryMetricCount: 0,
       totalCount: 0,
     })
   })

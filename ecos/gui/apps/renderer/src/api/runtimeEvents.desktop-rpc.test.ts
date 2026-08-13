@@ -1,4 +1,4 @@
-import type { DesignRuntimeEvent } from '@ecos-studio/shared'
+import type { DesignRuntimeEvent, EccRuntimeEvent } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
@@ -28,9 +28,7 @@ function installRuntimeEventBridge() {
   })
   setWindow({
     ecosDesktop: {
-      runtime: {
-        events: { onEvent },
-      },
+      runtime: { events: { onEvent } },
     },
   })
   return {
@@ -38,6 +36,13 @@ function installRuntimeEventBridge() {
     onEvent,
     unsubscribe,
   }
+}
+
+function asDesignEvent(
+  event: EccRuntimeEvent,
+  designTool: 'backend' | 'frontend' = 'backend',
+) {
+  return { ...event, designTool } as DesignRuntimeEvent
 }
 
 describe('createRuntimeEventClient desktop design runtime events', () => {
@@ -56,20 +61,20 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     client.on('step_complete', stepCompleteHandler)
     client.connect()
 
-    bridge.emit({
-      designTool: 'backend',
-      method: 'flow.run_step',
-      operationId: 'operation-1',
-      step: 'placement',
-      type: 'operation.completed',
-      workspaceHandle: 'workspace-handle-1',
-    })
+    bridge.emit(
+      asDesignEvent({
+        method: 'flow.run_step',
+        operationId: 'operation-1',
+        step: 'placement',
+        type: 'operation.completed',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
 
     expect(bridge.onEvent).toHaveBeenCalledTimes(1)
     expect(client.getState()).toBe('connected')
     expect(allHandler).toHaveBeenCalledWith(
       expect.objectContaining({
-        cmd: 'notify',
         data: expect.objectContaining({
           cmd: 'run_step',
           jobId: 'operation-1',
@@ -81,44 +86,51 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
       }),
     )
     expect(stepCompleteHandler).toHaveBeenCalledTimes(1)
-
     client.close()
     expect(bridge.unsubscribe).toHaveBeenCalledTimes(1)
-    expect(client.getState()).toBe('disconnected')
   })
 
   it('filters events by design tool and workspace handle', async () => {
     const bridge = installRuntimeEventBridge()
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('frontend-handle', {
-      designTool: 'frontend',
-    })
+    const client = createRuntimeEventClient('frontend-handle', { designTool: 'frontend' })
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
 
-    bridge.emit({
-      designTool: 'backend',
-      method: 'flow.run_step',
-      operationId: 'backend-operation',
-      type: 'operation.completed',
-      workspaceHandle: 'frontend-handle',
-    })
-    bridge.emit({
-      designTool: 'frontend',
-      method: 'flow.run_step',
-      operationId: 'other-workspace-operation',
-      type: 'operation.completed',
-      workspaceHandle: 'other-handle',
-    })
-    bridge.emit({
-      designTool: 'frontend',
-      method: 'flow.run_step',
-      operationId: 'frontend-operation',
-      type: 'operation.completed',
-      workspaceHandle: 'frontend-handle',
-    })
-
+    bridge.emit(
+      asDesignEvent(
+        {
+          method: 'flow.run_step',
+          operationId: 'backend-operation',
+          type: 'operation.completed',
+          workspaceHandle: 'frontend-handle',
+        },
+        'backend',
+      ),
+    )
+    bridge.emit(
+      asDesignEvent(
+        {
+          method: 'flow.run_step',
+          operationId: 'other-workspace-operation',
+          type: 'operation.completed',
+          workspaceHandle: 'other-handle',
+        },
+        'frontend',
+      ),
+    )
+    bridge.emit(
+      asDesignEvent(
+        {
+          method: 'flow.run_step',
+          operationId: 'frontend-operation',
+          type: 'operation.completed',
+          workspaceHandle: 'frontend-handle',
+        },
+        'frontend',
+      ),
+    )
     expect(allHandler).toHaveBeenCalledTimes(1)
     expect(allHandler).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -135,15 +147,16 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     client.onAll(allHandler)
     client.connect()
 
-    bridge.emit({
-      designTool: 'backend',
-      method: 'flow.run',
-      operationId: 'operation-rerun',
-      rerun: true,
-      type: 'operation.started',
-      workspaceDirectory: '/work/demo',
-      workspaceHandle: 'workspace-handle-1',
-    })
+    bridge.emit(
+      asDesignEvent({
+        method: 'flow.run',
+        operationId: 'operation-rerun',
+        rerun: true,
+        type: 'operation.started',
+        workspaceDirectory: '/work/demo',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
 
     expect(allHandler).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -168,15 +181,16 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     client.on('step_complete', stepCompleteHandler)
     client.connect()
 
-    bridge.emit({
-      designTool: 'backend',
-      executionScope: 'single_step',
-      method: 'candidate.rerun',
-      operationId: 'operation-single-rerun',
-      rerun: true,
-      type: 'operation.completed',
-      workspaceHandle: 'workspace-handle-1',
-    })
+    bridge.emit(
+      asDesignEvent({
+        executionScope: 'single_step',
+        method: 'candidate.rerun',
+        operationId: 'operation-single-rerun',
+        rerun: true,
+        type: 'operation.completed',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
 
     expect(allHandler).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -199,24 +213,26 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     client.onAll(allHandler)
     client.connect()
 
-    bridge.emit({
-      designTool: 'backend',
-      executionScope: 'full_flow',
-      method: 'candidate.rerun',
-      operationId: 'operation-rerun',
-      rerun: true,
-      type: 'operation.started',
-      workspaceHandle: 'workspace-handle-1',
-    })
-    bridge.emit({
-      designTool: 'backend',
-      executionScope: 'full_flow',
-      method: 'candidate.rerun',
-      operationId: 'operation-rerun',
-      rerun: true,
-      type: 'operation.completed',
-      workspaceHandle: 'workspace-handle-1',
-    })
+    bridge.emit(
+      asDesignEvent({
+        executionScope: 'full_flow',
+        method: 'candidate.rerun',
+        operationId: 'operation-rerun',
+        rerun: true,
+        type: 'operation.started',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
+    bridge.emit(
+      asDesignEvent({
+        executionScope: 'full_flow',
+        method: 'candidate.rerun',
+        operationId: 'operation-rerun',
+        rerun: true,
+        type: 'operation.completed',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
 
     expect(allHandler).toHaveBeenNthCalledWith(
       1,
@@ -242,7 +258,99 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     )
   })
 
-  it('maps frontend flow progress into an incremental step completion', async () => {
+  it('maps bounded step log chunks from the runtime protocol', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const logHandler = vi.fn()
+    client.on('log', logHandler)
+    client.connect()
+
+    bridge.emit(
+      asDesignEvent({
+        event: {
+          eventId: 'workspace-1:4',
+          kind: 'flow',
+          operationId: 'operation-1',
+          origin: 'gui',
+          payload: {
+            chunk: 'live synthesis log\\n',
+            cursor: 19,
+            step: 'Synthesis',
+            tool: 'yosys',
+          },
+          sequence: 4,
+          timestamp: 1,
+          type: 'step.log',
+          workspaceId: 'workspace-1',
+        },
+        type: 'runtime.protocol',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
+    expect(logHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          logChunk: 'live synthesis log\\n',
+          logCursor: 19,
+          runtimeEventId: 'workspace-1:4',
+          runtimeProtocolType: 'step.log',
+          step: 'Synthesis',
+          type: 'log',
+        }),
+      }),
+    )
+  })
+
+  it('maps rerun preparation metadata from the runtime protocol', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+    bridge.emit(
+      asDesignEvent({
+        event: {
+          eventId: 'workspace-1:5',
+          kind: 'step',
+          operationId: 'operation-rerun-step',
+          origin: 'gui',
+          payload: {
+            affectedSteps: ['Floorplan', 'route'],
+            scope: 'step',
+            targetStep: 'Floorplan',
+          },
+          rerun: true,
+          runSessionId: 'run-session-2',
+          runtimeInstanceId: 'runtime-2',
+          sequence: 5,
+          timestamp: 5,
+          type: 'operation.rerun_prepared',
+          workspaceId: 'workspace-1',
+        },
+        workspaceDirectory: '/work/demo',
+        workspaceHandle: 'workspace-handle-1',
+        type: 'runtime.protocol',
+      }),
+    )
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          affectedSteps: ['Floorplan', 'route'],
+          cmd: 'run_step',
+          directory: '/work/demo',
+          rerun: true,
+          rerunScope: 'step',
+          runtimeProtocolType: 'operation.rerun_prepared',
+          targetStep: 'Floorplan',
+          type: 'message',
+        }),
+      }),
+    )
+  })
+
+  it('maps frontend progress into an incremental step completion', async () => {
     const bridge = installRuntimeEventBridge()
     const { createRuntimeEventClient } = await import('./runtimeEvents')
     const client = createRuntimeEventClient('workspace-handle-1', {
@@ -251,35 +359,32 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
-
-    bridge.emit({
-      data: {
-        home_page: '/work/demo/home/home.json',
-        log_file: '/work/demo/prepare/log.txt',
-        state: 'Success',
-        subflow_path: '/work/demo/prepare/subflow.json',
-      },
-      designTool: 'frontend',
-      message: 'frontend step prepare Success',
-      method: 'flow.run',
-      operationId: 'operation-flow',
-      phase: 'stdout',
-      step: 'prepare',
-      type: 'operation.progress',
-      workspaceDirectory: '/work/demo',
-      workspaceHandle: 'workspace-handle-1',
-    })
-
+    bridge.emit(
+      asDesignEvent(
+        {
+          data: {
+            home_page: '/work/demo/home/home.json',
+            log_file: '/work/demo/prepare/log.txt',
+            state: 'Success',
+            subflow_path: '/work/demo/prepare/subflow.json',
+          },
+          message: 'frontend step prepare Success',
+          method: 'flow.run',
+          phase: 'stdout',
+          step: 'prepare',
+          type: 'operation.progress',
+          workspaceDirectory: '/work/demo',
+          workspaceHandle: 'workspace-handle-1',
+        },
+        'frontend',
+      ),
+    )
     expect(allHandler).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          cmd: 'rtl2gds',
           home_page: '/work/demo/home/home.json',
-          jobId: 'operation-flow',
-          log_file: '/work/demo/prepare/log.txt',
           state: 'Success',
           step: 'prepare',
-          subflow_path: '/work/demo/prepare/subflow.json',
           type: 'step_complete',
         }),
         message: ['frontend step prepare Success'],
@@ -293,65 +398,63 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     const { createRuntimeEventClient } = await import('./runtimeEvents')
     const client = createRuntimeEventClient('workspace-handle-1')
     const allHandler = vi.fn()
+    const errorHandler = vi.fn()
     client.onAll(allHandler)
+    client.onError(errorHandler)
     client.connect()
-
-    bridge.emit({
-      designTool: 'backend',
-      message: 'flow failed',
-      method: 'flow.run',
-      operationId: 'operation-failed',
-      type: 'operation.failed',
-      workspaceHandle: 'workspace-handle-1',
-    })
-    bridge.emit({
-      designTool: 'backend',
-      method: 'flow.run_step',
-      operationId: 'operation-cancelled',
-      type: 'operation.cancelled',
-      workspaceHandle: 'workspace-handle-1',
-    })
-
-    expect(allHandler).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ message: ['flow failed'], response: 'error' }),
-    )
-    expect(allHandler).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        data: expect.objectContaining({ type: 'cancelled' }),
-        response: 'cancelled',
+    bridge.emit(
+      asDesignEvent({
+        message: 'flow failed',
+        method: 'flow.run',
+        operationId: 'operation-failed',
+        type: 'operation.failed',
+        workspaceHandle: 'workspace-handle-1',
       }),
     )
+    bridge.emit(
+      asDesignEvent({
+        method: 'flow.run_step',
+        operationId: 'operation-cancelled',
+        type: 'operation.cancelled',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
+    expect(allHandler).toHaveBeenCalledTimes(2)
+    expect(errorHandler).toHaveBeenCalledWith('flow failed')
   })
 
   it('publishes only unexpected sidecar exits as errors', async () => {
     const bridge = installRuntimeEventBridge()
     const { createRuntimeEventClient } = await import('./runtimeEvents')
     const client = createRuntimeEventClient('workspace-handle-1')
+    const allHandler = vi.fn()
     const errorHandler = vi.fn()
+    client.onAll(allHandler)
     client.onError(errorHandler)
     client.connect()
 
-    bridge.emit({
-      code: 0,
-      designTool: 'backend',
-      reason: 'shutdown',
-      signal: null,
-      type: 'runtime.exited',
-      workspaceHandle: 'workspace-handle-1',
-    })
-    bridge.emit({
-      code: 1,
-      designTool: 'backend',
-      message: 'RPC sidecar exited unexpectedly',
-      reason: 'unexpected',
-      signal: null,
-      type: 'runtime.exited',
-      workspaceHandle: 'workspace-handle-1',
-    })
+    bridge.emit(
+      asDesignEvent({
+        code: 0,
+        reason: 'shutdown',
+        signal: null,
+        type: 'runtime.exited',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
+    bridge.emit(
+      asDesignEvent({
+        code: 1,
+        message: 'ECC RPC sidecar exited unexpectedly',
+        reason: 'unexpected',
+        signal: null,
+        type: 'runtime.exited',
+        workspaceHandle: 'workspace-handle-1',
+      }),
+    )
 
+    expect(allHandler).toHaveBeenCalledTimes(1)
     expect(errorHandler).toHaveBeenCalledOnce()
-    expect(errorHandler).toHaveBeenCalledWith('RPC sidecar exited unexpectedly')
+    expect(errorHandler).toHaveBeenCalledWith('ECC RPC sidecar exited unexpectedly')
   })
 })

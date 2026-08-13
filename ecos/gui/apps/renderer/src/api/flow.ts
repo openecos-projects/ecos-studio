@@ -8,7 +8,12 @@ import {
   ResponseEnum,
 } from './type'
 import { getDesktopApi } from '@/platform/desktop'
-import type { DesignTool } from '@ecos-studio/shared'
+import type {
+  EccRuntimeOperation,
+  EccRuntimeStartFlowRequest,
+  EccRuntimeStartStepRequest,
+  DesignTool,
+} from '@ecos-studio/shared'
 
 function workspaceHandleFromData(data: Record<string, unknown>): string {
   const workspaceHandle = data.workspaceHandle ?? data.workspace_handle
@@ -141,6 +146,20 @@ export function runStepApi(request: RequestData<RunStepRequest>) {
     ResponseData<RunStepResponse>
   >
 }
+
+export function startFlowOperationApi(request: EccRuntimeStartFlowRequest) {
+  const runtime = getDesktopApi().ecc.runtime
+  if (!runtime) throw new Error('ECC runtime operation API is unavailable.')
+  return runtime.startFlow(request)
+}
+
+export function startStepOperationApi(request: EccRuntimeStartStepRequest) {
+  const runtime = getDesktopApi().ecc.runtime
+  if (!runtime) throw new Error('ECC runtime operation API is unavailable.')
+  return runtime.startStep(request)
+}
+
+export type { EccRuntimeOperation }
 
 export interface RefreshConfigRequest {
   designTool?: DesignTool

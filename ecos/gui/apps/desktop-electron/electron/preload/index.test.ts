@@ -40,17 +40,12 @@ async function loadDesktopBridge() {
       flow: {
         runStep(request: unknown): Promise<unknown>
       }
+      runtime: {
+        waitForOperation(request: unknown): Promise<unknown>
+      }
       workspace: {
         exportSignoff(request: unknown): Promise<unknown>
         inspectSignoff(request: unknown): Promise<unknown>
-      }
-    }
-    runtime: {
-      events: {
-        onEvent(listener: (event: unknown) => void): () => void
-      }
-      flow: {
-        runStep(request: unknown): Promise<unknown>
       }
     }
     agent: {
@@ -75,7 +70,6 @@ async function loadDesktopBridge() {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
     workspace: {
-      authorizeWaveform(path: string): Promise<unknown>
       readProjectTextFile(path: string): Promise<unknown>
       listProjectDirectory(path: string): Promise<unknown>
       prepareProjectDirectoryReplacement(path: string): Promise<unknown>
@@ -112,12 +106,7 @@ describe('preload desktop bridge contract', () => {
             runStep: expect.any(Function),
           }),
         }),
-        runtime: expect.objectContaining({
-          events: expect.objectContaining({ onEvent: expect.any(Function) }),
-          flow: expect.objectContaining({ runStep: expect.any(Function) }),
-        }),
         workspace: expect.objectContaining({
-          authorizeWaveform: expect.any(Function),
           readProjectTextFile: expect.any(Function),
         }),
       }),
@@ -200,20 +189,6 @@ describe('preload desktop bridge contract', () => {
     )
   })
 
-  it('requests a scoped waveform URL through the desktop bridge', async () => {
-    const bridge = await loadDesktopBridge()
-    const waveformUrl = 'ecos-surfer://viewer/waveform/wave.vcd?token=test-token'
-    ipcRenderer.invoke.mockResolvedValueOnce(waveformUrl)
-
-    await expect(
-      bridge.workspace.authorizeWaveform('/work/demo/output/wave.vcd'),
-    ).resolves.toBe(waveformUrl)
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.workspaceAuthorizeWaveform,
-      '/work/demo/output/wave.vcd',
-    )
-  })
-
   it('routes ECC flow calls through the shared IPC channel constant', async () => {
     const bridge = await loadDesktopBridge()
     ipcRenderer.invoke.mockResolvedValueOnce({
@@ -236,23 +211,20 @@ describe('preload desktop bridge contract', () => {
     )
   })
 
-  it('routes unified runtime flow calls through the shared IPC channel', async () => {
+  it('routes runtime operation waits through the shared IPC channel constant', async () => {
     const bridge = await loadDesktopBridge()
-    const request = {
-      designTool: 'frontend',
-      options: { sim_test_suite: 'cpu_tests' },
-      rerun: true,
-      step: 'sim',
-      workspaceHandle: 'frontend-handle',
-    }
-    ipcRenderer.invoke.mockResolvedValueOnce({ state: 'Success', step: 'sim' })
+    const request = { operationId: 'operation-1', workspaceHandle: 'workspace-handle-1' }
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      operationId: 'operation-1',
+      state: 'succeeded',
+    })
 
-    await expect(bridge.runtime.flow.runStep(request)).resolves.toEqual({
-      state: 'Success',
-      step: 'sim',
+    await expect(bridge.ecc.runtime.waitForOperation(request)).resolves.toMatchObject({
+      operationId: 'operation-1',
+      state: 'succeeded',
     })
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.designRuntimeFlowRunStep,
+      desktopApiIpcChannels.eccRuntimeWaitForOperation,
       request,
     )
   })

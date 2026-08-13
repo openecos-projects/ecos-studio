@@ -16,8 +16,11 @@ const {
   toastAddMock,
   waitForRuntimeReadyMock,
   waitForDesktopApiMock,
+  getOptionalDesktopApiMock,
   requestHomeRunArtifactResetMock,
   clearHomeRunArtifactResetAwaitingBackendStartMock,
+  notifyWorkspaceRerunPreparedMock,
+  clearFlowExecutionActiveForWorkspaceMock,
 } = vi.hoisted(() => ({
   createRuntimeEventClientMock: vi.fn(),
   closeWorkspaceApiMock: vi.fn(),
@@ -32,8 +35,11 @@ const {
   toastAddMock: vi.fn(),
   waitForRuntimeReadyMock: vi.fn(),
   waitForDesktopApiMock: vi.fn(),
+  getOptionalDesktopApiMock: vi.fn(),
   requestHomeRunArtifactResetMock: vi.fn(),
   clearHomeRunArtifactResetAwaitingBackendStartMock: vi.fn(),
+  notifyWorkspaceRerunPreparedMock: vi.fn(),
+  clearFlowExecutionActiveForWorkspaceMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -50,6 +56,7 @@ vi.mock('primevue/usetoast', () => ({
 }))
 
 vi.mock('@/platform/desktop', () => ({
+  getOptionalDesktopApi: getOptionalDesktopApiMock,
   waitForDesktopApi: waitForDesktopApiMock,
 }))
 
@@ -93,6 +100,11 @@ vi.mock('./homeRunArtifacts', () => ({
   clearHomeRunArtifactResetAwaitingBackendStart:
     clearHomeRunArtifactResetAwaitingBackendStartMock,
   isAgentWorkspaceRerunHomePrepared: vi.fn(() => false),
+  notifyWorkspaceRerunPrepared: notifyWorkspaceRerunPreparedMock,
+}))
+
+vi.mock('./flowExecutionState', () => ({
+  clearFlowExecutionActiveForWorkspace: clearFlowExecutionActiveForWorkspaceMock,
 }))
 
 import { useWorkspace } from './useWorkspace'
@@ -212,7 +224,10 @@ describe('useWorkspace openProject', () => {
     toastAddMock.mockReset()
     waitForRuntimeReadyMock.mockReset()
     waitForDesktopApiMock.mockReset()
+    getOptionalDesktopApiMock.mockReset()
     requestHomeRunArtifactResetMock.mockReset()
+    notifyWorkspaceRerunPreparedMock.mockReset()
+    clearFlowExecutionActiveForWorkspaceMock.mockReset()
     settingsData.clear()
 
     desktopApi = createDesktopApiMock()
@@ -228,12 +243,14 @@ describe('useWorkspace openProject', () => {
       activeProjectRoot = null
     })
     waitForDesktopApiMock.mockResolvedValue(desktopApi)
+    getOptionalDesktopApiMock.mockReturnValue(desktopApi)
     waitForRuntimeReadyMock.mockResolvedValue(undefined)
     onRuntimeEvent = undefined
     createRuntimeEventClientMock.mockReturnValue({
       onAll: vi.fn((handler: (response: unknown) => void) => {
         onRuntimeEvent = handler
       }),
+      offAll: vi.fn(),
       connect: vi.fn(),
       close: vi.fn(),
     })
@@ -2303,7 +2320,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
   })
 
-  it('requests Home artifact reset when backend reports rerun start', async () => {
+  it('requests Home artifact reset after ECC prepares a full-flow rerun', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
 
     onRuntimeEvent?.({
@@ -2313,6 +2330,8 @@ describe('useWorkspace openProject', () => {
         cmd: 'rtl2gds',
         directory: '/work/demo',
         rerun: true,
+        rerunScope: 'flow',
+        runtimeProtocolType: 'operation.rerun_prepared',
       },
       message: ['Started rtl2gds'],
       response: 'success',
@@ -2320,9 +2339,85 @@ describe('useWorkspace openProject', () => {
 
     expect(workspace.runtimeEvents.value).toHaveLength(1)
     expect(requestHomeRunArtifactResetMock).toHaveBeenCalledWith('/work/demo')
+    expect(notifyWorkspaceRerunPreparedMock).toHaveBeenCalledWith({
+      affectedSteps: [],
+      projectPath: '/work/demo',
+      scope: 'flow',
+      targetStep: '',
+    })
   })
 
-  it('uses the current project path for RPC rerun start events that only carry a workspace handle', async () => {
+  it('broadcasts a single-step rerun without resetting the whole Home workspace', async () => {
+    await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        affectedSteps: ['Floorplan', 'route'],
+        cmd: 'run_step',
+        directory: '/work/demo',
+        rerun: true,
+        rerunScope: 'step',
+        runtimeProtocolType: 'operation.rerun_prepared',
+        targetStep: 'Floorplan',
+        type: 'message',
+      },
+      message: [],
+      response: 'success',
+    })
+
+    expect(notifyWorkspaceRerunPreparedMock).toHaveBeenCalledWith({
+      affectedSteps: ['Floorplan', 'route'],
+      projectPath: '/work/demo',
+      scope: 'step',
+      targetStep: 'Floorplan',
+    })
+    expect(requestHomeRunArtifactResetMock).not.toHaveBeenCalled()
+  })
+
+  it('releases the workspace run lock when a single-step operation completes', async () => {
+    await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        cmd: 'run_step',
+        directory: '/work/demo',
+        runtimeProtocolType: 'operation.completed',
+        type: 'step_complete',
+      },
+      message: [],
+      response: 'success',
+    })
+
+    expect(clearFlowExecutionActiveForWorkspaceMock).toHaveBeenCalledWith('/work/demo')
+  })
+
+  it('waits for the main-process terminal tracker when the renderer misses completion', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    let resolveTracker: ((operation: { state: string }) => void) | undefined
+    const waitForOperation = vi.fn(
+      () =>
+        new Promise<{ state: string }>((resolve) => {
+          resolveTracker = resolve
+        }),
+    )
+    getOptionalDesktopApiMock.mockReturnValue({
+      ecc: { runtime: { waitForOperation } },
+    } as unknown as DesktopApi)
+
+    const completion = workspace.waitForRuntimeOperation('operation-1')
+
+    expect(waitForOperation).toHaveBeenCalledWith({
+      operationId: 'operation-1',
+      workspaceHandle: 'workspace-demo',
+    })
+
+    resolveTracker?.({ state: 'succeeded' })
+    await expect(completion).resolves.toBeUndefined()
+  })
+
+  it('uses the current project path for prepared rerun events with only a workspace handle', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
 
     onRuntimeEvent?.({
@@ -2332,6 +2427,8 @@ describe('useWorkspace openProject', () => {
         cmd: 'rtl2gds',
         workspaceId: 'workspace-demo',
         rerun: true,
+        rerunScope: 'flow',
+        runtimeProtocolType: 'operation.rerun_prepared',
       },
       message: ['Started rtl2gds'],
       response: 'success',
@@ -2340,6 +2437,49 @@ describe('useWorkspace openProject', () => {
     expect(workspace.runtimeEvents.value).toHaveLength(1)
     expect(requestHomeRunArtifactResetMock).toHaveBeenCalledWith('/work/demo')
     expect(requestHomeRunArtifactResetMock).not.toHaveBeenCalledWith('workspace-demo')
+  })
+
+  it('accepts a new rerun event when a fresh sidecar reuses the legacy event id', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const sharedEventId = 'workspace-demo:1'
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'message',
+        cmd: 'rtl2gds',
+        directory: '/work/demo',
+        jobId: 'operation-old',
+        runtimeEventId: sharedEventId,
+        runtimeInstanceId: 'runtime-old',
+        runtimeProtocolType: 'operation.rerun_prepared',
+        workspaceId: 'workspace-demo',
+        rerun: true,
+        rerunScope: 'flow',
+      },
+      message: [],
+      response: 'success',
+    })
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'message',
+        cmd: 'rtl2gds',
+        directory: '/work/demo',
+        jobId: 'operation-new',
+        runtimeEventId: sharedEventId,
+        runtimeInstanceId: 'runtime-new',
+        runtimeProtocolType: 'operation.rerun_prepared',
+        workspaceId: 'workspace-demo',
+        rerun: true,
+        rerunScope: 'flow',
+      },
+      message: [],
+      response: 'success',
+    })
+
+    expect(workspace.runtimeEvents.value).toHaveLength(2)
+    expect(requestHomeRunArtifactResetMock).toHaveBeenCalledTimes(2)
   })
 
   it('keeps the workspace loading overlay visible while a new workspace is being created', async () => {
@@ -2669,6 +2809,7 @@ describe('useWorkspace openProject', () => {
         schema_version: 1,
         project_id: 'proj_work',
         name: 'work',
+        design_name: 'demo',
         description: '',
         root_path: '/work',
         created_at: '2026-07-08T00:00:00.000Z',

@@ -48,13 +48,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Dialog from 'primevue/dialog'
-import { StateEnum } from '@/api/type'
 import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useFlowStages } from '@/composables/useFlowStages'
-import { prepareFlowLogSegmentForRerun } from '@/composables/useHomeData'
-import { rerunHomeWorkspace } from '@/composables/homeFlowRerun'
 import { useSubflow } from '@/composables/useSubflow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
@@ -63,21 +60,18 @@ import { flowNodeStatus } from './flowStatus'
 const rerunConfirmationVisible = ref(false)
 const preparingRerun = ref(false)
 const { currentStage } = useCurrentStage()
-const { isRunning, runFlow, runAllFlow, state: flowRunState } = useFlowRunner()
+const { isRunning, runFlow, runAllFlow } = useFlowRunner()
 const { startFlowRunArtifactCapture } = useFlowRunArtifacts()
 const {
   dynamicFlowStages,
-  hasOngoingRunStage,
   refreshFlowStages,
   setFirstRunStepOngoing,
   setRunStepOngoingByPath,
 } = useFlowStages()
-const { overallStatus, refreshCurrentSubflow } = useSubflow()
+const { overallStatus } = useSubflow()
 const { currentProject, ensureApiReady, showToast } = useWorkspace()
 
-const flowRunControlBusy = computed(
-  () => preparingRerun.value || isRunning.value || hasOngoingRunStage.value,
-)
+const flowRunControlBusy = computed(() => preparingRerun.value || isRunning.value)
 const isHomeStage = computed(() => currentStage.value === 'home')
 const runTargetLabel = computed(() => (isHomeStage.value ? 'the full flow' : 'this step'))
 const runButtonLabel = computed(() =>
@@ -123,17 +117,8 @@ async function executeRun(rerun: boolean): Promise<void> {
   if (rerun) {
     preparingRerun.value = true
     try {
-      if (isHomeStage.value) {
-        const rebuilt = await rerunHomeWorkspace()
-        if (!rebuilt) {
-          await refreshFlowStages()
-          return
-        }
-        await refreshFlowStages()
-      } else if (!(await canRerunCurrentStep())) {
+      if (!isHomeStage.value && !(await canRerunCurrentStep())) {
         return
-      } else {
-        prepareFlowLogSegmentForRerun(currentStage.value)
       }
     } catch (error) {
       showToast({
@@ -148,39 +133,20 @@ async function executeRun(rerun: boolean): Promise<void> {
     }
   }
 
-  const capture = await startFlowRunArtifactCapture({
+  const capture = startFlowRunArtifactCapture({
     stepNames: isHomeStage.value
       ? dynamicFlowStages.value.map((stage) => stage.path)
       : [currentStage.value],
   })
 
-  try {
-    if (isHomeStage.value) {
-      setFirstRunStepOngoing()
-      if (rerun) {
-        await runAllFlow({ rerun: false })
-      } else {
-        await runAllFlow({ rerun })
-      }
-      await refreshFlowStages()
-      await capture.settle({
-        forceStepNames:
-          flowRunState.value === StateEnum.Success
-            ? dynamicFlowStages.value.map((stage) => stage.path)
-            : [],
-      })
-      return
-    }
-
-    setRunStepOngoingByPath(currentStage.value)
-    const result = await runFlow({ rerun })
-    await Promise.all([refreshCurrentSubflow(), refreshFlowStages()])
-    await capture.settle({
-      forceStepNames: result?.state === StateEnum.Success ? [currentStage.value] : [],
-    })
-  } finally {
-    capture.stop()
+  if (isHomeStage.value) {
+    setFirstRunStepOngoing()
+    if (!(await runAllFlow({ rerun }))) capture.stop()
+    return
   }
+
+  setRunStepOngoingByPath(currentStage.value)
+  if (!(await runFlow({ rerun, resetDependents: rerun }))) capture.stop()
 }
 
 async function canRerunCurrentStep(): Promise<boolean> {

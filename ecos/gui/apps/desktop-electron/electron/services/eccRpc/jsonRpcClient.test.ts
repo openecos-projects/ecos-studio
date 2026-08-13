@@ -53,6 +53,32 @@ describe('EccJsonRpcClient', () => {
     })
   })
 
+  it('forwards JSON-RPC notifications without treating them as responses', () => {
+    const notifications: unknown[] = []
+    const client = new EccJsonRpcClient({
+      onNotification: (notification) => notifications.push(notification),
+      writeFrame: () => undefined,
+    })
+
+    client.feedStdout(
+      encodeContentLengthFrame(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'runtime.event',
+          params: { eventId: 'workspace-1:1', type: 'step.started' },
+        }),
+      ),
+    )
+
+    expect(notifications).toEqual([
+      {
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: { eventId: 'workspace-1:1', type: 'step.started' },
+      },
+    ])
+  })
+
   it('rejects JSON-RPC error responses', async () => {
     const client = new EccJsonRpcClient({ writeFrame: () => undefined })
 
@@ -178,8 +204,10 @@ describe('EccJsonRpcClient', () => {
       encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
     )
 
-    expect(onNotification).toHaveBeenCalledWith('runtime.event', {
-      phase: 'started',
+    expect(onNotification).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: { phase: 'started' },
     })
     await expect(pending).resolves.toEqual({ ok: true })
   })

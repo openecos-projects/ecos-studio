@@ -18,6 +18,7 @@ const {
   flowLogError,
   flowLogLoading,
   flowLogSegments,
+  flowLogStepName,
 } = useHomeData()
 
 let isResizing = false
@@ -96,12 +97,14 @@ onUnmounted(() => {
     </template>
     <template #right-log>
       <FlowLogPanel
+        :active-step-name="flowLogStepName"
         :content-by-key="flowLogContentByKey"
         :ensure-content="ensureFlowLogSegmentContentLoaded"
         :error="flowLogError"
         :execution-active="currentWorkspaceFlowExecutionActive"
         :loading="flowLogLoading"
         :selected-node="currentStepLogNode"
+        :selected-node-pinned="true"
         :segments="flowLogSegments"
       />
     </template>

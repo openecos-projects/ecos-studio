@@ -45,6 +45,8 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   type?: 'text' | 'image' | 'info' | 'map' | 'choice' | 'tool'
+  /** Ephemeral report/layout content rendered by the workspace GUI. */
+  isGuiArtifact?: boolean
   status?: 'loading' | 'done' | 'error'
   image?: {
     url: string

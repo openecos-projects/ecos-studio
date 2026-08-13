@@ -18,6 +18,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { electronLogger } from './logger'
+import { isRelativePathOutsideRoot } from './pathScope'
 import {
   validateMpcSpec,
   type ResourceAction,
@@ -4641,7 +4642,7 @@ async function moveStrippedPrefix(
 function resolveInside(root: string, child: string): string {
   const resolved = resolve(root, child || '.')
   const relativePath = relative(root, resolved)
-  if (isAbsolute(relativePath) || relativePath.startsWith('..')) {
+  if (isAbsolute(relativePath) || isRelativePathOutsideRoot(relativePath)) {
     throw new Error(`Path escapes resource directory: ${child}`)
   }
   return resolved

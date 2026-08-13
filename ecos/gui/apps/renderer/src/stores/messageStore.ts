@@ -161,6 +161,7 @@ export const useMessageStore = defineStore('messages', () => {
       role: 'assistant',
       content: `${infoData.title} - ${infoData.step}`,
       type: 'info',
+      isGuiArtifact: true,
       status: 'done',
       infoData,
     })
@@ -338,6 +339,7 @@ export const useMessageStore = defineStore('messages', () => {
       role: 'assistant',
       content: `${mapData.title} - ${mapData.step}`,
       type: 'map',
+      isGuiArtifact: true,
       status: 'done',
       mapData,
     })
@@ -356,6 +358,57 @@ export const useMessageStore = defineStore('messages', () => {
     const next = { ...messagesBySessionId.value }
     delete next[sessionId]
     messagesBySessionId.value = next
+  }
+
+  const hasSessionGuiArtifacts = (sessionId = activeSessionId.value): boolean => {
+    if (!sessionId) return false
+    return (messagesBySessionId.value[sessionId] ?? []).some(
+      (message) => message.isGuiArtifact,
+    )
+  }
+
+  /** Removes only rendered report/layout cards from one Agent chat session. */
+  const clearSessionGuiArtifacts = (sessionId = activeSessionId.value): boolean => {
+    if (!sessionId) return false
+    const bucket = messagesBySessionId.value[sessionId]
+    if (!bucket) return false
+
+    const next = bucket.filter((message) => !message.isGuiArtifact)
+    if (next.length === bucket.length) return false
+
+    messagesBySessionId.value = {
+      ...messagesBySessionId.value,
+      [sessionId]: next,
+    }
+    return true
+  }
+
+  /** Removes rendered report/layout cards for only the rerun-affected steps. */
+  const clearSessionGuiArtifactsForSteps = (
+    stepNames: readonly string[],
+    sessionId = activeSessionId.value,
+  ): boolean => {
+    if (!sessionId) return false
+    const bucket = messagesBySessionId.value[sessionId]
+    if (!bucket) return false
+    const steps = new Set(
+      stepNames.map((step) => step.trim().toLowerCase()).filter(Boolean),
+    )
+    if (steps.size === 0) return clearSessionGuiArtifacts(sessionId)
+
+    const isAffectedArtifact = (message: Message): boolean => {
+      if (!message.isGuiArtifact) return false
+      const step = message.infoData?.step ?? message.mapData?.step ?? ''
+      return steps.has(step.trim().toLowerCase())
+    }
+    const next = bucket.filter((message) => !isAffectedArtifact(message))
+    if (next.length === bucket.length) return false
+
+    messagesBySessionId.value = {
+      ...messagesBySessionId.value,
+      [sessionId]: next,
+    }
+    return true
   }
 
   /**
@@ -398,5 +451,8 @@ export const useMessageStore = defineStore('messages', () => {
     removeMessage,
     clearMessages,
     clearSessionMessages,
+    hasSessionGuiArtifacts,
+    clearSessionGuiArtifacts,
+    clearSessionGuiArtifactsForSteps,
   }
 })

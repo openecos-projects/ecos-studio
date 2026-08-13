@@ -38,7 +38,7 @@ export class WorkspaceSessionRegistry {
     return this.sessions.size
   }
 
-  activate(directory: string, eccWorkspaceId: string): WorkspaceSessionRecord {
+  activate(directory: string, eccWorkspaceId: string | null): WorkspaceSessionRecord {
     const session = {
       directory,
       eccWorkspaceId,
@@ -88,6 +88,24 @@ export class WorkspaceSessionRegistry {
       }
     }
     return false
+  }
+
+  findByEccWorkspaceId(eccWorkspaceId: string): WorkspaceSessionRecord | null {
+    for (const session of this.sessions.values()) {
+      if (session.eccWorkspaceId === eccWorkspaceId) {
+        return { ...session }
+      }
+    }
+    return null
+  }
+
+  findByDirectory(directory: string): WorkspaceSessionRecord | null {
+    for (const session of this.sessions.values()) {
+      if (session.directory === directory) {
+        return { ...session }
+      }
+    }
+    return null
   }
 
   require(workspaceHandle: string): WorkspaceSessionRecord {

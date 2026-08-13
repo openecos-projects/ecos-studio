@@ -509,6 +509,11 @@
         </label>
 
         <label class="form-field">
+          <span>Design Name</span>
+          <input v-model="projectRootDraft.designName" type="text" placeholder="gcd" />
+        </label>
+
+        <label class="form-field">
           <span>Project Storage Location</span>
           <div class="path-picker">
             <input
@@ -763,10 +768,8 @@ import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
-import {
-  readProjectWorkspaceAnalysisInputs,
-  readProjectWorkspaceFlowStates,
-} from './project-management/projectWorkspaceAnalysisData'
+import { readProjectManagementWorkspaceData } from './project-management/projectWorkspaceAnalysisData'
+import { mapWithConcurrency } from './project-management/asyncConcurrency'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
@@ -779,8 +782,6 @@ import {
   resolveProjectSelectionUpdate,
   nextWorkspaceId,
   parseProjectManifest,
-  serializeProjectManifest,
-  setQorBaselineInManifest,
   type FlowStep,
   type ProjectFlowStatusHint,
   type ProjectManifest,
@@ -797,7 +798,10 @@ import {
   parseMpcSpecDesigns,
   type MpcSpecDesign,
 } from '@/utils/mpcSpec'
-import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
+import {
+  listProjectManagementEntries,
+  readProjectManagementManifest,
+} from '@/utils/projectManagementRead'
 import {
   loadProjectHistory,
   rememberProjectHistoryEntry,
@@ -810,6 +814,7 @@ type ProjectCard = { source: Project; model: ProjectManagementProject }
 
 const PROJECT_PREVIEW_LIMIT = 20
 const WORKSPACE_PREVIEW_LIMIT = 20
+const PROJECT_MANIFEST_READ_CONCURRENCY = 2
 
 const route = useRoute()
 const router = useRouter()
@@ -844,6 +849,7 @@ const showNewProjectDialog = ref(false)
 const projectRootError = ref('')
 const projectRootDraft = ref({
   name: '',
+  designName: '',
   directory: '',
   mpcId: '',
 })
@@ -1041,6 +1047,7 @@ let activeProjectKey: string | null = null
 let projectManifestRefreshQueue = Promise.resolve()
 let projectMpcLoadGeneration = 0
 let projectMpcSpecLoadGeneration = 0
+let selectedProjectSummaryLoadGeneration = 0
 
 watch(
   () => projectRootDraft.value.mpcId,
@@ -1075,6 +1082,10 @@ watch(
   },
   { immediate: true },
 )
+
+watch(selectedProjectId, () => {
+  void loadSelectedProjectWorkspaceData()
+})
 
 watch(projectSources, () => {
   void refreshProjectManifests()
@@ -1228,20 +1239,10 @@ async function setQorBaseline(payload: { workspaceId: string }) {
   if (!project.path) return
 
   try {
-    const manifest =
-      projectManifests.value[project.path] ?? (await readProjectManifest(project.path))
-    const updated = setQorBaselineInManifest(
-      manifest,
-      payload.workspaceId,
-      'Selected from Dashboard QoR Overview',
-    )
-    if (updated === manifest) {
-      throw new Error(
-        `Workspace ${payload.workspaceId} is not registered in project.json.`,
-      )
-    }
-    await writeProjectTextFile('project.json', serializeProjectManifest(updated), {
-      projectPath: project.path,
+    const updated = await mutateProjectManifest(project.path, {
+      type: 'select-qor-baseline',
+      workspaceId: payload.workspaceId,
+      reason: 'Selected from Dashboard QoR Overview',
     })
     await applyProjectManifestForProject(updated, project.path)
     selectedWorkspaceId.value = payload.workspaceId
@@ -1419,6 +1420,7 @@ async function continueWorkspaceDraft() {
       workspacePath: branchDraft.value.targetWorkspacePath,
       projectRoot: selectedProject.value.path,
       projectName: selectedProject.value.name,
+      designName: selectedProject.value.designName,
       sourceWorkspace: branchDraft.value.sourceWorkspaceId,
       sourceWorkspacePath: branchDraft.value.sourceWorkspacePath,
       sourceStep: branchDraft.value.step,
@@ -1469,44 +1471,68 @@ function refreshProjectManifests(): Promise<void> {
 }
 
 async function refreshProjectManifestsNow() {
-  const entries: Array<
-    [
-      string,
-      ProjectManifest,
-      ProjectWorkspaceFlowStatesById,
-      ProjectWorkspaceAnalysisInputsById,
-    ]
-  > = []
-
-  for (const project of projectSources.value) {
-    try {
-      const projectRoot = await registerProjectRootForProjectManagement(project.path)
-      if (!projectRoot) continue
-      const manifestText = await readOptionalProjectTextFile('project.json', {
-        projectPath: projectRoot,
-      })
-      if (!manifestText) continue
-      const manifest = parseProjectManifest(manifestText)
-      const flowStates = await readProjectWorkspaceFlowStates(manifest)
-      const analysisInputs = await readProjectWorkspaceAnalysisInputs(manifest)
-      entries.push([project.path, manifest, flowStates, analysisInputs])
-    } catch (error) {
-      console.warn(`Failed to load project manifest: ${project.path}`, error)
-    }
-  }
+  const loadedEntries = await mapWithConcurrency(
+    projectSources.value,
+    PROJECT_MANIFEST_READ_CONCURRENCY,
+    async (project): Promise<readonly [string, ProjectManifest] | null> => {
+      try {
+        const manifestText = await readProjectManagementManifest(project.path)
+        return manifestText ? [project.path, parseProjectManifest(manifestText)] : null
+      } catch (error) {
+        console.warn(`Failed to load project manifest: ${project.path}`, error)
+        return null
+      }
+    },
+  )
+  const entries = loadedEntries.flatMap((entry) => (entry ? [entry] : []))
 
   projectManifests.value = Object.fromEntries(
     entries.map(([path, manifest]) => [path, manifest]),
   )
   workspaceFlowStates.value = Object.fromEntries(
-    entries.map(([path, _manifest, flowStates]) => [path, flowStates]),
+    entries.map(([path]) => [path, workspaceFlowStates.value[path] ?? {}]),
   )
   workspaceAnalysisInputs.value = Object.fromEntries(
-    entries.map(([path, _manifest, _flowStates, analysisInputs]) => [
-      path,
-      analysisInputs,
-    ]),
+    entries.map(([path]) => [path, workspaceAnalysisInputs.value[path] ?? {}]),
   )
+  void loadSelectedProjectWorkspaceData()
+}
+
+async function loadSelectedProjectWorkspaceData() {
+  const project = selectedProject.value
+  const manifest = projectManifests.value[project.path]
+  if (!project.path || !manifest || selectedProjectId.value !== project.id) return
+
+  const projectId = project.id
+  const loadGeneration = ++selectedProjectSummaryLoadGeneration
+  try {
+    const summary = await readProjectManagementWorkspaceData(project.path, manifest)
+    if (
+      selectedProjectSummaryLoadGeneration !== loadGeneration ||
+      selectedProjectId.value !== projectId ||
+      projectManifests.value[project.path] !== manifest
+    ) {
+      return
+    }
+    workspaceFlowStates.value = {
+      ...workspaceFlowStates.value,
+      [project.path]: summary.flowStates,
+    }
+    workspaceAnalysisInputs.value = {
+      ...workspaceAnalysisInputs.value,
+      [project.path]: summary.analysisInputs,
+    }
+  } catch (error) {
+    if (
+      selectedProjectSummaryLoadGeneration === loadGeneration &&
+      selectedProjectId.value === projectId
+    ) {
+      console.warn(
+        `Failed to load selected project workspace summaries: ${project.path}`,
+        error,
+      )
+    }
+  }
 }
 
 async function importProject() {
@@ -1517,18 +1543,7 @@ async function importProject() {
     })
     if (!directory) return
 
-    const projectRoot = await registerProjectRootForProjectManagement(directory)
-    if (!projectRoot) {
-      showToast({
-        severity: 'warn',
-        summary: 'Project not imported',
-        detail:
-          'The selected project folder could not be registered for local file access.',
-      })
-      return
-    }
-
-    const project = await loadProjectFromRoot(projectRoot)
+    const project = await loadProjectFromRoot(directory)
     const manifest = await readProjectManifest(project.path)
     projectHistory.value = await rememberProjectHistoryEntry(project)
     projectManifests.value = {
@@ -1537,13 +1552,15 @@ async function importProject() {
     }
     workspaceFlowStates.value = {
       ...workspaceFlowStates.value,
-      [project.path]: await readProjectWorkspaceFlowStates(manifest),
+      [project.path]: {},
     }
     workspaceAnalysisInputs.value = {
       ...workspaceAnalysisInputs.value,
-      [project.path]: await readProjectWorkspaceAnalysisInputs(manifest),
+      [project.path]: {},
     }
+    const wasSelected = selectedProjectId.value === project.id
     selectedProjectId.value = project.id
+    if (wasSelected) void loadSelectedProjectWorkspaceData()
   } catch (error) {
     console.warn('Failed to import project root.', error)
     showToast({
@@ -1564,15 +1581,7 @@ async function importWorkspaceIntoProject(project: ProjectManagementProject) {
     })
     if (!directory) return
 
-    const projectRoot = await registerProjectRootForProjectManagement(project.path)
-    if (!projectRoot) {
-      showToast({
-        severity: 'warn',
-        summary: 'Workspace not imported',
-        detail: 'The project root could not be registered for local file access.',
-      })
-      return
-    }
+    const projectRoot = project.path
 
     const updated = await mutateProjectManifest(projectRoot, {
       type: 'register-workspace',
@@ -1604,6 +1613,7 @@ async function createWorkspaceForProject(project: ProjectManagementProject) {
     query: {
       projectRoot: project.path,
       projectName: project.name,
+      designName: project.designName,
       workspacePath: joinProjectPath(project.path, workspaceId),
       workspaceId,
     },
@@ -1694,11 +1704,7 @@ async function nextAvailableWorkspaceId(
   project: ProjectManagementProject,
 ): Promise<string | null> {
   try {
-    const projectRoot = await registerProjectRootForProjectManagement(project.path)
-    if (!projectRoot) throw new Error('Project root could not be registered.')
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const entries = await desktopApi.workspace.listProjectDirectory(projectRoot)
-    const occupiedWorkspaceIds = entries.map((entry) => entry.name)
+    const occupiedWorkspaceIds = await listProjectManagementEntries(project.path)
     return nextWorkspaceId(project, occupiedWorkspaceIds)
   } catch (error) {
     console.warn('Failed to inspect existing workspace directories.', error)
@@ -1732,6 +1738,7 @@ function openNewProjectDialog() {
   projectRootError.value = ''
   projectRootDraft.value = {
     name: '',
+    designName: '',
     directory: '',
     mpcId: '',
   }
@@ -1850,26 +1857,16 @@ async function createProjectFolderDraft() {
     return
   }
 
-  const projectRoot = await registerProjectRootForProjectManagement(directory)
-  if (!projectRoot) {
-    projectRootError.value = 'Project Storage Location could not be registered.'
-    showToast({
-      severity: 'warn',
-      summary: 'Project not created',
-      detail: 'The selected project root could not be registered for local file access.',
-    })
-    return
-  }
-
-  const name =
-    projectRootDraft.value.name.trim() || basenamePath(projectRoot) || 'project'
-  const manifest = await mutateProjectManifest(projectRoot, {
+  const name = projectRootDraft.value.name.trim() || basenamePath(directory) || 'project'
+  const designName = projectRootDraft.value.designName.trim() || name
+  const manifest = await mutateProjectManifest(directory, {
     type: 'create',
     name,
+    designName,
     mpc: selectedProjectMpc.value,
   })
-  await applyProjectManifestForProject(manifest, projectRoot)
-  selectedProjectId.value = projectRoot
+  await applyProjectManifestForProject(manifest, manifest.root_path)
+  selectedProjectId.value = manifest.root_path
   closeNewProjectDialog()
 }
 
@@ -1917,23 +1914,8 @@ async function loadProjectFromRoot(projectRoot: string): Promise<Project> {
   return projectFromManifest(manifest, root)
 }
 
-async function registerProjectRootForProjectManagement(
-  projectRoot: string,
-): Promise<string | null> {
-  try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const registeredRoot = await desktopApi.workspace.registerProjectRoot(projectRoot)
-    return normalizePath(registeredRoot || projectRoot)
-  } catch (error) {
-    console.warn('Failed to register project root for Project Management.', error)
-    return null
-  }
-}
-
 async function readProjectManifest(projectRoot: string): Promise<ProjectManifest> {
-  const manifestText = await readOptionalProjectTextFile('project.json', {
-    projectPath: projectRoot,
-  })
+  const manifestText = await readProjectManagementManifest(projectRoot)
   if (!manifestText) throw new Error('Project manifest does not exist.')
   return parseProjectManifest(manifestText)
 }
@@ -1942,11 +1924,7 @@ async function applyProjectManifestForProject(
   manifest: ProjectManifest,
   projectRoot: string,
 ) {
-  const registeredProjectRoot = await registerProjectRootForProjectManagement(projectRoot)
-  if (!registeredProjectRoot) throw new Error('Project root could not be registered.')
-  const normalizedRoot = normalizePath(registeredProjectRoot)
-  const flowStates = await readProjectWorkspaceFlowStates(manifest)
-  const analysisInputs = await readProjectWorkspaceAnalysisInputs(manifest)
+  const normalizedRoot = normalizePath(manifest.root_path || projectRoot)
   projectManifests.value = {
     ...projectManifests.value,
     [projectRoot]: manifest,
@@ -1954,17 +1932,23 @@ async function applyProjectManifestForProject(
   }
   workspaceFlowStates.value = {
     ...workspaceFlowStates.value,
-    [projectRoot]: flowStates,
-    [normalizedRoot]: flowStates,
+    [projectRoot]: {},
+    [normalizedRoot]: {},
   }
   workspaceAnalysisInputs.value = {
     ...workspaceAnalysisInputs.value,
-    [projectRoot]: analysisInputs,
-    [normalizedRoot]: analysisInputs,
+    [projectRoot]: {},
+    [normalizedRoot]: {},
   }
   projectHistory.value = await rememberProjectHistoryEntry(
     projectFromManifest(manifest, normalizedRoot),
   )
+  if (
+    selectedProjectId.value === projectRoot ||
+    selectedProjectId.value === normalizedRoot
+  ) {
+    void loadSelectedProjectWorkspaceData()
+  }
 }
 
 function workspaceRouteQuery(workspacePath?: string, workspaceId?: string) {

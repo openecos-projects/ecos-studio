@@ -231,5 +231,6 @@ export function projectFixture(
       metricDiffs: [],
     },
     ...overrides,
+    designName: overrides.designName ?? 'demo',
   }
 }

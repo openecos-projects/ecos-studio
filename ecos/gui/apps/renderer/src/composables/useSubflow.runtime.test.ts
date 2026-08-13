@@ -172,6 +172,43 @@ describe('useSubflow runtime refresh', () => {
     })
   })
 
+  it('keeps the rerun skeleton and applies live subflow-stage events', async () => {
+    const subflow = useSubflow()
+
+    await vi.waitFor(() => {
+      expect(subflow.subflowSteps.value).toHaveLength(1)
+    })
+
+    testState.runtimeEvents!.value.push({
+      data: {
+        runtimeProtocolType: 'step.started',
+        step: 'Floorplan',
+      },
+    })
+    await nextTick()
+    expect(subflow.subflowSteps.value[0]).toMatchObject({
+      name: 'floorplan',
+      status: 'running',
+    })
+
+    testState.runtimeEvents!.value.push({
+      data: {
+        runtimeProtocolType: 'subflow.stage',
+        state: 'Success',
+        step: 'Floorplan',
+        subflowPeakMemory: 24,
+        subflowRuntime: '0:0:3',
+        subflowStep: 'floorplan',
+      },
+    })
+    await nextTick()
+    expect(subflow.subflowSteps.value[0]).toMatchObject({
+      duration: '0:0:3',
+      peakMemory: 24,
+      status: 'completed',
+    })
+  })
+
   it('ignores a stale subflow read after the workspace session changes', async () => {
     let resolveFirstRead: ((content: string) => void) | undefined
     testState.readProjectTextFile

@@ -1,6 +1,5 @@
 <template>
   <section
-    v-if="visible"
     class="flow-log-panel"
     :class="{ 'is-collapsed': !expanded }"
     aria-label="Flow step log"
@@ -49,7 +48,7 @@
           :channel-key="keyFor(selectedSegment)"
           :content="selectedContent"
           :live="Boolean(selectedSegment.live)"
-          :loading="loading"
+          :loading="loading || Boolean(selectedSegment.contentLoading)"
           :missing="selectedSegment.missing"
         />
       </div>
@@ -97,20 +96,34 @@ import type { FlowStatusNode } from './flowStatus'
 import type { FlowLogSegment } from '@/composables/useHomeData'
 
 const props = defineProps<{
+  activeStepName: string
   contentByKey: Record<string, string>
   ensureContent: (segment: FlowLogSegment) => Promise<boolean>
   error: string | null
   executionActive: boolean
   loading: boolean
   selectedNode: FlowStatusNode | null
+  selectedNodePinned?: boolean
   segments: FlowLogSegment[]
 }>()
 
 const selectedKey = ref('')
+const selectionPinned = ref(false)
 const expanded = ref(true)
 const dialogVisible = ref(false)
 const copied = ref(false)
-const visible = computed(() => props.executionActive || props.segments.length > 0)
+const currentRuntimeSegment = computed(() => {
+  const activeStepName = props.activeStepName.trim().toLowerCase()
+  if (activeStepName) {
+    const matching = props.segments.filter(
+      (segment) => segment.stepName.trim().toLowerCase() === activeStepName,
+    )
+    const active =
+      matching.find((segment) => segment.live) ?? matching[matching.length - 1]
+    if (active) return active
+  }
+  return props.segments.find((segment) => segment.live) ?? null
+})
 const selectedSegment = computed(
   () => props.segments.find((segment) => keyFor(segment) === selectedKey.value) ?? null,
 )
@@ -139,34 +152,62 @@ async function copyLog(): Promise<void> {
   }
 }
 
-function selectSegmentForNode(): void {
-  const node = props.selectedNode
-  if (node) {
-    const matchingSegments = props.segments.filter(
-      (segment) =>
-        segment.stepName.trim().toLowerCase() === node.label.trim().toLowerCase(),
-    )
-    const segment = matchingSegments.find((item) => item.live) ?? matchingSegments[0]
-    selectedKey.value = segment ? keyFor(segment) : ''
-    return
-  }
-
-  const segment = props.segments.find((item) => item.live) ?? props.segments[0]
+function followRuntimeSegment(): void {
+  const segment = currentRuntimeSegment.value ?? props.segments[0]
   selectedKey.value = segment ? keyFor(segment) : ''
 }
 
+function selectSegmentForNode(): void {
+  if (!props.selectedNodePinned) {
+    selectionPinned.value = false
+    followRuntimeSegment()
+    return
+  }
+
+  const node = props.selectedNode
+  if (!node) {
+    selectionPinned.value = false
+    followRuntimeSegment()
+    return
+  }
+
+  selectionPinned.value = true
+  const matchingSegments = props.segments.filter(
+    (segment) =>
+      segment.stepName.trim().toLowerCase() === node.label.trim().toLowerCase(),
+  )
+  const segment = matchingSegments.find((item) => item.live) ?? matchingSegments[0]
+  if (!segment) {
+    selectedKey.value = ''
+    return
+  }
+  selectedKey.value = keyFor(segment)
+}
+
 watch(
-  () => props.selectedNode?.id,
+  () => [props.selectedNode?.id, props.selectedNodePinned] as const,
   () => selectSegmentForNode(),
   { immediate: true },
 )
 
 watch(
-  () => props.segments,
-  (segments) => {
-    if (!segments.some((segment) => keyFor(segment) === selectedKey.value)) {
-      selectSegmentForNode()
+  () => [props.segments, props.executionActive, props.activeStepName] as const,
+  ([segments]) => {
+    if (selectionPinned.value) {
+      if (!props.selectedNodePinned) {
+        selectionPinned.value = false
+      } else if (!segments.some((segment) => keyFor(segment) === selectedKey.value)) {
+        selectSegmentForNode()
+        return
+      } else {
+        return
+      }
     }
+    if (!segments.some((segment) => keyFor(segment) === selectedKey.value)) {
+      followRuntimeSegment()
+      return
+    }
+    followRuntimeSegment()
   },
   { deep: true, immediate: true },
 )
@@ -177,13 +218,6 @@ watch(
     if (segment) void props.ensureContent(segment)
   },
   { immediate: true },
-)
-
-watch(
-  () => props.executionActive,
-  (active) => {
-    if (active) expanded.value = true
-  },
 )
 
 onBeforeUnmount(() => {
