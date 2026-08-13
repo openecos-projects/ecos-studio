@@ -136,6 +136,7 @@ def test_workspace_setup_contract_carries_project_mpc_snapshot(tmp_path: Path) -
 
     assert contract["mpc"] == mpc
     assert contract["parameters"]["MPC"] == mpc
+    assert contract["mpc_enabled"] is True
 
     skipped = workspace_setup_contract(
         _proposal(
@@ -159,6 +160,7 @@ def test_workspace_setup_contract_carries_project_mpc_snapshot(tmp_path: Path) -
     )
     assert "mpc" not in skipped
     assert "MPC" not in skipped["parameters"]
+    assert skipped["mpc_enabled"] is False
 
 
 def test_new_ephemeral_thread_discards_prior_case_context(tmp_path: Path) -> None:
@@ -298,7 +300,7 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
         str(filelist),
             str(sdc),
             str(pdk),
-            "2",
+            "1",
             "",
         "",
         "",
@@ -317,6 +319,7 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
     assert setup["parameters"]["design"] == "gcd"
     assert setup["project_context"]["project_root"] == str(project_root)
     assert setup["parameters"]["target_overflow"] == 0.1
+    assert setup["mpc_enabled"] is True
     assert parser_contexts[0]["numeric_field"] == "target_overflow"
     assert parser_contexts[0]["numeric_bounds"] == {"lower": 0, "upper": 1}
     assert all(event["type"] != "error" for event in events)

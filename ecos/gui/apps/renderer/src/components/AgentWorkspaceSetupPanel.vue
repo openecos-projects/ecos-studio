@@ -20,6 +20,10 @@ import type {
   DesktopAgentWorkspaceSetupContract,
 } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
+import { installResourceApi, listResourcesApi, readMpcSpecApi } from '@/api/plugin'
+import { projectMpcOptionFromResource } from '@/utils/projectManagement'
+import type { ProjectManifestMpc } from '@/utils/projectManagement'
+import { createProjectManifestMpcSnapshot, parseMpcSpecDesigns } from '@/utils/mpcSpec'
 import { displayAgentContractTitle } from './agentContractDisplay'
 import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 
@@ -37,6 +41,8 @@ const emit = defineEmits<{
 }>()
 
 const submittedSetupId = ref('')
+const resolvedContract = ref<DesktopAgentWorkspaceSetupContract>()
+const mpcLoading = ref(false)
 const displayTitle = computed(() =>
   displayAgentContractTitle(props.contract?.title ?? ''),
 )
@@ -55,7 +61,7 @@ const executionState = computed(() => {
   return 'Confirmed'
 })
 const committedSummary = computed(() => {
-  const contract = props.contract
+  const contract = resolvedContract.value
   if (!contract) return ''
   const workspaceName = leafName(contract.directory)
   const design = contract.parameters.design
@@ -63,7 +69,7 @@ const committedSummary = computed(() => {
   return [workspaceName, design, flow].filter(Boolean).join(' · ')
 })
 const specRows = computed<[string, string][]>(() => {
-  const contract = props.contract
+  const contract = resolvedContract.value
   if (!contract) return []
   const parameters = contract.parameters
   const mpc = contract.mpc
@@ -92,7 +98,7 @@ const specRows = computed<[string, string][]>(() => {
     ['Margin', String(parameters.margin)],
     ['Target Density', String(parameters.target_density)],
     ['Target Overflow', String(parameters.target_overflow)],
-    ['Use SoC-MPC', mpc ? 'Yes' : 'No'],
+    ['Use SoC-MPC', contract.mpc_enabled ? 'Yes' : 'No'],
     ['SoC-MPC Template', mpc?.display_name ?? '-'],
     ['SoC-MPC Design', mpc?.design.design_name ?? '-'],
     ['SoC-MPC Spec', mpc?.spec_path ?? '-'],
@@ -104,17 +110,74 @@ const specRows = computed<[string, string][]>(() => {
 })
 
 watch(
-  [() => props.contract, () => props.createSetupId],
-  ([contract, setupId]) => {
+  [() => props.contract, () => props.createSetupId, () => mpcLoading.value],
+  async ([contract, setupId]) => {
+    if (contract && resolvedContract.value?.setup_id !== contract.setup_id) {
+      resolvedContract.value = contract
+      if (contract.mpc_enabled && !contract.mpc) await resolveMpc(contract)
+    }
     if (!setupId) {
       submittedSetupId.value = ''
       return
     }
-    if (!contract || setupId !== contract.setup_id || submittedSetupId.value === setupId)
+    if (
+      !resolvedContract.value ||
+      mpcLoading.value ||
+      setupId !== resolvedContract.value.setup_id ||
+      submittedSetupId.value === setupId
+    )
       return
     submittedSetupId.value = setupId
-    const config = workspaceConfig(contract)
-    emit('createWorkspace', config, contract)
+    const config = workspaceConfig(resolvedContract.value)
+    emit('createWorkspace', config, resolvedContract.value)
+  },
+  { immediate: true },
+)
+
+async function resolveMpc(contract: DesktopAgentWorkspaceSetupContract): Promise<void> {
+  mpcLoading.value = true
+  try {
+    let resources = await listResourcesApi()
+    let candidate = resources
+      .map(projectMpcOptionFromResource)
+      .find((item): item is NonNullable<typeof item> => item !== null)
+    if (!candidate) {
+      const downloadable = resources.find(
+        (resource) =>
+          resource.type === 'mpc' &&
+          resource.actions.includes('install') &&
+          resource.available_versions.length > 0,
+      )
+      if (downloadable) {
+        await installResourceApi(downloadable.id, downloadable.available_versions[0])
+        resources = await listResourcesApi()
+        candidate = resources
+          .map(projectMpcOptionFromResource)
+          .find((item): item is NonNullable<typeof item> => item !== null)
+      }
+    }
+    if (!candidate) return
+    const result = await readMpcSpecApi(candidate.resource_id)
+    const design = parseMpcSpecDesigns(result.spec)[0]
+    if (!design) return
+    const mpc: ProjectManifestMpc = createProjectManifestMpcSnapshot(candidate, design)
+    const parameters = { ...contract.parameters, MPC: mpc }
+    resolvedContract.value = { ...contract, mpc, parameters }
+  } catch {
+    // No usable installed resource: keep the explicit Use choice and allow creation.
+  } finally {
+    mpcLoading.value = false
+  }
+}
+
+/*
+ * The contract is frozen before this component receives it; only the selected
+ * resource snapshot is enriched locally before the create event is emitted.
+ */
+watch(
+  () => props.contract,
+  (contract) => {
+    if (!contract) resolvedContract.value = undefined
   },
   { immediate: true },
 )
