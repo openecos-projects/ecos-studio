@@ -78,9 +78,6 @@
 
             <div
               class="project-list"
-              :class="{
-                'project-list--popover-open': Boolean(popoverWorkspaceId),
-              }"
               aria-label="Project list"
             >
               <article
@@ -296,8 +293,9 @@
                       v-if="
                         popoverWorkspaceId === workspace.id && selectedPopoverWorkspace
                       "
-                      class="workspace-flow-popover"
+                      class="workspace-flow-popover workspace-flow-popover--floating"
                       :class="workspacePopoverPlacementClass(workspace.id)"
+                      :style="workspacePopoverStyle"
                       role="dialog"
                       aria-label="Workspace Flow Steps"
                     >
@@ -832,6 +830,7 @@ const selectedAnalysisTab = ref<'dashboard' | 'step'>('dashboard')
 const hasOpenedStepAnalysis = ref(false)
 const branchDraft = ref<BranchDraft | null>(null)
 const popoverWorkspaceId = ref('')
+const workspacePopoverStyle = ref<Record<string, string>>({})
 const projectActionMenuId = ref<string | null>(null)
 const workspaceActionMenuId = ref<string | null>(null)
 const pendingDeleteWorkspaceId = ref<string | null>(null)
@@ -869,6 +868,8 @@ const modalFocusReturnTarget = ref<HTMLElement | null>(null)
 onMounted(async () => {
   document.addEventListener('pointerdown', handleWorkspacePopoverPointerDown)
   document.addEventListener('keydown', handleWorkspacePopoverKeydown)
+  window.addEventListener('resize', updateWorkspaceFlowPopoverPosition)
+  window.addEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)
   projectHistory.value = await loadProjectHistory()
   await refreshProjectManifests()
   const focused = await applyRouteProjectFocus()
@@ -880,6 +881,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleWorkspacePopoverPointerDown)
   document.removeEventListener('keydown', handleWorkspacePopoverKeydown)
+  window.removeEventListener('resize', updateWorkspaceFlowPopoverPosition)
+  window.removeEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)
 })
 
 watch(
@@ -1281,10 +1284,26 @@ function toggleWorkspaceFlowPopover(workspaceId: string) {
   branchDraft.value = null
   closeRowActionMenus()
   popoverWorkspaceId.value = popoverWorkspaceId.value === workspaceId ? '' : workspaceId
+  void nextTick(updateWorkspaceFlowPopoverPosition)
 }
 
 function closeWorkspaceFlowPopover() {
   popoverWorkspaceId.value = ''
+  workspacePopoverStyle.value = {}
+}
+
+function updateWorkspaceFlowPopoverPosition() {
+  if (!popoverWorkspaceId.value) return
+  const trigger = document.querySelector<HTMLElement>(
+    `[data-workspace-id="${cssEscape(popoverWorkspaceId.value)}"]`,
+  )
+  if (!trigger) return
+  const rect = trigger.getBoundingClientRect()
+  const placement = workspacePopoverPlacementClass(popoverWorkspaceId.value)
+  workspacePopoverStyle.value = {
+    left: `${rect.right + 14}px`,
+    top: `${Math.max(12, placement ? rect.bottom : rect.top - 44)}px`,
+  }
 }
 
 function toggleProjectActionMenu(projectId: string) {
@@ -1886,8 +1905,12 @@ function flowStatusHintClass(state: ProjectFlowStatusHint['state']): string {
   return `flow-hint-${state}`
 }
 
-function workspacePopoverPlacementClass(_workspaceId: string): string {
-  return ''
+function workspacePopoverPlacementClass(workspaceId: string): string {
+  const workspaces = visibleProjectWorkspaces(selectedProject.value)
+  const index = workspaces.findIndex((workspace) => workspace.id === workspaceId)
+  return index >= Math.ceil(workspaces.length / 2)
+    ? 'workspace-flow-popover--above'
+    : ''
 }
 
 function stepStatusClass(status: ProjectStepStatus): string {

@@ -93,10 +93,12 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('.harden-output-table {')
     expect(componentSource).toContain('.harden-output-table table {')
     expect(componentSource).toContain(
-      '.harden-output-table th,\n.harden-output-table td {\n  font-size: 11px;',
+      '.harden-output-table th,\n.harden-output-table td {\n  font-size: 12px;',
     )
     expect(componentSource).toContain('is-sta-report-card')
-    expect(componentSource).toContain('grid-auto-rows: minmax(54px, auto)')
+    expect(componentSource).toContain(
+      'grid-template-rows: repeat(6, minmax(54px, 1fr))',
+    )
     expect(componentSource).toContain('white-space: normal')
   })
 
@@ -171,12 +173,9 @@ describe('StepDashboard', () => {
       'grid-template-columns: minmax(0, 3fr) minmax(0, 1fr)',
     )
     expect(componentSource).toContain('overflow-wrap: anywhere')
-    expect(componentSource).toContain(
-      'grid-template-rows: repeat(6, minmax(min-content, 1fr))',
-    )
+    expect(componentSource).toContain('grid-auto-rows: minmax(54px, auto)')
     expect(componentSource).toContain('.qor-step-list')
     expect(componentSource).toContain('overflow-y: auto')
-    expect(componentSource).toContain('grid-auto-rows: minmax(min-content, 1fr)')
     expect(componentSource).toContain('.qor-metric-current.is-neutral')
     expect(componentSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
     expect(componentSource).not.toContain('<dt>Baseline</dt>')

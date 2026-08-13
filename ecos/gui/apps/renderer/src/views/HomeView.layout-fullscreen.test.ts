@@ -118,6 +118,10 @@ describe('HomeView workspace dashboard layout', () => {
     )
     expect(homeViewSource).toContain('QoR comparison')
     expect(homeViewSource).toContain('class="qor-summary-content"')
+    expect(homeViewSource).toContain(
+      '.qor-summary-content {\n  display: grid;\n  grid-template-rows: auto auto minmax(0, 1fr) auto;',
+    )
+    expect(homeViewSource).toContain('.qor-summary-content .status-detail-link')
     expect(homeViewSource).toContain('class="qor-step-list"')
     expect(homeViewSource).toContain('class="qor-step-link"')
     expect(homeViewSource).toContain('openStepQorAnalysis(step.label)')
@@ -133,7 +137,7 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('>VS</span>')
     expect(homeViewSource).toContain('class="qor-comparison-pie"')
     expect(homeViewSource).toContain('label="QoR comparison distribution"')
-    expect(homeViewSource).toContain('show-labels')
+    expect(homeViewSource).not.toContain('show-labels\n                  />')
     expect(homeViewSource).not.toContain(':center-primary="qorCenterPrimary"')
     expect(homeViewSource).not.toContain(':center-secondary="qorCenterSecondary"')
     expect(homeViewSource).toContain('PASS >= ${QOR_SCORE_THRESHOLD}')

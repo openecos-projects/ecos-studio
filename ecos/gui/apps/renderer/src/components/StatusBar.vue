@@ -46,7 +46,7 @@ const guiVersion = computed(() => versions.value?.gui ?? '')
 }
 
 .status-text {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
@@ -61,7 +61,7 @@ const guiVersion = computed(() => versions.value?.gui ?? '')
   border-radius: 4px;
   color: var(--text-secondary);
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 

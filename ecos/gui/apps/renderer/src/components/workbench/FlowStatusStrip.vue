@@ -106,7 +106,7 @@ function selectNode(id: string): void {
 
 .flow-status-heading {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   gap: 6px;
   min-width: 0;
@@ -120,7 +120,7 @@ function selectNode(id: string): void {
 
 .flow-status-refreshing {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -210,7 +210,7 @@ function selectNode(id: string): void {
 }
 
 .flow-status-node-label {
-  font-size: 9px;
+  font-size: 12px;
   line-height: 12px;
   max-width: 100%;
   overflow: hidden;
@@ -267,7 +267,7 @@ function selectNode(id: string): void {
 .flow-status-empty {
   color: var(--text-secondary);
   flex: 1 1 auto;
-  font-size: 11px;
+  font-size: 12px;
   padding: 12px;
 }
 

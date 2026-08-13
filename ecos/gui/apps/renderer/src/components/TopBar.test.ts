@@ -124,6 +124,16 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain('isEditableKeyboardTarget')
   })
 
+  it('adds View zoom actions to the topbar menu', () => {
+    expect(topBarSource).toContain("label: 'View'")
+    expect(topBarSource).toContain("label: 'Zoom In'")
+    expect(topBarSource).toContain("label: 'Zoom Out'")
+    expect(topBarSource).toContain("label: 'Reset Zoom'")
+    expect(topBarSource).toContain('appMenuActionIds.zoomIn')
+    expect(topBarSource).toContain('appMenuActionIds.zoomOut')
+    expect(topBarSource).toContain('appMenuActionIds.zoomReset')
+  })
+
   it('adds a File menu action for reconfiguring the active workspace', () => {
     expect(topBarSource).toContain('Update Workspace')
     expect(topBarSource).not.toContain('Reconfigure Workspace...')

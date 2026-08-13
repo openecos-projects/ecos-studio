@@ -45,7 +45,7 @@
 }
 
 .step-config-root .sc-pro-hero__label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -62,7 +62,7 @@
 }
 
 .step-config-root .sc-pro-hero__hint {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-secondary);
   margin-top: 4px;
 }
@@ -114,7 +114,7 @@
 }
 
 .step-config-root .sc-pro-section__desc {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-secondary);
   margin-top: 2px;
   line-height: 1.35;
@@ -186,7 +186,7 @@
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /*
@@ -286,7 +286,7 @@
 .step-config-root .sc-pro-table thead th {
   text-align: left;
   padding: 8px 10px;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -332,7 +332,7 @@
 
 .step-config-root .sc-pro-table .sc-mono {
   font-family: 'Fira Code', ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Prime inputs: allow shrink in cells but keep number fields readable when table is wide enough */
@@ -412,7 +412,7 @@
 
 .step-config-root .sc-pro-flag__key {
   font-family: 'Fira Code', ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--sc-accent, #06b6d4);
   word-break: break-all;
 }
@@ -423,7 +423,7 @@
 
 .step-config-root .sc-pro-flag__val :deep(.p-inputtext) {
   font-family: 'Fira Code', ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .step-config-root .sc-pro-fixed-value {
@@ -436,7 +436,7 @@
   background: color-mix(in srgb, var(--bg-secondary) 75%, var(--bg-primary));
   color: var(--text-primary);
   font-family: 'Fira Code', ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
   box-sizing: border-box;
 }
 
@@ -446,7 +446,7 @@
   align-items: center;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   font-family: 'Fira Code', ui-monospace, monospace;
 }
@@ -474,7 +474,7 @@
 }
 
 .step-config-root .sc-pro-subpanel__title {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -499,7 +499,7 @@
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition:
@@ -529,7 +529,7 @@
 .step-config-root .sc-pro-path-field :deep(.p-inputtext),
 .step-config-root .sc-pro-path-field :deep(.p-textarea) {
   font-family: 'Fira Code', ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Accent color per section (views set --sc-accent) */

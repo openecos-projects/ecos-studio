@@ -210,7 +210,6 @@
                   <StatusPieChart
                     label="QoR comparison distribution"
                     :slices="qorSlices"
-                    show-labels
                   />
                 </div>
                 <button
@@ -1154,7 +1153,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .dashboard-badge,
 .dashboard-muted {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -1244,7 +1243,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .constraint-list dt {
   color: var(--text-secondary);
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.2;
   margin: 0;
 }
@@ -1276,7 +1275,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .key-metrics-grid dd {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.15;
 }
 
@@ -1287,7 +1286,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .key-metrics-grid dt {
-  font-size: 9px;
+  font-size: 12px;
   margin-bottom: 2px;
 }
 
@@ -1298,7 +1297,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   color: var(--accent-color);
   cursor: pointer;
   display: inline-flex;
-  font-size: 10px;
+  font-size: 12px;
   gap: 4px;
   margin: auto 10px 9px;
   padding: 0;
@@ -1383,7 +1382,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .layout-thumbnail-cell span {
   align-self: end;
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.2;
   max-width: 100%;
   overflow: hidden;
@@ -1404,7 +1403,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   display: flex;
   flex: 1;
   flex-direction: column;
-  font-size: 10px;
+  font-size: 12px;
   gap: 6px;
   justify-content: center;
   min-height: 0;
@@ -1465,7 +1464,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .qor-score-hero > span,
 .qor-score-hero em {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 700;
   line-height: 1.2;
@@ -1473,7 +1472,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-score-hero.is-baseline > small {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 11px;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1496,7 +1495,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-score-hero small {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .qor-score-hero.is-pass strong,
@@ -1513,7 +1512,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   align-items: center;
   color: var(--accent-color);
   display: flex;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   justify-content: center;
   letter-spacing: 0;
@@ -1521,16 +1520,15 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-comparison-pie {
   display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
-  min-height: 148px;
+  min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 2px 0;
 }
 
 .qor-comparison-pie :deep(.status-pie-chart-wrap) {
-  min-height: 104px;
+  min-height: 0;
 }
 
 .status-summary-content,
@@ -1541,6 +1539,11 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   min-height: 0;
   min-width: 0;
   padding: 9px 11px;
+}
+
+.qor-summary-content {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .status-summary-title {
@@ -1554,7 +1557,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .status-summary-content p,
 .qor-summary-content p {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
   margin: 4px 0 0;
 }
@@ -1569,7 +1572,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .status-count-list > div {
   color: var(--text-secondary);
   display: flex;
-  font-size: 11px;
+  font-size: 12px;
   justify-content: space-between;
   min-width: 0;
 }
@@ -1624,10 +1627,14 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   color: var(--accent-color);
   cursor: pointer;
   display: inline-flex;
-  font-size: 10px;
+  font-size: 12px;
   gap: 3px;
   margin-top: auto;
   padding: 0;
+}
+
+.qor-summary-content .status-detail-link {
+  margin-top: 0;
 }
 
 .status-detail-link:hover {
@@ -1707,7 +1714,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 .qor-step-link strong {
   color: var(--text-primary);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1715,7 +1722,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 .qor-step-link i {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 .qor-step-link:hover strong,
 .qor-step-link:focus-visible strong,
@@ -1779,7 +1786,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-step-total {
   color: var(--text-primary);
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: 1;
@@ -1865,7 +1872,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .home-snapshot-pie :deep(.status-pie-center span) {
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .snapshot-grid-cell i {
@@ -1875,7 +1882,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .snapshot-grid-cell span {
   align-self: end;
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.2;
   max-width: 100%;
   overflow: hidden;
@@ -1886,7 +1893,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .dashboard-detail-table {
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 12px;
   min-width: 100%;
   width: 100%;
 }
@@ -1939,7 +1946,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .checklist-detail-list p,
 .checklist-detail-list code {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 .checklist-detail-list p {
   margin: 4px 0;
@@ -1975,7 +1982,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .qor-detail-card header > span,
 .qor-detail-step-card header span {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -2019,7 +2026,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-detail-step-card header small {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2042,7 +2049,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .qor-detail-summary-grid > section > span {
   color: var(--text-secondary);
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -2080,7 +2087,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-detail-score-value > span {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .qor-detail-summary-list,
@@ -2108,7 +2115,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-detail-summary-list dt {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   margin: 0;
 }
 
@@ -2139,7 +2146,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-detail-no-metrics {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   margin: 2px 0;
   padding: 4px 2px;
@@ -2165,7 +2172,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   align-items: center;
   background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   padding-bottom: 7px;
   padding-top: 7px;
@@ -2201,7 +2208,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .qor-detail-metric-list dt small {
   color: var(--text-secondary);
   font-family: var(--font-family-mono, monospace);
-  font-size: 9px;
+  font-size: 11px;
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2229,7 +2236,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 
 .qor-detail-metric-list p {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.3;
   margin: 0;
 }
@@ -2265,7 +2272,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
     color: var(--text-secondary);
     display: block;
     font-family: var(--font-family-base, sans-serif);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 500;
     margin-bottom: 2px;
   }
@@ -2394,7 +2401,8 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
     grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
   }
   .qor-step-total {
-    font-size: 9px;
+    font-size: 11px;
   }
 }
+
 </style>

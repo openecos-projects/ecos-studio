@@ -64,6 +64,7 @@ const desktopBridge = {
     confirmClose: async () => undefined,
     create: async () => undefined,
     setTitle: async (_title: string) => undefined,
+    setZoomFactor: async (_factor: number) => undefined,
     isMaximized: async () => false,
     onCloseRequested: () => () => undefined,
     onResized: () => () => undefined,

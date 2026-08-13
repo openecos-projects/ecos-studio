@@ -26,6 +26,7 @@ export interface BrowserWindowLike {
   unmaximize(): void
   webContents: {
     send(channel: string, ...args: unknown[]): void
+    setZoomFactor?(factor: number): void
   }
 }
 

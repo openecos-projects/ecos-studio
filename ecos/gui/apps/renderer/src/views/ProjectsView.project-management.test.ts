@@ -43,7 +43,7 @@ describe('ProjectsView project management surface', () => {
     expect(analysisSource).toContain('Step Analysis')
     expect(source).toContain('class="project-workspace-tree"')
     expect(source).toContain('class="workspace-tree-list"')
-    expect(source).toContain('class="workspace-flow-popover"')
+    expect(source).toContain('workspace-flow-popover')
     expect(source).toContain('selectedAnalysisTab')
     expect(source).not.toContain('Workspace Flow Matrix')
     expect(source).not.toContain('class="flow-matrix"')
@@ -112,10 +112,9 @@ describe('ProjectsView project management surface', () => {
     expect(projectListStyles).toContain('overflow-y: auto;')
     expect(projectListStyles).toContain('overflow-x: hidden;')
     expect(projectListStyles).toContain('scrollbar-gutter: stable;')
-    expect(source).toContain("'project-list--popover-open': Boolean(popoverWorkspaceId)")
+    expect(source).not.toContain("'project-list--popover-open': Boolean(popoverWorkspaceId)")
     expect(source).not.toContain('popoverWorkspaceId || projectActionMenuId')
-    expect(projectStyles).toContain('.project-list--popover-open {')
-    expect(projectStyles).toContain('overflow: visible;')
+    expect(projectStyles).not.toContain('.project-list--popover-open {')
   })
 
   it('opens the final workspace action menu upward within the scrollable list', () => {
@@ -297,6 +296,23 @@ describe('ProjectsView project management surface', () => {
       /startWorkspaceFromPopoverStep\(\s*selectedPopoverWorkspace\.id,\s*cell\.step,\s*\)/,
     )
     expect(source).toContain('Workspace Flow Steps')
+  })
+
+  it('opens lower workspace flow popovers upward so they stay visible', () => {
+    expect(source).toContain("'workspace-flow-popover--above'")
+    expect(source).toContain('index >= Math.ceil(workspaces.length / 2)')
+    expect(projectStyles).toContain('.workspace-flow-popover--above')
+    expect(projectStyles).toContain('position: fixed;')
+    expect(projectStyles).toContain('transform: translateY(-100%);')
+  })
+
+  it('keeps the project list scroll container unchanged while the popover is open', () => {
+    expect(source).not.toContain("'project-list--popover-open'")
+    expect(projectStyles).not.toContain('.project-list--popover-open')
+    expect(source).toContain('updateWorkspaceFlowPopoverPosition')
+    expect(source).toContain("window.addEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)")
+    expect(source).toContain("window.removeEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)")
+    expect(source).toContain('`[data-workspace-id="${cssEscape(popoverWorkspaceId.value)}"]`')
   })
 
   it('closes the workspace flow popover from outside clicks or Escape', () => {

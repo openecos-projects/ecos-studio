@@ -255,10 +255,6 @@
   scrollbar-gutter: stable;
 }
 
-.project-list--popover-open {
-  overflow: visible;
-}
-
 .list-preview-toggle {
   display: inline-flex;
   min-height: 30px;
@@ -789,6 +785,16 @@
   box-shadow: 0 10px 18px rgba(17, 24, 39, 0.1);
 }
 
+.workspace-flow-popover--floating {
+  position: fixed;
+  left: 0;
+  top: 0;
+}
+
+.workspace-flow-popover--above {
+  transform: translateY(-100%);
+}
+
 .workspace-flow-popover::before {
   position: absolute;
   top: 74px;
@@ -801,6 +807,11 @@
   background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
   content: '';
   transform: rotate(45deg);
+}
+
+.workspace-flow-popover--above::before {
+  top: auto;
+  bottom: 74px;
 }
 
 .workspace-flow-popover header {

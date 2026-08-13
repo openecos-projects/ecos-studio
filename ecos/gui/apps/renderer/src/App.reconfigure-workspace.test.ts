@@ -2,6 +2,26 @@ import { describe, expect, it } from 'vitest'
 import appSource from './App.vue?raw'
 
 describe('App workspace reconfiguration wizard wiring', () => {
+  it('does not let a failed zoom setting restore block app startup', () => {
+    const restoreStart = appSource.indexOf('if (desktopApi.value) {', appSource.indexOf('onMounted(async () =>'))
+    const restoreEnd = appSource.indexOf('themeStore.initTheme()', restoreStart)
+    const restoreSource = appSource.slice(restoreStart, restoreEnd)
+
+    expect(restoreSource).toContain('try {')
+    expect(restoreSource).toContain('catch (error)')
+    expect(restoreSource).toContain('Failed to restore UI zoom setting')
+  })
+
+  it('does not let zoom persistence failure reject after applying the factor', () => {
+    const zoomStart = appSource.indexOf('async function setZoomFactor')
+    const zoomEnd = appSource.indexOf('async function adjustZoom', zoomStart)
+    const zoomSource = appSource.slice(zoomStart, zoomEnd)
+
+    expect(zoomSource).toContain('await api.window.setZoomFactor(factor)')
+    expect(zoomSource).toContain('await api.settings.set(zoomSettingKey, factor)')
+    expect(zoomSource).toContain('Failed to persist UI zoom setting')
+  })
+
   it('consumes second-instance openWorkspace query through the shared launch helper', () => {
     expect(appSource).toContain('consumeOpenWorkspaceLaunchQuery')
     expect(appSource).toContain('route.query.openWorkspace')
