@@ -43,6 +43,9 @@ const emit = defineEmits<{
 const submittedSetupId = ref('')
 const resolvedContract = ref<DesktopAgentWorkspaceSetupContract>()
 const mpcLoading = ref(false)
+// ponytail: bounded install polling; replace with resource progress events if installs exceed 30s.
+const MPC_RESOLUTION_ATTEMPTS = 60
+const MPC_RESOLUTION_DELAY_MS = 500
 const displayTitle = computed(() =>
   displayAgentContractTitle(props.contract?.title ?? ''),
 )
@@ -150,10 +153,17 @@ async function resolveMpc(contract: DesktopAgentWorkspaceSetupContract): Promise
       )
       if (downloadable) {
         await installResourceApi(downloadable.id, downloadable.available_versions[0])
-        resources = await listResourcesApi()
-        candidate = resources
-          .map(projectMpcOptionFromResource)
-          .find((item): item is NonNullable<typeof item> => item !== null)
+        for (
+          let attempt = 0;
+          attempt < MPC_RESOLUTION_ATTEMPTS && !candidate;
+          attempt += 1
+        ) {
+          if (attempt > 0) await delay(MPC_RESOLUTION_DELAY_MS)
+          resources = await listResourcesApi()
+          candidate = resources
+            .map(projectMpcOptionFromResource)
+            .find((item): item is NonNullable<typeof item> => item !== null)
+        }
       }
     }
     if (!candidate) return
@@ -168,6 +178,10 @@ async function resolveMpc(contract: DesktopAgentWorkspaceSetupContract): Promise
   } finally {
     mpcLoading.value = false
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
 /*

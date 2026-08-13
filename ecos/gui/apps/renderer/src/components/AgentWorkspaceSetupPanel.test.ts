@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopAgentWorkspaceSetupContract } from '@ecos-studio/shared'
 import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
 import source from './AgentWorkspaceSetupPanel.vue?raw'
@@ -93,6 +93,10 @@ describe('AgentWorkspaceSetupPanel', () => {
     mocks.readMpcSpecApi.mockReset()
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('resolves and injects the selected MPC before workspace creation', async () => {
     mocks.listResourcesApi
       .mockResolvedValueOnce([registryMpc])
@@ -131,6 +135,45 @@ describe('AgentWorkspaceSetupPanel', () => {
       mpc_enabled: true,
       mpc: { display_name: 'MPC Frame', design: { design_name: 'frame' } },
       parameters: { MPC: { resource_id: registryMpc.id } },
+    })
+  })
+
+  it('waits for an in-progress install before creating the workspace', async () => {
+    vi.useFakeTimers()
+    mocks.listResourcesApi
+      .mockResolvedValueOnce([registryMpc])
+      .mockResolvedValueOnce([
+        { ...registryMpc, status: 'installing', actions: ['cancel'] },
+      ])
+      .mockResolvedValueOnce([installedMpc])
+    mocks.installResourceApi.mockResolvedValue({
+      status: 'started',
+      resource_id: registryMpc.id,
+    })
+    mocks.readMpcSpecApi.mockResolvedValue({
+      resource_id: installedMpc.id,
+      installed_version: installedMpc.installed_version,
+      spec_path: `${installedMpc.path}/spec/spec.json.in`,
+      spec: {
+        number: 1,
+        designs: [{ design_name: 'frame', core_template: { minimum_area: 100 } }],
+      },
+    })
+
+    const wrapper = mount(AgentWorkspaceSetupPanel, {
+      props: { contract: workspaceContract },
+      global: { stubs: { AgentExecutionContractPanel: { template: '<div />' } } },
+    })
+    await flushPromises()
+    await wrapper.setProps({ createSetupId: workspaceContract.setup_id })
+    await flushPromises()
+    await vi.runAllTimersAsync()
+    await flushPromises()
+
+    expect(wrapper.emitted('createWorkspace')).toHaveLength(1)
+    expect(wrapper.emitted('createWorkspace')?.[0]?.[1]).toMatchObject({
+      mpc: { resource_id: registryMpc.id },
+      parameters: { MPC: { core_template: { minimum_area: 100 } } },
     })
   })
 

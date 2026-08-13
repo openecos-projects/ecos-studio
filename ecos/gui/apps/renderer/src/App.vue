@@ -306,6 +306,12 @@ async function createWorkspaceFromAgent(
   contract: DesktopAgentWorkspaceSetupContract,
   ownerSessionId: string,
 ): Promise<import('@/composables/agentWorkspaceSetup').AgentWorkspaceCreationResult> {
+  if (contract.mpc_enabled && !config.mpc) {
+    return {
+      created: false,
+      error: 'SoC-MPC was selected, but no validated MPC template was resolved.',
+    }
+  }
   const agentShell = useAgentShellStore()
   agentShell.beginPreserveForAgentWorkspaceSwitch()
   const success = await newProject(config)

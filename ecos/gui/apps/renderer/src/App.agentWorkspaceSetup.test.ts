@@ -16,6 +16,11 @@ describe('agent workspace creation', () => {
     expect(source).toContain('created: false')
   })
 
+  it('fails closed when SoC-MPC was selected without a validated snapshot', () => {
+    expect(source).toContain('contract.mpc_enabled && !config.mpc')
+    expect(source).toContain('no validated MPC template was resolved')
+  })
+
   it('keeps the managed project context when opening the new workspace home', () => {
     expect(source).toContain("path: '/workspace/home'")
     expect(source).toContain('projectRoot: contract.project_context.project_root')
