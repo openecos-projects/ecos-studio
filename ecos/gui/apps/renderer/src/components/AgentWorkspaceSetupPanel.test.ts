@@ -5,8 +5,16 @@ describe('AgentWorkspaceSetupPanel', () => {
   it('creates from the frozen contract without reopening NewProjectWizard', () => {
     expect(source).toContain("emit('createWorkspace'")
     expect(source).toContain('() => props.createSetupId')
-    expect(source).toContain('workspaceConfig(contract)')
+    expect(source).toContain('workspaceConfig(selectedContract)')
     expect(source).not.toContain('NewProjectWizard')
+  })
+
+  it('lets the reviewer keep or remove the project MPC snapshot before creation', () => {
+    expect(source).toContain('Use the Project\'s SoC-MPC template')
+    expect(source).toContain('v-model="useMpc"')
+    expect(source).toContain('const selectedMpcValue = useMpc.value ? selectedMpc.value : null')
+    expect(source).toContain('mpcLoading.value')
+    expect(source).toContain('delete selectedParameters.MPC')
   })
 
   it('renders the complete resolved specification in a two-column table', () => {

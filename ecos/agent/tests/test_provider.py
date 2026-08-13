@@ -13,9 +13,11 @@ from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
 from ecos_agent.source_retriever import SourceCodeRetriever
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
 from ecos_agent.workspace_setup import (
+    WorkspaceInputs,
     display_path,
     recommended_workspace_name,
     workspace_search_roots,
+    workspace_setup_contract,
 )
 
 
@@ -95,6 +97,45 @@ def test_source_manifest_uses_the_user_codex_environment() -> None:
 
     assert manifest["command"] == "uv"
     assert "ECOS_AGENT_CODEX_BIN" not in manifest.get("environment", {})
+
+
+def test_workspace_setup_contract_carries_project_mpc_snapshot(tmp_path: Path) -> None:
+    rtl, filelist, sdc, pdk = _write_workspace_inputs(tmp_path)
+    mpc_root = tmp_path / "mpc-frame"
+    mpc_root.mkdir()
+    mpc = {
+        "resource_id": "mpc:mpc-frame",
+        "display_name": "MPC Frame",
+        "installed_version": "0.1.0",
+        "path": str(mpc_root),
+        "spec_path": str(mpc_root / "spec" / "spec.json.in"),
+        "design": {"index": 0, "design_name": "frame"},
+        "core_template": {"minimum_area": 100},
+    }
+    (tmp_path / "project.json").write_text(json.dumps({"mpc": mpc}), encoding="utf-8")
+
+    contract = workspace_setup_contract(
+        _proposal(
+            workspace_name="ws_0001",
+            design_name="gcd",
+            top_module="gcd",
+            clock_name="clk",
+            flow_start="Synthesis",
+            flow_end="Harden",
+        ),
+        WorkspaceInputs(
+            project_root=str(tmp_path),
+            rtl_path=str(rtl),
+            filelist_path=str(filelist),
+            sdc_path=str(sdc),
+            pdk_root=str(pdk),
+        ),
+        "en",
+        "setup-mpc",
+    )
+
+    assert contract["mpc"] == mpc
+    assert contract["parameters"]["MPC"] == mpc
 
 
 def test_new_ephemeral_thread_discards_prior_case_context(tmp_path: Path) -> None:

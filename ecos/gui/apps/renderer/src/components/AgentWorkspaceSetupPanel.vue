@@ -10,6 +10,16 @@
     :title="displayTitle"
     @select="emit('select', $event)"
   />
+  <div v-if="contract && (mpcLoading || selectedMpc)" class="agent-mpc-choice">
+    <label class="agent-mpc-choice__label">
+      <input v-model="useMpc" type="checkbox" :disabled="mpcLoading || Boolean(createSetupId)" />
+      Use the Project's SoC-MPC template for this workspace
+    </label>
+    <p v-if="useMpc && selectedMpc" class="agent-mpc-choice__summary">
+      {{ selectedMpc.display_name }} / {{ selectedMpc.design.design_name }}
+      <span>{{ selectedMpc.spec_path }}</span>
+    </p>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -20,6 +30,9 @@ import type {
   DesktopAgentWorkspaceSetupContract,
 } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
+import type { ProjectManifestMpc } from '@/utils/projectManagement'
+import { parseProjectManifest } from '@/utils/projectManagement'
+import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import { displayAgentContractTitle } from './agentContractDisplay'
 import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 
@@ -37,6 +50,9 @@ const emit = defineEmits<{
 }>()
 
 const submittedSetupId = ref('')
+const selectedMpc = ref<ProjectManifestMpc | null>(null)
+const useMpc = ref(false)
+const mpcLoading = ref(false)
 const displayTitle = computed(() =>
   displayAgentContractTitle(props.contract?.title ?? ''),
 )
@@ -99,16 +115,55 @@ const specRows = computed<[string, string][]>(() => {
 })
 
 watch(
-  [() => props.contract, () => props.createSetupId],
+  () => props.contract?.project_context.project_root,
+  async (projectRoot) => {
+    selectedMpc.value = props.contract?.mpc ?? null
+    useMpc.value = Boolean(selectedMpc.value)
+    if (!projectRoot) return
+    mpcLoading.value = true
+    try {
+      const content = await readProjectManagementManifest(projectRoot)
+      if (content && !props.contract?.mpc) {
+        selectedMpc.value = parseProjectManifest(content).mpc
+        useMpc.value = Boolean(selectedMpc.value)
+      }
+    } catch {
+      selectedMpc.value = props.contract?.mpc ?? null
+      useMpc.value = Boolean(selectedMpc.value)
+    } finally {
+      mpcLoading.value = false
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  [() => props.contract, () => props.createSetupId, () => mpcLoading.value],
   ([contract, setupId]) => {
     if (!setupId) {
       submittedSetupId.value = ''
       return
     }
-    if (!contract || setupId !== contract.setup_id || submittedSetupId.value === setupId)
+    if (
+      !contract ||
+      mpcLoading.value ||
+      setupId !== contract.setup_id ||
+      submittedSetupId.value === setupId
+    )
       return
     submittedSetupId.value = setupId
-    emit('createWorkspace', workspaceConfig(contract), contract)
+    const selectedMpcValue = useMpc.value ? selectedMpc.value : null
+    const selectedParameters = { ...contract.parameters } as typeof contract.parameters &
+      Record<string, unknown>
+    if (selectedMpcValue) selectedParameters.MPC = selectedMpcValue
+    else delete selectedParameters.MPC
+    const selectedContract = {
+      ...contract,
+      mpc: selectedMpcValue,
+      parameters: selectedParameters,
+    }
+    const config = workspaceConfig(selectedContract)
+    emit('createWorkspace', config, selectedContract)
   },
   { immediate: true },
 )
@@ -122,6 +177,7 @@ function workspaceConfig(contract: DesktopAgentWorkspaceSetupContract): Workspac
     origin_def: '',
     origin_verilog: '',
     parameters: { ...contract.parameters },
+    mpc: contract.mpc ?? null,
     pdk: contract.pdk,
     pdk_config: contract.pdk_config,
     pdk_config_mode: contract.pdk_config_mode,

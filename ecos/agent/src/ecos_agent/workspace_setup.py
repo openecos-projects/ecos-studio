@@ -297,7 +297,8 @@ def workspace_setup_contract(
     if start_index > end_index:
         raise ValueError("workspace flow start must not follow its end")
     workspace_directory = _workspace_directory(inputs, proposal)
-    return {
+    mpc = _project_mpc_snapshot(inputs.project_root)
+    contract = {
         "schema_version": "flow-agent.workspace_setup_contract.v2",
         "title": "Workspace 运行方案" if language == "zh" else "Workspace run plan",
         "setup_id": setup_id,
@@ -338,6 +339,65 @@ def workspace_setup_contract(
             "steps": list(GUI_WORKSPACE_FLOW_STEPS[start_index : end_index + 1]),
         },
     }
+    if mpc is not None:
+        contract["mpc"] = mpc
+        contract["parameters"]["MPC"] = mpc
+    return contract
+
+
+def _project_mpc_snapshot(project_root: str) -> dict[str, Any] | None:
+    """Read only the validated project-managed MPC snapshot, when present."""
+    manifest_path = Path(project_root) / "project.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    mpc = payload.get("mpc") if isinstance(payload, dict) else None
+    if not isinstance(mpc, dict):
+        return None
+    required = (
+        "resource_id",
+        "display_name",
+        "installed_version",
+        "path",
+        "spec_path",
+        "design",
+        "core_template",
+    )
+    if any(key not in mpc for key in required):
+        return None
+    if (
+        not isinstance(mpc["resource_id"], str)
+        or not mpc["resource_id"].startswith("mpc:")
+        or len(mpc["resource_id"]) == 4
+        or not isinstance(mpc["display_name"], str)
+        or not mpc["display_name"]
+        or not isinstance(mpc["installed_version"], str)
+        or not mpc["installed_version"]
+    ):
+        return None
+    if (
+        not isinstance(mpc["path"], str)
+        or not Path(mpc["path"]).is_absolute()
+        or not isinstance(mpc["spec_path"], str)
+        or not Path(mpc["spec_path"]).is_absolute()
+    ):
+        return None
+    if mpc["spec_path"] != f'{mpc["path"].rstrip("/")}/spec/spec.json.in':
+        return None
+    design = mpc["design"]
+    if (
+        not isinstance(design, dict)
+        or isinstance(design.get("index"), bool)
+        or not isinstance(design.get("index"), int)
+        or design["index"] < 0
+        or not isinstance(design.get("design_name"), str)
+        or not design["design_name"]
+    ):
+        return None
+    if not isinstance(mpc["core_template"], dict):
+        return None
+    return json.loads(json.dumps(mpc))
 
 
 def _validated_workspace_inputs(inputs: WorkspaceInputs) -> WorkspaceInputs:

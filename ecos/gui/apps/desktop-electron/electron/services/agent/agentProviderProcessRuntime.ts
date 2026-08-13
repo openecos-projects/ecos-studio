@@ -588,6 +588,7 @@ function readWorkspaceSetupContract(
   const sdc = readOptionalWorkspaceSetupPath(record.sdc)
   const pdkConfig = readWorkspaceSetupPdkConfig(record.pdk_config)
   const projectContext = readWorkspaceSetupProjectContext(record.project_context)
+  const mpc = readWorkspaceSetupMpc(record.mpc)
   if (
     !parameters ||
     !flowConfig ||
@@ -599,6 +600,7 @@ function readWorkspaceSetupContract(
     sdc === null ||
     !pdkConfig ||
     !projectContext ||
+    (record.mpc !== undefined && record.mpc !== null && !mpc) ||
     record.design_input_mode !== 'rtl' ||
     record.pdk_config_mode !== 'default'
   )
@@ -620,6 +622,48 @@ function readWorkspaceSetupContract(
     setup_id: setupId,
     ...(sdc ? { sdc } : {}),
     title: readEventText(record.title) as string,
+    mpc,
+  }
+}
+
+function readWorkspaceSetupMpc(
+  value: unknown,
+): DesktopAgentWorkspaceSetupContract['mpc'] {
+  if (value === undefined || value === null) return null
+  const record = readRecord(value)
+  const resourceId = typeof record.resource_id === 'string' ? record.resource_id : ''
+  const displayName = typeof record.display_name === 'string' ? record.display_name : ''
+  const installedVersion =
+    typeof record.installed_version === 'string' ? record.installed_version : ''
+  const path = typeof record.path === 'string' ? record.path : ''
+  const specPath = typeof record.spec_path === 'string' ? record.spec_path : ''
+  const design = readRecord(record.design)
+  const coreTemplate = readRecord(record.core_template)
+  if (
+    !/^mpc:[^/]+$/.test(resourceId) ||
+    !displayName ||
+    !installedVersion ||
+    !path.startsWith('/') ||
+    specPath !== `${path}/spec/spec.json.in` ||
+    !Number.isInteger(design.index) ||
+    (design.index as number) < 0 ||
+    typeof design.design_name !== 'string' ||
+    !design.design_name
+  ) return null
+  return {
+    resource_id: resourceId,
+    display_name: displayName,
+    installed_version: installedVersion,
+    path,
+    spec_path: specPath,
+    design: {
+      index: design.index as number,
+      design_name: design.design_name,
+      ...(typeof design.directory === 'string' && design.directory
+        ? { directory: design.directory }
+        : {}),
+    },
+    core_template: coreTemplate,
   }
 }
 

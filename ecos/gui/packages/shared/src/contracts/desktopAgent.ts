@@ -187,6 +187,8 @@ export interface DesktopAgentWorkspaceSetupContract {
   setup_id: string
   sdc?: string
   title: string
+  /** Optional project-managed SoC-MPC snapshot selected by the GUI reviewer. */
+  mpc?: import('../utils/projectManifest').ProjectManifestMpc | null
 }
 
 export type DesktopAgentWorkspaceRerunParameterValue =
