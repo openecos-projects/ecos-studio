@@ -7,6 +7,7 @@ import {
   dashboardMetrics,
   formatDashboardMetric,
   instanceMetricsFromDbFeature,
+  instanceMetricsFromStepFeature,
   maxFanoutFromParameters,
   mpcConstraintsFromParameters,
   mpcDisplayNameFromParameters,
@@ -159,6 +160,7 @@ describe('dashboard data presentation', () => {
 
   it('extracts physical instance metrics from the Floorplan-through-Route db feature', () => {
     const dbMetrics = instanceMetricsFromDbFeature({
+      'Design Statis': { num_iopins: 54, num_instances: 432, num_nets: 777 },
       Instances: {
         macros: { num: 3, area: 41.25 },
         logic: { num: 316, area: 803.04 },
@@ -176,6 +178,22 @@ describe('dashboard data presentation', () => {
       { id: 'std-cell-area', label: 'Std Cell Area', value: 803.04, unit: 'um2' },
       { id: 'io-pad-number', label: 'IO Pad Number', value: 54 },
     ])
+    expect(metrics.find((metric) => metric.id === 'io-pins')?.value).toBe(54)
+    expect(metrics.find((metric) => metric.id === 'nets')?.value).toBe(777)
+  })
+
+  it('extracts physical counters from a previous step feature fallback', () => {
+    expect(
+      instanceMetricsFromStepFeature({
+        route: { instance_cnt: 432, total_pins: 54, net_cnt: 777 },
+      }),
+    ).toEqual(
+      new Map([
+        ['instance_count', 432],
+        ['io_pin_count', 54],
+        ['net_count', 777],
+      ]),
+    )
   })
 
   it('selects only the latest successful step except for the Harden summary', () => {

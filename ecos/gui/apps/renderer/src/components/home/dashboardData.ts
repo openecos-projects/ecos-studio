@@ -298,7 +298,8 @@ export function synthesisMetricsFromStat(value: unknown): Map<string, number> {
 }
 
 export function instanceMetricsFromDbFeature(value: unknown): Map<string, number> {
-  const instances = record(record(value)?.Instances)
+  const source = record(value)
+  const instances = record(source?.Instances)
   const metrics = new Map<string, number>()
   const metricKeys: readonly [string, string, 'num' | 'area'][] = [
     ['macro_count', 'macros', 'num'],
@@ -313,6 +314,67 @@ export function instanceMetricsFromDbFeature(value: unknown): Map<string, number
     const metricValue = finiteNumber(instanceMetrics?.[sourceKey])
     if (metricValue !== null) metrics.set(metricId, metricValue)
   }
+
+  const statistics = record(source?.['Design Statis'])
+  const totalMetricKeys: readonly [string, string][] = [
+    ['io_pin_count', 'num_iopins'],
+    ['instance_count', 'num_instances'],
+    ['net_count', 'num_nets'],
+  ]
+  for (const [metricId, sourceKey] of totalMetricKeys) {
+    const metricValue = finiteNumber(statistics?.[sourceKey])
+    if (metricValue !== null) metrics.set(metricId, metricValue)
+  }
+  return metrics
+}
+
+/**
+ * Extracts the physical counters that older step feature files may expose
+ * without the full DB summary shape. These files are only a fallback when the
+ * current step has no db.json, so unrecognised step-specific values are ignored.
+ */
+export function instanceMetricsFromStepFeature(value: unknown): Map<string, number> {
+  const metrics = instanceMetricsFromDbFeature(value)
+  const aliases: Record<string, string> = {
+    iopin_count: 'io_pin_count',
+    io_pin_count: 'io_pin_count',
+    num_iopins: 'io_pin_count',
+    pin_count: 'io_pin_count',
+    total_pins: 'io_pin_count',
+    instance_count: 'instance_count',
+    instance_cnt: 'instance_count',
+    num_instances: 'instance_count',
+    total_instances: 'instance_count',
+    net_count: 'net_count',
+    net_cnt: 'net_count',
+    num_nets: 'net_count',
+    total_nets: 'net_count',
+    macro_count: 'macro_count',
+    macro_num: 'macro_count',
+    std_cell_count: 'std_cell_count',
+    stdcell_count: 'std_cell_count',
+    io_pad_count: 'io_pad_count',
+    iopad_count: 'io_pad_count',
+  }
+
+  function visit(node: unknown): void {
+    const source = record(node)
+    if (!source) return
+    for (const [key, child] of Object.entries(source)) {
+      const normalizedKey = key
+        .trim()
+        .toLowerCase()
+        .replace(/[\s-]+/g, '_')
+      const metricId = aliases[normalizedKey]
+      const numeric = finiteNumber(child)
+      if (metricId && numeric !== null && !metrics.has(metricId)) {
+        metrics.set(metricId, numeric)
+      }
+      if (record(child)) visit(child)
+    }
+  }
+
+  visit(value)
   return metrics
 }
 
