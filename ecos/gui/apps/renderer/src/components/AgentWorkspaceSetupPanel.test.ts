@@ -10,11 +10,15 @@ describe('AgentWorkspaceSetupPanel', () => {
   })
 
   it('lets the reviewer keep or remove the project MPC snapshot before creation', () => {
-    expect(source).toContain('Use the Project\'s SoC-MPC template')
+    expect(source).toContain('Use a SoC-MPC template')
     expect(source).toContain('v-model="useMpc"')
-    expect(source).toContain('const selectedMpcValue = useMpc.value ? selectedMpc.value : null')
+    expect(source).toContain(
+      'const selectedMpcValue = useMpc.value ? selectedMpc.value : null',
+    )
     expect(source).toContain('mpcLoading.value')
     expect(source).toContain('delete selectedParameters.MPC')
+    expect(source).toContain('listResourcesApi')
+    expect(source).toContain('readMpcSpecApi')
   })
 
   it('renders the complete resolved specification in a two-column table', () => {

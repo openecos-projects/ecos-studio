@@ -10,10 +10,40 @@
     :title="displayTitle"
     @select="emit('select', $event)"
   />
-  <div v-if="contract && (mpcLoading || selectedMpc)" class="agent-mpc-choice">
+  <div v-if="contract" class="agent-mpc-choice">
     <label class="agent-mpc-choice__label">
-      <input v-model="useMpc" type="checkbox" :disabled="mpcLoading || Boolean(createSetupId)" />
-      Use the Project's SoC-MPC template for this workspace
+      <input
+        v-model="useMpc"
+        type="checkbox"
+        :disabled="mpcLoading || Boolean(createSetupId) || !selectedMpc"
+      />
+      Use a SoC-MPC template for this workspace
+    </label>
+    <p v-if="mpcLoading" class="agent-mpc-choice__status">
+      Loading available templates...
+    </p>
+    <p v-else-if="!selectedMpc" class="agent-mpc-choice__status">
+      No usable SoC-MPC template is selected.
+    </p>
+    <label v-if="mpcCandidates.length" class="agent-mpc-choice__select">
+      <span>Template</span>
+      <select v-model="selectedMpcResourceId" :disabled="Boolean(createSetupId)">
+        <option
+          v-for="candidate in mpcCandidates"
+          :key="candidate.resource_id"
+          :value="candidate.resource_id"
+        >
+          {{ candidate.display_name }} ({{ candidate.installed_version }})
+        </option>
+      </select>
+    </label>
+    <label v-if="mpcDesigns.length > 1" class="agent-mpc-choice__select">
+      <span>Design</span>
+      <select v-model="selectedMpcDesignIndex" :disabled="Boolean(createSetupId)">
+        <option v-for="design in mpcDesigns" :key="design.index" :value="design.index">
+          {{ design.designName }}
+        </option>
+      </select>
     </label>
     <p v-if="useMpc && selectedMpc" class="agent-mpc-choice__summary">
       {{ selectedMpc.display_name }} / {{ selectedMpc.design.design_name }}
@@ -30,9 +60,19 @@ import type {
   DesktopAgentWorkspaceSetupContract,
 } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
-import type { ProjectManifestMpc } from '@/utils/projectManagement'
+import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
+import type {
+  ProjectManifestMpc,
+  ProjectManifestMpcCandidate,
+} from '@/utils/projectManagement'
 import { parseProjectManifest } from '@/utils/projectManagement'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
+import {
+  createProjectManifestMpcSnapshot,
+  parseMpcSpecDesigns,
+  type MpcSpecDesign,
+} from '@/utils/mpcSpec'
+import { projectMpcOptionFromResource } from '@/utils/projectManagement'
 import { displayAgentContractTitle } from './agentContractDisplay'
 import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 
@@ -51,6 +91,10 @@ const emit = defineEmits<{
 
 const submittedSetupId = ref('')
 const selectedMpc = ref<ProjectManifestMpc | null>(null)
+const mpcCandidates = ref<ProjectManifestMpcCandidate[]>([])
+const selectedMpcResourceId = ref('')
+const mpcDesigns = ref<MpcSpecDesign[]>([])
+const selectedMpcDesignIndex = ref<number | null>(null)
 const useMpc = ref(false)
 const mpcLoading = ref(false)
 const displayTitle = computed(() =>
@@ -119,13 +163,42 @@ watch(
   async (projectRoot) => {
     selectedMpc.value = props.contract?.mpc ?? null
     useMpc.value = Boolean(selectedMpc.value)
+    mpcCandidates.value = []
+    mpcDesigns.value = []
+    selectedMpcResourceId.value = selectedMpc.value?.resource_id ?? ''
+    selectedMpcDesignIndex.value = selectedMpc.value?.design.index ?? null
     if (!projectRoot) return
     mpcLoading.value = true
     try {
-      const content = await readProjectManagementManifest(projectRoot)
+      let content: string | null = null
+      try {
+        content = await readProjectManagementManifest(projectRoot)
+      } catch {
+        // A new project has no manifest yet; installed MPC resources are still selectable.
+      }
       if (content && !props.contract?.mpc) {
-        selectedMpc.value = parseProjectManifest(content).mpc
-        useMpc.value = Boolean(selectedMpc.value)
+        try {
+          selectedMpc.value = parseProjectManifest(content).mpc
+          useMpc.value = Boolean(selectedMpc.value)
+        } catch {
+          // An invalid project manifest must not hide otherwise usable MPC resources.
+        }
+      }
+      selectedMpcResourceId.value = selectedMpc.value?.resource_id ?? ''
+      if (!selectedMpc.value) {
+        try {
+          const resources = await listResourcesApi()
+          mpcCandidates.value = resources.flatMap((resource) => {
+            const candidate = projectMpcOptionFromResource(resource)
+            return candidate ? [candidate] : []
+          })
+          if (mpcCandidates.value[0]) {
+            selectedMpcResourceId.value = mpcCandidates.value[0].resource_id
+            await loadMpcDesigns(mpcCandidates.value[0])
+          }
+        } catch {
+          mpcCandidates.value = []
+        }
       }
     } catch {
       selectedMpc.value = props.contract?.mpc ?? null
@@ -136,6 +209,36 @@ watch(
   },
   { immediate: true },
 )
+
+watch(selectedMpcResourceId, async (resourceId) => {
+  if (!resourceId || selectedMpc.value?.resource_id === resourceId) return
+  const candidate = mpcCandidates.value.find((item) => item.resource_id === resourceId)
+  if (!candidate) return
+  mpcLoading.value = true
+  try {
+    await loadMpcDesigns(candidate)
+  } finally {
+    mpcLoading.value = false
+  }
+})
+
+watch(selectedMpcDesignIndex, (index) => {
+  const candidate = mpcCandidates.value.find(
+    (item) => item.resource_id === selectedMpcResourceId.value,
+  )
+  const design = mpcDesigns.value.find((item) => item.index === index)
+  if (candidate && design) {
+    selectedMpc.value = createProjectManifestMpcSnapshot(candidate, design)
+  }
+})
+
+async function loadMpcDesigns(candidate: ProjectManifestMpcCandidate): Promise<void> {
+  const result = await readMpcSpecApi(candidate.resource_id)
+  mpcDesigns.value = parseMpcSpecDesigns(result.spec)
+  selectedMpcDesignIndex.value = mpcDesigns.value[0]?.index ?? null
+  const design = mpcDesigns.value[0]
+  if (design) selectedMpc.value = createProjectManifestMpcSnapshot(candidate, design)
+}
 
 watch(
   [() => props.contract, () => props.createSetupId, () => mpcLoading.value],
