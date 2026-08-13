@@ -308,7 +308,10 @@ export function useFlowStages() {
     try {
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
       const flowData = await workspaceLifecycle.runForSession(sessionId, async () => {
-        if (!workspaceHandle) {
+        // ECC-FE owns its workspace handle through DesignRuntime. The shared
+        // ECC snapshot API only understands backend workspace handles, so
+        // frontend projects must continue to read their complete flow.json.
+        if (!workspaceHandle || currentProject.value?.designTool === 'frontend') {
           return (await readWorkspaceFlowResourceApi()) as FlowData | null
         }
         const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)

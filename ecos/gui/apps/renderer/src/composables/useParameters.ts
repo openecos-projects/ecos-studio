@@ -507,7 +507,7 @@ export function useParameters() {
 
     try {
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
-      if (workspaceHandle) {
+      if (workspaceHandle && currentProject.value?.designTool !== 'frontend') {
         const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
           getWorkspaceRuntimeSnapshotApi(workspaceHandle),
         )
@@ -604,6 +604,7 @@ export function useParameters() {
           projectPath,
           isDesktopRuntimeAvailable,
           workspaceSession?.value?.workspaceId ?? '',
+          currentProject.value?.designTool ?? 'backend',
         ),
       )
       if (homeData === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
@@ -624,7 +625,7 @@ export function useParameters() {
 
       const parametersPath = convertToLocalPath(homeData.parameters)
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
-      if (workspaceHandle) {
+      if (workspaceHandle && currentProject.value?.designTool !== 'frontend') {
         const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
           getWorkspaceRuntimeSnapshotApi(workspaceHandle),
         )
