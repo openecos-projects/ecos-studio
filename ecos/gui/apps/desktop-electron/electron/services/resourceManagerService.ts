@@ -2747,9 +2747,24 @@ async function downloadAsset(
     response = await fetchImpl(url, { signal })
   } catch (error) {
     if (isAbortError(error) || signal?.aborted) throw error
-    throw new Error(`Failed to download ${url}: ${formatDownloadError(error)}`, {
-      cause: error,
-    })
+    const fallbackUrl = githubCodeloadArchiveUrl(url)
+    if (fallbackUrl) {
+      try {
+        response = await fetchImpl(fallbackUrl, { signal })
+      } catch (fallbackError) {
+        if (isAbortError(fallbackError) || signal?.aborted) throw fallbackError
+        throw new Error(
+          `Failed to download ${url}: ${formatDownloadError(fallbackError)}`,
+          {
+            cause: fallbackError,
+          },
+        )
+      }
+    } else {
+      throw new Error(`Failed to download ${url}: ${formatDownloadError(error)}`, {
+        cause: error,
+      })
+    }
   }
   if (!response.ok) {
     throw new Error(`Download failed with ${response.status}: ${url}`)
@@ -2808,6 +2823,19 @@ async function downloadAsset(
     reader.releaseLock()
     await file.close()
   }
+}
+
+function githubCodeloadArchiveUrl(value: string): string | null {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return null
+  }
+  if (url.hostname !== 'github.com') return null
+  const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/archive\/(.+)\.tar\.gz$/)
+  if (!match) return null
+  return `https://codeload.github.com/${match[1]}/${match[2]}/tar.gz/${match[3]}`
 }
 
 function formatDownloadError(error: unknown): string {
