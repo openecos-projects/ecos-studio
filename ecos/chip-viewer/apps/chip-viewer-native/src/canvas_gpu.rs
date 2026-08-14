@@ -20,7 +20,7 @@ pub struct CanvasUniform {
     pub min_shape_screen_size: f32,
     pub screen_size_px: [f32; 2],
     pub is_interacting: f32,
-    pub pad: f32,
+    pub global_alpha: f32,
 }
 
 #[repr(C)]
@@ -33,7 +33,7 @@ pub struct GpuShapeInstance {
     pub line_width_px: f32,
 }
 
-pub const GPU_TILE_SIZE_DBU: i32 = 200_000;
+pub const GPU_TILE_SIZE_DBU: i32 = 600_000;
 
 pub fn tile_coords_for_bbox(bbox: chipgeom_format::Rect32, tile_size: i32) -> Vec<(i32, i32)> {
     if tile_size <= 0 {
@@ -139,7 +139,7 @@ struct CanvasUniform {
     min_shape_screen_size: f32,
     screen_size_px: vec2<f32>,
     is_interacting: f32,
-    pad: f32,
+    global_alpha: f32,
 };
 
 struct GpuShapeInstance {
@@ -407,7 +407,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    return vec4<f32>(out_rgb, out_a);
+    return vec4<f32>(out_rgb * u_canvas.global_alpha, out_a * u_canvas.global_alpha);
 }
 "#;
 
@@ -484,6 +484,16 @@ mod tests {
         let rgba = [0x12, 0x34, 0x56, 0x78];
         let packed = pack_rgba_u32(rgba);
         assert_eq!(packed.to_le_bytes(), rgba);
+    }
+
+    #[test]
+    fn heatmap_texture_row_alignment_calculation() {
+        let width = 20u32;
+        let unpadded_bytes_per_row = (4 * width) as usize;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) & !(align - 1);
+        assert_eq!(padded_bytes_per_row, 256);
+        assert_eq!(padded_bytes_per_row % 256, 0);
     }
 }
 
@@ -751,4 +761,113 @@ pub fn build_gpu_instances(
         });
     }
     instances
+}
+
+pub struct HeatmapGpuResources(pub CanvasGpuResources);
+
+pub struct HeatmapGpuCallback {
+    pub uniform: CanvasUniform,
+    pub instances: std::sync::Arc<Vec<GpuShapeInstance>>,
+    pub buffer_key: GpuBufferKey,
+    pub frame_counter: u64,
+    pub target_format: wgpu::TextureFormat,
+}
+
+impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut wgpu::CommandEncoder,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if callback_resources.get::<HeatmapGpuResources>().is_none() {
+            callback_resources.insert(HeatmapGpuResources(CanvasGpuResources::new(
+                device,
+                self.target_format,
+            )));
+        }
+        let resources = &mut callback_resources
+            .get_mut::<HeatmapGpuResources>()
+            .unwrap()
+            .0;
+
+        queue.write_buffer(
+            &resources.uniform_buffer,
+            0,
+            bytemuck::bytes_of(&self.uniform),
+        );
+
+        if self.instances.is_empty() {
+            return Vec::new();
+        }
+
+        if !resources.instance_buffers.contains_key(&self.buffer_key) {
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Heatmap Instance Buffer"),
+                contents: bytemuck::cast_slice(&self.instances),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Heatmap Bind Group"),
+                layout: &resources.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: resources.uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+            resources.instance_buffers.insert(
+                self.buffer_key,
+                GpuBufferCacheEntry {
+                    instance_buffer: buffer,
+                    bind_group,
+                    count: self.instances.len() as u32,
+                    last_used_frame: self.frame_counter,
+                },
+            );
+        }
+
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        let Some(resources_wrapper) = callback_resources.get::<HeatmapGpuResources>() else {
+            return;
+        };
+        let resources = &resources_wrapper.0;
+
+        if let Some(entry) = resources.instance_buffers.get(&self.buffer_key) {
+            if entry.count == 0 {
+                return;
+            }
+
+            let clip = info.clip_rect_in_pixels();
+            let clip_min_x = clip.left_px.max(0) as u32;
+            let clip_min_y = clip.top_px.max(0) as u32;
+            let clip_w = clip.width_px.max(0) as u32;
+            let clip_h = clip.height_px.max(0) as u32;
+
+            if clip_w > 0 && clip_h > 0 {
+                render_pass.set_scissor_rect(clip_min_x, clip_min_y, clip_w, clip_h);
+            }
+
+            render_pass.set_pipeline(&resources.pipeline);
+            render_pass.set_bind_group(0, &entry.bind_group, &[]);
+            render_pass.draw(0..6, 0..entry.count);
+        }
+    }
 }
