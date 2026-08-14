@@ -67,7 +67,7 @@
 
 .step-config-root .topbar-left .subtitle {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
@@ -108,7 +108,7 @@
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   border-radius: 6px;
   transition: all 0.15s;
@@ -132,7 +132,7 @@
   border: none;
   background: #6366f1;
   color: white;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   border-radius: 6px;
@@ -209,7 +209,7 @@
 
 .step-config-root .field label {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
   margin-bottom: 4px;

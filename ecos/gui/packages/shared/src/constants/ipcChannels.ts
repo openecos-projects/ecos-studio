@@ -6,6 +6,7 @@ export const desktopApiIpcChannels = {
   windowConfirmClose: 'window:confirm-close',
   windowSetTitle: 'window:set-title',
   windowIsMaximized: 'window:is-maximized',
+  windowSetZoomFactor: 'window:set-zoom-factor',
   windowCreate: 'window:create',
   workspaceOpenOrFocus: 'workspace:open-or-focus',
   workspacePrepareFlowAgentRerun: 'workspace:prepare-flow-agent-rerun',

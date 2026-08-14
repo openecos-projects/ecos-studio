@@ -165,6 +165,7 @@
 import { ref, onMounted, onUnmounted, computed, nextTick, provide, watch } from 'vue'
 import {
   appMenuActionIds,
+  type AppMenuAction,
   type DesktopAgentWorkspaceSetupContract,
   type DesktopApi,
 } from '@ecos-studio/shared'
@@ -217,6 +218,9 @@ const themeStore = useThemeStore()
 const route = useRoute()
 const isWelcome = computed(() => route.path === '/')
 const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
+const zoomFactors = [0.8, 0.9, 1, 1.1, 1.25, 1.4] as const
+const zoomFactor = ref<(typeof zoomFactors)[number]>(1)
+const zoomSettingKey = 'ui.zoomFactor'
 const {
   loadRecentProjects,
   currentProject,
@@ -916,6 +920,33 @@ const openDocumentation = async () => {
   }
 }
 
+async function setZoomFactor(nextFactor: number): Promise<void> {
+  const factor = zoomFactors.includes(nextFactor as (typeof zoomFactors)[number])
+    ? (nextFactor as (typeof zoomFactors)[number])
+    : 1
+  const api = desktopApi.value ?? (await waitForDesktopApi())
+  desktopApi.value = api
+  await api.window.setZoomFactor(factor)
+  zoomFactor.value = factor
+  try {
+    await api.settings.set(zoomSettingKey, factor)
+  } catch (error) {
+    console.warn('[App] Failed to persist UI zoom setting:', error)
+  }
+}
+
+async function adjustZoom(action: AppMenuAction): Promise<void> {
+  const index = zoomFactors.indexOf(zoomFactor.value)
+  if (action === appMenuActionIds.zoomReset) {
+    await setZoomFactor(1)
+    return
+  }
+  const nextIndex = action === appMenuActionIds.zoomIn ? index + 1 : index - 1
+  await setZoomFactor(
+    zoomFactors[Math.max(0, Math.min(zoomFactors.length - 1, nextIndex))],
+  )
+}
+
 const { handleMenuAction } = useAppMenuActions({
   createWindow: async () => {
     const api = await waitForDesktopApi()
@@ -933,6 +964,7 @@ const { handleMenuAction } = useAppMenuActions({
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
   exportSignoffPackage,
   manageDesignFiles: openManageDialog,
+  adjustZoom,
 })
 useAppWindowClose(closeProject)
 
@@ -1032,6 +1064,20 @@ onMounted(async () => {
     }
   }
   console.info('[App] Desktop bridge available:', Boolean(desktopApi.value))
+
+  if (desktopApi.value) {
+    try {
+      const savedZoom = await desktopApi.value.settings.get<number>(zoomSettingKey)
+      if (
+        typeof savedZoom === 'number' &&
+        zoomFactors.includes(savedZoom as (typeof zoomFactors)[number])
+      ) {
+        await setZoomFactor(savedZoom)
+      }
+    } catch (error) {
+      console.warn('[App] Failed to restore UI zoom setting:', error)
+    }
+  }
 
   themeStore.initTheme()
   // 在应用启动时加载最近项目和已导入的 PDK

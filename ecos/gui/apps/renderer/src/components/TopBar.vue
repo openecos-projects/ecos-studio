@@ -318,6 +318,30 @@ const menus = computed<Menu[]>(() => [
   },
   ...(isWorkspaceRoute.value ? [editMenu.value] : []),
   {
+    label: 'View',
+    action: 'view',
+    children: [
+      {
+        label: 'Zoom In',
+        icon: 'ri-zoom-in-line',
+        shortcut: '⌘+',
+        event: appMenuActionIds.zoomIn,
+      },
+      {
+        label: 'Zoom Out',
+        icon: 'ri-zoom-out-line',
+        shortcut: '⌘−',
+        event: appMenuActionIds.zoomOut,
+      },
+      {
+        label: 'Reset Zoom',
+        icon: 'ri-refresh-line',
+        shortcut: '⌘0',
+        event: appMenuActionIds.zoomReset,
+      },
+    ],
+  },
+  {
     label: 'Help',
     action: 'help',
     children: [
