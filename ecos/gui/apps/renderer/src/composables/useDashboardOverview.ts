@@ -9,6 +9,7 @@ import {
   dashboardMetricSourceStepIndexes,
   dashboardMetrics,
   instanceMetricsFromDbFeature,
+  instanceMetricsFromStepFeature,
   maxFanoutFromParameters,
   metricsFromAnalysis,
   mpcDisplayNameFromParameters,
@@ -76,21 +77,43 @@ async function synthesisDashboardMetrics(
 async function dbFeatureDashboardMetrics(
   step: WorkspaceStepResource,
 ): Promise<Map<string, number>> {
-  const stepName = step.name.trim().toLowerCase()
-  if (
-    !['floorplan', 'fixfanout', 'place', 'cts', 'legalization', 'route'].includes(
-      stepName,
-    )
-  ) {
-    return new Map()
-  }
-
   const dbPath = step.resources.feature.db
   if (!dbPath?.exists) return new Map()
   return metricsFromTextWith(
     await readAuthorizedProjectTextFile(dbPath.path),
     instanceMetricsFromDbFeature,
   )
+}
+
+function hasDbFeature(step: WorkspaceStepResource | undefined): boolean {
+  return Boolean(step?.resources.feature.db?.exists)
+}
+
+async function previousSuccessfulStepFeatureMetrics(
+  steps: readonly WorkspaceStepResource[],
+  currentIndex: number,
+): Promise<Map<string, number>> {
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const step = steps[index]
+    if (!step || !isSuccessfulStep(step) || !step.resources.feature.step?.exists) continue
+    return metricsFromTextWith(
+      await readAuthorizedProjectTextFile(step.resources.feature.step.path),
+      instanceMetricsFromStepFeature,
+    )
+  }
+  return new Map()
+}
+
+function isSuccessfulStep(step: WorkspaceStepResource): boolean {
+  switch (step.state.trim().toLowerCase()) {
+    case 'success':
+    case 'succeeded':
+    case 'complete':
+    case 'completed':
+      return true
+    default:
+      return false
+  }
 }
 
 function metricsFromTextWith(
@@ -187,15 +210,41 @@ export function useDashboardOverview() {
 
       const latestSourceStep =
         sourceIndexes.length === 1 ? nextIndex.flow.steps[sourceIndexes[0]!] : null
+      const latestSourceGroup =
+        sourceIndexes.length === 1 ? metricGroups[sourceIndexes[0]!] : undefined
       const nextMetricValues =
         latestSourceStep?.name.trim().toLowerCase() === 'synthesis'
-          ? await synthesisDashboardMetrics(latestSourceStep)
+          ? mergeMetrics([
+              await synthesisDashboardMetrics(latestSourceStep),
+              latestSourceGroup?.metrics ?? new Map<string, number>(),
+            ])
           : mergeMetrics(
               sourceIndexes.flatMap((index) => {
                 const group = metricGroups[index]
                 return group ? [group.metrics] : []
               }),
             )
+      const latestSourceIndex = sourceIndexes.length === 1 ? sourceIndexes[0] : undefined
+      const latestSource =
+        latestSourceIndex === undefined
+          ? undefined
+          : nextIndex.flow.steps[latestSourceIndex]
+      if (
+        latestSourceIndex !== undefined &&
+        latestSource &&
+        !hasDbFeature(latestSource)
+      ) {
+        const fallbackMetrics = await previousSuccessfulStepFeatureMetrics(
+          nextIndex.flow.steps,
+          latestSourceIndex,
+        )
+        if (token !== loadToken || currentProject.value?.path !== projectPath) return
+        const merged = mergeMetrics([fallbackMetrics, nextMetricValues])
+        index.value = nextIndex
+        qorSteps.value = metricGroups.map((group) => group.step)
+        metricValues.value = merged
+        return
+      }
       if (token !== loadToken || currentProject.value?.path !== projectPath) return
 
       index.value = nextIndex

@@ -124,6 +124,15 @@ export function registerApplicationMenu(options: ApplicationMenuOptions = {}): v
     })
   }
 
+  template.push({
+    label: 'View',
+    submenu: [
+      createMenuAction('Zoom In', appMenuActionIds.zoomIn, 'CmdOrCtrl+='),
+      createMenuAction('Zoom Out', appMenuActionIds.zoomOut, 'CmdOrCtrl+-'),
+      createMenuAction('Reset Zoom', appMenuActionIds.zoomReset, 'CmdOrCtrl+0'),
+    ],
+  })
+
   template.push(
     {
       label: 'File',

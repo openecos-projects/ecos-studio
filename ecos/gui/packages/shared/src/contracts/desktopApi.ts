@@ -214,6 +214,7 @@ export interface DesktopApi {
     confirmClose(): Promise<void>
     setTitle(title: string): Promise<void>
     isMaximized(): Promise<boolean>
+    setZoomFactor(factor: number): Promise<void>
     create(options?: { initialRoute?: string }): Promise<void>
     onCloseRequested(listener: () => void): DesktopEventUnsubscribe
     onResized(listener: () => void): DesktopEventUnsubscribe

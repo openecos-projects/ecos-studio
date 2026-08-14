@@ -32,7 +32,7 @@
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
 }
@@ -61,7 +61,7 @@
   padding: 0 4px;
   color: var(--bg-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -177,7 +177,7 @@
 .workspace-selector-value strong {
   overflow: hidden;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -293,7 +293,7 @@
 .workspace-picker-empty {
   margin: 2px 0;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .workspace-picker-preview-toggle {
@@ -339,7 +339,7 @@
   border-radius: 6px;
   padding: 0 4px;
   color: var(--bg-primary);
-  font-size: 9px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 800;
 }
@@ -359,7 +359,7 @@
 
 .chip-role {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -381,7 +381,7 @@
   padding: 2px 7px;
   color: var(--bg-primary);
   background: color-mix(in srgb, var(--text-secondary) 60%, transparent);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -402,7 +402,7 @@
 
 .verdict-summary {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -414,7 +414,7 @@
 
 .verdict-fact small {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 750;
   text-transform: uppercase;
 }
@@ -422,7 +422,7 @@
 .verdict-fact strong {
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .verdict-fact strong.good {
@@ -461,7 +461,7 @@
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -497,7 +497,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -543,7 +543,7 @@
 
 .pane-title {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -553,7 +553,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -582,7 +582,7 @@
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  font-size: 9px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -648,7 +648,7 @@
 
 .issue-kind {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 750;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -665,7 +665,7 @@
 .issue-actual {
   color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
@@ -731,7 +731,7 @@
 .evidence-flag,
 .evidence-severity {
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -782,7 +782,7 @@
 
 .evidence-facts dt {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 780;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -799,7 +799,7 @@
 
 .evidence-facts dd.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .evidence-facts dd.strong {
@@ -834,7 +834,7 @@
 .metric-group-label {
   padding: 3px 0;
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 780;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -859,14 +859,14 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .metric-value {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -879,7 +879,7 @@
   align-items: baseline;
   color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -906,7 +906,7 @@
 .detail-table-wrap table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .detail-table-wrap th,
@@ -928,7 +928,7 @@
   z-index: 1;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-primary));
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -941,7 +941,7 @@
   margin: 0;
   padding: 16px 12px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
 }
 
@@ -953,7 +953,7 @@
 
 .pane-empty-detail small {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 /* Region 4b — cross-workspace comparison for the selected step. */
@@ -993,7 +993,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1116,7 +1116,7 @@
   background: transparent;
   cursor: pointer;
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1128,7 +1128,7 @@
 .compare-column-filters button em {
   color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -1200,7 +1200,7 @@
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1290,7 +1290,7 @@
   z-index: 5;
   padding: 7px 10px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
   text-transform: uppercase;
   background: color-mix(in srgb, var(--bg-secondary) 86%, var(--bg-primary));
@@ -1345,7 +1345,7 @@
 .compare-head button {
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1364,7 +1364,7 @@
 .compare-head button small {
   color: var(--text-secondary);
   font-family: inherit;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -1421,13 +1421,13 @@
 
 .compare-metric strong {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 
 .compare-metric small {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .compare-rank-mark {
@@ -1459,7 +1459,7 @@
   overflow: hidden;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1505,7 +1505,7 @@
   overflow: hidden;
   color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -1684,7 +1684,7 @@
 
   .severity-filters button {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .compare-column-filters {

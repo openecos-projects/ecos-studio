@@ -161,6 +161,10 @@ pub enum ShapeGeometry {
 pub struct LayerShapeIndex {
     by_layer: BTreeMap<u16, Vec<usize>>,
     spatial_by_layer: BTreeMap<u16, RTree<LayerSpatialEntry>>,
+    /// Top-level R-Tree whose leaves are the bounding boxes of entire layers.
+    /// Used to skip layers that have no shapes anywhere near the query bbox,
+    /// eliminating per-layer R-Tree root descents for off-screen layers.
+    layer_bboxes: RTree<LayerBBoxEntry>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -215,10 +219,29 @@ impl RTreeObject for LayerSpatialEntry {
     }
 }
 
+/// A single leaf in the top-level layer bounding-box R-Tree.
+/// Stores the layer ID plus the merged AABB of all shapes on that layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LayerBBoxEntry {
+    layer_id: u16,
+    envelope: AABB<[i32; 2]>,
+}
+
+impl RTreeObject for LayerBBoxEntry {
+    type Envelope = AABB<[i32; 2]>;
+
+    fn envelope(&self) -> Self::Envelope {
+        self.envelope
+    }
+}
+
 impl LayerShapeIndex {
     pub fn from_shapes(shapes: &[ShapeRecord]) -> Self {
         let mut by_layer = BTreeMap::<u16, Vec<usize>>::new();
         let mut spatial_entries_by_layer = BTreeMap::<u16, Vec<LayerSpatialEntry>>::new();
+        // Track the merged bounding box for each layer so we can build the
+        // top-level layer-bbox R-Tree in a single bulk-load pass.
+        let mut layer_bbox_map: BTreeMap<u16, [i32; 4]> = BTreeMap::new();
         for (index, shape) in shapes.iter().enumerate() {
             if shape.state != ShapeState::Alive as u8 {
                 continue;
@@ -231,14 +254,39 @@ impl LayerShapeIndex {
                     index,
                     envelope: rect_envelope(shape.bbox),
                 });
+            // Merge this shape's bbox into the per-layer AABB.
+            let b = shape.bbox;
+            let lx = b.lx.min(b.hx);
+            let ly = b.ly.min(b.hy);
+            let hx = b.lx.max(b.hx);
+            let hy = b.ly.max(b.hy);
+            layer_bbox_map
+                .entry(shape.layer_id)
+                .and_modify(|acc| {
+                    acc[0] = acc[0].min(lx);
+                    acc[1] = acc[1].min(ly);
+                    acc[2] = acc[2].max(hx);
+                    acc[3] = acc[3].max(hy);
+                })
+                .or_insert([lx, ly, hx, hy]);
         }
-        let spatial_by_layer = spatial_entries_by_layer
+        let spatial_by_layer: BTreeMap<u16, RTree<LayerSpatialEntry>> = spatial_entries_by_layer
             .into_iter()
             .map(|(layer_id, entries)| (layer_id, RTree::bulk_load(entries)))
             .collect();
+        // Build the top-level layer bounding-box R-Tree.
+        let layer_bbox_entries: Vec<LayerBBoxEntry> = layer_bbox_map
+            .into_iter()
+            .map(|(layer_id, [lx, ly, hx, hy])| LayerBBoxEntry {
+                layer_id,
+                envelope: AABB::from_corners([lx, ly], [hx, hy]),
+            })
+            .collect();
+        let layer_bboxes = RTree::bulk_load(layer_bbox_entries);
         Self {
             by_layer,
             spatial_by_layer,
+            layer_bboxes,
         }
     }
 
@@ -289,8 +337,19 @@ impl LayerShapeIndex {
         layer_ids: &[u16],
         bbox: Rect32,
     ) -> Vec<ShapeId> {
+        let viewport_envelope = rect_envelope(bbox);
+        let layers_in_view: std::collections::HashSet<u16> = self
+            .layer_bboxes
+            .locate_in_envelope_intersecting(viewport_envelope)
+            .map(|entry| entry.layer_id)
+            .collect();
+
         let mut hits = Vec::new();
         for layer_id in layer_ids {
+            // Skip layers whose entire extent lies outside the viewport.
+            if !layers_in_view.contains(layer_id) {
+                continue;
+            }
             let mut layer_hits = self.query_layer_intersect(shapes, *layer_id, bbox);
             layer_hits.sort_unstable();
             hits.extend(layer_hits);

@@ -249,6 +249,9 @@ function createWindowDouble(isMaximized = false) {
     maximize: vi.fn(),
     minimize: vi.fn(),
     setTitle: vi.fn(),
+    webContents: {
+      setZoomFactor: vi.fn(),
+    },
     unmaximize: vi.fn(),
   }
 }
@@ -965,6 +968,29 @@ describe('registerIpc', () => {
     expect(windowDouble.setTitle).toHaveBeenCalledWith('ECOS Studio')
     expect(isMaximized).toBe(false)
     expect(windowDouble.close).toHaveBeenCalledTimes(2)
+  })
+
+  it('applies valid zoom factors and rejects values outside the supported range', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    fromWebContents.mockReturnValue(windowDouble)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.windowSetZoomFactor)?.(event, 1.25),
+    ).resolves.toBeUndefined()
+    expect(windowDouble.webContents.setZoomFactor).toHaveBeenCalledWith(1.25)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.windowSetZoomFactor)?.(event, 1.5),
+    ).resolves.toEqual({
+      error: {
+        message: 'Zoom factor must be between 0.8 and 1.4',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(windowDouble.webContents.setZoomFactor).toHaveBeenCalledTimes(1)
   })
 
   it('toggles maximize by maximizing a normal window and restoring a maximized one', async () => {

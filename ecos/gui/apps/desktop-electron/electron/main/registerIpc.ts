@@ -1006,6 +1006,14 @@ export function registerIpc(
     return isWindowMaximized(getEventWindow(event))
   })
 
+  handle(desktopApiIpcChannels.windowSetZoomFactor, (event, factor) => {
+    const value = Number(factor)
+    if (!Number.isFinite(value) || value < 0.8 || value > 1.4) {
+      throw new Error('Zoom factor must be between 0.8 and 1.4')
+    }
+    getEventWindow(event).webContents.setZoomFactor(value)
+  })
+
   handle(desktopApiIpcChannels.windowCreate, async (_event, options) => {
     if (!services.createWindow) {
       throw new Error('Window creation is not available')

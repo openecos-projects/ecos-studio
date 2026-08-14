@@ -1553,7 +1553,7 @@ function fileName(path: string): string {
 
 .step-dashboard-header h2 {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   margin: 0;
   overflow: hidden;
@@ -1568,7 +1568,7 @@ function fileName(path: string): string {
 
 .dashboard-muted {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -1597,7 +1597,7 @@ function fileName(path: string): string {
 .step-status {
   border: 1px solid currentColor;
   border-radius: 3px;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
   padding: 3px 5px;
@@ -1667,14 +1667,14 @@ function fileName(path: string): string {
 
 .overview-subcard-header h3 {
   color: var(--text-primary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   margin: 0;
 }
 
 .overview-subcard-header span {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 12px;
   margin-left: auto;
   max-width: 45%;
   overflow: hidden;
@@ -1716,7 +1716,7 @@ function fileName(path: string): string {
 .config-preview-grid dt,
 .data-highlights dt {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 12px;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1786,7 +1786,7 @@ function fileName(path: string): string {
   display: flex;
   flex: 1;
   flex-direction: column;
-  font-size: 10px;
+  font-size: 12px;
   gap: 5px;
   justify-content: center;
   min-height: 0;
@@ -1802,12 +1802,12 @@ function fileName(path: string): string {
 
 .checklist-empty-state strong {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .checklist-empty-state span {
   color: var(--success-color);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1853,7 +1853,7 @@ function fileName(path: string): string {
 }
 .step-status-summary p {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
   margin: 4px 0 0;
 }
@@ -1866,7 +1866,7 @@ function fileName(path: string): string {
 .status-count-list > div {
   color: var(--text-secondary);
   display: flex;
-  font-size: 11px;
+  font-size: 12px;
   justify-content: space-between;
   min-width: 0;
 }
@@ -1910,7 +1910,7 @@ function fileName(path: string): string {
   color: var(--accent-color);
   cursor: pointer;
   display: inline-flex;
-  font-size: 10px;
+  font-size: 12px;
   gap: 3px;
   margin-top: auto;
   padding: 0;
@@ -1932,7 +1932,7 @@ function fileName(path: string): string {
 }
 .qor-visual-column :deep(.qor-pie-unavailable .status-pie-center strong) {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 .qor-summary-content {
@@ -1942,9 +1942,8 @@ function fileName(path: string): string {
   align-content: start;
   display: grid;
   gap: 4px 6px;
-  grid-auto-rows: minmax(min-content, 1fr);
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(6, minmax(min-content, 1fr));
+  grid-template-rows: repeat(6, minmax(54px, 1fr));
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -1972,7 +1971,7 @@ function fileName(path: string): string {
 }
 .qor-step-link strong {
   color: var(--text-primary);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2010,13 +2009,14 @@ function fileName(path: string): string {
 }
 .qor-metric-values span {
   color: var(--text-primary);
-  font-size: 8px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: 1.2;
   min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .qor-metric-values span:last-child {
   text-align: right;
@@ -2059,14 +2059,15 @@ function fileName(path: string): string {
 }
 .qor-step-total {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-align: right;
-  white-space: normal;
+  white-space: nowrap;
 }
 .qor-step-total.is-improvement {
   color: var(--success-color);
@@ -2157,7 +2158,7 @@ function fileName(path: string): string {
 .timing-path-summary h3,
 .timing-path-list h3 {
   color: var(--text-primary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   margin: 0;
 }
@@ -2165,7 +2166,7 @@ function fileName(path: string): string {
 .floorplan-insight-header > span,
 .timing-path-list-header > span {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .synthesis-value-grid,
@@ -2207,7 +2208,7 @@ function fileName(path: string): string {
 .timing-path-values dt,
 .timing-path-stages dt {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 12px;
   margin: 0;
 }
 .synthesis-value-grid dt {
@@ -2221,7 +2222,7 @@ function fileName(path: string): string {
 .timing-path-stages dd {
   color: var(--text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
   margin: 2px 0 0;
@@ -2258,7 +2259,7 @@ function fileName(path: string): string {
   border: 1px solid transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 8px;
+  font-size: 12px;
   min-height: 21px;
   min-width: 0;
   overflow: hidden;
@@ -2294,7 +2295,7 @@ function fileName(path: string): string {
   white-space: normal;
 }
 .floorplan-metrics-grid dd {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
 }
 .floorplan-snapshot-grid {
@@ -2345,7 +2346,7 @@ function fileName(path: string): string {
 }
 .floorplan-snapshot-copy strong {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 400;
   min-width: 0;
   overflow: hidden;
@@ -2355,7 +2356,7 @@ function fileName(path: string): string {
 .floorplan-snapshot-copy span {
   color: var(--text-primary);
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
@@ -2367,7 +2368,7 @@ function fileName(path: string): string {
   min-height: 0;
 }
 .floorplan-snapshot-pie :deep(.status-pie-center strong) {
-  font-size: 10px;
+  font-size: 12px;
 }
 .floorplan-snapshot-pie :deep(.status-pie-center span) {
   font-size: 7px;
@@ -2389,6 +2390,7 @@ function fileName(path: string): string {
 }
 .insight-table-wrap table {
   border-collapse: collapse;
+  height: 100%;
   table-layout: fixed;
   width: 100%;
 }
@@ -2396,12 +2398,12 @@ function fileName(path: string): string {
 .insight-table-wrap td {
   border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 7px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
-  line-height: 1.15;
+  line-height: 1.25;
   min-width: 0;
   overflow: hidden;
-  padding: 3px 2px;
+  padding: 4px 3px;
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2410,7 +2412,7 @@ function fileName(path: string): string {
   background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
   color: var(--text-secondary);
   font-family: inherit;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 600;
   text-align: center;
 }
@@ -2429,23 +2431,42 @@ function fileName(path: string): string {
 }
 .rcx-corner-table th,
 .rcx-corner-table td {
-  font-size: 0.625rem;
-  padding: 0.25rem 0.1875rem;
+  font-size: 10px;
+  padding: 4px 3px;
 }
 .rcx-corner-table thead th {
-  font-size: 0.5625rem;
+  font-size: 10px;
 }
 .drc-statistics-table {
+  align-items: flex-start;
+  display: block;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px;
+}
+.drc-statistics-table table {
+  height: auto;
+  min-width: max-content;
+  table-layout: auto;
+  width: max-content;
 }
 .drc-statistics-table th,
 .drc-statistics-table td {
-  font-size: 6px;
-  padding: 3px 1px;
+  font-size: 10px;
+  min-width: 58px;
+  padding: 4px 3px;
   text-align: center;
+}
+.drc-statistics-table thead th {
+  line-height: 1.2;
+  max-width: 120px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .drc-statistics-table th:first-child,
 .drc-statistics-table td:first-child {
+  min-width: 84px;
   overflow-wrap: anywhere;
   text-align: left;
   white-space: normal;
@@ -2464,12 +2485,12 @@ function fileName(path: string): string {
 }
 .harden-output-table th,
 .harden-output-table td {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
   padding: 7px 8px;
 }
 .harden-output-table thead th {
-  font-size: 10px;
+  font-size: 12px;
 }
 .harden-output-table th:last-child,
 .harden-output-table td:last-child {
@@ -2477,7 +2498,7 @@ function fileName(path: string): string {
 }
 .harden-output-table td:nth-child(2) {
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
   overflow-wrap: anywhere;
   text-align: left;
@@ -2487,7 +2508,7 @@ function fileName(path: string): string {
 .harden-output-state {
   align-items: center;
   display: inline-flex;
-  font-size: 11px;
+  font-size: 12px;
   gap: 4px;
   justify-content: flex-end;
   white-space: nowrap;
@@ -2514,7 +2535,7 @@ function fileName(path: string): string {
   border: 1px solid transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 8px;
+  font-size: 12px;
   min-height: 21px;
   min-width: 0;
   overflow: hidden;
@@ -2557,7 +2578,7 @@ function fileName(path: string): string {
   font-size: 26px;
 }
 .floorplan-snapshot-large-pie :deep(.status-pie-center span) {
-  font-size: 11px;
+  font-size: 12px;
 }
 .floorplan-snapshot-detail-list {
   display: flex;
@@ -2585,12 +2606,12 @@ function fileName(path: string): string {
 }
 .floorplan-snapshot-detail-list h3 {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   margin: 0;
 }
 .floorplan-snapshot-detail-list > header > span {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .floorplan-snapshot-detail-list ul {
@@ -2637,7 +2658,7 @@ function fileName(path: string): string {
 }
 .floorplan-snapshot-detail-list li strong {
   color: var(--text-primary);
-  font-size: 9px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2645,12 +2666,12 @@ function fileName(path: string): string {
 .floorplan-snapshot-detail-list li > span:not(.floorplan-snapshot-swatch) {
   color: var(--text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 9px;
+  font-size: 12px;
   text-align: right;
 }
 .floorplan-snapshot-detail-list li small {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 12px;
   text-align: right;
 }
 .synthesis-timing-path-link {
@@ -2665,7 +2686,7 @@ function fileName(path: string): string {
 }
 .synthesis-timing-path-link span {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 12px;
 }
 .synthesis-empty-state {
   align-items: center;
@@ -2673,7 +2694,7 @@ function fileName(path: string): string {
   display: flex;
   flex: 1;
   flex-direction: column;
-  font-size: 9px;
+  font-size: 12px;
   gap: 4px;
   justify-content: center;
   padding: 8px;
@@ -2697,7 +2718,7 @@ function fileName(path: string): string {
 }
 .distribution-chart figcaption {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   margin-bottom: 8px;
 }
 .distribution-tabs {
@@ -2711,7 +2732,7 @@ function fileName(path: string): string {
   color: var(--text-secondary);
   cursor: pointer;
   flex: 1;
-  font-size: 8px;
+  font-size: 12px;
   min-height: 19px;
   padding: 2px 4px;
 }
@@ -2732,7 +2753,7 @@ function fileName(path: string): string {
 }
 .distribution-row span {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2750,7 +2771,7 @@ function fileName(path: string): string {
 }
 .distribution-row strong {
   color: var(--text-primary);
-  font-size: 9px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -2767,7 +2788,7 @@ function fileName(path: string): string {
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
-  font-size: 10px;
+  font-size: 12px;
   gap: 5px;
   justify-content: center;
   padding: 8px;
@@ -2809,7 +2830,7 @@ function fileName(path: string): string {
 .report-copy strong {
   color: var(--text-primary);
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2818,14 +2839,14 @@ function fileName(path: string): string {
 .report-copy small {
   color: var(--text-secondary);
   display: block;
-  font-size: 8px;
+  font-size: 12px;
   margin-top: 2px;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 .report-copy small i {
   color: var(--accent-color);
-  font-size: 10px;
+  font-size: 12px;
   margin-right: 3px;
 }
 .reports-card.is-sta-report-card .report-list {
@@ -2914,14 +2935,14 @@ function fileName(path: string): string {
 .timing-path-waterfall > article > header > span {
   color: var(--accent-color);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 8px;
+  font-size: 12px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .timing-path-waterfall > article > header small {
   color: var(--text-secondary);
   flex: 0 0 auto;
-  font-size: 8px;
+  font-size: 12px;
 }
 .timing-path-values {
   display: grid;
@@ -2930,7 +2951,7 @@ function fileName(path: string): string {
   padding: 7px;
 }
 .timing-path-values dd {
-  font-size: 8px;
+  font-size: 12px;
 }
 .timing-path-stages {
   border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
@@ -2957,7 +2978,7 @@ function fileName(path: string): string {
 .timing-path-stages li > span {
   color: var(--text-secondary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 8px;
+  font-size: 12px;
   padding-top: 1px;
   text-align: right;
 }
@@ -2967,7 +2988,7 @@ function fileName(path: string): string {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .timing-path-stages dd {
-  font-size: 8px;
+  font-size: 12px;
   margin-top: 1px;
 }
 
@@ -2978,7 +2999,7 @@ function fileName(path: string): string {
   display: flex;
   flex: 1;
   flex-direction: column;
-  font-size: 10px;
+  font-size: 12px;
   gap: 6px;
   justify-content: center;
   min-height: 0;
@@ -3004,7 +3025,7 @@ function fileName(path: string): string {
   border: 0;
   color: var(--accent-color);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   padding: 0;
 }
 
@@ -3031,7 +3052,7 @@ function fileName(path: string): string {
   background: var(--bg-secondary);
   color: var(--text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
   margin: 0;
   max-height: min(66vh, 680px);
@@ -3078,7 +3099,7 @@ function fileName(path: string): string {
 .checklist-detail-list small,
 .qor-gate-list small {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 .checklist-detail-list strong,
 .qor-gate-list strong {
@@ -3087,14 +3108,14 @@ function fileName(path: string): string {
 }
 .checklist-detail-list p {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   margin: 5px 0 0;
 }
 .checklist-detail-list code {
   color: var(--text-secondary);
   display: block;
-  font-size: 9px;
+  font-size: 12px;
   margin-top: 5px;
   overflow-wrap: anywhere;
 }
@@ -3128,14 +3149,14 @@ function fileName(path: string): string {
 }
 .qor-detail-metric-list strong {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .qor-detail-metric-list small {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 @media (max-width: 880px) {
@@ -3151,6 +3172,16 @@ function fileName(path: string): string {
   }
   .step-summary-body {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .step-qor-overview {
+    grid-template-columns: 96px minmax(132px, 0.5fr) minmax(220px, 1.5fr);
+  }
+
+  .qor-step-row {
+    padding: 4px 6px;
   }
 }
 

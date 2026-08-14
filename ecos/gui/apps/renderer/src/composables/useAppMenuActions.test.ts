@@ -129,4 +129,36 @@ describe('useAppMenuActions', () => {
 
     expect(navigateToWorkspace).not.toHaveBeenCalled()
   })
+
+  it('dispatches all View zoom actions to the shared zoom handler', async () => {
+    let registeredHandlers: Partial<Record<string, () => void>> | undefined
+    useMenuEvents.mockImplementation((handlers) => {
+      registeredHandlers = handlers
+    })
+    const adjustZoom = vi.fn().mockResolvedValue(undefined)
+    const { handleMenuAction } = useAppMenuActions({
+      adjustZoom,
+      navigateToWorkspace: vi.fn(),
+      openDocumentation: vi.fn().mockResolvedValue(undefined),
+      openProject: vi.fn().mockResolvedValue(false),
+      showAboutDialog: vi.fn(),
+      showNewProjectWizard: vi.fn(),
+    })
+
+    for (const action of [
+      appMenuActionIds.zoomIn,
+      appMenuActionIds.zoomOut,
+      appMenuActionIds.zoomReset,
+    ]) {
+      registeredHandlers?.[action]?.()
+      await handleMenuAction(action)
+    }
+
+    expect(adjustZoom).toHaveBeenNthCalledWith(1, appMenuActionIds.zoomIn)
+    expect(adjustZoom).toHaveBeenNthCalledWith(2, appMenuActionIds.zoomIn)
+    expect(adjustZoom).toHaveBeenNthCalledWith(3, appMenuActionIds.zoomOut)
+    expect(adjustZoom).toHaveBeenNthCalledWith(4, appMenuActionIds.zoomOut)
+    expect(adjustZoom).toHaveBeenNthCalledWith(5, appMenuActionIds.zoomReset)
+    expect(adjustZoom).toHaveBeenNthCalledWith(6, appMenuActionIds.zoomReset)
+  })
 })

@@ -326,7 +326,7 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   display: flex;
   flex: 1;
-  font-size: 10px;
+  font-size: 12px;
   justify-content: center;
   padding: 8px;
   text-align: center;

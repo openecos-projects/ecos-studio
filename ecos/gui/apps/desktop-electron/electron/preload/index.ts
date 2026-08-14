@@ -86,6 +86,8 @@ const desktopApi: DesktopApi = {
     confirmClose: () => invokeDesktop(desktopApiIpcChannels.windowConfirmClose),
     setTitle: (title) => invokeDesktop(desktopApiIpcChannels.windowSetTitle, title),
     isMaximized: () => invokeDesktop(desktopApiIpcChannels.windowIsMaximized),
+    setZoomFactor: (factor) =>
+      invokeDesktop(desktopApiIpcChannels.windowSetZoomFactor, factor),
     create: (options) => invokeDesktop(desktopApiIpcChannels.windowCreate, options),
     onCloseRequested: (listener) =>
       subscribeToDesktopEvent(desktopApiEventChannels.windowCloseRequested, () => {

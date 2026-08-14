@@ -981,6 +981,17 @@ export class ResourceManagerService {
     await this.mutateManifest((manifest) => {
       const existing = manifest.installed[resourceId]
       if (isPdkEntry(existing)) {
+        existing.id = scanned.pdkId
+        existing.name = scanned.name
+        existing.pdk_id = scanned.pdkId
+        existing.canonical_path = scanned.canonicalPath
+        existing.path = scanned.canonicalPath
+        existing.detected_files = [
+          ...scanned.detectedFiles.directories,
+          ...scanned.detectedFiles.files,
+        ]
+        existing.detected_file_groups = scanned.detectedFiles
+        existing.health = scannedHealth
         entry = existing
         return
       }
