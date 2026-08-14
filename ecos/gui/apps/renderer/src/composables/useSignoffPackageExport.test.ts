@@ -110,22 +110,20 @@ async function openReviewAndConfirm(
   mounted: ReturnType<typeof mountComposable>,
 ): Promise<void> {
   await mounted.result.exportSignoffPackage()
-  await mounted.result.confirmSignoffPackageExport()
+  await mounted.result.confirmSignoffPackageExport('/exports/signoff_package.tar.gz')
 }
 
 function createApi() {
   const setActionEnabled = vi.fn().mockResolvedValue(undefined)
   const readFlow = vi.fn().mockResolvedValue(successfulFlow())
-  const readParameters = vi.fn().mockResolvedValue({ Design: 'chip_top' })
   const inspectSignoff = vi.fn().mockResolvedValue(readyReview())
-  const saveFile = vi.fn().mockResolvedValue('/exports/chip_top_signoff_package.tar.gz')
   const exportSignoff = vi.fn(async (request: { outputPath: string }) => ({
     outputPath: request.outputPath,
   }))
   testState.api = {
     menu: { setActionEnabled },
-    workspaceResources: { readFlow, readParameters },
-    dialog: { saveFile },
+    workspaceResources: { readFlow },
+    dialog: {},
     ecc: { workspace: { exportSignoff, inspectSignoff } },
   } as unknown as DesktopApi
 
@@ -133,8 +131,6 @@ function createApi() {
     exportSignoff,
     inspectSignoff,
     readFlow,
-    readParameters,
-    saveFile,
     setActionEnabled,
   }
 }
@@ -393,7 +389,6 @@ describe('useSignoffPackageExport export action', () => {
       false,
     )
     expect(api.readFlow).not.toHaveBeenCalled()
-    expect(api.saveFile).not.toHaveBeenCalled()
     expect(api.exportSignoff).not.toHaveBeenCalled()
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -403,7 +398,7 @@ describe('useSignoffPackageExport export action', () => {
     )
   })
 
-  it('opens review before Save As and exports after a ready review is confirmed', async () => {
+  it('opens review before path export and exports after a ready review is confirmed', async () => {
     const api = createApi()
     const mounted = mountComposable()
     scope = mounted.scope
@@ -418,12 +413,14 @@ describe('useSignoffPackageExport export action', () => {
       result: readyReview(),
       visible: true,
     })
-    expect(api.saveFile).not.toHaveBeenCalled()
+    await mounted.result.confirmSignoffPackageExport(
+      '/exports/chip_top_signoff_package.tar.gz',
+    )
 
-    await mounted.result.confirmSignoffPackageExport()
-
-    expect(api.saveFile).toHaveBeenCalledTimes(1)
-    expect(api.exportSignoff).toHaveBeenCalledTimes(1)
+    expect(api.exportSignoff).toHaveBeenCalledWith({
+      outputPath: '/exports/chip_top_signoff_package.tar.gz',
+      workspaceHandle: 'workspace-handle-1',
+    })
   })
 
   it('keeps Save As closed when the review is blocked', async () => {
@@ -436,8 +433,8 @@ describe('useSignoffPackageExport export action', () => {
     await mounted.result.exportSignoffPackage()
 
     expect(mounted.result.canConfirmSignoffPackageExport.value).toBe(false)
-    await mounted.result.confirmSignoffPackageExport()
-    expect(api.saveFile).not.toHaveBeenCalled()
+    await mounted.result.confirmSignoffPackageExport('/exports/signoff.tar.gz')
+    expect(api.exportSignoff).not.toHaveBeenCalled()
   })
 
   it('keeps the review open after an inspection error and allows a refresh', async () => {
@@ -457,8 +454,8 @@ describe('useSignoffPackageExport export action', () => {
       visible: true,
     })
     expect(mounted.result.canConfirmSignoffPackageExport.value).toBe(false)
-    await mounted.result.confirmSignoffPackageExport()
-    expect(api.saveFile).not.toHaveBeenCalled()
+    await mounted.result.confirmSignoffPackageExport('/exports/signoff.tar.gz')
+    expect(api.exportSignoff).not.toHaveBeenCalled()
     expect(mounted.showToast).not.toHaveBeenCalled()
 
     await mounted.result.refreshSignoffPackageReview()
@@ -488,7 +485,6 @@ describe('useSignoffPackageExport export action', () => {
     await exportPromise
 
     expect(mounted.result.signoffPackageReview.value.visible).toBe(false)
-    expect(api.saveFile).not.toHaveBeenCalled()
     expect(api.exportSignoff).not.toHaveBeenCalled()
   })
 
@@ -501,7 +497,6 @@ describe('useSignoffPackageExport export action', () => {
 
     await openReviewAndConfirm(mounted)
 
-    expect(api.saveFile).not.toHaveBeenCalled()
     expect(api.setActionEnabled).toHaveBeenLastCalledWith(
       appMenuActionIds.exportSignoffPackage,
       false,
@@ -511,35 +506,28 @@ describe('useSignoffPackageExport export action', () => {
     )
   })
 
-  it('does nothing after the save dialog is cancelled', async () => {
+  it('does nothing when an empty output path is submitted', async () => {
     const api = createApi()
-    api.saveFile.mockResolvedValueOnce(null)
     const mounted = mountComposable()
     scope = mounted.scope
     await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
 
-    await openReviewAndConfirm(mounted)
+    await mounted.result.exportSignoffPackage()
+    await mounted.result.confirmSignoffPackageExport('   ')
 
     expect(api.exportSignoff).not.toHaveBeenCalled()
     expect(mounted.showToast).not.toHaveBeenCalled()
   })
 
-  it('opens Save As in the workspace project signoff directory using Design for the filename', async () => {
+  it('exports to the user-provided output path', async () => {
     const api = createApi()
-    api.readParameters.mockResolvedValueOnce({ Design: 'rocket_core' })
-    api.saveFile.mockResolvedValueOnce('/tmp/rocket package.tar.gz')
     const mounted = mountComposable(ref({ path: '/workspaces/active path' }))
     scope = mounted.scope
     await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
 
-    await openReviewAndConfirm(mounted)
+    await mounted.result.exportSignoffPackage()
+    await mounted.result.confirmSignoffPackageExport('/tmp/rocket package.tar.gz')
 
-    expect(api.saveFile).toHaveBeenCalledWith({
-      title: 'Export Signoff Package',
-      defaultPath: '/workspaces/signoff/rocket_core_signoff_package.tar.gz',
-      ensureDirectory: true,
-      filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
-    })
     expect(api.exportSignoff).toHaveBeenCalledWith({
       outputPath: '/tmp/rocket package.tar.gz',
       workspaceHandle: 'workspace-handle-1',
@@ -548,23 +536,6 @@ describe('useSignoffPackageExport export action', () => {
       expect.objectContaining({
         severity: 'success',
         detail: expect.stringContaining('/tmp/rocket package.tar.gz'),
-      }),
-    )
-  })
-
-  it('falls back to the workspace leaf for the default name', async () => {
-    const api = createApi()
-    api.readParameters.mockResolvedValueOnce({ Design: '   ' })
-    const mounted = mountComposable(ref({ path: 'C:\\projects\\fallback_chip\\' }))
-    scope = mounted.scope
-    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
-
-    await openReviewAndConfirm(mounted)
-
-    expect(api.saveFile).toHaveBeenCalledWith(
-      expect.objectContaining({
-        defaultPath: 'C:\\projects\\signoff\\fallback_chip_signoff_package.tar.gz',
-        ensureDirectory: true,
       }),
     )
   })
@@ -608,7 +579,7 @@ describe('useSignoffPackageExport export action', () => {
 
   it('converts a non-Error rejection into useful error details', async () => {
     const api = createApi()
-    api.saveFile.mockRejectedValueOnce('dialog bridge unavailable')
+    api.exportSignoff.mockRejectedValueOnce('rpc bridge unavailable')
     const mounted = mountComposable()
     scope = mounted.scope
     await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
@@ -618,15 +589,13 @@ describe('useSignoffPackageExport export action', () => {
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'error',
-        detail: 'dialog bridge unavailable',
+        detail: 'rpc bridge unavailable',
       }),
     )
   })
 
   it.each([
     ['flow read', 'readFlow'],
-    ['parameters read', 'readParameters'],
-    ['save dialog', 'saveFile'],
     ['ECC RPC execution', 'exportSignoff'],
   ] as const)('shows an error toast when %s throws', async (_label, method) => {
     const api = createApi()
@@ -642,7 +611,7 @@ describe('useSignoffPackageExport export action', () => {
 
     await mounted.result.exportSignoffPackage()
     if (method !== 'readFlow') {
-      await mounted.result.confirmSignoffPackageExport()
+      await mounted.result.confirmSignoffPackageExport('/exports/signoff.tar.gz')
     }
 
     expect(mounted.showToast).toHaveBeenCalledWith(
@@ -672,63 +641,18 @@ describe('useSignoffPackageExport export action', () => {
     exportRead.resolve(successfulFlow())
     await exportPromise
 
-    expect(api.saveFile).not.toHaveBeenCalled()
     expect(api.exportSignoff).not.toHaveBeenCalled()
   })
 
-  it('does not open the dialog when the workspace switches during parameter loading', async () => {
+  it('does not export when the workspace switches before path confirmation', async () => {
     const api = createApi()
-    const parametersRead = deferred<Record<string, unknown> | null>()
-    api.readParameters.mockImplementationOnce(() => parametersRead.promise)
     const mounted = mountComposable(ref({ path: '/workspaces/a' }))
     scope = mounted.scope
     await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
 
     await mounted.result.exportSignoffPackage()
-    const exportPromise = mounted.result.confirmSignoffPackageExport()
-    await vi.waitFor(() => expect(api.readParameters).toHaveBeenCalledTimes(1))
     mounted.currentProject.value = { path: '/workspaces/b' }
-    parametersRead.resolve({ Design: 'workspace_a' })
-    await exportPromise
-
-    expect(api.saveFile).not.toHaveBeenCalled()
-    expect(api.exportSignoff).not.toHaveBeenCalled()
-  })
-
-  it('suppresses a rejected parameter read after the workspace switches', async () => {
-    const api = createApi()
-    const parametersRead = deferred<Record<string, unknown> | null>()
-    api.readParameters.mockImplementationOnce(() => parametersRead.promise)
-    const mounted = mountComposable(ref({ path: '/workspaces/a' }))
-    scope = mounted.scope
-    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
-
-    await mounted.result.exportSignoffPackage()
-    const exportPromise = mounted.result.confirmSignoffPackageExport()
-    await vi.waitFor(() => expect(api.readParameters).toHaveBeenCalledTimes(1))
-    mounted.currentProject.value = { path: '/workspaces/b' }
-    parametersRead.reject(new Error('stale workspace read failed'))
-    await exportPromise
-
-    expect(mounted.showToast).not.toHaveBeenCalled()
-    expect(api.saveFile).not.toHaveBeenCalled()
-    expect(api.exportSignoff).not.toHaveBeenCalled()
-  })
-
-  it('does not execute when the workspace switches while the dialog is open', async () => {
-    const api = createApi()
-    const dialogResult = deferred<string | null>()
-    api.saveFile.mockImplementationOnce(() => dialogResult.promise)
-    const mounted = mountComposable(ref({ path: '/workspaces/a' }))
-    scope = mounted.scope
-    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
-
-    await mounted.result.exportSignoffPackage()
-    const exportPromise = mounted.result.confirmSignoffPackageExport()
-    await vi.waitFor(() => expect(api.saveFile).toHaveBeenCalledTimes(1))
-    mounted.currentProject.value = { path: '/workspaces/b' }
-    dialogResult.resolve('/tmp/a.tar.gz')
-    await exportPromise
+    await mounted.result.confirmSignoffPackageExport('/tmp/a.tar.gz')
 
     expect(api.exportSignoff).not.toHaveBeenCalled()
   })
@@ -742,7 +666,7 @@ describe('useSignoffPackageExport export action', () => {
     await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
 
     await mounted.result.exportSignoffPackage()
-    const exportPromise = mounted.result.confirmSignoffPackageExport()
+    const exportPromise = mounted.result.confirmSignoffPackageExport('/tmp/a.tar.gz')
     await vi.waitFor(() => expect(api.exportSignoff).toHaveBeenCalledTimes(1))
     mounted.currentProject.value = { path: '/workspaces/b' }
     rpcResult.resolve({ outputPath: '/tmp/a.tar.gz' })
@@ -760,7 +684,7 @@ describe('useSignoffPackageExport export action', () => {
     await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
 
     await mounted.result.exportSignoffPackage()
-    const exportPromise = mounted.result.confirmSignoffPackageExport()
+    const exportPromise = mounted.result.confirmSignoffPackageExport('/tmp/a.tar.gz')
     await vi.waitFor(() => expect(api.exportSignoff).toHaveBeenCalledTimes(1))
     mounted.workspaceSession.value = {
       state: 'active',

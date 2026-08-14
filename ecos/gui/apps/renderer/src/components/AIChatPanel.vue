@@ -79,6 +79,9 @@
               @continue-select="handleWorkspaceContinueChoice"
               @parameter-select="handleWorkspaceParameterChoice"
               @signoff-select="handleWorkspaceSignoffChoice"
+              @signoff-path-input="handleWorkspaceSignoffPathInput"
+              @signoff-path-confirm="handleWorkspaceSignoffPathConfirm"
+              @signoff-path-cancel="handleWorkspaceSignoffPathCancel"
             />
             <MessageItem
               v-for="msg in turn.responses"
@@ -115,6 +118,9 @@
               @continue-select="handleWorkspaceContinueChoice"
               @parameter-select="handleWorkspaceParameterChoice"
               @signoff-select="handleWorkspaceSignoffChoice"
+              @signoff-path-input="handleWorkspaceSignoffPathInput"
+              @signoff-path-confirm="handleWorkspaceSignoffPathConfirm"
+              @signoff-path-cancel="handleWorkspaceSignoffPathCancel"
             />
           </div>
         </section>
@@ -200,6 +206,7 @@ import type {
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
+import { joinLocalPath } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
@@ -404,6 +411,12 @@ const workspaceSignoffChoice = computed(() => activeUi.value.workspaceSignoffCho
 const workspaceSignoffAnsweredOptionId = computed(
   () => activeUi.value.workspaceSignoffAnsweredOptionId,
 )
+const workspaceSignoffOutputPath = computed(
+  () => activeUi.value.workspaceSignoffOutputPath,
+)
+const workspaceSignoffPathInputVisible = computed(
+  () => activeUi.value.workspaceSignoffPathInputVisible,
+)
 const lastContractSurface = computed(() => activeUi.value.lastContractSurface)
 const workspaceRerunRows = computed<[string, string][]>(
   () =>
@@ -495,6 +508,8 @@ const contractPanelBind = computed(() => ({
   workspaceSignoffAnchorTurnId: activeUi.value.workspaceSignoffAnchorTurnId,
   workspaceSignoffChoice: workspaceSignoffChoice.value,
   workspaceSignoffExecutionState: workspaceSignoffExecutionState.value,
+  workspaceSignoffOutputPath: workspaceSignoffOutputPath.value,
+  workspaceSignoffPathInputVisible: workspaceSignoffPathInputVisible.value,
   workspaceSignoffTitle: workspaceSignoffChoice.value?.title ?? 'Signoff package export',
   workspaceSetupAnsweredOptionId: workspaceSetupAnsweredOptionId.value,
   workspaceSetupAnchorTurnId: activeUi.value.workspaceSetupAnchorTurnId,
@@ -1156,6 +1171,8 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       ui.workspaceSignoffChoice = undefined
       ui.workspaceSignoffAnsweredOptionId = ''
       ui.workspaceSignoffAnchorTurnId = undefined
+      ui.workspaceSignoffOutputPath = ''
+      ui.workspaceSignoffPathInputVisible = false
     }
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
@@ -1397,6 +1414,33 @@ function handleWorkspaceSignoffChoice(option: DesktopAgentChoiceOption): void {
     messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
     return
   }
+  if (option.value === '1') {
+    activeUi.value.workspaceSignoffOutputPath ||= defaultSignoffOutputPath(
+      currentProject.value?.path ?? '',
+    )
+    activeUi.value.workspaceSignoffPathInputVisible = true
+    return
+  }
+  activeUi.value.workspaceSignoffAnsweredOptionId = option.id
+  void submitChoice(option, 'signoff')
+}
+
+function handleWorkspaceSignoffPathInput(path: string): void {
+  activeUi.value.workspaceSignoffOutputPath = path
+}
+
+function handleWorkspaceSignoffPathCancel(): void {
+  activeUi.value.workspaceSignoffPathInputVisible = false
+}
+
+function handleWorkspaceSignoffPathConfirm(): void {
+  const path = activeUi.value.workspaceSignoffOutputPath.trim()
+  const option = activeUi.value.workspaceSignoffChoice?.options.find(
+    (candidate) => candidate.value === '1',
+  )
+  if (!path || !option) return
+  activeUi.value.workspaceSignoffOutputPath = path
+  activeUi.value.workspaceSignoffPathInputVisible = false
   activeUi.value.workspaceSignoffAnsweredOptionId = option.id
   void submitChoice(option, 'signoff')
 }
@@ -1851,20 +1895,8 @@ async function executeWorkspaceSignoff(
       )
       return
     }
-    const outputPath = await desktopApi.dialog.saveFile({
-      title: 'Export Signoff Package',
-      ensureDirectory: true,
-      filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
-    })
-    if (!outputPath) {
-      await reportWorkspaceSignoffResult(
-        contract.signoff_id,
-        'cancelled',
-        '',
-        ownerSessionId,
-      )
-      return
-    }
+    const outputPath = ui.workspaceSignoffOutputPath.trim()
+    if (!outputPath) throw new Error('Enter a signoff package output path.')
     const result = await desktopApi.ecc.workspace.exportSignoff({
       outputPath,
       workspaceHandle,
@@ -1909,6 +1941,11 @@ async function executeWorkspaceSignoff(
   } finally {
     ui.isWorkspaceSignoffPending = false
   }
+}
+
+function defaultSignoffOutputPath(workspacePath: string): string {
+  const workspace = normalizeWorkspaceRoot(workspacePath)
+  return workspace ? joinLocalPath(workspace, 'signoff/signoff_package.tar.gz') : ''
 }
 
 async function reportWorkspaceSignoffInspection(

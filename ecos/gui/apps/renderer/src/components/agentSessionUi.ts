@@ -70,6 +70,8 @@ export interface AgentSessionUiState {
   workspaceSignoffChoice?: DesktopAgentChoice
   workspaceSignoffAnsweredOptionId: string
   workspaceSignoffAnchorTurnId?: string
+  workspaceSignoffOutputPath: string
+  workspaceSignoffPathInputVisible: boolean
   pendingParameterUpdate?: NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>
   lastContractSurface?: AgentContractSurface
   pendingGuiAction?: PendingGuiAction
@@ -98,6 +100,8 @@ export function createAgentSessionUiState(): AgentSessionUiState {
     workspaceParameterMessage: '',
     workspaceParameterAnsweredOptionId: '',
     workspaceSignoffAnsweredOptionId: '',
+    workspaceSignoffOutputPath: '',
+    workspaceSignoffPathInputVisible: false,
   }
 }
 

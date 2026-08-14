@@ -156,7 +156,7 @@ describe('AIChatPanel flow contracts', () => {
     )
   })
 
-  it('runs signoff inspection before native export and reports checklist blocking', () => {
+  it('runs signoff inspection before path-based export and reports checklist blocking', () => {
     expect(source).toContain("event.type === 'workspace_signoff'")
     expect(source).toContain("ui.lastContractSurface = 'signoff'")
     expect(source).toContain('workspaceSignoffChoice')
@@ -167,7 +167,10 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('workspace_signoff_inspection:')
     expect(source).toContain('review.status')
     expect(source).toContain("contract.action === 'inspect'")
-    expect(source).toContain('dialog.saveFile({')
+    expect(source).not.toContain('dialog.saveFile({')
+    expect(source).toContain('workspaceSignoffOutputPath')
+    expect(source).toContain('handleWorkspaceSignoffPathConfirm')
+    expect(source).toContain('Enter a signoff package output path.')
     expect(source).toContain('exportSignoff({')
     expect(source).toContain('workspace_signoff_result:')
     expect(source).toContain("canExportSignoffPackage(flow) ? 'Harden'")

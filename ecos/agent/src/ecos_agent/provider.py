@@ -1057,7 +1057,7 @@ class EcosAgentProvider:
         self._emit(
             session,
             "workspace_signoff",
-            "Exporting the signoff package after the native save location is selected.",
+            "Exporting the signoff package after the output path is provided.",
             workspace_signoff={
                 "action": "export",
                 "schema_version": "flow-agent.workspace_signoff_contract.v1",

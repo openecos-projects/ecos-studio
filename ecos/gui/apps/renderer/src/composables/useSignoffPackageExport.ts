@@ -1,7 +1,6 @@
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import {
   appMenuActionIds,
-  joinLocalPath,
   type EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
@@ -56,30 +55,6 @@ export function canExportSignoffPackage(flow: unknown): boolean {
     typeof finalStep.name === 'string' &&
     finalStep.name.trim().toLowerCase() === 'harden' &&
     finalStep.state === 'Success'
-  )
-}
-
-function workspaceLeaf(path: string): string {
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/g, '')
-  const parts = normalized.split('/').filter(Boolean)
-  return parts[parts.length - 1] || normalized
-}
-
-function projectPathForWorkspace(workspacePath: string): string {
-  const normalized = workspacePath.replace(/[\\/]+$/g, '')
-  const separatorIndex = Math.max(
-    normalized.lastIndexOf('/'),
-    normalized.lastIndexOf('\\'),
-  )
-
-  if (separatorIndex <= 0) return normalized
-  return normalized.slice(0, separatorIndex)
-}
-
-function signoffPackageDefaultPath(workspacePath: string, design: string): string {
-  return joinLocalPath(
-    joinLocalPath(projectPathForWorkspace(workspacePath), 'signoff'),
-    `${design}_signoff_package.tar.gz`,
   )
 }
 
@@ -317,8 +292,10 @@ export function useSignoffPackageExport({
     }
   }
 
-  async function confirmSignoffPackageExport(): Promise<void> {
+  async function confirmSignoffPackageExport(outputPath: string): Promise<void> {
     if (!canConfirmSignoffPackageExport.value) return
+    const normalizedOutputPath = outputPath.trim()
+    if (!normalizedOutputPath) return
 
     const workspace = activeWorkspaceSnapshot()
     if (
@@ -333,30 +310,10 @@ export function useSignoffPackageExport({
     closeSignoffPackageReview()
     try {
       const api = getDesktopApi()
-      const parameters = await api.workspaceResources.readParameters()
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
 
-      const design =
-        isRecord(parameters) &&
-        typeof parameters.Design === 'string' &&
-        parameters.Design.trim()
-          ? parameters.Design.trim()
-          : workspaceLeaf(workspace.workspacePath)
-      const outputPath = await api.dialog.saveFile({
-        title: 'Export Signoff Package',
-        defaultPath: signoffPackageDefaultPath(workspace.workspacePath, design),
-        ensureDirectory: true,
-        filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
-      })
-      if (
-        !outputPath ||
-        !isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)
-      ) {
-        return
-      }
-
       const result = await api.ecc.workspace.exportSignoff({
-        outputPath,
+        outputPath: normalizedOutputPath,
         workspaceHandle: workspace.workspaceHandle,
       })
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
