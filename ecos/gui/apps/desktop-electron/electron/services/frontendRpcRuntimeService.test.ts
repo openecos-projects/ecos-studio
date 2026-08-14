@@ -1,3 +1,4 @@
+import type { EccRuntimeEvent } from '@ecos-studio/shared'
 import type { EccRpcRuntimeService } from './eccRpc/runtimeService'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -52,5 +53,35 @@ describe('FrontendRpcRuntimeService', () => {
     })
     expect(service.activeWorkspaceDirectory).toBe('/work/frontend')
     expect(service.isWorkspaceRuntimeActive('/work/frontend')).toBe(true)
+  })
+
+  it('normalizes frontend progress before exposing the runtime event stream', () => {
+    const runtime = createRuntime()
+    const service = new FrontendRpcRuntimeService({
+      runtime: runtime as unknown as EccRpcRuntimeService,
+    })
+    const listener = vi.fn()
+
+    service.onEvent(listener)
+    const runtimeListener = runtime.onEvent.mock.calls[0]?.[0] as
+      | ((event: EccRuntimeEvent) => void)
+      | undefined
+    runtimeListener?.({
+      data: { state: 'Success', step: 'prepare' },
+      method: 'flow.run',
+      operationId: 'frontend-op-1',
+      phase: 'completed',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+      workspaceHandle: 'handle-1',
+    })
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'runtime.protocol',
+        workspaceHandle: 'handle-1',
+      }),
+    )
   })
 })

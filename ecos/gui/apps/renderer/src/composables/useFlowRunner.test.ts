@@ -34,7 +34,11 @@ const {
     },
   },
   workspaceSession: {
-    value: { sessionId: 'session-1', workspaceId: 'workspace-demo' },
+    value: {
+      sessionId: 'session-1',
+      workspaceId: 'workspace-demo',
+      state: undefined as string | undefined,
+    },
   },
   runStepApi: vi.fn(),
   rtl2gdsApi: vi.fn(),
@@ -104,7 +108,11 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     waitForRuntimeOperation.mockImplementation(() => new Promise<void>(() => undefined))
     markHomeRunArtifactResetAwaitingBackendStart.mockReset()
     clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
-    workspaceSession.value = { sessionId: 'session-1', workspaceId: 'workspace-demo' }
+    workspaceSession.value = {
+      sessionId: 'session-1',
+      workspaceId: 'workspace-demo',
+      state: undefined,
+    }
     resourceVersions.value = {
       home: 0,
       flow: 0,
@@ -225,6 +233,25 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     expect(markHomeRunArtifactResetAwaitingBackendStart).not.toHaveBeenCalled()
     expect(clearHomeRunArtifactResetAwaitingBackendStart).toHaveBeenCalledWith(
       '/work/frontend-demo',
+    )
+  })
+
+  it('waits for a frontend workspace session to become active before running', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+    workspaceSession.value = {
+      sessionId: 'session-1',
+      workspaceId: '',
+      state: 'loading',
+    }
+
+    const runner = useFlowRunner()
+    await expect(runner.runAllFlow()).resolves.toBeNull()
+
+    expect(rtl2gdsApi).not.toHaveBeenCalled()
+    expect(startFlowOperationApi).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: 'No Workspace Open' }),
     )
   })
 

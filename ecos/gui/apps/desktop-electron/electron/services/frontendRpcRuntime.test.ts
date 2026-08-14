@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   createFrontendRpcLaunchResolver,
   frontendRuntimeEventFromNotification,
+  normalizeFrontendRuntimeEvent,
 } from './frontendRpcRuntime'
 
 const roots: string[] = []
@@ -83,6 +84,7 @@ describe('frontendRuntimeEventFromNotification', () => {
           state: 'Success',
           step: 'prepare',
           subflow_path: '/work/frontend/prepare/subflow.json',
+          workspaceId: 'workspace-frontend-1',
         },
         message: ['frontend step prepare Success'],
         phase: 'stdout',
@@ -96,6 +98,7 @@ describe('frontendRuntimeEventFromNotification', () => {
         state: 'Success',
         step: 'prepare',
         subflow_path: '/work/frontend/prepare/subflow.json',
+        workspaceId: 'workspace-frontend-1',
       },
       message: 'frontend step prepare Success',
       method: 'flow.run',
@@ -106,7 +109,129 @@ describe('frontendRuntimeEventFromNotification', () => {
     })
   })
 
+  it('normalizes ecc-fe subflow stages for the shared renderer contract', () => {
+    expect(
+      frontendRuntimeEventFromNotification('runtime.event', {
+        cmd: 'run_step',
+        data: {
+          directory: '/work/frontend',
+          peak_memory_mb: 12.5,
+          runtime: '0:0:1',
+          state: 'Success',
+          step: 'prepare',
+          subflow_step: 'collect inputs',
+          tool: 'fe',
+          workspaceId: 'workspace-frontend-1',
+        },
+        phase: 'subflow.stage',
+        type: 'event',
+      }),
+    ).toEqual({
+      data: {
+        directory: '/work/frontend',
+        peak_memory_mb: 12.5,
+        runtime: '0:0:1',
+        runtimeProtocolType: 'subflow.stage',
+        state: 'Success',
+        step: 'prepare',
+        subflowPeakMemory: 12.5,
+        subflowRuntime: '0:0:1',
+        subflowStep: 'collect inputs',
+        subflow_step: 'collect inputs',
+        tool: 'fe',
+        workspaceId: 'workspace-frontend-1',
+      },
+      message: undefined,
+      method: 'flow.run_step',
+      phase: 'subflow.stage',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+    })
+  })
+
   it('ignores unrelated JSON-RPC notifications', () => {
     expect(frontendRuntimeEventFromNotification('rpc.log', {})).toBeNull()
+  })
+})
+
+describe('normalizeFrontendRuntimeEvent', () => {
+  it('converts frontend parent step boundaries into standard protocol events', () => {
+    const normalized = normalizeFrontendRuntimeEvent({
+      data: {
+        directory: '/work/frontend',
+        log_file: '/work/frontend/prepare/log.txt',
+        state: 'Success',
+        step: 'prepare',
+        tool: 'fe',
+      },
+      method: 'flow.run',
+      operationId: 'frontend-op-1',
+      phase: 'completed',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+      workspaceHandle: 'workspace-frontend-1',
+    })
+
+    expect(normalized.type).toBe('runtime.protocol')
+    if (normalized.type !== 'runtime.protocol') return
+    expect(normalized.event).toMatchObject({
+      kind: 'flow',
+      operationId: 'frontend-op-1',
+      origin: 'gui',
+      type: 'step.completed',
+      workspaceId: 'workspace-frontend-1',
+    })
+    expect(normalized.event.payload).toMatchObject({
+      state: 'Success',
+      step: 'prepare',
+      tool: 'fe',
+    })
+  })
+
+  it('converts frontend subflow stages into the standard protocol shape', () => {
+    const normalized = normalizeFrontendRuntimeEvent({
+      data: {
+        peak_memory_mb: 12.5,
+        runtime: '0:0:1',
+        state: 'Success',
+        step: 'prepare',
+        subflow_step: 'collect inputs',
+      },
+      method: 'flow.run',
+      operationId: 'frontend-op-2',
+      phase: 'subflow.stage',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+      workspaceHandle: 'workspace-frontend-1',
+    })
+
+    expect(normalized.type).toBe('runtime.protocol')
+    if (normalized.type !== 'runtime.protocol') return
+    expect(normalized.event).toMatchObject({
+      kind: 'flow',
+      operationId: 'frontend-op-2',
+      type: 'subflow.stage',
+    })
+    expect(normalized.event.payload).toMatchObject({
+      state: 'Success',
+      step: 'prepare',
+      subflowPeakMemory: 12.5,
+      subflowRuntime: '0:0:1',
+      subflowStep: 'collect inputs',
+    })
+  })
+
+  it('leaves progress unmodified until the runtime has an operation identity', () => {
+    const event = {
+      data: { step: 'prepare' },
+      method: 'flow.run',
+      phase: 'started',
+      step: 'prepare',
+      type: 'operation.progress' as const,
+    }
+    expect(normalizeFrontendRuntimeEvent(event)).toBe(event)
   })
 })

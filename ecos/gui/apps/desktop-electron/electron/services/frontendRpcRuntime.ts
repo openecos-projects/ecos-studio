@@ -4,6 +4,8 @@ import type { EccRuntimeEvent } from '@ecos-studio/shared'
 import type { EccRpcSidecarLaunch } from './eccRpc/sidecarProcess'
 import { resolveFrontendDevelopmentRoot } from './frontendDevelopmentRoot'
 
+let legacyFrontendProtocolSequence = 0
+
 export interface FrontendRpcLaunchResolverOptions {
   env?: NodeJS.ProcessEnv
   frontendRootSearchRoots?: string[]
@@ -41,14 +43,113 @@ export function frontendRuntimeEventFromNotification(
   const phase = typeof payload.phase === 'string' ? payload.phase : ''
   if (!method || !phase) return null
 
+  const normalizedData =
+    phase === 'subflow.stage'
+      ? {
+          ...data,
+          runtimeProtocolType: 'subflow.stage',
+          subflowPeakMemory: data.peak_memory_mb,
+          subflowRuntime: data.runtime,
+          subflowStep: data.subflow_step,
+        }
+      : data
+
   return {
-    data,
+    data: normalizedData,
     message: firstMessage(payload.message),
     method,
     phase,
-    step: typeof data.step === 'string' ? data.step : undefined,
+    step: typeof normalizedData.step === 'string' ? normalizedData.step : undefined,
     type: 'operation.progress',
-    workspaceDirectory: typeof data.directory === 'string' ? data.directory : undefined,
+    workspaceDirectory:
+      typeof normalizedData.directory === 'string' ? normalizedData.directory : undefined,
+  }
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function protocolTypeForFrontendProgress(
+  event: Extract<EccRuntimeEvent, { type: 'operation.progress' }>,
+): 'step.started' | 'step.completed' | 'subflow.stage' | null {
+  if (event.phase === 'started') return 'step.started'
+  if (event.phase === 'subflow.stage') return 'subflow.stage'
+  if (event.phase === 'completed' || event.phase === 'failed') return 'step.completed'
+
+  const state = stringValue(event.data?.state)?.toLowerCase()
+  return state &&
+    [
+      'success',
+      'succeeded',
+      'complete',
+      'completed',
+      'failed',
+      'failure',
+      'error',
+      'invalid',
+      'incomplete',
+    ].includes(state)
+    ? 'step.completed'
+    : null
+}
+
+/**
+ * Convert the legacy ECC-FE progress stream to the same protocol consumed by
+ * the backend renderer. This is deliberately placed at the runtime boundary;
+ * no renderer feature should need to know which sidecar produced the event.
+ */
+export function normalizeFrontendRuntimeEvent(event: EccRuntimeEvent): EccRuntimeEvent {
+  if (event.type !== 'operation.progress') return event
+
+  const protocolType = protocolTypeForFrontendProgress(event)
+  const operationId = event.operationId
+  const workspaceHandle = event.workspaceHandle
+  if (!protocolType || !operationId || !workspaceHandle) return event
+
+  const data = event.data ?? {}
+  const step = stringValue(data.step) ?? stringValue(event.step)
+  const rawState = stringValue(data.state)
+  const state =
+    rawState ??
+    (protocolType === 'step.started'
+      ? 'Ongoing'
+      : event.phase === 'failed'
+        ? 'Incomplete'
+        : undefined)
+  const subflowStep = stringValue(data.subflowStep) ?? stringValue(data.subflow_step)
+  const subflowRuntime = stringValue(data.subflowRuntime) ?? stringValue(data.runtime)
+  const subflowPeakMemory =
+    typeof data.subflowPeakMemory === 'number'
+      ? data.subflowPeakMemory
+      : typeof data.peak_memory_mb === 'number'
+        ? data.peak_memory_mb
+        : undefined
+  const sequence = ++legacyFrontendProtocolSequence
+  const payload: Record<string, unknown> = {
+    ...data,
+    ...(step ? { step } : {}),
+    ...(state ? { state } : {}),
+    ...(subflowStep ? { subflowStep } : {}),
+    ...(subflowRuntime ? { subflowRuntime } : {}),
+    ...(subflowPeakMemory !== undefined ? { subflowPeakMemory } : {}),
+  }
+
+  return {
+    event: {
+      eventId: `frontend-legacy-${operationId}-${sequence}`,
+      kind: event.method === 'flow.run' ? 'flow' : 'step',
+      operationId,
+      origin: 'gui',
+      payload,
+      sequence,
+      timestamp: Date.now(),
+      type: protocolType,
+      workspaceId: workspaceHandle,
+    },
+    type: 'runtime.protocol',
+    ...(event.workspaceDirectory ? { workspaceDirectory: event.workspaceDirectory } : {}),
+    workspaceHandle,
   }
 }
 

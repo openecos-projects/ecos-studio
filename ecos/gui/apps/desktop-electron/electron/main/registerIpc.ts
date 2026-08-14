@@ -780,12 +780,22 @@ export function registerIpc(
       if (subscription && subscription.designTool === designTool) {
         if (designTool === 'backend') sendEccEventToSender(subscription.sender, payload)
         sendDesignRuntimeEventToSender(subscription.sender, designTool, payload)
-      } else if (designTool === 'backend') {
+        return
+      }
+
+      // A sidecar progress notification can arrive before the runtime has
+      // attached the GUI handle, or carry a stale handle after a workspace
+      // reopen. The explicit directory is still scoped to the owning window,
+      // so use it as a routing fallback instead of dropping the progress event.
+      const delivered = deliverDirectoryScopedEvent(designTool, payload)
+      if (delivered === 0 && designTool === 'backend') {
         acknowledgeDetachedStepCommit(payload)
       }
       return
     }
-    if (!isDirectoryScopedEccRuntimeEvent(payload)) return
+    // Frontend legacy RPC progress events are directory-scoped even though
+    // they do not carry the shared runtime protocol's workspaceHandle.
+    if (!readWorkspaceDirectoryFromEvent(payload)) return
     const delivered = deliverDirectoryScopedEvent(designTool, payload)
     if (delivered === 0 && designTool === 'backend')
       acknowledgeDetachedStepCommit(payload)

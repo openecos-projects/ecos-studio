@@ -65,8 +65,8 @@ function clearTransientInteractionLocks() {
  * 流程运行器 Hook
  * 负责处理流程的运行、停止、重置等操作
  *
- * Runtime lifecycle events 由 useWorkspace 管理（workspace 级别订阅），
- * 本 Hook 只负责调用 ECC RPC runtime command 并等待结果。
+ * Workspace lifecycle events 由 useWorkspace 管理。ECC-FE 与 backend 共用
+ * 同一套 renderer runtime protocol，状态更新由事件消费者直接完成。
  */
 export function useFlowRunner() {
   const { ensureDesktopRuntime } = useDesktopRuntime()
@@ -119,7 +119,17 @@ export function useFlowRunner() {
   }
 
   function getCurrentWorkspaceHandle(): string | null {
-    return workspaceSession.value.workspaceId || null
+    const session = workspaceSession.value
+    // A new workspace can expose its project path before the runtime session
+    // has finished activation. Do not send flow commands with a stale or
+    // empty handle during that transition.
+    if (
+      typeof session.state === 'string' &&
+      (session.state !== 'active' || !session.workspaceId.trim())
+    ) {
+      return null
+    }
+    return session.workspaceId.trim() || null
   }
 
   function getCurrentDesignTool(): DesignTool {
@@ -330,7 +340,6 @@ export function useFlowRunner() {
     markFlowExecutionActiveForWorkspace(directory)
     state.value = StateEnum.Ongoing
     error.value = null
-
     try {
       const flowLabel = designTool === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'
       console.log(`Starting ${flowLabel}...`)

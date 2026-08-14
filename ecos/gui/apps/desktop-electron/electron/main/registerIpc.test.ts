@@ -1929,6 +1929,99 @@ describe('registerIpc', () => {
     expect(getAllWindows).not.toHaveBeenCalled()
   })
 
+  it('streams frontend subflow progress to its subscribed workspace window', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSend = vi.fn()
+    const otherSend = vi.fn()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: ownerSend,
+    })
+    const otherSender = Object.assign(new EventEmitter(), {
+      id: 22,
+      isDestroyed: vi.fn(() => false),
+      send: otherSend,
+    })
+    services.frontendRpcRuntimeService.openWorkspace
+      .mockResolvedValueOnce({
+        directory: '/work/frontend',
+        workspaceHandle: 'workspace-frontend-1',
+      })
+      .mockResolvedValueOnce({
+        directory: '/work/other',
+        workspaceHandle: 'workspace-frontend-2',
+      })
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender: ownerSender },
+      { designTool: 'frontend', directory: '/work/frontend' },
+    )
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender: otherSender },
+      { designTool: 'frontend', directory: '/work/other' },
+    )
+
+    const listener = services.frontendRpcRuntimeService.onEvent.mock.calls[0]?.[0]
+    const progress: EccRuntimeEvent = {
+      data: {
+        runtimeProtocolType: 'subflow.stage',
+        state: 'Success',
+        step: 'prepare',
+        subflowStep: 'collect inputs',
+      },
+      method: 'flow.run_step',
+      phase: 'subflow.stage',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+      workspaceHandle: 'workspace-frontend-1',
+    }
+    listener?.(progress)
+
+    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.designRuntimeEvent, {
+      ...progress,
+      designTool: 'frontend',
+    })
+    expect(otherSend).not.toHaveBeenCalled()
+  })
+
+  it('routes frontend progress by directory when a sidecar handle is unavailable', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSend = vi.fn()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: ownerSend,
+    })
+    services.frontendRpcRuntimeService.openWorkspace.mockResolvedValueOnce({
+      directory: '/work/frontend',
+      workspaceHandle: 'workspace-frontend-1',
+    })
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender: ownerSender },
+      { designTool: 'frontend', directory: '/work/frontend' },
+    )
+
+    const listener = services.frontendRpcRuntimeService.onEvent.mock.calls[0]?.[0]
+    listener?.({
+      data: { step: 'prepare' },
+      method: 'flow.run',
+      phase: 'started',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+    })
+
+    expect(ownerSend).toHaveBeenCalledWith(
+      desktopApiEventChannels.designRuntimeEvent,
+      expect.objectContaining({
+        designTool: 'frontend',
+        phase: 'started',
+        step: 'prepare',
+      }),
+    )
+  })
+
   it('focuses an existing workspace window instead of proceeding to open', async () => {
     const { handlers } = registerHandlers()
     const existing = {

@@ -2301,6 +2301,56 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.all).toBe(before.all)
   })
 
+  it('does not reload stale resources for a frontend full-flow step completion', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const before = { ...workspace.resourceVersions.value }
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        cmd: 'rtl2gds',
+        designTool: 'frontend',
+        home_page: '/work/frontend/home/home.json',
+        jobId: 'frontend-flow-operation',
+        state: 'Success',
+        step: 'prepare',
+      },
+    })
+
+    expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(workspace.resourceVersions.value).toEqual(before)
+  })
+
+  it('refreshes id-less frontend step completions again on the next rerun', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const before = { ...workspace.resourceVersions.value }
+    const completedStep = {
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        cmd: 'rtl2gds',
+        state: 'Success',
+        step: 'prepare',
+      },
+    }
+
+    onRuntimeEvent?.(completedStep)
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_start',
+        cmd: 'rtl2gds',
+        step: 'prepare',
+      },
+    })
+    onRuntimeEvent?.(completedStep)
+
+    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 2)
+    expect(workspace.resourceVersions.value.step).toBe(before.step + 2)
+    expect(workspace.resourceVersions.value.all).toBe(before.all)
+  })
+
   it('invalidates all workspace resources when rtl2gds completes', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const before = { ...workspace.resourceVersions.value }
@@ -2573,6 +2623,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-frontend')
     expect(createRuntimeEventClientMock).toHaveBeenCalledWith('workspace-frontend', {
       designTool: 'frontend',
+      workspaceDirectory: '/work/frontend-project',
     })
 
     await workspace.closeProject()

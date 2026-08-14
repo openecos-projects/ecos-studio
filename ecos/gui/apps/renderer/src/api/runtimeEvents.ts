@@ -1,4 +1,4 @@
-import type { EccRuntimeEvent, DesignRuntimeEvent, DesignTool } from '@ecos-studio/shared'
+import type { DesignRuntimeEvent, DesignTool } from '@ecos-studio/shared'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 
 export type RuntimeNotifyType =
@@ -35,6 +35,7 @@ export interface RuntimeEventClientConfig {
   maxReconnectDelay?: number
   connectionTimeout?: number
   designTool?: DesignTool
+  workspaceDirectory?: string
 }
 
 export type RuntimeEventClientState =
@@ -74,9 +75,27 @@ function isFullFlowMethod(
   )
 }
 
-function eventMatchesWorkspace(event: DesignRuntimeEvent, workspaceId: string): boolean {
-  if (!('workspaceHandle' in event) || !event.workspaceHandle) return true
-  return event.workspaceHandle === workspaceId
+function normalizeWorkspacePath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/')
+  return normalized.length > 1 && normalized.endsWith('/')
+    ? normalized.slice(0, -1)
+    : normalized
+}
+
+function eventMatchesWorkspace(
+  event: DesignRuntimeEvent,
+  workspaceId: string,
+  workspaceDirectory?: string,
+): boolean {
+  if (!('workspaceHandle' in event) || !event.workspaceHandle) {
+    return true
+  }
+  if (event.workspaceHandle === workspaceId) return true
+  if (!workspaceDirectory || !event.workspaceDirectory) return false
+  return (
+    normalizeWorkspacePath(event.workspaceDirectory) ===
+    normalizeWorkspacePath(workspaceDirectory)
+  )
 }
 
 function notifyTypeFromEvent(event: DesignRuntimeEvent): RuntimeNotifyType | null {
@@ -84,17 +103,18 @@ function notifyTypeFromEvent(event: DesignRuntimeEvent): RuntimeNotifyType | nul
     return event.reason === 'unexpected' ? 'error' : null
   }
   if (event.type === 'operation.progress') {
+    if (event.data?.runtimeProtocolType === 'subflow.stage') return 'message'
     const executionScope =
       'executionScope' in event && typeof event.executionScope === 'string'
         ? event.executionScope
         : undefined
     if (!isFlowMethod(event.method, executionScope)) return null
+    if (event.phase === 'started') return event.step ? 'step_start' : 'message'
+    if (event.phase === 'completed' || event.phase === 'failed') {
+      return event.step ? 'step_complete' : 'message'
+    }
     const state = event.data?.state
-    if (
-      event.phase === 'completed' ||
-      event.phase === 'failed' ||
-      typeof state === 'string'
-    ) {
+    if (typeof state === 'string') {
       return event.step ? 'step_complete' : 'message'
     }
     return event.step ? 'step_start' : 'message'
@@ -133,6 +153,7 @@ function responseFromEvent(event: DesignRuntimeEvent): RuntimeResponseType {
     return 'error'
   }
   if (event.type === 'operation.progress') {
+    if (event.data?.runtimeProtocolType === 'subflow.stage') return 'success'
     const state = event.data?.state
     if (
       event.phase === 'failed' ||
@@ -163,6 +184,7 @@ function responseFromRuntimeEvent(
   const data: RuntimeEventResponse['data'] = {
     ...progressData,
     cmd: command,
+    designTool: event.designTool,
     directory: 'workspaceDirectory' in event ? event.workspaceDirectory : undefined,
     executionScope,
     jobId: 'operationId' in event ? event.operationId : undefined,
@@ -185,7 +207,7 @@ function responseFromRuntimeEvent(
 }
 
 function responseFromProtocolEvent(
-  event: Extract<EccRuntimeEvent, { type: 'runtime.protocol' }>,
+  event: Extract<DesignRuntimeEvent, { type: 'runtime.protocol' }>,
 ): RuntimeEventResponse | null {
   const protocol = event.event
   const payload = protocol.payload
@@ -221,9 +243,12 @@ function responseFromProtocolEvent(
   return {
     cmd: 'notify',
     data: {
+      ...payload,
       cmd: command,
+      designTool: event.designTool,
       directory: event.workspaceDirectory,
       finalLog: payload.finalLog,
+      info: payload,
       jobId: protocol.operationId,
       logChunk,
       logCursor,
@@ -235,9 +260,18 @@ function responseFromProtocolEvent(
       runtimeInstanceId: protocol.runtimeInstanceId,
       rerunScope: payload.scope,
       stepCommitId: payload.stepCommitId,
-      subflowPeakMemory: payload.peakMemory,
-      subflowRuntime: payload.runtime,
-      subflowStep: payload.subflowStep,
+      subflowPeakMemory:
+        typeof payload.subflowPeakMemory === 'number'
+          ? payload.subflowPeakMemory
+          : payload.peakMemory,
+      subflowRuntime:
+        typeof payload.subflowRuntime === 'string'
+          ? payload.subflowRuntime
+          : payload.runtime,
+      subflowStep:
+        typeof payload.subflowStep === 'string'
+          ? payload.subflowStep
+          : payload.subflow_step,
       targetStep: payload.targetStep,
       workspaceRevision: payload.workspaceRevision,
       state,
@@ -306,7 +340,7 @@ export function createRuntimeEventClient(
     const designTool = config.designTool ?? 'backend'
     unsubscribeEvents = desktopApi.runtime.events.onEvent((event) => {
       if (event.designTool !== designTool) return
-      if (!eventMatchesWorkspace(event, workspaceId)) return
+      if (!eventMatchesWorkspace(event, workspaceId, config.workspaceDirectory)) return
       const response = responseFromRuntimeEvent(event)
       if (response) {
         handleNotification(response)

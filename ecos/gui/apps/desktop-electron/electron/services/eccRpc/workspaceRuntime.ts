@@ -658,16 +658,17 @@ export class EccWorkspaceRuntime {
   private handleSidecarEvent(event: EccRuntimeEvent): void {
     if (event.type === 'operation.progress') {
       const inFlight = this.inFlightOperation
-      if (!inFlight) return
+      const sessionHandle = this.sessions.active?.workspaceHandle
+      const workspaceHandle = inFlight?.workspaceHandle ?? sessionHandle
       this.emit({
         ...event,
-        operationId: inFlight.operationId,
+        ...(inFlight?.operationId ? { operationId: inFlight.operationId } : {}),
         workspaceDirectory:
           event.workspaceDirectory ??
-          this.runtimeDirectoryForHandle(inFlight.workspaceHandle) ??
+          this.runtimeDirectoryForHandle(workspaceHandle) ??
           this.boundDirectory ??
           undefined,
-        workspaceHandle: inFlight.workspaceHandle,
+        ...(workspaceHandle ? { workspaceHandle } : {}),
       })
       return
     }

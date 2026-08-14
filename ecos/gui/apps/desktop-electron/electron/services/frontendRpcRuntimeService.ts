@@ -12,6 +12,7 @@ import type {
   EccWorkspaceOpenResult,
 } from '@ecos-studio/shared'
 import { EccRpcRuntimeService } from './eccRpc/runtimeService'
+import { normalizeFrontendRuntimeEvent } from './frontendRpcRuntime'
 
 export interface FrontendRpcHelloResult extends Omit<EccRpcHelloResult, 'eccVersion'> {
   eccFeVersion: string
@@ -33,7 +34,7 @@ export class FrontendRpcRuntimeService {
   }
 
   onEvent(listener: (event: EccRuntimeEvent) => void): () => void {
-    return this.runtime.onEvent(listener)
+    return this.runtime.onEvent((event) => listener(normalizeFrontendRuntimeEvent(event)))
   }
 
   isWorkspaceRuntimeActive(directory: string): boolean {

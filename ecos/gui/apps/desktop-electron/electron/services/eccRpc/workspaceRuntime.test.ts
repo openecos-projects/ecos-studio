@@ -323,6 +323,33 @@ describe('EccWorkspaceRuntime', () => {
     await expect(running).resolves.toEqual({ rerun: false })
   })
 
+  it('binds a late sidecar progress event to the active workspace session', async () => {
+    const { client, events, service, sidecarEvent } = createService('/work/frontend')
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/frontend', workspaceId: 'frontend-1' },
+    )
+
+    const workspace = await service.openWorkspace({ directory: '/work/frontend' })
+    sidecarEvent({
+      data: { directory: '/work/frontend', step: 'prepare' },
+      method: 'flow.run',
+      phase: 'started',
+      step: 'prepare',
+      type: 'operation.progress',
+    })
+
+    expect(events).toContainEqual({
+      data: { directory: '/work/frontend', step: 'prepare' },
+      method: 'flow.run',
+      phase: 'started',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+  })
+
   it('cancels the matching in-flight operation and emits a cancelled event', async () => {
     const { client, events, service, sidecar } = createService()
     client.responses.push(

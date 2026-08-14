@@ -14,6 +14,7 @@ const testState = vi.hoisted(() => ({
     path: string
     designTool?: 'backend' | 'frontend'
   } | null> | null,
+  resourceVersions: null as Ref<{ all: number; flow: number }> | null,
   workspaceSession: null as Ref<{ workspaceId: string } | null> | null,
   runtimeEvents: null as Ref<unknown[]> | null,
   watchProjectFile: vi.fn(),
@@ -23,7 +24,7 @@ vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject:
       testState.currentProject ?? ref({ path: '/workspace/demo', designTool: 'backend' }),
-    resourceVersions: ref({ all: 0, flow: 0 }),
+    resourceVersions: testState.resourceVersions ?? ref({ all: 0, flow: 0 }),
     runtimeEvents: testState.runtimeEvents,
     workspaceSession: testState.workspaceSession ?? ref(null),
   }),
@@ -167,7 +168,7 @@ describe('useFlowStages runtime updates', () => {
     scope.stop()
   })
 
-  it('tracks legacy frontend progress events during a full rerun', async () => {
+  it('tracks standard frontend protocol events during a full rerun', async () => {
     testState.currentProject = ref({
       path: '/workspace/frontend',
       designTool: 'frontend',
@@ -202,9 +203,11 @@ describe('useFlowStages runtime updates', () => {
 
     testState.runtimeEvents.value.push({
       data: {
-        type: 'step_start',
+        runtimeProtocolType: 'step.started',
+        state: 'Ongoing',
         step: 'prepare',
         tool: 'fe',
+        type: 'step_start',
       },
     })
     await vi.waitFor(() => {
@@ -213,17 +216,20 @@ describe('useFlowStages runtime updates', () => {
 
     testState.runtimeEvents.value.push({
       data: {
-        type: 'step_complete',
+        runtimeProtocolType: 'step.completed',
         state: 'Success',
         step: 'prepare',
         tool: 'fe',
+        type: 'step_complete',
       },
     })
     testState.runtimeEvents.value.push({
       data: {
-        type: 'step_start',
+        runtimeProtocolType: 'step.started',
+        state: 'Ongoing',
         step: 'review',
         tool: 'fe',
+        type: 'step_start',
       },
     })
     await vi.waitFor(() => {
@@ -238,11 +244,11 @@ describe('useFlowStages runtime updates', () => {
 
     testState.runtimeEvents.value.push({
       data: {
-        type: 'step_complete',
-        phase: 'failed',
+        runtimeProtocolType: 'step.completed',
         state: 'Incomplete',
         step: 'review',
         tool: 'fe',
+        type: 'step_complete',
       },
       response: 'failed',
     })
@@ -316,5 +322,159 @@ describe('useFlowStages runtime updates', () => {
     await new Promise<void>((resolve) => queueMicrotask(resolve))
     expect(stages.dynamicFlowStages.value[0]?.state).toBe('Success')
     scope.stop()
+  })
+
+  it('keeps a frontend runtime completion over a later stale resource read', async () => {
+    testState.currentProject = ref({
+      path: '/workspace/frontend',
+      designTool: 'frontend',
+    })
+    testState.workspaceSession = ref({ workspaceId: 'frontend-runtime-handle' })
+    testState.runtimeEvents = ref([])
+    testState.resourceVersions = ref({ all: 0, flow: 0 })
+    testState.readWorkspaceFlowResourceApi.mockReset()
+    testState.readWorkspaceFlowResourceApi.mockResolvedValue({
+      steps: [
+        { name: 'prepare', state: 'Unstart', tool: 'fe' },
+        { name: 'review', state: 'Unstart', tool: 'fe' },
+      ],
+    })
+
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const stages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value).toHaveLength(2)
+    })
+
+    testState.runtimeEvents.value.push({
+      data: {
+        runtimeProtocolType: 'step.completed',
+        state: 'Success',
+        step: 'prepare',
+        tool: 'fe',
+        type: 'step_complete',
+      },
+    })
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value[0]?.state).toBe('Success')
+    })
+
+    testState.resourceVersions.value.flow += 1
+    await vi.waitFor(() => {
+      expect(testState.readWorkspaceFlowResourceApi).toHaveBeenCalledTimes(2)
+    })
+    expect(stages.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+      'Success',
+      'Unstart',
+    ])
+
+    testState.runtimeEvents.value.push({
+      data: {
+        runtimeProtocolType: 'step.started',
+        state: 'Ongoing',
+        step: 'review',
+        tool: 'fe',
+        type: 'step_start',
+      },
+    })
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+        'Success',
+        'Ongoing',
+      ])
+    })
+    scope.stop()
+    testState.resourceVersions = null
+  })
+
+  it('clears an optimistic running state when the full flow completes', async () => {
+    testState.currentProject = ref({
+      path: '/workspace/frontend',
+      designTool: 'frontend',
+    })
+    testState.workspaceSession = ref({ workspaceId: 'frontend-runtime-handle' })
+    testState.runtimeEvents = ref([])
+    testState.resourceVersions = ref({ all: 0, flow: 0 })
+    testState.readWorkspaceFlowResourceApi.mockReset()
+    testState.readWorkspaceFlowResourceApi
+      .mockResolvedValueOnce({
+        steps: [{ name: 'prepare', state: 'Unstart', tool: 'fe' }],
+      })
+      .mockResolvedValue({
+        steps: [{ name: 'prepare', state: 'Success', tool: 'fe' }],
+      })
+
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const stages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value).toHaveLength(1)
+    })
+    stages.setFirstRunStepOngoing()
+    expect(stages.dynamicFlowStages.value[0]?.state).toBe('Ongoing')
+
+    testState.runtimeEvents.value.push({
+      data: {
+        cmd: 'rtl2gds',
+        type: 'task_complete',
+      },
+    })
+    testState.resourceVersions.value.all += 1
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value[0]?.state).toBe('Success')
+    })
+    scope.stop()
+    testState.resourceVersions = null
+  })
+
+  it('merges live state into a later frontend flow resource read', async () => {
+    testState.currentProject = ref({
+      path: '/workspace/frontend',
+      designTool: 'frontend',
+    })
+    testState.workspaceSession = ref({ workspaceId: 'frontend-runtime-handle' })
+    testState.runtimeEvents = ref([])
+    testState.resourceVersions = ref({ all: 0, flow: 0 })
+    testState.readWorkspaceFlowResourceApi.mockReset()
+    testState.readWorkspaceFlowResourceApi
+      .mockResolvedValueOnce({
+        steps: [
+          { name: 'prepare', state: 'Ongoing', tool: 'fe' },
+          { name: 'review', state: 'Unstart', tool: 'fe' },
+        ],
+      })
+      .mockResolvedValue({
+        steps: [
+          { name: 'prepare', state: 'Success', tool: 'fe' },
+          { name: 'review', state: 'Ongoing', tool: 'fe' },
+        ],
+      })
+
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const stages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+        'Ongoing',
+        'Unstart',
+      ])
+    })
+
+    testState.resourceVersions.value.flow += 1
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+        'Success',
+        'Ongoing',
+      ])
+    })
+    expect(testState.readWorkspaceFlowResourceApi).toHaveBeenCalledTimes(2)
+    scope.stop()
+    testState.resourceVersions = null
   })
 })

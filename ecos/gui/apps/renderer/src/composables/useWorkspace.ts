@@ -1565,7 +1565,10 @@ export function useWorkspace() {
 
     const client =
       designTool === 'frontend'
-        ? runtimeEventApi.createRuntimeEventClient(workspaceId, { designTool })
+        ? runtimeEventApi.createRuntimeEventClient(workspaceId, {
+            designTool,
+            workspaceDirectory: currentProject.value?.path,
+          })
         : runtimeEventApi.createRuntimeEventClient(workspaceId)
 
     // 注册通用处理器，收集所有通知到 runtimeEvents
@@ -1695,6 +1698,7 @@ export function useWorkspace() {
     const event = response.data
     const eventType = event?.type as string | undefined
     const protocolType = asString(event?.runtimeProtocolType)
+    const eventDesignTool = asString(event?.designTool)
     // GUI flow steps already update their visible state and log from the runtime
     // event. Reading Home, snapshots, reports, and maps here would start several
     // independent NFS scans before the renderer can acknowledge the step.
@@ -1713,17 +1717,37 @@ export function useWorkspace() {
       return null
     }
 
-    const refreshKey = [event.jobId, eventType, event.step, cmd]
-      .filter((part): part is string => typeof part === 'string' && part.length > 0)
-      .join('|')
+    // A frontend full-flow step is already reflected by the live runtime
+    // event. Its flow.json write can lag behind that event, so reloading the
+    // resource here would immediately roll the visible step back. The final
+    // task_complete event still performs the broad authoritative refresh.
+    if (
+      (eventDesignTool === 'frontend' ||
+        currentProject.value?.designTool === 'frontend') &&
+      cmd === 'rtl2gds' &&
+      eventType === 'step_complete'
+    ) {
+      return null
+    }
+
+    // Legacy ECC-FE progress can be emitted after the wrapper operation has
+    // already completed, so it has no jobId/runtimeEventId. Do not create a
+    // cross-run dedupe key from only the step name: the next rerun must refresh
+    // the same step again.
+    const refreshIdentity = asString(event.runtimeEventId) ?? asString(event.jobId)
+    const refreshKey = refreshIdentity
+      ? [refreshIdentity, eventType, event.step, cmd]
+          .filter((part): part is string => typeof part === 'string' && part.length > 0)
+          .join('|')
+      : ''
 
     if (refreshKey && handledRefreshRuntimeEvents.has(refreshKey)) {
       return null
     }
 
-    // A direct step run can update every Home data source. During a full flow,
-    // keep intermediate step events incremental and perform the broad refresh
-    // only when the task reaches its terminal event.
+    // A direct step run can update every Home data source. Backend full-flow
+    // steps retain their incremental resource refresh; frontend full-flow
+    // steps returned above and reconcile once the task reaches its terminal event.
     const isIntermediateFullFlowStep = cmd === 'rtl2gds' && eventType === 'step_complete'
     const scopes = new Set<WorkspaceInvalidationScope>(
       isIntermediateFullFlowStep ? ['flow', 'step', 'maps', 'logs'] : ['all'],

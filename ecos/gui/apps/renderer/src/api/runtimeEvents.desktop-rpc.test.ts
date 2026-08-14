@@ -77,6 +77,7 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           cmd: 'run_step',
+          designTool: 'backend',
           jobId: 'operation-1',
           step: 'placement',
           type: 'step_complete',
@@ -134,7 +135,43 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     expect(allHandler).toHaveBeenCalledTimes(1)
     expect(allHandler).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ jobId: 'frontend-operation' }),
+        data: expect.objectContaining({
+          designTool: 'frontend',
+          jobId: 'frontend-operation',
+        }),
+      }),
+    )
+  })
+
+  it('accepts a frontend event with a stale handle when its directory matches', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('frontend-handle', {
+      designTool: 'frontend',
+      workspaceDirectory: '/work/frontend/',
+    })
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+
+    bridge.emit(
+      asDesignEvent(
+        {
+          data: { step: 'prepare' },
+          method: 'flow.run',
+          phase: 'started',
+          step: 'prepare',
+          type: 'operation.progress',
+          workspaceDirectory: '/work/frontend',
+          workspaceHandle: 'stale-handle',
+        },
+        'frontend',
+      ),
+    )
+
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ step: 'prepare', type: 'step_start' }),
       }),
     )
   })
@@ -382,6 +419,7 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     expect(allHandler).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
+          designTool: 'frontend',
           home_page: '/work/demo/home/home.json',
           state: 'Success',
           step: 'prepare',
@@ -391,6 +429,124 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
         response: 'success',
       }),
     )
+  })
+
+  it('keeps standard frontend step start and completion events incremental', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1', {
+      designTool: 'frontend',
+    })
+    const startHandler = vi.fn()
+    const completeHandler = vi.fn()
+    client.on('step_start', startHandler)
+    client.on('step_complete', completeHandler)
+    client.connect()
+
+    const event = (type: 'step.started' | 'step.completed', state?: string) =>
+      asDesignEvent(
+        {
+          event: {
+            eventId: `frontend:${type}`,
+            kind: 'flow',
+            operationId: 'frontend-operation-1',
+            origin: 'gui',
+            payload: {
+              home_page: '/work/frontend/home/home.json',
+              log_file: '/work/frontend/prepare/log.txt',
+              ...(state ? { state } : {}),
+              step: 'prepare',
+              subflow_path: '/work/frontend/prepare/subflow.json',
+            },
+            sequence: type === 'step.started' ? 1 : 2,
+            timestamp: Date.now(),
+            type,
+            workspaceId: 'workspace-handle-1',
+          },
+          workspaceHandle: 'workspace-handle-1',
+          type: 'runtime.protocol',
+        },
+        'frontend',
+      )
+
+    bridge.emit(event('step.started'))
+    expect(startHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ step: 'prepare', type: 'step_start' }),
+      }),
+    )
+    expect(completeHandler).not.toHaveBeenCalled()
+
+    bridge.emit(event('step.completed', 'Success'))
+    expect(completeHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          designTool: 'frontend',
+          home_page: '/work/frontend/home/home.json',
+          info: expect.objectContaining({
+            log_file: '/work/frontend/prepare/log.txt',
+            subflow_path: '/work/frontend/prepare/subflow.json',
+          }),
+          log_file: '/work/frontend/prepare/log.txt',
+          step: 'prepare',
+          type: 'step_complete',
+        }),
+      }),
+    )
+  })
+
+  it('maps standard frontend subflow stages without completing the outer step', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1', {
+      designTool: 'frontend',
+    })
+    const allHandler = vi.fn()
+    const stepCompleteHandler = vi.fn()
+    client.onAll(allHandler)
+    client.on('step_complete', stepCompleteHandler)
+    client.connect()
+
+    bridge.emit(
+      asDesignEvent(
+        {
+          event: {
+            eventId: 'frontend:subflow:1',
+            kind: 'flow',
+            operationId: 'frontend-operation-1',
+            origin: 'gui',
+            payload: {
+              peakMemory: 12.5,
+              runtime: '0:0:1',
+              state: 'Success',
+              step: 'prepare',
+              subflowStep: 'collect inputs',
+            },
+            sequence: 3,
+            timestamp: Date.now(),
+            type: 'subflow.stage',
+            workspaceId: 'workspace-handle-1',
+          },
+          workspaceHandle: 'workspace-handle-1',
+          type: 'runtime.protocol',
+        },
+        'frontend',
+      ),
+    )
+
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          runtimeProtocolType: 'subflow.stage',
+          state: 'Success',
+          step: 'prepare',
+          subflowStep: 'collect inputs',
+          type: 'message',
+        }),
+        response: 'success',
+      }),
+    )
+    expect(stepCompleteHandler).not.toHaveBeenCalled()
   })
 
   it('maps failures and cancellation to terminal notifications', async () => {
