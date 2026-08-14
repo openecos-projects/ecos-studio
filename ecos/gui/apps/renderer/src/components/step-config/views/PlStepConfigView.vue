@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, watchEffect } from 'vue'
+import { computed, onMounted, watchEffect } from 'vue'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import GenericStepConfigView from '../GenericStepConfigView.vue'
 
 const draft = defineModel<Record<string, unknown>>({ required: true })
+const emit = defineEmits<{ initialized: [] }>()
+
+onMounted(() => emit('initialized'))
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)

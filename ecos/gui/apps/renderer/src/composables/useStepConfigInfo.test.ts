@@ -11,7 +11,7 @@ const testState = vi.hoisted(() => ({
 }))
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, nextTick, ref, type EffectScope } from 'vue'
+import { effectScope, nextTick, ref, watch, type EffectScope } from 'vue'
 import { InfoEnum, StepEnum } from '@/api/type'
 
 vi.mock('vue-router', () => ({
@@ -506,6 +506,42 @@ describe('useStepConfigInfo', () => {
     await vi.waitFor(() => {
       expect(result.hasStepConfigChanges.value).toBe(false)
     })
+  })
+
+  it('does not treat editor-created empty containers as unsaved changes', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: { config: '/workspace/demo/config/fp_default_config.json' },
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'Floorplan',
+    })
+    testState.readProjectTextFile.mockResolvedValue('{}')
+
+    const result = scope.run(() => useStepConfigInfo())!
+    watch(
+      result.stepConfigDraft,
+      (draft) => {
+        if (draft && typeof draft === 'object' && !('Floorplan' in draft)) {
+          ;(draft as Record<string, unknown>).Floorplan = {}
+        }
+      },
+      { deep: true },
+    )
+
+    await vi.waitFor(() => expect(result.stepConfigDraft.value).toEqual({ Floorplan: {} }))
+    result.markStepConfigEditorInitialized()
+    expect(result.hasStepConfigChanges.value).toBe(false)
+
+    ;(result.stepConfigDraft.value as Record<string, unknown>).Floorplan = {
+      'Tap distance': 10,
+    }
+    expect(result.hasStepConfigChanges.value).toBe(true)
+
+    result.resetStepConfig()
+    await nextTick()
+    expect(result.hasStepConfigChanges.value).toBe(false)
   })
 
   it('rejects step config saves while the workspace flow is running', async () => {

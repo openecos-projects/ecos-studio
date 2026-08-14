@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, type Component } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onMounted,
+  type Component,
+} from 'vue'
 import { StepEnum } from '@/api/type'
 import GenericStepConfigView from './GenericStepConfigView.vue'
 /** Sync import: async chunks mount after flex scroll layout in WebKit/GTK, which can break .sc-scroll overflow. */
@@ -10,6 +15,8 @@ const draft = defineModel<unknown>({ required: true })
 const props = defineProps<{
   step: StepEnum
 }>()
+const emit = defineEmits<{ initialized: [] }>()
+let initialized = false
 const CtsStepConfigView = defineAsyncComponent(
   () => import('./views/CtsStepConfigView.vue'),
 )
@@ -35,8 +42,20 @@ const VIEW_MAP: Partial<Record<StepEnum, Component>> = {
 }
 
 const activeView = computed(() => VIEW_MAP[props.step] ?? GenericStepConfigView)
+
+function emitInitialized(): void {
+  if (initialized) return
+  initialized = true
+  emit('initialized')
+}
+
+onMounted(() => {
+  if (activeView.value !== DrcStepConfigView && activeView.value !== PlStepConfigView) {
+    emitInitialized()
+  }
+})
 </script>
 
 <template>
-  <component :is="activeView" v-model="draft" />
+  <component :is="activeView" v-model="draft" @initialized="emitInitialized" />
 </template>
