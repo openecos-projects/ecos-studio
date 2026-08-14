@@ -26,14 +26,11 @@ export enum InfoEnum {
 export enum StepEnum {
   RTL2GDS = 'RTL2GDS',
   INIT = 'Init',
-  SOC = 'SOC',
-  FUNC_SIM = 'Functional simulation',
   SYNTHESIS = 'Synthesis',
   FLOORPLAN = 'Floorplan',
   NETLIST_OPT = 'fixFanout',
   PLACEMENT = 'place',
   CTS = 'CTS',
-  PNP = 'PNP',
   TIMING_OPT = 'Timing optimization',
   LEGALIZATION = 'legalization',
   ROUTING = 'route',
@@ -45,7 +42,6 @@ export enum StepEnum {
   DRC = 'drc',
   RCX = 'RCX',
   ABSTRACT_LEF = 'Abstract lef',
-  MERGE = 'GDS merge',
 }
 
 /** 步骤元数据配置 */
@@ -190,13 +186,6 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'AbsLef',
     icon: 'ri-file-text-line',
     path: StepEnum.ABSTRACT_LEF,
-    showInSidebar: false,
-    group: 'run',
-  },
-  [StepEnum.MERGE.toLowerCase()]: {
-    label: 'Merge',
-    icon: 'ri-merge-cells-horizontal',
-    path: StepEnum.MERGE,
     showInSidebar: false,
     group: 'run',
   },

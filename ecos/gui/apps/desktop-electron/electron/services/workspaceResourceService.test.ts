@@ -491,7 +491,6 @@ describe('WorkspaceResourceService', () => {
     ['fixFanout', 'no_default_config_fixfanout.json'],
     ['place', 'pl_default_config.json'],
     ['CTS', 'cts_default_config.json'],
-    ['PNP', 'pnp_default_config.json'],
     ['legalization', 'pl_default_config.json'],
     ['route', 'rt_default_config.json'],
     ['drc', 'drc_default_config.json'],

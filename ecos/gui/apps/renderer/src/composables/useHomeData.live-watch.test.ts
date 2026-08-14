@@ -7,7 +7,6 @@ const testState = vi.hoisted(() => ({
     flow: '',
     layout: '',
     parameters: '',
-    'GDS merge': '',
     checklist: '',
     metrics: {},
     monitor: { step: [] },

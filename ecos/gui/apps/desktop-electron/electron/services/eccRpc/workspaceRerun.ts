@@ -847,13 +847,6 @@ async function pruneWorkspaceRerunHomeJson(
   ) {
     data.layout = ''
   }
-  if (
-    typeof data['GDS merge'] === 'string' &&
-    pathBelongsToWipedStage(data['GDS merge'], options.wipedDirectories)
-  ) {
-    data['GDS merge'] = ''
-  }
-
   if (data.metrics && typeof data.metrics === 'object' && !Array.isArray(data.metrics)) {
     const metrics = { ...(data.metrics as Record<string, unknown>) }
     for (const [key, value] of Object.entries(metrics)) {

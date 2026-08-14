@@ -798,10 +798,6 @@ function addEccConfigResources(
     join(root, 'config', 'pl_default_config.json'),
     'config',
   )
-  resources.config.pnp = createFile(
-    join(root, 'config', 'pnp_default_config.json'),
-    'config',
-  )
   resources.config.routing = createFile(
     join(root, 'config', 'rt_default_config.json'),
     'config',
@@ -841,8 +837,6 @@ function configResourceForEccStep(
       return config.legalization
     case 'filler':
       return config.filler
-    case 'pnp':
-      return config.pnp
     case 'rcx':
       return config.rcx
     case 'sta':
