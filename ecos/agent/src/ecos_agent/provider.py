@@ -70,6 +70,7 @@ from ecos_agent.messages import (
     workspace_continue_prompt,
     workspace_continue_title,
     workspace_signoff_confirmation_prompt,
+    workspace_signoff_choice,
     workspace_signoff_inspection_prompt,
     workspace_creation_failed,
     workspace_execution_started,
@@ -2214,11 +2215,12 @@ class EcosAgentProvider:
             )
         elif session.phase == "workspace_confirmation":
             choice = confirmation_choice(session.language, prompt_id, allow_free_text=True)
+        elif session.phase == "workspace_signoff_confirmation":
+            choice = workspace_signoff_choice(session.language, prompt_id)
         elif session.phase in {
             "confirmation",
             "workspace_continue_confirmation",
             "workspace_parameter_confirmation",
-            "workspace_signoff_confirmation",
         }:
             choice = confirmation_choice(session.language, prompt_id, allow_free_text=False)
         if choice is not None:

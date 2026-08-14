@@ -425,6 +425,19 @@ def workspace_signoff_confirmation_prompt(language: str, status: str) -> str:
     )
 
 
+def workspace_signoff_choice(language: str, prompt_id: str) -> dict[str, Any]:
+    return _choice(
+        prompt_id,
+        _prompt(language, "导出 signoff 包？", "Export signoff package?"),
+        (
+            _prompt(language, "导出 signoff 包", "Export signoff package"),
+            _prompt(language, "取消", "Cancel"),
+        ),
+        variant="buttons",
+        allow_free_text=False,
+    )
+
+
 def home_ready_choice(language: str, prompt_id: str) -> dict[str, Any]:
     return _choice(
         prompt_id,

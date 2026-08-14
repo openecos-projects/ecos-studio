@@ -78,6 +78,7 @@
               @rerun-select="handleWorkspaceRerunChoice"
               @continue-select="handleWorkspaceContinueChoice"
               @parameter-select="handleWorkspaceParameterChoice"
+              @signoff-select="handleWorkspaceSignoffChoice"
             />
             <MessageItem
               v-for="msg in turn.responses"
@@ -113,6 +114,7 @@
               @rerun-select="handleWorkspaceRerunChoice"
               @continue-select="handleWorkspaceContinueChoice"
               @parameter-select="handleWorkspaceParameterChoice"
+              @signoff-select="handleWorkspaceSignoffChoice"
             />
           </div>
         </section>
@@ -398,6 +400,10 @@ const workspaceParameterChoice = computed(() => activeUi.value.workspaceParamete
 const workspaceParameterAnsweredOptionId = computed(
   () => activeUi.value.workspaceParameterAnsweredOptionId,
 )
+const workspaceSignoffChoice = computed(() => activeUi.value.workspaceSignoffChoice)
+const workspaceSignoffAnsweredOptionId = computed(
+  () => activeUi.value.workspaceSignoffAnsweredOptionId,
+)
 const lastContractSurface = computed(() => activeUi.value.lastContractSurface)
 const workspaceRerunRows = computed<[string, string][]>(
   () =>
@@ -443,6 +449,9 @@ const workspaceParameterExecutionState = computed(() =>
         )
       : 'Review',
 )
+const workspaceSignoffExecutionState = computed(() =>
+  workspaceSignoffAnsweredOptionId.value ? 'Confirmed' : 'Review',
+)
 
 function contractAnswerState(
   choice: DesktopAgentChoice | undefined,
@@ -482,6 +491,11 @@ const contractPanelBind = computed(() => ({
   workspaceRerunTitle: displayAgentContractTitle(
     workspaceRerunContract.value?.title ?? '',
   ),
+  workspaceSignoffAnsweredOptionId: workspaceSignoffAnsweredOptionId.value,
+  workspaceSignoffAnchorTurnId: activeUi.value.workspaceSignoffAnchorTurnId,
+  workspaceSignoffChoice: workspaceSignoffChoice.value,
+  workspaceSignoffExecutionState: workspaceSignoffExecutionState.value,
+  workspaceSignoffTitle: workspaceSignoffChoice.value?.title ?? 'Signoff package export',
   workspaceSetupAnsweredOptionId: workspaceSetupAnsweredOptionId.value,
   workspaceSetupAnchorTurnId: activeUi.value.workspaceSetupAnchorTurnId,
   workspaceSetupChoice: workspaceSetupChoice.value,
@@ -520,6 +534,9 @@ const activeChoice = computed(
     (lastContractSurface.value === 'parameter' &&
     !workspaceParameterAnsweredOptionId.value
       ? workspaceParameterChoice.value
+      : undefined) ??
+    (lastContractSurface.value === 'signoff' && !workspaceSignoffAnsweredOptionId.value
+      ? workspaceSignoffChoice.value
       : undefined) ??
     pendingMessageChoice.value,
 )
@@ -1048,6 +1065,12 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     ) {
       ui.workspaceParameterChoice = event.choice
       ui.workspaceParameterAnsweredOptionId = ''
+    } else if (
+      event.choice.variant === 'buttons' &&
+      ui.lastContractSurface === 'signoff'
+    ) {
+      ui.workspaceSignoffChoice = event.choice
+      ui.workspaceSignoffAnsweredOptionId = ''
     } else {
       if (event.choice.variant === 'list') {
         ui.lastContractSurface = undefined
@@ -1055,6 +1078,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
         ui.workspaceRerunChoice = undefined
         ui.workspaceContinueChoice = undefined
         ui.workspaceParameterChoice = undefined
+        ui.workspaceSignoffChoice = undefined
       }
       messageStore.addChoice(event.choice, event.messageId, event.sessionId)
     }
@@ -1127,6 +1151,12 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_signoff' && event.workspaceSignoff) {
+    ui.lastContractSurface = 'signoff'
+    if (event.workspaceSignoff.action === 'inspect') {
+      ui.workspaceSignoffChoice = undefined
+      ui.workspaceSignoffAnsweredOptionId = ''
+      ui.workspaceSignoffAnchorTurnId = undefined
+    }
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? 'Preparing the signoff package workflow.',
@@ -1361,6 +1391,16 @@ function handleWorkspaceParameterChoice(option: DesktopAgentChoiceOption): void 
   void submitChoice(option, 'parameter')
 }
 
+function handleWorkspaceSignoffChoice(option: DesktopAgentChoiceOption): void {
+  if (activeUi.value.workspaceSignoffAnsweredOptionId) return
+  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
+    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
+    return
+  }
+  activeUi.value.workspaceSignoffAnsweredOptionId = option.id
+  void submitChoice(option, 'signoff')
+}
+
 async function submitChoice(
   option: DesktopAgentChoiceOption,
   contractSurface?: AgentContractSurface,
@@ -1375,6 +1415,8 @@ async function submitChoice(
       activeUi.value.workspaceContinueAnchorTurnId = turnId
     if (contractSurface === 'parameter')
       activeUi.value.workspaceParameterAnchorTurnId = turnId
+    if (contractSurface === 'signoff')
+      activeUi.value.workspaceSignoffAnchorTurnId = turnId
   }
   await sendAgentMessage(option.value, false)
 }

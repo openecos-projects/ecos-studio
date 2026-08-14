@@ -1112,7 +1112,13 @@ def test_harden_signoff_requires_unblocked_checklist_and_user_confirmation(tmp_p
         f'workspace_signoff_inspection:{json.dumps({"signoff_id": signoff_id, "status": "ready", "error": ""})}',
     )
     assert session.phase == "workspace_signoff_confirmation"
-    assert _last_event(events, "choice")["choice"]["variant"] == "buttons"
+    choice = _last_event(events, "choice")["choice"]
+    assert choice["variant"] == "buttons"
+    assert choice["title"] == "Export signoff package?"
+    assert [option["label"] for option in choice["options"]] == [
+        "Export signoff package",
+        "Cancel",
+    ]
 
     _send(provider, session_id, "1")
     export = _last_event(events, "workspace_signoff")["workspaceSignoff"]

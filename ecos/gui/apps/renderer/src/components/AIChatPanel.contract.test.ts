@@ -158,6 +158,10 @@ describe('AIChatPanel flow contracts', () => {
 
   it('runs signoff inspection before native export and reports checklist blocking', () => {
     expect(source).toContain("event.type === 'workspace_signoff'")
+    expect(source).toContain("ui.lastContractSurface = 'signoff'")
+    expect(source).toContain('workspaceSignoffChoice')
+    expect(source).toContain('@signoff-select="handleWorkspaceSignoffChoice"')
+    expect(source).toContain("submitChoice(option, 'signoff')")
     expect(source).toContain('inspectSignoff({ workspaceHandle })')
     expect(source).toContain("risk.severity === 'blocked'")
     expect(source).toContain('workspace_signoff_inspection:')

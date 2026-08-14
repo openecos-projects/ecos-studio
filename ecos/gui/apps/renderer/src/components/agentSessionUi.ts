@@ -5,7 +5,12 @@ import type {
   DesktopAgentRunStatus,
 } from '@ecos-studio/shared'
 
-export type AgentContractSurface = 'setup' | 'rerun' | 'continue' | 'parameter'
+export type AgentContractSurface =
+  | 'setup'
+  | 'rerun'
+  | 'continue'
+  | 'parameter'
+  | 'signoff'
 
 export type PendingGuiAction =
   | {
@@ -62,6 +67,9 @@ export interface AgentSessionUiState {
   workspaceParameterChoice?: DesktopAgentChoice
   workspaceParameterAnsweredOptionId: string
   workspaceParameterAnchorTurnId?: string
+  workspaceSignoffChoice?: DesktopAgentChoice
+  workspaceSignoffAnsweredOptionId: string
+  workspaceSignoffAnchorTurnId?: string
   pendingParameterUpdate?: NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>
   lastContractSurface?: AgentContractSurface
   pendingGuiAction?: PendingGuiAction
@@ -89,6 +97,7 @@ export function createAgentSessionUiState(): AgentSessionUiState {
     workspaceContinueAnsweredOptionId: '',
     workspaceParameterMessage: '',
     workspaceParameterAnsweredOptionId: '',
+    workspaceSignoffAnsweredOptionId: '',
   }
 }
 

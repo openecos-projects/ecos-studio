@@ -6,6 +6,8 @@ describe('AgentSessionContractPanels', () => {
     expect(source).toContain("mode: 'awaiting' | 'committed'")
     expect(source).toContain('AgentWorkspaceSetupPanel')
     expect(source).toContain('AgentExecutionContractPanel')
+    expect(source).toContain('workspaceSignoffChoice')
+    expect(source).toContain('@select="emit(\'signoffSelect\', $event)"')
     expect(source).toContain("props.mode === 'awaiting'")
     expect(source).toContain('anchorTurnId === props.turnId')
   })

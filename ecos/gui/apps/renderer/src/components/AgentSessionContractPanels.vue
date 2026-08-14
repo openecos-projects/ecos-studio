@@ -43,6 +43,16 @@
     :title="workspaceParameterTitle"
     @select="emit('parameterSelect', $event)"
   />
+  <AgentExecutionContractPanel
+    v-if="showSignoff"
+    :answered-option-id="workspaceSignoffAnsweredOptionId"
+    :choice="workspaceSignoffChoice"
+    :choice-disabled="choiceDisabled"
+    :execution-state="workspaceSignoffExecutionState"
+    :rows="[]"
+    :title="workspaceSignoffTitle"
+    @select="emit('signoffSelect', $event)"
+  />
 </template>
 
 <script setup lang="ts">
@@ -84,6 +94,11 @@ const props = defineProps<{
   workspaceRerunMessage: string
   workspaceRerunRows: [string, string][]
   workspaceRerunTitle: string
+  workspaceSignoffAnsweredOptionId: string
+  workspaceSignoffAnchorTurnId?: string
+  workspaceSignoffChoice?: DesktopAgentChoice
+  workspaceSignoffExecutionState: string
+  workspaceSignoffTitle: string
   workspaceSetupAnsweredOptionId: string
   workspaceSetupAnchorTurnId?: string
   workspaceSetupChoice?: DesktopAgentChoice
@@ -96,6 +111,7 @@ const emit = defineEmits<{
   createWorkspace: [config: WorkspaceConfig, contract: DesktopAgentWorkspaceSetupContract]
   parameterSelect: [option: DesktopAgentChoiceOption]
   rerunSelect: [option: DesktopAgentChoiceOption]
+  signoffSelect: [option: DesktopAgentChoiceOption]
   setupSelect: [option: DesktopAgentChoiceOption]
 }>()
 
@@ -125,6 +141,13 @@ const showParameter = computed(() =>
     Boolean(props.workspaceParameterTitle),
     props.workspaceParameterAnsweredOptionId,
     props.workspaceParameterAnchorTurnId,
+  ),
+)
+const showSignoff = computed(() =>
+  visibleForMode(
+    Boolean(props.workspaceSignoffChoice),
+    props.workspaceSignoffAnsweredOptionId,
+    props.workspaceSignoffAnchorTurnId,
   ),
 )
 
