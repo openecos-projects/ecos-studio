@@ -119,6 +119,8 @@ export type {
   DesktopAgentParameterWriteFile,
   DesktopAgentParameterWriteSurface,
   DesktopAgentWorkspaceContinueContract,
+  DesktopAgentWorkspaceSignoffAction,
+  DesktopAgentWorkspaceSignoffContract,
   DesktopAgentWorkspaceParameterUpdateContract,
   DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunContract,

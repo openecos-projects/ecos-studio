@@ -21,6 +21,10 @@ export type PendingGuiAction =
       type: 'parameter'
       payload: NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>
     }
+  | {
+      type: 'signoff'
+      contract: NonNullable<DesktopAgentEvent['workspaceSignoff']>
+    }
 
 export interface AgentSessionUiState {
   runStatus: DesktopAgentRunStatus
@@ -35,6 +39,7 @@ export interface AgentSessionUiState {
   isWorkspaceRerunPending: boolean
   isWorkspaceContinuePending: boolean
   isWorkspaceParameterPending: boolean
+  isWorkspaceSignoffPending: boolean
   workspaceSetupContract?: DesktopAgentEvent['workspaceSetup']
   workspaceSetupMessage: string
   workspaceSetupChoice?: DesktopAgentChoice
@@ -75,6 +80,7 @@ export function createAgentSessionUiState(): AgentSessionUiState {
     isWorkspaceRerunPending: false,
     isWorkspaceContinuePending: false,
     isWorkspaceParameterPending: false,
+    isWorkspaceSignoffPending: false,
     workspaceSetupMessage: '',
     workspaceSetupAnsweredOptionId: '',
     workspaceRerunMessage: '',

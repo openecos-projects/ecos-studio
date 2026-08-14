@@ -9,6 +9,7 @@ import type {
   DesktopAgentWorkspaceParameterUpdateContract,
   DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunContract,
+  DesktopAgentWorkspaceSignoffContract,
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
@@ -389,6 +390,7 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'workspace_rerun',
   'workspace_continue',
   'workspace_parameter_update',
+  'workspace_signoff',
   'error',
 ])
 
@@ -407,6 +409,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   const workspaceParameterUpdate = readWorkspaceParameterUpdateContract(
     record.workspaceParameterUpdate,
   )
+  const workspaceSignoff = readWorkspaceSignoffContract(record.workspaceSignoff)
   const status = readAgentRunStatus(record.status)
   const delta = readEventText(record.delta)
   const messageId = readOptionalIdentifier(record.messageId)
@@ -418,6 +421,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   if (type === 'workspace_rerun' && !workspaceRerun) return null
   if (type === 'workspace_continue' && !workspaceContinue) return null
   if (type === 'workspace_parameter_update' && !workspaceParameterUpdate) return null
+  if (type === 'workspace_signoff' && !workspaceSignoff) return null
   const providerId = readEventText(record.providerId)
   const sessionId = readEventText(record.sessionId)
   const text = readEventText(record.text)
@@ -436,7 +440,30 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(workspaceRerun ? { workspaceRerun } : {}),
     ...(workspaceContinue ? { workspaceContinue } : {}),
     ...(workspaceParameterUpdate ? { workspaceParameterUpdate } : {}),
+    ...(workspaceSignoff ? { workspaceSignoff } : {}),
     type: type as DesktopAgentEventType,
+  }
+}
+
+function readWorkspaceSignoffContract(
+  value: unknown,
+): DesktopAgentWorkspaceSignoffContract | null {
+  const record = readRecord(value)
+  const signoffId = readOptionalIdentifier(record.signoff_id)
+  const workspace = readWorkspaceRerunPath(record.workspace)
+  if (
+    record.schema_version !== 'flow-agent.workspace_signoff_contract.v1' ||
+    !signoffId ||
+    !workspace ||
+    (record.action !== 'inspect' && record.action !== 'export')
+  ) {
+    return null
+  }
+  return {
+    action: record.action,
+    schema_version: 'flow-agent.workspace_signoff_contract.v1',
+    signoff_id: signoffId,
+    workspace,
   }
 }
 

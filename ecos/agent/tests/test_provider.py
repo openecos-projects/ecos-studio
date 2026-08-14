@@ -1092,6 +1092,95 @@ def test_workspace_continue_uses_compact_confirm_without_command_table(
     assert "Continue the unfinished flow in the current workspace" in str(contract["text"])
 
 
+def test_harden_signoff_requires_unblocked_checklist_and_user_confirmation(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    session = provider.sessions[session_id]
+
+    provider._begin_workspace_signoff(session, str(workspace))
+    signoff = _last_event(events, "workspace_signoff")["workspaceSignoff"]
+    signoff_id = str(signoff["signoff_id"])
+    assert signoff["action"] == "inspect"
+    _send(
+        provider,
+        session_id,
+        f'workspace_signoff_inspection:{json.dumps({"signoff_id": signoff_id, "status": "ready", "error": ""})}',
+    )
+    assert session.phase == "workspace_signoff_confirmation"
+    assert _last_event(events, "choice")["choice"]["variant"] == "buttons"
+
+    _send(provider, session_id, "1")
+    export = _last_event(events, "workspace_signoff")["workspaceSignoff"]
+    assert export["action"] == "export"
+    _send(
+        provider,
+        session_id,
+        f'workspace_signoff_result:{json.dumps({"signoff_id": signoff_id, "status": "succeeded", "error": ""})}',
+    )
+    assert session.phase == "operation"
+    assert any("exported successfully" in str(event.get("text")) for event in events)
+
+
+def test_harden_signoff_blocked_checklist_never_reaches_export(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    session = provider.sessions[session_id]
+    provider._begin_workspace_signoff(session, str(workspace))
+    signoff_id = str(_last_event(events, "workspace_signoff")["workspaceSignoff"]["signoff_id"])
+
+    _send(
+        provider,
+        session_id,
+        f'workspace_signoff_inspection:{json.dumps({"signoff_id": signoff_id, "status": "blocked", "error": "MPC checklist blocked"})}',
+    )
+
+    assert session.phase == "operation"
+    assert not any(
+        event["type"] == "workspace_signoff"
+        and event.get("workspaceSignoff", {}).get("action") == "export"
+        for event in events
+    )
+
+
+def test_workspace_creation_harden_result_starts_signoff_inspection(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    session.workspace_setup_id = "setup-1"
+    session.workspace_contract = {"directory": str(workspace)}
+    session.phase = "workspace_creation_pending"
+
+    _send(
+        provider,
+        session_id,
+        "workspace_create_result:" + json.dumps(
+            {
+                "setup_id": "setup-1",
+                "status": "succeeded",
+                "error": "",
+                "end_step": "Harden",
+                "workspace": str(workspace),
+            }
+        ),
+    )
+
+    assert session.phase == "workspace_signoff_inspection_pending"
+    assert _last_event(events, "workspace_signoff")["workspaceSignoff"]["action"] == "inspect"
+
+
 def _workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
     workspace = tmp_path / "gcd"
     flow = workspace / "home" / "flow.json"

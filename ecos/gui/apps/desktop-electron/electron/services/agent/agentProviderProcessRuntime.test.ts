@@ -425,6 +425,66 @@ describe('AgentProviderProcessRuntime', () => {
     )
   })
 
+  it('forwards only validated workspace signoff contracts', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_signoff',
+          workspaceSignoff: {
+            action: 'inspect',
+            schema_version: 'flow-agent.workspace_signoff_contract.v1',
+            signoff_id: 'signoff-1',
+            workspace: '/runs/gcd',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+    expect(listener).toHaveBeenCalledWith({
+      providerId: 'local',
+      type: 'workspace_signoff',
+      workspaceSignoff: {
+        action: 'inspect',
+        schema_version: 'flow-agent.workspace_signoff_contract.v1',
+        signoff_id: 'signoff-1',
+        workspace: '/runs/gcd',
+      },
+    })
+
+    listener.mockClear()
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_signoff',
+          workspaceSignoff: {
+            action: 'export',
+            schema_version: 'flow-agent.workspace_signoff_contract.v1',
+            signoff_id: 'signoff-2',
+            workspace: 'relative/path',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+    expect(listener).not.toHaveBeenCalled()
+  })
+
   it('drops workspace setup contracts with an invalid MPC snapshot', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
@@ -463,12 +523,22 @@ describe('AgentProviderProcessRuntime', () => {
               project_json_path: '/runs/project.json',
             },
             parameters: {
-              design: 'gcd', top_module: 'gcd', clock: 'clk', description: '',
-              frequency_max: 50, die_area_mode: 'utilitization_margin', utilitization: 0.4,
-              margin: 0, max_fanout: 32, target_density: 0.2, target_overflow: 0,
+              design: 'gcd',
+              top_module: 'gcd',
+              clock: 'clk',
+              description: '',
+              frequency_max: 50,
+              die_area_mode: 'utilitization_margin',
+              utilitization: 0.4,
+              margin: 0,
+              max_fanout: 32,
+              target_density: 0.2,
+              target_overflow: 0,
             },
             flow_config: {
-              start_step: 'Synthesis', end_step: 'Harden', steps: ['Synthesis', 'Harden'],
+              start_step: 'Synthesis',
+              end_step: 'Harden',
+              steps: ['Synthesis', 'Harden'],
             },
             requires_gui_review: true,
             mpc: { resource_id: 'mpc:bad', path: 'relative/path' },

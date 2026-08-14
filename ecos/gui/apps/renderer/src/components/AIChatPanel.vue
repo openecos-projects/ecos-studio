@@ -194,6 +194,7 @@ import type {
   DesktopAgentChoiceOption,
   DesktopAgentEvent,
   DesktopAgentWorkspaceParameterWrite,
+  DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
@@ -228,6 +229,8 @@ import {
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { refreshConfigApi, syncConfigApi } from '@/api/flow'
+import { readWorkspaceFlowResourceApi } from '@/api/workspaceResources'
+import { canExportSignoffPackage } from '@/composables/useSignoffPackageExport'
 import { CMDEnum, ResponseEnum } from '@/api/type'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import {
@@ -258,6 +261,7 @@ const {
   openProject,
   invalidateWorkspaceResources,
   currentProject,
+  workspaceSession,
   runtimeEvents,
   waitForRuntimeOperation,
 } = useWorkspace()
@@ -354,6 +358,12 @@ const isWorkspaceParameterPending = computed({
   get: () => activeUi.value.isWorkspaceParameterPending,
   set: (value: boolean) => {
     activeUi.value.isWorkspaceParameterPending = value
+  },
+})
+const isWorkspaceSignoffPending = computed({
+  get: () => activeUi.value.isWorkspaceSignoffPending,
+  set: (value: boolean) => {
+    activeUi.value.isWorkspaceSignoffPending = value
   },
 })
 const workspaceSetupContract = computed(() => activeUi.value.workspaceSetupContract)
@@ -486,6 +496,7 @@ const isRunning = computed(
     isWorkspaceRerunPending.value ||
     isWorkspaceContinuePending.value ||
     isWorkspaceParameterPending.value ||
+    isWorkspaceSignoffPending.value ||
     agentRunStatus.value === 'running',
 )
 const pendingMessageChoice = computed(
@@ -903,6 +914,10 @@ async function flushPendingGuiActionForActiveTab(): Promise<void> {
     await executeWorkspaceContinue(pending.payload, sessionId)
     return
   }
+  if (pending.type === 'signoff') {
+    await executeWorkspaceSignoff(pending.contract, sessionId)
+    return
+  }
   await executeWorkspaceParameterUpdate(pending.payload, sessionId)
 }
 
@@ -921,10 +936,13 @@ async function maybeRunPostCreateFlow(): Promise<void> {
         throw new Error('Flow execution did not complete successfully.')
       }
       await waitForRuntimeOperation(flowResult.operationId)
+      const flow = await readWorkspaceFlowResourceApi()
       await reportWorkspaceCreationResult(
         handoff.setupId,
         'succeeded',
         '',
+        canExportSignoffPackage(flow) ? 'Harden' : undefined,
+        handoff.workspacePath,
         handoff.ownerSessionId,
       )
     } finally {
@@ -938,6 +956,8 @@ async function maybeRunPostCreateFlow(): Promise<void> {
         handoff.setupId,
         'failed',
         reason,
+        undefined,
+        undefined,
         handoff.ownerSessionId,
       )
     } catch {
@@ -1104,6 +1124,23 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       return
     }
     void executeWorkspaceParameterUpdate(event.workspaceParameterUpdate, event.sessionId)
+    return
+  }
+  if (event.type === 'workspace_signoff' && event.workspaceSignoff) {
+    if (isActive) scrollWorkspaceSetupIntoView()
+    messageStore.addAssistantMessage(
+      event.text ?? 'Preparing the signoff package workflow.',
+      'done',
+      event.sessionId,
+    )
+    if (!isActive) {
+      deferGuiAction(event.sessionId, {
+        type: 'signoff',
+        contract: event.workspaceSignoff,
+      })
+      return
+    }
+    void executeWorkspaceSignoff(event.workspaceSignoff, event.sessionId)
     return
   }
   if (event.type === 'error') {
@@ -1409,6 +1446,8 @@ async function createWorkspaceFromAgent(
         contract.setup_id,
         'failed',
         result.error || 'The workspace could not be created.',
+        undefined,
+        undefined,
         ownerSessionId,
       )
     }
@@ -1421,6 +1460,8 @@ async function createWorkspaceFromAgent(
         contract.setup_id,
         'failed',
         reason,
+        undefined,
+        undefined,
         ownerSessionId,
       )
     } catch {
@@ -1435,12 +1476,20 @@ async function reportWorkspaceCreationResult(
   setupId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  endStep?: string,
+  workspace?: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
-    message: `workspace_create_result:${JSON.stringify({ setup_id: setupId, status, error })}`,
+    message: `workspace_create_result:${JSON.stringify({
+      setup_id: setupId,
+      status,
+      error,
+      ...(endStep ? { end_step: endStep } : {}),
+      ...(workspace ? { workspace } : {}),
+    })}`,
     providerId: AGENT_PROVIDER_ID,
     sessionId: ownerSessionId,
   })
@@ -1522,7 +1571,13 @@ async function executeWorkspaceRerun(
       `Rerun ${contract.rerun_id} completed.`,
       ownerSessionId,
     )
-    await reportWorkspaceRerunResult(contract.rerun_id, 'succeeded', '', ownerSessionId)
+    await reportWorkspaceRerunResult(
+      contract.rerun_id,
+      'succeeded',
+      '',
+      contract.end_step,
+      ownerSessionId,
+    )
   } catch (error) {
     const reason = agentErrorMessage(error)
     messageStore.addAssistantMessage(`Rerun failed: ${reason}`, 'error', ownerSessionId)
@@ -1531,6 +1586,7 @@ async function executeWorkspaceRerun(
         contract.rerun_id,
         'failed',
         reason,
+        undefined,
         ownerSessionId,
       )
     } catch {
@@ -1623,12 +1679,18 @@ async function reportWorkspaceRerunResult(
   rerunId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  endStep?: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
-    message: `workspace_rerun_result:${JSON.stringify({ rerun_id: rerunId, status, error })}`,
+    message: `workspace_rerun_result:${JSON.stringify({
+      rerun_id: rerunId,
+      status,
+      error,
+      ...(endStep ? { end_step: endStep } : {}),
+    })}`,
     providerId: AGENT_PROVIDER_ID,
     sessionId: ownerSessionId,
   })
@@ -1654,10 +1716,12 @@ async function executeWorkspaceContinue(
       throw new Error('Flow execution did not complete successfully.')
     }
     await waitForRuntimeOperation(flowResult.operationId)
+    const flow = await readWorkspaceFlowResourceApi()
     await reportWorkspaceContinueResult(
       contract.continue_id,
       'succeeded',
       '',
+      canExportSignoffPackage(flow) ? 'Harden' : undefined,
       ownerSessionId,
     )
   } catch (error) {
@@ -1672,6 +1736,7 @@ async function executeWorkspaceContinue(
         contract.continue_id,
         'failed',
         reason,
+        undefined,
         ownerSessionId,
       )
     } catch {
@@ -1688,12 +1753,156 @@ async function reportWorkspaceContinueResult(
   continueId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  endStep?: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
-    message: `workspace_continue_result:${JSON.stringify({ continue_id: continueId, status, error })}`,
+    message: `workspace_continue_result:${JSON.stringify({
+      continue_id: continueId,
+      status,
+      error,
+      ...(endStep ? { end_step: endStep } : {}),
+    })}`,
+    providerId: AGENT_PROVIDER_ID,
+    sessionId: ownerSessionId,
+  })
+  messageStore.finishStreamingMessages(ownerSessionId)
+}
+
+async function executeWorkspaceSignoff(
+  contract: DesktopAgentWorkspaceSignoffContract,
+  ownerSessionId = agentSessionId.value ?? '',
+): Promise<void> {
+  const ui = sessionUi(ownerSessionId)
+  if (!isActiveGuiOwner(ownerSessionId)) {
+    deferGuiAction(ownerSessionId, { type: 'signoff', contract })
+    return
+  }
+  if (ui.isWorkspaceSignoffPending) return
+  ui.isWorkspaceSignoffPending = true
+  messageStore.setActiveSessionId(ownerSessionId)
+  try {
+    const desktopApi = getOptionalDesktopApi()
+    const workspaceHandle = workspaceSession.value.workspaceId
+    const workspacePath = normalizeWorkspaceRoot(currentProject.value?.path ?? '')
+    if (!desktopApi || !workspaceHandle || !workspacePath) {
+      throw new Error('The active workspace is unavailable for signoff.')
+    }
+    if (normalizeWorkspaceRoot(contract.workspace) !== workspacePath) {
+      throw new Error('The signoff contract targets a workspace that is not open.')
+    }
+    if (contract.action === 'inspect') {
+      const review = await desktopApi.ecc.workspace.inspectSignoff({ workspaceHandle })
+      const blocked = review.risks
+        .filter((risk) => risk.severity === 'blocked')
+        .map((risk) => `${risk.title}: ${risk.summary}`)
+        .join('; ')
+      await reportWorkspaceSignoffInspection(
+        contract.signoff_id,
+        review.status,
+        blocked ||
+          review.risks.map((risk) => risk.summary).join('; ') ||
+          (review.status === 'blocked' ? 'Signoff checklist is blocked.' : ''),
+        ownerSessionId,
+      )
+      return
+    }
+    const outputPath = await desktopApi.dialog.saveFile({
+      title: 'Export Signoff Package',
+      ensureDirectory: true,
+      filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
+    })
+    if (!outputPath) {
+      await reportWorkspaceSignoffResult(
+        contract.signoff_id,
+        'cancelled',
+        '',
+        ownerSessionId,
+      )
+      return
+    }
+    const result = await desktopApi.ecc.workspace.exportSignoff({
+      outputPath,
+      workspaceHandle,
+    })
+    messageStore.addAssistantMessage(
+      `Signoff package saved to ${result.outputPath}.`,
+      'done',
+      ownerSessionId,
+    )
+    await reportWorkspaceSignoffResult(
+      contract.signoff_id,
+      'succeeded',
+      '',
+      ownerSessionId,
+    )
+  } catch (error) {
+    const reason = agentErrorMessage(error)
+    messageStore.addAssistantMessage(
+      `Signoff export failed: ${reason}`,
+      'error',
+      ownerSessionId,
+    )
+    try {
+      if (contract.action === 'inspect') {
+        await reportWorkspaceSignoffInspection(
+          contract.signoff_id,
+          'blocked',
+          reason,
+          ownerSessionId,
+        )
+      } else {
+        await reportWorkspaceSignoffResult(
+          contract.signoff_id,
+          'failed',
+          reason,
+          ownerSessionId,
+        )
+      }
+    } catch {
+      messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
+    }
+  } finally {
+    ui.isWorkspaceSignoffPending = false
+  }
+}
+
+async function reportWorkspaceSignoffInspection(
+  signoffId: string,
+  status: 'blocked' | 'ready' | 'attention',
+  error: string,
+  ownerSessionId = agentSessionId.value ?? '',
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
+  await agent.sendMessage({
+    message: `workspace_signoff_inspection:${JSON.stringify({
+      signoff_id: signoffId,
+      status,
+      error,
+    })}`,
+    providerId: AGENT_PROVIDER_ID,
+    sessionId: ownerSessionId,
+  })
+  messageStore.finishStreamingMessages(ownerSessionId)
+}
+
+async function reportWorkspaceSignoffResult(
+  signoffId: string,
+  status: 'succeeded' | 'failed' | 'cancelled' | 'blocked',
+  error: string,
+  ownerSessionId = agentSessionId.value ?? '',
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
+  await agent.sendMessage({
+    message: `workspace_signoff_result:${JSON.stringify({
+      signoff_id: signoffId,
+      status,
+      error,
+    })}`,
     providerId: AGENT_PROVIDER_ID,
     sessionId: ownerSessionId,
   })

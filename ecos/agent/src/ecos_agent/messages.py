@@ -404,6 +404,27 @@ def workspace_continue_title(language: str) -> str:
     return _prompt(language, "继续未完成的 flow", "Continue unfinished flow")
 
 
+def workspace_signoff_inspection_prompt(language: str) -> str:
+    return _prompt(
+        language,
+        "Flow 已完成 Harden，正在检查 signoff checklist。",
+        "Harden completed. Checking the signoff checklist.",
+    )
+
+
+def workspace_signoff_confirmation_prompt(language: str, status: str) -> str:
+    attention = status == "attention"
+    return _prompt(
+        language,
+        "Signoff checklist 未发现 blocked 项，但存在 attention 项。是否导出 signoff 包？"
+        if attention
+        else "Signoff checklist 未发现 blocked 项。是否导出 signoff 包？",
+        "The signoff checklist has no blocked items, but it has attention items. Export the signoff package?"
+        if attention
+        else "The signoff checklist has no blocked items. Export the signoff package?",
+    )
+
+
 def home_ready_choice(language: str, prompt_id: str) -> dict[str, Any]:
     return _choice(
         prompt_id,

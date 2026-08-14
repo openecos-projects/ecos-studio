@@ -68,6 +68,9 @@ _WORKSPACE_NAME_TOKEN = re.compile(r"\b(ws_\d{1,8})\b", re.IGNORECASE)
 _SPEC_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _WORKSPACE_CREATE_RESULT_PREFIX = "workspace_create_result:"
 _WORKSPACE_RERUN_RESULT_PREFIX = "workspace_rerun_result:"
+_WORKSPACE_CONTINUE_RESULT_PREFIX = "workspace_continue_result:"
+_WORKSPACE_SIGNOFF_INSPECTION_PREFIX = "workspace_signoff_inspection:"
+_WORKSPACE_SIGNOFF_RESULT_PREFIX = "workspace_signoff_result:"
 _PATH_FIELD_HINTS: tuple[tuple[tuple[str, ...], str, str], ...] = (
     (("pdk", "工艺库", "工艺"), "pdk_root", "directory"),
     (("project root", "project_root", "项目根", "project"), "project_root", "directory"),
@@ -166,8 +169,11 @@ def _handle_workspace_rerun_result(provider: Any, session: Any, message: str) ->
     if result[0] != contract.rerun_id:
         provider._emit(session, "error", "Workspace rerun result does not match the pending contract.")
         return
-    _, status, error = result
+    _, status, error, end_step = result
     if status == "succeeded":
+        if end_step and end_step.strip().lower() == "harden":
+            provider._begin_workspace_signoff(session, contract.target_workspace)
+            return
         provider._emit(session, "message", _rerun_completion_message(session.language))
         provider._reset(session)
         provider._emit_phase_choice(session)
@@ -917,14 +923,16 @@ def _optional_text(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _workspace_creation_result(message: str) -> tuple[str, str, str] | None:
+def _workspace_creation_result(message: str) -> tuple[str, str, str, str | None, str | None] | None:
     if not message.startswith(_WORKSPACE_CREATE_RESULT_PREFIX):
         return None
     try:
         payload = json.loads(message.removeprefix(_WORKSPACE_CREATE_RESULT_PREFIX))
     except json.JSONDecodeError:
         return None
-    if not isinstance(payload, dict) or set(payload) != {"setup_id", "status", "error"}:
+    if not isinstance(payload, dict) or not {"setup_id", "status", "error"}.issubset(payload):
+        return None
+    if set(payload) - {"setup_id", "status", "error", "end_step", "workspace"}:
         return None
     setup_id = payload.get("setup_id")
     status = payload.get("status")
@@ -939,17 +947,32 @@ def _workspace_creation_result(message: str) -> tuple[str, str, str] | None:
     normalized_error = re.sub(r"[\x00-\x1f\x7f]+", " ", error).strip()[:512]
     if status == "failed" and not normalized_error:
         return None
-    return setup_id, status, normalized_error
+    end_step = payload.get("end_step")
+    workspace = payload.get("workspace")
+    if end_step is not None and (
+        not isinstance(end_step, str) or len(end_step) > 64 or not end_step.strip()
+    ):
+        return None
+    if workspace is not None and (
+        not isinstance(workspace, str)
+        or len(workspace) > 4096
+        or not workspace.startswith('/')
+        or '\x00' in workspace
+    ):
+        return None
+    return setup_id, status, normalized_error, end_step.strip() if end_step else None, workspace
 
 
-def _workspace_rerun_result(message: str) -> tuple[str, str, str] | None:
+def _workspace_rerun_result(message: str) -> tuple[str, str, str, str | None] | None:
     if not message.startswith(_WORKSPACE_RERUN_RESULT_PREFIX):
         return None
     try:
         payload = json.loads(message.removeprefix(_WORKSPACE_RERUN_RESULT_PREFIX))
     except json.JSONDecodeError:
         return None
-    if not isinstance(payload, dict) or set(payload) != {"rerun_id", "status", "error"}:
+    if not isinstance(payload, dict) or not {"rerun_id", "status", "error"}.issubset(payload):
+        return None
+    if set(payload) - {"rerun_id", "status", "error", "end_step"}:
         return None
     rerun_id, status, error = payload.get("rerun_id"), payload.get("status"), payload.get("error")
     if (
@@ -962,7 +985,81 @@ def _workspace_rerun_result(message: str) -> tuple[str, str, str] | None:
     normalized_error = re.sub(r"[\x00-\x1f\x7f]+", " ", error).strip()[:512]
     if status == "failed" and not normalized_error:
         return None
-    return rerun_id, status, normalized_error
+    end_step = payload.get("end_step")
+    if end_step is not None and (
+        not isinstance(end_step, str) or len(end_step) > 64 or not end_step.strip()
+    ):
+        return None
+    return rerun_id, status, normalized_error, end_step.strip() if end_step else None
+
+
+def _workspace_continue_result(message: str) -> tuple[str, str, str, str | None] | None:
+    if not message.startswith(_WORKSPACE_CONTINUE_RESULT_PREFIX):
+        return None
+    try:
+        payload = json.loads(message.removeprefix(_WORKSPACE_CONTINUE_RESULT_PREFIX))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or not {"continue_id", "status", "error"}.issubset(payload):
+        return None
+    if set(payload) - {"continue_id", "status", "error", "end_step"}:
+        return None
+    continue_id, status, error = payload.get("continue_id"), payload.get("status"), payload.get("error")
+    if (
+        not isinstance(continue_id, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", continue_id)
+        or status not in {"succeeded", "failed"}
+        or not isinstance(error, str)
+    ):
+        return None
+    normalized_error = re.sub(r"[\x00-\x1f\x7f]+", " ", error).strip()[:512]
+    if status == "failed" and not normalized_error:
+        return None
+    end_step = payload.get("end_step")
+    if end_step is not None and (
+        not isinstance(end_step, str) or len(end_step) > 64 or not end_step.strip()
+    ):
+        return None
+    return continue_id, status, normalized_error, end_step.strip() if end_step else None
+
+
+def _workspace_signoff_inspection_result(
+    message: str,
+) -> tuple[str, str, str] | None:
+    return _workspace_signoff_result_payload(
+        message, _WORKSPACE_SIGNOFF_INSPECTION_PREFIX, "signoff_id", {"blocked", "ready", "attention"}
+    )
+
+
+def _workspace_signoff_result(message: str) -> tuple[str, str, str] | None:
+    return _workspace_signoff_result_payload(
+        message, _WORKSPACE_SIGNOFF_RESULT_PREFIX, "signoff_id", {"succeeded", "failed", "cancelled", "blocked"}
+    )
+
+
+def _workspace_signoff_result_payload(
+    message: str, prefix: str, identifier: str, statuses: set[str]
+) -> tuple[str, str, str] | None:
+    if not message.startswith(prefix):
+        return None
+    try:
+        payload = json.loads(message.removeprefix(prefix))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or set(payload) != {identifier, "status", "error"}:
+        return None
+    value, status, error = payload.get(identifier), payload.get("status"), payload.get("error")
+    if (
+        not isinstance(value, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value)
+        or status not in statuses
+        or not isinstance(error, str)
+    ):
+        return None
+    normalized_error = re.sub(r"[\x00-\x1f\x7f]+", " ", error).strip()[:512]
+    if status in {"failed", "blocked"} and not normalized_error:
+        return None
+    return value, status, normalized_error
 
 
 def _required_message(value: object) -> str:

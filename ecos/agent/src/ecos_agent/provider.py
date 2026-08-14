@@ -69,6 +69,8 @@ from ecos_agent.messages import (
     workspace_confirmation_prompt,
     workspace_continue_prompt,
     workspace_continue_title,
+    workspace_signoff_confirmation_prompt,
+    workspace_signoff_inspection_prompt,
     workspace_creation_failed,
     workspace_execution_started,
     workspace_name_prompt,
@@ -110,6 +112,9 @@ from ecos_agent.provider_support import (
     _gui_workspace_codex_provider,
     _gui_workspace_request_context,
     _handle_workspace_rerun_result,
+    _workspace_continue_result,
+    _workspace_signoff_inspection_result,
+    _workspace_signoff_result,
     _keyword_operation_choice,
     _number_default,
     _operation_choice,
@@ -262,6 +267,8 @@ class _Session:
     workspace_contract: dict[str, Any] | None = None
     workspace_continue_id: str | None = None
     workspace_parameter_update: dict[str, Any] | None = None
+    workspace_signoff_id: str | None = None
+    workspace_signoff_workspace: str | None = None
     active_interrupt: Callable[[], None] | None = None
     active_tool_message_id: str | None = None
     active_turn_id: str | None = None
@@ -452,6 +459,9 @@ class EcosAgentProvider:
             "workspace_rerun_pending": self._handle_workspace_rerun_result,
             "workspace_continue_confirmation": self._confirm_workspace_continue,
             "workspace_continue_pending": self._handle_workspace_continue_result,
+            "workspace_signoff_inspection_pending": self._handle_workspace_signoff_inspection_result,
+            "workspace_signoff_confirmation": self._confirm_workspace_signoff,
+            "workspace_signoff_export_pending": self._handle_workspace_signoff_result,
             "workspace_parameter_request": self._select_workspace_parameter_request,
             "workspace_parameter_confirmation": self._confirm_workspace_parameter_update,
             "workspace_parameter_pending": self._handle_workspace_parameter_update_result,
@@ -972,14 +982,102 @@ class EcosAgentProvider:
         )
 
     def _handle_workspace_continue_result(self, session: _Session, message: str) -> None:
-        if not message.startswith("workspace_continue_result:"):
+        result = _workspace_continue_result(message)
+        if result is None or result[0] != session.workspace_continue_id:
             self._emit(session, "error", "Continue-flow result is invalid.")
             return
+        _, status, error, end_step = result
+        if status == "succeeded" and end_step and end_step.lower() == "harden":
+            self._begin_workspace_signoff(session, session.rerun_workspace_path or "")
+            return
         self._reset(session)
-        if '"status":"succeeded"' in message or '"status": "succeeded"' in message:
+        if status == "succeeded":
             self._emit(session, "message", "Flow continue finished.")
         else:
-            self._emit(session, "message", "Flow continue did not complete successfully.")
+            self._emit(session, "message", f"Flow continue did not complete successfully: {error}")
+        self._emit_phase_choice(session)
+
+    def _begin_workspace_signoff(self, session: _Session, workspace: str) -> None:
+        if not workspace or not workspace.startswith("/"):
+            self._emit(session, "error", "Signoff workspace is unavailable.")
+            self._reset(session)
+            self._emit_phase_choice(session)
+            return
+        signoff_id = uuid.uuid4().hex
+        session.workspace_signoff_id = signoff_id
+        session.workspace_signoff_workspace = workspace
+        session.phase = "workspace_signoff_inspection_pending"
+        self._emit(
+            session,
+            "workspace_signoff",
+            workspace_signoff_inspection_prompt(session.language),
+            workspace_signoff={
+                "action": "inspect",
+                "schema_version": "flow-agent.workspace_signoff_contract.v1",
+                "signoff_id": signoff_id,
+                "workspace": workspace,
+            },
+        )
+
+    def _handle_workspace_signoff_inspection_result(
+        self, session: _Session, message: str
+    ) -> None:
+        result = _workspace_signoff_inspection_result(message)
+        if result is None or result[0] != session.workspace_signoff_id:
+            self._emit(session, "error", "Signoff checklist result is invalid.")
+            return
+        _, status, error = result
+        if status == "blocked":
+            self._emit(session, "error", f"Signoff export blocked: {error}")
+            self._reset(session)
+            self._emit_phase_choice(session)
+            return
+        session.phase = "workspace_signoff_confirmation"
+        self._emit(session, "message", workspace_signoff_confirmation_prompt(session.language, status))
+        self._emit_phase_choice(session)
+
+    def _confirm_workspace_signoff(self, session: _Session, message: str) -> None:
+        choice = _operation_choice(message)
+        if choice == "2" or message.strip().lower() in {"cancel", "n", "no"}:
+            self._reset(session)
+            self._emit(session, "message", cancellation_message(session.language))
+            self._emit_phase_choice(session)
+            return
+        if choice != "1" and message.strip().lower() not in {"confirm", "y", "yes", ""}:
+            self._emit(session, "message", confirmation_menu(session.language))
+            self._emit_phase_choice(session)
+            return
+        signoff_id = session.workspace_signoff_id
+        workspace = session.workspace_signoff_workspace
+        if not signoff_id or not workspace:
+            self._emit(session, "error", "Signoff contract is incomplete.")
+            return
+        session.phase = "workspace_signoff_export_pending"
+        self._emit(
+            session,
+            "workspace_signoff",
+            "Exporting the signoff package after the native save location is selected.",
+            workspace_signoff={
+                "action": "export",
+                "schema_version": "flow-agent.workspace_signoff_contract.v1",
+                "signoff_id": signoff_id,
+                "workspace": workspace,
+            },
+        )
+
+    def _handle_workspace_signoff_result(self, session: _Session, message: str) -> None:
+        result = _workspace_signoff_result(message)
+        if result is None or result[0] != session.workspace_signoff_id:
+            self._emit(session, "error", "Signoff export result is invalid.")
+            return
+        _, status, error = result
+        self._reset(session)
+        if status == "succeeded":
+            self._emit(session, "message", "Signoff package exported successfully.")
+        elif status == "cancelled":
+            self._emit(session, "message", cancellation_message(session.language))
+        else:
+            self._emit(session, "error", f"Signoff package export failed: {error}")
         self._emit_phase_choice(session)
 
     def _begin_workspace_parameter_update(self, session: _Session) -> None:
@@ -1706,13 +1804,19 @@ class EcosAgentProvider:
         if result is None or result[0] != session.workspace_setup_id:
             self._emit(session, "error", "Workspace creation result is invalid.")
             return
-        _, status, error = result
+        _, status, error, end_step, workspace = result
         if status == "succeeded":
             session.mode = "workspace"
+            workspace_path = workspace
             if session.workspace_contract and isinstance(session.workspace_contract, dict):
                 directory = session.workspace_contract.get("directory")
                 if isinstance(directory, str) and directory.strip():
-                    session.rerun_workspace_path = directory
+                    workspace_path = workspace_path or directory
+            if workspace_path:
+                session.rerun_workspace_path = workspace_path
+            if end_step and end_step.lower() == "harden":
+                self._begin_workspace_signoff(session, workspace_path or "")
+                return
             self._reset(session)
             self._emit(
                 session,
@@ -1917,6 +2021,7 @@ class EcosAgentProvider:
         workspace_rerun: dict[str, Any] | None = None,
         workspace_continue: dict[str, Any] | None = None,
         workspace_parameter_update: dict[str, Any] | None = None,
+        workspace_signoff: dict[str, Any] | None = None,
         choice: dict[str, Any] | None = None,
         delta: str | None = None,
         message_id: str | None = None,
@@ -1945,6 +2050,8 @@ class EcosAgentProvider:
             event["workspaceContinue"] = workspace_continue
         if workspace_parameter_update is not None:
             event["workspaceParameterUpdate"] = workspace_parameter_update
+        if workspace_signoff is not None:
+            event["workspaceSignoff"] = workspace_signoff
         self.emit(event)
 
     def _emit_status(self, session: _Session, state: str) -> None:
@@ -2111,6 +2218,7 @@ class EcosAgentProvider:
             "confirmation",
             "workspace_continue_confirmation",
             "workspace_parameter_confirmation",
+            "workspace_signoff_confirmation",
         }:
             choice = confirmation_choice(session.language, prompt_id, allow_free_text=False)
         if choice is not None:
@@ -2191,6 +2299,7 @@ class EcosAgentProvider:
                 "workspace_confirmation",
                 "workspace_continue_confirmation",
                 "workspace_parameter_confirmation",
+                "workspace_signoff_confirmation",
                 "confirmation",
             }
             else "idle"
@@ -2228,6 +2337,8 @@ class EcosAgentProvider:
         session.workspace_contract = None
         session.workspace_continue_id = None
         session.workspace_parameter_update = None
+        session.workspace_signoff_id = None
+        session.workspace_signoff_workspace = None
 
 
 def main() -> int:

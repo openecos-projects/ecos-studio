@@ -156,6 +156,19 @@ describe('AIChatPanel flow contracts', () => {
     )
   })
 
+  it('runs signoff inspection before native export and reports checklist blocking', () => {
+    expect(source).toContain("event.type === 'workspace_signoff'")
+    expect(source).toContain('inspectSignoff({ workspaceHandle })')
+    expect(source).toContain("risk.severity === 'blocked'")
+    expect(source).toContain('workspace_signoff_inspection:')
+    expect(source).toContain('review.status')
+    expect(source).toContain("contract.action === 'inspect'")
+    expect(source).toContain('dialog.saveFile({')
+    expect(source).toContain('exportSignoff({')
+    expect(source).toContain('workspace_signoff_result:')
+    expect(source).toContain("canExportSignoffPackage(flow) ? 'Harden'")
+  })
+
   it('applies parameter updates from the contract instead of a local knob table', () => {
     // A second mapping here silently dropped every knob it did not know about.
     expect(source).not.toContain('applyParameterPatchToParametersJson')

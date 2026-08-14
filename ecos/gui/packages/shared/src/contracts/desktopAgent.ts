@@ -104,6 +104,15 @@ export interface DesktopAgentWorkspaceContinueContract {
   workspace: string
 }
 
+export type DesktopAgentWorkspaceSignoffAction = 'inspect' | 'export'
+
+export interface DesktopAgentWorkspaceSignoffContract {
+  action: DesktopAgentWorkspaceSignoffAction
+  schema_version: 'flow-agent.workspace_signoff_contract.v1'
+  signoff_id: string
+  workspace: string
+}
+
 /**
  * Workspace files the Agent may write a parameter into. `home/parameters.json`
  * is authoritative; ECC regenerates the `config/*.json` step configs from it.
@@ -248,6 +257,7 @@ export type DesktopAgentEventType =
   | 'workspace_rerun'
   | 'workspace_continue'
   | 'workspace_parameter_update'
+  | 'workspace_signoff'
   | 'error'
 
 export type DesktopAgentRunStatus =
@@ -286,5 +296,6 @@ export interface DesktopAgentEvent {
   workspaceParameterUpdate?: DesktopAgentWorkspaceParameterUpdateContract
   workspaceRerun?: DesktopAgentWorkspaceRerunContract
   workspaceRerunToken?: string
+  workspaceSignoff?: DesktopAgentWorkspaceSignoffContract
   workspaceSetup?: DesktopAgentWorkspaceSetupContract
 }
