@@ -1,10 +1,5 @@
 <script setup lang="ts">
-import {
-  computed,
-  defineAsyncComponent,
-  onMounted,
-  type Component,
-} from 'vue'
+import { computed, defineAsyncComponent, onMounted, type Component } from 'vue'
 import { StepEnum } from '@/api/type'
 import GenericStepConfigView from './GenericStepConfigView.vue'
 /** Sync import: async chunks mount after flex scroll layout in WebKit/GTK, which can break .sc-scroll overflow. */

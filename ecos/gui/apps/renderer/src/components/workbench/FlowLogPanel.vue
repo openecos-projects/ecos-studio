@@ -80,7 +80,10 @@
             :disabled="!selectedContent"
             @click="copyLog"
           >
-            <i :class="copied ? 'ri-check-line' : 'ri-file-copy-line'" aria-hidden="true" />
+            <i
+              :class="copied ? 'ri-check-line' : 'ri-file-copy-line'"
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>

@@ -530,7 +530,9 @@ describe('useStepConfigInfo', () => {
       { deep: true },
     )
 
-    await vi.waitFor(() => expect(result.stepConfigDraft.value).toEqual({ Floorplan: {} }))
+    await vi.waitFor(() =>
+      expect(result.stepConfigDraft.value).toEqual({ Floorplan: {} }),
+    )
     result.markStepConfigEditorInitialized()
     expect(result.hasStepConfigChanges.value).toBe(false)
 
