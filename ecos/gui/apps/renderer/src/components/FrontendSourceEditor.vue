@@ -54,8 +54,11 @@
         <span>{{ error }}</span>
       </div>
 
-      <div class="editor-wrap" :class="`theme-${editorTheme}`">
-        <div ref="editorHost" class="editor-host"></div>
+      <div
+        class="editor-wrap monaco-widget-overflow-host"
+        :class="`theme-${editorTheme}`"
+      >
+        <div ref="editorHost" class="editor-host monaco-widget-overflow-host"></div>
         <div v-if="loading" class="editor-overlay">
           <i class="ri-loader-4-line spin"></i>
           <span>Loading</span>

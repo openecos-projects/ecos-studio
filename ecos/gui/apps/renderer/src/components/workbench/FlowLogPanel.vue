@@ -41,9 +41,12 @@
         </button>
       </div>
     </header>
-    <div v-if="expanded" class="flow-log-panel-body">
+    <div v-if="expanded" class="flow-log-panel-body monaco-widget-overflow-host">
       <div v-if="error" class="flow-log-message is-error">{{ error }}</div>
-      <div v-else-if="selectedSegment" class="flow-log-viewer">
+      <div
+        v-else-if="selectedSegment"
+        class="flow-log-viewer monaco-widget-overflow-host"
+      >
         <FlowLogCodeViewer
           :channel-key="keyFor(selectedSegment)"
           :content="selectedContent"
@@ -71,7 +74,7 @@
     :style="{ width: 'min(980px, calc(100vw - 32px))' }"
     :draggable="false"
   >
-    <div class="flow-log-dialog-content">
+    <div class="flow-log-dialog-content monaco-widget-overflow-host">
       <FlowLogCodeViewer
         v-if="dialogVisible && selectedSegment"
         :channel-key="`${keyFor(selectedSegment)}\u001fdialog`"

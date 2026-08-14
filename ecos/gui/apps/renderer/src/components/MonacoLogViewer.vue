@@ -1,6 +1,10 @@
 <template>
-  <div class="monaco-log-viewer" role="region" :aria-label="ariaLabel">
-    <div ref="editorHost" class="monaco-log-editor"></div>
+  <div
+    class="monaco-log-viewer monaco-widget-overflow-host"
+    role="region"
+    :aria-label="ariaLabel"
+  >
+    <div ref="editorHost" class="monaco-log-editor monaco-widget-overflow-host"></div>
     <div v-if="runtimeLoading || runtimeError" class="monaco-log-overlay">
       <i
         :class="runtimeError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'"

@@ -55,8 +55,11 @@
         <i :class="error ? 'ri-error-warning-line' : 'ri-focus-3-line'"></i>
         <span>{{ message }}</span>
       </div>
-      <div class="disassembly-editor-wrap">
-        <div ref="editorHost" class="disassembly-editor"></div>
+      <div class="disassembly-editor-wrap monaco-widget-overflow-host">
+        <div
+          ref="editorHost"
+          class="disassembly-editor monaco-widget-overflow-host"
+        ></div>
         <div v-if="loading" class="disassembly-overlay">
           <i class="ri-loader-4-line spin"></i>
           <span>Loading disassembly</span>

@@ -383,14 +383,21 @@ function onFlowLogContextMenuKeydown(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <div class="flow-log-viewer-shell" role="region" :aria-label="ariaLabel">
+  <div
+    class="flow-log-viewer-shell monaco-widget-overflow-host"
+    role="region"
+    :aria-label="ariaLabel"
+  >
     <div
       v-show="!isViewerEmpty"
-      class="flow-log-viewer-editor-wrap"
+      class="flow-log-viewer-editor-wrap monaco-widget-overflow-host"
       :class="{ 'is-live': live }"
       @contextmenu="onViewerContextMenu"
     >
-      <div ref="editorHost" class="flow-log-viewer-editor"></div>
+      <div
+        ref="editorHost"
+        class="flow-log-viewer-editor monaco-widget-overflow-host"
+      ></div>
       <span v-if="live" class="flow-log-terminal-cursor" aria-hidden="true"></span>
     </div>
 

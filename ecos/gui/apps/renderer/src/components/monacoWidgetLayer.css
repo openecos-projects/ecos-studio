@@ -1,0 +1,9 @@
+/* Monaco appends context-view tooltips to the editor host instead of document.body. */
+.monaco-widget-overflow-host {
+  overflow: visible !important;
+}
+
+.monaco-editor .find-widget,
+.monaco-hover {
+  -webkit-app-region: no-drag;
+}

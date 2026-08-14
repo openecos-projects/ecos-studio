@@ -21,6 +21,7 @@ import 'monaco-editor/esm/vs/editor/contrib/multicursor/browser/multicursor'
 import 'monaco-editor/esm/vs/editor/contrib/readOnlyMessage/browser/contribution'
 import 'monaco-editor/esm/vs/editor/contrib/wordOperations/browser/wordOperations'
 import 'monaco-editor/esm/vs/editor/contrib/wordPartOperations/browser/wordPartOperations'
+import './monacoWidgetLayer.css'
 import {
   MONACO_DISASSEMBLY_LANGUAGE_ID,
   MONACO_LOG_LANGUAGE_ID,
