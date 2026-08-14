@@ -464,6 +464,8 @@ export class EccWorkspaceRuntime {
 
   private async ensureStarted(): Promise<EccRpcRuntimeClient> {
     this.sidecarLifecycle.cancelDiagnosticRelease()
+    const finalSnapshotTask = this.sidecarLifecycle.waitForFinalSnapshot()
+    if (finalSnapshotTask) await finalSnapshotTask
     const client = await this.sidecar.start()
     if (client !== this.client) {
       this.client = client
