@@ -42,6 +42,7 @@
           type="button"
           class="run-btn"
           :class="{ danger: runBusy }"
+          :disabled="!runBusy && !workspaceRuntimeReady"
           @click="runBusy ? cancelCurrentRun() : runCurrentStep()"
         >
           <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
@@ -221,6 +222,14 @@
             </button>
           </section>
 
+          <FlowStatusStrip
+            v-if="frontendSubflowNodes.length"
+            class="frontend-subflow-strip"
+            :loading="subflowLoading"
+            :nodes="frontendSubflowNodes"
+            :title="`${stepTitle} subflow`"
+          />
+
           <section v-if="isSimStep" class="sim-run-card">
             <div class="sim-run-head">
               <div class="sim-controls">
@@ -277,6 +286,7 @@
                 type="button"
                 class="run-btn sim-run-action"
                 :class="{ running: runBusy }"
+                :disabled="!runBusy && !workspaceRuntimeReady"
                 @click="runBusy ? cancelCurrentRun() : runCurrentStep()"
               >
                 <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
@@ -1916,7 +1926,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { DesignRuntimeEvent, WorkspaceStepResource } from '@ecos-studio/shared'
+import type {
+  DesignRuntimeEvent,
+  WorkspaceResourceIndex,
+  WorkspaceStepResource,
+} from '@ecos-studio/shared'
 import {
   getWorkspaceResourceIndexApi,
   resolveWorkspaceStepInfoApi,
@@ -1935,6 +1949,7 @@ import {
   selectLintRuleDiagnostic,
 } from '@/views/frontendReviewPresentation'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useSubflow } from '@/composables/useSubflow'
 import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
 import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
@@ -1949,6 +1964,8 @@ import FrontendDisassemblyViewer from '@/components/frontend/FrontendDisassembly
 import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
 import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
 import MonacoLogViewer from '@/components/MonacoLogViewer.vue'
+import FlowStatusStrip from '@/components/workbench/FlowStatusStrip.vue'
+import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import {
@@ -2391,16 +2408,21 @@ const initialConsoleStepIsSim =
 const {
   currentProject,
   resourceVersions,
+  runtimeEvents,
   showToast,
   invalidateWorkspaceResources,
   workspaceSession,
 } = useWorkspace()
 const { config } = useParameters()
+const { isLoading: subflowLoading, subflowSteps } = useSubflow()
 const CONSOLE_MIN_HEIGHT = 128
 const CONSOLE_DEFAULT_HEIGHT = 178
 const CONSOLE_MAX_HEIGHT = 420
+const RESOURCE_INDEX_RETRY_DELAYS_MS = [120, 300, 600] as const
 
 const steps = ref<WorkspaceStepResource[]>([])
+const liveRuntimeStepOverrides = new Map<string, Partial<WorkspaceStepResource>>()
+const handledRuntimeStepEvents = new WeakSet<object>()
 const loading = ref(false)
 const runBusy = ref(false)
 const runPhase = ref<RunPhase>('idle')
@@ -2499,6 +2521,15 @@ const currentStep = computed(
       (step) => step.name.toLowerCase() === currentStepName.value.toLowerCase(),
     ) ?? null,
 )
+const workspaceRuntimeReady = computed(
+  () =>
+    workspaceSession.value.state === 'active' &&
+    Boolean(workspaceSession.value.workspaceId.trim()) &&
+    Boolean(currentProject.value?.path?.trim()) &&
+    !loading.value &&
+    Boolean(currentStepName.value) &&
+    Boolean(currentStep.value),
+)
 const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
 const isPrepareStep = computed(() => currentStepName.value.toLowerCase() === 'prepare')
 const isReviewStep = computed(() => currentStepName.value.toLowerCase() === 'review')
@@ -2548,6 +2579,16 @@ const currentStepRuntime = computed(() =>
   runBusy.value
     ? runElapsedLabel()
     : detail.value?.runtime || currentStep.value?.runtime || '--',
+)
+const frontendSubflowNodes = computed<FlowStatusNode[]>(() =>
+  subflowSteps.value.map((step) => ({
+    id: step.id,
+    label: step.name,
+    status: flowNodeStatus(step.status),
+    runtime: step.duration ?? '',
+    peakMemoryMb: step.peakMemory ?? null,
+    detail: step.description,
+  })),
 )
 const runElapsedSecondsLabel = computed(() => {
   void runClockTick.value
@@ -3743,21 +3784,55 @@ const waveStatusMessage = computed(() => {
   return ''
 })
 
+async function readWorkspaceResourceIndexWithRetry(
+  isCurrentRequest: () => boolean,
+): Promise<WorkspaceResourceIndex | null> {
+  let lastError: unknown
+
+  for (let attempt = 0; attempt <= RESOURCE_INDEX_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const index = await getWorkspaceResourceIndexApi()
+      const resourceNotReady =
+        index.status !== 'available' && index.flow.steps.length === 0
+      if (!resourceNotReady || attempt === RESOURCE_INDEX_RETRY_DELAYS_MS.length) {
+        return index
+      }
+    } catch (err) {
+      lastError = err
+      if (attempt === RESOURCE_INDEX_RETRY_DELAYS_MS.length) throw err
+    }
+
+    await new Promise<void>((resolve) =>
+      globalThis.setTimeout(resolve, RESOURCE_INDEX_RETRY_DELAYS_MS[attempt] ?? 600),
+    )
+    if (!isCurrentRequest()) return null
+  }
+
+  if (lastError) throw lastError
+  return null
+}
+
 async function refresh(): Promise<void> {
   const requestGeneration = ++refreshGeneration
   const requestSessionId = workspaceSession.value.sessionId
   const requestProjectPath = currentProject.value?.path || ''
+  const requestWorkspaceHandle = workspaceSession.value.workspaceId
   const isCurrentRequest = () =>
     requestGeneration === refreshGeneration &&
     requestSessionId === workspaceSession.value.sessionId &&
-    requestProjectPath === (currentProject.value?.path || '')
+    requestProjectPath === (currentProject.value?.path || '') &&
+    requestWorkspaceHandle === workspaceSession.value.workspaceId
 
   loading.value = true
   error.value = ''
   try {
-    const index = await getWorkspaceResourceIndexApi()
+    const index = await readWorkspaceResourceIndexWithRetry(isCurrentRequest)
+    if (!index) return
     if (!isCurrentRequest()) return
-    steps.value = index.flow.steps
+    steps.value = index.flow.steps.map((step) => ({
+      ...step,
+      ...liveRuntimeStepOverrides.get(step.name.trim().toLowerCase()),
+    }))
     if (!isHomeView.value) {
       await loadDetail({
         refreshGeneration: requestGeneration,
@@ -3900,7 +3975,21 @@ async function hydrateWaveCasesFromWorkspaceResources(): Promise<void> {
 }
 
 async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
-  if (!currentProject.value?.path || !currentStepName.value) return
+  const projectPath = currentProject.value?.path?.trim() || ''
+  const workspaceHandle =
+    workspaceSession.value.state === 'active'
+      ? workspaceSession.value.workspaceId.trim()
+      : ''
+  if (!projectPath || !currentStepName.value) return
+  if (!workspaceHandle) {
+    showToast({
+      severity: 'warn',
+      summary: 'Workspace Is Still Starting',
+      detail: 'Wait for the new workspace to finish opening, then run Prepare again.',
+      life: 5000,
+    })
+    return
+  }
   runBusy.value = true
   runPhase.value = 'queued'
   runStartedAt.value = Date.now()
@@ -3913,8 +4002,8 @@ async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
       cmd: CMDEnum.run_step,
       data: {
         designTool: 'frontend',
-        directory: currentProject.value.path,
-        workspaceHandle: workspaceSession.value.workspaceId,
+        directory: projectPath,
+        workspaceHandle,
         step: currentStepName.value,
         rerun: true,
         ...payload,
@@ -3981,15 +4070,19 @@ function handleRuntimeEvent(event: DesignRuntimeEvent): void {
   if (event.designTool !== 'frontend') return
   if (event.type === 'runtime.exited' || !('method' in event)) return
   if (event.method !== 'flow.run_step' && event.method !== 'flow.run') return
-  if (
-    event.workspaceHandle &&
-    event.workspaceHandle !== workspaceSession.value.workspaceId
-  ) {
+  const eventWorkspaceMatches =
+    !event.workspaceHandle ||
+    event.workspaceHandle === workspaceSession.value.workspaceId ||
+    (Boolean(event.workspaceDirectory) &&
+      normalizeWorkspacePath(event.workspaceDirectory ?? '') ===
+        normalizeWorkspacePath(currentProject.value?.path ?? ''))
+  if (!eventWorkspaceMatches) return
+  if (runJobId.value && event.operationId && event.operationId !== runJobId.value) {
     return
   }
-  if (runJobId.value && event.operationId !== runJobId.value) return
 
   if (event.type === 'operation.started') {
+    liveRuntimeStepOverrides.clear()
     runBusy.value = true
     runJobId.value = event.operationId
     runPhase.value = 'running'
@@ -4014,6 +4107,60 @@ function handleRuntimeEvent(event: DesignRuntimeEvent): void {
     invalidateWorkspaceResources(['flow', 'step', 'logs'])
     void refresh()
   }
+}
+
+function processRuntimeStepEvent(event: unknown): void {
+  if (!event || typeof event !== 'object' || handledRuntimeStepEvents.has(event)) {
+    return
+  }
+  handledRuntimeStepEvents.add(event)
+
+  const data = (event as { data?: unknown }).data
+  if (!data || typeof data !== 'object') return
+  const eventData = data as Record<string, unknown>
+  const protocolType =
+    typeof eventData.runtimeProtocolType === 'string' ? eventData.runtimeProtocolType : ''
+  const legacyType = typeof eventData.type === 'string' ? eventData.type : ''
+  const isStarted =
+    protocolType === 'step.started' || (!protocolType && legacyType === 'step_start')
+  const isCompleted =
+    protocolType === 'step.completed' || (!protocolType && legacyType === 'step_complete')
+  if (!isStarted && !isCompleted) return
+
+  const eventOperationId =
+    typeof eventData.jobId === 'string' ? eventData.jobId.trim() : ''
+  if (runJobId.value && eventOperationId && eventOperationId !== runJobId.value) {
+    return
+  }
+
+  const stepName = typeof eventData.step === 'string' ? eventData.step.trim() : ''
+  if (!stepName) return
+  const rawState = typeof eventData.state === 'string' ? eventData.state.trim() : ''
+  const response = (event as { response?: unknown }).response
+  const state =
+    rawState || (isStarted ? 'Ongoing' : response === 'failed' ? 'Incomplete' : 'Success')
+  const override: Partial<WorkspaceStepResource> = { state }
+  if (typeof eventData.tool === 'string' && eventData.tool.trim()) {
+    override.tool = eventData.tool.trim()
+  }
+  if (typeof eventData.runtime === 'string') override.runtime = eventData.runtime
+
+  const stepKey = stepName.toLowerCase()
+  liveRuntimeStepOverrides.set(stepKey, override)
+  const stepIndex = steps.value.findIndex(
+    (step) => step.name.trim().toLowerCase() === stepKey,
+  )
+  if (stepIndex < 0) return
+  steps.value[stepIndex] = {
+    ...steps.value[stepIndex]!,
+    ...override,
+  }
+}
+
+function consumeRuntimeStepEvents(
+  events: readonly unknown[] = runtimeEvents.value,
+): void {
+  for (const event of events) processRuntimeStepEvent(event)
 }
 
 function normalizeWorkspacePath(path: string): string {
@@ -5306,8 +5453,22 @@ onBeforeUnmount(() => {
 })
 
 watch(
+  () => [currentProject.value?.path, workspaceSession.value.sessionId],
+  () => liveRuntimeStepOverrides.clear(),
+)
+
+watch(runtimeEvents, (events) => consumeRuntimeStepEvents(events), {
+  deep: true,
+  flush: 'sync',
+  immediate: true,
+})
+
+watch(
   () => [
     currentProject.value?.path,
+    workspaceSession.value.sessionId,
+    workspaceSession.value.state,
+    workspaceSession.value.workspaceId,
     resourceVersions.value.flow,
     resourceVersions.value.step,
     resourceVersions.value.logs,
