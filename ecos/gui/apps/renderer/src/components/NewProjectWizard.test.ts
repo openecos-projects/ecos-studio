@@ -321,6 +321,36 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain("pdkConfigMode.value === 'default'")
   })
 
+  it('explains why an invalid PDK cannot use ECC defaults', () => {
+    expect(source).toContain('defaultConfigUnavailableReason')
+    expect(source).toContain('PDK validation failed')
+    expect(source).toContain('PDK path is unavailable.')
+    expect(source).toContain('ECC defaults are only available for a known PDK layout.')
+    expect(source).toContain('pdkValidationMessage')
+  })
+
+  it('rechecks project-pinned PDKs from their source path', () => {
+    expect(source).toContain("if (pdk.source === 'project')")
+    expect(source).toContain('scanPdkDirectory(pdk.path)')
+    expect(source).toContain('projectPinnedPdk.value = updatedPdk')
+  })
+
+  it('keeps PDK actions outside the selection button', () => {
+    const cardMarker = source.indexOf('v-for="pdk in pdkOptions"')
+    const cardStart = source.lastIndexOf('<div', cardMarker)
+    const selectionStart = source.indexOf(
+      ':aria-pressed="selectedPdkId === pdk.id"',
+      cardStart,
+    )
+    const selectionEnd = source.indexOf('</button>', selectionStart)
+    const actionStart = source.indexOf('handleValidatePdk(pdk.id)', selectionStart)
+    const cardSource = source.slice(cardStart, actionStart)
+
+    expect(cardSource).toContain('<div')
+    expect(selectionStart).toBeGreaterThan(cardStart)
+    expect(selectionEnd).toBeLessThan(actionStart)
+  })
+
   it('redesigns Manual PDK Resources into category navigation plus selected-file detail view', () => {
     expect(source).toContain('PdkResourcePickerDialog')
     expect(source).toContain('pdkResourcePickerOpen')

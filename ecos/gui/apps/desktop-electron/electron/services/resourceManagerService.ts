@@ -639,6 +639,18 @@ export class ResourceManagerService {
     const resourceId = localPdkResourceId(scanned.pdkId, scanned.canonicalPath)
     const existing = manifest.installed[resourceId]
     if (isPdkEntry(existing)) {
+      existing.id = scanned.pdkId
+      existing.name = scanned.name
+      existing.pdk_id = scanned.pdkId
+      existing.canonical_path = scanned.canonicalPath
+      existing.path = scanned.canonicalPath
+      existing.detected_files = [
+        ...scanned.detectedFiles.directories,
+        ...scanned.detectedFiles.files,
+      ]
+      existing.detected_file_groups = scanned.detectedFiles
+      existing.health = await validateScannedPdk(scanned)
+      await this.writeManifest(manifest)
       return this.pdkEntryToResource(resourceId, existing)
     }
     const hasActiveSibling = Object.values(manifest.installed).some(
