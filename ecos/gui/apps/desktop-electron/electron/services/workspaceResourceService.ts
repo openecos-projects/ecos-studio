@@ -808,18 +808,6 @@ function addEccConfigResources(
   )
   resources.config.rcx = createFile(join(root, 'config', 'rcx.json'), 'config')
   resources.config.sta = createFile(join(root, 'config', 'sta.json'), 'config')
-  resources.config.timing_opt_drv = createFile(
-    join(root, 'config', 'to_default_config_drv.json'),
-    'config',
-  )
-  resources.config.timing_opt_hold = createFile(
-    join(root, 'config', 'to_default_config_hold.json'),
-    'config',
-  )
-  resources.config.timing_opt_setup = createFile(
-    join(root, 'config', 'to_default_config_setup.json'),
-    'config',
-  )
   resources.config.legalization = createFile(
     join(root, 'config', 'pl_default_config.json'),
     'config',
@@ -849,12 +837,6 @@ function configResourceForEccStep(
       return config.drc
     case 'fixfanout':
       return config.netlist_opt
-    case 'optdrv':
-      return config.timing_opt_drv
-    case 'opthold':
-      return config.timing_opt_hold
-    case 'optsetup':
-      return config.timing_opt_setup
     case 'legalization':
       return config.legalization
     case 'filler':
