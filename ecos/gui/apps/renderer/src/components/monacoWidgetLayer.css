@@ -7,3 +7,49 @@
 .monaco-hover {
   -webkit-app-region: no-drag;
 }
+
+/* Keep the find controls stable while the pointer moves across their edge. */
+.monaco-editor .find-widget {
+  overflow: hidden !important;
+  transition: none !important;
+}
+
+.monaco-editor .find-widget .button,
+.monaco-editor .find-widget .codicon-find-selection {
+  box-sizing: border-box;
+  transition: none !important;
+}
+
+.monaco-editor .find-widget > .button.codicon-widget-close {
+  width: 16px;
+  height: 16px;
+  padding: 3px;
+  top: 9px;
+  right: 4px;
+}
+
+.monaco-editor .find-widget .button:focus,
+.monaco-editor .find-widget .codicon-find-selection:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* A log tooltip must not steal the find control's pointer hit-test. */
+.monaco-log-editor .monaco-hover[role='tooltip'],
+.flow-log-viewer-editor .monaco-hover[role='tooltip'] {
+  pointer-events: none;
+}
+
+.monaco-log-editor .monaco-hover[role='tooltip'] .hover-contents,
+.flow-log-viewer-editor .monaco-hover[role='tooltip'] .hover-contents {
+  white-space: nowrap !important;
+}
+
+.monaco-log-editor .context-view:has(.monaco-hover[role='tooltip']),
+.flow-log-viewer-editor .context-view:has(.monaco-hover[role='tooltip']) {
+  pointer-events: none;
+}
+
+.monaco-log-editor .context-view:has(.monaco-hover[role='tooltip']) {
+  transform: translateX(var(--ecos-log-tooltip-shift-x, 0px));
+}

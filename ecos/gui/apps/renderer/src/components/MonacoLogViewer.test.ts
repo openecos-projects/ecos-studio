@@ -27,6 +27,9 @@ describe('MonacoLogViewer contract', () => {
     expect(viewerSource).toContain('editor.saveViewState()')
     expect(viewerSource).toContain('editor.restoreViewState(record.viewState)')
     expect(viewerSource).toContain('record.model.dispose()')
+    expect(viewerSource).toContain('observeLogTooltipBounds()')
+    expect(viewerSource).toContain('new MutationObserver')
+    expect(viewerSource).toContain('clampLogTooltipsToEditorBounds()')
   })
 
   it('loads only the editor worker and registers semantic log highlighting', () => {
@@ -47,5 +50,25 @@ describe('MonacoLogViewer contract', () => {
     expect(flowLogViewerSource.match(/monaco-widget-overflow-host/g)).toHaveLength(3)
     expect(flowLogPanelSource.match(/monaco-widget-overflow-host/g)).toHaveLength(3)
     expect(disassemblyViewerSource.match(/monaco-widget-overflow-host/g)).toHaveLength(2)
+  })
+
+  it('keeps find controls stable and compact while hovered', () => {
+    expect(widgetLayerSource).toMatch(
+      /\.monaco-editor \.find-widget\s*{[^}]*transition:\s*none !important;/s,
+    )
+    expect(widgetLayerSource).toMatch(
+      /\.monaco-editor \.find-widget > \.button\.codicon-widget-close\s*{[^}]*width:\s*16px;[^}]*height:\s*16px;[^}]*padding:\s*3px;[^}]*top:\s*9px;/s,
+    )
+    expect(widgetLayerSource).toContain('overflow: hidden !important')
+    expect(widgetLayerSource).toContain(
+      ".monaco-log-editor .monaco-hover[role='tooltip']",
+    )
+    expect(widgetLayerSource).toContain(
+      ".context-view:has(.monaco-hover[role='tooltip'])",
+    )
+    expect(widgetLayerSource).toContain('white-space: nowrap !important')
+    expect(widgetLayerSource).toContain('--ecos-log-tooltip-shift-x')
+    expect(widgetLayerSource).toContain('.button:focus')
+    expect(widgetLayerSource).toContain('outline: none !important')
   })
 })

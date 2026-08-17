@@ -55,6 +55,9 @@ let applyTheme: ((theme: 'light' | 'dark') => void) | null = null
 let activeChannelKey = ''
 let viewerDisposed = false
 let viewerId = 0
+let tooltipBoundsObserver: MutationObserver | null = null
+let tooltipHostResizeObserver: ResizeObserver | null = null
+let tooltipBoundsFrame: number | null = null
 const models = new Map<string, ModelRecord>()
 
 onMounted(async () => {
@@ -106,6 +109,7 @@ onMounted(async () => {
         alwaysConsumeMouseWheel: false,
       },
     })
+    observeLogTooltipBounds()
     syncActiveModel()
   } catch (error) {
     runtimeError.value = error instanceof Error ? error.message : String(error)
@@ -126,6 +130,7 @@ watch(editorTheme, (theme) => {
 
 onBeforeUnmount(() => {
   viewerDisposed = true
+  disposeLogTooltipBounds()
   saveActiveViewState()
   editor?.dispose()
   editor = null
@@ -207,6 +212,65 @@ function saveActiveViewState(): void {
   if (!editor || !activeChannelKey) return
   const record = models.get(activeChannelKey)
   if (record) record.viewState = editor.saveViewState()
+}
+
+function observeLogTooltipBounds(): void {
+  const host = editorHost.value
+  if (!host) return
+
+  tooltipBoundsObserver = new MutationObserver(() => scheduleLogTooltipBounds())
+  tooltipBoundsObserver.observe(host, {
+    attributes: true,
+    attributeFilter: ['class', 'style'],
+    childList: true,
+    subtree: true,
+  })
+  tooltipHostResizeObserver = new ResizeObserver(() => scheduleLogTooltipBounds())
+  tooltipHostResizeObserver.observe(host)
+}
+
+function disposeLogTooltipBounds(): void {
+  tooltipBoundsObserver?.disconnect()
+  tooltipBoundsObserver = null
+  tooltipHostResizeObserver?.disconnect()
+  tooltipHostResizeObserver = null
+  if (tooltipBoundsFrame !== null) {
+    cancelAnimationFrame(tooltipBoundsFrame)
+    tooltipBoundsFrame = null
+  }
+}
+
+function scheduleLogTooltipBounds(): void {
+  if (tooltipBoundsFrame !== null) return
+  tooltipBoundsFrame = requestAnimationFrame(() => {
+    tooltipBoundsFrame = null
+    clampLogTooltipsToEditorBounds()
+  })
+}
+
+function clampLogTooltipsToEditorBounds(): void {
+  const host = editorHost.value
+  if (!host) return
+
+  const hostBounds = host.getBoundingClientRect()
+  const minimumLeft = hostBounds.left + 4
+  const maximumRight = hostBounds.right - 4
+  for (const contextView of host.querySelectorAll<HTMLElement>('.context-view')) {
+    if (!contextView.querySelector(".monaco-hover[role='tooltip']")) continue
+    const bounds = contextView.getBoundingClientRect()
+    if (!bounds.width || !bounds.height) continue
+
+    const currentShift =
+      Number.parseFloat(
+        contextView.style.getPropertyValue('--ecos-log-tooltip-shift-x'),
+      ) || 0
+    const unshiftedLeft = bounds.left - currentShift
+    const maximumLeft = Math.max(minimumLeft, maximumRight - bounds.width)
+    const desiredLeft = Math.min(Math.max(unshiftedLeft, minimumLeft), maximumLeft)
+    const nextShift = Math.round(desiredLeft - unshiftedLeft)
+    if (nextShift === currentShift) continue
+    contextView.style.setProperty('--ecos-log-tooltip-shift-x', `${nextShift}px`)
+  }
 }
 
 function normalizedChannelKey(): string {
