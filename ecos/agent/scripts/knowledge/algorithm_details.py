@@ -52,7 +52,7 @@ SOURCE_PATHS = {
     "ista.analyzer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/timing_analyzer/TimingAnalyzer.cpp",
     "ista.characterizer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iSTA/source/module/timing_characterizer/TimingCharacterizer.cpp",
     "idb.python": "ecc/chipcompiler/thirdparty/ecc-tools/src/interface/python/py_idb/py_db.cpp",
-    "idb.builder": "ecc/chipcompiler/thirdparty/ecc-tools/src/database/manager/builder/builder.cpp",
+    "idb.builder": "ecc/chipcompiler/thirdparty/ecc-tools/src/eccdb/manager/builder/builder.cpp",
 }
 
 

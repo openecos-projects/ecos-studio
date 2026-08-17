@@ -20,7 +20,7 @@ PLACE_SOURCE_PATHS = {
     "ecc.plot": "ecc/chipcompiler/tools/ecc/plot.py",
     "ecc.feature_manager": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/feature_manager.cpp",
     "ecc.feature_summary": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/parser/feature_parser.cpp",
-    "ecc.geometry": "ecc/chipcompiler/thirdparty/ecc-tools/src/database/manager/builder/geometry_builder/GeometrySnapshotWriter.cpp",
+    "ecc.geometry": "ecc/chipcompiler/thirdparty/ecc-tools/src/eccdb/manager/builder/geometry_builder/GeometrySnapshotWriter.cpp",
     "ecc.service": "ecc/chipcompiler/tools/ecc/service.py",
     "ecc.feature_union": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/builder/feature_eval_union.cpp",
     "ecc.feature_parser": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/parser/feature_parser_eval.cpp",
