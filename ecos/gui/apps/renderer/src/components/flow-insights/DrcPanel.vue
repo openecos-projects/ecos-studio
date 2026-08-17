@@ -3,42 +3,31 @@
     <div v-if="!model" class="insight-empty">Waiting for DRC statistics…</div>
     <template v-else>
       <div class="drc-hero-row">
-        <button
-          type="button"
+        <div
           class="drc-hero"
           :class="isClean ? 'is-clean' : 'is-dirty'"
-          :disabled="!related.drcStepName"
           :title="heroTitle"
-          @click="openDrcStep"
         >
           <strong class="drc-count">{{ displayDrcCount }}</strong>
           <span class="drc-status">
-            {{ isClean ? 'CLEAN · all layers pass' : 'violations detected · open DRC' }}
+            {{ isClean ? 'CLEAN · all layers pass' : 'violations detected' }}
           </span>
-        </button>
+        </div>
         <div class="drc-related">
-          <button
-            type="button"
+          <div
             class="drc-related-card"
             :class="toneClass(related.routeDrViolations)"
-            :disabled="!related.routeStepName"
-            title="Open Route DR details"
-            @click="openRouteStep(related.routeDrViolations)"
           >
             <span>Route DR</span>
             <strong>{{ formatCount(related.routeDrViolations) }}</strong>
-          </button>
-          <button
-            type="button"
+          </div>
+          <div
             class="drc-related-card"
             :class="toneClass(related.routeLaOverflow)"
-            :disabled="!related.routeStepName"
-            title="Open Route LA overflow"
-            @click="openRouteStep(related.routeLaOverflow)"
           >
             <span>LA overflow</span>
             <strong>{{ formatCount(related.routeLaOverflow) }}</strong>
-          </button>
+          </div>
         </div>
       </div>
 
@@ -158,10 +147,6 @@ const props = defineProps<{
   related?: DrcRelatedMetrics | null
 }>()
 
-const emit = defineEmits<{
-  (e: 'select-step', stepName: string, options?: { panel?: string }): void
-}>()
-
 const nonZeroOnly = ref(false)
 const selectedTypeName = ref<string | null>(null)
 const chartMode = ref<'bar' | 'pie'>('bar')
@@ -236,22 +221,8 @@ function toggleType(name: string): void {
 
 const heroTitle = computed(() => {
   if (!related.value.drcStepName) return 'DRC step unavailable'
-  return isClean.value ? `Open ${related.value.drcStepName}` : `Open ${related.value.drcStepName} violations`
+  return isClean.value ? `${related.value.drcStepName} is clean` : `${related.value.drcStepName} violations`
 })
-
-function openDrcStep(): void {
-  if (!related.value.drcStepName) return
-  emit('select-step', related.value.drcStepName, isClean.value ? undefined : { panel: 'analysis' })
-}
-
-function openRouteStep(count: number | null): void {
-  if (!related.value.routeStepName) return
-  emit(
-    'select-step',
-    related.value.routeStepName,
-    count ? { panel: 'analysis' } : undefined,
-  )
-}
 
 function formatCount(value: number | null): string {
   return value === null ? '—' : String(value)
@@ -306,7 +277,6 @@ function humanize(value: string): string {
 .drc-hero {
   align-items: center;
   border-radius: 10px;
-  cursor: pointer;
   display: flex;
   gap: 14px;
   padding: 12px 18px;
@@ -323,7 +293,6 @@ function humanize(value: string): string {
   background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -435,11 +404,6 @@ function humanize(value: string): string {
   background: color-mix(in srgb, var(--accent-color, #3b82f6) 16%, transparent);
   border-color: color-mix(in srgb, var(--accent-color, #3b82f6) 62%, var(--border-color));
   color: var(--text-primary);
-}
-
-.drc-hero:disabled,
-.drc-related-card:disabled {
-  cursor: default;
 }
 
 .drc-clean-baseline {

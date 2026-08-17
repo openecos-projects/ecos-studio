@@ -33,7 +33,10 @@
 
     <Dialog
       v-model:visible="dialogVisible"
+      v-model:maximized="dialogMaximized"
+      class="data-snapshot-dialog"
       modal
+      maximizable
       :header="activeModule?.title ?? 'Data Snapshot'"
       :style="{ width: 'min(1080px, calc(100vw - 40px))' }"
       :content-style="{ height: 'min(72vh, 680px)', overflow: 'auto' }"
@@ -43,13 +46,11 @@
         <StepResourcesPanel
           v-if="activeTab === 'resources'"
           :model="stepResources"
-          @select-step="forwardSelectStep"
         />
         <DbTrendsPanel
           v-else-if="activeTab === 'db-trends'"
           :model="dbTrends"
           :composition="instanceComposition"
-          @select-step="forwardSelectStep"
         />
         <CongestionPanel
           v-else-if="activeTab === 'congestion'"
@@ -60,7 +61,6 @@
           v-else-if="activeTab === 'drc'"
           :model="drc"
           :related="drcRelated"
-          @select-step="forwardSelectStep"
         />
         <StaPanel
           v-else-if="activeTab === 'timing'"
@@ -113,16 +113,13 @@ const props = defineProps<{
   loading?: boolean
 }>()
 
-const emit = defineEmits<{
-  (e: 'select-step', stepName: string, options?: { panel?: string }): void
-}>()
-
 const DATA_SNAPSHOT_ROWS = 4
 const DATA_SNAPSHOT_COLUMNS = 5
 const DATA_SNAPSHOT_CELL_COUNT = DATA_SNAPSHOT_ROWS * DATA_SNAPSHOT_COLUMNS
 
 const activeTab = ref<string | null>(null)
 const dialogVisible = ref(false)
+const dialogMaximized = ref(false)
 
 const modules = computed(() =>
   resolveFlowInsightModules({
@@ -144,11 +141,8 @@ const activeModule = computed(() =>
 
 function openModule(moduleId: string): void {
   activeTab.value = moduleId
+  dialogMaximized.value = false
   dialogVisible.value = true
-}
-
-function forwardSelectStep(stepName: string, options?: { panel?: string }): void {
-  emit('select-step', stepName, options)
 }
 </script>
 
@@ -284,5 +278,32 @@ function forwardSelectStep(stepName: string, options?: { panel?: string }): void
 
 .flow-insights-loading .spin {
   animation: flow-insights-spin 1s linear infinite;
+}
+</style>
+
+<!-- Dialog teleports to body; keep maximize layout rules unscoped. -->
+<style>
+.data-snapshot-dialog.p-dialog-maximized {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-height: 100vh;
+  width: 100vw;
+}
+
+.data-snapshot-dialog.p-dialog-maximized .p-dialog-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.data-snapshot-dialog.p-dialog-maximized .data-snapshot-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 </style>

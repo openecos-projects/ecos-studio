@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import panelSource from './FlowInsightsPanel.vue?raw'
+import stepResourcesSource from './StepResourcesPanel.vue?raw'
 
 describe('FlowInsightsPanel data snapshot entry', () => {
   it('shows a five-tile Data Snapshot grid and opens modules in a dialog', () => {
@@ -11,6 +12,10 @@ describe('FlowInsightsPanel data snapshot entry', () => {
     expect(panelSource).not.toContain('flow-insights-timeline')
     expect(panelSource).not.toContain('role="tablist"')
     expect(panelSource).not.toContain('More analysis modules coming soon')
+    expect(panelSource).toContain('maximizable')
+    expect(panelSource).toContain('v-model:maximized="dialogMaximized"')
+    expect(panelSource).not.toContain('select-step')
+    expect(panelSource).not.toContain('forwardSelectStep')
   })
 
   it('lays Data Snapshot out as a four-by-five grid', () => {
@@ -20,5 +25,13 @@ describe('FlowInsightsPanel data snapshot entry', () => {
     expect(panelSource).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
     expect(panelSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
     expect(panelSource).toContain('snapshot-empty-')
+  })
+})
+
+describe('StepResourcesPanel', () => {
+  it('does not list individual steps or jump to a step page', () => {
+    expect(stepResourcesSource).not.toContain('resource-steps')
+    expect(stepResourcesSource).not.toContain('select-step')
+    expect(stepResourcesSource).not.toContain('selectStepByKey')
   })
 })

@@ -26,7 +26,6 @@
           right-unit="MB"
           :log-axis="logScale"
           height="260px"
-          @select-category="selectStepByKey"
         />
         <label class="resource-log-toggle">
           <input v-model="logScale" type="checkbox" />
@@ -45,37 +44,7 @@
           :category-states="stepStates"
           left-unit="s"
           height="200px"
-          @select-category="selectStepByKey"
         />
-      </div>
-      <div class="resource-steps" role="list" aria-label="Step resource rows">
-        <div
-          v-for="(step, index) in model.steps"
-          :key="step.name"
-          class="resource-step-row"
-          :class="`is-${flowInsightStepTone(step.state)}`"
-          role="listitem"
-          @click="$emit('select-step', step.name)"
-        >
-          <span class="resource-step-status" aria-hidden="true" />
-          <strong class="resource-step-name" :title="`${step.name} (${step.tool})`">
-            {{ step.key }}
-          </strong>
-          <span class="resource-step-tool">{{ step.tool }}</span>
-          <span class="resource-step-value">
-            {{ step.runtimeSeconds === null ? '--' : formatDuration(step.runtimeSeconds) }}
-          </span>
-          <span class="resource-step-value">
-            {{ step.peakMemoryMb === null ? '--' : formatMemory(step.peakMemoryMb) }}
-          </span>
-          <span
-            v-if="index === model.runtimeBottleneckIndex || index === model.memoryBottleneckIndex"
-            class="resource-step-badge"
-          >
-            {{ index === model.runtimeBottleneckIndex ? 'time' : '' }}
-            {{ index === model.memoryBottleneckIndex ? 'mem' : '' }}
-          </span>
-        </div>
       </div>
     </template>
   </div>
@@ -92,8 +61,6 @@ import {
 } from './flowInsightsData'
 
 const props = defineProps<{ model: StepResourcesModel | null }>()
-
-const emit = defineEmits<{ (e: 'select-step', stepName: string): void }>()
 
 const logScale = ref(false)
 
@@ -159,11 +126,6 @@ const chartSeries = computed<FlowTrendSeries[]>(() => {
     yAxisIndex: row.id === 'runtime' ? 0 : 1,
   }))
 })
-
-function selectStepByKey(key: string): void {
-  const step = props.model?.steps.find((item) => item.key === key || item.name === key)
-  if (step) emit('select-step', step.name)
-}
 
 const bottleneckStep = computed(() => {
   const model = props.model
@@ -268,75 +230,4 @@ function formatMemory(mb: number): string {
   gap: 4px;
 }
 
-.resource-steps {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  display: grid;
-  gap: 2px;
-  max-height: 220px;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.resource-step-row {
-  align-items: center;
-  border-radius: 6px;
-  cursor: pointer;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 8px 64px 1fr 76px 76px 44px;
-  padding: 4px 8px;
-}
-
-.resource-step-row:nth-child(odd) {
-  background: color-mix(in srgb, var(--bg-primary) 60%, transparent);
-}
-
-.resource-step-status {
-  border-radius: 50%;
-  height: 6px;
-  width: 6px;
-}
-
-.resource-step-row.is-good .resource-step-status {
-  background: var(--success-color);
-}
-
-.resource-step-row.is-bad .resource-step-status {
-  background: var(--danger-color);
-}
-
-.resource-step-row.is-warn .resource-step-status {
-  background: var(--warn-color);
-}
-
-.resource-step-row.is-neutral .resource-step-status {
-  background: var(--text-secondary);
-}
-
-.resource-step-name {
-  color: var(--text-primary);
-  font-size: 11px;
-}
-
-.resource-step-tool {
-  color: var(--text-secondary);
-  font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-step-value {
-  color: var(--text-primary);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.resource-step-badge {
-  color: var(--warn-color);
-  font-size: 9px;
-  text-align: right;
-}
 </style>

@@ -41,7 +41,7 @@ describe('HomeView workspace dashboard layout', () => {
   it('replaces the snapshot card with the Data Snapshot panel', () => {
     expect(homeViewSource).toContain('<FlowInsightsPanel')
     expect(homeViewSource).toContain('useFlowInsights')
-    expect(homeViewSource).toContain('@select-step="openFlowInsightStep"')
+    expect(homeViewSource).not.toContain('openFlowInsightStep')
     expect(homeViewSource).toContain("name: ':step'")
     expect(homeViewSource).not.toContain('snapshot-card')
   })

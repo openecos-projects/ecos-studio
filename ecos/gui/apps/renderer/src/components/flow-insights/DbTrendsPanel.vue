@@ -38,7 +38,6 @@
                   :class="cellClass(row, index)"
                   :style="cellHeatStyle(row, index)"
                   :title="cellTitle(row, value, index)"
-                  @click="selectStep(index)"
                 >
                   <span class="dbtrend-value">{{ formatValue(value, row.unit) }}</span>
                   <span v-if="index > 0 && row.deltas[index] !== null" class="dbtrend-delta">
@@ -85,7 +84,6 @@
           :right-unit="rightUnit"
           delta-tooltip
           height="240px"
-          @select-category="selectStepByKey"
         />
       </section>
 
@@ -118,7 +116,6 @@
           :category-states="stepStates"
           :left-unit="compositionField === 'area' ? 'um2' : 'count'"
           height="220px"
-          @select-category="selectStepByKey"
         />
       </section>
     </template>
@@ -144,8 +141,6 @@ const props = defineProps<{
     area: InstanceCompositionModel
   } | null
 }>()
-
-const emit = defineEmits<{ (e: 'select-step', stepName: string): void }>()
 
 const DEFAULT_METRIC_IDS = ['instance_count', 'net_count', 'core_utilization']
 
@@ -215,16 +210,6 @@ const compositionSeries = computed<FlowTrendSeries[]>(() => {
 
 function focusMetric(id: string): void {
   activeMetricIds.value = new Set([id])
-}
-
-function selectStep(index: number): void {
-  const stepName = props.model?.steps[index]?.name
-  if (stepName) emit('select-step', stepName)
-}
-
-function selectStepByKey(key: string): void {
-  const step = props.model?.steps.find((item) => item.key === key || item.name === key)
-  if (step) emit('select-step', step.name)
 }
 
 function cellHeatStyle(row: DbTrendMetricRow, index: number): Record<string, string> {
@@ -368,9 +353,6 @@ function formatDelta(delta: number | null): string {
   color: var(--text-primary);
 }
 
-.dbtrend-matrix td {
-  cursor: pointer;
-}
 
 .dbtrend-mode {
   display: flex;

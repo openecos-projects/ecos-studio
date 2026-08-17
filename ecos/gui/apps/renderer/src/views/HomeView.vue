@@ -361,7 +361,6 @@
               :sta-critical-paths="flowInsightStaPaths"
               :sta-convergence="flowInsightStaConvergence"
               :loading="flowInsightsLoading"
-              @select-step="openFlowInsightStep"
             />
           </section>
         </div>
@@ -934,15 +933,6 @@ function openStepQorAnalysis(step: string): void {
     name: ':step',
     params: { step },
     query: { ...route.query, panel: 'analysis' },
-  })
-}
-
-function openFlowInsightStep(step: string, options?: { panel?: string }): void {
-  if (!step) return
-  void router.push({
-    name: ':step',
-    params: { step },
-    query: options?.panel ? { ...route.query, panel: options.panel } : { ...route.query },
   })
 }
 
