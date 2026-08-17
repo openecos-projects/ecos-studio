@@ -135,6 +135,7 @@ export class EccRpcSidecarProcess {
 
     this.logFile = this.createLogFile()
     this.shuttingDown = false
+    this.appendLog(`[sidecar] spawning ${this.command} rpc serve --stdio --persistent-db\n`)
 
     const child = this.spawnImpl(
       this.command,

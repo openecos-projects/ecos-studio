@@ -347,55 +347,22 @@
             </dl>
           </section>
 
-          <section class="dashboard-section snapshot-card">
-            <header class="dashboard-section-header">
-              <div>
-                <i class="ri-gallery-line" aria-hidden="true" />
-                <h2>Data Snapshot</h2>
-              </div>
-              <span class="dashboard-muted">{{ insightSnapshots.length }} snapshots</span>
-            </header>
-            <div
-              v-if="insightSnapshots.length"
-              class="snapshot-grid"
-              aria-label="Flow snapshots"
-            >
-              <div
-                v-for="(snapshot, index) in insightSnapshotCells"
-                :key="snapshot?.id ?? `snapshot-empty-${index}`"
-                class="snapshot-grid-cell"
-                :class="{ 'is-empty': !snapshot }"
-              >
-                <button
-                  v-if="snapshot"
-                  type="button"
-                  :title="snapshot.label"
-                  @click="
-                    snapshot.kind === 'image'
-                      ? (preview = { label: snapshot.label, url: snapshot.url })
-                      : openHomeSnapshotDetail(snapshot)
-                  "
-                >
-                  <img
-                    v-if="snapshot.kind === 'image'"
-                    :src="snapshot.url"
-                    :alt="snapshot.label"
-                  />
-                  <StatusPieChart
-                    v-else
-                    class="home-snapshot-pie"
-                    :label="`${snapshot.label} distribution`"
-                    :slices="snapshot.slices"
-                    :center-primary="formatHomeSnapshotTotal(snapshot.total)"
-                    :center-secondary="snapshot.unit || 'count'"
-                  />
-                  <span>{{ snapshot.label }}</span>
-                </button>
-              </div>
-            </div>
-            <div v-else class="dashboard-empty">
-              <i class="ri-gallery-line" /><span>No flow snapshots</span>
-            </div>
+          <section class="dashboard-section flow-insights-card">
+            <FlowInsightsPanel
+              :steps="flowInsightSteps"
+              :step-resources="flowInsightResources"
+              :db-trends="flowInsightDbTrends"
+              :instance-composition="flowInsightComposition"
+              :congestion-tiles="flowInsightCongestionTiles"
+              :congestion-tile-urls="flowInsightCongestionUrls"
+              :drc="flowInsightDrc"
+              :drc-related="flowInsightDrcRelated"
+              :sta="flowInsightSta"
+              :sta-critical-paths="flowInsightStaPaths"
+              :sta-convergence="flowInsightStaConvergence"
+              :loading="flowInsightsLoading"
+              @select-step="openFlowInsightStep"
+            />
           </section>
         </div>
       </main>
@@ -580,50 +547,7 @@
     <p v-else class="dialog-empty">{{ qorDetailsEmptyLabel }}</p>
   </Dialog>
 
-  <Dialog
-    v-model:visible="previewVisible"
-    modal
-    maximizable
-    :header="preview?.label ?? 'Preview'"
-    :style="{ width: 'min(1100px, calc(100vw - 32px))' }"
-    :draggable="false"
-  >
-    <img
-      v-if="preview"
-      class="dashboard-image-preview"
-      :src="preview.url"
-      :alt="preview.label"
-    />
-  </Dialog>
 
-  <Dialog
-    v-model:visible="homeSnapshotDetailVisible"
-    modal
-    :header="selectedHomeSnapshot?.label ?? 'Snapshot Distribution'"
-    :style="{ width: 'min(880px, calc(100vw - 32px))' }"
-    :draggable="false"
-  >
-    <div v-if="selectedHomeSnapshot" class="home-snapshot-detail">
-      <section class="home-snapshot-detail-chart">
-        <StatusPieChart
-          :label="`${selectedHomeSnapshot.label} distribution`"
-          :slices="selectedHomeSnapshot.slices"
-          :center-primary="formatHomeSnapshotTotal(selectedHomeSnapshot.total)"
-          :center-secondary="selectedHomeSnapshot.unit || 'count'"
-          show-labels
-        />
-      </section>
-      <dl class="home-snapshot-detail-list">
-        <div v-for="slice in selectedHomeSnapshot.slices" :key="slice.id">
-          <dt>
-            <span :style="{ backgroundColor: slice.color ?? undefined }" />
-            {{ slice.label }}
-          </dt>
-          <dd>{{ formatHomeSnapshotTotal(slice.value) }}</dd>
-        </div>
-      </dl>
-    </div>
-  </Dialog>
 </template>
 
 <script setup lang="ts">
@@ -633,6 +557,8 @@ import { useRoute, useRouter } from 'vue-router'
 import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
+import FlowInsightsPanel from '@/components/flow-insights/FlowInsightsPanel.vue'
+import { staConvergenceFromComparison } from '@/components/flow-insights/flowInsightsData'
 import StatusPieChart from '@/components/home/StatusPieChart.vue'
 import {
   checklistPieSlices,
@@ -650,8 +576,8 @@ import { useHomeData } from '@/composables/useHomeData'
 import {
   useHomeSnapshots,
   type HomeLayoutThumbnail,
-  type HomeSnapshotDistribution,
 } from '@/composables/useHomeSnapshots'
+import { useFlowInsights } from '@/composables/useFlowInsights'
 import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
 import { useParameters } from '@/composables/useParameters'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
@@ -679,7 +605,22 @@ const {
   flowLogSegments,
   flowLogStepName,
 } = useHomeData()
-const { insightSnapshots, layoutThumbnails } = useHomeSnapshots()
+const { layoutThumbnails } = useHomeSnapshots()
+const {
+  stepResources: flowInsightResources,
+  dbTrends: flowInsightDbTrends,
+  instanceComposition: flowInsightComposition,
+  congestionTiles: flowInsightCongestionTiles,
+  congestionTileUrls: flowInsightCongestionUrls,
+  drc: flowInsightDrc,
+  drcRelated: flowInsightDrcRelated,
+  sta: flowInsightSta,
+  staCriticalPaths: flowInsightStaPaths,
+  loading: flowInsightsLoading,
+} = useFlowInsights()
+const flowInsightSteps = computed(
+  () => flowInsightResources.value?.steps ?? [],
+)
 const { keyMetrics, maxFanout, mpcDisplayName, mpcConstraints, qorSteps } =
   useDashboardOverview()
 const { state: qorComparisonState, refresh: refreshQorComparison } =
@@ -688,48 +629,15 @@ const { state: qorComparisonState, refresh: refreshQorComparison } =
 const showPorts = ref(false)
 const showChecklist = ref(false)
 const showQor = ref(false)
-const preview = ref<{ label: string; url: string } | null>(null)
-const selectedHomeSnapshot = ref<HomeSnapshotDistribution | null>(null)
 const openingLayoutStep = ref<string | null>(null)
 const LAYOUT_THUMBNAIL_ROWS = 4
 const LAYOUT_THUMBNAIL_COLUMNS = 4
-const INSIGHT_SNAPSHOT_ROWS = 4
-const INSIGHT_SNAPSHOT_COLUMNS = 5
 const layoutThumbnailCells = computed(() =>
   Array.from(
     { length: LAYOUT_THUMBNAIL_ROWS * LAYOUT_THUMBNAIL_COLUMNS },
     (_, index) => layoutThumbnails.value[index] ?? null,
   ),
 )
-const insightSnapshotCells = computed(() =>
-  Array.from(
-    { length: INSIGHT_SNAPSHOT_ROWS * INSIGHT_SNAPSHOT_COLUMNS },
-    (_, index) => insightSnapshots.value[index] ?? null,
-  ),
-)
-const previewVisible = computed({
-  get: () => preview.value !== null,
-  set: (visible: boolean) => {
-    if (!visible) preview.value = null
-  },
-})
-const homeSnapshotDetailVisible = computed({
-  get: () => selectedHomeSnapshot.value !== null,
-  set: (visible: boolean) => {
-    if (!visible) selectedHomeSnapshot.value = null
-  },
-})
-
-function openHomeSnapshotDetail(snapshot: HomeSnapshotDistribution): void {
-  selectedHomeSnapshot.value = snapshot
-}
-
-function formatHomeSnapshotTotal(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: 2,
-    notation: Math.abs(value) >= 1_000_000 ? 'compact' : 'standard',
-  }).format(value)
-}
 
 const flowNodes = computed<FlowStatusNode[]>(() =>
   flowStages.value
@@ -748,6 +656,9 @@ const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
 const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
 const qorComparisonSummary = computed(() =>
   summarizeHomeQorComparison(qorComparisonState.value.comparison),
+)
+const flowInsightStaConvergence = computed(() =>
+  staConvergenceFromComparison(qorComparisonState.value.comparison),
 )
 const qorDetail = computed(() =>
   buildHomeQorDetailModel(qorComparisonState.value.comparison),
@@ -1026,6 +937,15 @@ function openStepQorAnalysis(step: string): void {
   })
 }
 
+function openFlowInsightStep(step: string, options?: { panel?: string }): void {
+  if (!step) return
+  void router.push({
+    name: ':step',
+    params: { step },
+    query: options?.panel ? { ...route.query, panel: options.panel } : { ...route.query },
+  })
+}
+
 function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
   if (!thumbnail.hasGeometry) return false
   return canOpenChipViewer({
@@ -1100,7 +1020,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .home-dashboard-bottom {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .dashboard-section {
@@ -1796,99 +1716,9 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   font-size: 13px;
 }
 
-.snapshot-grid {
-  display: grid;
-  flex: 1;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  grid-template-rows: repeat(4, minmax(0, 1fr));
-  min-height: 0;
-  padding: 7px;
-}
-
-.snapshot-grid-cell {
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-  border-right: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-  min-height: 0;
+.flow-insights-card {
   min-width: 0;
-}
-
-.snapshot-grid-cell:nth-child(5n) {
-  border-right: 0;
-}
-
-.snapshot-grid-cell:nth-child(n + 16) {
-  border-bottom: 0;
-}
-
-.snapshot-grid-cell button {
-  align-items: stretch;
-  background: transparent;
-  border: 0;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  height: 100%;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  padding: 6% 7% 4%;
-  width: 100%;
-}
-
-.snapshot-grid-cell button:hover,
-.snapshot-grid-cell button:focus-visible {
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
-  outline: none;
-}
-
-.snapshot-grid-cell img {
-  align-self: stretch;
-  background: var(--dashboard-soft-surface);
-  border: 1px solid var(--dashboard-border);
-  border-radius: 3px;
-  display: block;
-  height: 100%;
-  min-height: 0;
-  object-fit: contain;
-  width: 100%;
-}
-
-.home-snapshot-pie {
-  align-self: stretch;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 3px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.home-snapshot-pie :deep(.status-pie-chart-wrap) {
-  min-height: 0;
-}
-
-.home-snapshot-pie :deep(.status-pie-center strong) {
-  font-size: 12px;
-}
-
-.home-snapshot-pie :deep(.status-pie-center span) {
-  font-size: 10px;
-}
-
-.snapshot-grid-cell i {
-  align-self: center;
-  font-size: 18px;
-}
-
-.snapshot-grid-cell span {
-  align-self: end;
-  font-size: 10px;
-  line-height: 1.2;
-  max-width: 100%;
-  overflow: hidden;
-  padding-top: 4%;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 8px 9px 9px;
 }
 
 .dashboard-detail-table {
@@ -2285,85 +2115,6 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
     content: 'Current';
   }
 }
-.dashboard-image-preview {
-  display: block;
-  height: auto;
-  max-height: min(75vh, 820px);
-  object-fit: contain;
-  width: 100%;
-}
-
-.home-snapshot-detail {
-  align-items: stretch;
-  display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1fr);
-  min-width: 0;
-}
-
-.home-snapshot-detail-chart {
-  min-height: 280px;
-}
-
-.home-snapshot-detail-list {
-  align-content: start;
-  display: grid;
-  gap: 7px 16px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0;
-  min-width: 0;
-}
-
-.home-snapshot-detail-list > div {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  min-width: 0;
-}
-
-.home-snapshot-detail-list dt,
-.home-snapshot-detail-list dd {
-  margin: 0;
-}
-
-.home-snapshot-detail-list dt {
-  align-items: center;
-  color: var(--text-secondary);
-  display: flex;
-  font-size: 12px;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.home-snapshot-detail-list dt span {
-  border-radius: 50%;
-  flex: 0 0 auto;
-  height: 8px;
-  width: 8px;
-}
-
-.home-snapshot-detail-list dd {
-  color: var(--text-primary);
-  flex: 0 0 auto;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-@media (max-width: 680px) {
-  .home-snapshot-detail {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .home-snapshot-detail-chart {
-    min-height: 240px;
-  }
-}
-
 @media (max-width: 1180px) {
   .home-dashboard {
     grid-template-rows: auto auto auto;

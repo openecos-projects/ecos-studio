@@ -25,7 +25,7 @@ describe('HomeView workspace dashboard layout', () => {
     expect(topRow).toContain('class="dashboard-section status-card"')
     expect(middleRow.indexOf('qor-card')).toBeLessThan(middleRow.indexOf('layout-card'))
     expect(bottomRow.indexOf('key-metrics-card')).toBeLessThan(
-      bottomRow.indexOf('snapshot-card'),
+      bottomRow.indexOf('flow-insights-card'),
     )
     expect(homeViewSource).toContain(
       '.home-dashboard-top {\n  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 3fr);',
@@ -34,14 +34,16 @@ describe('HomeView workspace dashboard layout', () => {
       '.home-dashboard-middle {\n  grid-template-columns: minmax(0, 5fr) minmax(0, 2fr);',
     )
     expect(homeViewSource).toContain(
-      '.home-dashboard-bottom {\n  grid-template-columns: repeat(2, minmax(0, 1fr));',
+      '.home-dashboard-bottom {\n  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);',
     )
   })
 
-  it('keeps insight snapshot previews accessible through modal dialogs', () => {
-    expect(homeViewSource).toContain('openHomeSnapshotDetail(snapshot)')
-    expect(homeViewSource).toContain('maximizable')
-    expect(homeViewSource).toContain('class="dashboard-image-preview"')
+  it('replaces the snapshot card with the Data Snapshot panel', () => {
+    expect(homeViewSource).toContain('<FlowInsightsPanel')
+    expect(homeViewSource).toContain('useFlowInsights')
+    expect(homeViewSource).toContain('@select-step="openFlowInsightStep"')
+    expect(homeViewSource).toContain("name: ':step'")
+    expect(homeViewSource).not.toContain('snapshot-card')
   })
 
   it('opens the ChipView data for the clicked layout thumbnail step', () => {
@@ -68,28 +70,13 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
   })
 
-  it('lays Data Snapshot out as a responsive 4-by-5 insight grid', () => {
-    expect(homeViewSource).toContain('const INSIGHT_SNAPSHOT_ROWS = 4')
-    expect(homeViewSource).toContain('const INSIGHT_SNAPSHOT_COLUMNS = 5')
-    expect(homeViewSource).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
-    expect(homeViewSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
-    expect(homeViewSource).toContain(
-      'border-right: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent)',
-    )
-    expect(homeViewSource).toContain(
-      'border-bottom: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent)',
-    )
-    expect(homeViewSource).toContain('object-fit: contain')
-  })
-
-  it('keeps layout and insight snapshot data separated', () => {
+  it('keeps layout thumbnails independent from Data Snapshot modules', () => {
     expect(homeViewSource).toContain('useHomeSnapshots')
     expect(homeViewSource).toContain('layoutThumbnails.length')
-    expect(homeViewSource).toContain('insightSnapshots.length')
-    expect(homeViewSource).toContain("snapshot.kind === 'image'")
-    expect(homeViewSource).toContain('openHomeSnapshotDetail(snapshot)')
-    expect(homeViewSource).toContain('class="home-snapshot-pie"')
-    expect(homeViewSource).toContain('class="home-snapshot-detail"')
+    expect(homeViewSource).toContain('useFlowInsights')
+    expect(homeViewSource).toContain('flowInsightResources')
+    expect(homeViewSource).toContain('flow-insights-card')
+    expect(homeViewSource).not.toContain('insightSnapshots')
   })
 
   it('keeps dashboard cards free of decorative corner brackets', () => {
@@ -274,8 +261,8 @@ describe('HomeView workspace dashboard layout', () => {
     )
   })
 
-  it('preserves fixed-size checklist, QoR, and snapshot pie chart regions', () => {
-    expect(homeViewSource.match(/<StatusPieChart/g)?.length).toBe(4)
+  it('preserves fixed-size checklist and QoR pie chart regions', () => {
+    expect(homeViewSource.match(/<StatusPieChart/g)?.length).toBe(2)
     expect(homeViewSource).toContain('min-height: 108px')
     expect(homeViewSource).toContain('grid-template-columns: minmax(104px, 0.45fr)')
     expect(homeViewSource).toContain(
