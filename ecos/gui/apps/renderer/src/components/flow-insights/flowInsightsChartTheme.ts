@@ -58,8 +58,10 @@ export function readFlowInsightsChartTokens(
   element: HTMLElement | null,
   themeName: 'light' | 'dark' = 'dark',
 ): FlowInsightsChartTokens {
-  const fallback = themeName === 'light' ? FLOW_INSIGHTS_LIGHT_TOKENS : FLOW_INSIGHTS_DARK_TOKENS
-  const target = element ?? (typeof document === 'undefined' ? null : document.documentElement)
+  const fallback =
+    themeName === 'light' ? FLOW_INSIGHTS_LIGHT_TOKENS : FLOW_INSIGHTS_DARK_TOKENS
+  const target =
+    element ?? (typeof document === 'undefined' ? null : document.documentElement)
   if (!target) return fallback
   const style = getComputedStyle(target)
   return {
@@ -76,7 +78,14 @@ export function readFlowInsightsChartTokens(
 }
 
 export function flowInsightsSeriesPalette(tokens: FlowInsightsChartTokens): string[] {
-  return [tokens.accent, tokens.warn, tokens.success, tokens.info, tokens.danger, '#8b5cf6']
+  return [
+    tokens.accent,
+    tokens.warn,
+    tokens.success,
+    tokens.info,
+    tokens.danger,
+    '#8b5cf6',
+  ]
 }
 
 export function deltaToneColor(
@@ -130,5 +139,7 @@ export function registerFlowInsightsChartThemes(): void {
 }
 
 export function flowInsightsChartThemeName(themeName: 'light' | 'dark'): string {
-  return themeName === 'light' ? FLOW_INSIGHTS_CHART_THEME_LIGHT : FLOW_INSIGHTS_CHART_THEME_DARK
+  return themeName === 'light'
+    ? FLOW_INSIGHTS_CHART_THEME_LIGHT
+    : FLOW_INSIGHTS_CHART_THEME_DARK
 }

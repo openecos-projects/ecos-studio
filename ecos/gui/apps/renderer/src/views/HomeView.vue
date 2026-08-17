@@ -545,8 +545,6 @@
     </div>
     <p v-else class="dialog-empty">{{ qorDetailsEmptyLabel }}</p>
   </Dialog>
-
-
 </template>
 
 <script setup lang="ts">
@@ -617,9 +615,7 @@ const {
   staCriticalPaths: flowInsightStaPaths,
   loading: flowInsightsLoading,
 } = useFlowInsights()
-const flowInsightSteps = computed(
-  () => flowInsightResources.value?.steps ?? [],
-)
+const flowInsightSteps = computed(() => flowInsightResources.value?.steps ?? [])
 const { keyMetrics, maxFanout, mpcDisplayName, mpcConstraints, qorSteps } =
   useDashboardOverview()
 const { state: qorComparisonState, refresh: refreshQorComparison } =

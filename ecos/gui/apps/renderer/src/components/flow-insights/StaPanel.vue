@@ -17,8 +17,18 @@
         </div>
         <div class="sta-kpi" :class="overallTone">
           <span>Frequency</span>
-          <strong>{{ displayed.frequencyMhz === null ? '--' : `${Math.round(displayed.frequencyMhz)} MHz` }}</strong>
-          <small>{{ displayed.allCornersMet === null ? '' : displayed.allCornersMet ? 'all corners met' : 'violations' }}</small>
+          <strong>{{
+            displayed.frequencyMhz === null
+              ? '--'
+              : `${Math.round(displayed.frequencyMhz)} MHz`
+          }}</strong>
+          <small>{{
+            displayed.allCornersMet === null
+              ? ''
+              : displayed.allCornersMet
+                ? 'all corners met'
+                : 'violations'
+          }}</small>
         </div>
       </div>
 
@@ -35,7 +45,9 @@
                 </option>
               </select>
             </label>
-            <label class="sta-toggle"><input v-model="negativeFirst" type="checkbox" />Negative first</label>
+            <label class="sta-toggle"
+              ><input v-model="negativeFirst" type="checkbox" />Negative first</label
+            >
           </div>
         </header>
         <div class="sta-table-scroll">
@@ -53,30 +65,58 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in sortedCorners" :key="row.corner" :class="{ 'is-missing': row.missing }">
+              <tr
+                v-for="row in sortedCorners"
+                :key="row.corner"
+                :class="{ 'is-missing': row.missing }"
+              >
                 <th class="sta-corner-col" :title="row.corner">{{ row.corner }}</th>
                 <template v-if="row.missing">
                   <td colspan="7" class="sta-missing-cell">missing</td>
                 </template>
                 <template v-else>
-                  <td :class="slackClass(row.setup?.wns)" :title="pathPreviewTitle(row)">{{ formatSlack(row.setup?.wns) }}</td>
-                  <td :class="slackClass(row.setup?.tns)" :title="pathPreviewTitle(row)">{{ formatSlack(row.setup?.tns) }}</td>
-                  <td :class="countClass(row.setup?.nvp)" :title="pathPreviewTitle(row)">{{ row.setup?.nvp ?? '—' }}</td>
-                  <td :class="slackClass(row.hold?.wns)" :title="pathPreviewTitle(row)">{{ formatSlack(row.hold?.wns) }}</td>
-                  <td :class="slackClass(row.hold?.tns)" :title="pathPreviewTitle(row)">{{ formatSlack(row.hold?.tns) }}</td>
-                  <td :class="countClass(row.hold?.nvp)" :title="pathPreviewTitle(row)">{{ row.hold?.nvp ?? '—' }}</td>
-                  <td :title="pathPreviewTitle(row)">{{ row.setup?.frequencyMhz ?? '—' }}</td>
+                  <td :class="slackClass(row.setup?.wns)" :title="pathPreviewTitle(row)">
+                    {{ formatSlack(row.setup?.wns) }}
+                  </td>
+                  <td :class="slackClass(row.setup?.tns)" :title="pathPreviewTitle(row)">
+                    {{ formatSlack(row.setup?.tns) }}
+                  </td>
+                  <td :class="countClass(row.setup?.nvp)" :title="pathPreviewTitle(row)">
+                    {{ row.setup?.nvp ?? '—' }}
+                  </td>
+                  <td :class="slackClass(row.hold?.wns)" :title="pathPreviewTitle(row)">
+                    {{ formatSlack(row.hold?.wns) }}
+                  </td>
+                  <td :class="slackClass(row.hold?.tns)" :title="pathPreviewTitle(row)">
+                    {{ formatSlack(row.hold?.tns) }}
+                  </td>
+                  <td :class="countClass(row.hold?.nvp)" :title="pathPreviewTitle(row)">
+                    {{ row.hold?.nvp ?? '—' }}
+                  </td>
+                  <td :title="pathPreviewTitle(row)">
+                    {{ row.setup?.frequencyMhz ?? '—' }}
+                  </td>
                 </template>
               </tr>
               <tr class="sta-total-row">
                 <th class="sta-corner-col">Worst</th>
-                <td :class="slackClass(displayed.worstSetup?.wns)">{{ formatSlack(displayed.worstSetup?.wns) }}</td>
+                <td :class="slackClass(displayed.worstSetup?.wns)">
+                  {{ formatSlack(displayed.worstSetup?.wns) }}
+                </td>
                 <td :class="slackClass(minSetupTns)">{{ formatSlack(minSetupTns) }}</td>
                 <td>{{ displayed.setupViolationCount }}</td>
-                <td :class="slackClass(displayed.worstHold?.wns)">{{ formatSlack(displayed.worstHold?.wns) }}</td>
+                <td :class="slackClass(displayed.worstHold?.wns)">
+                  {{ formatSlack(displayed.worstHold?.wns) }}
+                </td>
                 <td :class="slackClass(minHoldTns)">{{ formatSlack(minHoldTns) }}</td>
                 <td>{{ displayed.holdViolationCount }}</td>
-                <td>{{ displayed.frequencyMhz === null ? '—' : Math.round(displayed.frequencyMhz) }}</td>
+                <td>
+                  {{
+                    displayed.frequencyMhz === null
+                      ? '—'
+                      : Math.round(displayed.frequencyMhz)
+                  }}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -112,7 +152,9 @@
           <article v-for="path in group.paths" :key="path.id" class="sta-path-card">
             <header>
               <strong>{{ path.id.split(':').slice(1).join(':') || path.id }}</strong>
-              <span :class="slackClass(path.slackNs)">{{ formatSlack(path.slackNs) }} ns</span>
+              <span :class="slackClass(path.slackNs)"
+                >{{ formatSlack(path.slackNs) }} ns</span
+              >
               <small>{{ path.stageCount }} stages · {{ path.corner }}</small>
             </header>
             <div class="sta-path-waterfall" aria-hidden="true">
@@ -124,7 +166,10 @@
               />
             </div>
             <ol class="sta-path-stages">
-              <li v-for="(stage, index) in path.stages" :key="`${path.id}-stage-${index}`">
+              <li
+                v-for="(stage, index) in path.stages"
+                :key="`${path.id}-stage-${index}`"
+              >
                 <span>{{ stage.pin || `stage ${index + 1}` }}</span>
                 <small>{{ stage.cell }}</small>
                 <em>{{ formatDelay(stage.delayNs) }}</em>
@@ -181,7 +226,10 @@ const selectedPathGroup = ref('summary')
 const pathGroupOptions = computed(() => props.model?.pathGroups ?? [])
 
 watch(pathGroupOptions, (groups) => {
-  if (selectedPathGroup.value !== 'summary' && !groups.includes(selectedPathGroup.value)) {
+  if (
+    selectedPathGroup.value !== 'summary' &&
+    !groups.includes(selectedPathGroup.value)
+  ) {
     selectedPathGroup.value = 'summary'
   }
 })
@@ -212,7 +260,9 @@ const sortedCorners = computed(() => {
 function worstSlackOf(row: StaCornerRowModel): number {
   const setup = row.setup?.wns
   const hold = row.hold?.wns
-  const values = [setup, hold].filter((value): value is number => value !== null && value !== undefined)
+  const values = [setup, hold].filter(
+    (value): value is number => value !== null && value !== undefined,
+  )
   if (!values.length) return Number.POSITIVE_INFINITY
   return Math.min(...values)
 }
@@ -311,7 +361,11 @@ const minHoldTns = computed(() => {
 const worstSetupTone = computed(() => slackTone(displayed.value.worstSetup?.wns))
 const worstHoldTone = computed(() => slackTone(displayed.value.worstHold?.wns))
 const overallTone = computed(() => {
-  if (displayed.value.allCornersMet === null || displayed.value.allCornersMet === undefined) return ''
+  if (
+    displayed.value.allCornersMet === null ||
+    displayed.value.allCornersMet === undefined
+  )
+    return ''
   return displayed.value.allCornersMet ? 'is-good' : 'is-bad'
 })
 
@@ -489,7 +543,7 @@ function stageTitle(stage: StaPathStage, index: number): string {
   background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
   color: var(--text-secondary);
   font-weight: 600;
-  left:  0;
+  left: 0;
   position: sticky;
   text-align: left;
   z-index: 1;

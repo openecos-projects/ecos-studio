@@ -198,7 +198,8 @@ async function buildFlowInsightsData(
       }
 
       if (key === 'Synth') {
-        const statFile = step.resources.feature.stat ?? step.resources.feature.generic_stat
+        const statFile =
+          step.resources.feature.stat ?? step.resources.feature.generic_stat
         if (statFile?.exists) synthesisStatJson = await readJsonFrom(statFile.path)
         return
       }
@@ -371,11 +372,7 @@ export function useFlowInsights() {
     () => data.value?.congestionTileUrls ?? new Map<string, string>(),
   )
   const drc = computed(() => data.value?.drc ?? null)
-  const drcRelated = computed(
-    () =>
-      data.value?.drcRelated ??
-      buildDrcRelatedMetrics({}),
-  )
+  const drcRelated = computed(() => data.value?.drcRelated ?? buildDrcRelatedMetrics({}))
   const sta = computed(() => data.value?.sta ?? null)
   const staCriticalPaths = computed(() => data.value?.staCriticalPaths ?? null)
 

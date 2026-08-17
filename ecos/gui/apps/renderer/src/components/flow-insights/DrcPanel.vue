@@ -14,17 +14,11 @@
           </span>
         </div>
         <div class="drc-related">
-          <div
-            class="drc-related-card"
-            :class="toneClass(related.routeDrViolations)"
-          >
+          <div class="drc-related-card" :class="toneClass(related.routeDrViolations)">
             <span>Route DR</span>
             <strong>{{ formatCount(related.routeDrViolations) }}</strong>
           </div>
-          <div
-            class="drc-related-card"
-            :class="toneClass(related.routeLaOverflow)"
-          >
+          <div class="drc-related-card" :class="toneClass(related.routeLaOverflow)">
             <span>LA overflow</span>
             <strong>{{ formatCount(related.routeLaOverflow) }}</strong>
           </div>
@@ -35,7 +29,11 @@
         <header class="drc-subheader">
           <h3>{{ chartMode === 'pie' ? 'Violation Share' : 'Violations by Layer' }}</h3>
           <div class="drc-mode">
-            <span class="drc-hint">{{ selectedTypeName ? humanize(selectedTypeName) : `${model.layerColumns.length} layers` }}</span>
+            <span class="drc-hint">{{
+              selectedTypeName
+                ? humanize(selectedTypeName)
+                : `${model.layerColumns.length} layers`
+            }}</span>
             <button
               type="button"
               class="drc-chip"
@@ -80,13 +78,17 @@
             :class="{ 'is-active': selectedTypeName === type.name }"
             @click="toggleType(type.name)"
           >
-            <strong class="drc-type-name" :title="type.name">{{ humanize(type.name) }}</strong>
+            <strong class="drc-type-name" :title="type.name">{{
+              humanize(type.name)
+            }}</strong>
             <span class="drc-type-bar" aria-hidden="true">
               <span :style="{ width: `${typeShare(type.total)}%` }" />
             </span>
             <span class="drc-type-count">{{ type.total }}</span>
             <span class="drc-type-share">{{ typeShare(type.total).toFixed(1) }}%</span>
-            <span class="drc-type-layer">{{ type.maxLayer ? `main: ${type.maxLayer}` : '' }}</span>
+            <span class="drc-type-layer">{{
+              type.maxLayer ? `main: ${type.maxLayer}` : ''
+            }}</span>
           </li>
         </ul>
       </section>
@@ -204,9 +206,7 @@ const layerSeries = computed<FlowTrendSeries[]>(() => {
 const visibleLayers = computed(() => {
   const layers = props.model?.layerColumns ?? []
   if (!nonZeroOnly.value) return layers
-  return layers.filter(
-    (_, index) => (props.model?.totalByLayer[index] ?? 0) > 0,
-  )
+  return layers.filter((_, index) => (props.model?.totalByLayer[index] ?? 0) > 0)
 })
 
 const visibleTypes = computed(() => {
@@ -221,7 +221,9 @@ function toggleType(name: string): void {
 
 const heroTitle = computed(() => {
   if (!related.value.drcStepName) return 'DRC step unavailable'
-  return isClean.value ? `${related.value.drcStepName} is clean` : `${related.value.drcStepName} violations`
+  return isClean.value
+    ? `${related.value.drcStepName} is clean`
+    : `${related.value.drcStepName} violations`
 })
 
 function formatCount(value: number | null): string {
@@ -244,9 +246,7 @@ function typeShare(total: number): number {
 }
 
 function humanize(value: string): string {
-  return value
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 </script>
 
@@ -433,7 +433,10 @@ function humanize(value: string): string {
   cursor: pointer;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(90px, 1.2fr) minmax(60px, 2fr) 40px 44px minmax(70px, 0.8fr);
+  grid-template-columns: minmax(90px, 1.2fr) minmax(60px, 2fr) 40px 44px minmax(
+      70px,
+      0.8fr
+    );
   padding: 2px 4px;
 }
 

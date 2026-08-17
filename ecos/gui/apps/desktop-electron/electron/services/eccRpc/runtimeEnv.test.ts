@@ -420,9 +420,15 @@ describe('createEccRuntimeEnv', () => {
 
   it('resolves the development ECC shim by absolute path', () => {
     const fixture = createRepoFixture()
-    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '[project]\nname = "ecc"\n')
+    writeFileSync(
+      join(fixture.repoRoot, 'ecc', 'pyproject.toml'),
+      '[project]\nname = "ecc"\n',
+    )
     mkdirSync(join(fixture.repoRoot, 'ecos', 'scripts'), { recursive: true })
-    writeFileSync(join(fixture.repoRoot, 'ecos', 'scripts', 'ecc-wrapper.sh'), '#!/usr/bin/env bash\n')
+    writeFileSync(
+      join(fixture.repoRoot, 'ecos', 'scripts', 'ecc-wrapper.sh'),
+      '#!/usr/bin/env bash\n',
+    )
 
     const executable = resolveEccExecutable({
       appPath: fixture.appPath,

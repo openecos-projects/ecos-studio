@@ -43,10 +43,7 @@
       :draggable="false"
     >
       <div class="data-snapshot-dialog-body">
-        <StepResourcesPanel
-          v-if="activeTab === 'resources'"
-          :model="stepResources"
-        />
+        <StepResourcesPanel v-if="activeTab === 'resources'" :model="stepResources" />
         <DbTrendsPanel
           v-else-if="activeTab === 'db-trends'"
           :model="dbTrends"
@@ -57,11 +54,7 @@
           :tiles="congestionTiles"
           :tile-urls="congestionTileUrls"
         />
-        <DrcPanel
-          v-else-if="activeTab === 'drc'"
-          :model="drc"
-          :related="drcRelated"
-        />
+        <DrcPanel v-else-if="activeTab === 'drc'" :model="drc" :related="drcRelated" />
         <StaPanel
           v-else-if="activeTab === 'timing'"
           :model="sta"
@@ -132,11 +125,14 @@ const modules = computed(() =>
 )
 
 const snapshotCells = computed(() =>
-  Array.from({ length: DATA_SNAPSHOT_CELL_COUNT }, (_, index) => modules.value[index] ?? null),
+  Array.from(
+    { length: DATA_SNAPSHOT_CELL_COUNT },
+    (_, index) => modules.value[index] ?? null,
+  ),
 )
 
-const activeModule = computed(() =>
-  modules.value.find((module) => module.id === activeTab.value) ?? null,
+const activeModule = computed(
+  () => modules.value.find((module) => module.id === activeTab.value) ?? null,
 )
 
 function openModule(moduleId: string): void {

@@ -25,6 +25,8 @@ describe('flow insights module registry', () => {
       sta: null,
     })
     expect(resolved.every((module) => module.available === false)).toBe(true)
-    expect(resolved.find((module) => module.id === 'timing')?.hint).toContain('Waiting for sta')
+    expect(resolved.find((module) => module.id === 'timing')?.hint).toContain(
+      'Waiting for sta',
+    )
   })
 })

@@ -30,7 +30,9 @@ export interface FlowInsightsModuleDescriptor {
   title: string
   icon: string
   component: Component
-  availability: (context: FlowInsightsAvailabilityContext) => FlowInsightsModuleAvailability
+  availability: (
+    context: FlowInsightsAvailabilityContext,
+  ) => FlowInsightsModuleAvailability
 }
 
 export const FLOW_INSIGHT_MODULES: FlowInsightsModuleDescriptor[] = [

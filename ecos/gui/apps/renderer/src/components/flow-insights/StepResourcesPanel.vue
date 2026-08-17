@@ -9,7 +9,9 @@
         </div>
         <div class="resource-kpi">
           <span>Peak memory</span>
-          <strong>{{ model.peakMemoryMb === null ? '--' : formatMemory(model.peakMemoryMb) }}</strong>
+          <strong>{{
+            model.peakMemoryMb === null ? '--' : formatMemory(model.peakMemoryMb)
+          }}</strong>
         </div>
         <div v-if="bottleneckStep" class="resource-kpi is-accent">
           <span>Bottleneck step</span>
@@ -35,7 +37,9 @@
       <div class="resource-chart">
         <header class="resource-subheader">
           <h3>Runtime waterfall</h3>
-          <span class="resource-hint">cumulative {{ formatDuration(waterfall.completedRuntimeSeconds) }}</span>
+          <span class="resource-hint"
+            >cumulative {{ formatDuration(waterfall.completedRuntimeSeconds) }}</span
+          >
         </header>
         <FlowTrendChart
           label="Cumulative step runtime"
@@ -72,7 +76,13 @@ const stepStates = computed(
 const waterfall = computed(() =>
   props.model
     ? buildRuntimeWaterfallModel(props.model.steps)
-    : { categories: [], offsets: [], durations: [], runningIndex: -1, completedRuntimeSeconds: 0 },
+    : {
+        categories: [],
+        offsets: [],
+        durations: [],
+        runningIndex: -1,
+        completedRuntimeSeconds: 0,
+      },
 )
 
 const waterfallSeries = computed<FlowTrendSeries[]>(() => {
@@ -229,5 +239,4 @@ function formatMemory(mb: number): string {
   font-size: 10px;
   gap: 4px;
 }
-
 </style>

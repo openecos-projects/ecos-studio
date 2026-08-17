@@ -40,7 +40,10 @@
                   :title="cellTitle(row, value, index)"
                 >
                   <span class="dbtrend-value">{{ formatValue(value, row.unit) }}</span>
-                  <span v-if="index > 0 && row.deltas[index] !== null" class="dbtrend-delta">
+                  <span
+                    v-if="index > 0 && row.deltas[index] !== null"
+                    class="dbtrend-delta"
+                  >
                     {{ formatDelta(row.deltas[index]) }}
                   </span>
                 </td>
@@ -87,7 +90,11 @@
         />
       </section>
 
-      <section v-if="compositionSeries.length" class="dbtrend-chart-card" aria-label="Instance composition">
+      <section
+        v-if="compositionSeries.length"
+        class="dbtrend-chart-card"
+        aria-label="Instance composition"
+      >
         <header class="dbtrend-subheader">
           <h3>Instance Composition</h3>
           <div class="dbtrend-mode">
@@ -352,7 +359,6 @@ function formatDelta(delta: number | null): string {
 .dbtrend-metric-col.is-active {
   color: var(--text-primary);
 }
-
 
 .dbtrend-mode {
   display: flex;

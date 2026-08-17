@@ -30,7 +30,9 @@ import {
 
 function insightSteps(
   names: string[],
-  extras: Array<Partial<{ runtime: string; state: string; peakMemoryMb: number | null }>> = [],
+  extras: Array<
+    Partial<{ runtime: string; state: string; peakMemoryMb: number | null }>
+  > = [],
 ) {
   return buildFlowInsightSteps(
     names.map((name, index) => ({
@@ -78,12 +80,8 @@ describe('flow insights data', () => {
       'STA',
       'Harden',
     ]
-    const runtimes = [
-      22.8, 2.3, 2.1, 66.7, 30.7, 3.0, 11.1, 4.1, 3.5, 8.2, 215.479, 12.8,
-    ]
-    const memories = [
-      1706, 73, 101, 865, 2024, 148, 166, 213, 120, 831, 11482.379, 831,
-    ]
+    const runtimes = [22.8, 2.3, 2.1, 66.7, 30.7, 3.0, 11.1, 4.1, 3.5, 8.2, 215.479, 12.8]
+    const memories = [1706, 73, 101, 865, 2024, 148, 166, 213, 120, 831, 11482.379, 831]
     const steps = insightSteps(
       names,
       names.map((_, index) => ({
@@ -116,7 +114,9 @@ describe('flow insights data', () => {
       'RCX',
       'STA',
     ]
-    const instanceCounts = [1699, 2161, 2189, 2189, 2206, 2206, 2206, 2206, 5879, 5879, 5879]
+    const instanceCounts = [
+      1699, 2161, 2189, 2189, 2206, 2206, 2206, 2206, 5879, 5879, 5879,
+    ]
     const dbJsonByStep = new Map(
       names.slice(1).map((name, index) => [
         name,
@@ -132,11 +132,9 @@ describe('flow insights data', () => {
         } as Record<string, unknown>,
       ]),
     )
-    const model = buildDbTrendModel(
-      insightSteps(names),
-      dbJsonByStep,
-      { design: { num_cells: 1699 } },
-    )
+    const model = buildDbTrendModel(insightSteps(names), dbJsonByStep, {
+      design: { num_cells: 1699 },
+    })
     const instanceRow = model.rows.find((row) => row.id === 'instance_count')
     expect(instanceRow?.values).toEqual(instanceCounts)
     const fillerIndex = names.indexOf('filler')
@@ -185,13 +183,13 @@ describe('flow insights data', () => {
       `${steps[1].directory}/feature/egr_congestion_map/CTS_egr_union_overflow.png`,
     ])
     const tiles = buildCongestionTiles(steps, existing)
-    expect(tiles.map((tile) => tile.id)).toEqual([
-      'place-egr-union',
-      'CTS-egr-union',
-    ])
+    expect(tiles.map((tile) => tile.id)).toEqual(['place-egr-union', 'CTS-egr-union'])
     const withStats = tiles.map((tile, index) => ({
       ...tile,
-      stats: index === 0 ? { max: 18, total: 466, hotspotCount: 12 } : { max: 4, total: 20, hotspotCount: 3 },
+      stats:
+        index === 0
+          ? { max: 18, total: 466, hotspotCount: 12 }
+          : { max: 4, total: 20, hotspotCount: 3 },
     }))
     expect(buildCongestionComparisonModel(withStats)).toEqual([
       { stepKey: 'Place', stepName: 'place', total: 466, max: 18 },
@@ -225,11 +223,7 @@ describe('flow insights data', () => {
       hotspotCount: 6,
     })
     const drc = parseDrcStatisCsv(
-      [
-        'Type,MET1,VIA1,MET2,total',
-        'total,0,0,0,0',
-        'short,0,0,0,0',
-      ].join('\n'),
+      ['Type,MET1,VIA1,MET2,total', 'total,0,0,0,0', 'short,0,0,0,0'].join('\n'),
     )
     expect(drc?.totalCount).toBe(0)
     expect(drc?.totalByLayer).toEqual([0, 0, 0])
@@ -340,7 +334,10 @@ describe('flow insights data', () => {
         {
           corner: 'MAX_125/Cworst',
           summary: {
-            summary: { setup: { wns: 13.139, tns: 0, nvp: 0 }, hold: { wns: 0.1, tns: 0, nvp: 0 } },
+            summary: {
+              setup: { wns: 13.139, tns: 0, nvp: 0 },
+              hold: { wns: 0.1, tns: 0, nvp: 0 },
+            },
           },
         },
       ]),
@@ -364,11 +361,7 @@ describe('flow insights data', () => {
   it('builds a cumulative runtime waterfall and keeps pending steps as gaps', () => {
     const steps = insightSteps(
       ['Synthesis', 'Floorplan', 'STA'],
-      [
-        { runtime: '0:0:10' },
-        { runtime: '0:0:5' },
-        { runtime: '', state: 'Ongoing' },
-      ],
+      [{ runtime: '0:0:10' }, { runtime: '0:0:5' }, { runtime: '', state: 'Ongoing' }],
     )
     steps[2] = { ...steps[2], runtimeSeconds: null }
     const waterfall = buildRuntimeWaterfallModel(steps)
@@ -442,7 +435,10 @@ describe('flow insights data', () => {
         { metricName: 'sta_frequency_mhz', currentValue: 146, baselineValue: 140 },
       ],
     })
-    expect(model?.points.map((point) => point.workspaceName)).toEqual(['ws_0001', 'ws_0007'])
+    expect(model?.points.map((point) => point.workspaceName)).toEqual([
+      'ws_0001',
+      'ws_0007',
+    ])
     expect(model?.points[1]?.setupWns).toBe(13.139)
   })
 })

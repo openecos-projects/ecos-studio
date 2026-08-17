@@ -11,15 +11,19 @@
  */
 
 export type FlowInsightTone = 'good' | 'warn' | 'bad' | 'neutral'
-export type MetricDeltaState = 'improvement' | 'regression' | 'neutral' | 'structural' | 'missing'
-export type MetricPolarity = 'higher_is_better' | 'lower_is_better' | 'target_range' | 'trend_only'
+export type MetricDeltaState =
+  | 'improvement'
+  | 'regression'
+  | 'neutral'
+  | 'structural'
+  | 'missing'
+export type MetricPolarity =
+  | 'higher_is_better'
+  | 'lower_is_better'
+  | 'target_range'
+  | 'trend_only'
 
-const SUCCESSFUL_STEP_STATES = new Set([
-  'success',
-  'reused',
-  'skipped',
-  'completed',
-])
+const SUCCESSFUL_STEP_STATES = new Set(['success', 'reused', 'skipped', 'completed'])
 
 export function flowInsightStepTone(state: string): FlowInsightTone {
   const normalized = state.trim().toLowerCase()
@@ -195,9 +199,7 @@ export function buildFlowInsightSteps(
   }))
 }
 
-export function buildStepResourcesModel(
-  steps: FlowInsightStep[],
-): StepResourcesModel {
+export function buildStepResourcesModel(steps: FlowInsightStep[]): StepResourcesModel {
   const runtimeValues = steps.map((step) => step.runtimeSeconds)
   const memoryValues = steps.map((step) => step.peakMemoryMb)
   const totalRuntimeSeconds = runtimeValues.reduce<number>(
@@ -250,7 +252,9 @@ export interface RuntimeWaterfallModel {
   completedRuntimeSeconds: number
 }
 
-export function buildRuntimeWaterfallModel(steps: FlowInsightStep[]): RuntimeWaterfallModel {
+export function buildRuntimeWaterfallModel(
+  steps: FlowInsightStep[],
+): RuntimeWaterfallModel {
   let cursor = 0
   let runningIndex = -1
   const offsets: number[] = []
@@ -508,9 +512,7 @@ export function buildDbTrendModel(
       const ratio =
         previous !== 0 ? Math.abs(delta / previous) : delta === 0 ? 0 : Infinity
       deltas.push(delta)
-      deltaStates.push(
-        deltaStateFor(definition.polarity, delta, ratio, steps[index].key),
-      )
+      deltaStates.push(deltaStateFor(definition.polarity, delta, ratio, steps[index].key))
       previousIndex = index
     })
 
@@ -584,7 +586,10 @@ export function buildInstanceCompositionModel(
 }
 
 /** 矩阵单元格背景热力值：行内 min-max 归一化（null → null）。 */
-export function metricHeatLevel(values: Array<number | null>, value: number | null): number | null {
+export function metricHeatLevel(
+  values: Array<number | null>,
+  value: number | null,
+): number | null {
   const finite = values.filter((item): item is number => item !== null)
   if (value === null || finite.length < 2) return null
   const min = Math.min(...finite)
@@ -684,7 +689,9 @@ export function buildCongestionTiles(
         const csvPath = `${directory}/${fileStem}.csv`
         const layoutCsvPath = `${directory}/layout.csv`
         if (!existingFiles.has(pngPath)) continue
-        const directionLabel = direction ? ` ${direction[0].toUpperCase()}${direction.slice(1)}` : ''
+        const directionLabel = direction
+          ? ` ${direction[0].toUpperCase()}${direction.slice(1)}`
+          : ''
         tiles.push({
           id: `${step.name}-${spec.mapKind}-${direction || 'plain'}`,
           step,
@@ -777,13 +784,15 @@ export interface DrcRelatedMetrics {
   routeStepName: string | null
 }
 
-export function buildDrcRelatedMetrics(source: {
-  drcCount?: number | null
-  routeDrViolations?: number | null
-  routeLaOverflow?: number | null
-  drcStepName?: string | null
-  routeStepName?: string | null
-} = {}): DrcRelatedMetrics {
+export function buildDrcRelatedMetrics(
+  source: {
+    drcCount?: number | null
+    routeDrViolations?: number | null
+    routeLaOverflow?: number | null
+    drcStepName?: string | null
+    routeStepName?: string | null
+  } = {},
+): DrcRelatedMetrics {
   return {
     drcCount: source.drcCount ?? null,
     routeDrViolations: source.routeDrViolations ?? null,
@@ -814,7 +823,9 @@ export function parseDrcStatisCsv(content: string | null): DrcLayerTypeMatrix | 
   }
 
   const totalRow = rows.find((cells) => (cells[0] ?? '').toLowerCase() === 'total')
-  const typeRows = rows.slice(1).filter((cells) => (cells[0] ?? '').toLowerCase() !== 'total')
+  const typeRows = rows
+    .slice(1)
+    .filter((cells) => (cells[0] ?? '').toLowerCase() !== 'total')
 
   const types = typeRows.map((cells) => {
     const values = layerColumns.map((_, index) => toCount(cells[index + 1] ?? ''))
@@ -941,8 +952,10 @@ export function parseStaCornerSummaries(
   return corners.flatMap((candidate) => {
     const corner = record(candidate)
     const cornerName = typeof corner?.sta_corner === 'string' ? corner.sta_corner : ''
-    const summaryFile = typeof corner?.summary_file === 'string' ? corner.summary_file : ''
-    const pathsFile = typeof corner?.timing_paths_file === 'string' ? corner.timing_paths_file : ''
+    const summaryFile =
+      typeof corner?.summary_file === 'string' ? corner.summary_file : ''
+    const pathsFile =
+      typeof corner?.timing_paths_file === 'string' ? corner.timing_paths_file : ''
     if (!cornerName) return []
     const summaryPath = summaryFile || `feature/${cornerName}/qor_summary.json`
     return [
@@ -956,7 +969,9 @@ export function parseStaCornerSummaries(
   })
 }
 
-function parseStaPathGroupMap(summary: Record<string, unknown> | null): Record<string, StaCornerChecks> {
+function parseStaPathGroupMap(
+  summary: Record<string, unknown> | null,
+): Record<string, StaCornerChecks> {
   if (!summary) return {}
   const groups = Array.isArray(summary.path_groups) ? summary.path_groups : []
   const result: Record<string, StaCornerChecks> = {}
@@ -990,16 +1005,11 @@ function summarizeStaOverview(
   const worstSetup = setupEntries.sort((left, right) => left.wns - right.wns)[0] ?? null
   const worstHold = holdEntries.sort((left, right) => left.wns - right.wns)[0] ?? null
   const frequencyMhz =
-    corners.flatMap((row) => (row.setup?.frequencyMhz != null ? [row.setup.frequencyMhz] : []))[0] ??
-    null
-  const setupViolationCount = corners.reduce(
-    (sum, row) => sum + (row.setup?.nvp ?? 0),
-    0,
-  )
-  const holdViolationCount = corners.reduce(
-    (sum, row) => sum + (row.hold?.nvp ?? 0),
-    0,
-  )
+    corners.flatMap((row) =>
+      row.setup?.frequencyMhz != null ? [row.setup.frequencyMhz] : [],
+    )[0] ?? null
+  const setupViolationCount = corners.reduce((sum, row) => sum + (row.setup?.nvp ?? 0), 0)
+  const holdViolationCount = corners.reduce((sum, row) => sum + (row.hold?.nvp ?? 0), 0)
   const allCornersMet =
     worstSetup !== null && worstHold !== null
       ? worstSetup.wns >= 0 && worstHold.wns >= 0
@@ -1072,7 +1082,10 @@ export function selectStaPathGroup(
         ...row,
         setup: row.summary.setup,
         hold: row.summary.hold,
-        missing: row.summary.setup === null && row.summary.hold === null && !Object.keys(row.groups).length,
+        missing:
+          row.summary.setup === null &&
+          row.summary.hold === null &&
+          !Object.keys(row.groups).length,
       }
     }
     const group = row.groups[selected]
@@ -1155,10 +1168,7 @@ export function formatStaPathPreview(preview: StaPathPreview | null): string {
     .join(' · ')
 }
 
-export function staCornerSummaryPath(
-  stepDirectory: string,
-  corner: string,
-): string {
+export function staCornerSummaryPath(stepDirectory: string, corner: string): string {
   const [group, sub] = corner.split('/')
   if (!sub) return `${stepDirectory}/feature/${group}/qor_summary.json`
   return `${stepDirectory}/feature/${group}/${sub}/qor_summary.json`
@@ -1209,7 +1219,9 @@ export function parseStaTimingPaths(
       const arrivalNs = finiteMetricNumber(stage.arrival_ns ?? stage.arrival)
       const previous = stages[stages.length - 1]
       const inferredDelay =
-        arrivalNs !== null && previous?.arrivalNs !== null && previous?.arrivalNs !== undefined
+        arrivalNs !== null &&
+        previous?.arrivalNs !== null &&
+        previous?.arrivalNs !== undefined
           ? arrivalNs - previous.arrivalNs
           : arrivalNs
       stages.push({
@@ -1237,15 +1249,23 @@ export function buildStaCriticalPathsModel(
   pathGroups: Array<{ corner: string; source: Record<string, unknown> | null }>,
   limit = 5,
 ): StaCriticalPathsModel {
-  const paths = pathGroups.flatMap(({ corner, source }) => parseStaTimingPaths(source, corner))
+  const paths = pathGroups.flatMap(({ corner, source }) =>
+    parseStaTimingPaths(source, corner),
+  )
   const bySlack = (left: StaCriticalPath, right: StaCriticalPath): number => {
     const leftSlack = left.slackNs ?? Number.POSITIVE_INFINITY
     const rightSlack = right.slackNs ?? Number.POSITIVE_INFINITY
     return leftSlack - rightSlack
   }
   return {
-    setup: paths.filter((path) => path.analysisType === 'setup').sort(bySlack).slice(0, limit),
-    hold: paths.filter((path) => path.analysisType === 'hold').sort(bySlack).slice(0, limit),
+    setup: paths
+      .filter((path) => path.analysisType === 'setup')
+      .sort(bySlack)
+      .slice(0, limit),
+    hold: paths
+      .filter((path) => path.analysisType === 'hold')
+      .sort(bySlack)
+      .slice(0, limit),
   }
 }
 
@@ -1260,7 +1280,9 @@ export interface StaConvergenceModel {
   points: StaConvergencePoint[]
 }
 
-export function buildStaConvergenceModel(points: StaConvergencePoint[]): StaConvergenceModel | null {
+export function buildStaConvergenceModel(
+  points: StaConvergencePoint[],
+): StaConvergenceModel | null {
   const kept = points.filter(
     (point) =>
       point.setupWns !== null || point.holdWns !== null || point.frequencyMhz !== null,
@@ -1268,22 +1290,28 @@ export function buildStaConvergenceModel(points: StaConvergencePoint[]): StaConv
   return kept.length >= 2 ? { points: kept } : null
 }
 
-export function staConvergenceFromComparison(comparison: {
-  workspaceName: string
-  baselineWorkspaceName: string | null
-  isBaselineWorkspace: boolean
-  metrics: Array<{
-    metricName: string
-    currentValue: number
-    baselineValue: number
-  }>
-} | null): StaConvergenceModel | null {
+export function staConvergenceFromComparison(
+  comparison: {
+    workspaceName: string
+    baselineWorkspaceName: string | null
+    isBaselineWorkspace: boolean
+    metrics: Array<{
+      metricName: string
+      currentValue: number
+      baselineValue: number
+    }>
+  } | null,
+): StaConvergenceModel | null {
   if (!comparison?.baselineWorkspaceName || comparison.isBaselineWorkspace) return null
-  const pick = (metricName: string): { current: number | null; baseline: number | null } => {
+  const pick = (
+    metricName: string,
+  ): { current: number | null; baseline: number | null } => {
     const metric = comparison.metrics.find((item) => item.metricName === metricName)
     return {
-      current: metric && Number.isFinite(metric.currentValue) ? metric.currentValue : null,
-      baseline: metric && Number.isFinite(metric.baselineValue) ? metric.baselineValue : null,
+      current:
+        metric && Number.isFinite(metric.currentValue) ? metric.currentValue : null,
+      baseline:
+        metric && Number.isFinite(metric.baselineValue) ? metric.baselineValue : null,
     }
   }
   const setup = pick('sta_setup_wns')

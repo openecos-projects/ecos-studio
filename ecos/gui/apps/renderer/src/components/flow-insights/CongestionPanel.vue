@@ -33,7 +33,10 @@
             :title="tileTitle(tile)"
             @click="previewTile = tile"
           >
-            <img :src="tileUrls.get(tile.pngPath)" :alt="`${group.label} ${tile.label}`" />
+            <img
+              :src="tileUrls.get(tile.pngPath)"
+              :alt="`${group.label} ${tile.label}`"
+            />
             <span class="congestion-tile-copy">
               <strong>{{ tile.label }}</strong>
               <small>
@@ -44,7 +47,10 @@
                 <template v-else>no grid data</template>
               </small>
             </span>
-            <span class="congestion-badge" :class="hasOverflow(tile) ? 'is-hot' : 'is-clean'">
+            <span
+              class="congestion-badge"
+              :class="hasOverflow(tile) ? 'is-hot' : 'is-clean'"
+            >
               {{ hasOverflow(tile) ? 'overflow' : 'clean' }}
             </span>
           </button>
@@ -100,7 +106,9 @@ const props = defineProps<{
 const previewTile = ref<CongestionMapTileModel | null>(null)
 
 const comparison = computed(() => buildCongestionComparisonModel(props.tiles))
-const comparisonCategories = computed(() => comparison.value.map((point) => point.stepKey))
+const comparisonCategories = computed(() =>
+  comparison.value.map((point) => point.stepKey),
+)
 const comparisonSeries = computed<FlowTrendSeries[]>(() => {
   if (comparison.value.length < 2) return []
   return [
@@ -125,7 +133,8 @@ const comparisonSeries = computed<FlowTrendSeries[]>(() => {
 })
 
 const stepGroups = computed(() => {
-  const groups: Array<{ step: string; label: string; tiles: CongestionMapTileModel[] }> = []
+  const groups: Array<{ step: string; label: string; tiles: CongestionMapTileModel[] }> =
+    []
   for (const tile of props.tiles) {
     const group = groups.find((item) => item.step === tile.step.name)
     if (group) group.tiles.push(tile)
