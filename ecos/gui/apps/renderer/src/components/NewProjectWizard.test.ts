@@ -48,7 +48,8 @@ describe('NewProjectWizard RTL browsing', () => {
   it('uses the project workspace naming rule for the default workspace name', () => {
     expect(source).toContain('defaultWorkspaceName')
     expect(source).toContain('nextWorkspaceNameForProject')
-    expect(source).toContain("readOptionalProjectTextFile('project.json'")
+    expect(source).toContain('readProjectManagementManifest')
+    expect(source).not.toContain("readOptionalProjectTextFile('project.json'")
     expect(source).toContain('parseProjectManifest')
     expect(source).toContain("`ws_${String(next).padStart(4, '0')}`")
   })
