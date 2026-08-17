@@ -70,18 +70,36 @@
     class="flow-log-dialog"
     modal
     maximizable
-    :header="logTitle"
     :style="{ width: 'min(980px, calc(100vw - 32px))' }"
     :draggable="false"
   >
+    <template #header>
+      <div class="flow-log-dialog-header">
+        <span class="flow-log-dialog-title">{{ logTitle }}</span>
+        <div class="flow-log-actions">
+          <button
+            type="button"
+            :title="copied ? 'Copied' : 'Copy log'"
+            :aria-label="copied ? 'Copied log' : 'Copy log'"
+            :disabled="!selectedContent"
+            @click="copyLog"
+          >
+            <i
+              :class="copied ? 'ri-check-line' : 'ri-file-copy-line'"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      </div>
+    </template>
     <div class="flow-log-dialog-content monaco-widget-overflow-host">
       <FlowLogCodeViewer
         v-if="dialogVisible && selectedSegment"
         :channel-key="`${keyFor(selectedSegment)}\u001fdialog`"
         :content="selectedContent"
         :live="Boolean(selectedSegment.live)"
-        :loading="loading"
-        :missing="selectedSegment.missing"
+        :loading="loading || Boolean(selectedSegment.contentLoading)"
+        :missing="Boolean(selectedSegment.missing)"
         aria-label="Expanded flow step log"
       />
       <div v-else class="flow-log-message">No log content yet.</div>
@@ -342,10 +360,31 @@ onBeforeUnmount(() => {
 
 .flow-log-dialog-content {
   display: flex;
+  flex: 1 1 auto;
   height: min(70vh, 760px);
   max-height: min(70vh, 760px);
   min-height: min(280px, 70vh);
+  min-width: 0;
   overflow: hidden;
+}
+
+.flow-log-dialog-header {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.flow-log-dialog-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-log-dialog-header .flow-log-actions {
+  margin-left: auto;
 }
 </style>
 

@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 
 const draft = defineModel<Record<string, unknown>>({ required: true })
+const emit = defineEmits<{ initialized: [] }>()
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -18,6 +20,7 @@ function ensure(): void {
 }
 
 ensure()
+onMounted(() => emit('initialized'))
 </script>
 
 <template>

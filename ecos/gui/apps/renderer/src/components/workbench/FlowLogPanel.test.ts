@@ -10,6 +10,16 @@ describe('FlowLogPanel embedded controls', () => {
     expect(source).toContain('ri-arrow-up-s-line')
   })
 
+  it('keeps copy available in the maximizable log dialog', () => {
+    expect(source).toContain('<template #header>')
+    expect(source).toContain('class="flow-log-dialog-header"')
+    expect(source).toContain('@click="copyLog"')
+    expect(source).toContain(
+      'class="flow-log-dialog-content monaco-widget-overflow-host"',
+    )
+    expect(source).toContain(':content="selectedContent"')
+  })
+
   it('uses the selected flow node to switch logs and render its concise runtime title', () => {
     expect(source).toContain('selectedNode: FlowStatusNode | null')
     expect(source).toContain('selectSegmentForNode')

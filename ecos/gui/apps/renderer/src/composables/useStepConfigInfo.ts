@@ -1,4 +1,4 @@
-import { ref, computed, unref, watch, type Ref } from 'vue'
+import { computed, nextTick, ref, unref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { CMDEnum, InfoEnum, ResponseEnum, StepEnum } from '@/api/type'
 import { syncConfigApi } from '@/api/flow'
@@ -112,6 +112,9 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   const isSavingStepConfig = ref(false)
   const activeStepConfigSave = ref<symbol | null>(null)
   const stepConfigSaveError = ref<string | null>(null)
+  // Specialized editors add empty containers during their first render.
+  let initialEditorDraftPending = false
+  let stepConfigEditorMounted = false
   const isMutationLocked = computed(() =>
     isFlowExecutionActiveForWorkspace(currentProject.value?.path),
   )
@@ -224,6 +227,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   function syncDraftFromRaw(): void {
     const raw = stepConfigRaw.value
     stepConfigSaveError.value = null
+    initialEditorDraftPending = false
     if (raw == null || raw === '') {
       stepConfigDraft.value = null
       stepConfigBaselineSig.value = ''
@@ -245,6 +249,13 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         currentStep.value,
       )
       stepConfigBaselineSig.value = stableJsonSig(parsed)
+      // Floorplan/placement/DRC forms materialize missing containers on mount. Let
+      // that view-only initialization become the baseline, but keep routing's
+      // enforced layer pinning dirty so it still requires an explicit save.
+      initialEditorDraftPending = currentStep.value !== StepEnum.ROUTING
+      if (stepConfigEditorMounted) {
+        void nextTick(markStepConfigEditorInitialized)
+      }
       stepConfigTextDraft.value = ''
       stepConfigTextBaseline.value = ''
     } catch {
@@ -365,6 +376,13 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     },
     { immediate: true },
   )
+
+  function markStepConfigEditorInitialized(): void {
+    stepConfigEditorMounted = true
+    if (!initialEditorDraftPending || stepConfigDraft.value === null) return
+    stepConfigBaselineSig.value = stableJsonSig(stepConfigDraft.value)
+    initialEditorDraftPending = false
+  }
 
   const hasStepConfigChanges = computed(() => {
     const raw = stepConfigRaw.value
@@ -549,6 +567,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     isSavingStepConfig,
     stepConfigSaveError,
     isMutationLocked,
+    markStepConfigEditorInitialized,
     saveStepConfig,
     resetStepConfig,
     reloadStepConfigFiles,
