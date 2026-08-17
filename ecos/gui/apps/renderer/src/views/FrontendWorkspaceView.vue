@@ -941,8 +941,36 @@
                   </div>
                 </section>
 
+                <section
+                  v-if="reviewStructuralProbe"
+                  class="review-structural-overview"
+                  :class="reviewStructuralTone"
+                  aria-label="Yosys precheck overview"
+                >
+                  <div class="review-structural-summary">
+                    <div class="review-structural-title">
+                      <span>Yosys Precheck</span>
+                      <strong>{{ reviewStructuralStatus }}</strong>
+                    </div>
+                    <p>{{ reviewStructuralReason || reviewStructuralQualityLabel }}</p>
+                  </div>
+                  <div class="review-overview-metrics">
+                    <span class="review-overview-metrics-label">
+                      {{
+                        reviewMode === 'source' ? 'Source Metrics' : 'Structural Metrics'
+                      }}
+                    </span>
+                    <dl class="review-overview-metric-grid">
+                      <div v-for="metric in reviewOverviewMetricRows" :key="metric.label">
+                        <dt>{{ metric.label }}</dt>
+                        <dd>{{ metric.value }}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </section>
+
                 <section class="review-main">
-                  <aside class="review-sidebar">
+                  <aside class="review-sidebar" aria-label="RTL review views">
                     <div class="review-mode-list">
                       <button
                         v-for="mode in reviewModeItems"
@@ -958,71 +986,6 @@
                           <em>{{ mode.count }}</em>
                         </span>
                       </button>
-                    </div>
-                    <div
-                      v-if="reviewStructuralProbe"
-                      class="review-structural"
-                      :class="reviewStructuralTone"
-                    >
-                      <div>
-                        <span>Yosys Precheck</span>
-                        <strong>{{ reviewStructuralStatus }}</strong>
-                      </div>
-                      <p v-if="reviewStructuralReason">{{ reviewStructuralReason }}</p>
-                      <p v-else>{{ reviewStructuralQualityLabel }}</p>
-                      <div class="review-structural-grid">
-                        <span
-                          >Cells
-                          <strong>{{
-                            numberLabel(reviewStructuralMetrics.cells)
-                          }}</strong></span
-                        >
-                        <span
-                          >Wires
-                          <strong>{{
-                            numberLabel(reviewStructuralMetrics.wires)
-                          }}</strong></span
-                        >
-                        <span
-                          >Diag
-                          <strong>{{
-                            numberLabel(reviewStructuralDiagnostics)
-                          }}</strong></span
-                        >
-                        <span
-                          >Fanout
-                          <strong>{{
-                            numberLabel(reviewStructuralMetrics.max_fanout)
-                          }}</strong></span
-                        >
-                        <span
-                          >Fanin
-                          <strong>{{
-                            numberLabel(reviewStructuralMetrics.max_fanin)
-                          }}</strong></span
-                        >
-                        <span
-                          >Depth
-                          <strong>{{
-                            numberLabel(reviewStructuralMetrics.max_comb_depth)
-                          }}</strong></span
-                        >
-                      </div>
-                    </div>
-                    <div v-if="reviewMode === 'source'" class="review-metrics">
-                      <div v-for="metric in reviewMetricRows" :key="metric.label">
-                        <span>{{ metric.label }}</span>
-                        <strong>{{ metric.value }}</strong>
-                      </div>
-                    </div>
-                    <div v-else class="review-metrics">
-                      <div
-                        v-for="metric in reviewStructuralMetricRows"
-                        :key="metric.label"
-                      >
-                        <span>{{ metric.label }}</span>
-                        <strong>{{ metric.value }}</strong>
-                      </div>
                     </div>
                   </aside>
 
@@ -3214,10 +3177,6 @@ const reviewStructuralStatus = computed(() =>
 const reviewStructuralReason = computed(() =>
   String(reviewStructuralProbe.value?.reason || '').trim(),
 )
-const reviewStructuralDiagnostics = computed(() => {
-  const diagnostics = reviewStructuralProbe.value?.diagnostics
-  return Array.isArray(diagnostics) ? diagnostics.length : 0
-})
 const reviewYosysDiagnostics = computed<YosysDiagnostic[]>(() => {
   const diagnostics = reviewStructuralProbe.value?.diagnostics
   return Array.isArray(diagnostics)
@@ -3675,6 +3634,7 @@ const reviewStructuralMetricRows = computed(() => {
   return [
     { label: 'Cells', value: numberLabel(metrics.cells) },
     { label: 'Wires', value: numberLabel(metrics.wires) },
+    { label: 'Diagnostics', value: numberLabel(reviewYosysDiagnostics.value.length) },
     { label: 'Mux Cells', value: numberLabel(metrics.mux_cells) },
     { label: 'Arithmetic', value: numberLabel(metrics.arithmetic_cells) },
     { label: 'Memory', value: numberLabel(metrics.memory_cells) },
@@ -3683,6 +3643,11 @@ const reviewStructuralMetricRows = computed(() => {
     { label: 'Max Depth', value: numberLabel(metrics.max_comb_depth) },
   ]
 })
+const reviewOverviewMetricRows = computed(() =>
+  reviewMode.value === 'source'
+    ? reviewMetricRows.value
+    : reviewStructuralMetricRows.value,
+)
 const consoleStyle = computed(() => ({
   '--console-height': `${consoleHeight.value}px`,
 }))
@@ -6818,6 +6783,7 @@ button:disabled {
   min-height: 0;
   height: 100%;
   flex: 1;
+  overflow: hidden;
 }
 
 .review-sidebar,
@@ -6832,8 +6798,10 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  align-self: start;
   padding: 10px;
-  overflow: auto;
+  overflow: visible;
+  background: var(--bg-secondary);
 }
 
 .review-stage {
@@ -6845,6 +6813,8 @@ button:disabled {
 }
 
 .review-mode-list {
+  position: sticky;
+  top: 0;
   display: grid;
   gap: 6px;
 }
@@ -7006,102 +6976,127 @@ button:disabled {
   margin: 8px;
 }
 
-.review-structural {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+.review-structural-overview {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  flex-shrink: 0;
+  min-height: 82px;
   border: 1px solid var(--border-color);
   border-left: 3px solid var(--text-secondary);
   border-radius: 8px;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
+  overflow: hidden;
 }
 
-.review-structural.ok {
+.review-structural-overview.ok {
   border-left-color: #10b981;
 }
 
-.review-structural.warning {
+.review-structural-overview.warning {
   border-left-color: #f59e0b;
 }
 
-.review-structural.muted {
+.review-structural-overview.muted {
   border-left-color: var(--text-secondary);
 }
 
-.review-structural > div:first-child {
+.review-structural-summary {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.review-structural-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.review-structural span {
+.review-structural-title span,
+.review-overview-metrics-label {
   color: var(--text-secondary);
   font-size: 10px;
   text-transform: uppercase;
 }
 
-.review-structural strong {
+.review-structural-title strong {
+  flex-shrink: 0;
   color: var(--text-primary);
   font-size: 12px;
 }
 
-.review-structural p {
+.review-structural-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-structural-summary p {
   margin: 0;
+  overflow-wrap: anywhere;
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.45;
 }
 
-.review-structural-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.review-overview-metrics {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   gap: 6px;
-}
-
-.review-structural-grid span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   min-width: 0;
-  padding: 6px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-primary);
-  text-transform: none;
+  min-height: 80px;
+  padding: 9px 12px;
 }
 
-.review-structural-grid strong {
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 11px;
+.review-overview-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(64px, 1fr));
+  min-width: 0;
+  margin: 0;
+  user-select: text;
 }
 
-.review-metrics {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
+.review-overview-metric-grid div {
+  min-width: 0;
+  min-height: 37px;
+  padding: 2px 10px;
+  border-left: 1px solid var(--border-color);
+  background: transparent;
 }
 
-.review-metrics div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 9px;
-  border: 1px solid var(--border-color);
-  border-radius: 7px;
-  background: var(--bg-secondary);
+.review-overview-metric-grid div:first-child {
+  padding-left: 0;
+  border-left: 0;
 }
 
-.review-metrics span {
+.review-overview-metric-grid dt,
+.review-overview-metric-grid dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-overview-metric-grid dt {
+  margin-bottom: 3px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 10px;
 }
 
-.review-metrics strong {
+.review-overview-metric-grid dd {
+  color: var(--text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 12px;
+  font-weight: 600;
 }
 
 .review-issue {
@@ -8610,6 +8605,29 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .review-structural-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .review-structural-summary {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .review-overview-metric-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    row-gap: 8px;
+  }
+
+  .review-overview-metric-grid div:nth-child(4n + 1) {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .review-mode-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .workspace-home-card__head,
   .workspace-home-card__body,
   .sim-run-context,
@@ -8648,6 +8666,19 @@ button:disabled {
 
   .review-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .review-overview-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .review-overview-metric-grid div:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .review-mode-list {
+    grid-template-columns: 1fr;
   }
 
   .review-module-metrics {
