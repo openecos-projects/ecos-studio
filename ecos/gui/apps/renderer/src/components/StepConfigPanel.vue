@@ -162,6 +162,7 @@
                     v-if="currentStep"
                     v-model="stepConfigDraft"
                     :step="currentStep"
+                    @initialized="markStepConfigEditorInitialized"
                   />
                 </template>
               </template>
@@ -206,6 +207,7 @@ const {
   isSavingStepConfig,
   stepConfigSaveError,
   isMutationLocked,
+  markStepConfigEditorInitialized,
   saveStepConfig,
   resetStepConfig,
   reloadStepConfigFiles,

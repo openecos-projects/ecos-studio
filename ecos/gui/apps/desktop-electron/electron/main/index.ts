@@ -15,7 +15,7 @@ import {
   getElectronMainLogFile,
   getLogSessionDirectory,
 } from '../services/desktopLogPaths'
-import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
+import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
@@ -110,7 +110,7 @@ function getDesktopServices() {
     filePath: join(app.getPath('userData'), 'settings.json'),
   })
   projectScopeService = new ProjectScopeService()
-  const runtimeEnv = createEccRuntimeEnv({
+  const eccRuntimeOptions = {
     appPath: app.getAppPath(),
     cwd: process.cwd(),
     env: {
@@ -120,7 +120,16 @@ function getDesktopServices() {
     isPackaged: app.isPackaged,
     platform: process.platform,
     userDataPath: app.getPath('userData'),
-  })
+  }
+  const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
+  const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
+  if (eccExecutable) {
+    electronLogger.info('[runtime] Using ECC executable %s', eccExecutable)
+  } else {
+    electronLogger.warn(
+      '[runtime] Packaged/dev ECC executable was not resolved; falling back to PATH lookup for ecc',
+    )
+  }
   const appInfoService = new AppInfoService({
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
@@ -136,6 +145,7 @@ function getDesktopServices() {
   const eccRuntimeService = new EccRpcRuntimeService({
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
+        command: eccExecutable ?? 'ecc',
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () =>
