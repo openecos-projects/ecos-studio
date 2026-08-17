@@ -37,18 +37,12 @@ export enum FrontendStepEnum {
 export enum StepEnum {
   RTL2GDS = 'RTL2GDS',
   INIT = 'Init',
-  SOC = 'SOC',
-  FUNC_SIM = 'Functional simulation',
   SYNTHESIS = 'Synthesis',
   FLOORPLAN = 'Floorplan',
   NETLIST_OPT = 'fixFanout',
   PLACEMENT = 'place',
   CTS = 'CTS',
-  PNP = 'PNP',
   TIMING_OPT = 'Timing optimization',
-  TIMING_OPT_DRV = 'optDrv',
-  TIMING_OPT_HOLD = 'optHold',
-  TIMING_OPT_SETUP = 'optSetup',
   LEGALIZATION = 'legalization',
   ROUTING = 'route',
   FILLER = 'filler',
@@ -59,7 +53,6 @@ export enum StepEnum {
   DRC = 'drc',
   RCX = 'RCX',
   ABSTRACT_LEF = 'Abstract lef',
-  MERGE = 'GDS merge',
 }
 
 /** 步骤元数据配置 */
@@ -137,27 +130,6 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     showInSidebar: true,
     group: 'run',
   },
-  [StepEnum.TIMING_OPT_DRV.toLowerCase()]: {
-    label: 'OptDrv',
-    icon: 'ri-speed-line',
-    path: StepEnum.TIMING_OPT_DRV,
-    showInSidebar: false,
-    group: 'run',
-  },
-  [StepEnum.TIMING_OPT_HOLD.toLowerCase()]: {
-    label: 'OptHold',
-    icon: 'ri-time-line',
-    path: StepEnum.TIMING_OPT_HOLD,
-    showInSidebar: false,
-    group: 'run',
-  },
-  [StepEnum.TIMING_OPT_SETUP.toLowerCase()]: {
-    label: 'OptSetup',
-    icon: 'ri-timer-line',
-    path: StepEnum.TIMING_OPT_SETUP,
-    showInSidebar: false,
-    group: 'run',
-  },
   [StepEnum.LEGALIZATION.toLowerCase()]: {
     label: 'Legalization',
     icon: 'ri-check-double-line',
@@ -225,13 +197,6 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'AbsLef',
     icon: 'ri-file-text-line',
     path: StepEnum.ABSTRACT_LEF,
-    showInSidebar: false,
-    group: 'run',
-  },
-  [StepEnum.MERGE.toLowerCase()]: {
-    label: 'Merge',
-    icon: 'ri-merge-cells-horizontal',
-    path: StepEnum.MERGE,
     showInSidebar: false,
     group: 'run',
   },

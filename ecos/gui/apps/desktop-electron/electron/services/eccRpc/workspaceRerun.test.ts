@@ -181,7 +181,6 @@ describe('prepareWorkspaceRerun', () => {
           parameters: `${source}/home/parameters.json`,
           flow: `${source}/home/flow.json`,
           layout: `${source}/legalization_dreamplace/output/layout.png`,
-          'GDS merge': '',
           checklist: `${source}/home/checklist.json`,
           metrics: {
             'drc dist.': `${source}/drc_ecc/analysis/drc.png`,
