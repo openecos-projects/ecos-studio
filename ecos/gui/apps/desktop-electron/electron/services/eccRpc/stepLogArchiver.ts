@@ -6,7 +6,9 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+
+import { isPathWithinRoot } from '../pathScope'
 
 /**
  * Client-side archiver for the ecc step marker protocol (v1).
@@ -55,7 +57,13 @@ interface ActiveStepArchive extends StepLogStepRef {
   archiveOk: boolean
   cursor: number
   path: string
-  pending: Buffer
+  pendingBytes: number
+  pendingChunks: Buffer[]
+}
+
+interface TailChunks {
+  bytes: number
+  chunks: Buffer[]
 }
 
 export function stepLogKey(step: string, tool: string): string {
@@ -77,7 +85,7 @@ export function parseStepMarker(line: Buffer): StepMarker | null {
   }
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return null
   const record = data as Record<string, unknown>
-  if (typeof record.v !== 'number' || record.v !== STEP_MARKER_VERSION) return null
+  if (record.v !== STEP_MARKER_VERSION) return null
   if (
     typeof record.event !== 'string' ||
     typeof record.step !== 'string' ||
@@ -120,18 +128,8 @@ function isSafeMarkerName(value: string): boolean {
   )
 }
 
-function pathIsWithin(path: string, directory: string): boolean {
-  const relativePath = relative(resolve(directory), resolve(path))
-  return (
-    relativePath !== '' &&
-    relativePath !== '..' &&
-    !relativePath.startsWith(`..${sep}`) &&
-    !isAbsolute(relativePath)
-  )
-}
-
 function archivePathContained(archivePath: string, workspaceDirectory: string): boolean {
-  if (!pathIsWithin(archivePath, workspaceDirectory)) return false
+  if (!isPathWithinRoot(archivePath, workspaceDirectory)) return false
   // A symlinked step or log directory inside the workspace would otherwise
   // pass the textual check: resolve the deepest existing ancestor.
   let ancestor = dirname(archivePath)
@@ -139,7 +137,7 @@ function archivePathContained(archivePath: string, workspaceDirectory: string): 
     if (existsSync(ancestor)) {
       try {
         const resolved = join(realpathSync(ancestor), basename(archivePath))
-        return pathIsWithin(resolved, realpathSync(workspaceDirectory))
+        return isPathWithinRoot(resolved, realpathSync(workspaceDirectory))
       } catch {
         return false
       }
@@ -158,7 +156,7 @@ export class StepLogArchiver {
   private active: ActiveStepArchive | null = null
   private buffer = Buffer.alloc(0)
   private flushTimer: NodeJS.Timeout | null = null
-  private readonly tails = new Map<string, Buffer>()
+  private readonly tails = new Map<string, TailChunks>()
 
   constructor(private readonly options: StepLogArchiverOptions) {
     this.batchBytes = options.batchBytes ?? DEFAULT_BATCH_BYTES
@@ -166,15 +164,7 @@ export class StepLogArchiver {
     this.tailBytes = options.tailBytes ?? DEFAULT_TAIL_BYTES
   }
 
-  refreshAllowlist(steps: Iterable<StepLogStepRef>): void {
-    const keys = new Set<string>()
-    for (const ref of steps) {
-      keys.add(stepLogKey(ref.step, ref.tool))
-    }
-    this.refreshAllowlistKeys(keys)
-  }
-
-  refreshAllowlistKeys(keys: Iterable<string>): void {
+  refreshAllowlist(keys: Iterable<string>): void {
     this.allowlist = new Set(keys)
   }
 
@@ -193,7 +183,8 @@ export class StepLogArchiver {
     const tail = this.tails.get(stepLogKey(step, tool))
     if (!tail) return ''
     const limit = maxBytes ?? this.tailBytes
-    return tail.subarray(Math.max(0, tail.length - limit)).toString('utf8')
+    const combined = Buffer.concat(tail.chunks, tail.bytes)
+    return combined.subarray(Math.max(0, combined.length - limit)).toString('utf8')
   }
 
   close(): void {
@@ -206,9 +197,12 @@ export class StepLogArchiver {
     }
     this.clearFlushTimer()
     const active = this.active
-    if (active?.archiveOk && active.pending.length > 0) {
+    if (active?.archiveOk && active.pendingBytes > 0) {
       try {
-        appendFileSync(active.path, active.pending)
+        appendFileSync(
+          active.path,
+          Buffer.concat(active.pendingChunks, active.pendingBytes),
+        )
       } catch (error) {
         this.options.onProtocolViolation?.(
           `archive flush on close failed: ${String(error)}`,
@@ -311,11 +305,12 @@ export class StepLogArchiver {
       archiveOk,
       cursor: 0,
       path: archivePath,
-      pending: Buffer.alloc(0),
+      pendingBytes: 0,
+      pendingChunks: [],
       step: marker.step,
       tool: marker.tool,
     }
-    this.tails.set(stepLogKey(marker.step, marker.tool), Buffer.alloc(0))
+    this.tails.set(stepLogKey(marker.step, marker.tool), { bytes: 0, chunks: [] })
   }
 
   private emitData(data: Buffer): void {
@@ -325,20 +320,26 @@ export class StepLogArchiver {
       return
     }
     const key = stepLogKey(active.step, active.tool)
-    const combined = Buffer.concat([this.tails.get(key) ?? Buffer.alloc(0), data])
-    this.tails.set(
-      key,
-      combined.length > this.tailBytes
-        ? combined.subarray(combined.length - this.tailBytes)
-        : combined,
-    )
+    let tail = this.tails.get(key)
+    if (!tail) {
+      tail = { bytes: 0, chunks: [] }
+      this.tails.set(key, tail)
+    }
+    // Copy the line: storing parser subarrays would pin whole stream chunks.
+    const copy = Buffer.from(data)
+    tail.chunks.push(copy)
+    tail.bytes += copy.length
+    while (tail.bytes > this.tailBytes && tail.chunks.length > 1) {
+      tail.bytes -= tail.chunks.shift()!.length
+    }
     if (!active.archiveOk) {
       // The archive was abandoned after an earlier write failure; the memory
       // tail still serves finalLog.
       return
     }
-    active.pending = Buffer.concat([active.pending, data])
-    if (active.pending.length >= this.batchBytes) {
+    active.pendingChunks.push(data)
+    active.pendingBytes += data.length
+    if (active.pendingBytes >= this.batchBytes) {
       this.flushActive()
     } else {
       this.scheduleFlush()
@@ -348,9 +349,10 @@ export class StepLogArchiver {
   private flushActive(): void {
     const active = this.active
     this.clearFlushTimer()
-    if (!active || active.pending.length === 0) return
-    const chunk = active.pending
-    active.pending = Buffer.alloc(0)
+    if (!active || active.pendingBytes === 0) return
+    const chunk = Buffer.concat(active.pendingChunks, active.pendingBytes)
+    active.pendingChunks = []
+    active.pendingBytes = 0
     try {
       appendFileSync(active.path, chunk)
     } catch (error) {

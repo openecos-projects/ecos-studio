@@ -65,7 +65,9 @@ function makeHarness(
     ...(options.tailBytes !== undefined ? { tailBytes: options.tailBytes } : {}),
   })
   if (options.allowlist) {
-    archiver.refreshAllowlist(options.allowlist)
+    archiver.refreshAllowlist(
+      options.allowlist.map((ref) => stepLogKey(ref.step, ref.tool)),
+    )
   }
   return {
     archiver,
@@ -376,7 +378,7 @@ describe('StepLogArchiver marker state machine', () => {
     const h = harness({ allowlist: [{ step: 'A', tool: 't' }] })
     h.archiver.feed(v1Marker('begin', 'B', 't'))
     expect(h.unscoped.join('')).toContain('B')
-    h.archiver.refreshAllowlist([{ step: 'B', tool: 't' }])
+    h.archiver.refreshAllowlist([stepLogKey('B', 't')])
     h.unscoped.length = 0
     h.archiver.feed(v1Marker('begin', 'B', 't'))
     h.archiver.feed(Buffer.from('now archived\n'))
@@ -454,7 +456,7 @@ describe('StepLogArchiver batching and tail', () => {
       onUnscoped: () => undefined,
       batchBytes: 64 * 1024,
     })
-    archiver.refreshAllowlist([{ step: 'S', tool: 'T' }])
+    archiver.refreshAllowlist([stepLogKey('S', 'T')])
 
     archiver.feed(v1Marker('begin', 'S', 'T'))
     archiver.feed(Buffer.from('pending bytes\n'))

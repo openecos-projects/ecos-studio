@@ -87,7 +87,7 @@ export class StepLogEventBridge {
 
   /** Reload the flow.json allowlist into the archiver. */
   refreshAllowlist(): void {
-    this.archiver.refreshAllowlistKeys(
+    this.archiver.refreshAllowlist(
       readFlowJsonStepAllowlist(this.options.workspaceDirectory),
     )
   }
