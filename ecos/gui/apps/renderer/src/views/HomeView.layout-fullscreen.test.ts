@@ -28,7 +28,7 @@ describe('HomeView workspace dashboard layout', () => {
       bottomRow.indexOf('flow-insights-card'),
     )
     expect(homeViewSource).toContain(
-      '.home-dashboard-top {\n  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 3fr);',
+      '.home-dashboard-top {\n  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);',
     )
     expect(homeViewSource).toContain(
       '.home-dashboard-middle {\n  grid-template-columns: minmax(0, 5fr) minmax(0, 2fr);',
