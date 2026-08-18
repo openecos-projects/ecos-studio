@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import {
   chmod,
   cp,
+  link,
   mkdir,
   mkdtemp,
   readdir,
@@ -34,6 +35,26 @@ async function createFixtureArchive(
     path: archive,
     sha256: 'fixture-sha',
     size: Buffer.byteLength(payload),
+  }
+}
+
+async function createYosysArchiveWithInternalLinks(
+  root: string,
+): Promise<{ path: string; sha256: string; size: number }> {
+  const sourceRoot = join(root, 'yosys-source')
+  const archive = join(root, 'yosys-links.tar')
+  const binDir = join(sourceRoot, 'yosys-runtime', 'bin')
+  await mkdir(binDir, { recursive: true })
+  await writeFile(join(binDir, 'yosys'), '#!/bin/sh\n', 'utf8')
+  await chmod(join(binDir, 'yosys'), 0o755)
+  await symlink('yosys', join(binDir, 'yosys-alias'))
+  await link(join(binDir, 'yosys'), join(binDir, 'yosys-hardlink'))
+  await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'yosys-runtime'])
+  const archiveBytes = await readFile(archive)
+  return {
+    path: archive,
+    sha256: createHash('sha256').update(archiveBytes).digest('hex'),
+    size: archiveBytes.byteLength,
   }
 }
 
@@ -396,6 +417,7 @@ async function writeYosysRegistry(
     size?: number
     url?: string
     version?: string
+    stripPrefix?: string
     versions?: unknown[]
   } = {},
 ): Promise<void> {
@@ -418,6 +440,7 @@ async function writeYosysRegistry(
                   url: options.url ?? 'file:///tmp/yosys.tar',
                   sha256: options.sha256 ?? 'managed-sha',
                   size: options.size ?? 12,
+                  strip_prefix: options.stripPrefix,
                 },
               },
             },
@@ -2039,6 +2062,38 @@ describe('ResourceManagerService', () => {
       detected_executables: ['bin/yosys'],
       executable: 'bin/yosys',
     })
+  })
+
+  it('installs managed tool archives with safe internal links', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createYosysArchiveWithInternalLinks(root)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      version: '0.61',
+      stripPrefix: 'yosys-runtime',
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys', '0.61')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '0.61',
+    })
+
+    const installedRoot = join(dirs.toolsDir, 'yosys', '0.61')
+    await expect(
+      readFile(join(installedRoot, 'bin', 'yosys-alias'), 'utf8'),
+    ).resolves.toBe('#!/bin/sh\n')
+    await expect(
+      readFile(join(installedRoot, 'bin', 'yosys-hardlink'), 'utf8'),
+    ).resolves.toBe('#!/bin/sh\n')
   })
 
   it('lists an unmanaged local registry tool as local with a replace install action', async () => {

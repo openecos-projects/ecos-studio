@@ -8,13 +8,23 @@ import {
   open,
   readdir,
   readFile,
+  readlink,
   realpath,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  posix as posixPath,
+  relative,
+  resolve,
+  sep,
+} from 'node:path'
 import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { electronLogger } from './logger'
@@ -4541,7 +4551,7 @@ async function extractArchive(
   destination: string,
   stripPrefix?: string | null,
 ): Promise<void> {
-  if (!archivePath.endsWith('.zip')) await assertSafeTarArchive(archivePath)
+  if (!archivePath.endsWith('.zip')) await assertSafeTarArchive(archivePath, stripPrefix)
   await mkdir(destination, { recursive: true })
   if (archivePath.endsWith('.zip')) {
     await extractZipArchive(archivePath, destination, stripPrefix)
@@ -4556,7 +4566,16 @@ async function extractArchive(
   await assertNoArchiveLinks(destination)
 }
 
-async function assertSafeTarArchive(archivePath: string): Promise<void> {
+interface TarLinkEntry {
+  path: string
+  target: string
+  type: 'hard' | 'symbolic'
+}
+
+async function assertSafeTarArchive(
+  archivePath: string,
+  stripPrefix?: string | null,
+): Promise<void> {
   const entries = await runCommandOutput('tar', ['-tf', archivePath])
   for (const entry of entries.split(/\r?\n/)) {
     if (!entry) continue
@@ -4565,10 +4584,70 @@ async function assertSafeTarArchive(archivePath: string): Promise<void> {
     }
   }
   const verboseEntries = await runCommandOutput('tar', ['-tvf', archivePath])
+  for (const link of parseTarLinkEntries(verboseEntries)) {
+    const linkPath = stripArchivePath(link.path, stripPrefix)
+    if (link.type === 'hard') {
+      assertSafeArchivePath(stripArchivePath(link.target, stripPrefix))
+      continue
+    }
+    assertSafeArchiveLinkTarget(linkPath, link.target)
+  }
+}
+
+function parseTarLinkEntries(verboseEntries: string): TarLinkEntry[] {
+  const links: TarLinkEntry[] = []
+  for (const entry of verboseEntries.split(/\r?\n/)) {
+    const type = entry[0]
+    if (type !== 'l' && type !== 'h') continue
+    const timestamp = entry.match(/\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+/)
+    if (!timestamp || timestamp.index === undefined) {
+      throw new Error('Archive contains unsupported link entry')
+    }
+    const payload = entry.slice(timestamp.index + timestamp[0].length).trim()
+    const marker = type === 'l' ? ' -> ' : ' link to '
+    const markerIndex = payload.lastIndexOf(marker)
+    if (markerIndex <= 0) throw new Error('Archive contains unsupported link entry')
+    const path = payload.slice(0, markerIndex).trim()
+    const target = payload.slice(markerIndex + marker.length).trim()
+    if (!path || !target) throw new Error('Archive contains unsupported link entry')
+    links.push({
+      path,
+      target,
+      type: type === 'l' ? 'symbolic' : 'hard',
+    })
+  }
+  return links
+}
+
+function stripArchivePath(path: string, stripPrefix?: string | null): string {
+  if (!stripPrefix) return path
+  return path.split('/').filter(Boolean).slice(1).join('/')
+}
+
+function assertSafeArchivePath(path: string): void {
   if (
-    verboseEntries
-      .split(/\r?\n/)
-      .some((entry) => entry.startsWith('l') || entry.startsWith('h'))
+    !path ||
+    posixPath.isAbsolute(path) ||
+    path.split('/').includes('..') ||
+    path.includes('\\')
+  ) {
+    throw new Error('Archive contains unsupported link entry')
+  }
+}
+
+function assertSafeArchiveLinkTarget(linkPath: string, target: string): void {
+  if (posixPath.isAbsolute(target)) {
+    throw new Error('Archive contains unsupported link entry')
+  }
+  const resolvedTarget = posixPath.normalize(
+    posixPath.join(posixPath.dirname(linkPath), target),
+  )
+  if (
+    !resolvedTarget ||
+    resolvedTarget === '..' ||
+    resolvedTarget.startsWith('../') ||
+    resolvedTarget.startsWith('/') ||
+    resolvedTarget.includes('\\')
   ) {
     throw new Error('Archive contains unsupported link entry')
   }
@@ -4579,7 +4658,15 @@ async function assertNoArchiveLinks(root: string): Promise<void> {
   for (const entry of entries) {
     const path = join(root, entry.name)
     const stats = await lstat(path)
-    if (stats.isSymbolicLink()) throw new Error('Archive contains unsupported link entry')
+    if (stats.isSymbolicLink()) {
+      const target = await readlink(path)
+      if (isAbsolute(target)) throw new Error('Archive contains unsupported link entry')
+      const resolvedTarget = resolve(dirname(path), target)
+      const relativeTarget = relative(root, resolvedTarget)
+      if (isAbsolute(relativeTarget) || isRelativePathOutsideRoot(relativeTarget)) {
+        throw new Error('Archive contains unsupported link entry')
+      }
+    }
     if (stats.isDirectory()) await assertNoArchiveLinks(path)
   }
 }
