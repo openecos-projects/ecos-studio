@@ -49,6 +49,14 @@ async function createYosysArchiveWithInternalLinks(
   await chmod(join(binDir, 'yosys'), 0o755)
   await symlink('yosys', join(binDir, 'yosys-alias'))
   await link(join(binDir, 'yosys'), join(binDir, 'yosys-hardlink'))
+  await mkdir(join(sourceRoot, 'yosys-runtime', 'share', 'nested'), {
+    recursive: true,
+  })
+  await writeFile(join(sourceRoot, 'yosys-runtime', 'share', 'target.txt'), 'target\n')
+  await symlink(
+    '../target.txt',
+    join(sourceRoot, 'yosys-runtime', 'share', 'nested', 'target-link.txt'),
+  )
   await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'yosys-runtime'])
   const archiveBytes = await readFile(archive)
   return {
@@ -2094,6 +2102,9 @@ describe('ResourceManagerService', () => {
     await expect(
       readFile(join(installedRoot, 'bin', 'yosys-hardlink'), 'utf8'),
     ).resolves.toBe('#!/bin/sh\n')
+    await expect(
+      readFile(join(installedRoot, 'share', 'nested', 'target-link.txt'), 'utf8'),
+    ).resolves.toBe('target\n')
   })
 
   it('lists an unmanaged local registry tool as local with a replace install action', async () => {
@@ -3953,6 +3964,12 @@ describe('ResourceManagerService', () => {
         progress: 1,
       }),
     )
+    const downloadingProgress = progress.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.phase === 'downloading')
+      .map((event) => event.progress)
+    expect(downloadingProgress.at(-1)).toBe(1)
+    expect(downloadingProgress.slice(0, -1)).not.toContain(1)
     expect(progress).toHaveBeenCalledWith(
       expect.objectContaining({
         phase: 'extracting',
@@ -3965,6 +3982,92 @@ describe('ResourceManagerService', () => {
         progress: 0.98,
       }),
     )
+  })
+
+  it('resumes a stream after an interrupted download using a byte range', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [
+          {
+            name: 'yosys',
+            display_name: 'Yosys',
+            description: 'RTL synthesis',
+            category: 'synthesis',
+            homepage: '',
+            versions: [
+              {
+                version: '0.61',
+                platforms: {
+                  'all-platform': {
+                    url: 'https://example.com/yosys.tar',
+                    sha256: 'fixture-sha',
+                    size: 9,
+                  },
+                },
+              },
+            ],
+          },
+        ],
+        pdks: [],
+      }),
+      'utf8',
+    )
+    let calls = 0
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      calls += 1
+      if (calls === 1) {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1, 2, 3]))
+              controller.close()
+            },
+          }),
+          { status: 200, headers: { 'content-length': '9' } },
+        )
+      }
+      const headers = init?.headers as Record<string, string> | undefined
+      expect(headers?.Range).toBe('bytes=3-')
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([4, 5, 6, 7, 8, 9]))
+            controller.close()
+          },
+        }),
+        {
+          status: 206,
+          headers: {
+            'content-range': 'bytes 3-8/9',
+            'content-length': '6',
+          },
+        },
+      )
+    })
+    const extract = vi.fn(async (_archivePath: string, destination: string) => {
+      await mkdir(join(destination, 'bin'), { recursive: true })
+      const executable = join(destination, 'bin', 'yosys')
+      await writeFile(executable, '#!/bin/sh\n', 'utf8')
+      await chmod(executable, 0o755)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      archiveExtractor: extract,
+      fetchImpl: fetchImpl as typeof fetch,
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await service.installResource('tool:yosys', '0.61')
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(extract).toHaveBeenCalledTimes(1)
   })
 
   it('reports the source URL and network cause when a tool download fails before a response', async () => {
@@ -4015,7 +4118,7 @@ describe('ResourceManagerService', () => {
     })
     const progress = vi.fn()
     const expectedMessage =
-      'Failed to download https://github.com/YosysHQ/oss-cad-suite-build/releases/download/0.61/yosys.tar: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout Error)'
+      'Failed to download https://github.com/YosysHQ/oss-cad-suite-build/releases/download/0.61/yosys.tar: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout Error) (after 3 attempts; received 0 B)'
 
     await expect(service.installResource('tool:yosys', '0.61', progress)).rejects.toThrow(
       expectedMessage,
@@ -4106,7 +4209,7 @@ describe('ResourceManagerService', () => {
       }),
     )
     await expect(readdir(join(root, 'state', 'resources', 'downloads'))).resolves.toEqual(
-      [],
+      [expect.stringMatching(/\.part$/)],
     )
   })
 
@@ -4483,7 +4586,7 @@ describe('ResourceManagerService', () => {
     ).rejects.toThrow('ENOENT')
   })
 
-  it('rejects a PDK archive containing a symlink', async () => {
+  it('rejects a PDK archive containing an external symlink', async () => {
     const root = await createTempDir('ecos-resources-')
     const source = join(root, 'unsafe-pdk')
     const archivePath = join(root, 'unsafe-pdk.tar')

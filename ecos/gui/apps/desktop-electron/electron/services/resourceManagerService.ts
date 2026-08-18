@@ -47,6 +47,8 @@ const SURFER_RELEASE_ASSET_URL =
   'https://github.com/openecos-projects/ecos-resource-assets/releases/download/v0.7.0-ecos/surfer-web-assets-0.7.0-ecos.zip'
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 const REGISTRY_CACHE_VERSION = 1
+const DOWNLOAD_MAX_ATTEMPTS = 3
+const DOWNLOAD_RETRY_DELAY_MS = 250
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry | MpcInventoryEntry
 type ArchiveExtractor = (
@@ -71,6 +73,25 @@ interface DownloadProgress {
   downloadedBytes: number
   progress: number
   totalBytes: number | null
+}
+
+class DownloadResponseError extends Error {
+  readonly status: number
+
+  constructor(status: number, url: string) {
+    super(`Download failed with ${status}: ${url}`)
+    this.name = 'DownloadResponseError'
+    this.status = status
+  }
+}
+
+class DownloadSizeMismatchError extends Error {
+  constructor(url: string, expectedBytes: number, receivedBytes: number) {
+    super(
+      `Download size mismatch for ${url}: expected ${expectedBytes} bytes, received ${receivedBytes} bytes`,
+    )
+    this.name = 'DownloadSizeMismatchError'
+  }
 }
 
 interface PlatformAsset {
@@ -1272,6 +1293,7 @@ export class ResourceManagerService {
     const controller = new AbortController()
     this.activeJobs.set(resourceId, { action, controller, listener })
     let tempArchive = ''
+    let partialArchive = ''
     let tempExtract = ''
 
     try {
@@ -1287,14 +1309,17 @@ export class ResourceManagerService {
       const resolvedAsset = await this.resolvePlatformAsset(asset)
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
-      tempArchive = join(
+      tempArchive = resourceArchivePath(
         this.resourcesDir,
-        'downloads',
-        `${name}-${version}-${randomUUID()}${archiveExtensionFromUrl(resolvedAsset.url)}`,
+        resourceId,
+        version,
+        resolvedAsset.url,
       )
+      partialArchive = `${tempArchive}.part`
       tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
+      await recoverPartialArchive(tempArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1318,7 +1343,7 @@ export class ResourceManagerService {
       })
       await downloadAsset(
         resolvedAsset.url,
-        tempArchive,
+        partialArchive,
         this.fetchImpl,
         resolvedAsset.size,
         (progress) => {
@@ -1341,6 +1366,7 @@ export class ResourceManagerService {
         },
         controller.signal,
       )
+      await rename(partialArchive, tempArchive)
       throwIfAborted(controller.signal)
       this.publish(listener, {
         resource_id: resourceId,
@@ -1451,6 +1477,7 @@ export class ResourceManagerService {
     const controller = new AbortController()
     this.activeJobs.set(resourceId, { action, controller, listener })
     let tempArchive = ''
+    let partialArchive = ''
     let tempExtract = ''
 
     try {
@@ -1484,14 +1511,17 @@ export class ResourceManagerService {
         })
         return { status: 'started', resource_id: resourceId, version }
       }
-      tempArchive = join(
+      tempArchive = resourceArchivePath(
         this.resourcesDir,
-        'downloads',
-        `${pdkId}-${version}-${randomUUID()}${archiveExtensionFromUrl(resolvedAsset.url)}`,
+        resourceId,
+        version,
+        resolvedAsset.url,
       )
+      partialArchive = `${tempArchive}.part`
       tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
+      await recoverPartialArchive(tempArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1515,7 +1545,7 @@ export class ResourceManagerService {
       })
       await downloadAsset(
         resolvedAsset.url,
-        tempArchive,
+        partialArchive,
         this.fetchImpl,
         resolvedAsset.size,
         (progress) => {
@@ -1538,6 +1568,7 @@ export class ResourceManagerService {
         },
         controller.signal,
       )
+      await rename(partialArchive, tempArchive)
       throwIfAborted(controller.signal)
       this.publish(listener, {
         resource_id: resourceId,
@@ -1722,6 +1753,7 @@ export class ResourceManagerService {
     const controller = new AbortController()
     this.activeJobs.set(resourceId, { action, controller, listener })
     let tempArchive = ''
+    let partialArchive = ''
     let tempExtract = ''
 
     try {
@@ -1737,14 +1769,12 @@ export class ResourceManagerService {
       const version = versionEntry.version
       const displayName = mpc.display_name || mpcId
       const destination = join(this.mpcsDir, mpcId, version)
-      tempArchive = join(
-        this.resourcesDir,
-        'downloads',
-        `${mpcId}-${version}-${randomUUID()}.archive`,
-      )
+      tempArchive = resourceArchivePath(this.resourcesDir, resourceId, version, asset.url)
+      partialArchive = `${tempArchive}.part`
       tempExtract = join(this.mpcsDir, mpcId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
+      await recoverPartialArchive(tempArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1761,7 +1791,7 @@ export class ResourceManagerService {
       })
       await downloadAsset(
         asset.url,
-        tempArchive,
+        partialArchive,
         this.fetchImpl,
         asset.size,
         (progress) => {
@@ -1777,6 +1807,7 @@ export class ResourceManagerService {
         },
         controller.signal,
       )
+      await rename(partialArchive, tempArchive)
       throwIfAborted(controller.signal)
       this.publish(listener, {
         resource_id: resourceId,
@@ -4241,72 +4272,216 @@ async function downloadAsset(
     })
     return
   }
-  let response: Response
-  try {
-    response = await fetchImpl(url, { signal })
-  } catch (error) {
-    if (isAbortError(error) || signal?.aborted) throw error
-    throw new Error(`Failed to download ${url}: ${formatDownloadError(error)}`, {
-      cause: error,
-    })
-  }
-  if (!response.ok) {
-    throw new Error(`Download failed with ${response.status}: ${url}`)
+
+  let lastError: unknown = null
+  for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt += 1) {
+    throwIfAborted(signal)
+    let existingBytes = await fileSize(destination)
+    if (expectedSize !== null && expectedSize > 0 && existingBytes > expectedSize) {
+      await writeFile(destination, Buffer.alloc(0))
+      existingBytes = 0
+    }
+    try {
+      const rangeRequested = existingBytes > 0
+      const response = await fetchImpl(url, {
+        signal,
+        ...(rangeRequested ? { headers: { Range: `bytes=${existingBytes}-` } } : {}),
+      })
+
+      if (response.status === 416 && rangeRequested) {
+        const totalBytes =
+          parseContentRange(response.headers.get('content-range'))?.total ?? expectedSize
+        if (totalBytes !== null && totalBytes === existingBytes) {
+          onProgress?.({
+            downloadedBytes: existingBytes,
+            progress: 1,
+            totalBytes,
+          })
+          return
+        }
+        throw new DownloadResponseError(response.status, url)
+      }
+      if (!response.ok) throw new DownloadResponseError(response.status, url)
+
+      const contentRange = parseContentRange(response.headers.get('content-range'))
+      const append = rangeRequested && response.status === 206
+      const startingBytes = append ? existingBytes : 0
+      const contentLength = readContentLength(response.headers.get('content-length'))
+      const totalBytes =
+        (expectedSize && expectedSize > 0 ? expectedSize : null) ??
+        contentRange?.total ??
+        (contentLength === null
+          ? null
+          : append
+            ? startingBytes + contentLength
+            : contentLength)
+
+      if (append && !contentRange) {
+        throw new Error(`Download response omitted Content-Range for ${url}`)
+      }
+      if (append && contentRange && contentRange.start !== existingBytes) {
+        throw new Error(
+          `Download range mismatch for ${url}: requested ${existingBytes}, received ${contentRange.start}`,
+        )
+      }
+
+      const publishProgress = createDownloadProgressPublisher(
+        onProgress,
+        totalBytes,
+        startingBytes,
+      )
+      if (!response.body) {
+        const data = Buffer.from(await response.arrayBuffer())
+        await writeFile(destination, data, { flag: append ? 'a' : 'w' })
+        const downloadedBytes = startingBytes + data.byteLength
+        assertDownloadSize(url, totalBytes, expectedSize, downloadedBytes)
+        publishProgress(downloadedBytes, true)
+        return
+      }
+
+      const reader = response.body.getReader()
+      const file = await open(destination, append ? 'a' : 'w')
+      let downloadedBytes = startingBytes
+      let completed = false
+      try {
+        while (true) {
+          throwIfAborted(signal)
+          let result: ReadableStreamReadResult<Uint8Array>
+          try {
+            result = await reader.read()
+          } catch (error) {
+            if (isAbortError(error) || signal?.aborted) throw error
+            throw new Error('Response stream interrupted', { cause: error })
+          }
+          const { done, value } = result
+          if (done) {
+            completed = true
+            break
+          }
+          if (!value) continue
+          await file.write(value)
+          downloadedBytes += value.byteLength
+          publishProgress(downloadedBytes, false)
+        }
+      } finally {
+        reader.releaseLock()
+        await file.close()
+      }
+      if (!completed) {
+        throw new Error(`Download stream ended unexpectedly for ${url}`)
+      }
+      assertDownloadSize(url, totalBytes, expectedSize, downloadedBytes)
+      publishProgress(downloadedBytes, true)
+      return
+    } catch (error) {
+      if (isAbortError(error) || signal?.aborted) throw error
+      lastError = error
+      const receivedBytes = await fileSize(destination)
+      const retryable = isRetryableDownloadError(error)
+      if (!retryable || attempt === DOWNLOAD_MAX_ATTEMPTS) {
+        throw new Error(
+          `Failed to download ${url}: ${formatDownloadError(error)} (after ${attempt} attempts; received ${formatBytes(receivedBytes)})`,
+          { cause: error },
+        )
+      }
+      electronLogger.warn(
+        '[resources] Download attempt %d/%d failed for %s after %s; retrying: %s',
+        attempt,
+        DOWNLOAD_MAX_ATTEMPTS,
+        url,
+        formatBytes(receivedBytes),
+        formatDownloadError(error),
+      )
+      await waitForDownloadRetry(DOWNLOAD_RETRY_DELAY_MS, signal)
+    }
   }
 
-  const totalBytes =
-    readContentLength(response.headers.get('content-length')) ??
-    (expectedSize && expectedSize > 0 ? expectedSize : null)
-  if (!response.body) {
-    const data = Buffer.from(await response.arrayBuffer())
-    await writeFile(destination, data)
-    onProgress?.({
-      downloadedBytes: data.byteLength,
-      progress: 1,
-      totalBytes: totalBytes ?? data.byteLength,
-    })
-    return
-  }
+  throw new Error(`Failed to download ${url}: ${formatDownloadError(lastError)}`, {
+    cause: lastError,
+  })
+}
 
-  const reader = response.body.getReader()
-  const file = await open(destination, 'w')
-  let downloadedBytes = 0
-  let lastPublishedBytes = 0
+function createDownloadProgressPublisher(
+  listener: DownloadProgressListener | undefined,
+  totalBytes: number | null,
+  startingBytes: number,
+): (downloadedBytes: number, complete: boolean) => void {
+  let lastPublishedBytes = startingBytes
   let lastPublishedProgress = 0
-
-  const publishProgress = (force = false): void => {
-    const progress = totalBytes === null ? 0 : Math.min(downloadedBytes / totalBytes, 1)
+  return (downloadedBytes, complete) => {
+    const rawProgress = totalBytes === null ? 0 : downloadedBytes / totalBytes
+    if (!complete && rawProgress >= 1) return
+    const progress = complete ? 1 : Math.min(rawProgress, 1)
     const shouldPublishKnownTotal =
-      totalBytes !== null && (progress - lastPublishedProgress >= 0.01 || progress >= 1)
+      totalBytes !== null &&
+      (progress - lastPublishedProgress >= 0.01 || (complete && progress === 1))
     const shouldPublishUnknownTotal =
       totalBytes === null && downloadedBytes - lastPublishedBytes >= 1024 * 1024
-    if (!force && !shouldPublishKnownTotal && !shouldPublishUnknownTotal) return
+    if (!complete && !shouldPublishKnownTotal && !shouldPublishUnknownTotal) return
     if (downloadedBytes === lastPublishedBytes && progress === lastPublishedProgress)
       return
     lastPublishedBytes = downloadedBytes
     lastPublishedProgress = progress
-    onProgress?.({
-      downloadedBytes,
-      progress,
-      totalBytes,
-    })
+    listener?.({ downloadedBytes, progress, totalBytes })
   }
+}
 
-  try {
-    while (true) {
-      throwIfAborted(signal)
-      const { done, value } = await reader.read()
-      if (done) break
-      if (!value) continue
-      await file.write(value)
-      downloadedBytes += value.byteLength
-      publishProgress()
-    }
-    publishProgress(true)
-  } finally {
-    reader.releaseLock()
-    await file.close()
+function assertDownloadSize(
+  url: string,
+  totalBytes: number | null,
+  expectedSize: number | null,
+  downloadedBytes: number,
+): void {
+  const requiredSize =
+    totalBytes ?? (expectedSize && expectedSize > 0 ? expectedSize : null)
+  if (requiredSize !== null && downloadedBytes !== requiredSize) {
+    throw new DownloadSizeMismatchError(url, requiredSize, downloadedBytes)
   }
+}
+
+function isRetryableDownloadError(error: unknown): boolean {
+  if (!(error instanceof DownloadResponseError)) return true
+  return error.status === 408 || error.status === 429 || error.status >= 500
+}
+
+async function waitForDownloadRetry(
+  delayMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolvePromise()
+    }, delayMs)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      rejectPromise(new DOMException('The operation was aborted.', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function parseContentRange(value: string | null): {
+  start: number
+  end: number
+  total: number | null
+} | null {
+  if (!value) return null
+  const match = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i.exec(value.trim())
+  if (!match) return null
+  const start = Number(match[1])
+  const end = Number(match[2])
+  const total = match[3] === '*' ? null : Number(match[3])
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null
+  if (total !== null && !Number.isSafeInteger(total)) return null
+  return { start, end, total }
+}
+
+async function fileSize(path: string): Promise<number> {
+  return stat(path)
+    .then((value) => value.size)
+    .catch(() => 0)
 }
 
 function formatDownloadError(error: unknown): string {
@@ -4481,6 +4656,34 @@ function archiveExtensionFromUrl(sourceUrl: string): string {
   return '.archive'
 }
 
+function resourceArchivePath(
+  resourcesDir: string,
+  resourceId: string,
+  version: string,
+  sourceUrl: string,
+): string {
+  const safeId = resourceId.replace(/[^A-Za-z0-9._-]+/g, '-')
+  const safeVersion = version.replace(/[^A-Za-z0-9._-]+/g, '-')
+  const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
+  return join(
+    resourcesDir,
+    'downloads',
+    `${safeId}-${safeVersion}-${sourceHash}${archiveExtensionFromUrl(sourceUrl)}`,
+  )
+}
+
+async function recoverPartialArchive(
+  archivePath: string,
+  partialArchivePath: string,
+): Promise<void> {
+  if (!(await pathExists(archivePath))) return
+  if (await pathExists(partialArchivePath)) {
+    await rm(archivePath, { force: true })
+    return
+  }
+  await rename(archivePath, partialArchivePath)
+}
+
 async function readMpcSpecFromDirectory(
   mpcPath: string,
 ): Promise<{ specPath: string; spec: unknown }> {
@@ -4555,7 +4758,7 @@ async function extractArchive(
   await mkdir(destination, { recursive: true })
   if (archivePath.endsWith('.zip')) {
     await extractZipArchive(archivePath, destination, stripPrefix)
-    await assertNoArchiveLinks(destination)
+    await assertSafeExtractedArchiveLinks(destination)
     return
   }
   const args = ['-xf', archivePath, '-C', destination]
@@ -4563,7 +4766,7 @@ async function extractArchive(
     args.push('--strip-components', '1')
   }
   await runCommand('tar', args)
-  await assertNoArchiveLinks(destination)
+  await assertSafeExtractedArchiveLinks(destination)
 }
 
 interface TarLinkEntry {
@@ -4637,7 +4840,7 @@ function assertSafeArchivePath(path: string): void {
 
 function assertSafeArchiveLinkTarget(linkPath: string, target: string): void {
   if (posixPath.isAbsolute(target)) {
-    throw new Error('Archive contains unsupported link entry')
+    throw unsupportedArchiveLinkError(linkPath, target)
   }
   const resolvedTarget = posixPath.normalize(
     posixPath.join(posixPath.dirname(linkPath), target),
@@ -4649,25 +4852,43 @@ function assertSafeArchiveLinkTarget(linkPath: string, target: string): void {
     resolvedTarget.startsWith('/') ||
     resolvedTarget.includes('\\')
   ) {
-    throw new Error('Archive contains unsupported link entry')
+    throw unsupportedArchiveLinkError(linkPath, target)
   }
 }
 
-async function assertNoArchiveLinks(root: string): Promise<void> {
-  const entries = await readdir(root, { withFileTypes: true })
+function unsupportedArchiveLinkError(linkPath: string, target: string): Error {
+  return new Error(`Archive contains unsupported link entry: ${linkPath} -> ${target}`)
+}
+
+async function assertSafeExtractedArchiveLinks(
+  root: string,
+  directory = root,
+): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true })
   for (const entry of entries) {
-    const path = join(root, entry.name)
+    const path = join(directory, entry.name)
     const stats = await lstat(path)
     if (stats.isSymbolicLink()) {
       const target = await readlink(path)
-      if (isAbsolute(target)) throw new Error('Archive contains unsupported link entry')
+      const relativePath = relative(root, path).split(sep).join('/')
+      assertSafeArchiveLinkTarget(relativePath, target)
       const resolvedTarget = resolve(dirname(path), target)
       const relativeTarget = relative(root, resolvedTarget)
       if (isAbsolute(relativeTarget) || isRelativePathOutsideRoot(relativeTarget)) {
-        throw new Error('Archive contains unsupported link entry')
+        throw unsupportedArchiveLinkError(relativePath, target)
+      }
+      const canonicalTarget = await realpath(resolvedTarget).catch(() => null)
+      if (canonicalTarget) {
+        const canonicalRelativeTarget = relative(root, canonicalTarget)
+        if (
+          isAbsolute(canonicalRelativeTarget) ||
+          isRelativePathOutsideRoot(canonicalRelativeTarget)
+        ) {
+          throw unsupportedArchiveLinkError(relativePath, target)
+        }
       }
     }
-    if (stats.isDirectory()) await assertNoArchiveLinks(path)
+    if (stats.isDirectory()) await assertSafeExtractedArchiveLinks(root, path)
   }
 }
 
