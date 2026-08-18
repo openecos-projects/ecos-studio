@@ -230,4 +230,124 @@ describe('step log runtime integration', () => {
     const completed = protocolEvents().find((event) => event.type === 'step.completed')
     expect(completed?.payload.finalLog).toBe('output before crash\n')
   })
+
+  it('settles terminal waiters only when the archive barrier releases', async () => {
+    const service = setup()
+
+    notify(runtimeNotification('operation.started', {}, { sequence: 3 }))
+    notify(
+      runtimeNotification(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+        { sequence: 4 },
+      ),
+    )
+
+    // The tracker waiter must stay pending while the barrier holds the
+    // terminal: begin + bytes arrive, then the executor fails without any
+    // completion or end marker.
+    let settled = false
+    const waiting = service
+      .waitForOperation({ operationId: 'operation-1', workspaceHandle: 'handle-1' })
+      .then(() => {
+        settled = true
+      })
+
+    sidecar.archiver!.feed(v1Marker('begin', 'Synthesis', 'yosys'))
+    sidecar.archiver!.feed(Buffer.from('crashing output\n'))
+    notify(
+      runtimeNotification(
+        'operation.failed',
+        { error: { message: 'x' } },
+        { sequence: 5 },
+      ),
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(settled).toBe(false)
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'runtime.protocol' && event.event.type === 'operation.failed',
+      ),
+    ).toBe(false)
+
+    // The barrier's bounded timeout abandons the stale archive and only then
+    // settles the waiter and the renderer-visible terminal.
+    await new Promise((resolve) => setTimeout(resolve, 2300))
+    expect(settled).toBe(true)
+    await waiting
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'runtime.protocol' && event.event.type === 'operation.failed',
+      ),
+    ).toBe(true)
+
+    // A follow-up operation starts with a fresh truncated archive.
+    notify(
+      runtimeNotification(
+        'operation.started',
+        {},
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 6 },
+      ),
+    )
+    notify(
+      runtimeNotification(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 7 },
+      ),
+    )
+    sidecar.archiver!.feed(v1Marker('begin', 'Synthesis', 'yosys'))
+    sidecar.archiver!.feed(Buffer.from('fresh run\n'))
+    sidecar.archiver!.feed(v1Marker('end', 'Synthesis', 'yosys'))
+
+    const archived = readFileSync(
+      join(workspace, 'Synthesis_yosys', 'log', 'Synthesis.log'),
+      'utf8',
+    )
+    expect(archived).toBe('fresh run\n')
+    expect(sidecar.stderrTexts.join('')).not.toContain('ECC-STEP')
+  }, 10_000)
+
+  it('releases a held terminal immediately when the end marker arrives', async () => {
+    const service = setup()
+
+    notify(runtimeNotification('operation.started', {}, { sequence: 3 }))
+    notify(
+      runtimeNotification(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+        { sequence: 4 },
+      ),
+    )
+
+    let settled = false
+    const waiting = service
+      .waitForOperation({ operationId: 'operation-1', workspaceHandle: 'handle-1' })
+      .then(() => {
+        settled = true
+      })
+
+    sidecar.archiver!.feed(v1Marker('begin', 'Synthesis', 'yosys'))
+    sidecar.archiver!.feed(Buffer.from('slow finish\n'))
+    notify(
+      runtimeNotification(
+        'operation.failed',
+        { error: { message: 'x' } },
+        { sequence: 5 },
+      ),
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(settled).toBe(false)
+
+    // The end marker arrives before the timeout: the terminal settles
+    // immediately, without waiting out the barrier.
+    sidecar.archiver!.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(settled).toBe(true)
+    await waiting
+  }, 10_000)
 })

@@ -631,6 +631,16 @@ export class EccWorkspaceRuntime {
       return
     }
     const protocolEvent = notification.params
+    if (this.stepLogBridge) {
+      this.stepLogBridge.handleProtocolEvent(protocolEvent, (event) =>
+        this.trackAndEmitProtocolEvent(event),
+      )
+      return
+    }
+    this.trackAndEmitProtocolEvent(protocolEvent)
+  }
+
+  private trackAndEmitProtocolEvent(protocolEvent: EccRuntimeProtocolPayload): void {
     const terminalAlreadyRecorded = this.operationTracker.hasTerminalOperation(
       protocolEvent.operationId,
     )
@@ -653,9 +663,7 @@ export class EccWorkspaceRuntime {
     ) {
       this.sidecarLifecycle.retainFailedOperationForDiagnostics()
     }
-    const forward = (event: EccRuntimeProtocolPayload) => this.emitProtocolEvent(event)
-    if (this.stepLogBridge) this.stepLogBridge.handleProtocolEvent(protocolEvent, forward)
-    else forward(protocolEvent)
+    this.emitProtocolEvent(protocolEvent)
   }
 
   private emitProtocolEvent(protocolEvent: EccRuntimeProtocolPayload): void {

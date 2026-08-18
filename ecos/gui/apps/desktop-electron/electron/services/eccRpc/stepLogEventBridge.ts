@@ -309,9 +309,10 @@ export class StepLogEventBridge {
   ): void {
     const step = typeof event.payload.step === 'string' ? event.payload.step : ''
     const tool = typeof event.payload.tool === 'string' ? event.payload.tool : ''
-    if (event.payload.state === 'Skipped') {
+    if (event.payload.state === 'Skipped' || event.payload.replayed === true) {
       // Skipped steps return before any marker emission, so no StepEnded
-      // will ever arrive for them: forward immediately.
+      // will ever arrive for them; render-gate replays re-send an already
+      // accounted completion. Neither may be held: forward immediately.
       this.forwardWithFinalLog(event, forward)
       return
     }
