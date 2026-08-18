@@ -532,4 +532,166 @@ describe('StepLogEventBridge', () => {
     expect(h.emitted[0]!.sequence).toBe(2)
     expect(h.emitted[0]!.operationId).toBe('operation-2')
   })
+
+  it('holds a terminal operation event behind a held step.completed', () => {
+    const h = harness()
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h)
+    startStep(h, 'Synthesis', 'yosys')
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('failing output\n'))
+
+    // A failed step does not wait for the render gate: step.completed and
+    // operation.failed can both arrive before the stderr end marker.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Imcomplete' },
+        { sequence: 3 },
+      ),
+      h.forward,
+    )
+    h.bridge.handleProtocolEvent(
+      protocolEvent('operation.failed', { error: { message: 'x' } }, { sequence: 4 }),
+      h.forward,
+    )
+    expect(h.forwarded.map((event) => event.type)).toEqual([
+      'operation.started',
+      'step.started',
+    ])
+
+    // The end marker finally arrives: completion first, then the terminal.
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    expect(h.forwarded.map((event) => event.type)).toEqual([
+      'operation.started',
+      'step.started',
+      'step.completed',
+      'operation.failed',
+    ])
+    expect(h.forwarded[2]!.payload.finalLog).toBe('failing output\n')
+  })
+
+  it('forwards a queued terminal on hold timeout after the completion', () => {
+    vi.useFakeTimers()
+    const h = harness({ holdTimeoutMs: 2000 })
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h)
+    startStep(h, 'Synthesis', 'yosys')
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('some output\n'))
+
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Imcomplete' },
+        { sequence: 3 },
+      ),
+      h.forward,
+    )
+    h.bridge.handleProtocolEvent(
+      protocolEvent('operation.failed', { error: { message: 'x' } }, { sequence: 4 }),
+      h.forward,
+    )
+
+    vi.advanceTimersByTime(2000)
+    expect(h.forwarded.map((event) => event.type)).toEqual([
+      'operation.started',
+      'step.started',
+      'step.completed',
+      'operation.failed',
+    ])
+  })
+
+  it('abandons the stale archive on timeout so the next run starts fresh', () => {
+    vi.useFakeTimers()
+    const h = harness({ holdTimeoutMs: 2000 })
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h)
+    startStep(h, 'Synthesis', 'yosys')
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('first attempt\n'))
+
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Imcomplete' },
+        { sequence: 3 },
+      ),
+      h.forward,
+    )
+    vi.advanceTimersByTime(2000)
+    expect(h.forwarded.map((event) => event.type)).toContain('step.completed')
+
+    // The next attempt's begin must not read as nested inside the stale one.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'operation.started',
+        {},
+        {
+          operationId: 'operation-2',
+          runSessionId: 'run-session-2',
+          sequence: 4,
+        },
+      ),
+      h.forward,
+    )
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 5 },
+      ),
+      h.forward,
+    )
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('second attempt\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+
+    expect(h.archiveText('Synthesis', 'yosys')).toBe('second attempt\n')
+    const synthesized = h.emitted.filter((event) => event.type === 'step.log')
+    expect(synthesized.at(-1)?.operationId).toBe('operation-2')
+    expect(synthesized.at(-1)?.payload.chunk).toBe('second attempt\n')
+  })
+
+  it('tracks attempts across reruns when completion precedes the end marker', () => {
+    const h = harness()
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h)
+    startStep(h, 'Synthesis', 'yosys')
+
+    // First attempt: completion arrives before its end marker.
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('attempt one\n'))
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Success' },
+        { sequence: 3 },
+      ),
+      h.forward,
+    )
+    expect(h.forwarded.map((event) => event.type)).not.toContain('step.completed')
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    expect(h.forwarded[2]!.payload.finalLog).toBe('attempt one\n')
+
+    // Rerun the same step: its completion must also wait for its own end.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+        { sequence: 4 },
+      ),
+      h.forward,
+    )
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('attempt two\n'))
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Success' },
+        { sequence: 5 },
+      ),
+      h.forward,
+    )
+    const completedBefore = h.forwarded.filter((event) => event.type === 'step.completed')
+    expect(completedBefore).toHaveLength(1)
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    const completedAfter = h.forwarded.filter((event) => event.type === 'step.completed')
+    expect(completedAfter).toHaveLength(2)
+    expect(completedAfter[1]!.payload.finalLog).toBe('attempt two\n')
+  })
 })

@@ -212,6 +212,31 @@ export class StepLogArchiver {
     this.active = null
   }
 
+  /**
+   * Abandon the active step without emitting StepEnded: flush its pending
+   * bytes to the archive and clear the active state, so a later begin for
+   * any step starts a fresh attempt instead of reading as nested. Used when
+   * the step's end marker never arrives (lost or crashed producer).
+   */
+  abandonActiveStep(): void {
+    const active = this.active
+    if (!active) return
+    this.clearFlushTimer()
+    if (active.archiveOk && active.pendingBytes > 0) {
+      try {
+        appendFileSync(
+          active.path,
+          Buffer.concat(active.pendingChunks, active.pendingBytes),
+        )
+      } catch (error) {
+        this.options.onProtocolViolation?.(
+          `archive flush on abandon failed: ${String(error)}`,
+        )
+      }
+    }
+    this.active = null
+  }
+
   private processBuffer(): void {
     for (;;) {
       const candidate = this.buffer.indexOf(STEP_MARKER_PREFIX)

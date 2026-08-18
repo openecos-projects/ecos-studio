@@ -49,6 +49,11 @@ interface HeldStepCompleted {
   timer: NodeJS.Timeout
 }
 
+interface PendingTerminalEvent {
+  event: EccRuntimeProtocolPayload
+  forward: (event: EccRuntimeProtocolPayload) => void
+}
+
 export interface StepLogEventBridgeOptions {
   workspaceDirectory: string
   emitProtocolEvent: (event: EccRuntimeProtocolPayload) => void
@@ -70,6 +75,7 @@ export class StepLogEventBridge {
   private readonly endedStepCounts = new Map<string, number>()
   private readonly completedStepCounts = new Map<string, number>()
   private heldCompleted: HeldStepCompleted | null = null
+  private pendingTerminal: PendingTerminalEvent | null = null
 
   constructor(private readonly options: StepLogEventBridgeOptions) {
     this.holdTimeoutMs = options.holdTimeoutMs ?? DEFAULT_HOLD_TIMEOUT_MS
@@ -108,6 +114,13 @@ export class StepLogEventBridge {
       this.lastSequence = event.sequence
     }
     if (event.type === 'operation.started') {
+      // A terminal event still queued belongs to the previous operation and
+      // must reach the fanout before the new operation's start.
+      const staleTerminal = this.pendingTerminal
+      if (staleTerminal) {
+        this.pendingTerminal = null
+        staleTerminal.forward(staleTerminal.event)
+      }
       this.operationContext = {
         kind: event.kind,
         operationId: event.operationId,
@@ -132,6 +145,14 @@ export class StepLogEventBridge {
       event.type === 'operation.failed' ||
       event.type === 'operation.cancelled'
     ) {
+      if (this.heldCompleted) {
+        // The step completion barrier comes first: the terminal event waits
+        // for the held step.completed, preserving lifecycle order when the
+        // RPC channel races the stderr stream (a failed step does not wait
+        // for the render gate, so this race is routine).
+        this.pendingTerminal = { event, forward }
+        return
+      }
       // Any segment still buffered at a terminal boundary belongs to a step
       // whose step.started never arrived (crash); the archive file holds the
       // bytes, so only synthesis is dropped.
@@ -169,6 +190,11 @@ export class StepLogEventBridge {
       this.heldCompleted = null
       clearTimeout(held.timer)
       this.releaseStepCompleted(held)
+    }
+    const pending = this.pendingTerminal
+    if (pending) {
+      this.pendingTerminal = null
+      pending.forward(pending.event)
     }
     this.operationContext = null
     this.lastSequence = 0
@@ -244,6 +270,7 @@ export class StepLogEventBridge {
           this.options.emitUnscoped(
             `[step-log] end marker for step ${step} did not arrive within ${this.holdTimeoutMs}ms; releasing step.completed\n`,
           )
+          this.archiver.abandonActiveStep()
           this.releaseStepCompleted(held)
         }
       }, this.holdTimeoutMs),
@@ -258,16 +285,29 @@ export class StepLogEventBridge {
       this.options.emitUnscoped(
         `[step-log] superseded hold for step ${String(previous.event.payload.step)}; its end marker never arrived\n`,
       )
+      this.archiver.abandonActiveStep()
       this.releaseStepCompleted(previous)
     }
     this.heldCompleted = held
   }
 
   private releaseStepCompleted(held: HeldStepCompleted): void {
-    this.archiver.flushStep(
-      typeof held.event.payload.step === 'string' ? held.event.payload.step : '',
-    )
+    const step =
+      typeof held.event.payload.step === 'string' ? held.event.payload.step : ''
+    const tool =
+      typeof held.event.payload.tool === 'string' ? held.event.payload.tool : ''
+    this.archiver.flushStep(step)
+    // Every forwarded completion consumes one attempt, however it released.
+    const key = stepLogKey(step, tool)
+    this.completedStepCounts.set(key, (this.completedStepCounts.get(key) ?? 0) + 1)
     this.forwardWithFinalLog(held.event, held.forward)
+    const pending = this.pendingTerminal
+    if (pending) {
+      this.pendingTerminal = null
+      this.bufferedSegments.clear()
+      this.operationContext = null
+      pending.forward(pending.event)
+    }
   }
 
   private forwardWithFinalLog(
