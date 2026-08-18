@@ -48,6 +48,7 @@ import {
   isRuntimeProtocolPayload,
 } from './runtimeOperationTracker'
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
+import { shutdownBarrierFrom } from './runtimeClient'
 import { RuntimeSidecarLifecycle } from './runtimeSidecarLifecycle'
 import { StepLogEventBridge } from './stepLogEventBridge'
 import { attachStepLogBridge, wrapProtocolEvent } from './runtimeProtocolFanout'
@@ -687,20 +688,4 @@ export class EccWorkspaceRuntime {
       listener(event)
     }
   }
-}
-
-function shutdownBarrierFrom(
-  error: unknown,
-): NonNullable<EccRpcShutdownResult['shutdownBarrier']> | null {
-  if (!(error instanceof Error) || !('shutdownBarrier' in error)) return null
-  const barrier = (error as Error & { shutdownBarrier?: unknown }).shutdownBarrier
-  if (typeof barrier !== 'object' || barrier === null || Array.isArray(barrier))
-    return null
-  const value = barrier as Record<string, unknown>
-  return typeof value.operationId === 'string' &&
-    typeof value.state === 'string' &&
-    typeof value.step === 'string' &&
-    typeof value.workspaceId === 'string'
-    ? (value as NonNullable<EccRpcShutdownResult['shutdownBarrier']>)
-    : null
 }
