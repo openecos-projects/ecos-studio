@@ -5,10 +5,12 @@ import {
   chmod,
   cp,
   link,
+  lstat,
   mkdir,
   mkdtemp,
   readdir,
   readFile,
+  readlink,
   rm,
   symlink,
   writeFile,
@@ -35,6 +37,14 @@ async function createFixtureArchive(
     path: archive,
     sha256: 'fixture-sha',
     size: Buffer.byteLength(payload),
+  }
+}
+
+async function archiveLock(path: string): Promise<{ sha256: string; size: number }> {
+  const bytes = await readFile(path)
+  return {
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    size: bytes.byteLength,
   }
 }
 
@@ -69,13 +79,13 @@ async function createYosysArchiveWithInternalLinks(
 async function runFixtureCommand(
   command: string,
   args: string[],
-  options?: { cwd?: string },
+  options: { cwd?: string } = {},
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = execFile(
       command,
       args,
-      { cwd: options?.cwd },
+      { cwd: options.cwd },
       (error, _stdout, stderr) => {
         if (error) {
           reject(new Error(`${command} failed: ${stderr || error.message}`))
@@ -4586,7 +4596,44 @@ describe('ResourceManagerService', () => {
     ).rejects.toThrow('ENOENT')
   })
 
-  it('rejects a PDK archive containing an external symlink', async () => {
+  it('rejects a PDK archive whose strip_prefix turns a member path into an escape', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'unsafe-pdk')
+    const archivePath = join(root, 'unsafe-pdk.tar')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'payload'), 'unsafe\n', 'utf8')
+    await runFixtureCommand('tar', [
+      '-cf',
+      archivePath,
+      '--transform=s|^payload|icsprout55-pdk-1.10.100/../payload|',
+      '-C',
+      source,
+      'payload',
+    ])
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('pdk:ics55')).rejects.toThrow(
+      'Archive entry escapes destination: icsprout55-pdk-1.10.100/../payload',
+    )
+    await expect(readdir(join(dirs.pdksDir, 'ics55', '1.10.100'))).rejects.toThrow(
+      'ENOENT',
+    )
+    await expect(
+      readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ).rejects.toThrow('ENOENT')
+  })
+
+  it('rejects a PDK archive containing a symlink', async () => {
     const root = await createTempDir('ecos-resources-')
     const source = join(root, 'unsafe-pdk')
     const archivePath = join(root, 'unsafe-pdk.tar')
@@ -4607,9 +4654,343 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.installResource('pdk:ics55')).rejects.toThrow(
-      'Archive contains unsupported link entry',
+      'Archive link target is outside the extract root: /tmp',
     )
     await expect(readdir(join(dirs.pdksDir, 'ics55', '1.10.100'))).rejects.toThrow(
+      'ENOENT',
+    )
+    await expect(
+      readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ).rejects.toThrow('ENOENT')
+  })
+
+  it('installs a tool archive that contains an in-root relative symlink', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'yosys-source')
+    const archivePath = join(root, 'yosys-symlink.tar')
+    await mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(source, 'bin', 'yosys'), 0o755)
+    await writeFile(join(source, 'bin', 'yosys.real'), 'real\n', 'utf8')
+    await symlink('yosys.real', join(source, 'bin', 'yosys-link'))
+    await runFixtureCommand('tar', ['-cf', archivePath, '-C', source, '.'])
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '2026-05-13',
+    })
+    const installedRoot = join(dirs.toolsDir, 'yosys', '2026-05-13')
+    await expect(readlink(join(installedRoot, 'bin', 'yosys-link'))).resolves.toBe(
+      'yosys.real',
+    )
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      id: 'tool:yosys',
+      status: 'installed',
+      path: installedRoot,
+    })
+  })
+
+  it('installs a tool archive that contains an in-root hardlink', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'yosys-source')
+    const archivePath = join(root, 'yosys-hardlink.tar')
+    await mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(source, 'bin', 'yosys'), 0o755)
+    await runFixtureCommand('ln', [
+      join(source, 'bin', 'yosys'),
+      join(source, 'bin', 'yosys.hard'),
+    ])
+    await runFixtureCommand('tar', ['-cf', archivePath, '-C', source, '.'])
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '2026-05-13',
+    })
+    const installedRoot = join(dirs.toolsDir, 'yosys', '2026-05-13')
+    const original = await lstat(join(installedRoot, 'bin', 'yosys'))
+    const hardlink = await lstat(join(installedRoot, 'bin', 'yosys.hard'))
+    expect(hardlink.ino).toBe(original.ino)
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      id: 'tool:yosys',
+      status: 'installed',
+      path: installedRoot,
+    })
+  })
+
+  it('installs a tool archive that contains an in-root hardlink after strip_prefix', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'yosys-source')
+    const nested = join(source, 'oss-cad-suite')
+    const archivePath = join(root, 'yosys-hardlink-stripped.tar')
+    await mkdir(join(nested, 'bin'), { recursive: true })
+    await mkdir(join(nested, 'lib'), { recursive: true })
+    await writeFile(join(nested, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(nested, 'bin', 'yosys'), 0o755)
+    await runFixtureCommand('ln', [
+      join(nested, 'bin', 'yosys'),
+      join(nested, 'lib', 'yosys.hard'),
+    ])
+    await runFixtureCommand('tar', ['-cf', archivePath, '-C', source, 'oss-cad-suite'])
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+      platforms: {
+        'all-platform': {
+          url: `file://${archivePath}`,
+          ...archive,
+          strip_prefix: 'oss-cad-suite',
+        },
+      },
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '2026-05-13',
+    })
+    const installedRoot = join(dirs.toolsDir, 'yosys', '2026-05-13')
+    const original = await lstat(join(installedRoot, 'bin', 'yosys'))
+    const hardlink = await lstat(join(installedRoot, 'lib', 'yosys.hard'))
+    expect(hardlink.ino).toBe(original.ino)
+  })
+
+  it('rejects a tool archive whose hardlink escapes the extract root', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'yosys-source')
+    const archivePath = join(root, 'yosys-hardlink-escape.tar')
+    await mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(source, 'bin', 'yosys'), 0o755)
+    await runFixtureCommand('ln', [
+      join(source, 'bin', 'yosys'),
+      join(source, 'bin', 'yosys.hard'),
+    ])
+    await runFixtureCommand('tar', [
+      '-cf',
+      archivePath,
+      '-C',
+      source,
+      'bin/yosys',
+      '--transform=s|^bin/yosys.hard|../yosys.hard|',
+      'bin/yosys.hard',
+    ])
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).rejects.toThrow(
+      'Archive entry escapes destination: ../yosys.hard',
+    )
+    await expect(readdir(join(dirs.toolsDir, 'yosys', '2026-05-13'))).rejects.toThrow(
+      'ENOENT',
+    )
+    await expect(
+      readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ).rejects.toThrow('ENOENT')
+  })
+
+  it('installs a tool archive that contains a dangling in-root relative symlink', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'yosys-source')
+    const archivePath = join(root, 'yosys-dangling.tar')
+    await mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(source, 'bin', 'yosys'), 0o755)
+    await symlink('missing-optional.so', join(source, 'bin', 'optional.so'))
+    await runFixtureCommand('tar', ['-cf', archivePath, '-C', source, '.'])
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+      status: 'started',
+      resource_id: 'tool:yosys',
+    })
+    await expect(
+      readlink(join(dirs.toolsDir, 'yosys', '2026-05-13', 'bin', 'optional.so')),
+    ).resolves.toBe('missing-optional.so')
+  })
+
+  it('rejects a tool archive whose strip_prefix turns a link into an escape', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'yosys-source')
+    const nested = join(source, 'oss-cad-suite')
+    const archivePath = join(root, 'yosys-stripped-escape.tar')
+    await mkdir(join(nested, 'bin'), { recursive: true })
+    await writeFile(join(nested, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(nested, 'bin', 'yosys'), 0o755)
+    await symlink('..', join(nested, 'escape'))
+    await runFixtureCommand('tar', ['-cf', archivePath, '-C', source, 'oss-cad-suite'])
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+      platforms: {
+        'all-platform': {
+          url: `file://${archivePath}`,
+          ...archive,
+          strip_prefix: 'oss-cad-suite',
+        },
+      },
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).rejects.toThrow(
+      'Archive link target is outside the extract root: ..',
+    )
+    await expect(readdir(join(dirs.toolsDir, 'yosys', '2026-05-13'))).rejects.toThrow(
+      'ENOENT',
+    )
+    await expect(
+      readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ).rejects.toThrow('ENOENT')
+  })
+
+  it('installs a zip tool archive that contains an in-root relative symlink', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'yosys-source')
+    const archivePath = join(root, 'yosys-symlink.zip')
+    await mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(source, 'bin', 'yosys'), 0o755)
+    await writeFile(join(source, 'bin', 'yosys.real'), 'real\n', 'utf8')
+    await symlink('yosys.real', join(source, 'bin', 'yosys-link'))
+    await runFixtureCommand('zip', ['-rqy', archivePath, 'bin'], { cwd: source })
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+      status: 'started',
+      resource_id: 'tool:yosys',
+    })
+    await expect(
+      readlink(join(dirs.toolsDir, 'yosys', '2026-05-13', 'bin', 'yosys-link')),
+    ).resolves.toBe('yosys.real')
+  })
+
+  it('rejects a zip tool archive whose symlink escapes the extract root', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'unsafe-yosys')
+    const archivePath = join(root, 'unsafe-yosys.zip')
+    await mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(source, 'bin', 'yosys'), 0o755)
+    await symlink('/tmp', join(source, 'outside'))
+    await runFixtureCommand('zip', ['-rqy', archivePath, 'bin', 'outside'], {
+      cwd: source,
+    })
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).rejects.toThrow(
+      'Archive link target is outside the extract root: /tmp',
+    )
+    await expect(readdir(join(dirs.toolsDir, 'yosys', '2026-05-13'))).rejects.toThrow(
+      'ENOENT',
+    )
+    await expect(
+      readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ).rejects.toThrow('ENOENT')
+  })
+
+  it('rejects a zip tool archive whose relative symlink escapes the extract root', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const source = join(root, 'unsafe-yosys')
+    const archivePath = join(root, 'unsafe-yosys-relative.zip')
+    await mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(source, 'bin', 'yosys'), 0o755)
+    await symlink('../outside', join(source, 'escape'))
+    await runFixtureCommand('zip', ['-rqy', archivePath, 'bin', 'escape'], {
+      cwd: source,
+    })
+    const archive = await archiveLock(archivePath)
+    const registryPath = join(root, 'registry.json')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      ...archive,
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.installResource('tool:yosys')).rejects.toThrow(
+      'Archive link target is outside the extract root: ../outside',
+    )
+    await expect(readdir(join(dirs.toolsDir, 'yosys', '2026-05-13'))).rejects.toThrow(
       'ENOENT',
     )
     await expect(

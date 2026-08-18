@@ -20,7 +20,7 @@ import {
   dirname,
   isAbsolute,
   join,
-  posix as posixPath,
+  posix,
   relative,
   resolve,
   sep,
@@ -4730,6 +4730,177 @@ async function verifySha256(filePath: string, expected: string): Promise<boolean
   return hash.digest('hex') === expected.toLowerCase()
 }
 
+async function isZipArchive(archivePath: string): Promise<boolean> {
+  if (archivePath.toLowerCase().endsWith('.zip')) return true
+  const handle = await open(archivePath, 'r')
+  try {
+    const header = Buffer.alloc(4)
+    const { bytesRead } = await handle.read(header, 0, 4, 0)
+    return bytesRead >= 2 && header[0] === 0x50 && header[1] === 0x4b
+  } finally {
+    await handle.close()
+  }
+}
+
+function linkTargetOutsideExtractRootMessage(target: string): string {
+  return `Archive link target is outside the extract root: ${target}`
+}
+
+function posixArchivePath(value: string): string {
+  return value.replaceAll('\\', '/').replace(/\/+$/, '')
+}
+
+function isAbsoluteArchiveTarget(target: string): boolean {
+  return (
+    posix.isAbsolute(target) || target.startsWith('/') || /^[A-Za-z]:[\\/]/.test(target)
+  )
+}
+
+function stripArchivePrefix(
+  memberPath: string,
+  stripPrefix?: string | null,
+): string | null {
+  const normalized = posixArchivePath(memberPath)
+  if (!normalized || normalized === '.') return null
+  if (!stripPrefix) return normalized
+  const prefix = posixArchivePath(stripPrefix)
+  if (!prefix) return normalized
+  if (normalized === prefix) return null
+  if (normalized.startsWith(`${prefix}/`)) {
+    const stripped = normalized.slice(prefix.length + 1)
+    return stripped || null
+  }
+  return normalized
+}
+
+function lexicalPathInsideExtractRoot(relativePath: string): boolean {
+  if (!relativePath) return true
+  if (isAbsoluteArchiveTarget(relativePath)) return false
+  const normalized = posix.normalize(relativePath)
+  return normalized !== '..' && !normalized.startsWith('../')
+}
+
+function assertMemberPathInsideExtractRoot(
+  memberPath: string,
+  stripPrefix?: string | null,
+): string | null {
+  const stripped = stripArchivePrefix(memberPath, stripPrefix)
+  if (stripped === null) return null
+  if (!lexicalPathInsideExtractRoot(stripped)) {
+    throw new Error(`Archive entry escapes destination: ${memberPath}`)
+  }
+  return stripped
+}
+
+function resolveArchiveLinkTarget(
+  memberPath: string,
+  target: string,
+  stripPrefix?: string | null,
+  targetKind: 'symlink' | 'hardlink' = 'symlink',
+): string {
+  if (isAbsoluteArchiveTarget(target)) return target
+  if (targetKind === 'hardlink') {
+    const strippedTarget = stripArchivePrefix(target, stripPrefix)
+    return strippedTarget ?? posix.normalize(target)
+  }
+  return posix.normalize(posix.join(posix.dirname(memberPath), target))
+}
+
+function assertLinkTargetInsideExtractRoot(
+  memberPath: string,
+  target: string,
+  stripPrefix?: string | null,
+  targetKind: 'symlink' | 'hardlink' = 'symlink',
+): void {
+  const strippedMember = assertMemberPathInsideExtractRoot(memberPath, stripPrefix)
+  if (strippedMember === null) {
+    throw new Error(linkTargetOutsideExtractRootMessage(target))
+  }
+  const resolved = resolveArchiveLinkTarget(
+    strippedMember,
+    target,
+    stripPrefix,
+    targetKind,
+  )
+  if (!lexicalPathInsideExtractRoot(resolved)) {
+    throw new Error(linkTargetOutsideExtractRootMessage(target))
+  }
+}
+
+function parseTarVerboseLink(
+  line: string,
+): { memberPath: string; target: string; kind: 'symlink' | 'hardlink' } | null {
+  const kind = line[0]
+  if (kind !== 'l' && kind !== 'h') return null
+  const separator = kind === 'l' ? ' -> ' : ' link to '
+  const separatorIndex = line.lastIndexOf(separator)
+  if (separatorIndex < 0) return null
+  const target = line.slice(separatorIndex + separator.length)
+  if (!target) return null
+  const metaAndName = line.slice(0, separatorIndex)
+  const match = metaAndName.match(
+    /\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?\s+(.+)$/,
+  )
+  const memberPath = match?.[1]?.trim()
+  if (!memberPath) return null
+  return { memberPath, target, kind: kind === 'h' ? 'hardlink' : 'symlink' }
+}
+
+function parseZipInfoSymlinkName(line: string): string | null {
+  if (!line.startsWith('l')) return null
+  const match = line.match(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+(.+)$/)
+  return match?.[1] ?? null
+}
+
+async function assertSafeTarArchive(
+  archivePath: string,
+  stripPrefix?: string | null,
+): Promise<void> {
+  const entries = await runCommandOutput('tar', ['-tf', archivePath])
+  for (const entry of entries.split(/\r?\n/)) {
+    if (!entry) continue
+    assertMemberPathInsideExtractRoot(entry, stripPrefix)
+  }
+
+  const verboseEntries = await runCommandOutput('tar', ['-tvf', archivePath])
+  for (const line of verboseEntries.split(/\r?\n/)) {
+    if (!line) continue
+    const link = parseTarVerboseLink(line)
+    if (!link) continue
+    assertLinkTargetInsideExtractRoot(
+      link.memberPath,
+      link.target,
+      stripPrefix,
+      link.kind,
+    )
+  }
+}
+
+async function assertSafeZipArchive(
+  archivePath: string,
+  stripPrefix?: string | null,
+): Promise<void> {
+  const listing = await runCommandOutput('unzip', ['-Z', '-1', archivePath])
+  for (const entry of listing.split(/\r?\n/)) {
+    if (!entry) continue
+    assertMemberPathInsideExtractRoot(entry, stripPrefix)
+  }
+
+  const verboseListing = await runCommandOutput('unzip', ['-Z', archivePath])
+  const symlinkNames: string[] = []
+  for (const line of verboseListing.split(/\r?\n/)) {
+    if (!line) continue
+    const memberPath = parseZipInfoSymlinkName(line)
+    if (memberPath) symlinkNames.push(memberPath)
+  }
+  for (const memberPath of symlinkNames) {
+    const target = (
+      await runCommandOutput('unzip', ['-p', archivePath, memberPath])
+    ).replace(/\r?\n$/, '')
+    assertLinkTargetInsideExtractRoot(memberPath, target, stripPrefix)
+  }
+}
+
 async function extractZipArchive(
   archivePath: string,
   destination: string,
@@ -4754,11 +4925,16 @@ async function extractArchive(
   destination: string,
   stripPrefix?: string | null,
 ): Promise<void> {
-  if (!archivePath.endsWith('.zip')) await assertSafeTarArchive(archivePath, stripPrefix)
+  const zipArchive = await isZipArchive(archivePath)
+  if (zipArchive) {
+    await assertSafeZipArchive(archivePath, stripPrefix)
+  } else {
+    await assertSafeTarArchive(archivePath, stripPrefix)
+  }
   await mkdir(destination, { recursive: true })
-  if (archivePath.endsWith('.zip')) {
+  if (zipArchive) {
     await extractZipArchive(archivePath, destination, stripPrefix)
-    await assertSafeExtractedArchiveLinks(destination)
+    await assertExtractedLinksStayInsideRoot(destination)
     return
   }
   const args = ['-xf', archivePath, '-C', destination]
@@ -4766,130 +4942,7 @@ async function extractArchive(
     args.push('--strip-components', '1')
   }
   await runCommand('tar', args)
-  await assertSafeExtractedArchiveLinks(destination)
-}
-
-interface TarLinkEntry {
-  path: string
-  target: string
-  type: 'hard' | 'symbolic'
-}
-
-async function assertSafeTarArchive(
-  archivePath: string,
-  stripPrefix?: string | null,
-): Promise<void> {
-  const entries = await runCommandOutput('tar', ['-tf', archivePath])
-  for (const entry of entries.split(/\r?\n/)) {
-    if (!entry) continue
-    if (entry.startsWith('/') || entry.split('/').includes('..')) {
-      throw new Error(`Archive entry escapes destination: ${entry}`)
-    }
-  }
-  const verboseEntries = await runCommandOutput('tar', ['-tvf', archivePath])
-  for (const link of parseTarLinkEntries(verboseEntries)) {
-    const linkPath = stripArchivePath(link.path, stripPrefix)
-    if (link.type === 'hard') {
-      assertSafeArchivePath(stripArchivePath(link.target, stripPrefix))
-      continue
-    }
-    assertSafeArchiveLinkTarget(linkPath, link.target)
-  }
-}
-
-function parseTarLinkEntries(verboseEntries: string): TarLinkEntry[] {
-  const links: TarLinkEntry[] = []
-  for (const entry of verboseEntries.split(/\r?\n/)) {
-    const type = entry[0]
-    if (type !== 'l' && type !== 'h') continue
-    const timestamp = entry.match(/\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+/)
-    if (!timestamp || timestamp.index === undefined) {
-      throw new Error('Archive contains unsupported link entry')
-    }
-    const payload = entry.slice(timestamp.index + timestamp[0].length).trim()
-    const marker = type === 'l' ? ' -> ' : ' link to '
-    const markerIndex = payload.lastIndexOf(marker)
-    if (markerIndex <= 0) throw new Error('Archive contains unsupported link entry')
-    const path = payload.slice(0, markerIndex).trim()
-    const target = payload.slice(markerIndex + marker.length).trim()
-    if (!path || !target) throw new Error('Archive contains unsupported link entry')
-    links.push({
-      path,
-      target,
-      type: type === 'l' ? 'symbolic' : 'hard',
-    })
-  }
-  return links
-}
-
-function stripArchivePath(path: string, stripPrefix?: string | null): string {
-  if (!stripPrefix) return path
-  return path.split('/').filter(Boolean).slice(1).join('/')
-}
-
-function assertSafeArchivePath(path: string): void {
-  if (
-    !path ||
-    posixPath.isAbsolute(path) ||
-    path.split('/').includes('..') ||
-    path.includes('\\')
-  ) {
-    throw new Error('Archive contains unsupported link entry')
-  }
-}
-
-function assertSafeArchiveLinkTarget(linkPath: string, target: string): void {
-  if (posixPath.isAbsolute(target)) {
-    throw unsupportedArchiveLinkError(linkPath, target)
-  }
-  const resolvedTarget = posixPath.normalize(
-    posixPath.join(posixPath.dirname(linkPath), target),
-  )
-  if (
-    !resolvedTarget ||
-    resolvedTarget === '..' ||
-    resolvedTarget.startsWith('../') ||
-    resolvedTarget.startsWith('/') ||
-    resolvedTarget.includes('\\')
-  ) {
-    throw unsupportedArchiveLinkError(linkPath, target)
-  }
-}
-
-function unsupportedArchiveLinkError(linkPath: string, target: string): Error {
-  return new Error(`Archive contains unsupported link entry: ${linkPath} -> ${target}`)
-}
-
-async function assertSafeExtractedArchiveLinks(
-  root: string,
-  directory = root,
-): Promise<void> {
-  const entries = await readdir(directory, { withFileTypes: true })
-  for (const entry of entries) {
-    const path = join(directory, entry.name)
-    const stats = await lstat(path)
-    if (stats.isSymbolicLink()) {
-      const target = await readlink(path)
-      const relativePath = relative(root, path).split(sep).join('/')
-      assertSafeArchiveLinkTarget(relativePath, target)
-      const resolvedTarget = resolve(dirname(path), target)
-      const relativeTarget = relative(root, resolvedTarget)
-      if (isAbsolute(relativeTarget) || isRelativePathOutsideRoot(relativeTarget)) {
-        throw unsupportedArchiveLinkError(relativePath, target)
-      }
-      const canonicalTarget = await realpath(resolvedTarget).catch(() => null)
-      if (canonicalTarget) {
-        const canonicalRelativeTarget = relative(root, canonicalTarget)
-        if (
-          isAbsolute(canonicalRelativeTarget) ||
-          isRelativePathOutsideRoot(canonicalRelativeTarget)
-        ) {
-          throw unsupportedArchiveLinkError(relativePath, target)
-        }
-      }
-    }
-    if (stats.isDirectory()) await assertSafeExtractedArchiveLinks(root, path)
-  }
+  await assertExtractedLinksStayInsideRoot(destination)
 }
 
 async function replaceDirectoryWithRollback(
@@ -4940,6 +4993,27 @@ async function replaceDirectoryWithRollback(
         error instanceof Error ? error.message : String(error),
       )
     })
+  }
+}
+
+async function assertExtractedLinksStayInsideRoot(
+  root: string,
+  relativeDirectory = '',
+): Promise<void> {
+  const entries = await readdir(root, { withFileTypes: true })
+  for (const entry of entries) {
+    const relativePath = relativeDirectory
+      ? `${relativeDirectory}/${entry.name}`
+      : entry.name
+    const path = join(root, entry.name)
+    const stats = await lstat(path)
+    if (stats.isSymbolicLink()) {
+      assertLinkTargetInsideExtractRoot(relativePath, await readlink(path))
+      continue
+    }
+    if (stats.isDirectory()) {
+      await assertExtractedLinksStayInsideRoot(path, relativePath)
+    }
   }
 }
 
