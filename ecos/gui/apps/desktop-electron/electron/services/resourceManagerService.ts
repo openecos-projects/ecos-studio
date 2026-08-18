@@ -3017,10 +3017,15 @@ function posixArchivePath(value: string): string {
 }
 
 function isAbsoluteArchiveTarget(target: string): boolean {
-  return posix.isAbsolute(target) || target.startsWith('/') || /^[A-Za-z]:[\\/]/.test(target)
+  return (
+    posix.isAbsolute(target) || target.startsWith('/') || /^[A-Za-z]:[\\/]/.test(target)
+  )
 }
 
-function stripArchivePrefix(memberPath: string, stripPrefix?: string | null): string | null {
+function stripArchivePrefix(
+  memberPath: string,
+  stripPrefix?: string | null,
+): string | null {
   const normalized = posixArchivePath(memberPath)
   if (!normalized || normalized === '.') return null
   if (!stripPrefix) return normalized
@@ -3077,7 +3082,12 @@ function assertLinkTargetInsideExtractRoot(
   if (strippedMember === null) {
     throw new Error(linkTargetOutsideExtractRootMessage(target))
   }
-  const resolved = resolveArchiveLinkTarget(strippedMember, target, stripPrefix, targetKind)
+  const resolved = resolveArchiveLinkTarget(
+    strippedMember,
+    target,
+    stripPrefix,
+    targetKind,
+  )
   if (!lexicalPathInsideExtractRoot(resolved)) {
     throw new Error(linkTargetOutsideExtractRootMessage(target))
   }
@@ -3150,10 +3160,9 @@ async function assertSafeZipArchive(
     if (memberPath) symlinkNames.push(memberPath)
   }
   for (const memberPath of symlinkNames) {
-    const target = (await runCommandOutput('unzip', ['-p', archivePath, memberPath])).replace(
-      /\r?\n$/,
-      '',
-    )
+    const target = (
+      await runCommandOutput('unzip', ['-p', archivePath, memberPath])
+    ).replace(/\r?\n$/, '')
     assertLinkTargetInsideExtractRoot(memberPath, target, stripPrefix)
   }
 }

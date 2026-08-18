@@ -45,13 +45,18 @@ async function runFixtureCommand(
   options: { cwd?: string } = {},
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = execFile(command, args, { cwd: options.cwd }, (error, _stdout, stderr) => {
-      if (error) {
-        reject(new Error(`${command} failed: ${stderr || error.message}`))
-        return
-      }
-      resolve()
-    })
+    const child = execFile(
+      command,
+      args,
+      { cwd: options.cwd },
+      (error, _stdout, stderr) => {
+        if (error) {
+          reject(new Error(`${command} failed: ${stderr || error.message}`))
+          return
+        }
+        resolve()
+      },
+    )
     child.on('error', reject)
   })
 }
