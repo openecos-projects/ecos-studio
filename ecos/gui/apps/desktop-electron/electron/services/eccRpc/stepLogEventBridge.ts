@@ -114,8 +114,17 @@ export class StepLogEventBridge {
       this.lastSequence = event.sequence
     }
     if (event.type === 'operation.started') {
-      // A terminal event still queued belongs to the previous operation and
-      // must reach the fanout before the new operation's start.
+      // The previous operation's leftovers resolve before this start: its
+      // held step.completed releases now (ecc only allows a new operation
+      // after the previous one went terminal, so that end marker can no
+      // longer arrive), then its queued terminal event forwards.
+      const held = this.heldCompleted
+      if (held) {
+        this.heldCompleted = null
+        clearTimeout(held.timer)
+        this.archiver.abandonActiveStep()
+        this.releaseStepCompleted(held)
+      }
       const staleTerminal = this.pendingTerminal
       if (staleTerminal) {
         this.pendingTerminal = null

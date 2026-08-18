@@ -694,4 +694,69 @@ describe('StepLogEventBridge', () => {
     expect(completedAfter).toHaveLength(2)
     expect(completedAfter[1]!.payload.finalLog).toBe('attempt two\n')
   })
+
+  it('resolves a held completion and queued terminal before a new operation starts', () => {
+    const h = harness()
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h)
+    startStep(h, 'Synthesis', 'yosys')
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('failed output\n'))
+
+    // The step's completion is held (no end marker yet) and the terminal
+    // event queues behind it.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Imcomplete' },
+        { sequence: 3 },
+      ),
+      h.forward,
+    )
+    h.bridge.handleProtocolEvent(
+      protocolEvent('operation.failed', { error: { message: 'x' } }, { sequence: 4 }),
+      h.forward,
+    )
+    expect(h.forwarded.map((event) => event.type)).toEqual([
+      'operation.started',
+      'step.started',
+    ])
+
+    // ecc allows a new operation once the previous one is terminal: its
+    // start must first resolve the leftover hold and terminal in order.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'operation.started',
+        {},
+        {
+          operationId: 'operation-2',
+          runSessionId: 'run-session-2',
+          sequence: 5,
+        },
+      ),
+      h.forward,
+    )
+    expect(h.forwarded.map((event) => event.type)).toEqual([
+      'operation.started',
+      'step.started',
+      'step.completed',
+      'operation.failed',
+      'operation.started',
+    ])
+    expect(h.forwarded[2]!.payload.finalLog).toBe('failed output\n')
+    expect(h.forwarded[4]!.operationId).toBe('operation-2')
+
+    // The new operation's markers start a fresh archive attempt.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 6 },
+      ),
+      h.forward,
+    )
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('fresh run\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    expect(h.archiveText('Synthesis', 'yosys')).toBe('fresh run\n')
+    expect(h.emitted.at(-1)?.operationId).toBe('operation-2')
+  })
 })
