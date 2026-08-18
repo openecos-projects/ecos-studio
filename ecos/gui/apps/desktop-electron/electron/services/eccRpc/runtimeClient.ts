@@ -1,3 +1,5 @@
+import type { StepLogArchiver } from './stepLogArchiver'
+
 export interface EccRpcRuntimeClient {
   call<T>(
     method: string,
@@ -9,6 +11,8 @@ export interface EccRpcRuntimeClient {
 export interface EccRpcRuntimeSidecar {
   logFile: string | null
   relocateLogFileFrom?(workspaceDirectory: string | null): void
+  attachStepLogArchiver?(archiver: StepLogArchiver): void
+  appendStderrText?(text: string): void
   shutdown(): Promise<void>
   start(): Promise<EccRpcRuntimeClient>
 }

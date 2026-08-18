@@ -171,7 +171,11 @@ export class StepLogArchiver {
     for (const ref of steps) {
       keys.add(stepLogKey(ref.step, ref.tool))
     }
-    this.allowlist = keys
+    this.refreshAllowlistKeys(keys)
+  }
+
+  refreshAllowlistKeys(keys: Iterable<string>): void {
+    this.allowlist = new Set(keys)
   }
 
   feed(chunk: Buffer): void {

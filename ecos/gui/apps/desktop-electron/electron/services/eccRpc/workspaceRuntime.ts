@@ -18,6 +18,7 @@ import type {
   EccRuntimeEvent,
   EccRuntimeOperation,
   EccRuntimeOperationRequest,
+  EccRuntimeProtocolPayload,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccRuntimeStepRenderedAckRequest,
@@ -48,6 +49,7 @@ import {
 } from './runtimeOperationTracker'
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 import { RuntimeSidecarLifecycle } from './runtimeSidecarLifecycle'
+import { StepLogEventBridge } from './stepLogEventBridge'
 import {
   WorkspaceRuntimeCommands,
   type EccWorkspaceSessionResult,
@@ -98,6 +100,7 @@ export class EccWorkspaceRuntime {
   private queue = Promise.resolve()
   private ready = false
   private boundDirectory: string | null
+  private stepLogBridge: StepLogEventBridge | null = null
 
   constructor(private readonly options: EccWorkspaceRuntimeOptions) {
     this.boundDirectory = options.directory
@@ -106,6 +109,20 @@ export class EccWorkspaceRuntime {
       (event) => this.handleSidecarEvent(event),
       (notification) => this.handleNotification(notification),
     )
+    if (this.boundDirectory && typeof this.sidecar.attachStepLogArchiver === 'function') {
+      this.stepLogBridge = new StepLogEventBridge({
+        workspaceDirectory: this.boundDirectory,
+        emitProtocolEvent: (event) => this.emitProtocolEvent(event),
+        emitUnscoped: (text) => {
+          if (typeof this.sidecar.appendStderrText === 'function') {
+            this.sidecar.appendStderrText(text)
+            return
+          }
+          this.handleSidecarEvent({ text, type: 'runtime.stderr' })
+        },
+      })
+      this.sidecar.attachStepLogArchiver(this.stepLogBridge.archiver)
+    }
     this.sidecarLifecycle = new RuntimeSidecarLifecycle({
       captureFinalSnapshot: async (workspaceId) => {
         const client = this.client
@@ -232,7 +249,10 @@ export class EccWorkspaceRuntime {
   }
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
-    return this.commands.openWorkspace(request)
+    return this.commands.openWorkspace(request).then((result) => {
+      this.stepLogBridge?.refreshAllowlist()
+      return result
+    })
   }
 
   closeWorkspace(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult> {
@@ -573,6 +593,7 @@ export class EccWorkspaceRuntime {
 
   private handleSidecarEvent(event: EccRuntimeEvent): void {
     if (event.type === 'runtime.exited') {
+      this.stepLogBridge?.handleSidecarClose()
       this.client = null
       this.ready = false
       this.helloResult = null
@@ -620,7 +641,6 @@ export class EccWorkspaceRuntime {
     const terminalAlreadyRecorded = this.operationTracker.hasTerminalOperation(
       protocolEvent.operationId,
     )
-    const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     const isTerminal = this.operationTracker.track(protocolEvent)
     if (
       protocolEvent.type === 'operation.completed' &&
@@ -640,6 +660,16 @@ export class EccWorkspaceRuntime {
     ) {
       this.sidecarLifecycle.retainFailedOperationForDiagnostics()
     }
+    const forward = (event: EccRuntimeProtocolPayload) => this.emitProtocolEvent(event)
+    if (this.stepLogBridge) {
+      this.stepLogBridge.handleProtocolEvent(protocolEvent, forward)
+      return
+    }
+    forward(protocolEvent)
+  }
+
+  private emitProtocolEvent(protocolEvent: EccRuntimeProtocolPayload): void {
+    const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     this.emit({
       event: protocolEvent,
       type: 'runtime.protocol',
