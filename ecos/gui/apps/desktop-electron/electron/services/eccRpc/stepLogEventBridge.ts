@@ -54,6 +54,10 @@ interface PendingTerminalEvent {
   forward: (event: EccRuntimeProtocolPayload) => void
 }
 
+interface HeldTerminalEvent extends PendingTerminalEvent {
+  timer: NodeJS.Timeout
+}
+
 export interface StepLogEventBridgeOptions {
   workspaceDirectory: string
   emitProtocolEvent: (event: EccRuntimeProtocolPayload) => void
@@ -76,6 +80,7 @@ export class StepLogEventBridge {
   private readonly completedStepCounts = new Map<string, number>()
   private heldCompleted: HeldStepCompleted | null = null
   private pendingTerminal: PendingTerminalEvent | null = null
+  private heldTerminal: HeldTerminalEvent | null = null
 
   constructor(private readonly options: StepLogEventBridgeOptions) {
     this.holdTimeoutMs = options.holdTimeoutMs ?? DEFAULT_HOLD_TIMEOUT_MS
@@ -125,6 +130,15 @@ export class StepLogEventBridge {
         this.archiver.abandonActiveStep()
         this.releaseStepCompleted(held)
       }
+      const heldTerminal = this.heldTerminal
+      if (heldTerminal) {
+        this.heldTerminal = null
+        clearTimeout(heldTerminal.timer)
+        this.archiver.abandonActiveStep()
+        this.bufferedSegments.clear()
+        this.operationContext = null
+        heldTerminal.forward(heldTerminal.event)
+      }
       const staleTerminal = this.pendingTerminal
       if (staleTerminal) {
         this.pendingTerminal = null
@@ -160,6 +174,31 @@ export class StepLogEventBridge {
         // RPC channel races the stderr stream (a failed step does not wait
         // for the render gate, so this race is routine).
         this.pendingTerminal = { event, forward }
+        return
+      }
+      if (this.archiver.activeStep) {
+        // The executor can raise after begin without ever emitting a
+        // completion or an end marker. Hold the terminal event briefly for
+        // the end marker; on timeout the stale archive is abandoned before
+        // the terminal forwards, so the next operation starts clean.
+        const held: HeldTerminalEvent = {
+          event,
+          forward,
+          timer: setTimeout(() => {
+            if (this.heldTerminal === held) {
+              this.heldTerminal = null
+              this.options.emitUnscoped(
+                `[step-log] end marker for step ${this.archiver.activeStep?.step ?? 'unknown'} did not arrive before ${event.type}; releasing after ${this.holdTimeoutMs}ms\n`,
+              )
+              this.archiver.abandonActiveStep()
+              this.bufferedSegments.clear()
+              this.operationContext = null
+              held.forward(held.event)
+            }
+          }, this.holdTimeoutMs),
+        }
+        held.timer.unref?.()
+        this.heldTerminal = held
         return
       }
       // Any segment still buffered at a terminal boundary belongs to a step
@@ -205,6 +244,12 @@ export class StepLogEventBridge {
       this.pendingTerminal = null
       pending.forward(pending.event)
     }
+    const heldTerminal = this.heldTerminal
+    if (heldTerminal) {
+      this.heldTerminal = null
+      clearTimeout(heldTerminal.timer)
+      heldTerminal.forward(heldTerminal.event)
+    }
     this.operationContext = null
     this.lastSequence = 0
     this.startedSteps.clear()
@@ -234,6 +279,16 @@ export class StepLogEventBridge {
   private handleStepEnded(ref: StepLogStepRef): void {
     const key = stepLogKey(ref.step, ref.tool)
     this.endedStepCounts.set(key, (this.endedStepCounts.get(key) ?? 0) + 1)
+    const heldTerminal = this.heldTerminal
+    if (heldTerminal) {
+      // The end marker arrived: the archive is complete and the terminal
+      // event can forward in lifecycle order.
+      this.heldTerminal = null
+      clearTimeout(heldTerminal.timer)
+      this.bufferedSegments.clear()
+      this.operationContext = null
+      heldTerminal.forward(heldTerminal.event)
+    }
     const held = this.heldCompleted
     if (
       held &&

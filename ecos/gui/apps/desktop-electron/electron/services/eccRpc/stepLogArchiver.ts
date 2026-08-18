@@ -168,6 +168,12 @@ export class StepLogArchiver {
     this.allowlist = new Set(keys)
   }
 
+  /** The currently archiving step, or null when no step is active. */
+  get activeStep(): StepLogStepRef | null {
+    const active = this.active
+    return active ? { step: active.step, tool: active.tool } : null
+  }
+
   feed(chunk: Buffer): void {
     this.buffer = Buffer.concat([this.buffer, chunk])
     this.processBuffer()
