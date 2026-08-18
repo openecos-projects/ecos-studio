@@ -5,6 +5,7 @@ import {
   importPdkPathApi,
   listResourcesApi,
   removePdkReferenceApi,
+  validatePdkApi,
 } from '@/api/plugin'
 import { hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import { useWorkspace } from './useWorkspace'
@@ -22,6 +23,11 @@ function healthValue(resource: ResourceInfo, key: string): unknown {
 
 function resourceToPdk(resource: ResourceInfo): ImportedPdk {
   const detectedFiles = healthValue(resource, 'detected_file_groups')
+  const healthStatus = healthValue(resource, 'status')
+  const status =
+    healthStatus === 'invalid' || healthStatus === 'missing'
+      ? healthStatus
+      : resource.status
   return {
     id: resource.id,
     name: resource.display_name,
@@ -37,8 +43,8 @@ function resourceToPdk(resource: ResourceInfo): ImportedPdk {
     source: resource.source,
     version: resource.installed_version ?? '',
     active: resource.active,
-    status: resource.status,
-    valid: resource.status === 'installed' || resource.status === 'update_available',
+    status,
+    valid: status === 'installed' || status === 'update_available',
     knownLayout: healthValue(resource, 'known_layout') === true,
   }
 }
@@ -160,6 +166,11 @@ export function usePdkManager() {
     await loadPdks(true)
   }
 
+  const validatePdk = async (resourceId: string): Promise<void> => {
+    await validatePdkApi(resourceId)
+    await loadPdks(true)
+  }
+
   return {
     importedPdks,
     loadPdks,
@@ -167,6 +178,7 @@ export function usePdkManager() {
     importPdkByPath,
     importPdkForResource,
     removePdk,
+    validatePdk,
     getPdkById: (id: string) => importedPdks.value.find((pdk) => pdk.id === id),
   }
 }

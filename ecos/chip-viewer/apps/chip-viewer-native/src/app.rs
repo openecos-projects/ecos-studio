@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use chip_display::{FillPattern, LayerRole, LayerStyle};
+use chip_display::{FillPattern, LayerRole, LayerStack, LayerStyle};
 use chip_render::{RenderCacheStats, RenderPlanCache, ViewTilePlaneCache};
 use chip_view_db::{
     ChipViewDb, ChipViewMemoryStats, ConnectivityMetadata, DeltaStats, GridMetadata, NearestShape,
@@ -18,7 +19,7 @@ use chipgeom_format::{
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
-use crate::map_data::{HeatmapData, MapCatalog, MapItem};
+use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FOCUS_VIEWPORT_FILL: f32 = 0.45;
@@ -142,6 +143,7 @@ struct LoadedViewer {
     analysis_tab: AnalysisTab,
     expanded_map_categories: BTreeSet<String>,
     selected_map_item: Option<PathBuf>,
+    previous_map_item: Option<(crate::map_data::MapItem, Option<PathBuf>)>,
     active_heatmap: Option<ActiveHeatmap>,
     map_item_error: Option<String>,
     map_thumbnails: BTreeMap<PathBuf, MapThumbnailState>,
@@ -154,6 +156,11 @@ struct LoadedViewer {
     ruler_tool: OrthogonalRuler,
     object_visibility: ObjectVisibility,
     coordinate_unit: CoordinateUnit,
+    view_mode: ViewMode,
+    camera3d: crate::camera3d::OrbitCamera,
+    layer_stack: LayerStack,
+    view3d_fitted: bool,
+    view3d_bootstrapped: bool,
     sidebar_info_panel: Option<SidebarInfoPanel>,
     geometry_epoch: u64,
     owner_category_cache: OwnerCategoryCache,
@@ -171,6 +178,7 @@ struct LoadedViewer {
     /// Pre-allocated string buffer for canvas/hover status lines.
     /// Re-used every frame via fmt::Write to avoid String heap allocations.
     status_line_buffer: String,
+    shortcuts_overlay_visible: bool,
 }
 
 struct LayerUiState {
@@ -232,6 +240,135 @@ struct ActiveHeatmap {
     title: String,
     data: HeatmapData,
     selected_cell: Option<(usize, usize)>,
+    colormap_mode: ColormapMode,
+    threshold: f32,
+    invert_threshold: bool,
+    opacity: f32,
+    instances: std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>>,
+    cached_hash: u64,
+}
+
+fn build_heatmap_instances(
+    data: &HeatmapData,
+    mode: ColormapMode,
+    threshold: f32,
+    invert: bool,
+) -> std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>> {
+    let pitch = data.core_pitch();
+    let mut instances = Vec::new();
+    for ((row, col), rect) in data.cells() {
+        // Skip the non-uniform boundary ring (cells mapped onto the die
+        // border); they are wider/taller than the core grid and visually
+        // "stretch" the overlay past the core on all sides.
+        if let Some((px, py)) = pitch {
+            let w = (rect.hx - rect.lx).abs();
+            let h = (rect.hy - rect.ly).abs();
+            // Core cells are highly uniform. Boundary cells deviate significantly.
+            // A 5% tolerance is enough to absorb 1-DBU rounding differences
+            // while safely dropping boundary cells (which deviate by ~25%+).
+            if (w - px).abs() * 20 > px || (h - py).abs() * 20 > py {
+                continue;
+            }
+        }
+        let Some(norm) = data.normalized_value(row, col) else {
+            continue;
+        };
+        // Transparent filtering:
+        // When not inverted: hide sub-threshold cells (norm < threshold)
+        // When inverted: hide above-threshold cells (norm > threshold) to focus on coldspots
+        let hidden = if !invert {
+            norm < threshold
+        } else {
+            norm > threshold
+        };
+        if hidden {
+            continue;
+        }
+        let [r, g, b, _] = mode.sample(norm);
+        instances.push(crate::canvas_gpu::GpuShapeInstance {
+            rect_dbu: [rect.lx, rect.ly, rect.hx, rect.hy],
+            fill_rgba: crate::canvas_gpu::pack_rgba_u32([r, g, b, 255]),
+            frame_rgba: 0,               // no outline
+            pattern_bits: (0 << 16) | 1, // shape_type=rect, pattern=solid
+            line_width_px: 0.0,
+        });
+    }
+    std::sync::Arc::new(instances)
+}
+
+impl ActiveHeatmap {
+    fn refresh_hash(&mut self) {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.colormap_mode.hash(&mut hasher);
+        self.threshold.to_bits().hash(&mut hasher);
+        self.invert_threshold.hash(&mut hasher);
+        self.title.hash(&mut hasher);
+        self.instances.len().hash(&mut hasher);
+        if let Some(first) = self.instances.first() {
+            first.rect_dbu.hash(&mut hasher);
+        }
+        if let Some(last) = self.instances.last() {
+            last.rect_dbu.hash(&mut hasher);
+        }
+        self.cached_hash = hasher.finish();
+    }
+
+    fn new(title: String, data: HeatmapData) -> Self {
+        let colormap_mode = ColormapMode::default();
+        let threshold = 0.0;
+        let invert_threshold = false;
+        let instances = build_heatmap_instances(&data, colormap_mode, threshold, invert_threshold);
+        let mut self_obj = Self {
+            title,
+            data,
+            selected_cell: None,
+            colormap_mode,
+            threshold,
+            invert_threshold,
+            opacity: 0.65,
+            instances,
+            cached_hash: 0,
+        };
+        self_obj.refresh_hash();
+        self_obj
+    }
+
+    fn set_colormap_mode(&mut self, mode: ColormapMode) {
+        if self.colormap_mode != mode {
+            self.colormap_mode = mode;
+            self.instances =
+                build_heatmap_instances(&self.data, mode, self.threshold, self.invert_threshold);
+            self.refresh_hash();
+        }
+    }
+
+    fn set_threshold(&mut self, threshold: f32) {
+        let clamped = threshold.clamp(0.0, 1.0);
+        if (self.threshold - clamped).abs() > 0.001 {
+            self.threshold = clamped;
+            self.instances = build_heatmap_instances(
+                &self.data,
+                self.colormap_mode,
+                self.threshold,
+                self.invert_threshold,
+            );
+            self.refresh_hash();
+        }
+    }
+
+    fn set_invert_threshold(&mut self, invert: bool) {
+        if self.invert_threshold != invert {
+            self.invert_threshold = invert;
+            self.instances = build_heatmap_instances(
+                &self.data,
+                self.colormap_mode,
+                self.threshold,
+                self.invert_threshold,
+            );
+            self.refresh_hash();
+        }
+    }
 }
 
 enum MapThumbnailState {
@@ -600,6 +737,12 @@ enum CoordinateUnit {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ViewMode {
+    TwoD,
+    ThreeD,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ObjectVisibility {
     instances: bool,
     net_signal: bool,
@@ -854,6 +997,10 @@ fn drawing_category_counts(db: &ChipViewDb) -> BTreeMap<DrawingCategory, usize> 
         if let Some(category) = drawing_category_for_shape(db, shape) {
             *counts.entry(category).or_insert(0) += 1;
         }
+    }
+    for guide in db.unrouted_net_guides() {
+        let category = net_kind_drawing_category(Some(&guide.net_kind));
+        *counts.entry(category).or_insert(0) += guide.pin_centers.len();
     }
     counts
 }
@@ -1867,6 +2014,7 @@ impl LoadedViewer {
             analysis_tab,
             expanded_map_categories,
             selected_map_item: None,
+            previous_map_item: None,
             active_heatmap: None,
             map_item_error: None,
             map_thumbnails: BTreeMap::new(),
@@ -1879,6 +2027,11 @@ impl LoadedViewer {
             ruler_tool: OrthogonalRuler::default(),
             object_visibility: ObjectVisibility::default(),
             coordinate_unit: CoordinateUnit::Dbu,
+            view_mode: ViewMode::TwoD,
+            camera3d: crate::camera3d::OrbitCamera::default(),
+            layer_stack: LayerStack::default(),
+            view3d_fitted: false,
+            view3d_bootstrapped: false,
             sidebar_info_panel: None,
             geometry_epoch: 1,
             owner_category_cache: OwnerCategoryCache::default(),
@@ -1890,6 +2043,7 @@ impl LoadedViewer {
             frame_valid_shapes: Vec::new(),
             frame_valid_labels: Vec::new(),
             status_line_buffer: String::with_capacity(128),
+            shortcuts_overlay_visible: false,
         }
     }
 
@@ -2139,6 +2293,39 @@ impl LoadedViewer {
             ui.colored_label(ecos_warning(), warning);
         }
 
+        if let Some(heatmap) = self.active_heatmap.as_mut() {
+            ui.add_space(4.0);
+            ui.group(|ui| {
+                ui.label(
+                    egui::RichText::new("HEATMAP OVERLAY")
+                        .small()
+                        .strong()
+                        .color(ecos_accent()),
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Colormap:");
+                    let mut current_mode = heatmap.colormap_mode;
+                    for mode in [
+                        ColormapMode::Turbo,
+                        ColormapMode::Viridis,
+                        ColormapMode::Plasma,
+                    ] {
+                        if ui
+                            .selectable_label(current_mode == mode, mode.label())
+                            .clicked()
+                        {
+                            current_mode = mode;
+                        }
+                    }
+                    heatmap.set_colormap_mode(current_mode);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Opacity:");
+                    ui.add(egui::Slider::new(&mut heatmap.opacity, 0.05..=1.0).show_value(true));
+                });
+            });
+        }
+
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
             .id_salt("chip_viewer_map_catalog_scroll")
@@ -2214,6 +2401,16 @@ impl LoadedViewer {
     }
 
     fn activate_map_item(&mut self, item: &MapItem, layout_path: Option<&Path>) {
+        if let Some(current_png) = &self.selected_map_item {
+            if current_png != &item.png_path {
+                if let Some(catalog) = &self.map_catalog {
+                    if let Some((curr_item, curr_layout)) = catalog.find_item_by_png(current_png) {
+                        self.previous_map_item =
+                            Some((curr_item.clone(), curr_layout.map(|p| p.to_path_buf())));
+                    }
+                }
+            }
+        }
         self.selected_map_item = Some(item.png_path.clone());
         self.active_heatmap = None;
         self.map_item_error = None;
@@ -2229,14 +2426,17 @@ impl LoadedViewer {
         };
         match HeatmapData::load(csv_path, layout_path) {
             Ok(data) => {
-                self.active_heatmap = Some(ActiveHeatmap {
-                    title: item.label.clone(),
-                    data,
-                    selected_cell: None,
-                });
+                self.active_heatmap = Some(ActiveHeatmap::new(item.label.clone(), data));
             }
             Err(err) => self.map_item_error = Some(err),
         }
+    }
+
+    fn toggle_previous_map_item(&mut self) {
+        let Some((prev_item, prev_layout)) = self.previous_map_item.take() else {
+            return;
+        };
+        self.activate_map_item(&prev_item, prev_layout.as_deref());
     }
 
     fn map_thumbnail_id(&mut self, ctx: &egui::Context, path: &Path) -> Option<egui::TextureId> {
@@ -2367,11 +2567,36 @@ impl LoadedViewer {
             });
         });
         ui.horizontal(|ui| {
+            for (mode, label) in [(ViewMode::TwoD, "2D"), (ViewMode::ThreeD, "3D")] {
+                if ui
+                    .selectable_label(self.view_mode == mode, label)
+                    .on_hover_text(if mode == ViewMode::ThreeD {
+                        "Orbit the extruded metal stack"
+                    } else {
+                        "Plan-view layout canvas"
+                    })
+                    .clicked()
+                {
+                    if self.view_mode != mode {
+                        self.view_mode = mode;
+                        self.pan_drag.reset();
+                        self.focus_animation = None;
+                        if mode == ViewMode::ThreeD {
+                            self.view3d_fitted = false;
+                        }
+                    }
+                }
+            }
+            ui.separator();
             if ui.button("⛶").on_hover_text("Fit layout to view").clicked() {
                 self.focus_animation = None;
-                self.zoom = 1.0;
-                self.pan = egui::Vec2::ZERO;
                 self.pan_drag.reset();
+                if self.view_mode == ViewMode::ThreeD {
+                    self.view3d_fitted = false;
+                } else {
+                    self.zoom = 1.0;
+                    self.pan = egui::Vec2::ZERO;
+                }
             }
             let can_reload = self.pending_edit.is_none() && self.draft.is_none();
             if ui
@@ -2406,7 +2631,54 @@ impl LoadedViewer {
                     ui.selectable_value(&mut self.coordinate_unit, unit, unit.label());
                 });
             }
+            ui.separator();
+            if ui
+                .add_sized(
+                    egui::vec2(28.0, 26.0),
+                    egui::Button::new(
+                        egui::RichText::new("?")
+                            .strong()
+                            .size(13.0)
+                            .color(ecos_accent()),
+                    )
+                    .selected(self.shortcuts_overlay_visible),
+                )
+                .on_hover_text("Keyboard Shortcuts (?)")
+                .clicked()
+            {
+                self.shortcuts_overlay_visible = !self.shortcuts_overlay_visible;
+            }
         });
+        if self.view_mode == ViewMode::ThreeD {
+            ui.horizontal(|ui| {
+                if ui
+                    .small_button("Iso")
+                    .on_hover_text("Isometric camera")
+                    .clicked()
+                {
+                    self.camera3d.set_iso();
+                }
+                if ui
+                    .small_button("Top")
+                    .on_hover_text("Look down from +Z")
+                    .clicked()
+                {
+                    self.camera3d.set_top();
+                }
+                if ui
+                    .small_button("Front")
+                    .on_hover_text("Look across the stack")
+                    .clicked()
+                {
+                    self.camera3d.set_front();
+                }
+            });
+            ui.add(
+                egui::Slider::new(&mut self.camera3d.z_scale, 0.05..=6.0)
+                    .logarithmic(true)
+                    .text("Z-scale"),
+            );
+        }
     }
 
     fn sidebar_physical_layers_section(&mut self, ui: &mut egui::Ui, max_height: f32) {
@@ -2807,6 +3079,59 @@ impl LoadedViewer {
         nearest_orthogonal_edge_snap(anchor, pointer, &rects, radius)
     }
 
+    fn paint_gpu_heatmap_overlay(&self, ui: &mut egui::Ui, canvas: egui::Rect, world: Rect32) {
+        if self.analysis_tab != AnalysisTab::Map {
+            return;
+        }
+        let Some(heatmap) = self.active_heatmap.as_ref() else {
+            return;
+        };
+        if heatmap.instances.is_empty() {
+            return;
+        }
+
+        let scale = world_to_screen_scale(world, canvas, self.zoom);
+        let uniform = crate::canvas_gpu::CanvasUniform {
+            world_center_dbu: [
+                (world.lx + world.hx) as f32 * 0.5,
+                (world.ly + world.hy) as f32 * 0.5,
+            ],
+            canvas_center_px: [
+                canvas.width() * 0.5 + self.pan.x,
+                canvas.height() * 0.5 + self.pan.y,
+            ],
+            scale_px_per_dbu: scale,
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            pattern_min_size_px: crate::canvas_gpu::PATTERN_MIN_SIZE_PX,
+            min_shape_screen_size: crate::canvas_gpu::MIN_SHAPE_SCREEN_SIZE,
+            screen_size_px: [canvas.width(), canvas.height()],
+            is_interacting: 0.0,
+            global_alpha: heatmap.opacity,
+        };
+
+        // Dedicated cache key so the instance buffer is uploaded once per heatmap edit.
+        // opacity changes only modify `global_alpha` in uniform, preserving the cache.
+        let buffer_key = crate::canvas_gpu::GpuBufferKey {
+            geometry_epoch: self.geometry_epoch,
+            tile_x: i32::MIN,
+            tile_y: i32::MIN,
+            zoom_tier: 0,
+            layer_visibility_hash: heatmap.cached_hash,
+            object_visibility_bits: 0,
+        };
+
+        let callback = crate::canvas_gpu::HeatmapGpuCallback {
+            uniform,
+            instances: std::sync::Arc::clone(&heatmap.instances),
+            buffer_key,
+            frame_counter: self.gpu_frame_counter,
+            target_format: self.gpu_canvas.target_format,
+        };
+
+        ui.painter()
+            .add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
+    }
+
     fn canvas(&mut self, ui: &mut egui::Ui) {
         let canvas_start = Instant::now();
         let mut query_duration = Duration::ZERO;
@@ -2849,6 +3174,20 @@ impl LoadedViewer {
             );
             return;
         };
+
+        if self.view_mode == ViewMode::ThreeD {
+            self.canvas_3d(
+                ui,
+                &response,
+                canvas,
+                &painter,
+                pointer_over_layout,
+                pointer_over_heatmap,
+                drag_started_in_canvas,
+                world,
+            );
+            return;
+        }
 
         if response.hovered() && !pointer_over_heatmap {
             let raw_scroll_delta_y = ui.ctx().input(|input| input.raw_scroll_delta.y);
@@ -2946,8 +3285,100 @@ impl LoadedViewer {
             self.pan_drag.reset();
         }
 
-        if self.ruler_tool.enabled && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            self.ruler_tool.clear();
+        if !ui.ctx().wants_keyboard_input() {
+            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                if self.shortcuts_overlay_visible {
+                    self.shortcuts_overlay_visible = false;
+                } else if self.ruler_tool.enabled {
+                    self.ruler_tool.clear();
+                } else if self.selected.is_some()
+                    || !self.highlighted.is_empty()
+                    || self.selected_drc.is_some()
+                    || self.selected_antenna.is_some()
+                    || self.selected_map_bbox.is_some()
+                {
+                    self.selected = None;
+                    self.highlighted.clear();
+                    self.selected_drc = None;
+                    self.selected_antenna = None;
+                    self.selected_map_bbox = None;
+                }
+            }
+            if ui.input(|input| {
+                input.key_pressed(egui::Key::F) || input.key_pressed(egui::Key::Home)
+            }) {
+                self.focus_animation = None;
+                self.zoom = 1.0;
+                self.pan = egui::Vec2::ZERO;
+                self.pan_drag.reset();
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Z)) {
+                if let Some(shape_id) = self.selected {
+                    if let Some(shape) = self.db.find_shape(shape_id) {
+                        self.pending_focus = Some(PendingFocus {
+                            bbox: shape.bbox,
+                            select_shape_id: Some(shape_id),
+                            transition: FocusTransition::Animated,
+                        });
+                    }
+                } else if let Some(bbox) = self.selected_map_bbox {
+                    self.pending_focus = Some(PendingFocus {
+                        bbox: contextual_map_focus_bbox(bbox),
+                        select_shape_id: None,
+                        transition: FocusTransition::Animated,
+                    });
+                } else if let Some(drc_id) = self.selected_drc {
+                    if let Some(overlay) = &self.drc_overlay {
+                        if let Some(v) = overlay.violations.iter().find(|v| v.id == drc_id) {
+                            self.pending_focus = Some(PendingFocus {
+                                bbox: contextual_map_focus_bbox(v.bbox),
+                                select_shape_id: None,
+                                transition: FocusTransition::Animated,
+                            });
+                        }
+                    }
+                } else if !self.highlighted.is_empty() {
+                    self.focus_highlighted_shapes();
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::K) || input.key_pressed(egui::Key::R))
+            {
+                self.ruler_tool.toggle();
+                self.pan_drag.reset();
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Space)) {
+                if self.analysis_tab == AnalysisTab::Map || self.active_heatmap.is_some() {
+                    self.toggle_previous_map_item();
+                }
+            }
+            if ui.input(|input| {
+                input.key_pressed(egui::Key::Questionmark) || input.key_pressed(egui::Key::F1)
+            }) {
+                self.shortcuts_overlay_visible = !self.shortcuts_overlay_visible;
+            }
+            if ui.input(|input| {
+                (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(egui::Key::F)
+            }) || ui.input(|input| input.key_pressed(egui::Key::Slash))
+            {
+                self.sidebar_info_panel = None;
+                self.query_input_mode = QueryInputMode::Search;
+            }
+            if ui.input(|input| {
+                input.key_pressed(egui::Key::Plus) || input.key_pressed(egui::Key::Equals)
+            }) {
+                let center = canvas.center();
+                let (new_zoom, new_pan) =
+                    zoom_at_screen_pos(world, canvas, self.zoom, self.pan, 1.25, center);
+                self.zoom = new_zoom;
+                self.pan = new_pan;
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Minus)) {
+                let center = canvas.center();
+                let (new_zoom, new_pan) =
+                    zoom_at_screen_pos(world, canvas, self.zoom, self.pan, 0.8, center);
+                self.zoom = new_zoom;
+                self.pan = new_pan;
+            }
         }
         let interaction_point = response
             .interact_pointer_pos()
@@ -3067,6 +3498,8 @@ impl LoadedViewer {
                 query_duration += query_start.elapsed();
             }
 
+            self.paint_gpu_heatmap_overlay(ui, canvas, world);
+
             if self.gpu_canvas.enabled {
                 let gpu_start = Instant::now();
 
@@ -3094,7 +3527,7 @@ impl LoadedViewer {
                     min_shape_screen_size: crate::canvas_gpu::MIN_SHAPE_SCREEN_SIZE,
                     screen_size_px: [canvas.width(), canvas.height()],
                     is_interacting: if is_interacting { 1.0 } else { 0.0 },
-                    pad: 0.0,
+                    global_alpha: 1.0,
                 };
 
                 let tiles = crate::canvas_gpu::tile_coords_for_bbox(
@@ -3588,6 +4021,21 @@ impl LoadedViewer {
                 self.db.snapshot().manifest().dbu_per_micron,
                 hover_nearest,
             );
+            if self.analysis_tab == AnalysisTab::Map {
+                if let Some(heatmap) = &self.active_heatmap {
+                    if let Some((row, col)) = heatmap.data.cell_at_world_point(point) {
+                        if let Some(val) = heatmap.data.value(row, col) {
+                            let _ = std::fmt::Write::write_fmt(
+                                &mut self.status_line_buffer,
+                                format_args!(
+                                    " | Heatmap: {} (Row {row}, Col {col})",
+                                    format_map_value(val)
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
             painter.text(
                 canvas.left_top() + egui::vec2(10.0, 28.0),
                 egui::Align2::LEFT_TOP,
@@ -3654,7 +4102,10 @@ impl LoadedViewer {
         let selected_cell = heatmap.selected_cell;
         let (_, grid_size) = map_heatmap_layout(canvas, rows, columns);
         let mut close_requested = false;
+        let mut focus_peak_requested = false;
         let mut clicked_cell = None;
+        let mut updated_threshold = None;
+        let mut updated_invert = None;
         let ctx = ui.ctx().clone();
 
         egui::Area::new(egui::Id::new("chip_viewer_map_heatmap_popup"))
@@ -3706,7 +4157,15 @@ impl LoadedViewer {
                             let (grid_rect, response) =
                                 ui.allocate_exact_size(grid_size, egui::Sense::click());
                             let painter = ui.painter_at(grid_rect);
-                            paint_heatmap_grid(&painter, grid_rect, &heatmap.data, selected_cell);
+                            paint_heatmap_grid(
+                                &painter,
+                                grid_rect,
+                                &heatmap.data,
+                                selected_cell,
+                                heatmap.colormap_mode,
+                                heatmap.threshold,
+                                heatmap.invert_threshold,
+                            );
                             let hovered_cell = response.hover_pos().and_then(|pos| {
                                 interactive_heatmap_cell_at(pos, grid_rect, &heatmap.data)
                             });
@@ -3755,9 +4214,45 @@ impl LoadedViewer {
                                     .color(ecos_text_secondary()),
                             );
                         }
-                        paint_heatmap_legend(ui, heatmap.data.min(), heatmap.data.max());
+                        let mut new_threshold = heatmap.threshold;
+                        let mut new_invert = heatmap.invert_threshold;
+                        let (thresh_chg, inv_chg, peak_req) = paint_heatmap_legend(
+                            ui,
+                            heatmap.data.min(),
+                            heatmap.data.max(),
+                            heatmap.colormap_mode,
+                            &mut new_threshold,
+                            &mut new_invert,
+                        );
+                        if thresh_chg {
+                            updated_threshold = Some(new_threshold);
+                        }
+                        if inv_chg {
+                            updated_invert = Some(new_invert);
+                        }
+                        if peak_req {
+                            focus_peak_requested = true;
+                        }
                     });
             });
+
+        if let Some(threshold) = updated_threshold {
+            if let Some(heatmap) = self.active_heatmap.as_mut() {
+                heatmap.set_threshold(threshold);
+            }
+        }
+        if let Some(invert) = updated_invert {
+            if let Some(heatmap) = self.active_heatmap.as_mut() {
+                heatmap.set_invert_threshold(invert);
+            }
+        }
+        if focus_peak_requested {
+            if let Some(heatmap) = self.active_heatmap.as_ref() {
+                clicked_cell = heatmap
+                    .data
+                    .next_peak_cell(heatmap.selected_cell, heatmap.invert_threshold);
+            }
+        }
 
         if close_requested {
             self.active_heatmap = None;
@@ -3846,6 +4341,450 @@ impl LoadedViewer {
                             });
                     });
             });
+    }
+
+    fn canvas_3d(
+        &mut self,
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        canvas: egui::Rect,
+        painter: &egui::Painter,
+        pointer_over_layout: bool,
+        pointer_over_heatmap: bool,
+        drag_started_in_canvas: bool,
+        world: Rect32,
+    ) {
+        self.ensure_3d_view(world, canvas);
+
+        if let Some(focus) = self.pending_focus.take() {
+            let span = ((focus.bbox.hx - focus.bbox.lx).max(focus.bbox.hy - focus.bbox.ly) as f32)
+                .max(1.0);
+            self.camera3d.focus_xy(
+                (focus.bbox.lx + focus.bbox.hx) as f32 * 0.5,
+                (focus.bbox.ly + focus.bbox.hy) as f32 * 0.5,
+                span,
+                self.layer_stack.height(),
+            );
+            self.selected = focus.select_shape_id;
+            self.pan_drag.reset();
+        }
+
+        let pointer_over_zoom_target = !pointer_over_heatmap
+            && ui.ctx().input(|input| {
+                input
+                    .pointer
+                    .hover_pos()
+                    .is_some_and(|pos| canvas.contains(pos) || response.rect.contains(pos))
+            });
+        if pointer_over_zoom_target {
+            let (scroll_y, pinch_zoom) = ui.ctx().input(|input| {
+                let scroll_y = if input.raw_scroll_delta.y.abs() > f32::EPSILON {
+                    input.raw_scroll_delta.y
+                } else {
+                    input.smooth_scroll_delta.y
+                };
+                (scroll_y, input.zoom_delta())
+            });
+            let zoom_factor = if scroll_y.abs() > f32::EPSILON {
+                scroll_zoom_factor(scroll_y)
+            } else {
+                pinch_zoom
+            };
+            if (zoom_factor - 1.0).abs() > f32::EPSILON {
+                let pivot = ui
+                    .ctx()
+                    .input(|input| input.pointer.hover_pos())
+                    .and_then(|pos| {
+                        self.camera3d
+                            .ray_from_screen(
+                                [pos.x, pos.y],
+                                [canvas.left(), canvas.top()],
+                                [canvas.width(), canvas.height()],
+                            )
+                            .and_then(|ray| {
+                                ray.intersect_z_plane(self.camera3d.target.z)
+                                    .or_else(|| ray.intersect_z_plane(0.0))
+                            })
+                    });
+                self.camera3d
+                    .zoom_toward(1.0 / zoom_factor.max(0.05), pivot);
+                ui.ctx().input_mut(|input| {
+                    input.raw_scroll_delta.y = 0.0;
+                    input.smooth_scroll_delta.y = 0.0;
+                });
+                self.pan_drag.reset();
+                ui.ctx().request_repaint();
+            }
+        }
+
+        if response.drag_started() && drag_started_in_canvas && !pointer_over_heatmap {
+            let mode = if response.drag_started_by(egui::PointerButton::Middle)
+                || response.drag_started_by(egui::PointerButton::Secondary)
+            {
+                Some(CanvasDragMode::Edit)
+            } else if response.drag_started_by(egui::PointerButton::Primary) {
+                Some(CanvasDragMode::Pan)
+            } else {
+                None
+            };
+            if let Some(mode) = mode {
+                self.pan_drag.start(mode);
+            }
+        }
+        if response.dragged() && !pointer_over_heatmap {
+            let delta = response.drag_delta();
+            match self.pan_drag.mode() {
+                Some(CanvasDragMode::Edit) => {
+                    self.camera3d.orbit(delta.x * 0.008, -delta.y * 0.008);
+                    ui.ctx().request_repaint();
+                }
+                Some(CanvasDragMode::Pan) => {
+                    self.camera3d.pan(delta.x, delta.y);
+                    ui.ctx().request_repaint();
+                }
+                _ => {}
+            }
+        }
+        if response.drag_stopped() {
+            self.pan_drag.reset();
+        }
+
+        let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
+        if response.clicked_by(egui::PointerButton::Primary) && pointer_over_layout {
+            self.selected = response
+                .interact_pointer_pos()
+                .and_then(|pos| self.pick_shape_at_3d(pos, canvas, world, &query_layer_ids));
+        }
+
+        if pointer_over_layout {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+
+        let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
+        let viewport = crate::canvas_gpu3d::query_rect_for_camera(self.camera3d, world, aspect);
+        let instances =
+            std::sync::Arc::new(self.build_3d_instances(world, viewport, &query_layer_ids));
+        let drawn = instances.len();
+
+        if !self.gpu_canvas.enabled || self.gpu_canvas.failed {
+            painter.text(
+                canvas.center(),
+                egui::Align2::CENTER_CENTER,
+                "3D view requires the GPU canvas",
+                egui::FontId::proportional(14.0),
+                ecos_text_secondary(),
+            );
+        } else {
+            let pixels_per_point = ui.ctx().pixels_per_point();
+            let callback = crate::canvas_gpu3d::CanvasGpu3dCallback {
+                uniform: crate::canvas_gpu3d::CanvasUniform3d::from_camera(self.camera3d, aspect),
+                instances,
+                target_pixels: [
+                    (canvas.width() * pixels_per_point).round().max(1.0) as u32,
+                    (canvas.height() * pixels_per_point).round().max(1.0) as u32,
+                ],
+                target_format: self.gpu_canvas.target_format,
+            };
+            ui.painter()
+                .add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
+        }
+
+        self.status_line_buffer.clear();
+        use std::fmt::Write as _;
+        let using_overview_tiles = crate::canvas_gpu3d::use_overview_slabs(self.camera3d, world)
+            && self.db.view_tile_count() > 0
+            && drawn > 0;
+        let _ = write!(
+            self.status_line_buffer,
+            "3D  {} {}  yaw {:.0}°  pitch {:.0}°  z×{:.1}",
+            drawn,
+            if using_overview_tiles {
+                "tiles"
+            } else {
+                "shapes"
+            },
+            self.camera3d.yaw.to_degrees(),
+            self.camera3d.pitch.to_degrees(),
+            self.camera3d.z_scale
+        );
+        painter.text(
+            canvas.left_top() + egui::vec2(10.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            self.status_line_buffer.as_str(),
+            egui::FontId::proportional(13.0),
+            ecos_text_secondary(),
+        );
+
+        if let Some(pos) = ui
+            .ctx()
+            .input(|input| input.pointer.hover_pos())
+            .filter(|_| pointer_over_layout)
+        {
+            if let Some(point) = self.hover_world_point_3d(pos, canvas) {
+                self.status_line_buffer.clear();
+                hover_status_line_into(
+                    &mut self.status_line_buffer,
+                    point,
+                    self.coordinate_unit,
+                    self.db.snapshot().manifest().dbu_per_micron,
+                    None,
+                );
+                painter.text(
+                    canvas.left_top() + egui::vec2(10.0, 28.0),
+                    egui::Align2::LEFT_TOP,
+                    self.status_line_buffer.as_str(),
+                    egui::FontId::monospace(12.0),
+                    ecos_text_secondary(),
+                );
+            }
+        }
+
+        self.canvas_info_overlay(ui, canvas);
+        self.drc_detail_overlay(ui, canvas);
+        self.antenna_detail_overlay(ui, canvas);
+        self.map_heatmap_overlay(ui, canvas);
+    }
+
+    fn ensure_3d_view(&mut self, world: Rect32, canvas: egui::Rect) {
+        self.rebuild_layer_stack();
+        if !self.view3d_bootstrapped {
+            self.view3d_bootstrapped = true;
+            if visible_layer_count(&self.layers) == 0 {
+                set_layer_visibility(&mut self.layers, true);
+            }
+            if !self.object_visibility.net_signal
+                && !self.object_visibility.net_clock
+                && !self.object_visibility.pdn
+                && !self.object_visibility.vias
+            {
+                self.object_visibility.net_signal = true;
+                self.object_visibility.vias = true;
+                self.apply_object_visibility();
+            }
+        }
+        if !self.view3d_fitted {
+            let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
+            self.camera3d.fit_world_with_aspect(
+                crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
+                crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
+                self.layer_stack.height(),
+                aspect,
+            );
+            self.view3d_fitted = true;
+        }
+    }
+
+    fn rebuild_layer_stack(&mut self) {
+        let mut entries: Vec<(LayerId, LayerRole, u32)> = self
+            .layers
+            .iter()
+            .map(|layer| {
+                (
+                    layer.layer_id,
+                    LayerRole::from_metadata(&layer.name, &layer.layer_type),
+                    layer.order,
+                )
+            })
+            .collect();
+        if !entries
+            .iter()
+            .any(|(layer_id, _, _)| *layer_id == LAYOUT_GEOMETRY_LAYER)
+        {
+            entries.push((LAYOUT_GEOMETRY_LAYER, LayerRole::Overlap, 0));
+        }
+        self.layer_stack = chip_display::heuristic_layer_stack(entries);
+    }
+
+    fn build_3d_instances(
+        &self,
+        world: Rect32,
+        viewport: Rect32,
+        query_layer_ids: &[LayerId],
+    ) -> Vec<crate::canvas_gpu3d::GpuShapeInstance3d> {
+        if crate::canvas_gpu3d::use_overview_slabs(self.camera3d, world)
+            && self.db.view_tile_count() > 0
+        {
+            let overview = self.build_3d_overview_instances(world, viewport);
+            if !overview.is_empty() {
+                return overview;
+            }
+        }
+
+        let visibility_hash = layers_visibility_hash(&self.layers);
+        let layer_index = if self.visibility_rules_cache.epoch == self.geometry_epoch
+            && self.visibility_rules_cache.layer_visibility_hash == visibility_hash
+        {
+            Some(&self.visibility_rules_cache.layer_index)
+        } else {
+            None
+        };
+        let fallback_index = layer_index
+            .is_none()
+            .then(|| LayerRenderIndex::new(&self.layers));
+        let layer_index = layer_index.unwrap_or_else(|| fallback_index.as_ref().unwrap());
+        let zoom_rules = ZoomVisibilityRules::new(&self.db);
+
+        let mut prepared = Vec::new();
+        for shape_id in self
+            .db
+            .query_layers_intersect(query_layer_ids, viewport)
+            .into_iter()
+            .chain(overlay_shape_ids(self.selected, &self.highlighted))
+        {
+            let Some(shape) = self.db.find_shape(shape_id) else {
+                continue;
+            };
+            if !is_renderable_shape(shape) {
+                continue;
+            }
+            let owner = self.db.owner_for_shape(shape);
+            let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+            if !zoom_rules.is_drawn_at_zoom(owner_type, 8.0) {
+                continue;
+            }
+            let owner_category =
+                owner.and_then(|owner| drawing_category_for_owner(&self.db, owner));
+            if !shape_is_visible_fast(
+                shape,
+                owner_type,
+                owner_category,
+                layer_index,
+                &self.object_visibility,
+            ) {
+                continue;
+            }
+            let Some(mut style) =
+                visible_style_for_shape_fast(shape, owner, owner_type, layer_index)
+            else {
+                continue;
+            };
+            if self.selected == Some(shape_id) {
+                style.rgba = [76, 196, 255, 230];
+                style.fill_alpha = 230;
+            } else if self.highlighted.contains(&shape_id) {
+                style.rgba = [255, 214, 90, 210];
+                style.fill_alpha = 210;
+            }
+            let band =
+                self.layer_stack
+                    .band(shape.layer_id)
+                    .unwrap_or(chip_display::LayerStackBand {
+                        layer_id: shape.layer_id,
+                        z0: 0.0,
+                        z1: 400.0,
+                    });
+            prepared.push((self.db.shape_geometry(shape), style, band.z0, band.z1));
+            if prepared.len() >= crate::canvas_gpu3d::MAX_3D_INSTANCES {
+                break;
+            }
+        }
+        crate::canvas_gpu3d::build_gpu_instances_3d(prepared.into_iter())
+    }
+
+    fn build_3d_overview_instances(
+        &self,
+        world: Rect32,
+        viewport: Rect32,
+    ) -> Vec<crate::canvas_gpu3d::GpuShapeInstance3d> {
+        let mut layers: Vec<(&LayerUiState, chip_display::LayerStackBand)> = self
+            .layers
+            .iter()
+            .filter(|layer| layer.visible)
+            .filter_map(|layer| {
+                self.layer_stack
+                    .band(layer.layer_id)
+                    .map(|band| (layer, band))
+            })
+            .collect();
+        layers.sort_by(|lhs, rhs| lhs.1.z0.total_cmp(&rhs.1.z0));
+        let layer_ids: Vec<LayerId> = layers.iter().map(|(layer, _)| layer.layer_id).collect();
+        let preferred_lod = select_overview_lod(&self.db, &layer_ids, viewport, world)
+            .unwrap_or_else(|| crate::canvas_gpu3d::overview_lod_level(self.camera3d, world));
+
+        let mut instances = Vec::new();
+        for (layer, band) in layers {
+            for tile in
+                overview_tiles_for_layer(&self.db, preferred_lod, layer.layer_id, viewport, world)
+            {
+                crate::canvas_gpu3d::push_overview_tile_instance(
+                    &mut instances,
+                    tile.bbox,
+                    tile.shape_count,
+                    band.z0,
+                    band.z1,
+                    &layer.style,
+                );
+                if instances.len() >= crate::canvas_gpu3d::MAX_3D_INSTANCES {
+                    return instances;
+                }
+            }
+        }
+        instances
+    }
+
+    fn hover_world_point_3d(&self, pos: egui::Pos2, canvas: egui::Rect) -> Option<Point32> {
+        let ray = self.camera3d.ray_from_screen(
+            [pos.x, pos.y],
+            [canvas.left(), canvas.top()],
+            [canvas.width(), canvas.height()],
+        )?;
+        let hit = ray.intersect_z_plane(0.0)?;
+        Some(Point32 {
+            x: hit.x.round() as i32,
+            y: hit.y.round() as i32,
+        })
+    }
+
+    fn pick_shape_at_3d(
+        &self,
+        pos: egui::Pos2,
+        canvas: egui::Rect,
+        world: Rect32,
+        query_layer_ids: &[LayerId],
+    ) -> Option<ShapeId> {
+        let ray = self.camera3d.ray_from_screen(
+            [pos.x, pos.y],
+            [canvas.left(), canvas.top()],
+            [canvas.width(), canvas.height()],
+        )?;
+        let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
+        let viewport = crate::canvas_gpu3d::query_rect_for_camera(self.camera3d, world, aspect);
+        let mut best: Option<(f32, ShapeId)> = None;
+        for shape_id in self.db.query_layers_intersect(query_layer_ids, viewport) {
+            let Some(shape) = self.db.find_shape(shape_id) else {
+                continue;
+            };
+            if !is_renderable_shape(shape) || !self.shape_is_visible(shape) {
+                continue;
+            }
+            let Some(rect) = shape_xy_rect(self.db.shape_geometry(shape)) else {
+                continue;
+            };
+            let band =
+                self.layer_stack
+                    .band(shape.layer_id)
+                    .unwrap_or(chip_display::LayerStackBand {
+                        layer_id: shape.layer_id,
+                        z0: 0.0,
+                        z1: 400.0,
+                    });
+            let min = crate::camera3d::Vec3::new(
+                rect.lx as f32,
+                rect.ly as f32,
+                band.z0 * self.camera3d.z_scale,
+            );
+            let max = crate::camera3d::Vec3::new(
+                rect.hx as f32,
+                rect.hy as f32,
+                band.z1 * self.camera3d.z_scale,
+            );
+            if let Some(t) = ray.intersect_aabb(min, max) {
+                if best.is_none_or(|(best_t, _)| t < best_t) {
+                    best = Some((t, shape_id));
+                }
+            }
+        }
+        best.map(|(_, shape_id)| shape_id)
     }
 
     fn should_use_view_tiles(&self, viewport: Rect32, world: Rect32) -> bool {
@@ -4330,6 +5269,90 @@ impl LoadedViewer {
         }
     }
 
+    fn show_shortcuts_overlay(&mut self, ctx: &egui::Context) {
+        if !self.shortcuts_overlay_visible {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Keyboard Shortcuts")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_min_width(380.0);
+                ui.add_space(2.0);
+
+                let render_shortcut_row = |ui: &mut egui::Ui, key: &str, desc: &str| {
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(22.0);
+                        egui::Frame::NONE
+                            .fill(egui::Color32::from_rgb(38, 40, 48))
+                            .stroke(egui::Stroke::new(1.0_f32, ecos_border()))
+                            .corner_radius(4)
+                            .inner_margin(egui::Margin::symmetric(6, 2))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(key)
+                                        .monospace()
+                                        .size(11.0)
+                                        .strong()
+                                        .color(ecos_accent()),
+                                );
+                            });
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(desc)
+                                .size(12.0)
+                                .color(ecos_text_primary()),
+                        );
+                    });
+                };
+
+                ui.label(
+                    egui::RichText::new("NAVIGATION & VIEW")
+                        .small()
+                        .strong()
+                        .color(ecos_text_secondary()),
+                );
+                render_shortcut_row(ui, "F  or  Home", "Fit entire design to viewport");
+                render_shortcut_row(ui, "Z", "Zoom / focus to selected object");
+                render_shortcut_row(ui, "+  /  -", "Zoom in / Zoom out");
+                render_shortcut_row(ui, "Scroll Wheel", "Zoom at cursor position");
+                render_shortcut_row(ui, "Middle / Right Drag", "Pan viewport");
+
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("TOOLS & INSPECTION")
+                        .small()
+                        .strong()
+                        .color(ecos_text_secondary()),
+                );
+                render_shortcut_row(ui, "K  or  R", "Toggle Ruler / Measurement tool");
+                render_shortcut_row(ui, "Esc", "Clear ruler, selection, or close popup");
+                render_shortcut_row(ui, "Ctrl + F  or  /", "Focus search query");
+                render_shortcut_row(ui, "?  or  F1", "Toggle Keyboard Shortcuts overlay");
+
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("HEATMAP & MAP ANALYSIS")
+                        .small()
+                        .strong()
+                        .color(ecos_text_secondary()),
+                );
+                render_shortcut_row(
+                    ui,
+                    "Space",
+                    "A/B Map Quick-Toggle (switch with previous map)",
+                );
+                render_shortcut_row(ui, "Drag on Legend", "Slide threshold cutoff in minimap");
+                ui.add_space(4.0);
+            });
+        if !open {
+            self.shortcuts_overlay_visible = false;
+        }
+    }
+
     fn poll_external_snapshot_refresh(&mut self) {
         if self.pending_edit.is_some()
             || self.pending_session_action.is_some()
@@ -4403,6 +5426,8 @@ impl LoadedViewer {
         retain_existing_shape_ids(&mut self.highlighted, |shape_id| {
             db.find_shape(shape_id).is_some()
         });
+        self.rebuild_layer_stack();
+        self.view3d_fitted = false;
     }
 
     fn allocate_command_id(&mut self) -> u64 {
@@ -4894,6 +5919,7 @@ impl eframe::App for ChipViewerApp {
         if let ViewerState::Loaded(loaded) = &mut self.state {
             loaded.show_close_confirmation(ctx);
             loaded.show_session_action_progress(ctx);
+            loaded.show_shortcuts_overlay(ctx);
         }
         if close_after_session_action {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -5089,6 +6115,9 @@ fn paint_heatmap_grid(
     rect: egui::Rect,
     data: &HeatmapData,
     selected_cell: Option<(usize, usize)>,
+    colormap_mode: ColormapMode,
+    threshold: f32,
+    invert_threshold: bool,
 ) {
     let rows = data.rows().max(1);
     let columns = data.columns().max(1);
@@ -5100,8 +6129,17 @@ fn paint_heatmap_grid(
             let Some(normalized) = data.normalized_value(row, column) else {
                 continue;
             };
+            let hidden = if !invert_threshold {
+                normalized < threshold
+            } else {
+                normalized > threshold
+            };
+            if hidden {
+                continue;
+            }
             let cell = heatmap_cell_rect(rect, rows, columns, row, column);
-            painter.rect_filled(cell, 0.0, heatmap_color(normalized));
+            let [r, g, b, _] = colormap_mode.sample(normalized);
+            painter.rect_filled(cell, 0.0, egui::Color32::from_rgb(r, g, b));
         }
     }
     painter.rect_stroke(
@@ -5143,23 +6181,80 @@ fn paint_heatmap_grid(
     }
 }
 
-fn paint_heatmap_legend(ui: &mut egui::Ui, min: f64, max: f64) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 8.0), egui::Sense::hover());
+fn paint_heatmap_legend(
+    ui: &mut egui::Ui,
+    min: f64,
+    max: f64,
+    colormap_mode: ColormapMode,
+    threshold: &mut f32,
+    invert_threshold: &mut bool,
+) -> (bool, bool, bool) {
+    let mut threshold_changed = false;
+    let mut invert_changed = false;
+    let mut peak_clicked = false;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 10.0),
+        egui::Sense::click_and_drag(),
+    );
+
+    if response.clicked() || response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let t = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+            if (*threshold - t).abs() > 0.001 {
+                *threshold = t;
+                threshold_changed = true;
+            }
+        }
+    }
+
     let painter = ui.painter_at(rect);
     let segments = 64;
     for segment in 0..segments {
         let t0 = segment as f32 / segments as f32;
         let t1 = (segment + 1) as f32 / segments as f32;
+        let mid = (t0 + t1) * 0.5;
+        let [r, g, b, _] = colormap_mode.sample(mid);
+        let is_sub = if !*invert_threshold {
+            mid < *threshold
+        } else {
+            mid > *threshold
+        };
+        let color = if is_sub {
+            // Defocused / dimmed representation for inactive portion
+            egui::Color32::from_rgba_unmultiplied(r / 4 + 15, g / 4 + 15, b / 4 + 15, 120)
+        } else {
+            egui::Color32::from_rgb(r, g, b)
+        };
         painter.rect_filled(
             egui::Rect::from_min_max(
                 egui::pos2(egui::lerp(rect.x_range(), t0), rect.top()),
                 egui::pos2(egui::lerp(rect.x_range(), t1), rect.bottom()),
             ),
             0.0,
-            heatmap_color((t0 + t1) * 0.5),
+            color,
         );
     }
+
+    // Border around legend
+    painter.rect_stroke(
+        rect,
+        0.0,
+        egui::Stroke::new(1.0_f32, ecos_border()),
+        egui::StrokeKind::Inside,
+    );
+
+    // Indicator line at threshold cutoff position
+    if *threshold > 0.001 {
+        let handle_x = egui::lerp(rect.x_range(), *threshold);
+        painter.line_segment(
+            [
+                egui::pos2(handle_x, rect.top() - 2.0),
+                egui::pos2(handle_x, rect.bottom() + 2.0),
+            ],
+            egui::Stroke::new(2.0_f32, egui::Color32::WHITE),
+        );
+    }
+
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(format_map_value(min))
@@ -5167,6 +6262,27 @@ fn paint_heatmap_legend(ui: &mut egui::Ui, min: f64, max: f64) {
                 .size(10.0)
                 .color(ecos_text_secondary()),
         );
+        if ui
+            .small_button("Peak")
+            .on_hover_text("Focus camera on the maximum hotspot cell")
+            .clicked()
+        {
+            peak_clicked = true;
+        }
+        let invert_label = if *invert_threshold {
+            "Coldspots"
+        } else {
+            "Hotspots"
+        };
+        if ui
+            .small_button(invert_label)
+            .on_hover_text("Toggle between filtering hotspots (normal) and coldspots (inverted)")
+            .clicked()
+        {
+            *invert_threshold = !*invert_threshold;
+            invert_changed = true;
+        }
+
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 egui::RichText::new(format_map_value(max))
@@ -5174,8 +6290,24 @@ fn paint_heatmap_legend(ui: &mut egui::Ui, min: f64, max: f64) {
                     .size(10.0)
                     .color(ecos_text_secondary()),
             );
+            if *threshold > 0.001 && *threshold < 0.999 {
+                let thresh_val = min + (*threshold as f64) * (max - min);
+                let label_str = if !*invert_threshold {
+                    format!("cutoff: ≥ {}", format_map_value(thresh_val))
+                } else {
+                    format!("cutoff: ≤ {}", format_map_value(thresh_val))
+                };
+                ui.label(
+                    egui::RichText::new(label_str)
+                        .monospace()
+                        .size(10.0)
+                        .color(ecos_accent()),
+                );
+            }
         });
     });
+
+    (threshold_changed, invert_changed, peak_clicked)
 }
 
 fn heatmap_cell_at(
@@ -5241,25 +6373,6 @@ fn paint_heatmap_cell_outline(
         stroke,
         egui::StrokeKind::Inside,
     );
-}
-
-fn heatmap_color(value: f32) -> egui::Color32 {
-    const STOPS: [[u8; 3]; 5] = [
-        [30, 42, 85],
-        [23, 108, 124],
-        [41, 156, 105],
-        [153, 211, 67],
-        [250, 225, 52],
-    ];
-    let scaled = value.clamp(0.0, 1.0) * (STOPS.len() - 1) as f32;
-    let lower = scaled.floor() as usize;
-    let upper = (lower + 1).min(STOPS.len() - 1);
-    let t = scaled - lower as f32;
-    let channel = |index: usize| {
-        (STOPS[lower][index] as f32 + (STOPS[upper][index] as f32 - STOPS[lower][index] as f32) * t)
-            .round() as u8
-    };
-    egui::Color32::from_rgb(channel(0), channel(1), channel(2))
 }
 
 fn format_map_value(value: f64) -> String {
@@ -7535,11 +8648,16 @@ fn nice_ruler_interval(target: f64) -> f64 {
 }
 
 fn scroll_zoom_factor(scroll: f32) -> f32 {
-    if scroll > 0.0 {
-        1.15
-    } else {
-        1.0 / 1.15
+    if scroll.abs() < f32::EPSILON {
+        return 1.0;
     }
+    let steps = if scroll.abs() <= 5.0 {
+        scroll
+    } else {
+        scroll / 25.0
+    };
+    let base: f32 = 1.35;
+    base.powf(steps).clamp(0.05, 20.0)
 }
 
 fn zoom_at_screen_pos(
@@ -7556,7 +8674,7 @@ fn zoom_at_screen_pos(
         .min(canvas.height() / world_height)
         .max(0.001);
     let old_zoom = zoom.max(0.001);
-    let new_zoom = (zoom * zoom_factor).clamp(0.05, 200.0);
+    let new_zoom = (zoom * zoom_factor).clamp(0.05, 50_000.0);
     let old_scale = base_scale * old_zoom;
     let new_scale = base_scale * new_zoom;
     let world_cx = (world.lx + world.hx) as f32 * 0.5;
@@ -7579,6 +8697,63 @@ fn translate_rect(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
         hx: rect.hx.saturating_add(dx),
         hy: rect.hy.saturating_add(dy),
     }
+}
+
+fn overview_lod_candidates(preferred_lod: u8) -> [u8; 4] {
+    match preferred_lod {
+        3 => [3, 2, 1, 0],
+        2 => [2, 1, 0, 3],
+        1 => [1, 0, 2, 3],
+        _ => [0, 1, 2, 3],
+    }
+}
+
+fn tile_is_useful_overview(tile: &chipgeom_format::GeometryViewTileRecord, world: Rect32) -> bool {
+    tile.shape_count > 0 && !crate::canvas_gpu3d::tile_is_full_die(tile.bbox, world)
+}
+
+fn select_overview_lod(
+    db: &ChipViewDb,
+    layer_ids: &[LayerId],
+    viewport: Rect32,
+    world: Rect32,
+) -> Option<u8> {
+    crate::canvas_gpu3d::choose_overview_lod(
+        [0_u8, 1, 2, 3].into_iter().map(|lod| {
+            let mut total = 0usize;
+            let mut useful = 0usize;
+            for layer_id in layer_ids {
+                for tile in db.query_view_tiles(lod, *layer_id, viewport) {
+                    total += 1;
+                    if tile_is_useful_overview(tile, world) {
+                        useful += 1;
+                    }
+                }
+            }
+            (lod, total, useful)
+        }),
+        crate::canvas_gpu3d::OVERVIEW_INSTANCE_BUDGET,
+    )
+}
+
+fn overview_tiles_for_layer<'a>(
+    db: &'a ChipViewDb,
+    preferred_lod: u8,
+    layer_id: LayerId,
+    viewport: Rect32,
+    world: Rect32,
+) -> Vec<&'a chipgeom_format::GeometryViewTileRecord> {
+    for lod in overview_lod_candidates(preferred_lod) {
+        let tiles: Vec<_> = db
+            .query_view_tiles(lod, layer_id, viewport)
+            .into_iter()
+            .filter(|tile| tile_is_useful_overview(tile, world))
+            .collect();
+        if !tiles.is_empty() {
+            return tiles;
+        }
+    }
+    Vec::new()
 }
 
 fn should_use_view_tiles_for_state(
@@ -8010,6 +9185,44 @@ fn overlay_shape_ids(
     overlay
 }
 
+fn shape_xy_rect(geometry: ShapeGeometry) -> Option<Rect32> {
+    match geometry {
+        ShapeGeometry::Rect(rect) => Some(rect),
+        ShapeGeometry::Line(line) => {
+            let width = line.width.abs().max(80);
+            let half = (width / 2).max(40);
+            if line.begin.y == line.end.y {
+                Some(Rect32 {
+                    lx: line.begin.x.min(line.end.x),
+                    ly: line.begin.y.saturating_sub(half),
+                    hx: line.begin.x.max(line.end.x),
+                    hy: line.begin.y.saturating_add(half),
+                })
+            } else if line.begin.x == line.end.x {
+                Some(Rect32 {
+                    lx: line.begin.x.saturating_sub(half),
+                    ly: line.begin.y.min(line.end.y),
+                    hx: line.begin.x.saturating_add(half),
+                    hy: line.begin.y.max(line.end.y),
+                })
+            } else {
+                Some(Rect32 {
+                    lx: line.begin.x.min(line.end.x).saturating_sub(half),
+                    ly: line.begin.y.min(line.end.y).saturating_sub(half),
+                    hx: line.begin.x.max(line.end.x).saturating_add(half),
+                    hy: line.begin.y.max(line.end.y).saturating_add(half),
+                })
+            }
+        }
+        ShapeGeometry::Point(point) => Some(Rect32 {
+            lx: point.point.x.saturating_sub(80),
+            ly: point.point.y.saturating_sub(80),
+            hx: point.point.x.saturating_add(80),
+            hy: point.point.y.saturating_add(80),
+        }),
+    }
+}
+
 fn clear_search_state(search_text: &mut String, highlighted: &mut BTreeSet<ShapeId>) {
     search_text.clear();
     highlighted.clear();
@@ -8301,7 +9514,7 @@ fn focus_view_on_bbox(world: Rect32, target: Rect32, canvas: egui::Rect) -> (f32
     let target_height = (target.hy - target.ly).max(1) as f32;
     let target_scale =
         (canvas_width / target_width).min(canvas_height / target_height) * FOCUS_VIEWPORT_FILL;
-    let zoom = (target_scale / base_scale).clamp(1.0, 200.0);
+    let zoom = (target_scale / base_scale).clamp(1.0, 50_000.0);
     let scale = base_scale * zoom;
     let world_cx = (world.lx + world.hx) as f32 * 0.5;
     let world_cy = (world.ly + world.hy) as f32 * 0.5;
@@ -9010,8 +10223,13 @@ mod tests {
 
     #[test]
     fn scroll_zoom_factor_keeps_directional_zoom() {
-        assert!(scroll_zoom_factor(1.0) > 1.0);
-        assert!(scroll_zoom_factor(-1.0) < 1.0);
+        assert_eq!(scroll_zoom_factor(0.0), 1.0);
+        assert!((scroll_zoom_factor(1.0) - 1.35).abs() < 1e-4);
+        assert!((scroll_zoom_factor(-1.0) - (1.0 / 1.35)).abs() < 1e-4);
+        assert!(scroll_zoom_factor(2.0) > scroll_zoom_factor(1.0));
+        assert!(scroll_zoom_factor(-2.0) < scroll_zoom_factor(-1.0));
+        assert!(scroll_zoom_factor(50.0) > scroll_zoom_factor(25.0));
+        assert!(scroll_zoom_factor(-50.0) < scroll_zoom_factor(-25.0));
     }
 
     #[test]
@@ -9228,6 +10446,170 @@ mod tests {
             overview_viewport,
             world,
         ));
+    }
+
+    #[test]
+    fn overview_tile_query_falls_back_when_preferred_lod_is_missing() {
+        let dir = temp_snapshot_dir("3d-overview-lod-fallback");
+        write_empty_snapshot(&dir, false);
+        let tile = chipgeom_format::GeometryViewTileRecord {
+            lod_level: 2,
+            layer_id: 4,
+            shape_count: 12,
+            bbox: Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 110,
+                hy: 220,
+            },
+            ..chipgeom_format::GeometryViewTileRecord::default()
+        };
+        write_empty_geometry_file(
+            &dir.join("geometry.view.bin"),
+            chipgeom_format::GeometryFileKind::View,
+            core::mem::size_of::<chipgeom_format::GeometryViewTileRecord>() as u32,
+            any_as_bytes(&tile),
+        );
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let viewport = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1_000,
+            hy: 1_000,
+        };
+        let tiles = overview_tiles_for_layer(&db, 3, 4, viewport, viewport);
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0].lod_level, 2);
+        assert_eq!(tiles[0].bbox.lx, 10);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn three_d_overview_extrudes_snapshot_tiles_instead_of_full_die_slabs() {
+        let dir = temp_snapshot_dir("3d-overview-tiles");
+        write_empty_snapshot(&dir, false);
+        let tile = chipgeom_format::GeometryViewTileRecord {
+            lod_level: 3,
+            layer_id: 1,
+            shape_count: 32,
+            bbox: Rect32 {
+                lx: 100,
+                ly: 200,
+                hx: 1_400,
+                hy: 1_800,
+            },
+            ..chipgeom_format::GeometryViewTileRecord::default()
+        };
+        write_empty_geometry_file(
+            &dir.join("geometry.view.bin"),
+            chipgeom_format::GeometryFileKind::View,
+            core::mem::size_of::<chipgeom_format::GeometryViewTileRecord>() as u32,
+            any_as_bytes(&tile),
+        );
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+        );
+        loaded.layers = vec![layer_state(1, true)];
+        loaded.rebuild_layer_stack();
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 10_000,
+            hy: 8_000,
+        };
+        loaded.camera3d.fit_world(
+            crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
+            crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
+            loaded.layer_stack.height(),
+        );
+        let instances = loaded.build_3d_instances(world, world, &[1]);
+        assert_eq!(instances.len(), 1);
+        assert_eq!(
+            instances[0].rect_dbu,
+            [tile.bbox.lx, tile.bbox.ly, tile.bbox.hx, tile.bbox.hy]
+        );
+        assert_ne!(
+            instances[0].rect_dbu,
+            [world.lx, world.ly, world.hx, world.hy]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn three_d_fit_prefers_detailed_tiles_over_full_die_panels() {
+        let dir = temp_snapshot_dir("3d-fit-detailed-tiles");
+        write_empty_snapshot(&dir, false);
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 10_000,
+            hy: 8_000,
+        };
+        let coarse = chipgeom_format::GeometryViewTileRecord {
+            lod_level: 3,
+            layer_id: 1,
+            shape_count: 80,
+            bbox: world,
+            ..chipgeom_format::GeometryViewTileRecord::default()
+        };
+        let fine = chipgeom_format::GeometryViewTileRecord {
+            lod_level: 0,
+            layer_id: 1,
+            shape_count: 6,
+            bbox: Rect32 {
+                lx: 200,
+                ly: 300,
+                hx: 900,
+                hy: 1_100,
+            },
+            ..chipgeom_format::GeometryViewTileRecord::default()
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(any_as_bytes(&coarse));
+        payload.extend_from_slice(any_as_bytes(&fine));
+        write_empty_geometry_file(
+            &dir.join("geometry.view.bin"),
+            chipgeom_format::GeometryFileKind::View,
+            core::mem::size_of::<chipgeom_format::GeometryViewTileRecord>() as u32,
+            &payload,
+        );
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+        );
+        loaded.layers = vec![layer_state(1, true)];
+        loaded.rebuild_layer_stack();
+        loaded.camera3d.fit_world_with_aspect(
+            crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
+            crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
+            loaded.layer_stack.height(),
+            1.2,
+        );
+        let instances = loaded.build_3d_instances(world, world, &[1]);
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].rect_dbu, [200, 300, 900, 1_100]);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -9821,6 +11203,73 @@ mod tests {
     }
 
     #[test]
+    fn heatmap_threshold_omits_sub_threshold_cells_for_transparency() {
+        let directory = temp_snapshot_dir("heatmap-threshold-instances");
+        let values_path = directory.join("values.csv");
+        let layout_path = directory.join("layout.csv");
+        fs::write(&values_path, "0.0,0.5\n0.8,1.0\n").unwrap();
+        fs::write(
+            &layout_path,
+            "pixel_row,pixel_col,lx,ly,ux,uy\n0,0,0,10,10,20\n0,1,10,10,20,20\n1,0,0,0,10,10\n1,1,10,0,20,10\n",
+        )
+        .unwrap();
+        let data = HeatmapData::load(&values_path, &layout_path).unwrap();
+
+        let all_instances = build_heatmap_instances(&data, ColormapMode::Turbo, 0.0, false);
+        assert_eq!(all_instances.len(), 4);
+
+        let half_instances = build_heatmap_instances(&data, ColormapMode::Turbo, 0.6, false);
+        assert_eq!(half_instances.len(), 2);
+
+        // Inverted: norm <= 0.6 => keeps 0.0 and 0.5 (2 instances)
+        let inverted_instances = build_heatmap_instances(&data, ColormapMode::Turbo, 0.6, true);
+        assert_eq!(inverted_instances.len(), 2);
+
+        assert_eq!(data.peak_cell(false), Some((1, 1)));
+        assert_eq!(data.peak_cell(true), Some((0, 0)));
+
+        let mut active = ActiveHeatmap::new("Test".to_string(), data);
+        let hash_before = active.cached_hash;
+        active.set_threshold(0.7);
+        assert_ne!(active.cached_hash, hash_before);
+        assert_eq!(active.instances.len(), 2);
+
+        let hash_before_inv = active.cached_hash;
+        active.set_invert_threshold(true);
+        assert_ne!(active.cached_hash, hash_before_inv);
+        assert_eq!(active.instances.len(), 2);
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn map_catalog_find_item_by_png_locates_matching_item_and_layout() {
+        let catalog = MapCatalog {
+            categories: vec![crate::map_data::MapCategory {
+                id: "cat1".to_string(),
+                label: "Category 1".to_string(),
+                layout_path: Some(PathBuf::from("/tmp/layout.csv")),
+                items: vec![crate::map_data::MapItem {
+                    label: "Item 1".to_string(),
+                    png_path: PathBuf::from("/tmp/item1.png"),
+                    csv_path: Some(PathBuf::from("/tmp/item1.csv")),
+                }],
+            }],
+            warnings: Vec::new(),
+        };
+
+        let found = catalog.find_item_by_png(Path::new("/tmp/item1.png"));
+        assert!(found.is_some());
+        let (item, layout) = found.unwrap();
+        assert_eq!(item.label, "Item 1");
+        assert_eq!(layout, Some(Path::new("/tmp/layout.csv")));
+
+        assert!(catalog
+            .find_item_by_png(Path::new("/tmp/missing.png"))
+            .is_none());
+    }
+
+    #[test]
     fn map_thumbnail_decoder_downsizes_and_enforces_dimension_limit() {
         let directory = temp_snapshot_dir("map-thumbnail-limits");
         let preview_path = directory.join("preview.png");
@@ -9837,14 +11286,6 @@ mod tests {
         assert!(decode_map_thumbnail(&oversized_path).is_err());
 
         fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn heatmap_palette_has_distinct_low_and_high_colors() {
-        assert_eq!(heatmap_color(0.0), egui::Color32::from_rgb(30, 42, 85));
-        assert_eq!(heatmap_color(1.0), egui::Color32::from_rgb(250, 225, 52));
-        assert_ne!(heatmap_color(0.5), heatmap_color(0.0));
-        assert_ne!(heatmap_color(0.5), heatmap_color(1.0));
     }
 
     #[test]
@@ -10654,6 +12095,22 @@ mod tests {
         visibility.set_category_visible(DrawingCategory::NetClock, true);
 
         assert!(unrouted_net_guide_is_visible(&guide, visibility, viewport));
+    }
+
+    #[test]
+    fn drawing_category_counts_includes_unrouted_net_guides() {
+        let dir = temp_snapshot_dir("drawing-counts-unrouted");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let counts = drawing_category_counts(&db);
+        assert_eq!(
+            counts
+                .get(&DrawingCategory::NetSignal)
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

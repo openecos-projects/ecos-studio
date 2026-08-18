@@ -66,13 +66,35 @@
     class="flow-log-dialog"
     modal
     maximizable
-    :header="logTitle"
     :style="{ width: 'min(980px, calc(100vw - 32px))' }"
     :draggable="false"
   >
-    <pre class="flow-log-dialog-content">{{
-      selectedContent || 'No log content yet.'
-    }}</pre>
+    <template #header>
+      <div class="flow-log-dialog-header">
+        <span class="flow-log-dialog-title">{{ logTitle }}</span>
+        <div class="flow-log-actions">
+          <button
+            type="button"
+            :title="copied ? 'Copied' : 'Copy log'"
+            :aria-label="copied ? 'Copied log' : 'Copy log'"
+            :disabled="!selectedContent"
+            @click="copyLog"
+          >
+            <i
+              :class="copied ? 'ri-check-line' : 'ri-file-copy-line'"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      </div>
+    </template>
+    <FlowLogCodeViewer
+      class="flow-log-dialog-content"
+      :content="selectedContent"
+      :live="Boolean(selectedSegment?.live)"
+      :loading="loading || Boolean(selectedSegment?.contentLoading)"
+      :missing="Boolean(selectedSegment?.missing)"
+    />
   </Dialog>
 </template>
 
@@ -328,20 +350,29 @@ onBeforeUnmount(() => {
 }
 
 .flow-log-dialog-content {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0;
-  max-height: min(70vh, 760px);
+  flex: 1 1 auto;
+  height: min(70vh, 760px);
   min-height: 0;
-  overflow: auto;
-  padding: 12px;
-  user-select: text;
-  white-space: pre-wrap;
-  word-break: break-word;
+  min-width: 0;
+}
+
+.flow-log-dialog-header {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.flow-log-dialog-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-log-dialog-header .flow-log-actions {
+  margin-left: auto;
 }
 </style>
 

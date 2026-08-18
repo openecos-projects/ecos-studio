@@ -2573,6 +2573,23 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it('revalidates an existing local PDK when it is imported again', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const pdkRoot = join(root, 'local', 'ics55')
+    await mkdir(join(pdkRoot, 'IP'), { recursive: true })
+    await mkdir(join(pdkRoot, 'prtech'), { recursive: true })
+    const service = new ResourceManagerService(testResourceDirs(root))
+
+    const first = await service.importPdkPath(pdkRoot)
+    expect(first.status).toBe('invalid')
+
+    const second = await service.importPdkPath(pdkRoot)
+    expect(second.status).toBe('invalid')
+    expect(second.health).toMatchObject({
+      detected_file_groups: { directories: expect.arrayContaining(['IP', 'prtech']) },
+    })
+  })
+
   it('migrates a legacy managed PDK parent path to its installed version directory', async () => {
     const root = await createTempDir('ecos-resources-')
     const dirs = testResourceDirs(root)

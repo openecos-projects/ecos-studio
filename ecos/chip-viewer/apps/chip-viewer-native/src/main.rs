@@ -1,5 +1,7 @@
 mod app;
+mod camera3d;
 mod canvas_gpu;
+mod canvas_gpu3d;
 mod map_data;
 
 use std::path::PathBuf;

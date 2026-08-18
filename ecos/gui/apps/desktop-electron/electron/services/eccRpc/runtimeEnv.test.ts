@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createEccRuntimeEnv } from './runtimeEnv'
+import { createEccRuntimeEnv, resolveEccExecutable } from './runtimeEnv'
 
 function createRepoFixture(): {
   appPath: string
@@ -394,6 +394,54 @@ describe('createEccRuntimeEnv', () => {
     expect(env.Path).toBe(`${join(resourcesPath, 'binaries')};C:\\Windows\\System32`)
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
+  })
+
+  it('resolves the packaged ECC executable by absolute path', () => {
+    const fixture = createRepoFixture()
+    const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
+    const packagedEcc = join(resourcesPath, 'binaries', 'ecc')
+    mkdirSync(join(resourcesPath, 'binaries'), { recursive: true })
+    writeFileSync(packagedEcc, '#!/usr/bin/env bash\n')
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/home/ecos/.local/bin:/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(executable).toBe(packagedEcc)
+  })
+
+  it('resolves the development ECC shim by absolute path', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(
+      join(fixture.repoRoot, 'ecc', 'pyproject.toml'),
+      '[project]\nname = "ecc"\n',
+    )
+    mkdirSync(join(fixture.repoRoot, 'ecos', 'scripts'), { recursive: true })
+    writeFileSync(
+      join(fixture.repoRoot, 'ecos', 'scripts', 'ecc-wrapper.sh'),
+      '#!/usr/bin/env bash\n',
+    )
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        PATH: '/home/ecos/.local/bin:/usr/bin',
+      },
+      isPackaged: false,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(executable).toBe(join(fixture.userDataPath, 'runtime-bin', 'ecc'))
   })
 
   it('strips inherited OSS CAD vars in packaged mode without bundled ecc', () => {

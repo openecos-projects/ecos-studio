@@ -47,7 +47,6 @@ export interface HomeData {
   flow: string
   layout: string
   parameters: string
-  'GDS merge': string
   checklist: string
   metrics: Record<string, any>
   monitor: MonitorData

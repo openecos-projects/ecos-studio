@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -66,6 +74,21 @@ describe('ProjectManagementReadService', () => {
       },
       unavailablePaths: [],
     })
+  })
+
+  it('returns project.json text even when root_path does not match the selected directory', async () => {
+    const { projectRoot } = await createProject()
+    const manifest = JSON.parse(
+      await readFile(join(projectRoot, 'project.json'), 'utf8'),
+    ) as {
+      root_path: string
+    }
+    manifest.root_path = '/old/location/gcd'
+    await writeFile(join(projectRoot, 'project.json'), JSON.stringify(manifest))
+
+    await expect(
+      new ProjectManagementReadService().readManifest(projectRoot),
+    ).resolves.toContain('"root_path":"/old/location/gcd"')
   })
 
   it('rejects undeclared workspaces and files outside the summary allowlist', async () => {

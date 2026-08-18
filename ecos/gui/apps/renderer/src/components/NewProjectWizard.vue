@@ -81,7 +81,7 @@
             class="custom-scrollbar min-h-0 flex-1"
             :class="
               currentStep === 5
-                ? 'overflow-hidden p-4 md:p-5'
+                ? 'overflow-y-auto p-4 md:p-5'
                 : 'overflow-y-auto p-6 md:p-8'
             "
           >
@@ -752,7 +752,7 @@
               <div
                 v-else-if="currentStep === 5"
                 key="pdk-config"
-                class="mx-auto flex h-full w-full max-w-5xl flex-col"
+                class="mx-auto flex min-h-full w-full max-w-5xl flex-col"
               >
                 <header class="mb-4 shrink-0">
                   <h2 class="text-xl font-bold text-(--text-primary)">PDK Config</h2>
@@ -762,9 +762,7 @@
                   </p>
                 </header>
 
-                <div
-                  class="grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] gap-3"
-                >
+                <div class="grid gap-3">
                   <section
                     class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
                   >
@@ -784,59 +782,112 @@
 
                     <div
                       v-if="pdkOptions.length > 0"
-                      class="custom-scrollbar grid max-h-[132px] gap-2 overflow-y-auto pr-1 md:grid-cols-2"
+                      class="custom-scrollbar grid max-h-[220px] gap-2 overflow-y-auto pr-1 md:grid-cols-2"
                     >
-                      <button
+                      <div
                         v-for="pdk in pdkOptions"
                         :key="pdk.id"
-                        type="button"
                         class="relative rounded-lg border p-3 text-left transition-colors duration-200"
                         :class="
                           selectedPdkId === pdk.id
                             ? 'border-(--accent-color) bg-(--accent-color)/10'
                             : pdk.valid
                               ? 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
-                              : 'cursor-not-allowed border-(--border-color) bg-(--bg-primary)/40 opacity-65'
+                              : 'cursor-not-allowed border-red-300/60 bg-red-500/5'
                         "
-                        :disabled="!pdk.valid"
-                        @click="pdk.valid && selectPdk(pdk)"
                       >
-                        <span class="mb-1 flex items-start justify-between gap-3">
-                          <span>
-                            <span class="block font-semibold text-(--text-primary)">{{
-                              pdk.name
-                            }}</span>
-                            <span
-                              v-if="pdk.techNode"
-                              class="mt-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
-                              >{{ pdk.techNode }}</span
-                            >
-                            <span
-                              class="mt-1 ml-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
-                              >{{
-                                pdk.source === 'registry'
-                                  ? 'Resource Manager'
-                                  : pdk.source === 'project'
-                                    ? 'Project Pinned'
-                                    : 'Local'
-                              }}</span
-                            >
-                            <span
-                              v-if="pdk.version"
-                              class="mt-1 ml-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
-                              >{{ pdk.version }}</span
-                            >
-                          </span>
-                          <i
-                            v-if="selectedPdkId === pdk.id"
-                            class="ri-checkbox-circle-fill text-xl text-green-500"
-                          ></i>
-                        </span>
-                        <span
-                          class="block truncate font-mono text-xs text-(--text-secondary)"
-                          :title="pdk.path"
-                          >{{ pdk.path }}</span
+                        <button
+                          type="button"
+                          class="block w-full text-left"
+                          :aria-pressed="selectedPdkId === pdk.id"
+                          @click="selectPdk(pdk)"
                         >
+                          <span class="mb-1 flex items-start justify-between gap-3">
+                            <span>
+                              <span class="block font-semibold text-(--text-primary)">{{
+                                pdk.name
+                              }}</span>
+                              <span
+                                v-if="pdk.techNode"
+                                class="mt-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
+                                >{{ pdk.techNode }}</span
+                              >
+                              <span
+                                class="mt-1 ml-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
+                                >{{
+                                  pdk.source === 'registry'
+                                    ? 'Resource Manager'
+                                    : pdk.source === 'project'
+                                      ? 'Project Pinned'
+                                      : 'Local'
+                                }}</span
+                              >
+                              <span
+                                v-if="pdk.version"
+                                class="mt-1 ml-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
+                                >{{ pdk.version }}</span
+                              >
+                              <span
+                                v-if="!pdk.valid"
+                                class="mt-1 ml-1 inline-block rounded-md bg-red-500/10 px-2 py-0.5 text-xs font-semibold text-red-500"
+                              >
+                                {{ pdk.status === 'missing' ? 'Missing' : 'Invalid' }}
+                              </span>
+                            </span>
+                            <i
+                              v-if="selectedPdkId === pdk.id && pdk.valid"
+                              class="ri-checkbox-circle-fill text-xl text-green-500"
+                            ></i>
+                            <i
+                              v-else-if="selectedPdkId === pdk.id"
+                              class="ri-error-warning-fill text-xl text-red-500"
+                              aria-label="Selected PDK is invalid"
+                            ></i>
+                          </span>
+                          <span
+                            class="block truncate font-mono text-xs text-(--text-secondary)"
+                            :title="pdk.path"
+                            >{{ pdk.path }}</span
+                          >
+                        </button>
+                        <span
+                          v-if="pdkValidationMessage(pdk)"
+                          class="mt-2 block text-xs leading-5 text-red-500"
+                        >
+                          <i class="ri-error-warning-line mr-1" aria-hidden="true"></i>
+                          {{ pdkValidationMessage(pdk) }}
+                        </span>
+                        <ul
+                          v-if="pdkMissingFiles(pdk).length > 0"
+                          class="mt-1 list-disc pl-5 text-[11px] leading-5 text-red-500"
+                        >
+                          <li
+                            v-for="file in pdkMissingFiles(pdk)"
+                            :key="file"
+                            class="break-all"
+                          >
+                            {{ file }}
+                          </li>
+                        </ul>
+                        <button
+                          v-if="pdk.status !== 'installing'"
+                          type="button"
+                          class="mt-2 inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-(--accent-color) hover:underline disabled:cursor-wait disabled:opacity-60"
+                          :disabled="validatingPdkId === pdk.id"
+                          @click.stop="handleValidatePdk(pdk.id)"
+                        >
+                          <i
+                            :class="
+                              validatingPdkId === pdk.id
+                                ? 'ri-loader-4-line animate-spin'
+                                : 'ri-refresh-line'
+                            "
+                            aria-hidden="true"
+                          ></i>
+                          {{
+                            validatingPdkId === pdk.id ? 'Checking...' : 'Re-check PDK'
+                          }}
+                        </button>
                         <button
                           v-if="pdk.source === 'local' && selectedPdkId !== pdk.id"
                           type="button"
@@ -846,7 +897,7 @@
                         >
                           <i class="ri-delete-bin-line"></i>
                         </button>
-                      </button>
+                      </div>
                     </div>
 
                     <div
@@ -876,9 +927,39 @@
                     <div class="mb-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Config Mode</h3>
                       <p class="mt-1 text-xs text-(--text-secondary)">
-                        Default Config requires a validated known PDK. Manual Config lets
-                        you choose Tech LEF, Cell LEF, and Liberty.
+                        Both modes require a readable PDK. Default Config uses ECC's known
+                        layout; Manual Config lets you choose resource files after the PDK
+                        passes validation.
                       </p>
+                      <p
+                        v-if="selectedPdk && !defaultConfigAvailable"
+                        class="mt-2 text-xs leading-5 text-amber-600"
+                      >
+                        <i class="ri-information-line mr-1" aria-hidden="true"></i>
+                        {{ defaultConfigUnavailableReason }}
+                      </p>
+                    </div>
+                    <div class="mb-3 grid gap-2 text-xs md:grid-cols-3">
+                      <span
+                        v-for="item in pdkRequirementItems"
+                        :key="item.label"
+                        class="flex items-center gap-2 rounded-lg border px-3 py-2"
+                        :class="
+                          item.ready
+                            ? 'border-emerald-300/60 bg-emerald-500/5 text-emerald-700'
+                            : 'border-amber-300/60 bg-amber-500/5 text-amber-700'
+                        "
+                      >
+                        <i
+                          :class="
+                            item.ready
+                              ? 'ri-checkbox-circle-fill'
+                              : 'ri-error-warning-line'
+                          "
+                          aria-hidden="true"
+                        ></i>
+                        {{ item.label }}
+                      </span>
                     </div>
                     <div class="grid gap-2 md:grid-cols-2">
                       <button
@@ -892,6 +973,11 @@
                               : 'cursor-not-allowed border-(--border-color) bg-(--bg-primary)/40 opacity-65'
                         "
                         :disabled="!defaultConfigAvailable"
+                        :title="
+                          defaultConfigAvailable
+                            ? 'Use ECC defaults for this PDK'
+                            : defaultConfigUnavailableReason
+                        "
                         @click="pdkConfigMode = 'default'"
                       >
                         <span
@@ -982,7 +1068,7 @@
 
                   <section
                     v-else
-                    class="flex min-h-0 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
+                    class="flex min-h-[420px] flex-col rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
                   >
                     <div class="mb-3 flex items-start justify-between gap-4">
                       <div>
@@ -1000,6 +1086,14 @@
                         {{ activeManualPdkSelections.length }} selected
                       </span>
                     </div>
+                    <p
+                      v-if="activeManualPdkSelections.length === 0"
+                      class="mb-3 rounded-lg border border-amber-300/60 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-700"
+                    >
+                      <i class="ri-information-line mr-1" aria-hidden="true"></i>
+                      Select files for Tech LEF, Cell LEF, and Liberty. Use the refresh
+                      button in the panel to choose files from the selected PDK folder.
+                    </p>
 
                     <div
                       class="pdk-manual-resource-shell grid min-h-0 flex-1 gap-3 overflow-hidden xl:grid-cols-[200px_minmax(0,1fr)]"
@@ -1407,6 +1501,13 @@
               <i class="ri-arrow-left-line"></i>
               Back
             </button>
+            <p
+              v-else-if="currentStep === 5 && !canProceed && stepFiveBlockedReason"
+              class="max-w-[52%] text-xs leading-5 text-red-500"
+            >
+              <i class="ri-error-warning-line mr-1" aria-hidden="true"></i>
+              {{ stepFiveBlockedReason }}
+            </p>
             <div v-else></div>
 
             <div class="flex items-center gap-3">
@@ -1422,6 +1523,9 @@
                 type="button"
                 class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-semibold text-white transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
                 :disabled="!canProceed"
+                :title="
+                  currentStep === 5 && !canProceed ? stepFiveBlockedReason : undefined
+                "
                 @click="nextStep"
               >
                 Continue
@@ -1463,7 +1567,7 @@ import { usePdkManager } from '../composables/usePdkManager'
 import { useWorkspace } from '../composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import {
   parseProjectManifest,
   type ProjectManifest,
@@ -1701,12 +1805,19 @@ const managedWorkspacePreview = computed(() => {
   return deriveManagedWorkspacePath(workspaceName.value.trim() || '<workspace_name>')
 })
 
-const { importedPdks, loadPdks, importPdk: doImportPdk, removePdk } = usePdkManager()
+const {
+  importedPdks,
+  loadPdks,
+  importPdk: doImportPdk,
+  removePdk,
+  validatePdk,
+} = usePdkManager()
 const { showToast } = useWorkspace()
 const selectedPdkId = ref<string>(
   props.initialConfig?.pdk ?? props.initialConfig?.source_config?.pdk ?? '',
 )
 const hasLoadedPdks = ref(false)
+const validatingPdkId = ref('')
 
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
   tech_lef: [
@@ -1862,9 +1973,7 @@ async function readProjectManifestForProject(
 ): Promise<ProjectManifest | null> {
   const root = normalizePath(projectRoot)
   if (!root) return null
-  const manifestText = await readOptionalProjectTextFile('project.json', {
-    projectPath: root,
-  })
+  const manifestText = await readProjectManagementManifest(root)
   if (!manifestText) return null
   return parseProjectManifest(manifestText)
 }
@@ -2119,6 +2228,20 @@ const selectedPdk = computed(() =>
 const defaultConfigAvailable = computed(
   () => selectedPdk.value?.valid === true && selectedPdk.value.knownLayout === true,
 )
+const defaultConfigUnavailableReason = computed(() => {
+  if (!selectedPdk.value) return 'Select a PDK first.'
+  if (selectedPdk.value.status === 'missing') return 'The PDK path is unavailable.'
+  if (selectedPdk.value.status === 'invalid') {
+    const missing = pdkMissingFiles(selectedPdk.value)
+    return missing.length > 0
+      ? `PDK validation failed. Missing ${missing.length} required resource file${missing.length === 1 ? '' : 's'}.`
+      : 'PDK validation failed. Check the PDK resource files.'
+  }
+  if (!selectedPdk.value.valid) return 'This PDK is not validated.'
+  if (!selectedPdk.value.knownLayout)
+    return 'ECC defaults are only available for a known PDK layout.'
+  return ''
+})
 const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
 const currentPdkDetectedFiles = computed<PdkDetectedFiles>(
   () =>
@@ -2141,6 +2264,20 @@ const detectedPdkFiles = computed<Record<PdkResourceKey, string[]>>(() => {
     liberty: resolvedFiles.filter((file) => hasExtension(file, ['lib', 'liberty'])),
   }
 })
+const pdkRequirementItems = computed(() => [
+  { label: 'PDK selected', ready: Boolean(selectedPdk.value) },
+  { label: 'PDK validated', ready: selectedPdk.value?.valid === true },
+  {
+    label:
+      pdkConfigMode.value === 'default'
+        ? 'ECC default layout available'
+        : 'Manual resources selected',
+    ready:
+      pdkConfigMode.value === 'default'
+        ? defaultConfigAvailable.value
+        : pdkWizardSteps.every((step) => pdkSelections.value[step.key].length > 0),
+  },
+])
 
 const canProceed = computed(() => {
   switch (currentStep.value) {
@@ -2174,6 +2311,18 @@ const canProceed = computed(() => {
     default:
       return true
   }
+})
+const stepFiveBlockedReason = computed(() => {
+  if (currentStep.value !== 5 || canProceed.value) return ''
+  if (!selectedPdk.value) return 'Select a valid PDK first.'
+  if (!selectedPdk.value.valid) return pdkValidationMessage(selectedPdk.value)
+  if (pdkConfigMode.value === 'manual') {
+    const missing = pdkWizardSteps
+      .filter((step) => pdkSelections.value[step.key].length === 0)
+      .map((step) => step.title)
+    return `Select at least one file for: ${missing.join(', ')}.`
+  }
+  return 'Complete the PDK configuration before continuing.'
 })
 
 watch(
@@ -2989,14 +3138,73 @@ function designFilesReady() {
   )
 }
 
+function pdkValidationMessage(pdk: import('../types').ImportedPdk): string {
+  if (pdk.status === 'missing') return 'PDK path is unavailable.'
+  if (pdk.status === 'invalid') {
+    const missing = pdkMissingFiles(pdk)
+    return missing.length > 0
+      ? `Invalid PDK: ${missing.length} required resource file${missing.length === 1 ? '' : 's'} missing.`
+      : 'Invalid PDK: required resource files are missing.'
+  }
+  if (!pdk.valid) return 'PDK has not passed validation.'
+  if (!pdk.knownLayout) return 'Custom layout: ECC Default Config is unavailable.'
+  return ''
+}
+
+function pdkMissingFiles(pdk: import('../types').ImportedPdk): string[] {
+  if (pdk.pdkId !== 'ics55') return []
+  return ICS55_REQUIRED_PDK_FILES.filter(
+    (file) => !pdk.detectedFiles?.files.includes(file),
+  )
+}
+
 function selectPdk(pdk: import('../types').ImportedPdk) {
-  if (!pdk.valid) return
   selectedPdkId.value = pdk.id
   config.value.pdk = pdk.pdkId
   config.value.pdk_root = pdk.path
   manualPdkDetectedFiles.value = pdk.detectedFiles ?? null
-  if (!pdk.knownLayout) pdkConfigMode.value = 'manual'
+  if (!pdk.valid || !pdk.knownLayout) pdkConfigMode.value = 'manual'
   syncWorkspaceConfig()
+}
+
+async function handleValidatePdk(id: string): Promise<void> {
+  const pdk = pdkOptions.value.find((item) => item.id === id)
+  if (!pdk) return
+
+  validatingPdkId.value = id
+  try {
+    if (pdk.source === 'project') {
+      const scanned = await getDesktopApi().workspace.scanPdkDirectory(pdk.path)
+      const valid = hasValidKnownPdkLayout(scanned.pdkId, scanned.detectedFiles)
+      const updatedPdk = {
+        ...pdk,
+        name: scanned.name || pdk.name,
+        path: scanned.canonicalPath,
+        techNode: scanned.techNode,
+        pdkId: scanned.pdkId || pdk.pdkId,
+        detectedFiles: scanned.detectedFiles,
+        description: valid
+          ? 'PDK path pinned by the source project.'
+          : 'The source project PDK path is incomplete.',
+        status: valid ? 'installed' : 'invalid',
+        valid,
+        knownLayout: scanned.pdkId === 'ics55' && valid,
+      }
+      projectPinnedPdk.value = updatedPdk
+      if (selectedPdkId.value === id) selectPdk(updatedPdk)
+      return
+    }
+
+    await validatePdk(id)
+  } catch (error) {
+    showToast({
+      severity: 'error',
+      summary: 'PDK Check Failed',
+      detail: error instanceof Error ? error.message : 'The PDK could not be checked.',
+    })
+  } finally {
+    validatingPdkId.value = ''
+  }
 }
 
 async function handleImportPdk() {
