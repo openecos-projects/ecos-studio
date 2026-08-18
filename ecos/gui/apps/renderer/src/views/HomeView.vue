@@ -421,8 +421,8 @@
     :style="{ width: 'min(920px, calc(100vw - 32px))' }"
     :draggable="false"
   >
-    <div v-if="checklistItems.length" class="checklist-detail-list">
-      <section v-for="item in checklistItems" :key="item.id" :class="`is-${item.state}`">
+    <div v-if="resolvedChecklistItems.length" class="checklist-detail-list">
+      <section v-for="item in resolvedChecklistItems" :key="item.id" :class="`is-${item.state}`">
         <div>
           <strong>{{ item.title }}</strong
           ><span>{{ item.step }}</span>
@@ -561,6 +561,7 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
+  reconcileFlowChecklistItems,
 } from '@/components/home/dashboardData'
 import {
   buildHomeQorDetailModel,
@@ -651,8 +652,13 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
         : null,
     })),
 )
-const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
-const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
+const resolvedChecklistItems = computed(() =>
+  reconcileFlowChecklistItems(checklistItems.value, flowStages.value),
+)
+const checklistSlices = computed(() => checklistPieSlices(resolvedChecklistItems.value))
+const checklistSummary = computed(() =>
+  checklistStatusSummary(resolvedChecklistItems.value),
+)
 const qorComparisonSummary = computed(() =>
   summarizeHomeQorComparison(qorComparisonState.value.comparison),
 )
