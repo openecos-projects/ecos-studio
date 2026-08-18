@@ -196,6 +196,10 @@ import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import {
+  requestOpenStepConfigAfterCreate,
+  usePendingOpenStepConfigAfterCreate,
+} from '@/composables/openStepConfigAfterCreate'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
@@ -277,6 +281,21 @@ const documentationUrl =
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
 const showStepConfigDialog = ref(false)
+const pendingOpenStepConfigAfterCreate = usePendingOpenStepConfigAfterCreate()
+watch(
+  () =>
+    isWorkspaceRoute.value &&
+    pendingOpenStepConfigAfterCreate.value &&
+    Boolean(currentProject.value?.path) &&
+    !runtimeBackendConnecting.value,
+  (shouldOpenStepConfig) => {
+    if (!shouldOpenStepConfig) return
+    pendingOpenStepConfigAfterCreate.value = false
+    showStepConfigDialog.value = true
+  },
+  { flush: 'post' },
+)
+
 const stepConfigDialogRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
 const reconfigureWorkspacePath = ref('')
@@ -399,6 +418,7 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
   if (!success) return
 
   await syncProjectManagedWorkspace(config)
+  requestOpenStepConfigAfterCreate()
   router.push('/workspace')
 }
 

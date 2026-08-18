@@ -156,4 +156,33 @@ describe('App workspace reconfiguration wizard wiring', () => {
     )
     expect(updateSync).toBeGreaterThan(updateStart)
   })
+
+  it('opens Edit/Config after a successful new workspace create', () => {
+    expect(appSource).toContain('requestOpenStepConfigAfterCreate')
+    expect(appSource).toContain('usePendingOpenStepConfigAfterCreate')
+    expect(appSource).toContain('showStepConfigDialog.value = true')
+
+    const createStart = appSource.indexOf('const handleWizardCreate')
+    const createEnd = appSource.indexOf(
+      'function cancelWorkspaceUpdateBackup',
+      createStart,
+    )
+    const createSource = appSource.slice(createStart, createEnd)
+    expect(createSource).toContain('if (!success) return')
+    expect(createSource).toContain('requestOpenStepConfigAfterCreate()')
+    expect(createSource.indexOf('requestOpenStepConfigAfterCreate()')).toBeGreaterThan(
+      createSource.indexOf('await syncProjectManagedWorkspace(config)'),
+    )
+    expect(createSource.indexOf("router.push('/workspace')")).toBeGreaterThan(
+      createSource.indexOf('requestOpenStepConfigAfterCreate()'),
+    )
+
+    const updateStart = appSource.indexOf('async function runWorkspaceUpdate')
+    const updateEnd = appSource.indexOf(
+      'async function syncProjectManagedWorkspace',
+      updateStart,
+    )
+    const updateSource = appSource.slice(updateStart, updateEnd)
+    expect(updateSource).not.toContain('requestOpenStepConfigAfterCreate')
+  })
 })
