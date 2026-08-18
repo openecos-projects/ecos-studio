@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use chip_display::{FillPattern, LayerRole, LayerStyle};
+use chip_display::{FillPattern, LayerRole, LayerStack, LayerStyle};
 use chip_render::{RenderCacheStats, RenderPlanCache, ViewTilePlaneCache};
 use chip_view_db::{
     ChipViewDb, ChipViewMemoryStats, ConnectivityMetadata, DeltaStats, GridMetadata, NearestShape,
@@ -156,6 +156,11 @@ struct LoadedViewer {
     ruler_tool: OrthogonalRuler,
     object_visibility: ObjectVisibility,
     coordinate_unit: CoordinateUnit,
+    view_mode: ViewMode,
+    camera3d: crate::camera3d::OrbitCamera,
+    layer_stack: LayerStack,
+    view3d_fitted: bool,
+    view3d_bootstrapped: bool,
     sidebar_info_panel: Option<SidebarInfoPanel>,
     geometry_epoch: u64,
     owner_category_cache: OwnerCategoryCache,
@@ -729,6 +734,12 @@ fn ruler_start_requested(
 enum CoordinateUnit {
     Dbu,
     Micron,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ViewMode {
+    TwoD,
+    ThreeD,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2016,6 +2027,11 @@ impl LoadedViewer {
             ruler_tool: OrthogonalRuler::default(),
             object_visibility: ObjectVisibility::default(),
             coordinate_unit: CoordinateUnit::Dbu,
+            view_mode: ViewMode::TwoD,
+            camera3d: crate::camera3d::OrbitCamera::default(),
+            layer_stack: LayerStack::default(),
+            view3d_fitted: false,
+            view3d_bootstrapped: false,
             sidebar_info_panel: None,
             geometry_epoch: 1,
             owner_category_cache: OwnerCategoryCache::default(),
@@ -2551,11 +2567,36 @@ impl LoadedViewer {
             });
         });
         ui.horizontal(|ui| {
+            for (mode, label) in [(ViewMode::TwoD, "2D"), (ViewMode::ThreeD, "3D")] {
+                if ui
+                    .selectable_label(self.view_mode == mode, label)
+                    .on_hover_text(if mode == ViewMode::ThreeD {
+                        "Orbit the extruded metal stack"
+                    } else {
+                        "Plan-view layout canvas"
+                    })
+                    .clicked()
+                {
+                    if self.view_mode != mode {
+                        self.view_mode = mode;
+                        self.pan_drag.reset();
+                        self.focus_animation = None;
+                        if mode == ViewMode::ThreeD {
+                            self.view3d_fitted = false;
+                        }
+                    }
+                }
+            }
+            ui.separator();
             if ui.button("⛶").on_hover_text("Fit layout to view").clicked() {
                 self.focus_animation = None;
-                self.zoom = 1.0;
-                self.pan = egui::Vec2::ZERO;
                 self.pan_drag.reset();
+                if self.view_mode == ViewMode::ThreeD {
+                    self.view3d_fitted = false;
+                } else {
+                    self.zoom = 1.0;
+                    self.pan = egui::Vec2::ZERO;
+                }
             }
             let can_reload = self.pending_edit.is_none() && self.draft.is_none();
             if ui
@@ -2608,6 +2649,36 @@ impl LoadedViewer {
                 self.shortcuts_overlay_visible = !self.shortcuts_overlay_visible;
             }
         });
+        if self.view_mode == ViewMode::ThreeD {
+            ui.horizontal(|ui| {
+                if ui
+                    .small_button("Iso")
+                    .on_hover_text("Isometric camera")
+                    .clicked()
+                {
+                    self.camera3d.set_iso();
+                }
+                if ui
+                    .small_button("Top")
+                    .on_hover_text("Look down from +Z")
+                    .clicked()
+                {
+                    self.camera3d.set_top();
+                }
+                if ui
+                    .small_button("Front")
+                    .on_hover_text("Look across the stack")
+                    .clicked()
+                {
+                    self.camera3d.set_front();
+                }
+            });
+            ui.add(
+                egui::Slider::new(&mut self.camera3d.z_scale, 0.05..=6.0)
+                    .logarithmic(true)
+                    .text("Z-scale"),
+            );
+        }
     }
 
     fn sidebar_physical_layers_section(&mut self, ui: &mut egui::Ui, max_height: f32) {
@@ -3103,6 +3174,20 @@ impl LoadedViewer {
             );
             return;
         };
+
+        if self.view_mode == ViewMode::ThreeD {
+            self.canvas_3d(
+                ui,
+                &response,
+                canvas,
+                &painter,
+                pointer_over_layout,
+                pointer_over_heatmap,
+                drag_started_in_canvas,
+                world,
+            );
+            return;
+        }
 
         if response.hovered() && !pointer_over_heatmap {
             let raw_scroll_delta_y = ui.ctx().input(|input| input.raw_scroll_delta.y);
@@ -4258,6 +4343,450 @@ impl LoadedViewer {
             });
     }
 
+    fn canvas_3d(
+        &mut self,
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        canvas: egui::Rect,
+        painter: &egui::Painter,
+        pointer_over_layout: bool,
+        pointer_over_heatmap: bool,
+        drag_started_in_canvas: bool,
+        world: Rect32,
+    ) {
+        self.ensure_3d_view(world, canvas);
+
+        if let Some(focus) = self.pending_focus.take() {
+            let span = ((focus.bbox.hx - focus.bbox.lx).max(focus.bbox.hy - focus.bbox.ly) as f32)
+                .max(1.0);
+            self.camera3d.focus_xy(
+                (focus.bbox.lx + focus.bbox.hx) as f32 * 0.5,
+                (focus.bbox.ly + focus.bbox.hy) as f32 * 0.5,
+                span,
+                self.layer_stack.height(),
+            );
+            self.selected = focus.select_shape_id;
+            self.pan_drag.reset();
+        }
+
+        let pointer_over_zoom_target = !pointer_over_heatmap
+            && ui.ctx().input(|input| {
+                input
+                    .pointer
+                    .hover_pos()
+                    .is_some_and(|pos| canvas.contains(pos) || response.rect.contains(pos))
+            });
+        if pointer_over_zoom_target {
+            let (scroll_y, pinch_zoom) = ui.ctx().input(|input| {
+                let scroll_y = if input.raw_scroll_delta.y.abs() > f32::EPSILON {
+                    input.raw_scroll_delta.y
+                } else {
+                    input.smooth_scroll_delta.y
+                };
+                (scroll_y, input.zoom_delta())
+            });
+            let zoom_factor = if scroll_y.abs() > f32::EPSILON {
+                scroll_zoom_factor(scroll_y)
+            } else {
+                pinch_zoom
+            };
+            if (zoom_factor - 1.0).abs() > f32::EPSILON {
+                let pivot = ui
+                    .ctx()
+                    .input(|input| input.pointer.hover_pos())
+                    .and_then(|pos| {
+                        self.camera3d
+                            .ray_from_screen(
+                                [pos.x, pos.y],
+                                [canvas.left(), canvas.top()],
+                                [canvas.width(), canvas.height()],
+                            )
+                            .and_then(|ray| {
+                                ray.intersect_z_plane(self.camera3d.target.z)
+                                    .or_else(|| ray.intersect_z_plane(0.0))
+                            })
+                    });
+                self.camera3d
+                    .zoom_toward(1.0 / zoom_factor.max(0.05), pivot);
+                ui.ctx().input_mut(|input| {
+                    input.raw_scroll_delta.y = 0.0;
+                    input.smooth_scroll_delta.y = 0.0;
+                });
+                self.pan_drag.reset();
+                ui.ctx().request_repaint();
+            }
+        }
+
+        if response.drag_started() && drag_started_in_canvas && !pointer_over_heatmap {
+            let mode = if response.drag_started_by(egui::PointerButton::Middle)
+                || response.drag_started_by(egui::PointerButton::Secondary)
+            {
+                Some(CanvasDragMode::Edit)
+            } else if response.drag_started_by(egui::PointerButton::Primary) {
+                Some(CanvasDragMode::Pan)
+            } else {
+                None
+            };
+            if let Some(mode) = mode {
+                self.pan_drag.start(mode);
+            }
+        }
+        if response.dragged() && !pointer_over_heatmap {
+            let delta = response.drag_delta();
+            match self.pan_drag.mode() {
+                Some(CanvasDragMode::Edit) => {
+                    self.camera3d.orbit(delta.x * 0.008, -delta.y * 0.008);
+                    ui.ctx().request_repaint();
+                }
+                Some(CanvasDragMode::Pan) => {
+                    self.camera3d.pan(delta.x, delta.y);
+                    ui.ctx().request_repaint();
+                }
+                _ => {}
+            }
+        }
+        if response.drag_stopped() {
+            self.pan_drag.reset();
+        }
+
+        let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
+        if response.clicked_by(egui::PointerButton::Primary) && pointer_over_layout {
+            self.selected = response
+                .interact_pointer_pos()
+                .and_then(|pos| self.pick_shape_at_3d(pos, canvas, world, &query_layer_ids));
+        }
+
+        if pointer_over_layout {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+
+        let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
+        let viewport = crate::canvas_gpu3d::query_rect_for_camera(self.camera3d, world, aspect);
+        let instances =
+            std::sync::Arc::new(self.build_3d_instances(world, viewport, &query_layer_ids));
+        let drawn = instances.len();
+
+        if !self.gpu_canvas.enabled || self.gpu_canvas.failed {
+            painter.text(
+                canvas.center(),
+                egui::Align2::CENTER_CENTER,
+                "3D view requires the GPU canvas",
+                egui::FontId::proportional(14.0),
+                ecos_text_secondary(),
+            );
+        } else {
+            let pixels_per_point = ui.ctx().pixels_per_point();
+            let callback = crate::canvas_gpu3d::CanvasGpu3dCallback {
+                uniform: crate::canvas_gpu3d::CanvasUniform3d::from_camera(self.camera3d, aspect),
+                instances,
+                target_pixels: [
+                    (canvas.width() * pixels_per_point).round().max(1.0) as u32,
+                    (canvas.height() * pixels_per_point).round().max(1.0) as u32,
+                ],
+                target_format: self.gpu_canvas.target_format,
+            };
+            ui.painter()
+                .add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
+        }
+
+        self.status_line_buffer.clear();
+        use std::fmt::Write as _;
+        let using_overview_tiles = crate::canvas_gpu3d::use_overview_slabs(self.camera3d, world)
+            && self.db.view_tile_count() > 0
+            && drawn > 0;
+        let _ = write!(
+            self.status_line_buffer,
+            "3D  {} {}  yaw {:.0}°  pitch {:.0}°  z×{:.1}",
+            drawn,
+            if using_overview_tiles {
+                "tiles"
+            } else {
+                "shapes"
+            },
+            self.camera3d.yaw.to_degrees(),
+            self.camera3d.pitch.to_degrees(),
+            self.camera3d.z_scale
+        );
+        painter.text(
+            canvas.left_top() + egui::vec2(10.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            self.status_line_buffer.as_str(),
+            egui::FontId::proportional(13.0),
+            ecos_text_secondary(),
+        );
+
+        if let Some(pos) = ui
+            .ctx()
+            .input(|input| input.pointer.hover_pos())
+            .filter(|_| pointer_over_layout)
+        {
+            if let Some(point) = self.hover_world_point_3d(pos, canvas) {
+                self.status_line_buffer.clear();
+                hover_status_line_into(
+                    &mut self.status_line_buffer,
+                    point,
+                    self.coordinate_unit,
+                    self.db.snapshot().manifest().dbu_per_micron,
+                    None,
+                );
+                painter.text(
+                    canvas.left_top() + egui::vec2(10.0, 28.0),
+                    egui::Align2::LEFT_TOP,
+                    self.status_line_buffer.as_str(),
+                    egui::FontId::monospace(12.0),
+                    ecos_text_secondary(),
+                );
+            }
+        }
+
+        self.canvas_info_overlay(ui, canvas);
+        self.drc_detail_overlay(ui, canvas);
+        self.antenna_detail_overlay(ui, canvas);
+        self.map_heatmap_overlay(ui, canvas);
+    }
+
+    fn ensure_3d_view(&mut self, world: Rect32, canvas: egui::Rect) {
+        self.rebuild_layer_stack();
+        if !self.view3d_bootstrapped {
+            self.view3d_bootstrapped = true;
+            if visible_layer_count(&self.layers) == 0 {
+                set_layer_visibility(&mut self.layers, true);
+            }
+            if !self.object_visibility.net_signal
+                && !self.object_visibility.net_clock
+                && !self.object_visibility.pdn
+                && !self.object_visibility.vias
+            {
+                self.object_visibility.net_signal = true;
+                self.object_visibility.vias = true;
+                self.apply_object_visibility();
+            }
+        }
+        if !self.view3d_fitted {
+            let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
+            self.camera3d.fit_world_with_aspect(
+                crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
+                crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
+                self.layer_stack.height(),
+                aspect,
+            );
+            self.view3d_fitted = true;
+        }
+    }
+
+    fn rebuild_layer_stack(&mut self) {
+        let mut entries: Vec<(LayerId, LayerRole, u32)> = self
+            .layers
+            .iter()
+            .map(|layer| {
+                (
+                    layer.layer_id,
+                    LayerRole::from_metadata(&layer.name, &layer.layer_type),
+                    layer.order,
+                )
+            })
+            .collect();
+        if !entries
+            .iter()
+            .any(|(layer_id, _, _)| *layer_id == LAYOUT_GEOMETRY_LAYER)
+        {
+            entries.push((LAYOUT_GEOMETRY_LAYER, LayerRole::Overlap, 0));
+        }
+        self.layer_stack = chip_display::heuristic_layer_stack(entries);
+    }
+
+    fn build_3d_instances(
+        &self,
+        world: Rect32,
+        viewport: Rect32,
+        query_layer_ids: &[LayerId],
+    ) -> Vec<crate::canvas_gpu3d::GpuShapeInstance3d> {
+        if crate::canvas_gpu3d::use_overview_slabs(self.camera3d, world)
+            && self.db.view_tile_count() > 0
+        {
+            let overview = self.build_3d_overview_instances(world, viewport);
+            if !overview.is_empty() {
+                return overview;
+            }
+        }
+
+        let visibility_hash = layers_visibility_hash(&self.layers);
+        let layer_index = if self.visibility_rules_cache.epoch == self.geometry_epoch
+            && self.visibility_rules_cache.layer_visibility_hash == visibility_hash
+        {
+            Some(&self.visibility_rules_cache.layer_index)
+        } else {
+            None
+        };
+        let fallback_index = layer_index
+            .is_none()
+            .then(|| LayerRenderIndex::new(&self.layers));
+        let layer_index = layer_index.unwrap_or_else(|| fallback_index.as_ref().unwrap());
+        let zoom_rules = ZoomVisibilityRules::new(&self.db);
+
+        let mut prepared = Vec::new();
+        for shape_id in self
+            .db
+            .query_layers_intersect(query_layer_ids, viewport)
+            .into_iter()
+            .chain(overlay_shape_ids(self.selected, &self.highlighted))
+        {
+            let Some(shape) = self.db.find_shape(shape_id) else {
+                continue;
+            };
+            if !is_renderable_shape(shape) {
+                continue;
+            }
+            let owner = self.db.owner_for_shape(shape);
+            let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+            if !zoom_rules.is_drawn_at_zoom(owner_type, 8.0) {
+                continue;
+            }
+            let owner_category =
+                owner.and_then(|owner| drawing_category_for_owner(&self.db, owner));
+            if !shape_is_visible_fast(
+                shape,
+                owner_type,
+                owner_category,
+                layer_index,
+                &self.object_visibility,
+            ) {
+                continue;
+            }
+            let Some(mut style) =
+                visible_style_for_shape_fast(shape, owner, owner_type, layer_index)
+            else {
+                continue;
+            };
+            if self.selected == Some(shape_id) {
+                style.rgba = [76, 196, 255, 230];
+                style.fill_alpha = 230;
+            } else if self.highlighted.contains(&shape_id) {
+                style.rgba = [255, 214, 90, 210];
+                style.fill_alpha = 210;
+            }
+            let band =
+                self.layer_stack
+                    .band(shape.layer_id)
+                    .unwrap_or(chip_display::LayerStackBand {
+                        layer_id: shape.layer_id,
+                        z0: 0.0,
+                        z1: 400.0,
+                    });
+            prepared.push((self.db.shape_geometry(shape), style, band.z0, band.z1));
+            if prepared.len() >= crate::canvas_gpu3d::MAX_3D_INSTANCES {
+                break;
+            }
+        }
+        crate::canvas_gpu3d::build_gpu_instances_3d(prepared.into_iter())
+    }
+
+    fn build_3d_overview_instances(
+        &self,
+        world: Rect32,
+        viewport: Rect32,
+    ) -> Vec<crate::canvas_gpu3d::GpuShapeInstance3d> {
+        let mut layers: Vec<(&LayerUiState, chip_display::LayerStackBand)> = self
+            .layers
+            .iter()
+            .filter(|layer| layer.visible)
+            .filter_map(|layer| {
+                self.layer_stack
+                    .band(layer.layer_id)
+                    .map(|band| (layer, band))
+            })
+            .collect();
+        layers.sort_by(|lhs, rhs| lhs.1.z0.total_cmp(&rhs.1.z0));
+        let layer_ids: Vec<LayerId> = layers.iter().map(|(layer, _)| layer.layer_id).collect();
+        let preferred_lod = select_overview_lod(&self.db, &layer_ids, viewport, world)
+            .unwrap_or_else(|| crate::canvas_gpu3d::overview_lod_level(self.camera3d, world));
+
+        let mut instances = Vec::new();
+        for (layer, band) in layers {
+            for tile in
+                overview_tiles_for_layer(&self.db, preferred_lod, layer.layer_id, viewport, world)
+            {
+                crate::canvas_gpu3d::push_overview_tile_instance(
+                    &mut instances,
+                    tile.bbox,
+                    tile.shape_count,
+                    band.z0,
+                    band.z1,
+                    &layer.style,
+                );
+                if instances.len() >= crate::canvas_gpu3d::MAX_3D_INSTANCES {
+                    return instances;
+                }
+            }
+        }
+        instances
+    }
+
+    fn hover_world_point_3d(&self, pos: egui::Pos2, canvas: egui::Rect) -> Option<Point32> {
+        let ray = self.camera3d.ray_from_screen(
+            [pos.x, pos.y],
+            [canvas.left(), canvas.top()],
+            [canvas.width(), canvas.height()],
+        )?;
+        let hit = ray.intersect_z_plane(0.0)?;
+        Some(Point32 {
+            x: hit.x.round() as i32,
+            y: hit.y.round() as i32,
+        })
+    }
+
+    fn pick_shape_at_3d(
+        &self,
+        pos: egui::Pos2,
+        canvas: egui::Rect,
+        world: Rect32,
+        query_layer_ids: &[LayerId],
+    ) -> Option<ShapeId> {
+        let ray = self.camera3d.ray_from_screen(
+            [pos.x, pos.y],
+            [canvas.left(), canvas.top()],
+            [canvas.width(), canvas.height()],
+        )?;
+        let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
+        let viewport = crate::canvas_gpu3d::query_rect_for_camera(self.camera3d, world, aspect);
+        let mut best: Option<(f32, ShapeId)> = None;
+        for shape_id in self.db.query_layers_intersect(query_layer_ids, viewport) {
+            let Some(shape) = self.db.find_shape(shape_id) else {
+                continue;
+            };
+            if !is_renderable_shape(shape) || !self.shape_is_visible(shape) {
+                continue;
+            }
+            let Some(rect) = shape_xy_rect(self.db.shape_geometry(shape)) else {
+                continue;
+            };
+            let band =
+                self.layer_stack
+                    .band(shape.layer_id)
+                    .unwrap_or(chip_display::LayerStackBand {
+                        layer_id: shape.layer_id,
+                        z0: 0.0,
+                        z1: 400.0,
+                    });
+            let min = crate::camera3d::Vec3::new(
+                rect.lx as f32,
+                rect.ly as f32,
+                band.z0 * self.camera3d.z_scale,
+            );
+            let max = crate::camera3d::Vec3::new(
+                rect.hx as f32,
+                rect.hy as f32,
+                band.z1 * self.camera3d.z_scale,
+            );
+            if let Some(t) = ray.intersect_aabb(min, max) {
+                if best.is_none_or(|(best_t, _)| t < best_t) {
+                    best = Some((t, shape_id));
+                }
+            }
+        }
+        best.map(|(_, shape_id)| shape_id)
+    }
+
     fn should_use_view_tiles(&self, viewport: Rect32, world: Rect32) -> bool {
         if self.gpu_canvas.enabled {
             return false;
@@ -4897,6 +5426,8 @@ impl LoadedViewer {
         retain_existing_shape_ids(&mut self.highlighted, |shape_id| {
             db.find_shape(shape_id).is_some()
         });
+        self.rebuild_layer_stack();
+        self.view3d_fitted = false;
     }
 
     fn allocate_command_id(&mut self) -> u64 {
@@ -8168,6 +8699,63 @@ fn translate_rect(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
     }
 }
 
+fn overview_lod_candidates(preferred_lod: u8) -> [u8; 4] {
+    match preferred_lod {
+        3 => [3, 2, 1, 0],
+        2 => [2, 1, 0, 3],
+        1 => [1, 0, 2, 3],
+        _ => [0, 1, 2, 3],
+    }
+}
+
+fn tile_is_useful_overview(tile: &chipgeom_format::GeometryViewTileRecord, world: Rect32) -> bool {
+    tile.shape_count > 0 && !crate::canvas_gpu3d::tile_is_full_die(tile.bbox, world)
+}
+
+fn select_overview_lod(
+    db: &ChipViewDb,
+    layer_ids: &[LayerId],
+    viewport: Rect32,
+    world: Rect32,
+) -> Option<u8> {
+    crate::canvas_gpu3d::choose_overview_lod(
+        [0_u8, 1, 2, 3].into_iter().map(|lod| {
+            let mut total = 0usize;
+            let mut useful = 0usize;
+            for layer_id in layer_ids {
+                for tile in db.query_view_tiles(lod, *layer_id, viewport) {
+                    total += 1;
+                    if tile_is_useful_overview(tile, world) {
+                        useful += 1;
+                    }
+                }
+            }
+            (lod, total, useful)
+        }),
+        crate::canvas_gpu3d::OVERVIEW_INSTANCE_BUDGET,
+    )
+}
+
+fn overview_tiles_for_layer<'a>(
+    db: &'a ChipViewDb,
+    preferred_lod: u8,
+    layer_id: LayerId,
+    viewport: Rect32,
+    world: Rect32,
+) -> Vec<&'a chipgeom_format::GeometryViewTileRecord> {
+    for lod in overview_lod_candidates(preferred_lod) {
+        let tiles: Vec<_> = db
+            .query_view_tiles(lod, layer_id, viewport)
+            .into_iter()
+            .filter(|tile| tile_is_useful_overview(tile, world))
+            .collect();
+        if !tiles.is_empty() {
+            return tiles;
+        }
+    }
+    Vec::new()
+}
+
 fn should_use_view_tiles_for_state(
     view_tile_count: usize,
     _has_highlight: bool,
@@ -8595,6 +9183,44 @@ fn overlay_shape_ids(
         overlay.insert(shape_id);
     }
     overlay
+}
+
+fn shape_xy_rect(geometry: ShapeGeometry) -> Option<Rect32> {
+    match geometry {
+        ShapeGeometry::Rect(rect) => Some(rect),
+        ShapeGeometry::Line(line) => {
+            let width = line.width.abs().max(80);
+            let half = (width / 2).max(40);
+            if line.begin.y == line.end.y {
+                Some(Rect32 {
+                    lx: line.begin.x.min(line.end.x),
+                    ly: line.begin.y.saturating_sub(half),
+                    hx: line.begin.x.max(line.end.x),
+                    hy: line.begin.y.saturating_add(half),
+                })
+            } else if line.begin.x == line.end.x {
+                Some(Rect32 {
+                    lx: line.begin.x.saturating_sub(half),
+                    ly: line.begin.y.min(line.end.y),
+                    hx: line.begin.x.saturating_add(half),
+                    hy: line.begin.y.max(line.end.y),
+                })
+            } else {
+                Some(Rect32 {
+                    lx: line.begin.x.min(line.end.x).saturating_sub(half),
+                    ly: line.begin.y.min(line.end.y).saturating_sub(half),
+                    hx: line.begin.x.max(line.end.x).saturating_add(half),
+                    hy: line.begin.y.max(line.end.y).saturating_add(half),
+                })
+            }
+        }
+        ShapeGeometry::Point(point) => Some(Rect32 {
+            lx: point.point.x.saturating_sub(80),
+            ly: point.point.y.saturating_sub(80),
+            hx: point.point.x.saturating_add(80),
+            hy: point.point.y.saturating_add(80),
+        }),
+    }
 }
 
 fn clear_search_state(search_text: &mut String, highlighted: &mut BTreeSet<ShapeId>) {
@@ -9820,6 +10446,170 @@ mod tests {
             overview_viewport,
             world,
         ));
+    }
+
+    #[test]
+    fn overview_tile_query_falls_back_when_preferred_lod_is_missing() {
+        let dir = temp_snapshot_dir("3d-overview-lod-fallback");
+        write_empty_snapshot(&dir, false);
+        let tile = chipgeom_format::GeometryViewTileRecord {
+            lod_level: 2,
+            layer_id: 4,
+            shape_count: 12,
+            bbox: Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 110,
+                hy: 220,
+            },
+            ..chipgeom_format::GeometryViewTileRecord::default()
+        };
+        write_empty_geometry_file(
+            &dir.join("geometry.view.bin"),
+            chipgeom_format::GeometryFileKind::View,
+            core::mem::size_of::<chipgeom_format::GeometryViewTileRecord>() as u32,
+            any_as_bytes(&tile),
+        );
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let viewport = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1_000,
+            hy: 1_000,
+        };
+        let tiles = overview_tiles_for_layer(&db, 3, 4, viewport, viewport);
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0].lod_level, 2);
+        assert_eq!(tiles[0].bbox.lx, 10);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn three_d_overview_extrudes_snapshot_tiles_instead_of_full_die_slabs() {
+        let dir = temp_snapshot_dir("3d-overview-tiles");
+        write_empty_snapshot(&dir, false);
+        let tile = chipgeom_format::GeometryViewTileRecord {
+            lod_level: 3,
+            layer_id: 1,
+            shape_count: 32,
+            bbox: Rect32 {
+                lx: 100,
+                ly: 200,
+                hx: 1_400,
+                hy: 1_800,
+            },
+            ..chipgeom_format::GeometryViewTileRecord::default()
+        };
+        write_empty_geometry_file(
+            &dir.join("geometry.view.bin"),
+            chipgeom_format::GeometryFileKind::View,
+            core::mem::size_of::<chipgeom_format::GeometryViewTileRecord>() as u32,
+            any_as_bytes(&tile),
+        );
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+        );
+        loaded.layers = vec![layer_state(1, true)];
+        loaded.rebuild_layer_stack();
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 10_000,
+            hy: 8_000,
+        };
+        loaded.camera3d.fit_world(
+            crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
+            crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
+            loaded.layer_stack.height(),
+        );
+        let instances = loaded.build_3d_instances(world, world, &[1]);
+        assert_eq!(instances.len(), 1);
+        assert_eq!(
+            instances[0].rect_dbu,
+            [tile.bbox.lx, tile.bbox.ly, tile.bbox.hx, tile.bbox.hy]
+        );
+        assert_ne!(
+            instances[0].rect_dbu,
+            [world.lx, world.ly, world.hx, world.hy]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn three_d_fit_prefers_detailed_tiles_over_full_die_panels() {
+        let dir = temp_snapshot_dir("3d-fit-detailed-tiles");
+        write_empty_snapshot(&dir, false);
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 10_000,
+            hy: 8_000,
+        };
+        let coarse = chipgeom_format::GeometryViewTileRecord {
+            lod_level: 3,
+            layer_id: 1,
+            shape_count: 80,
+            bbox: world,
+            ..chipgeom_format::GeometryViewTileRecord::default()
+        };
+        let fine = chipgeom_format::GeometryViewTileRecord {
+            lod_level: 0,
+            layer_id: 1,
+            shape_count: 6,
+            bbox: Rect32 {
+                lx: 200,
+                ly: 300,
+                hx: 900,
+                hy: 1_100,
+            },
+            ..chipgeom_format::GeometryViewTileRecord::default()
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(any_as_bytes(&coarse));
+        payload.extend_from_slice(any_as_bytes(&fine));
+        write_empty_geometry_file(
+            &dir.join("geometry.view.bin"),
+            chipgeom_format::GeometryFileKind::View,
+            core::mem::size_of::<chipgeom_format::GeometryViewTileRecord>() as u32,
+            &payload,
+        );
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+        );
+        loaded.layers = vec![layer_state(1, true)];
+        loaded.rebuild_layer_stack();
+        loaded.camera3d.fit_world_with_aspect(
+            crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
+            crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
+            loaded.layer_stack.height(),
+            1.2,
+        );
+        let instances = loaded.build_3d_instances(world, world, &[1]);
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].rect_dbu, [200, 300, 900, 1_100]);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

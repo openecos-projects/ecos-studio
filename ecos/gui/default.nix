@@ -14,7 +14,7 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "ecos-studio";
-  version = "0.1.0-alpha.7";
+  version = "0.1.0-alpha.8";
 
   src =
     with lib.fileset;

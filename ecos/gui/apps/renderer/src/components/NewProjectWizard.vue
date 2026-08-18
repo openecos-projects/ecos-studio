@@ -1593,7 +1593,7 @@ import { usePdkManager } from '../composables/usePdkManager'
 import { useWorkspace } from '../composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import {
   parseProjectManifest,
   type ProjectManifest,
@@ -2018,9 +2018,7 @@ async function readProjectManifestForProject(
 ): Promise<ProjectManifest | null> {
   const root = normalizePath(projectRoot)
   if (!root) return null
-  const manifestText = await readOptionalProjectTextFile('project.json', {
-    projectPath: root,
-  })
+  const manifestText = await readProjectManagementManifest(root)
   if (!manifestText) return null
   return parseProjectManifest(manifestText)
 }

@@ -82,8 +82,11 @@ async function mapWithConcurrency<T, R>(
 
 export class ProjectManagementReadService {
   async readManifest(projectRoot: string): Promise<string | null> {
-    const project = await this.loadProject(projectRoot)
-    return project.content
+    const root = await canonicalizeExistingDirectory(projectRoot)
+    return await readOptionalBoundedTextFile(
+      join(root, 'project.json'),
+      PROJECT_MANIFEST_MAX_BYTES,
+    )
   }
 
   async listProjectEntries(projectRoot: string): Promise<string[]> {

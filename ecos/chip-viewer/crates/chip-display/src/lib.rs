@@ -366,6 +366,116 @@ fn routing_pattern(level: u8) -> FillPattern {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LayerStackBand {
+    pub layer_id: LayerId,
+    pub z0: f32,
+    pub z1: f32,
+}
+
+impl LayerStackBand {
+    pub fn mid(self) -> f32 {
+        (self.z0 + self.z1) * 0.5
+    }
+
+    pub fn thickness(self) -> f32 {
+        (self.z1 - self.z0).max(0.0)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LayerStack {
+    pub bands: Vec<LayerStackBand>,
+}
+
+impl LayerStack {
+    pub fn height(&self) -> f32 {
+        self.bands
+            .iter()
+            .map(|band| band.z1)
+            .fold(0.0_f32, f32::max)
+    }
+
+    pub fn band(&self, layer_id: LayerId) -> Option<LayerStackBand> {
+        self.bands
+            .iter()
+            .copied()
+            .find(|band| band.layer_id == layer_id)
+    }
+
+    pub fn auto_z_scale(&self, world_width: f32, world_height: f32) -> f32 {
+        let stack_height = self.height().max(1.0);
+        let diagonal = (world_width.hypot(world_height)).max(1.0);
+        (diagonal * 0.02 / stack_height).clamp(0.1, 4.0)
+    }
+}
+
+pub fn heuristic_layer_stack(
+    layers: impl IntoIterator<Item = (LayerId, LayerRole, u32)>,
+) -> LayerStack {
+    let mut entries: Vec<(u32, u32, LayerId, LayerRole)> = layers
+        .into_iter()
+        .map(|(layer_id, role, order)| {
+            let (major, minor) = stack_sort_key(role, order);
+            (major, minor, layer_id, role)
+        })
+        .collect();
+    entries.sort_by_key(|(major, minor, layer_id, _)| (*major, *minor, *layer_id));
+
+    let mut bands = Vec::with_capacity(entries.len());
+    let mut cursor = 0.0_f32;
+    for (_, _, layer_id, role) in entries {
+        let thickness = heuristic_layer_thickness(role);
+        let z0 = cursor;
+        let z1 = cursor + thickness;
+        bands.push(LayerStackBand { layer_id, z0, z1 });
+        cursor = z1 + heuristic_layer_gap(role);
+    }
+    LayerStack { bands }
+}
+
+fn stack_sort_key(role: LayerRole, order: u32) -> (u32, u32) {
+    match role {
+        LayerRole::Implant | LayerRole::MasterSlice => (10, order),
+        LayerRole::Overlap => (20, order),
+        LayerRole::Metal { level } => (100 + u32::from(level) * 2, 0),
+        LayerRole::Routing => (100 + order.saturating_mul(2), 1),
+        LayerRole::Via { level } => (101 + u32::from(level) * 2, 0),
+        LayerRole::Cut => (101 + order.saturating_mul(2), 1),
+        LayerRole::TopMetal { level } => (300 + u32::from(level) * 2, 0),
+        LayerRole::TopVia { level } => (301 + u32::from(level) * 2, 0),
+        LayerRole::RedistributionVia => (398, order),
+        LayerRole::Rdl => (400, order),
+        LayerRole::Fill | LayerRole::Blockage | LayerRole::Row => (500 + order, 0),
+        LayerRole::Unknown => (600 + order, 0),
+    }
+}
+
+fn heuristic_layer_thickness(role: LayerRole) -> f32 {
+    match role {
+        LayerRole::Implant | LayerRole::MasterSlice => 300.0,
+        LayerRole::Overlap => 120.0,
+        LayerRole::Metal { .. } | LayerRole::Routing => 2000.0,
+        LayerRole::Via { .. } | LayerRole::Cut => 360.0,
+        LayerRole::TopMetal { .. } => 2600.0,
+        LayerRole::TopVia { .. } => 420.0,
+        LayerRole::RedistributionVia => 400.0,
+        LayerRole::Rdl => 2200.0,
+        LayerRole::Fill | LayerRole::Blockage | LayerRole::Row => 220.0,
+        LayerRole::Unknown => 500.0,
+    }
+}
+
+fn heuristic_layer_gap(role: LayerRole) -> f32 {
+    match role {
+        LayerRole::Via { .. }
+        | LayerRole::Cut
+        | LayerRole::TopVia { .. }
+        | LayerRole::RedistributionVia => 80.0,
+        _ => 200.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,5 +534,27 @@ mod tests {
         assert_eq!(style.fill_pattern, FillPattern::Hollow);
         assert_eq!(style.fill_alpha, 0);
         assert_eq!(style.line_width_px, 2);
+    }
+
+    #[test]
+    fn heuristic_stack_orders_metal_via_metal() {
+        let stack = heuristic_layer_stack([
+            (2, LayerRole::Metal { level: 2 }, 20),
+            (3, LayerRole::Via { level: 1 }, 15),
+            (1, LayerRole::Metal { level: 1 }, 10),
+        ]);
+
+        assert_eq!(
+            stack
+                .bands
+                .iter()
+                .map(|band| band.layer_id)
+                .collect::<Vec<_>>(),
+            vec![1, 3, 2]
+        );
+        assert!(stack.band(1).unwrap().z1 <= stack.band(3).unwrap().z0 + 0.01);
+        assert!(stack.band(3).unwrap().z1 <= stack.band(2).unwrap().z0 + 0.01);
+        assert!(stack.height() > 4000.0);
+        assert!(stack.band(3).unwrap().thickness() < stack.band(1).unwrap().thickness() * 0.3);
     }
 }

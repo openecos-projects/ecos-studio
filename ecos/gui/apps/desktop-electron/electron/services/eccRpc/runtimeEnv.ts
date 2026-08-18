@@ -34,11 +34,15 @@ function prependPath(
   }
 }
 
+function packagedEccExecutableName(platform: RuntimePlatform): string {
+  return platform === 'win32' ? 'ecc.cmd' : 'ecc'
+}
+
 function resolvePackagedRuntimeBin(options: EccRuntimeEnvOptions): string | null {
   const binariesPath = resolvePackagedBinariesPath(options)
-  const executableName = options.platform === 'win32' ? 'ecc.cmd' : 'ecc'
-
-  return existsSync(join(binariesPath, executableName)) ? binariesPath : null
+  return existsSync(join(binariesPath, packagedEccExecutableName(options.platform)))
+    ? binariesPath
+    : null
 }
 
 function resolvePackagedBinariesPath(options: EccRuntimeEnvOptions): string {
@@ -111,6 +115,23 @@ function resolveDevelopmentEccBinDir(options: EccRuntimeEnvOptions): string | nu
   }
 
   return null
+}
+
+export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | null {
+  const executableName = packagedEccExecutableName(options.platform)
+
+  if (options.isPackaged) {
+    const candidate = join(resolvePackagedBinariesPath(options), executableName)
+    return existsSync(candidate) ? candidate : null
+  }
+
+  const developmentBinDir = resolveDevelopmentEccBinDir(options)
+  if (!developmentBinDir) {
+    return null
+  }
+
+  const candidate = join(developmentBinDir, executableName)
+  return existsSync(candidate) ? candidate : null
 }
 
 export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.ProcessEnv {

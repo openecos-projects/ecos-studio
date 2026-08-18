@@ -91,6 +91,27 @@ describe('EccRpcSidecarProcess', () => {
     )
   })
 
+  it('spawns the resolved absolute ECC executable when provided', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const sidecar = new EccRpcSidecarProcess({
+      command: '/tmp/packaged/binaries/ecc',
+      env: { PATH: '/home/ecos/.local/bin:/bin' },
+      spawn,
+    })
+
+    await sidecar.start()
+
+    expect(spawn).toHaveBeenCalledWith(
+      '/tmp/packaged/binaries/ecc',
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      {
+        env: { PATH: '/home/ecos/.local/bin:/bin' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
+  })
+
   it('rechecks equivalent runtime environments before reusing the sidecar', async () => {
     const child = new FakeChild()
     const spawn = vi.fn(() => child)
