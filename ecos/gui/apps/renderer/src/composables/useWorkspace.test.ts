@@ -21,6 +21,8 @@ const {
   clearHomeRunArtifactResetAwaitingBackendStartMock,
   notifyWorkspaceRerunPreparedMock,
   clearFlowExecutionActiveForWorkspaceMock,
+  isFlowExecutionActiveForWorkspaceMock,
+  markFlowExecutionActiveForWorkspaceMock,
 } = vi.hoisted(() => ({
   createRuntimeEventClientMock: vi.fn(),
   closeWorkspaceApiMock: vi.fn(),
@@ -40,6 +42,8 @@ const {
   clearHomeRunArtifactResetAwaitingBackendStartMock: vi.fn(),
   notifyWorkspaceRerunPreparedMock: vi.fn(),
   clearFlowExecutionActiveForWorkspaceMock: vi.fn(),
+  isFlowExecutionActiveForWorkspaceMock: vi.fn(() => false),
+  markFlowExecutionActiveForWorkspaceMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -105,6 +109,8 @@ vi.mock('./homeRunArtifacts', () => ({
 
 vi.mock('./flowExecutionState', () => ({
   clearFlowExecutionActiveForWorkspace: clearFlowExecutionActiveForWorkspaceMock,
+  isFlowExecutionActiveForWorkspace: isFlowExecutionActiveForWorkspaceMock,
+  markFlowExecutionActiveForWorkspace: markFlowExecutionActiveForWorkspaceMock,
 }))
 
 import { useWorkspace } from './useWorkspace'
@@ -185,6 +191,11 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       addDesignFiles: vi.fn(),
       removeDesignFile: vi.fn(),
       watchProjectFile: vi.fn(),
+    },
+    ecc: {
+      runtime: {
+        snapshot: vi.fn(async () => ({ operations: [] })),
+      },
     },
     ...overrides,
   } as DesktopApi
