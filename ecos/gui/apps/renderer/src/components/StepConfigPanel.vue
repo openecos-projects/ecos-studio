@@ -2,7 +2,7 @@
   <div class="step-config-root flex h-full min-h-0 w-full min-w-0 flex-col">
     <div class="shrink-0 border-b border-(--border-color) bg-(--bg-primary) px-3 py-2">
       <h2 class="truncate text-[12px] font-bold text-(--text-primary)">
-        {{ stepTitle }}
+        {{ stepHeading }}
       </h2>
       <p class="mt-0.5 text-[10px] tracking-wider text-(--text-secondary) uppercase">
         Step configuration
@@ -181,12 +181,13 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 import Textarea from 'primevue/textarea'
-import { getStepMetadata, type StepEnum } from '@/api/type'
+import { formatStepToolName, getStepMetadata, type StepEnum } from '@/api/type'
 import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
 import StepConfigDynamicView from '@/components/step-config/StepConfigDynamicView.vue'
 
 const props = defineProps<{
   step?: StepEnum
+  tool?: string
 }>()
 
 const {
@@ -217,6 +218,11 @@ const stepTitle = computed(() => {
   const s = currentStep.value
   if (!s) return 'Step'
   return getStepMetadata(s)?.label ?? s
+})
+
+const stepHeading = computed(() => {
+  const tool = formatStepToolName(props.tool)
+  return tool ? `${stepTitle.value} · ${tool}` : stepTitle.value
 })
 
 const hasStepFileBody = computed(() => (stepConfigDisplay.value?.trim() ?? '').length > 0)

@@ -1065,7 +1065,7 @@
     :draggable="false"
   >
     <div class="step-config-dialog">
-      <StepConfigPanel />
+      <StepConfigPanel :tool="currentFlowStage?.tool" />
     </div>
   </Dialog>
 
@@ -1214,7 +1214,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
-import { StepEnum } from '@/api/type'
+import { formatStepToolName, StepEnum } from '@/api/type'
 import {
   useStepDashboardData,
   type StepDashboardReport,
@@ -1321,9 +1321,11 @@ const basicInfo = computed(() => {
 const configPreviewEntries = computed(() => stepConfigPreview(stepConfigParsed.value))
 const configPathLabel = computed(() => stepConfigPathResolved.value ?? '')
 const configFileName = computed(() => fileName(configPathLabel.value))
-const configDialogTitle = computed(
-  () => `${data.value?.step ?? currentStep.value} Configuration`,
-)
+const configDialogTitle = computed(() => {
+  const stepName = data.value?.step ?? currentStep.value
+  const tool = formatStepToolName(currentFlowStage.value?.tool)
+  return tool ? `${stepName} · ${tool} Configuration` : `${stepName} Configuration`
+})
 const visibleQorMetrics = computed(() =>
   prioritizeQorMetricComparisons(
     data.value?.qor.metrics ?? [],

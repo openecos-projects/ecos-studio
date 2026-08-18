@@ -136,7 +136,9 @@ describe('StepDashboard', () => {
     expect(componentSource).not.toContain('No configuration data')
     expect(componentSource).toContain('showStepConfiguration')
     expect(componentSource).toContain('Details <i class="ri-arrow-right-up-line"')
-    expect(componentSource).toContain('<StepConfigPanel />')
+    expect(componentSource).toContain(
+      '<StepConfigPanel :tool="currentFlowStage?.tool" />',
+    )
   })
 
   it('uses STA terminology for Liberty corners and signoff matrices', () => {

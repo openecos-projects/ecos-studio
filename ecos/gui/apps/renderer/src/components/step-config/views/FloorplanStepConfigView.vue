@@ -3,6 +3,7 @@ import { onMounted, watchEffect } from 'vue'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
+import Select from 'primevue/select'
 
 const draft = defineModel<Record<string, unknown>>({ required: true })
 const emit = defineEmits<{ initialized: [] }>()
@@ -13,104 +14,130 @@ function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
+const dieModeOptions = [
+  { label: 'die_util', value: 'die_util' },
+  { label: 'die_size', value: 'die_size' },
+]
+
 watchEffect(() => {
-  if (!isObj(draft.value.Floorplan)) draft.value.Floorplan = {}
-  if (!isObj(draft.value.PDN)) draft.value.PDN = {}
-  const fp = draft.value.Floorplan as Record<string, unknown>
-  const ap = fp['Auto place pin']
-  if (!isObj(ap))
-    fp['Auto place pin'] = { layer: 'MET1', width: 0, height: 0, sides: [] as unknown[] }
-  if (!Array.isArray(fp.Tracks)) fp.Tracks = []
-  const pdn = draft.value.PDN as Record<string, unknown>
-  if (!Array.isArray(pdn.IO)) pdn.IO = []
-  if (!Array.isArray(pdn['Global connect'])) pdn['Global connect'] = []
-  if (!isObj(pdn.Grid))
-    pdn.Grid = { layer: '', 'power net': '', 'power ground': '', width: 0, offset: 0 }
-  if (!Array.isArray(pdn.Stripe)) pdn.Stripe = []
-  if (!Array.isArray(pdn['Connect layers'])) pdn['Connect layers'] = []
+  if (!isObj(draft.value.ifp)) draft.value.ifp = {}
+  if (!isObj(draft.value.macro_placer)) draft.value.macro_placer = {}
+  if (!isObj(draft.value.die_builder)) draft.value.die_builder = {}
+  if (!isObj(draft.value.io_placer)) draft.value.io_placer = {}
+  if (!isObj(draft.value.phy_placer)) draft.value.phy_placer = {}
+  if (!isObj(draft.value.pdn_generator)) draft.value.pdn_generator = {}
+
+  const die = draft.value.die_builder as Record<string, unknown>
+  if (!isObj(die.margin)) die.margin = {}
+  if (!isObj(die.die_util)) die.die_util = {}
+  if (!isObj(die.die_size)) die.die_size = {}
+  if (die.mode !== 'die_util' && die.mode !== 'die_size') die.mode = 'die_util'
+
+  const io = draft.value.io_placer as Record<string, unknown>
+  if (!Array.isArray(io.io_layer_list)) io.io_layer_list = []
+
+  const phy = draft.value.phy_placer as Record<string, unknown>
+  if (!isObj(phy.well_tap)) phy.well_tap = {}
+  if (!isObj(phy.side_endcap)) phy.side_endcap = {}
+  if (!isObj(phy.edge_endcap)) phy.edge_endcap = {}
+  if (!isObj(phy.boundary_tap)) phy.boundary_tap = {}
+  const edge = phy.edge_endcap as Record<string, unknown>
+  if (!Array.isArray(edge.top_cell_name_list)) edge.top_cell_name_list = []
+  if (!Array.isArray(edge.bottom_cell_name_list)) edge.bottom_cell_name_list = []
+  const tap = phy.boundary_tap as Record<string, unknown>
+  if (!Array.isArray(tap.top_cell_name_list)) tap.top_cell_name_list = []
+  if (!Array.isArray(tap.bottom_cell_name_list)) tap.bottom_cell_name_list = []
+
+  const pdn = draft.value.pdn_generator as Record<string, unknown>
+  if (!Array.isArray(pdn.global_connect)) pdn.global_connect = []
+  if (!Array.isArray(pdn.rail)) pdn.rail = []
+  if (!Array.isArray(pdn.stripe)) pdn.stripe = []
+  if (!Array.isArray(pdn.connect_layers)) pdn.connect_layers = []
 })
 
-const fp = () => draft.value.Floorplan as Record<string, unknown>
-const pdn = () => draft.value.PDN as Record<string, unknown>
-const autoPin = () => fp()['Auto place pin'] as Record<string, unknown>
+const ifp = () => draft.value.ifp as Record<string, unknown>
+const macro = () => draft.value.macro_placer as Record<string, unknown>
+const die = () => draft.value.die_builder as Record<string, unknown>
+const margin = () => die().margin as Record<string, unknown>
+const dieUtil = () => die().die_util as Record<string, unknown>
+const dieSize = () => die().die_size as Record<string, unknown>
+const io = () => draft.value.io_placer as Record<string, unknown>
+const phy = () => draft.value.phy_placer as Record<string, unknown>
+const wellTap = () => phy().well_tap as Record<string, unknown>
+const sideEndcap = () => phy().side_endcap as Record<string, unknown>
+const edgeEndcap = () => phy().edge_endcap as Record<string, unknown>
+const boundaryTap = () => phy().boundary_tap as Record<string, unknown>
+const pdn = () => draft.value.pdn_generator as Record<string, unknown>
 
-function addTrack(): void {
-  const t = fp().Tracks as Record<string, unknown>[]
-  t.push({ layer: 'MET1', 'x start': 0, 'x step': 200, 'y start': 0, 'y step': 200 })
+function stringList(obj: Record<string, unknown>, key: string): string[] {
+  if (!Array.isArray(obj[key])) obj[key] = []
+  return obj[key] as string[]
 }
 
-function removeTrack(i: number): void {
-  ;(fp().Tracks as unknown[]).splice(i, 1)
+function addString(list: string[]): void {
+  list.push('')
 }
 
-function addIo(): void {
-  ;(pdn().IO as Record<string, unknown>[]).push({
-    'net name': '',
-    direction: 'INOUT',
-    'is power': false,
+function removeString(list: string[], index: number): void {
+  list.splice(index, 1)
+}
+
+function addGlobalConnect(): void {
+  ;(pdn().global_connect as Record<string, unknown>[]).push({
+    net_name: '',
+    instance_pin_name: '',
+    is_power: false,
   })
 }
 
-function removeIo(i: number): void {
-  ;(pdn().IO as unknown[]).splice(i, 1)
+function removeGlobalConnect(index: number): void {
+  ;(pdn().global_connect as unknown[]).splice(index, 1)
 }
 
-function addGc(): void {
-  ;(pdn()['Global connect'] as Record<string, unknown>[]).push({
-    'net name': '',
-    'instance pin name': '',
-    'is power': false,
+function addRail(): void {
+  ;(pdn().rail as Record<string, unknown>[]).push({
+    routing_layer_name: '',
+    width_micron: 0,
   })
 }
 
-function removeGc(i: number): void {
-  ;(pdn()['Global connect'] as unknown[]).splice(i, 1)
+function removeRail(index: number): void {
+  ;(pdn().rail as unknown[]).splice(index, 1)
 }
 
 function addStripe(): void {
-  ;(pdn().Stripe as Record<string, unknown>[]).push({
-    layer: '',
-    'power net': '',
-    'ground net': '',
-    width: 0,
-    pitch: 0,
-    offset: 0,
+  ;(pdn().stripe as Record<string, unknown>[]).push({
+    routing_layer_name: '',
+    width_micron: 0,
+    pitch_micron: 0,
+    offset_micron: 0,
   })
 }
 
-function removeStripe(i: number): void {
-  ;(pdn().Stripe as unknown[]).splice(i, 1)
+function removeStripe(index: number): void {
+  ;(pdn().stripe as unknown[]).splice(index, 1)
 }
 
 function addConnectLayer(): void {
-  ;(pdn()['Connect layers'] as Record<string, unknown>[]).push({ layers: [] as string[] })
+  ;(pdn().connect_layers as Record<string, unknown>[]).push({
+    bottom_routing_layer_name: '',
+    top_routing_layer_name: '',
+  })
 }
 
-function removeConnectLayer(i: number): void {
-  ;(pdn()['Connect layers'] as unknown[]).splice(i, 1)
+function removeConnectLayer(index: number): void {
+  ;(pdn().connect_layers as unknown[]).splice(index, 1)
 }
 
-function setConnectLayersFromText(
-  item: Record<string, unknown>,
-  raw: string | undefined,
-): void {
-  const s = raw ?? ''
-  item.layers = s
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean)
-}
-
-/** 表格内数值列与文本列共用 InputText 时的展示（Stripe / Tracks） */
 function tableNumStr(n: unknown): string {
   if (n === undefined || n === null) return ''
   const x = Number(n)
   return Number.isFinite(x) ? String(x) : ''
 }
 
-function setStripeNum(
+function setRowNum(
   row: Record<string, unknown>,
-  key: 'width' | 'pitch' | 'offset',
+  key: string,
   raw: string | undefined,
 ): void {
   const s = (raw ?? '').trim()
@@ -122,269 +149,274 @@ function setStripeNum(
   row[key] = Number.isFinite(n) ? n : 0
 }
 
-/** Tracks 数值列与 layer 列共用 InputText（同 Stripe，避免 InputNumber + table overflow 裁切边框） */
-function setTrackNum(
-  row: Record<string, unknown>,
-  key: 'x start' | 'x step' | 'y start' | 'y step',
-  raw: string | undefined,
-): void {
-  const s = (raw ?? '').trim()
-  if (s === '') {
-    row[key] = 0
-    return
-  }
-  const n = Number(s)
-  row[key] = Number.isFinite(n) ? n : 0
+function setDieMode(value: unknown): void {
+  die().mode = value === 'die_size' ? 'die_size' : 'die_util'
 }
 </script>
 
 <template>
   <div class="sc-pro sc-cards" data-accent="indigo">
-    <!-- Hero metrics -->
     <div class="sc-pro-hero">
       <div class="sc-pro-hero__accent" />
       <div class="sc-pro-hero__body">
-        <div class="sc-pro-hero__label">Tap distance</div>
-        <div class="field mt-1 mb-0 w-full max-w-xs min-w-0">
+        <div class="sc-pro-hero__label">ifp</div>
+        <div class="sc-pro-grid mt-2">
+          <div class="field">
+            <label>thread_number</label>
+            <InputNumber
+              v-model="(ifp() as Record<string, number>).thread_number"
+              size="small"
+              fluid
+              :use-grouping="false"
+              class="w-full min-w-0"
+            />
+          </div>
+          <div class="field sc-pro-grid__full">
+            <label>temp_directory_path</label>
+            <InputText
+              v-model="(ifp() as Record<string, string>).temp_directory_path"
+              size="small"
+              fluid
+              class="sc-mono w-full min-w-0"
+            />
+          </div>
+        </div>
+        <p class="sc-pro-hero__hint">Floorplan runtime and workspace temp directory</p>
+      </div>
+    </div>
+
+    <section class="sc-pro-section">
+      <div class="sc-pro-section__head">
+        <div class="sc-pro-section__stripe" />
+        <div class="sc-pro-section__titles">
+          <div class="sc-pro-section__title">die_builder</div>
+          <div class="sc-pro-section__desc">
+            Die geometry from utilization or explicit size
+          </div>
+        </div>
+      </div>
+      <div class="sc-pro-section__body space-y-3">
+        <div class="sc-pro-grid">
+          <div class="field">
+            <label>mode</label>
+            <Select
+              :model-value="die().mode as string"
+              :options="dieModeOptions"
+              option-label="label"
+              option-value="value"
+              size="small"
+              fluid
+              class="min-w-0"
+              @update:model-value="setDieMode"
+            />
+          </div>
+          <div class="field">
+            <label>site_name</label>
+            <InputText
+              v-model="(die() as Record<string, string>).site_name"
+              size="small"
+              fluid
+              class="sc-mono w-full min-w-0"
+            />
+          </div>
+        </div>
+
+        <div class="sc-pro-subpanel">
+          <div class="sc-pro-subpanel__title">margin</div>
+          <div class="sc-pro-grid">
+            <div class="field">
+              <label>left_micron</label>
+              <InputNumber
+                v-model="(margin() as Record<string, number>).left_micron"
+                size="small"
+                fluid
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+            <div class="field">
+              <label>right_micron</label>
+              <InputNumber
+                v-model="(margin() as Record<string, number>).right_micron"
+                size="small"
+                fluid
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+            <div class="field">
+              <label>top_micron</label>
+              <InputNumber
+                v-model="(margin() as Record<string, number>).top_micron"
+                size="small"
+                fluid
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+            <div class="field">
+              <label>bottom_micron</label>
+              <InputNumber
+                v-model="(margin() as Record<string, number>).bottom_micron"
+                size="small"
+                fluid
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="sc-pro-subpanel">
+          <div class="sc-pro-subpanel__title">die_util</div>
+          <div class="sc-pro-grid">
+            <div class="field">
+              <label>aspect_ratio</label>
+              <InputNumber
+                v-model="(dieUtil() as Record<string, number>).aspect_ratio"
+                size="small"
+                fluid
+                :min-fraction-digits="0"
+                :max-fraction-digits="6"
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+            <div class="field">
+              <label>utilization</label>
+              <InputNumber
+                v-model="(dieUtil() as Record<string, number>).utilization"
+                size="small"
+                fluid
+                :min="0"
+                :max="1"
+                :min-fraction-digits="0"
+                :max-fraction-digits="6"
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="sc-pro-subpanel">
+          <div class="sc-pro-subpanel__title">die_size</div>
+          <div class="sc-pro-grid">
+            <div class="field">
+              <label>width_micron</label>
+              <InputNumber
+                v-model="(dieSize() as Record<string, number>).width_micron"
+                size="small"
+                fluid
+                :min-fraction-digits="0"
+                :max-fraction-digits="6"
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+            <div class="field">
+              <label>height_micron</label>
+              <InputNumber
+                v-model="(dieSize() as Record<string, number>).height_micron"
+                size="small"
+                fluid
+                :min-fraction-digits="0"
+                :max-fraction-digits="6"
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sc-pro-section">
+      <div class="sc-pro-section__head">
+        <div class="sc-pro-section__stripe" />
+        <div class="sc-pro-section__titles">
+          <div class="sc-pro-section__title">macro_placer</div>
+          <div class="sc-pro-section__desc">Macro halo and location input</div>
+        </div>
+      </div>
+      <div class="sc-pro-section__body sc-pro-grid">
+        <div class="field">
+          <label>macro_placement_halo</label>
           <InputNumber
-            v-model="
-              (draft.Floorplan as Record<string, unknown>)['Tap distance'] as number
-            "
+            v-model="(macro() as Record<string, number>).macro_placement_halo"
             size="small"
             fluid
+            :min-fraction-digits="0"
+            :max-fraction-digits="6"
             :use-grouping="false"
             class="w-full min-w-0"
           />
         </div>
-        <p class="sc-pro-hero__hint">
-          Global tap distance (same as template Floorplan section)
-        </p>
+        <div class="field">
+          <label>macro_routing_halo</label>
+          <InputNumber
+            v-model="(macro() as Record<string, number>).macro_routing_halo"
+            size="small"
+            fluid
+            :min-fraction-digits="0"
+            :max-fraction-digits="6"
+            :use-grouping="false"
+            class="w-full min-w-0"
+          />
+        </div>
+        <div class="field sc-pro-grid__full">
+          <label>macro_location_path</label>
+          <InputText
+            v-model="(macro() as Record<string, string>).macro_location_path"
+            size="small"
+            fluid
+            class="sc-mono w-full min-w-0"
+          />
+        </div>
       </div>
-    </div>
+    </section>
 
-    <!-- Floorplan: auto place pin + tracks -->
     <section class="sc-pro-section">
       <div class="sc-pro-section__head">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
-          <div class="sc-pro-section__title">Layout · Auto place pin</div>
+          <div class="sc-pro-section__title">io_placer</div>
           <div class="sc-pro-section__desc">
-            Pin layer and dimensions; maintain sides as a string array in JSON editing
-            below
+            Routing layers eligible for IO-pin placement
           </div>
         </div>
       </div>
       <div class="sc-pro-section__body">
-        <div class="sc-pro-grid">
-          <div class="field">
-            <label>layer</label>
-            <InputText
-              v-model="(autoPin() as Record<string, string>).layer"
-              size="small"
-              fluid
-              class="w-full min-w-0"
-            />
-          </div>
-          <div class="field">
-            <label>width</label>
-            <InputNumber
-              v-model="(autoPin() as Record<string, number>).width"
-              size="small"
-              fluid
-              :use-grouping="false"
-              class="w-full min-w-0"
-            />
-          </div>
-          <div class="field">
-            <label>height</label>
-            <InputNumber
-              v-model="(autoPin() as Record<string, number>).height"
-              size="small"
-              fluid
-              :use-grouping="false"
-              class="w-full min-w-0"
-            />
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
-        <div class="sc-pro-section__stripe" />
-        <div class="sc-pro-section__titles">
-          <div class="sc-pro-section__title">Tracks · Routing tracks</div>
-          <div class="sc-pro-section__desc">Per-layer start positions and step sizes</div>
-        </div>
-      </div>
-      <div class="sc-pro-section__body">
-        <div class="sc-pro-table-wrap">
-          <table class="sc-pro-table sc-pro-table--tracks">
-            <colgroup>
-              <col span="5" class="sc-pro-tracks__col-data" />
-              <col class="sc-pro-tracks__col-action" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>layer</th>
-                <th>x start</th>
-                <th>x step</th>
-                <th>y start</th>
-                <th>y step</th>
-                <th class="w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(row, i) in fp().Tracks as Record<string, string | number>[]"
-                :key="i"
+        <div class="field min-w-0">
+          <label>io_layer_list</label>
+          <div class="w-full min-w-0 space-y-1">
+            <div
+              v-for="(_layer, i) in stringList(io(), 'io_layer_list')"
+              :key="'io-layer-' + i"
+              class="flex w-full min-w-0 items-center gap-2"
+            >
+              <InputText
+                v-model="stringList(io(), 'io_layer_list')[i]"
+                size="small"
+                fluid
+                class="sc-mono min-w-0 flex-1"
+              />
+              <button
+                type="button"
+                class="sc-pro-btn sc-pro-btn--danger shrink-0"
+                @click="removeString(stringList(io(), 'io_layer_list'), i)"
               >
-                <td>
-                  <InputText
-                    v-model="(row as Record<string, string>).layer"
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                  />
-                </td>
-                <td>
-                  <InputText
-                    :model-value="
-                      tableNumStr((row as Record<string, unknown>)['x start'])
-                    "
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                    @update:model-value="
-                      setTrackNum(row as Record<string, unknown>, 'x start', $event)
-                    "
-                  />
-                </td>
-                <td>
-                  <InputText
-                    :model-value="tableNumStr((row as Record<string, unknown>)['x step'])"
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                    @update:model-value="
-                      setTrackNum(row as Record<string, unknown>, 'x step', $event)
-                    "
-                  />
-                </td>
-                <td>
-                  <InputText
-                    :model-value="
-                      tableNumStr((row as Record<string, unknown>)['y start'])
-                    "
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                    @update:model-value="
-                      setTrackNum(row as Record<string, unknown>, 'y start', $event)
-                    "
-                  />
-                </td>
-                <td>
-                  <InputText
-                    :model-value="tableNumStr((row as Record<string, unknown>)['y step'])"
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                    @update:model-value="
-                      setTrackNum(row as Record<string, unknown>, 'y step', $event)
-                    "
-                  />
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    class="sc-pro-btn sc-pro-btn--danger"
-                    title="Remove"
-                    @click="removeTrack(i)"
-                  >
-                    <i class="ri-delete-bin-line"></i>
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="sc-pro-inline-actions">
-          <button type="button" class="sc-pro-btn" @click="addTrack">
-            <i class="ri-add-line"></i>
-            Add track layer
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <!-- PDN -->
-    <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
-        <div class="sc-pro-section__stripe" />
-        <div class="sc-pro-section__titles">
-          <div class="sc-pro-section__title">PDN · IO</div>
-          <div class="sc-pro-section__desc">Power delivery IO pin declarations</div>
-        </div>
-      </div>
-      <div class="sc-pro-section__body">
-        <div class="sc-pro-table-wrap">
-          <table class="sc-pro-table sc-pro-table--fp4">
-            <colgroup>
-              <col />
-              <col />
-              <col />
-              <col />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>net name</th>
-                <th>direction</th>
-                <th>is power</th>
-                <th class="w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, i) in pdn().IO as Record<string, unknown>[]" :key="i">
-                <td>
-                  <InputText
-                    v-model="(row as Record<string, string>)['net name']"
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                  />
-                </td>
-                <td>
-                  <InputText
-                    v-model="(row as Record<string, string>).direction"
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                  />
-                </td>
-                <td>
-                  <Checkbox
-                    v-model="(row as Record<string, boolean>)['is power']"
-                    binary
-                  />
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    class="sc-pro-btn sc-pro-btn--danger"
-                    @click="removeIo(i)"
-                  >
-                    <i class="ri-delete-bin-line"></i>
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="sc-pro-inline-actions">
-          <button type="button" class="sc-pro-btn" @click="addIo">
-            <i class="ri-add-line"></i> Add IO
-          </button>
+                <i class="ri-close-line"></i>
+              </button>
+            </div>
+            <button
+              type="button"
+              class="sc-pro-btn"
+              @click="addString(stringList(io(), 'io_layer_list'))"
+            >
+              <i class="ri-add-line"></i>
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -393,7 +425,225 @@ function setTrackNum(
       <div class="sc-pro-section__head">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
-          <div class="sc-pro-section__title">Global connect</div>
+          <div class="sc-pro-section__title">phy_placer</div>
+          <div class="sc-pro-section__desc">Well tap, endcap, and boundary tap cells</div>
+        </div>
+      </div>
+      <div class="sc-pro-section__body space-y-3">
+        <div class="sc-pro-subpanel">
+          <div class="sc-pro-subpanel__title">well_tap</div>
+          <div class="sc-pro-grid">
+            <div class="field">
+              <label>cell_name</label>
+              <InputText
+                v-model="(wellTap() as Record<string, string>).cell_name"
+                size="small"
+                fluid
+                class="sc-mono w-full min-w-0"
+              />
+            </div>
+            <div class="field">
+              <label>distance_micron</label>
+              <InputNumber
+                v-model="(wellTap() as Record<string, number>).distance_micron"
+                size="small"
+                fluid
+                :min-fraction-digits="0"
+                :max-fraction-digits="6"
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="sc-pro-subpanel">
+          <div class="sc-pro-subpanel__title">side_endcap</div>
+          <div class="sc-pro-grid">
+            <div class="field">
+              <label>left_cell_name</label>
+              <InputText
+                v-model="(sideEndcap() as Record<string, string>).left_cell_name"
+                size="small"
+                fluid
+                class="sc-mono w-full min-w-0"
+              />
+            </div>
+            <div class="field">
+              <label>right_cell_name</label>
+              <InputText
+                v-model="(sideEndcap() as Record<string, string>).right_cell_name"
+                size="small"
+                fluid
+                class="sc-mono w-full min-w-0"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="sc-pro-subpanel">
+          <div class="sc-pro-subpanel__title">edge_endcap</div>
+          <div class="space-y-3">
+            <div class="field min-w-0">
+              <label>top_cell_name_list</label>
+              <div class="w-full min-w-0 space-y-1">
+                <div
+                  v-for="(_cell, i) in stringList(edgeEndcap(), 'top_cell_name_list')"
+                  :key="'edge-top-' + i"
+                  class="flex w-full min-w-0 items-center gap-2"
+                >
+                  <InputText
+                    v-model="stringList(edgeEndcap(), 'top_cell_name_list')[i]"
+                    size="small"
+                    fluid
+                    class="sc-mono min-w-0 flex-1"
+                  />
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger shrink-0"
+                    @click="
+                      removeString(stringList(edgeEndcap(), 'top_cell_name_list'), i)
+                    "
+                  >
+                    <i class="ri-close-line"></i>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="sc-pro-btn"
+                  @click="addString(stringList(edgeEndcap(), 'top_cell_name_list'))"
+                >
+                  <i class="ri-add-line"></i>
+                </button>
+              </div>
+            </div>
+            <div class="field min-w-0">
+              <label>bottom_cell_name_list</label>
+              <div class="w-full min-w-0 space-y-1">
+                <div
+                  v-for="(_cell, i) in stringList(edgeEndcap(), 'bottom_cell_name_list')"
+                  :key="'edge-bot-' + i"
+                  class="flex w-full min-w-0 items-center gap-2"
+                >
+                  <InputText
+                    v-model="stringList(edgeEndcap(), 'bottom_cell_name_list')[i]"
+                    size="small"
+                    fluid
+                    class="sc-mono min-w-0 flex-1"
+                  />
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger shrink-0"
+                    @click="
+                      removeString(stringList(edgeEndcap(), 'bottom_cell_name_list'), i)
+                    "
+                  >
+                    <i class="ri-close-line"></i>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="sc-pro-btn"
+                  @click="addString(stringList(edgeEndcap(), 'bottom_cell_name_list'))"
+                >
+                  <i class="ri-add-line"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sc-pro-subpanel">
+          <div class="sc-pro-subpanel__title">boundary_tap</div>
+          <div class="space-y-3">
+            <div class="field max-w-xs">
+              <label>rule_micron</label>
+              <InputNumber
+                v-model="(boundaryTap() as Record<string, number>).rule_micron"
+                size="small"
+                fluid
+                :min-fraction-digits="0"
+                :max-fraction-digits="6"
+                :use-grouping="false"
+                class="w-full min-w-0"
+              />
+            </div>
+            <div class="field min-w-0">
+              <label>top_cell_name_list</label>
+              <div class="w-full min-w-0 space-y-1">
+                <div
+                  v-for="(_cell, i) in stringList(boundaryTap(), 'top_cell_name_list')"
+                  :key="'bound-top-' + i"
+                  class="flex w-full min-w-0 items-center gap-2"
+                >
+                  <InputText
+                    v-model="stringList(boundaryTap(), 'top_cell_name_list')[i]"
+                    size="small"
+                    fluid
+                    class="sc-mono min-w-0 flex-1"
+                  />
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger shrink-0"
+                    @click="
+                      removeString(stringList(boundaryTap(), 'top_cell_name_list'), i)
+                    "
+                  >
+                    <i class="ri-close-line"></i>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="sc-pro-btn"
+                  @click="addString(stringList(boundaryTap(), 'top_cell_name_list'))"
+                >
+                  <i class="ri-add-line"></i>
+                </button>
+              </div>
+            </div>
+            <div class="field min-w-0">
+              <label>bottom_cell_name_list</label>
+              <div class="w-full min-w-0 space-y-1">
+                <div
+                  v-for="(_cell, i) in stringList(boundaryTap(), 'bottom_cell_name_list')"
+                  :key="'bound-bot-' + i"
+                  class="flex w-full min-w-0 items-center gap-2"
+                >
+                  <InputText
+                    v-model="stringList(boundaryTap(), 'bottom_cell_name_list')[i]"
+                    size="small"
+                    fluid
+                    class="sc-mono min-w-0 flex-1"
+                  />
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger shrink-0"
+                    @click="
+                      removeString(stringList(boundaryTap(), 'bottom_cell_name_list'), i)
+                    "
+                  >
+                    <i class="ri-close-line"></i>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="sc-pro-btn"
+                  @click="addString(stringList(boundaryTap(), 'bottom_cell_name_list'))"
+                >
+                  <i class="ri-add-line"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sc-pro-section">
+      <div class="sc-pro-section__head">
+        <div class="sc-pro-section__stripe" />
+        <div class="sc-pro-section__titles">
+          <div class="sc-pro-section__title">pdn_generator · global_connect</div>
           <div class="sc-pro-section__desc">Global net to instance pin binding</div>
         </div>
       </div>
@@ -408,20 +658,20 @@ function setTrackNum(
             </colgroup>
             <thead>
               <tr>
-                <th>net name</th>
-                <th>instance pin name</th>
-                <th>is power</th>
+                <th>net_name</th>
+                <th>instance_pin_name</th>
+                <th>is_power</th>
                 <th class="w-10"></th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="(row, i) in pdn()['Global connect'] as Record<string, unknown>[]"
-                :key="i"
+                v-for="(row, i) in pdn().global_connect as Record<string, unknown>[]"
+                :key="'gc-' + i"
               >
                 <td>
                   <InputText
-                    v-model="(row as Record<string, string>)['net name']"
+                    v-model="(row as Record<string, string>).net_name"
                     size="small"
                     fluid
                     class="sc-mono w-full min-w-0"
@@ -429,23 +679,20 @@ function setTrackNum(
                 </td>
                 <td>
                   <InputText
-                    v-model="(row as Record<string, string>)['instance pin name']"
+                    v-model="(row as Record<string, string>).instance_pin_name"
                     size="small"
                     fluid
                     class="sc-mono w-full min-w-0"
                   />
                 </td>
                 <td>
-                  <Checkbox
-                    v-model="(row as Record<string, boolean>)['is power']"
-                    binary
-                  />
+                  <Checkbox v-model="(row as Record<string, boolean>).is_power" binary />
                 </td>
                 <td>
                   <button
                     type="button"
                     class="sc-pro-btn sc-pro-btn--danger"
-                    @click="removeGc(i)"
+                    @click="removeGlobalConnect(i)"
                   >
                     <i class="ri-delete-bin-line"></i>
                   </button>
@@ -455,8 +702,8 @@ function setTrackNum(
           </table>
         </div>
         <div class="sc-pro-inline-actions">
-          <button type="button" class="sc-pro-btn" @click="addGc">
-            <i class="ri-add-line"></i> Add rule
+          <button type="button" class="sc-pro-btn" @click="addGlobalConnect">
+            <i class="ri-add-line"></i> Add global connect
           </button>
         </div>
       </div>
@@ -466,56 +713,70 @@ function setTrackNum(
       <div class="sc-pro-section__head">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
-          <div class="sc-pro-section__title">Grid</div>
+          <div class="sc-pro-section__title">pdn_generator · rail</div>
+          <div class="sc-pro-section__desc">
+            Follow-pin rails on declared routing layers
+          </div>
         </div>
       </div>
-      <div class="sc-pro-section__body sc-pro-grid min-w-0">
-        <div class="field min-w-0">
-          <label>layer</label>
-          <InputText
-            v-model="(pdn().Grid as Record<string, string>).layer"
-            size="small"
-            fluid
-            class="sc-mono w-full min-w-0"
-          />
+      <div class="sc-pro-section__body">
+        <div class="sc-pro-table-wrap">
+          <table class="sc-pro-table sc-pro-table--fp4">
+            <colgroup>
+              <col />
+              <col />
+              <col />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>routing_layer_name</th>
+                <th>width_micron</th>
+                <th class="w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(row, i) in pdn().rail as Record<string, unknown>[]"
+                :key="'rail-' + i"
+              >
+                <td>
+                  <InputText
+                    v-model="(row as Record<string, string>).routing_layer_name"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
+                </td>
+                <td>
+                  <InputText
+                    :model-value="
+                      tableNumStr((row as Record<string, unknown>).width_micron)
+                    "
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                    @update:model-value="
+                      setRowNum(row as Record<string, unknown>, 'width_micron', $event)
+                    "
+                  />
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger"
+                    @click="removeRail(i)"
+                  >
+                    <i class="ri-delete-bin-line"></i>
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div class="field min-w-0">
-          <label>power net</label>
-          <InputText
-            v-model="(pdn().Grid as Record<string, string>)['power net']"
-            size="small"
-            fluid
-            class="sc-mono w-full min-w-0"
-          />
-        </div>
-        <div class="field min-w-0">
-          <label>power ground</label>
-          <InputText
-            v-model="(pdn().Grid as Record<string, string>)['power ground']"
-            size="small"
-            fluid
-            class="sc-mono w-full min-w-0"
-          />
-        </div>
-        <div class="field min-w-0">
-          <label>width</label>
-          <InputNumber
-            v-model="(pdn().Grid as Record<string, number>).width"
-            size="small"
-            fluid
-            :use-grouping="false"
-            class="w-full min-w-0"
-          />
-        </div>
-        <div class="field sc-pro-grid__full min-w-0">
-          <label>offset</label>
-          <InputNumber
-            v-model="(pdn().Grid as Record<string, number>).offset"
-            size="small"
-            fluid
-            :use-grouping="false"
-            class="w-full min-w-0"
-          />
+        <div class="sc-pro-inline-actions">
+          <button type="button" class="sc-pro-btn" @click="addRail">
+            <i class="ri-add-line"></i> Add rail
+          </button>
         </div>
       </div>
     </section>
@@ -524,32 +785,36 @@ function setTrackNum(
       <div class="sc-pro-section__head">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
-          <div class="sc-pro-section__title">Stripe</div>
+          <div class="sc-pro-section__title">pdn_generator · stripe</div>
+          <div class="sc-pro-section__desc">
+            Periodic power stripes with width, pitch, and offset
+          </div>
         </div>
       </div>
       <div class="sc-pro-section__body">
         <div class="sc-pro-table-wrap">
           <table class="sc-pro-table sc-pro-table--stripe">
             <colgroup>
-              <col span="6" class="sc-pro-stripe__col-data" />
+              <col span="4" class="sc-pro-stripe__col-data" />
               <col class="sc-pro-stripe__col-action" />
             </colgroup>
             <thead>
               <tr>
-                <th>layer</th>
-                <th>power net</th>
-                <th>ground net</th>
-                <th>width</th>
-                <th>pitch</th>
-                <th>offset</th>
+                <th>routing_layer_name</th>
+                <th>width_micron</th>
+                <th>pitch_micron</th>
+                <th>offset_micron</th>
                 <th class="w-10"></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, i) in pdn().Stripe as Record<string, unknown>[]" :key="i">
+              <tr
+                v-for="(row, i) in pdn().stripe as Record<string, unknown>[]"
+                :key="'stripe-' + i"
+              >
                 <td>
                   <InputText
-                    v-model="(row as Record<string, string>).layer"
+                    v-model="(row as Record<string, string>).routing_layer_name"
                     size="small"
                     fluid
                     class="sc-mono w-full min-w-0"
@@ -557,50 +822,40 @@ function setTrackNum(
                 </td>
                 <td>
                   <InputText
-                    v-model="(row as Record<string, string>)['power net']"
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                  />
-                </td>
-                <td>
-                  <InputText
-                    v-model="(row as Record<string, string>)['ground net']"
-                    size="small"
-                    fluid
-                    class="sc-mono w-full min-w-0"
-                  />
-                </td>
-                <td>
-                  <InputText
-                    :model-value="tableNumStr((row as Record<string, unknown>).width)"
+                    :model-value="
+                      tableNumStr((row as Record<string, unknown>).width_micron)
+                    "
                     size="small"
                     fluid
                     class="sc-mono w-full min-w-0"
                     @update:model-value="
-                      setStripeNum(row as Record<string, unknown>, 'width', $event)
+                      setRowNum(row as Record<string, unknown>, 'width_micron', $event)
                     "
                   />
                 </td>
                 <td>
                   <InputText
-                    :model-value="tableNumStr((row as Record<string, unknown>).pitch)"
+                    :model-value="
+                      tableNumStr((row as Record<string, unknown>).pitch_micron)
+                    "
                     size="small"
                     fluid
                     class="sc-mono w-full min-w-0"
                     @update:model-value="
-                      setStripeNum(row as Record<string, unknown>, 'pitch', $event)
+                      setRowNum(row as Record<string, unknown>, 'pitch_micron', $event)
                     "
                   />
                 </td>
                 <td>
                   <InputText
-                    :model-value="tableNumStr((row as Record<string, unknown>).offset)"
+                    :model-value="
+                      tableNumStr((row as Record<string, unknown>).offset_micron)
+                    "
                     size="small"
                     fluid
                     class="sc-mono w-full min-w-0"
                     @update:model-value="
-                      setStripeNum(row as Record<string, unknown>, 'offset', $event)
+                      setRowNum(row as Record<string, unknown>, 'offset_micron', $event)
                     "
                   />
                 </td>
@@ -629,46 +884,66 @@ function setTrackNum(
       <div class="sc-pro-section__head">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
-          <div class="sc-pro-section__title">Connect layers</div>
-          <div class="sc-pro-section__desc">Layer pairs; layers is a string array</div>
+          <div class="sc-pro-section__title">pdn_generator · connect_layers</div>
+          <div class="sc-pro-section__desc">
+            Routing-layer pairs connected through the PDN
+          </div>
         </div>
       </div>
-      <div class="sc-pro-section__body min-w-0 space-y-2">
-        <div
-          v-for="(item, i) in pdn()['Connect layers'] as Record<string, unknown>[]"
-          :key="i"
-          class="sc-pro-subpanel max-w-full min-w-0"
-        >
-          <div class="mb-2 flex min-w-0 items-center justify-between gap-2">
-            <span
-              class="min-w-0 truncate text-[10px] font-bold text-(--text-secondary) uppercase"
-              >Pair {{ i + 1 }}</span
-            >
-            <button
-              type="button"
-              class="sc-pro-btn sc-pro-btn--danger shrink-0"
-              @click="removeConnectLayer(i)"
-            >
-              <i class="ri-delete-bin-line"></i>
-            </button>
-          </div>
-          <div class="field mb-0 max-w-full min-w-0">
-            <label>layers (comma-separated)</label>
-            <InputText
-              :model-value="(item.layers as string[] | undefined)?.join(', ') ?? ''"
-              size="small"
-              fluid
-              class="sc-mono w-full max-w-full min-w-0"
-              @update:model-value="
-                setConnectLayersFromText(item as Record<string, unknown>, $event)
-              "
-            />
-          </div>
+      <div class="sc-pro-section__body">
+        <div class="sc-pro-table-wrap">
+          <table class="sc-pro-table sc-pro-table--fp4">
+            <colgroup>
+              <col />
+              <col />
+              <col />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>bottom_routing_layer_name</th>
+                <th>top_routing_layer_name</th>
+                <th class="w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(row, i) in pdn().connect_layers as Record<string, unknown>[]"
+                :key="'cl-' + i"
+              >
+                <td>
+                  <InputText
+                    v-model="(row as Record<string, string>).bottom_routing_layer_name"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
+                </td>
+                <td>
+                  <InputText
+                    v-model="(row as Record<string, string>).top_routing_layer_name"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger"
+                    @click="removeConnectLayer(i)"
+                  >
+                    <i class="ri-delete-bin-line"></i>
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <button type="button" class="sc-pro-btn" @click="addConnectLayer">
-          <i class="ri-add-line"></i>
-          Add layer pair
-        </button>
+        <div class="sc-pro-inline-actions">
+          <button type="button" class="sc-pro-btn" @click="addConnectLayer">
+            <i class="ri-add-line"></i> Add layer pair
+          </button>
+        </div>
       </div>
     </section>
   </div>

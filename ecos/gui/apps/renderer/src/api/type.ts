@@ -253,6 +253,20 @@ export function getStepMetadata(stepName: string): StepMetadata | undefined {
   return STEP_METADATA[stepName.toLowerCase()]
 }
 
+const STEP_TOOL_LABELS: Record<string, string> = {
+  ecc: 'ECC',
+  dreamplace: 'DreamPlace',
+  yosys: 'Yosys',
+  klayout: 'KLayout',
+}
+
+/** Display name for a flow step tool from flow.json. */
+export function formatStepToolName(tool: string | undefined | null): string {
+  const value = (tool ?? '').trim()
+  if (!value) return ''
+  return STEP_TOOL_LABELS[value.toLowerCase()] ?? value
+}
+
 /**
  * 获取所有可在侧边栏显示的运行步骤
  */

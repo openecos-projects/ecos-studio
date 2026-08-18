@@ -21,19 +21,12 @@ const RtStepConfigView = defineAsyncComponent(
 const DrcStepConfigView = defineAsyncComponent(
   () => import('./views/DrcStepConfigView.vue'),
 )
-const PlStepConfigView = defineAsyncComponent(
-  () => import('./views/PlStepConfigView.vue'),
-)
 
 const VIEW_MAP: Partial<Record<StepEnum, Component>> = {
   [StepEnum.FLOORPLAN]: FloorplanStepConfigView,
   [StepEnum.CTS]: CtsStepConfigView,
   [StepEnum.ROUTING]: RtStepConfigView,
-  /** pl_default_config.json: root `PL` block — same schema as Placement / Legalization */
-  [StepEnum.FILLER]: PlStepConfigView,
   [StepEnum.DRC]: DrcStepConfigView,
-  [StepEnum.PLACEMENT]: PlStepConfigView,
-  [StepEnum.LEGALIZATION]: PlStepConfigView,
 }
 
 const activeView = computed(() => VIEW_MAP[props.step] ?? GenericStepConfigView)
@@ -45,7 +38,7 @@ function emitInitialized(): void {
 }
 
 onMounted(() => {
-  if (activeView.value !== DrcStepConfigView && activeView.value !== PlStepConfigView) {
+  if (activeView.value !== DrcStepConfigView) {
     emitInitialized()
   }
 })

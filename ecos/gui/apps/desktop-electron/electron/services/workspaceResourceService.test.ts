@@ -490,9 +490,7 @@ describe('WorkspaceResourceService', () => {
   it.each([
     ['Floorplan', 'fp_default_config.json'],
     ['fixFanout', 'no_default_config_fixfanout.json'],
-    ['place', 'pl_default_config.json'],
     ['CTS', 'cts_default_config.json'],
-    ['legalization', 'pl_default_config.json'],
     ['route', 'rt_default_config.json'],
     ['drc', 'drc_default_config.json'],
     ['filler', 'pl_default_config.json'],
@@ -529,6 +527,8 @@ describe('WorkspaceResourceService', () => {
     ['Signoff', []],
     ['lvs', ['drc_default_config.json', 'flow_config.json']],
     ['Harden', ['sta.json']],
+    ['place', ['pl_default_config.json']],
+    ['legalization', ['pl_default_config.json']],
   ])(
     'does not expose configuration for ECC %s even when unrelated config files exist',
     async (stepName, extraConfigFiles) => {

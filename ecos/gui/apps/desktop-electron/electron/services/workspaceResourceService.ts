@@ -838,20 +838,12 @@ function addEccConfigResources(
     join(root, 'config', 'no_default_config_fixfanout.json'),
     'config',
   )
-  resources.config.placement = createFile(
-    join(root, 'config', 'pl_default_config.json'),
-    'config',
-  )
   resources.config.routing = createFile(
     join(root, 'config', 'rt_default_config.json'),
     'config',
   )
   resources.config.rcx = createFile(join(root, 'config', 'rcx.json'), 'config')
   resources.config.sta = createFile(join(root, 'config', 'sta.json'), 'config')
-  resources.config.legalization = createFile(
-    join(root, 'config', 'pl_default_config.json'),
-    'config',
-  )
   resources.config.filler = createFile(
     join(root, 'config', 'pl_default_config.json'),
     'config',
@@ -867,8 +859,6 @@ function configResourceForEccStep(
   switch (stepName.toLowerCase()) {
     case 'floorplan':
       return config.floorplan
-    case 'place':
-      return config.placement
     case 'cts':
       return config.cts
     case 'route':
@@ -877,8 +867,6 @@ function configResourceForEccStep(
       return config.drc
     case 'fixfanout':
       return config.netlist_opt
-    case 'legalization':
-      return config.legalization
     case 'filler':
       return config.filler
     case 'rcx':
