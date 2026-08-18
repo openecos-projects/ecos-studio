@@ -537,6 +537,121 @@
               </div>
             </section>
           </div>
+          <div v-else-if="data.lvsInsights" class="data-body lvs-data-body">
+            <section class="rcx-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-git-merge-line" aria-hidden="true" />
+                  <h3>Entity comparison</h3>
+                </div>
+                <span>{{ data.lvsInsights.entities.length }} entities</span>
+              </header>
+              <div class="insight-table-wrap lvs-entity-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Entity</th>
+                      <th>Netlist</th>
+                      <th>DEF</th>
+                      <th>Diff</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in data.lvsInsights.entities" :key="row.id">
+                      <th :title="row.entity">{{ row.entity }}</th>
+                      <td>{{ insightTableValue(row.netlist) }}</td>
+                      <td>{{ insightTableValue(row.def) }}</td>
+                      <td
+                        :class="{
+                          'is-good': row.difference === 0,
+                          'is-bad':
+                            (row.difference ?? 0) !== 0 && row.difference !== null,
+                        }"
+                      >
+                        {{ insightTableValue(row.difference) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="rcx-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-links-line" aria-hidden="true" />
+                  <h3>Connectivity</h3>
+                </div>
+                <span>{{ data.lvsInsights.connections.length }} checks</span>
+              </header>
+              <div class="insight-table-wrap lvs-connectivity-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Open</th>
+                      <th>Short</th>
+                      <th>Connected</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in data.lvsInsights.connections" :key="row.id">
+                      <th :title="row.connectivity">{{ row.connectivity }}</th>
+                      <td :class="{ 'is-bad': (row.open ?? 0) > 0 }">
+                        {{ insightTableValue(row.open) }}
+                      </td>
+                      <td :class="{ 'is-bad': (row.short ?? 0) > 0 }">
+                        {{ insightTableValue(row.short) }}
+                      </td>
+                      <td
+                        :class="{
+                          'is-good':
+                            row.connected !== null && row.connected === row.total,
+                        }"
+                      >
+                        {{ insightTableValue(row.connected) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section
+              v-if="data.lvsInsights.violations.length"
+              class="lvs-violation-column"
+            >
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-error-warning-line" aria-hidden="true" />
+                  <h3>Violations</h3>
+                </div>
+                <span>{{ data.lvsInsights.violations.length }}</span>
+              </header>
+              <div class="insight-table-wrap lvs-violation-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Net</th>
+                      <th>Instance</th>
+                      <th>Terminals</th>
+                      <th>Components</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in data.lvsInsights.violations" :key="row.id">
+                      <th :title="row.type">{{ row.type }}</th>
+                      <td :title="row.net">{{ row.net }}</td>
+                      <td :title="row.instance">{{ row.instance }}</td>
+                      <td :title="row.terminals">{{ row.terminals }}</td>
+                      <td :title="row.components">{{ row.components }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
           <div v-else-if="data.staInsights" class="data-body sta-data-body">
             <div class="sta-corner-tabs" role="tablist" aria-label="STA corners">
               <button
@@ -2102,6 +2217,10 @@ function fileName(path: string): string {
 .drc-data-body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.lvs-data-body {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr) auto;
+}
 .data-body.harden-data-body {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -2125,6 +2244,14 @@ function fileName(path: string): string {
 .rcx-insight-column + .rcx-insight-column,
 .sta-insight-column + .sta-insight-column {
   border-left: 1px solid var(--border-color);
+}
+.lvs-violation-column {
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  grid-column: 1 / -1;
+  min-height: 0;
+  min-width: 0;
 }
 .synthesis-insight-header,
 .floorplan-insight-header {

@@ -256,14 +256,16 @@ describe('useStepDashboardData', () => {
     expect(source).toContain('revokeBlobUrl(placeDensityMapUrl)')
   })
 
-  it('loads specialized RCX, DRC, and STA feature artifacts for their insight surfaces', () => {
+  it('loads specialized RCX, DRC, LVS, and STA feature artifacts for their insight surfaces', () => {
     expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'rcx'")
     expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'drc'")
+    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'lvs'")
     expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'sta'")
     expect(source).toContain('analysis/drc_statis.csv')
     expect(source).toContain('readText(drcStatisticsPath)')
     expect(source).toContain('rcxInsights(stepJson)')
     expect(source).toContain('drcInsights(drcStatisticsText)')
+    expect(source).toContain('lvsInsights(stepJson)')
     expect(source).toContain('staCornerSummaryPaths(stepJson, resourceStep.directory)')
     expect(source).toContain('staInsights(stepJson, staTimingSummaries)')
   })

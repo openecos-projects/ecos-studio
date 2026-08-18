@@ -3,12 +3,49 @@ import {
   archiveWorkspaceInManifest,
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
+  normalizeProjectManifestFlowStep,
   parseProjectManifest,
+  projectManifestFlowSteps,
   registerWorkspaceInManifest,
   synchronizeProjectBaseline,
 } from './projectManifest'
 
 describe('project manifest parsing', () => {
+  it('places LVS after DRC and resolves lvs aliases to that catalog step', () => {
+    expect(projectManifestFlowSteps).toEqual([
+      'Synth',
+      'Floor',
+      'Fanout',
+      'Place',
+      'CTS',
+      'Legal',
+      'Route',
+      'DRC',
+      'LVS',
+      'Filler',
+      'RCX',
+      'STA',
+      'Harden',
+    ])
+    expect(normalizeProjectManifestFlowStep('lvs')).toBe('LVS')
+    expect(normalizeProjectManifestFlowStep('LVS')).toBe('LVS')
+    expect(normalizeProjectManifestFlowStep('DRC')).toBe('DRC')
+    const afterDrc = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        designName: 'gcd',
+      }),
+      {
+        projectRoot: '/work/gcd',
+        workspacePath: '/work/gcd/ws_from_drc',
+        sourceWorkspaceId: 'ws_0001',
+        sourceStep: 'DRC',
+      },
+    )
+    expect(afterDrc.workspaces[0]?.start_step).toBe('LVS')
+  })
+
   it('records an optional MPC association with the canonical spec path', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/work/gcd',

@@ -14,6 +14,7 @@ class ECCStepName(StrEnum):
     LEGALIZATION = "legalization"
     ROUTING = "route"
     DRC = "drc"
+    LVS = "lvs"
     FILLER = "filler"
     RCX = "RCX"
     STA = "sta"

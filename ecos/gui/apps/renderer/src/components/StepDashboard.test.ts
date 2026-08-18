@@ -65,7 +65,7 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('Place all-cell density map')
   })
 
-  it('uses dedicated RCX, DRC, and STA insight layouts for their specialized artifacts', () => {
+  it('uses dedicated RCX, DRC, LVS, and STA insight layouts for their specialized artifacts', () => {
     expect(componentSource).toContain('data.rcxInsights')
     expect(componentSource).toContain('Electrical Summary')
     expect(componentSource).toContain('Signoff Metrics')
@@ -73,6 +73,10 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('data.drcInsights')
     expect(componentSource).toContain('drc-statistics-table')
     expect(componentSource).toContain('data.drcInsights.snapshots')
+    expect(componentSource).toContain('data.lvsInsights')
+    expect(componentSource).toContain('Entity comparison')
+    expect(componentSource).toContain('lvs-connectivity-table')
+    expect(componentSource).toContain('lvs-violation-table')
     expect(componentSource).toContain('data.staInsights')
     expect(componentSource).toContain('sta-corner-tabs')
     expect(componentSource).toContain('selectedStaCorner')

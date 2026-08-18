@@ -405,7 +405,14 @@ function wrapIpcHandler(channel: string, handler: IpcHandler): IpcHandler {
       try {
         return await handler(event, ...args)
       } catch (error) {
-        electronLogger.warn(summarizeIpcError(channel, args, error), error)
+        if (
+          !(
+            channel === desktopApiIpcChannels.workspaceReadProjectBinaryFile &&
+            isNodeErrorWithCode(error, 'ENOENT')
+          )
+        ) {
+          electronLogger.warn(summarizeIpcError(channel, args, error), error)
+        }
         return {
           error: serializeError(error),
           ok: false,

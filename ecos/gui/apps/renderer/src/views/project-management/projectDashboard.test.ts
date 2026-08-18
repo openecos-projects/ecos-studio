@@ -255,6 +255,7 @@ describe('buildDashboardWorkspaceRows', () => {
       'frequency',
       'wns',
       'drc',
+      'lvs',
     ])
     expect(rows[0].cells[2].point.label).toBe('100 MHz')
     // ws_c has no metric points at all, so every cell falls back to pending.

@@ -14,7 +14,10 @@ import type { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
 
+import { electronLogger } from '../logger'
 import { EccJsonRpcClient, type JsonRpcNotificationPayload } from './jsonRpcClient'
+
+const STDERR_TAIL_CHARS = 8000
 
 export interface SpawnedEccRpcSidecar extends EventEmitter {
   kill(signal?: NodeJS.Signals): boolean
@@ -82,6 +85,12 @@ function dataToString(data: unknown): string {
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data)
 }
 
+function tailText(text: string, maxChars: number): string {
+  const sliced = text.trimEnd().slice(-maxChars)
+  const newline = sliced.indexOf('\n')
+  return newline === -1 ? sliced : sliced.slice(newline + 1)
+}
+
 function environmentsEqual(
   left: NodeJS.ProcessEnv | null,
   right: NodeJS.ProcessEnv,
@@ -120,6 +129,7 @@ export class EccRpcSidecarProcess {
   private forceKillTimer: ReturnType<typeof setTimeout> | null = null
   private shuttingDown = false
   private spawnEnv: NodeJS.ProcessEnv | null = null
+  private stderrTail = ''
   private spawnLaunchKey: string | null = null
   logFile: string | null = null
 
@@ -162,6 +172,7 @@ export class EccRpcSidecarProcess {
     }
 
     this.logFile = this.createLogFile()
+    this.stderrTail = ''
     this.shuttingDown = false
     this.appendLog(
       `[sidecar] spawning ${this.command} rpc serve --stdio --persistent-db\n`,
@@ -217,7 +228,7 @@ export class EccRpcSidecarProcess {
 
     child.stderr?.on('data', (chunk) => {
       const text = dataToString(chunk)
-      this.appendLog(text)
+      this.captureOutput(text)
       this.options.onEvent?.({
         logFile: this.logFile ?? undefined,
         text,
@@ -235,9 +246,10 @@ export class EccRpcSidecarProcess {
       this.clearForceKillTimer()
       const reason = this.shuttingDown ? 'shutdown' : 'unexpected'
       const message =
-        reason === 'unexpected'
-          ? `ECC RPC sidecar exited with ${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`}.`
-          : undefined
+        reason === 'unexpected' ? this.formatUnexpectedExitMessage(code, signal) : undefined
+      if (message) {
+        this.logUnexpectedExit(message)
+      }
       const exitError = new Error(message ?? 'ECC RPC sidecar exited.')
       client.rejectPending(exitError)
       if (this.child === child) {
@@ -408,6 +420,30 @@ export class EccRpcSidecarProcess {
     const path = join(logDir, `ecc-rpc-runtime-${timestampForFile()}-${randomUUID()}.log`)
     writeFileSync(path, '', { encoding: 'utf8', flag: 'w' })
     return path
+  }
+
+  private formatUnexpectedExitMessage(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ): string {
+    const cause = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`
+    return this.logFile
+      ? `ECC RPC sidecar exited with ${cause}. See ${this.logFile}`
+      : `ECC RPC sidecar exited with ${cause}.`
+  }
+
+  private logUnexpectedExit(message: string): void {
+    const tail = tailText(this.stderrTail, STDERR_TAIL_CHARS)
+    if (tail) {
+      electronLogger.error('[runtime] %s\n%s', message, tail)
+      return
+    }
+    electronLogger.error('[runtime] %s', message)
+  }
+
+  private captureOutput(text: string): void {
+    this.stderrTail = `${this.stderrTail}${text}`.slice(-STDERR_TAIL_CHARS)
+    this.appendLog(text)
   }
 
   private appendLog(text: string): void {

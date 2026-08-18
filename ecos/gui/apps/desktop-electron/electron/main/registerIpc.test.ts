@@ -2462,7 +2462,7 @@ describe('registerIpc', () => {
     expect(services.shellService.resize).toHaveBeenCalledWith('shell-1', 100, 28)
   })
 
-  it('logs missing project binary files in a single normalized warning before returning an IPC error result', async () => {
+  it('returns a missing project binary file as an IPC error without warning', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     const path = '/tmp/project/place_dreamplace/output/minirv_place.png'
@@ -2486,11 +2486,7 @@ describe('registerIpc', () => {
       ok: false,
     })
 
-    expect(electronLogger.warn).toHaveBeenCalledTimes(1)
-    expect(electronLogger.warn).toHaveBeenCalledWith(
-      `[workspace] Missing project binary file: ${path}`,
-      error,
-    )
+    expect(electronLogger.warn).not.toHaveBeenCalled()
   })
 
   it('sends project file change notifications to the requesting renderer', async () => {

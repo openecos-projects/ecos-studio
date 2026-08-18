@@ -257,6 +257,7 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'legalization',
       'route',
       'drc',
+      'lvs',
       'filler',
       'RCX',
       'sta',

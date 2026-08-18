@@ -14,6 +14,7 @@ import {
   getElectronLatestMainLogFile,
   getElectronMainLogFile,
   getLogSessionDirectory,
+  pruneOldLogSessions,
 } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
@@ -98,6 +99,7 @@ configureElectronLoggerFile({
   latestFilePath: mainLatestLogFile,
   sessionFilePath: mainLogFile,
 })
+pruneOldLogSessions()
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
 electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')

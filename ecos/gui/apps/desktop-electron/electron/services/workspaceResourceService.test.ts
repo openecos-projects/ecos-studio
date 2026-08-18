@@ -406,6 +406,7 @@ describe('WorkspaceResourceService', () => {
     ['legalization', 'dreamplace'],
     ['route', 'ecc'],
     ['drc', 'ecc'],
+    ['lvs', 'ecc'],
     ['filler', 'ecc'],
     ['RCX', 'ecc'],
   ])('marks %s layout available from native renderer inputs', async (stepName, tool) => {
@@ -526,6 +527,7 @@ describe('WorkspaceResourceService', () => {
   it.each([
     ['Timing optimization', []],
     ['Signoff', []],
+    ['lvs', ['drc_default_config.json', 'flow_config.json']],
     ['Harden', ['sta.json']],
   ])(
     'does not expose configuration for ECC %s even when unrelated config files exist',

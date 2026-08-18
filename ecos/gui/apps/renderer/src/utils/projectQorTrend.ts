@@ -451,6 +451,7 @@ const QOR_FLOW_STEPS: FlowStep[] = [
   'Legal',
   'Route',
   'DRC',
+  'LVS',
   'Filler',
   'RCX',
   'STA',
@@ -805,6 +806,12 @@ const QOR_METRIC_REGISTRY: Record<string, QorMetricDefinition> = {
     dimension: 'clock_robustness_dfm',
     polarity: 'lower_is_better',
   },
+  lvs_count: {
+    metricName: 'lvs_count',
+    displayName: 'LVS Violation Count',
+    dimension: 'clock_robustness_dfm',
+    polarity: 'lower_is_better',
+  },
   rcx_spef_file_count: {
     metricName: 'rcx_spef_file_count',
     displayName: 'RCX SPEF File Count',
@@ -967,6 +974,7 @@ const DIMENSION_LABELS: Record<QorDimension, string> = {
 
 const METRIC_FAIL_VALUES: Record<string, number> = {
   drc_count: 10,
+  lvs_count: 10,
   route_wirelength: 6000,
   route_via_count: 2000,
   cts_buffer_count: 20,
@@ -1618,9 +1626,10 @@ function buildWorkspaceSummary(
   const timingConstraints = resolveWorkspaceTimingConstraints(workspace)
   const areaScoringStep = resolveLastSuccessfulAreaStep(records, workspace.stepStatuses)
   const projectRecords = selectProjectRecords(records, areaScoringStep)
-  const missingAnalysisSteps = QOR_FLOW_STEPS.filter(
-    (step) => !workspace.stepMetricTexts[step],
-  )
+  const missingAnalysisSteps = QOR_FLOW_STEPS.filter((step) => {
+    if (step === 'LVS' && workspace.stepStatuses.LVS === undefined) return false
+    return !workspace.stepMetricTexts[step]
+  })
   const blockingIssues = QOR_FLOW_STEPS.flatMap((step) =>
     normalizeQorSummaryBlockingIssues(step, workspace.stepSummaryTexts?.[step]),
   )
@@ -1634,13 +1643,14 @@ function buildWorkspaceSummary(
     normalizeQorAnalysisIntegrity(step, workspace.stepMetricTexts[step]),
   )
   const missingMetrics = uniqueStrings([
-    ...buildMissingMetrics(records),
+    ...buildMissingMetrics(records, workspace.stepStatuses),
     ...summaryMissingMetrics.map((metric) => metric.metricName),
   ])
   const missingMetricCoverage = buildMissingMetricCoverage(
     records,
     summaryMissingMetrics,
     areaScoringStep,
+    workspace.stepStatuses,
   )
   const dataQuality = buildWorkspaceDataQuality(
     workspace,
@@ -1728,7 +1738,13 @@ function buildWorkspaceDataQuality(
   }
 }
 
-const PROJECT_GATE_STEPS: FlowStep[] = ['DRC', 'RCX', 'STA']
+const PROJECT_GATE_STEPS: FlowStep[] = ['DRC', 'LVS', 'RCX', 'STA']
+
+function workspaceGateSteps(
+  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
+): FlowStep[] {
+  return PROJECT_GATE_STEPS.filter((step) => stepStatuses[step] !== undefined)
+}
 
 function resolveWorkspaceGateStatus(
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
@@ -1741,7 +1757,10 @@ function resolveWorkspaceGateStatus(
   }
   if (blockingIssues.length > 0) return 'blocked'
 
-  for (const step of PROJECT_GATE_STEPS) {
+  const gateSteps = workspaceGateSteps(stepStatuses)
+  if (gateSteps.length === 0) return 'unavailable'
+
+  for (const step of gateSteps) {
     if (!isCompletedStepStatus(stepStatuses[step])) return 'incomplete'
     const status = qorSummaryStatus(summaryTexts?.[step])
     if (status === 'blocked') return 'blocked'
@@ -2815,12 +2834,16 @@ function regressionMessage(delta: ProjectQorDelta): string {
   return `${delta.displayName} regressed by ${delta.absoluteDelta}${unit}`
 }
 
-function buildMissingMetrics(records: ProjectQorMetricRecord[]): string[] {
+function buildMissingMetrics(
+  records: ProjectQorMetricRecord[],
+  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'] = {},
+): string[] {
   const available = new Set(records.map((record) => record.metricName))
   const expected = [
     'route_wirelength',
     'route_via_count',
     'drc_count',
+    ...(stepStatuses.LVS !== undefined ? (['lvs_count'] as const) : []),
     'cts_buffer_count',
     'cts_buffer_area',
     'die_area',
@@ -2833,6 +2856,7 @@ function buildMissingMetricCoverage(
   records: ProjectQorMetricRecord[],
   summaryMissingMetrics: Array<{ step: FlowStep; metricName: string }>,
   areaScoringStep: FlowStep | null,
+  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'] = {},
 ): ProjectQorMissingMetricCoverage[] {
   const metricIdsByStep = new Map<FlowStep, Set<string>>()
   const addMetric = (step: FlowStep, metricName: string) => {
@@ -2841,7 +2865,7 @@ function buildMissingMetricCoverage(
     metricIdsByStep.set(step, metricIds)
   }
 
-  for (const metricName of buildMissingMetrics(records)) {
+  for (const metricName of buildMissingMetrics(records, stepStatuses)) {
     const step = missingMetricProducerStep(metricName, areaScoringStep)
     if (step) addMetric(step, metricName)
   }
@@ -2865,6 +2889,8 @@ function missingMetricProducerStep(
       return 'Route'
     case 'drc_count':
       return 'DRC'
+    case 'lvs_count':
+      return 'LVS'
     case 'cts_buffer_count':
     case 'cts_buffer_area':
     case 'cts_worst_optimized_skew_ns':

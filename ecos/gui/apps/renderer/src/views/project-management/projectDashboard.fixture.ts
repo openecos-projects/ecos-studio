@@ -213,6 +213,10 @@ export function projectFixture(
         metricPointFixture('ws_a', 12, '12'),
         metricPointFixture('ws_b', 0, '0'),
       ]),
+      metricRowFixture('lvs', 'LVS', [
+        metricPointFixture('ws_a', 0, '0'),
+        metricPointFixture('ws_b', 0, '0'),
+      ]),
     ],
     workspaceSummaries: [
       workspaceSummaryFixture('ws_a', {}),

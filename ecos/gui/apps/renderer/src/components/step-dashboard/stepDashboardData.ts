@@ -110,6 +110,38 @@ export interface StepDashboardDrcInsights {
   snapshots: StepDashboardFloorplanSnapshot[]
 }
 
+export interface StepDashboardLvsEntity {
+  id: string
+  entity: string
+  netlist: number | null
+  def: number | null
+  difference: number | null
+}
+
+export interface StepDashboardLvsConnectivity {
+  id: string
+  connectivity: string
+  open: number | null
+  short: number | null
+  connected: number | null
+  total: number | null
+}
+
+export interface StepDashboardLvsViolation {
+  id: string
+  type: string
+  net: string
+  instance: string
+  terminals: string
+  components: string
+}
+
+export interface StepDashboardLvsInsights {
+  entities: StepDashboardLvsEntity[]
+  connections: StepDashboardLvsConnectivity[]
+  violations: StepDashboardLvsViolation[]
+}
+
 export interface StepDashboardStaCorner {
   id: string
   staCorner: string
@@ -339,6 +371,7 @@ function stepSection(
     cts: 'CTS',
     route: 'route',
     drc: 'drc',
+    lvs: 'lvs',
     sta: 'sta',
     rcx: 'rcx',
     harden: 'harden',
@@ -441,6 +474,20 @@ export function stepKeyMetrics(step: string, value: unknown): StepDashboardMetri
     )
   } else if (canonical === 'drc') {
     appendMetric(output, 'drc-count', 'DRC count', section.number, 'count', 'bad')
+  } else if (canonical === 'lvs') {
+    const violations = Array.isArray(source?.violations)
+      ? source.violations
+      : Array.isArray(section.violations)
+        ? section.violations
+        : null
+    appendMetric(
+      output,
+      'lvs-count',
+      'LVS count',
+      violations ? violations.length : section.lvs_count,
+      'count',
+      'bad',
+    )
   } else if (canonical === 'sta') {
     appendMetric(output, 'sta-corners', 'Loaded corners', section.corner_count, 'count')
     appendMetric(
@@ -741,6 +788,79 @@ function selectedInsightValues(
     label: humanize(field),
     value: insightMetricValue(source?.[field]),
   }))
+}
+
+function lvsSection(value: unknown): Record<string, unknown> | null {
+  const root = record(value)
+  if (!root) return null
+  return record(root.lvs) ?? root
+}
+
+function joinedText(value: unknown): string {
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => String(item).trim()).filter(Boolean)
+    return parts.length ? parts.join(', ') : '--'
+  }
+  return textValue(value)
+}
+
+export function lvsInsights(value: unknown): StepDashboardLvsInsights | null {
+  const section = lvsSection(value)
+  if (!section) return null
+  const entities = (Array.isArray(section.entity) ? section.entity : []).flatMap(
+    (candidate, index) => {
+      const row = record(candidate)
+      if (!row) return []
+      const entity = textValue(row.entity, '')
+      if (!entity) return []
+      return [
+        {
+          id: `lvs-entity-${index}-${entity}`,
+          entity,
+          netlist: finiteNumber(row.netlist),
+          def: finiteNumber(row.def),
+          difference: finiteNumber(row.difference),
+        },
+      ]
+    },
+  )
+  const connections = (
+    Array.isArray(section.connectivity) ? section.connectivity : []
+  ).flatMap((candidate, index) => {
+    const row = record(candidate)
+    if (!row) return []
+    const connectivity = textValue(row.connectivity, '')
+    if (!connectivity) return []
+    return [
+      {
+        id: `lvs-connectivity-${index}-${connectivity}`,
+        connectivity,
+        open: finiteNumber(row.open),
+        short: finiteNumber(row.short),
+        connected: finiteNumber(row.connected),
+        total: finiteNumber(row.total),
+      },
+    ]
+  })
+  const violations = (
+    Array.isArray(section.violations) ? section.violations : []
+  ).flatMap((candidate, index) => {
+    const row = record(candidate)
+    if (!row) return []
+    const type = textValue(row.type, `Violation ${index + 1}`)
+    return [
+      {
+        id: `lvs-violation-${index}-${type}`,
+        type,
+        net: joinedText(row.net),
+        instance: joinedText(row.instance),
+        terminals: joinedText(row.terminals),
+        components: joinedText(row.components),
+      },
+    ]
+  })
+  if (!entities.length && !connections.length && !violations.length) return null
+  return { entities, connections, violations }
 }
 
 export function rcxInsights(value: unknown): StepDashboardRcxInsights | null {

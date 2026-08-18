@@ -210,6 +210,7 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
         }),
       ]),
       DRC: metricsArtifact('drc', [metric('drc_count', 0)]),
+      LVS: metricsArtifact('lvs', [metric('lvs_count', 0)]),
       RCX: metricsArtifact('RCX', [
         metric('rcx_missing_corner_count', 0, {
           category: 'clock_robustness_dfm',
@@ -276,6 +277,7 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
     stepSummaryTexts: {
       Route: summaryArtifact('pass'),
       DRC: summaryArtifact('pass'),
+      LVS: summaryArtifact('pass'),
       RCX: summaryArtifact(
         readinessStatus,
         readinessStatus === 'pass'
@@ -366,6 +368,7 @@ describe('project management V3 model', () => {
       'Legal',
       'Route',
       'DRC',
+      'LVS',
       'Filler',
       'RCX',
       'STA',
@@ -402,6 +405,14 @@ describe('project management V3 model', () => {
       value: 0,
       state: 'good',
     })
+    expect(summary.finalMetrics.lvsCount).toMatchObject({ value: 0 })
+    expect(model.metricsRows.find((row) => row.id === 'lvs')?.points[0]).toMatchObject({
+      value: 0,
+      state: 'good',
+    })
+    expect(
+      model.stepCompareSummaries.find((item) => item.step === 'LVS')?.metrics,
+    ).toEqual([expect.objectContaining({ id: 'lvs_count' })])
     expect(
       model.stepCompareSummaries
         .find((item) => item.step === 'Synth')
@@ -570,19 +581,34 @@ describe('project management V3 model', () => {
         JSON.stringify({
           steps: [
             { name: 'route', state: 'running' },
+            { name: 'lvs', state: 'success' },
             { name: 'sta', state: 'success' },
             { name: 'Floorplan', state: 'reused' },
             { name: 'future_signoff', state: 'success' },
           ],
         }),
       ),
-    ).toEqual({ Route: 'running', STA: 'success', Floor: 'reused' })
+    ).toEqual({ Route: 'running', LVS: 'success', STA: 'success', Floor: 'reused' })
   })
 
   it('uses completed flow state instead of stale manifest status for QoR workspace status', () => {
     expect(workspaceStatusFromFlow('not_started', successStates)).toBe('success')
     expect(workspaceStatusFromFlow('not_started', { Route: 'running' })).toBe('running')
     expect(workspaceStatusFromFlow('success', { Route: 'failed' })).toBe('failed')
+
+    const withoutLvs = Object.fromEntries(
+      FLOW_STEPS.filter((step) => step !== 'LVS').map((step) => [step, 'success']),
+    ) as Partial<Record<FlowStep, 'success'>>
+    const modelWithoutLvs = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      { ws_0004: withoutLvs },
+      { ws_0004: v3Inputs() },
+    )
+    expect(modelWithoutLvs.qorTrendSummary.workspaces[0]?.gateStatus).not.toBe('blocked')
+    expect(modelWithoutLvs.qorTrendSummary.workspaces[0]?.missingMetrics).not.toContain(
+      'lvs_count',
+    )
 
     const model = buildProjectManagementProject(
       project,
