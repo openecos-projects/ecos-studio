@@ -39,6 +39,7 @@ class KnowledgeEntity:
     anchor: str
     chunk_sha256: str
     source_ids: tuple[str, ...]
+    stages: tuple[str, ...] = ()
 
 
 class KnowledgeBundle:
@@ -142,12 +143,24 @@ def _load_entity(
     chunk = _markdown_chunk(root / "knowledge" / document, anchor)
     if _sha256(chunk.encode("utf-8")) != str(raw.get("chunk_sha256", "")):
         raise KnowledgeBundleError(f"knowledge bundle chunk hash mismatch: {entity_id}")
+    raw_stages = raw.get("stages")
+    if raw_stages is None:
+        stages: tuple[str, ...] = ()
+    else:
+        if (
+            not isinstance(raw_stages, list)
+            or not raw_stages
+            or any(not isinstance(item, str) or not item or item == "general" for item in raw_stages)
+        ):
+            raise KnowledgeBundleError(f"knowledge bundle entity has invalid stages: {entity_id}")
+        stages = tuple(raw_stages)
     return KnowledgeEntity(
         entity_id,
         document,
         anchor,
         str(raw["chunk_sha256"]),
         source_ids,
+        stages,
     ), chunk
 
 

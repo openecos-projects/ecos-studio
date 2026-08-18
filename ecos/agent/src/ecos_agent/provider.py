@@ -20,7 +20,7 @@ from ecos_agent.contracts import (
 from ecos_agent.knowledge_bundle import KnowledgeAnswer
 from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, load_production_retrieval_config
 from ecos_agent.source_retriever import SourceCodeRetriever, SourceSearchResult
-from ecos_agent.step_knowledge import StepKnowledge, load_default_step_knowledge
+from ecos_agent.step_knowledge import StepKnowledge, load_default_general_knowledge, load_default_step_knowledge
 from ecos_agent.messages import (
     cancellation_message,
     confirmation_choice,
@@ -299,8 +299,9 @@ class EcosAgentProvider:
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.knowledge = knowledge or load_default_step_knowledge()
+        bundles = self.knowledge if knowledge is not None else (*self.knowledge, load_default_general_knowledge())
         self.knowledge_retriever = GlobalKnowledgeRetriever(
-            self.knowledge, config=load_production_retrieval_config()
+            bundles, config=load_production_retrieval_config()
         )
         self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
         self._uses_default_stage_routing = stage_routing_parser is None

@@ -356,20 +356,22 @@ def _add(
     document: str,
     body: str,
     evidence: tuple[str, ...],
+    stages: tuple[str, ...] = (),
 ) -> None:
     chunk = _section(entity_id, body, evidence)
     documents.setdefault(document, []).append(chunk)
-    entries.append(
-        {
-            "id": entity_id,
-            "kind": kind,
-            "document": document,
-            "anchor": entity_id,
-            "review_status": "source-audited",
-            "evidence": [{"source_id": source_id} for source_id in evidence],
-            "chunk_sha256": _sha256(chunk.strip().encode("utf-8")),
-        }
-    )
+    entry: dict[str, object] = {
+        "id": entity_id,
+        "kind": kind,
+        "document": document,
+        "anchor": entity_id,
+        "review_status": "source-audited",
+        "evidence": [{"source_id": source_id} for source_id in evidence],
+        "chunk_sha256": _sha256(chunk.strip().encode("utf-8")),
+    }
+    if stages:
+        entry["stages"] = list(stages)
+    entries.append(entry)
 
 
 def _flatten_config(value: object, prefix: str = "") -> list[tuple[str, object]]:
@@ -756,6 +758,8 @@ def build_all(output: Path) -> None:
             _build_place_bundle(bundle_output)
         else:
             _build_bundle(stage, bundle_output)
+    from .general_details import build_general_bundle
+    build_general_bundle(output / "general")
     (output / "retrieval-config.v1.json").write_text(
         _json({"schema_version": "ecos-frozen-knowledge-retrieval-config.v1", "top_k": 3, "field_weights": [10.0, 20.0, 10.0, 1.0], "max_query_tokens": 32, "max_raw_bm25": None, "min_score_margin": 0.0, "min_token_overlap": 3, "max_document_frequency": 0, "allow_metadata_match": False}) + "\n",
         encoding="utf-8",

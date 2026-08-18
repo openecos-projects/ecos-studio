@@ -1,0 +1,161 @@
+"""Congestion-metric general knowledge: step-scoped, not a flow stage."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from .steps import STAGES, _add, _json, _sha256, _source_inventory
+
+GENERAL_DIR = Path(__file__).resolve().parent / "general"
+GENERAL_SOURCE_PATHS = {
+    "general.statements": "ecos/agent/scripts/knowledge/general/statements.jsonl",
+    "general.bindings": "ecos/agent/scripts/knowledge/general/bindings.jsonl",
+}
+_ALLOWED_STAGES = {stage.slug for stage in STAGES}
+_DIRECTION = {
+    "increase": "increase",
+    "decrease": "decrease",
+    "set_true": "set true",
+    "set_false": "set false",
+}
+
+
+def _load_jsonl(name: str) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in (GENERAL_DIR / name).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _analog(binding: dict[str, object] | None) -> str:
+    if binding is None or not binding.get("knobs"):
+        return "No authorized knob. Do not invent one."
+    parts = []
+    for knob in binding["knobs"]:
+        if isinstance(knob, dict):
+            direction = _DIRECTION[str(knob["direction"])]
+            parts.append(f"{direction} `{knob['knob_id']}`")
+    return f"{'; '.join(parts)} ({binding.get('analog_quality', 'coarse')} analog)"
+
+
+def _strategy_entries() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
+    bindings = {str(item["action_intent"]): item for item in _load_jsonl("bindings.jsonl")}
+    entries: list[dict[str, object]] = []
+    documents: dict[str, list[str]] = {}
+    for statement in _load_jsonl("statements.jsonl"):
+        intent = str(statement["action_intent"])
+        diagnosis = statement["diagnosis"]
+        if not isinstance(diagnosis, dict):
+            raise ValueError(f"invalid diagnosis: {statement['id']}")
+        stages = tuple(statement.get("scope", {}).get("stages", ()))
+        if not stages or any(stage not in _ALLOWED_STAGES for stage in stages):
+            raise ValueError(f"invalid stages: {statement['id']}")
+        metric = str(statement["id"]).split(".")[1]
+        effects = "; ".join(
+            f"{item['metric']} {item['direction']}"
+            for item in statement["effects"]
+            if isinstance(item, dict)
+        )
+        body = "\n\n".join(
+            [
+                f"**Topic:** {metric} strategy.",
+                f"**Metric:** {metric}.",
+                f"**Applies to steps:** {', '.join(stages)}.",
+                f"**Condition:** {statement['condition']}",
+                f"**Diagnosis:** {str(diagnosis['cause']).replace('_', ' ')}.",
+                f"**Required evidence:** {', '.join(str(item) for item in diagnosis['required_evidence'])}.",
+                f"**Action intent:** {intent.replace('_', ' ')} (`{intent}`).",
+                f"**Effects:** {effects}.",
+                f"**Anti-conditions:** {', '.join(str(item) for item in statement['anti_conditions'])}.",
+                f"**ECOS analog:** {_analog(bindings.get(intent))}",
+                f"**Paper sources:** {', '.join(dict.fromkeys(str(item['source_id']) for item in statement['evidence'] if isinstance(item, dict)))}.",
+            ]
+        )
+        _add(
+            entries,
+            documents,
+            entity_id=str(statement["id"]),
+            kind="strategy",
+            aliases=(),
+            document="strategies.md",
+            body=body,
+            evidence=("general.statements", "general.bindings"),
+            stages=stages,
+        )
+        entries[-1]["metric"] = metric
+    return entries, documents
+
+
+GENERAL_REGRESSION_CASES = (
+    {
+        "id": "strategy-local-move",
+        "entity_id": "strategy.congestion.local_move_cells.v1",
+        "required_text": "spread_local_movable_cells",
+    },
+    {
+        "id": "strategy-global-whitespace",
+        "entity_id": "strategy.congestion.global_whitespace_insufficient.v1",
+        "required_text": "redistribute_global_routing_demand",
+    },
+    {
+        "id": "strategy-padding",
+        "entity_id": "strategy.congestion.pin_density_with_overflow.v1",
+        "required_text": "increase_cell_padding",
+    },
+    {
+        "id": "strategy-narrow-channel",
+        "entity_id": "strategy.congestion.macro_or_narrow_channel.v1",
+        "required_text": "macro_or_narrow_channel",
+    },
+    {
+        "id": "strategy-unbound-timing",
+        "entity_id": "strategy.congestion.timing_overflow_tradeoff.v1",
+        "required_text": "No authorized knob",
+    },
+)
+
+
+def build_general_bundle(output: Path) -> None:
+    entries, documents = _strategy_entries()
+    knowledge = output / "knowledge"
+    knowledge.mkdir(parents=True, exist_ok=True)
+    for name, chunks in documents.items():
+        (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
+    metrics = list(dict.fromkeys(str(entry.get("metric", "")) for entry in entries))
+    catalog = {
+        "schema_version": "ecos-general-catalog.v1",
+        "domain": "ecos_general_knowledge",
+        "publication": {
+            "status": "source-audited",
+            "scope": "step-scoped general strategies; not a flow stage",
+            "metrics": metrics,
+        },
+        "entities": entries,
+    }
+    (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
+    (output / "sources.json").write_text(
+        _json(_source_inventory(GENERAL_SOURCE_PATHS, "ecos-general-sources.v1")) + "\n",
+        encoding="utf-8",
+    )
+    regression = output / "regression"
+    regression.mkdir(exist_ok=True)
+    regression.joinpath("congestion_questions.jsonl").write_text(
+        "".join(
+            _json({**case, "question": f"Explain {case['entity_id']}"}) + "\n"
+            for case in GENERAL_REGRESSION_CASES
+        ),
+        encoding="utf-8",
+    )
+    files = {
+        str(path.relative_to(output)): _sha256(path.read_bytes())
+        for path in sorted(output.rglob("*"))
+        if path.is_file() and path.name != "manifest.json"
+    }
+    manifest = {
+        "schema_version": "ecos-general-manifest.v1",
+        "files": files,
+        "entity_count": len(entries),
+    }
+    (output / "manifest.json").write_text(_json(manifest) + "\n", encoding="utf-8")

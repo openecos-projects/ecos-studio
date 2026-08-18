@@ -55,11 +55,15 @@ def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path:
     )
 
     assert sorted(path.name for path in output.iterdir() if path.is_dir()) == sorted(
-        spec.slug for spec in STEP_KNOWLEDGE_SPECS
+        (*[spec.slug for spec in STEP_KNOWLEDGE_SPECS], "general")
     )
     assert (output / "retrieval-config.v1.json").is_file()
     place_catalog = json.loads((output / "place" / "catalog.json").read_text(encoding="utf-8"))
     assert place_catalog["schema_version"] == "ecos-place-catalog.v3"
+    general_catalog = json.loads((output / "general" / "catalog.json").read_text(encoding="utf-8"))
+    assert general_catalog["schema_version"] == "ecos-general-catalog.v1"
+    assert "strategy" in {entity["kind"] for entity in general_catalog["entities"]}
+    assert "strategy" not in {entity["kind"] for entity in place_catalog["entities"]}
     assert not (AGENT_ROOT / "scripts" / "knowledge" / "place.py").exists()
     assert "from knowledge import steps" in (AGENT_ROOT / "scripts" / "build_knowledge.py").read_text(
         encoding="utf-8"

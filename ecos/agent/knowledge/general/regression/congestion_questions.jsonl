@@ -1,0 +1,5 @@
+{"entity_id": "strategy.congestion.local_move_cells.v1", "id": "strategy-local-move", "question": "Explain strategy.congestion.local_move_cells.v1", "required_text": "spread_local_movable_cells"}
+{"entity_id": "strategy.congestion.global_whitespace_insufficient.v1", "id": "strategy-global-whitespace", "question": "Explain strategy.congestion.global_whitespace_insufficient.v1", "required_text": "redistribute_global_routing_demand"}
+{"entity_id": "strategy.congestion.pin_density_with_overflow.v1", "id": "strategy-padding", "question": "Explain strategy.congestion.pin_density_with_overflow.v1", "required_text": "increase_cell_padding"}
+{"entity_id": "strategy.congestion.macro_or_narrow_channel.v1", "id": "strategy-narrow-channel", "question": "Explain strategy.congestion.macro_or_narrow_channel.v1", "required_text": "macro_or_narrow_channel"}
+{"entity_id": "strategy.congestion.timing_overflow_tradeoff.v1", "id": "strategy-unbound-timing", "question": "Explain strategy.congestion.timing_overflow_tradeoff.v1", "required_text": "No authorized knob"}

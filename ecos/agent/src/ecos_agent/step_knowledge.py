@@ -52,8 +52,19 @@ class StepKnowledge(KnowledgeBundle):
         return cls._from_directory(root, spec.bundle_spec)
 
 
+GENERAL_KNOWLEDGE_SPEC = KnowledgeBundleSpec(
+    "general", "ecos-general-manifest.v1", "ecos-general-catalog.v1"
+)
+
+
 def load_default_step_knowledge() -> tuple[StepKnowledge, ...]:
     return tuple(StepKnowledge.from_default(spec) for spec in STEP_KNOWLEDGE_SPECS)
+
+
+def load_default_general_knowledge() -> KnowledgeBundle:
+    bundled_root = getattr(sys, "_MEIPASS", None)
+    root = Path(bundled_root) / "knowledge" if bundled_root else _default_knowledge_root()
+    return KnowledgeBundle._from_directory(root / "general", GENERAL_KNOWLEDGE_SPEC)
 
 
 def _default_knowledge_root() -> Path:
@@ -64,9 +75,11 @@ def _default_knowledge_root() -> Path:
 
 
 __all__ = [
+    "GENERAL_KNOWLEDGE_SPEC",
     "STEP_KNOWLEDGE_SPECS",
     "StepKnowledge",
     "StepKnowledgeError",
     "StepKnowledgeSpec",
+    "load_default_general_knowledge",
     "load_default_step_knowledge",
 ]

@@ -350,7 +350,14 @@ class GlobalKnowledgeRetriever:
         if len(matches) > 1 and matches[1][1] - matches[0][1] < self._config.min_score_margin:
             return ()
         matches.sort(key=lambda item: (item[0].key not in phrase_keys, item[1], item[0].key))
-        return tuple(matches[: self._config.top_k])
+        unique: list[tuple[_Record, float]] = []
+        seen_entities: set[str] = set()
+        for record, score in matches:
+            if record.entity.entity_id in seen_entities:
+                continue
+            seen_entities.add(record.entity.entity_id)
+            unique.append((record, score))
+        return tuple(unique[: self._config.top_k])
 
 
 def tokenize(text: str, *, limit: int | None = None) -> tuple[str, ...]:
@@ -400,36 +407,48 @@ def _stem(token: str) -> str:
     return token
 
 
+def _record_stages(bundle: KnowledgeBundle, entity: KnowledgeEntity) -> tuple[str, ...]:
+    if entity.stages:
+        if "general" in entity.stages:
+            raise KnowledgeRetrievalError(f"general is not a flow stage: {entity.entity_id}")
+        return entity.stages
+    if bundle.spec.slug == "general":
+        raise KnowledgeRetrievalError(f"general knowledge entity missing stages: {entity.entity_id}")
+    return (bundle.spec.slug,)
+
+
 def _records_from_bundles(bundles: tuple[KnowledgeBundle, ...]) -> tuple[_Record, ...]:
     records: list[_Record] = []
     seen_keys: set[str] = set()
     for bundle in bundles:
         for entity in bundle.entities:
-            key = f"{bundle.spec.slug}:{entity.entity_id}"
-            if key in seen_keys:
-                raise KnowledgeRetrievalError(f"duplicate knowledge entity: {key}")
-            seen_keys.add(key)
-            metadata_fields = (
-                bundle.spec.slug,
-                entity.entity_id,
-            )
-            fields = (
-                *metadata_fields,
-                bundle.chunk_text(entity.entity_id),
-            )
-            records.append(
-                _Record(
-                    key,
-                    entity,
-                    bundle.spec.slug,
-                    bundle.chunk_text(entity.entity_id),
-                    frozenset(token for field in fields for token in _acronym_tokens(field)),
-                    frozenset(tokenize(entity.entity_id)),
-                    _identifier_phrase_tokens(entity.entity_id),
-                    frozenset(token for field in fields for token in tokenize(field)),
-                    frozenset(token for field in metadata_fields for token in tokenize(field)),
+            text = bundle.chunk_text(entity.entity_id)
+            for stage in _record_stages(bundle, entity):
+                key = f"{stage}:{entity.entity_id}"
+                if key in seen_keys:
+                    raise KnowledgeRetrievalError(f"duplicate knowledge entity: {key}")
+                seen_keys.add(key)
+                metadata_fields = (
+                    stage,
+                    entity.entity_id,
                 )
-            )
+                fields = (
+                    *metadata_fields,
+                    text,
+                )
+                records.append(
+                    _Record(
+                        key,
+                        entity,
+                        stage,
+                        text,
+                        frozenset(token for field in fields for token in _acronym_tokens(field)),
+                        frozenset(tokenize(entity.entity_id)),
+                        _identifier_phrase_tokens(entity.entity_id),
+                        frozenset(token for field in fields for token in tokenize(field)),
+                        frozenset(token for field in metadata_fields for token in tokenize(field)),
+                    )
+                )
     return tuple(records)
 
 
@@ -621,11 +640,12 @@ def _fuse_matches(
     limit: int,
 ) -> tuple[tuple[_Record, float], ...]:
     fused = list(baseline)
-    seen = {record.key for record, _score in baseline}
+    seen = {record.entity.entity_id for record, _score in baseline}
     for match in supplemental or ():
-        if match[0].key not in seen:
+        entity_id = match[0].entity.entity_id
+        if entity_id not in seen:
             fused.append(match)
-            seen.add(match[0].key)
+            seen.add(entity_id)
     return tuple(fused[:limit])
 
 
