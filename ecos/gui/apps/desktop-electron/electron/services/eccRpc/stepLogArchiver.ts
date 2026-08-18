@@ -214,28 +214,53 @@ export class StepLogArchiver {
 
   private processBuffer(): void {
     for (;;) {
-      const newline = this.buffer.indexOf(0x0a)
-      if (newline < 0) {
-        if (this.buffer.length === 0) return
-        if (
-          this.buffer[0] === STEP_MARKER_PREFIX[0] &&
-          this.buffer.length < MARKER_HOLDBACK_BYTES
-        ) {
-          // A possible marker frame split across chunks: hold back until the
-          // newline arrives or the frame grows beyond any legitimate marker.
-          return
+      const candidate = this.buffer.indexOf(STEP_MARKER_PREFIX)
+      if (candidate < 0) {
+        // No candidate frame: hold back only a trailing partial prefix.
+        const tail = this.buffer.lastIndexOf(STEP_MARKER_PREFIX[0]!)
+        if (tail >= 0) {
+          const suffix = this.buffer.subarray(tail)
+          if (
+            suffix.length <= STEP_MARKER_PREFIX.length &&
+            STEP_MARKER_PREFIX.subarray(0, suffix.length).equals(suffix)
+          ) {
+            if (tail > 0) {
+              this.emitData(this.buffer.subarray(0, tail))
+            }
+            this.buffer = this.buffer.subarray(tail)
+            return
+          }
         }
-        this.emitData(this.buffer)
+        if (this.buffer.length > 0) {
+          this.emitData(this.buffer)
+        }
         this.buffer = Buffer.alloc(0)
         return
       }
-      const line = this.buffer.subarray(0, newline + 1)
+      if (candidate > 0) {
+        // Bytes before a marker candidate are ordinary stream data.
+        this.emitData(this.buffer.subarray(0, candidate))
+        this.buffer = this.buffer.subarray(candidate)
+        continue
+      }
+      const newline = this.buffer.indexOf(0x0a)
+      if (newline < 0) {
+        if (this.buffer.length < MARKER_HOLDBACK_BYTES) {
+          return
+        }
+        // An overlong candidate without a newline is not a marker: emit the
+        // prefix's first byte and rescan the remainder.
+        this.emitData(this.buffer.subarray(0, 1))
+        this.buffer = this.buffer.subarray(1)
+        continue
+      }
+      const frame = this.buffer.subarray(0, newline + 1)
       this.buffer = this.buffer.subarray(newline + 1)
-      const marker = parseStepMarker(line)
+      const marker = parseStepMarker(frame)
       if (marker) {
-        this.handleMarker(marker, line)
+        this.handleMarker(marker, frame)
       } else {
-        this.emitData(line)
+        this.emitData(frame)
       }
     }
   }

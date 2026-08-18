@@ -386,6 +386,61 @@ describe('StepLogArchiver marker state machine', () => {
     expect(h.readArchive('B', 't').toString()).toBe('now archived\n')
     expect(h.unscoped).toEqual([])
   })
+
+  it('consumes an end marker glued to output without a trailing newline', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
+    h.archiver.feed(v1Marker('begin', 'S', 'T'))
+    h.archiver.feed(Buffer.from('last line without newline'))
+    h.archiver.feed(v1Marker('end', 'S', 'T'))
+
+    expect(h.readArchive('S', 'T').toString()).toBe('last line without newline')
+    expect(h.ended).toEqual([{ step: 'S', tool: 'T' }])
+    expect(h.unscoped).toEqual([])
+  })
+
+  it('consumes an end marker split across chunks after unterminated output', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
+    h.archiver.feed(v1Marker('begin', 'S', 'T'))
+    h.archiver.feed(Buffer.from('unterminated'))
+    const end = v1Marker('end', 'S', 'T')
+    for (let offset = 0; offset < end.length; offset += 7) {
+      h.archiver.feed(end.subarray(offset, offset + 7))
+    }
+
+    expect(h.readArchive('S', 'T').toString()).toBe('unterminated')
+    expect(h.ended).toEqual([{ step: 'S', tool: 'T' }])
+  })
+
+  it('archives an invalid marker mid-line as data', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
+    h.archiver.feed(v1Marker('begin', 'S', 'T'))
+    h.archiver.feed(Buffer.from('glued text \x1eECC-STEP {bad json}\n'))
+    h.archiver.feed(v1Marker('end', 'S', 'T'))
+
+    const content = h.readArchive('S', 'T').toString()
+    expect(content).toContain('glued text ')
+    expect(content).toContain('{bad json}')
+    expect(h.ended).toEqual([{ step: 'S', tool: 'T' }])
+  })
+
+  it('recovers a valid marker following an overlong candidate', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
+    h.archiver.feed(v1Marker('begin', 'S', 'T'))
+    const overlong = Buffer.concat([
+      Buffer.from('\x1eECC-STEP '),
+      Buffer.alloc(600, 0x61),
+    ])
+    const end = v1Marker('end', 'S', 'T')
+    const combined = Buffer.concat([overlong, end])
+    for (let offset = 0; offset < combined.length; offset += 100) {
+      h.archiver.feed(combined.subarray(offset, offset + 100))
+    }
+
+    const content = h.readArchive('S', 'T')
+    expect(content.toString()).toContain('a'.repeat(600))
+    expect(content.toString()).not.toContain('"event":"end"')
+    expect(h.ended).toEqual([{ step: 'S', tool: 'T' }])
+  })
 })
 
 describe('StepLogArchiver batching and tail', () => {
