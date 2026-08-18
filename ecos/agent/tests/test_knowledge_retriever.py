@@ -21,7 +21,7 @@ def _retriever() -> GlobalKnowledgeRetriever:
 
 def _bundles() -> tuple[StepKnowledge, ...]:
     return tuple(
-        StepKnowledge.from_directory(KNOWLEDGE_ROOT / spec.slug, spec)
+        StepKnowledge.from_directory(KNOWLEDGE_ROOT / "tool" / spec.slug, spec)
         for spec in STEP_KNOWLEDGE_SPECS
     )
 

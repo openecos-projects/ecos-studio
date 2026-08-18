@@ -140,7 +140,7 @@ def _semantic_cases() -> list[dict[str, object]]:
 def _identifier_cases() -> list[dict[str, object]]:
     cases: list[dict[str, object]] = []
     for spec in STEP_KNOWLEDGE_SPECS:
-        bundle = StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / spec.slug, spec)
+        bundle = StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / "tool" / spec.slug, spec)
         by_kind = {
             kind: [entity.entity_id for entity in bundle.entities if entity.entity_id.startswith(f"{kind}.")]
             for kind in ("parameter", "metric", "artifact")
@@ -207,7 +207,7 @@ def _aliases_by_target() -> dict[str, tuple[str, ...]]:
         raise ValueError("legacy alias audit terms are invalid")
     aliases = {str(key): tuple(str(value) for value in values) for key, values in terms.items() if isinstance(values, list)}
     for spec in STEP_KNOWLEDGE_SPECS:
-        bundle = StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / spec.slug, spec)
+        bundle = StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / "tool" / spec.slug, spec)
         if any(f"{spec.slug}:{entity.entity_id}" not in aliases for entity in bundle.entities):
             raise ValueError("legacy alias audit terms are incomplete")
     return aliases
@@ -265,7 +265,7 @@ def _count_dict(values: list[object]) -> dict[str, int]:
 
 
 def _manifest(cases: list[dict[str, object]]) -> dict[str, object]:
-    corpus = [(spec.slug, entity.chunk_sha256) for spec in STEP_KNOWLEDGE_SPECS for entity in StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / spec.slug, spec).entities]
+    corpus = [(spec.slug, entity.chunk_sha256) for spec in STEP_KNOWLEDGE_SPECS for entity in StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / "tool" / spec.slug, spec).entities]
     benchmark = "\n".join(json.dumps(case, ensure_ascii=False, sort_keys=True) for case in cases) + "\n"
     counts = {
         "by_category": _count_dict([case["category"] for case in cases]),

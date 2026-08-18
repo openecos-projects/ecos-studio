@@ -45,7 +45,7 @@ class StepKnowledge(KnowledgeBundle):
     def from_default(cls, spec: StepKnowledgeSpec) -> "StepKnowledge":
         bundled_root = getattr(sys, "_MEIPASS", None)
         root = Path(bundled_root) / "knowledge" if bundled_root else _default_knowledge_root()
-        return cls.from_directory(root / spec.slug, spec)
+        return cls.from_directory(tool_bundle_path(root, spec.slug), spec)
 
     @classmethod
     def from_directory(cls, root: Path, spec: StepKnowledgeSpec) -> "StepKnowledge":
@@ -64,7 +64,15 @@ def load_default_step_knowledge() -> tuple[StepKnowledge, ...]:
 def load_default_general_knowledge() -> KnowledgeBundle:
     bundled_root = getattr(sys, "_MEIPASS", None)
     root = Path(bundled_root) / "knowledge" if bundled_root else _default_knowledge_root()
-    return KnowledgeBundle._from_directory(root / "general", GENERAL_KNOWLEDGE_SPEC)
+    return KnowledgeBundle._from_directory(general_bundle_path(root), GENERAL_KNOWLEDGE_SPEC)
+
+
+def tool_bundle_path(root: Path, slug: str) -> Path:
+    return root / "tool" / slug
+
+
+def general_bundle_path(root: Path, metric: str = "congestion") -> Path:
+    return root / "general" / metric
 
 
 def _default_knowledge_root() -> Path:
@@ -80,6 +88,8 @@ __all__ = [
     "StepKnowledge",
     "StepKnowledgeError",
     "StepKnowledgeSpec",
+    "general_bundle_path",
     "load_default_general_knowledge",
     "load_default_step_knowledge",
+    "tool_bundle_path",
 ]

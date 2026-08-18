@@ -49,7 +49,7 @@ def test_semantic_cases_do_not_contain_a_complete_target_alias() -> None:
 
 def test_semantic_cases_share_target_chunk_vocabulary() -> None:
     bundles = {
-        spec.slug: StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / spec.slug, spec)
+        spec.slug: StepKnowledge.from_directory(AGENT_ROOT / "knowledge" / "tool" / spec.slug, spec)
         for spec in STEP_KNOWLEDGE_SPECS
     }
     cases = [json.loads(line) for line in (BENCHMARK_ROOT / "benchmark.v1.jsonl").read_text(encoding="utf-8").splitlines()]

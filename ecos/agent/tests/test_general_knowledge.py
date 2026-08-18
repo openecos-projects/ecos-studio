@@ -12,8 +12,8 @@ from ecos_agent.step_knowledge import (
 
 
 AGENT_ROOT = Path(__file__).parents[1]
-GENERAL_ROOT = AGENT_ROOT / "knowledge" / "general"
-PLACE_ROOT = AGENT_ROOT / "knowledge" / "place"
+GENERAL_ROOT = AGENT_ROOT / "knowledge" / "general" / "congestion"
+PLACE_ROOT = AGENT_ROOT / "knowledge" / "tool" / "place"
 
 
 def _load_general():

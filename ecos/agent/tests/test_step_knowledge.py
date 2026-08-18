@@ -54,13 +54,15 @@ def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path:
         text=True,
     )
 
-    assert sorted(path.name for path in output.iterdir() if path.is_dir()) == sorted(
-        (*[spec.slug for spec in STEP_KNOWLEDGE_SPECS], "general")
+    assert sorted(path.name for path in output.iterdir() if path.is_dir()) == ["general", "tool"]
+    assert sorted(path.name for path in (output / "tool").iterdir()) == sorted(
+        spec.slug for spec in STEP_KNOWLEDGE_SPECS
     )
+    assert sorted(path.name for path in (output / "general").iterdir()) == ["congestion"]
     assert (output / "retrieval-config.v1.json").is_file()
-    place_catalog = json.loads((output / "place" / "catalog.json").read_text(encoding="utf-8"))
+    place_catalog = json.loads((output / "tool" / "place" / "catalog.json").read_text(encoding="utf-8"))
     assert place_catalog["schema_version"] == "ecos-place-catalog.v3"
-    general_catalog = json.loads((output / "general" / "catalog.json").read_text(encoding="utf-8"))
+    general_catalog = json.loads((output / "general" / "congestion" / "catalog.json").read_text(encoding="utf-8"))
     assert general_catalog["schema_version"] == "ecos-general-catalog.v1"
     assert "strategy" in {entity["kind"] for entity in general_catalog["entities"]}
     assert "strategy" not in {entity["kind"] for entity in place_catalog["entities"]}
@@ -82,7 +84,7 @@ def test_committed_stage_bundles_pass_generator_check() -> None:
 
 def test_every_flow_step_has_a_source_audited_knowledge_bundle() -> None:
     for spec in STEP_KNOWLEDGE_SPECS:
-        root = KNOWLEDGE_ROOT / spec.slug
+        root = KNOWLEDGE_ROOT / "tool" / spec.slug
         knowledge = StepKnowledge.from_directory(root, spec)
         answer = _bundle_smoke_retriever(knowledge).reply(
             f"How does the {spec.step_name} stage execute?"
@@ -99,7 +101,7 @@ def test_every_flow_step_has_a_source_audited_knowledge_bundle() -> None:
 
 def test_step_bundles_have_entity_level_algorithm_artifact_metric_and_failure_knowledge() -> None:
     for spec in STEP_KNOWLEDGE_SPECS:
-        root = KNOWLEDGE_ROOT / spec.slug
+        root = KNOWLEDGE_ROOT / "tool" / spec.slug
         knowledge = StepKnowledge.from_directory(root, spec)
         documents = {
             name: (root / "knowledge" / name).read_text(encoding="utf-8")
@@ -140,7 +142,7 @@ def test_step_bundles_have_entity_level_algorithm_artifact_metric_and_failure_kn
 
 def test_step_bundle_regression_questions_return_audited_read_only_answers() -> None:
     for spec in STEP_KNOWLEDGE_SPECS:
-        root = KNOWLEDGE_ROOT / spec.slug
+        root = KNOWLEDGE_ROOT / "tool" / spec.slug
         knowledge = StepKnowledge.from_directory(root, spec)
         cases = [
             json.loads(line)
@@ -162,7 +164,7 @@ def test_step_bundle_regression_questions_return_audited_read_only_answers() -> 
 def test_step_bundle_rejects_changed_markdown(tmp_path: Path) -> None:
     spec = next(item for item in STEP_KNOWLEDGE_SPECS if item.slug == "cts")
     copied_bundle = tmp_path / "cts"
-    shutil.copytree(KNOWLEDGE_ROOT / "cts", copied_bundle)
+    shutil.copytree(KNOWLEDGE_ROOT / "tool" / "cts", copied_bundle)
     algorithms = copied_bundle / "knowledge" / "algorithms.md"
     algorithms.write_text(algorithms.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
 
@@ -205,7 +207,7 @@ def test_wheel_build_copies_external_knowledge_and_removes_legacy_paths(tmp_path
 
     with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
         names = wheel.namelist()
-    assert "ecos_agent/knowledge/place/catalog.json" in names
+    assert "ecos_agent/knowledge/tool/place/catalog.json" in names
     assert "ecos_agent/place_knowledge.py" not in names
     assert not any("_knowledge/" in name for name in names)
     assert "graft knowledge" in (AGENT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")

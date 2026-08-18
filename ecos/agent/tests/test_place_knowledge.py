@@ -11,7 +11,7 @@ from ecos_agent.step_knowledge import STEP_KNOWLEDGE_SPECS, StepKnowledge, StepK
 
 
 AGENT_ROOT = Path(__file__).parents[1]
-BUNDLE_ROOT = AGENT_ROOT / "knowledge" / "place"
+BUNDLE_ROOT = AGENT_ROOT / "knowledge" / "tool" / "place"
 ECOS_ROOT = AGENT_ROOT.parents[1]
 PLACE_SPEC = next(spec for spec in STEP_KNOWLEDGE_SPECS if spec.slug == "place")
 
