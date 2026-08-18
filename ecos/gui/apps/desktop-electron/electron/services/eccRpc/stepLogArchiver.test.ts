@@ -505,6 +505,24 @@ describe('StepLogArchiver batching and tail', () => {
     expect(h.segments).toEqual([])
     expect(h.ended).toEqual([])
   })
+
+  it('close routes a truncated trailing marker candidate to unscoped', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
+    h.archiver.feed(Buffer.from('\x1eECC-STEP {bad'))
+    h.archiver.close()
+    expect(h.unscoped.join('')).toBe('\x1eECC-STEP {bad')
+  })
+
+  it('close archives a trailing partial line of the active step', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
+    h.archiver.feed(v1Marker('begin', 'S', 'T'))
+    h.archiver.feed(Buffer.from('complete line\n'))
+    h.archiver.feed(Buffer.from('partial without newline'))
+    h.archiver.close()
+    expect(h.readArchive('S', 'T').toString()).toBe(
+      'complete line\npartial without newline',
+    )
+  })
 })
 
 describe('readFlowJsonStepAllowlist', () => {

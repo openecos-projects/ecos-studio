@@ -50,6 +50,7 @@ import {
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 import { RuntimeSidecarLifecycle } from './runtimeSidecarLifecycle'
 import { StepLogEventBridge } from './stepLogEventBridge'
+import { attachStepLogBridge, wrapProtocolEvent } from './runtimeProtocolFanout'
 import {
   WorkspaceRuntimeCommands,
   type EccWorkspaceSessionResult,
@@ -109,20 +110,12 @@ export class EccWorkspaceRuntime {
       (event) => this.handleSidecarEvent(event),
       (notification) => this.handleNotification(notification),
     )
-    if (this.boundDirectory && typeof this.sidecar.attachStepLogArchiver === 'function') {
-      this.stepLogBridge = new StepLogEventBridge({
-        workspaceDirectory: this.boundDirectory,
-        emitProtocolEvent: (event) => this.emitProtocolEvent(event),
-        emitUnscoped: (text) => {
-          if (typeof this.sidecar.appendStderrText === 'function') {
-            this.sidecar.appendStderrText(text)
-            return
-          }
-          this.handleSidecarEvent({ text, type: 'runtime.stderr' })
-        },
-      })
-      this.sidecar.attachStepLogArchiver(this.stepLogBridge.archiver)
-    }
+    this.stepLogBridge = attachStepLogBridge({
+      directory: this.boundDirectory,
+      sidecar: this.sidecar,
+      emitProtocolEvent: (event) => this.emitProtocolEvent(event),
+      emitRuntimeEvent: (event) => this.handleSidecarEvent(event),
+    })
     this.sidecarLifecycle = new RuntimeSidecarLifecycle({
       captureFinalSnapshot: async (workspaceId) => {
         const client = this.client
@@ -661,28 +654,12 @@ export class EccWorkspaceRuntime {
       this.sidecarLifecycle.retainFailedOperationForDiagnostics()
     }
     const forward = (event: EccRuntimeProtocolPayload) => this.emitProtocolEvent(event)
-    if (this.stepLogBridge) {
-      this.stepLogBridge.handleProtocolEvent(protocolEvent, forward)
-      return
-    }
-    forward(protocolEvent)
+    if (this.stepLogBridge) this.stepLogBridge.handleProtocolEvent(protocolEvent, forward)
+    else forward(protocolEvent)
   }
 
   private emitProtocolEvent(protocolEvent: EccRuntimeProtocolPayload): void {
-    const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
-    this.emit({
-      event: protocolEvent,
-      type: 'runtime.protocol',
-      ...(session
-        ? {
-            workspaceDirectory: session.directory,
-            workspaceHandle: session.workspaceHandle,
-          }
-        : {}),
-      ...(this.boundDirectory && !session
-        ? { workspaceDirectory: this.boundDirectory }
-        : {}),
-    })
+    this.emit(wrapProtocolEvent(this.sessions, this.boundDirectory, protocolEvent))
   }
 
   private runtimeDirectoryForHandle(workspaceHandle: string | undefined): string | null {

@@ -197,6 +197,13 @@ export class StepLogArchiver {
   }
 
   close(): void {
+    // Bytes held back by the parser (an incomplete final line, possibly a
+    // truncated marker candidate) are still stream bytes: route them like
+    // any other data instead of discarding them.
+    if (this.buffer.length > 0) {
+      this.emitData(this.buffer)
+      this.buffer = Buffer.alloc(0)
+    }
     this.clearFlushTimer()
     const active = this.active
     if (active?.archiveOk && active.pending.length > 0) {
@@ -209,7 +216,6 @@ export class StepLogArchiver {
       }
     }
     this.active = null
-    this.buffer = Buffer.alloc(0)
   }
 
   private processBuffer(): void {

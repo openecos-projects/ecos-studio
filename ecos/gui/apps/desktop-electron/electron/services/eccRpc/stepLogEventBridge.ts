@@ -102,7 +102,10 @@ export class StepLogEventBridge {
     forward: (event: EccRuntimeProtocolPayload) => void,
   ): void {
     if (typeof event.sequence === 'number') {
-      this.lastSequence = Math.max(this.lastSequence, event.sequence)
+      // Most recently observed wins: replays can carry older values and a
+      // restarted sidecar restarts its own sequence. Ordering within a step
+      // is carried by payload.cursor, not by sequence.
+      this.lastSequence = event.sequence
     }
     if (event.type === 'operation.started') {
       this.operationContext = {
@@ -114,11 +117,26 @@ export class StepLogEventBridge {
         runtimeInstanceId: event.runtimeInstanceId,
         workspaceId: event.workspaceId,
       }
+      // Segments that arrived before operation.started (the stderr stream
+      // races the RPC channel) stay buffered: they belong to this operation
+      // and are released by their step.started with the new context.
       this.startedSteps.clear()
-      this.bufferedSegments.clear()
       this.endedStepCounts.clear()
       this.completedStepCounts.clear()
       this.refreshAllowlist()
+      forward(event)
+      return
+    }
+    if (
+      event.type === 'operation.completed' ||
+      event.type === 'operation.failed' ||
+      event.type === 'operation.cancelled'
+    ) {
+      // Any segment still buffered at a terminal boundary belongs to a step
+      // whose step.started never arrived (crash); the archive file holds the
+      // bytes, so only synthesis is dropped.
+      this.bufferedSegments.clear()
+      this.operationContext = null
       forward(event)
       return
     }
@@ -146,18 +164,26 @@ export class StepLogEventBridge {
 
   handleSidecarClose(): void {
     this.archiver.close()
-    this.bufferedSegments.clear()
     const held = this.heldCompleted
     if (held) {
       this.heldCompleted = null
       clearTimeout(held.timer)
       this.releaseStepCompleted(held)
     }
+    this.operationContext = null
+    this.lastSequence = 0
+    this.startedSteps.clear()
+    this.bufferedSegments.clear()
+    this.endedStepCounts.clear()
+    this.completedStepCounts.clear()
   }
 
   private handleSegment(segment: StepLogSegment): void {
     const key = stepLogKey(segment.step, segment.tool)
-    if (!this.startedSteps.has(key)) {
+    // Without an operation context (the stderr stream can run ahead of the
+    // RPC channel) or before the step's step.started, segments wait in the
+    // per-step buffer; the archive file already holds their bytes.
+    if (this.operationContext === null || !this.startedSteps.has(key)) {
       const queue = this.bufferedSegments.get(key) ?? []
       queue.push(segment)
       // Overflow drops only synthesis; the archive file stays complete.
@@ -193,6 +219,12 @@ export class StepLogEventBridge {
   ): void {
     const step = typeof event.payload.step === 'string' ? event.payload.step : ''
     const tool = typeof event.payload.tool === 'string' ? event.payload.tool : ''
+    if (event.payload.state === 'Skipped') {
+      // Skipped steps return before any marker emission, so no StepEnded
+      // will ever arrive for them: forward immediately.
+      this.forwardWithFinalLog(event, forward)
+      return
+    }
     const key = stepLogKey(step, tool)
     const ended = this.endedStepCounts.get(key) ?? 0
     const completed = this.completedStepCounts.get(key) ?? 0
@@ -218,10 +250,14 @@ export class StepLogEventBridge {
     }
     held.timer.unref?.()
     // A second step.completed cannot arrive while one is held (the executor
-    // is sequential), but release a previous hold defensively.
+    // is sequential); if one does, the previous step's end marker was lost,
+    // so its hold is released with whatever the tail holds.
     if (this.heldCompleted) {
       const previous = this.heldCompleted
       clearTimeout(previous.timer)
+      this.options.emitUnscoped(
+        `[step-log] superseded hold for step ${String(previous.event.payload.step)}; its end marker never arrived\n`,
+      )
       this.releaseStepCompleted(previous)
     }
     this.heldCompleted = held

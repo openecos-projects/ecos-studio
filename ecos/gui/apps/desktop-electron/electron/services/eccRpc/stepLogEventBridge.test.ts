@@ -380,4 +380,156 @@ describe('StepLogEventBridge', () => {
     expect(typeof finalLog).toBe('string')
     expect(Buffer.byteLength(finalLog as string, 'utf8')).toBeLessThanOrEqual(64 * 1024)
   })
+
+  it('releases pre-operation.started segments with the current operation identity', () => {
+    const h = harness()
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    // The workspace-open path loads the allowlist before any operation.
+    h.bridge.refreshAllowlist()
+    // The stderr stream races the RPC channel: begin + bytes + end all
+    // arrive before operation.started is observed.
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('raced output\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    expect(h.emitted).toEqual([])
+
+    startOperation(h)
+    expect(h.emitted).toEqual([])
+    startStep(h, 'Synthesis', 'yosys')
+    expect(h.emitted).toHaveLength(1)
+    expect(h.emitted[0]).toMatchObject({
+      operationId: 'operation-1',
+      runSessionId: 'run-session-1',
+      type: 'step.log',
+    })
+    expect(h.emitted[0]!.payload.chunk).toBe('raced output\n')
+  })
+
+  it('attributes segments to the operation that produced them across operations', () => {
+    const h = harness()
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h)
+    startStep(h, 'Synthesis', 'yosys')
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('first run\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    h.bridge.handleProtocolEvent(
+      protocolEvent('operation.completed', {}, { sequence: 9 }),
+      h.forward,
+    )
+
+    // The next operation's bytes arrive before its operation.started.
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('second run\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'operation.started',
+        {},
+        {
+          operationId: 'operation-2',
+          runSessionId: 'run-session-2',
+          sequence: 1,
+        },
+      ),
+      h.forward,
+    )
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 2 },
+      ),
+      h.forward,
+    )
+
+    const chunks = h.emitted.map((event) => [
+      event.operationId,
+      event.runSessionId,
+      event.payload.chunk,
+    ])
+    expect(chunks).toEqual([
+      ['operation-1', 'run-session-1', 'first run\n'],
+      ['operation-2', 'run-session-2', 'second run\n'],
+    ])
+  })
+
+  it('forwards skipped step completions immediately without a hold', () => {
+    vi.useFakeTimers()
+    const h = harness({ holdTimeoutMs: 2000 })
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h)
+
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Skipped' },
+        { sequence: 2 },
+      ),
+      h.forward,
+    )
+    h.bridge.handleProtocolEvent(
+      protocolEvent('operation.completed', {}, { sequence: 3 }),
+      h.forward,
+    )
+
+    // No hold, no timer wait: lifecycle order is preserved.
+    expect(h.forwarded.map((event) => event.type)).toEqual([
+      'operation.started',
+      'step.completed',
+      'operation.completed',
+    ])
+    expect(h.forwarded[1]!.payload.finalLog).toBe('')
+    expect(h.unscoped.join('')).not.toContain('did not arrive')
+  })
+
+  it('uses the latest observed sequence, not the maximum', () => {
+    const h = harness()
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h, 10)
+    startStep(h, 'Synthesis', 'yosys', 11)
+    // A replay carries an older sequence; synthesized events follow it.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys' },
+        { sequence: 4 },
+      ),
+      h.forward,
+    )
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('after replay\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    expect(h.emitted[0]!.sequence).toBe(4)
+  })
+
+  it('resets lifecycle state on sidecar close', () => {
+    const h = harness()
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h, 42)
+    startStep(h, 'Synthesis', 'yosys', 43)
+    h.bridge.handleSidecarClose()
+
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'operation.started',
+        {},
+        {
+          operationId: 'operation-2',
+          runSessionId: 'run-session-2',
+          sequence: 1,
+        },
+      ),
+      h.forward,
+    )
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.started',
+        { step: 'Synthesis', tool: 'yosys', state: 'Ongoing' },
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 2 },
+      ),
+      h.forward,
+    )
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('after restart\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    expect(h.emitted[0]!.sequence).toBe(2)
+    expect(h.emitted[0]!.operationId).toBe('operation-2')
+  })
 })
