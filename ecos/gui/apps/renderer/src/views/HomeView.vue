@@ -36,8 +36,8 @@
               </div>
               <div>
                 <dt>Workspace</dt>
-                <dd :title="valueOrNA(currentProject?.name)">
-                  {{ valueOrNA(currentProject?.name) }}
+                <dd :title="valueOrNA(currentWorkspaceName)">
+                  {{ valueOrNA(currentWorkspaceName) }}
                 </dd>
               </div>
               <div>
@@ -590,6 +590,10 @@ const { config } = useParameters()
 const router = useRouter()
 const route = useRoute()
 const { currentProject } = useWorkspace()
+const currentWorkspaceName = computed(() => {
+  const pathName = currentProject.value?.path?.split(/[/\\]/).filter(Boolean).pop()
+  return pathName || currentProject.value?.name || null
+})
 const { flowStages, isLoading: flowLoading } = useFlowStages()
 const {
   checklistItems,

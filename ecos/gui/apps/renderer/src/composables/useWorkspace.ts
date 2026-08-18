@@ -320,6 +320,9 @@ export function useWorkspace() {
     return normalized
   }
 
+  const workspaceNameFromPath = (path: string): string =>
+    path.split('/').filter(Boolean).pop() || path
+
   type WorkspaceAffinityResult =
     | { action: 'focused' }
     | { action: 'proceed'; previousPath: string | null }
@@ -547,8 +550,7 @@ export function useWorkspace() {
         ) ??
         ({
           id: normalizedBoundPath,
-          name:
-            normalizedBoundPath.split('/').filter(Boolean).pop() || normalizedBoundPath,
+          name: workspaceNameFromPath(normalizedBoundPath),
           path: normalizedBoundPath,
           lastOpened: new Date(),
         } satisfies Project)
@@ -809,7 +811,7 @@ export function useWorkspace() {
         const existingProject = recentProjects.value.find(
           (p) => normalizePath(p.path) === resolvedPath,
         )
-        const fallbackName = resolvedPath.split('/').filter(Boolean).pop() || resolvedPath
+        const fallbackName = workspaceNameFromPath(resolvedPath)
         const resolvedName = project?.name || existingProject?.name || fallbackName
 
         const loadedProject: Project = {
@@ -1263,7 +1265,7 @@ export function useWorkspace() {
 
         const createdProject: Project = {
           id: canonicalProjectRoot,
-          name: createdProjectName,
+          name: workspaceNameFromPath(canonicalProjectRoot),
           path: canonicalProjectRoot,
           designTool,
           lastOpened: new Date(),
