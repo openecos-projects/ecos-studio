@@ -531,6 +531,33 @@ describe('StepLogArchiver batching and tail', () => {
     expect(h.archiver.tail('S', 'T')).toBe('3456789\n')
   })
 
+  it('degrades to unscoped when the archive cannot be opened', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
+    // A regular file where the step directory belongs makes mkdir fail.
+    writeFileSync(join(h.workspace, 'S_T'), 'not a directory')
+    const begin = v1Marker('begin', 'S', 'T')
+    h.archiver.feed(begin)
+    h.archiver.feed(Buffer.from('step body\n'))
+    h.archiver.feed(v1Marker('end', 'S', 'T'))
+
+    const unscoped = h.unscoped.join('')
+    expect(unscoped).toContain(begin.toString())
+    expect(unscoped).toContain('step body\n')
+    expect(h.violations.some((reason) => reason.includes('archive open failed'))).toBe(
+      true,
+    )
+    expect(h.ended).toEqual([])
+    expect(h.segments).toEqual([])
+  })
+
+  it('bounds the tail even for a single oversized chunk', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }], tailBytes: 8 })
+    h.archiver.feed(v1Marker('begin', 'S', 'T'))
+    h.archiver.feed(Buffer.from('0123456789ABCDEF\n'))
+    h.archiver.feed(v1Marker('end', 'S', 'T'))
+    expect(h.archiver.tail('S', 'T')).toBe('9ABCDEF\n')
+  })
+
   it('abandons the archive on write error but keeps the tail', () => {
     const h = harness({ allowlist: [{ step: 'S', tool: 'T' }], batchBytes: 4 })
     h.archiver.feed(v1Marker('begin', 'S', 'T'))

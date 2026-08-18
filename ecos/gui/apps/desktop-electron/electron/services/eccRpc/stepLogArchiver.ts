@@ -319,7 +319,12 @@ export class StepLogArchiver {
         this.emitData(rawLine)
         return
       }
-      this.activate(marker, archivePath)
+      if (!this.activate(marker, archivePath)) {
+        // An activation failure loses the archive target entirely, so the
+        // marker and the step's bytes take the unscoped path (sidecar log +
+        // runtime.stderr) where they stay visible.
+        this.emitData(rawLine)
+      }
       return
     }
     if (marker.event === 'end' && this.matchesActive(marker)) {
@@ -341,18 +346,17 @@ export class StepLogArchiver {
     )
   }
 
-  private activate(marker: StepMarker, archivePath: string): void {
-    let archiveOk = true
+  private activate(marker: StepMarker, archivePath: string): boolean {
     try {
       mkdirSync(dirname(archivePath), { recursive: true })
       // Truncate on begin: a rerun starts a fresh byte stream with cursor 0.
       writeFileSync(archivePath, Buffer.alloc(0))
     } catch (error) {
       this.options.onProtocolViolation?.(`archive open failed: ${String(error)}`)
-      archiveOk = false
+      return false
     }
     this.active = {
-      archiveOk,
+      archiveOk: true,
       cursor: 0,
       path: archivePath,
       pendingBytes: 0,
@@ -361,6 +365,7 @@ export class StepLogArchiver {
       tool: marker.tool,
     }
     this.tails.set(stepLogKey(marker.step, marker.tool), { bytes: 0, chunks: [] })
+    return true
   }
 
   private emitData(data: Buffer): void {
@@ -376,7 +381,10 @@ export class StepLogArchiver {
       this.tails.set(key, tail)
     }
     // Copy the line: storing parser subarrays would pin whole stream chunks.
-    const copy = Buffer.from(data)
+    let copy = Buffer.from(data)
+    if (copy.length > this.tailBytes) {
+      copy = copy.subarray(copy.length - this.tailBytes)
+    }
     tail.chunks.push(copy)
     tail.bytes += copy.length
     while (tail.bytes > this.tailBytes && tail.chunks.length > 1) {
