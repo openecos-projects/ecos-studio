@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  parametersHaveChipIdentity,
   parseParametersData,
   transformConfigToParameters,
   transformParametersToConfig,
@@ -195,4 +196,19 @@ describe('useParameters helpers', () => {
     expect(parameters['Bottom layer']).toBe('MET2')
     expect(parameters['Top layer']).toBe('MET5')
   })
+  it('treats empty snapshots as missing chip identity', () => {
+    expect(parametersHaveChipIdentity({})).toBe(false)
+    expect(parametersHaveChipIdentity({ Die: { Size: [], Area: 0 } })).toBe(false)
+    expect(
+      parametersHaveChipIdentity({
+        PDK: 'ics55',
+        Design: 'demo',
+        'Top module': 'top',
+        Clock: 'clk',
+      }),
+    ).toBe(true)
+    expect(parametersHaveChipIdentity({ pdk: 'ics55', design: 'demo' })).toBe(true)
+    expect(parametersHaveChipIdentity({ die: { area: 1200 } })).toBe(true)
+  })
+
 })

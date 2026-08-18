@@ -225,6 +225,28 @@ function normalizeStringArray(value: unknown): string[] {
     : []
 }
 
+export function parametersHaveChipIdentity(
+  data: Partial<ParametersData> | Record<string, unknown> | null | undefined,
+): boolean {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false
+  const record = data as Record<string, unknown>
+  const identityValues = [
+    record.PDK,
+    record.pdk,
+    record.Design,
+    record.design,
+    record['Top module'],
+    record.topModule,
+    record.Clock,
+    record.clock,
+  ]
+  if (identityValues.some((value) => String(value ?? '').trim())) return true
+  const die = record.Die ?? record.die
+  if (!die || typeof die !== 'object' || Array.isArray(die)) return false
+  const area = Number((die as { Area?: unknown; area?: unknown }).Area ?? (die as { area?: unknown }).area ?? 0)
+  return Number.isFinite(area) && area > 0
+}
+
 export function parseParametersData(fileContent: string): ParametersData {
   const raw = JSON.parse(fileContent) as Record<string, unknown>
   return {
@@ -478,14 +500,29 @@ export function useParameters() {
     applyParametersData(parseParametersData(fileContent))
   }
 
-  function applyParametersData(parametersData: ParametersData): void {
+  function isParametersRecord(
+    value: unknown,
+  ): value is ParametersData & Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+  }
+
+  function applyParametersData(parametersData: ParametersData): boolean {
     console.log('Loaded parameters data:', parametersData)
 
     const transformedConfig = transformParametersToConfig(parametersData)
     const nextConfigSnapshot = JSON.stringify(transformedConfig)
     if (nextConfigSnapshot === originalConfig) {
       hasChanges.value = false
-      return
+      return true
+    }
+
+    if (
+      !parametersHaveChipIdentity(parametersData) &&
+      originalConfig &&
+      parametersHaveChipIdentity(JSON.parse(originalConfig) as ConfigData)
+    ) {
+      console.warn('Ignoring empty parameters payload to keep last chip identity')
+      return false
     }
 
     Object.assign(config, transformedConfig)
@@ -494,6 +531,7 @@ export function useParameters() {
     hasChanges.value = false
 
     console.log('Parameters loaded:', config)
+    return true
   }
 
   async function reloadParametersFromKnownPathIfRunning(): Promise<boolean> {
@@ -516,9 +554,8 @@ export function useParameters() {
         }
         if (
           snapshot &&
-          snapshot.parameters &&
-          typeof snapshot.parameters === 'object' &&
-          !Array.isArray(snapshot.parameters) &&
+          isParametersRecord(snapshot.parameters) &&
+          parametersHaveChipIdentity(snapshot.parameters) &&
           loadResourceToken === parametersResourceToken
         ) {
           applyParametersData(snapshot.parameters as unknown as ParametersData)
@@ -557,7 +594,7 @@ export function useParameters() {
     } catch (err) {
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return true
       console.error('Failed to reload running flow parameters:', err)
-      if (!keepLastParametersDuringFlowReload()) {
+      if (!keepLastParametersDuringFlowReload() && !originalConfig) {
         error.value = err instanceof Error ? err.message : String(err)
         resetParametersState()
       }
@@ -612,18 +649,22 @@ export function useParameters() {
       if (!homeData) {
         console.warn('Failed to get home data')
         if (keepLastParametersDuringFlowReload()) return
-        resetParametersState()
-        return
       }
 
-      if (!homeData.parameters) {
+      if (!homeData?.parameters && keepLastParametersDuringFlowReload()) {
         console.warn('No parameters field found in home.json')
-        if (keepLastParametersDuringFlowReload()) return
-        resetParametersState()
         return
       }
 
-      const parametersPath = convertToLocalPath(homeData.parameters)
+      const parametersPath = homeData?.parameters
+        ? convertToLocalPath(homeData.parameters)
+        : fallbackParametersPath(projectPath)
+      if (!homeData?.parameters) {
+        console.warn(
+          'No parameters field found in home.json; falling back to',
+          parametersPath,
+        )
+      }
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
       if (workspaceHandle && currentProject.value?.designTool !== 'frontend') {
         const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
@@ -634,9 +675,8 @@ export function useParameters() {
         }
         if (
           snapshot &&
-          snapshot.parameters &&
-          typeof snapshot.parameters === 'object' &&
-          !Array.isArray(snapshot.parameters)
+          isParametersRecord(snapshot.parameters) &&
+          parametersHaveChipIdentity(snapshot.parameters)
         ) {
           const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
             resolveProjectPathAccess(parametersPath),
@@ -660,7 +700,7 @@ export function useParameters() {
         return
       console.log('Loading parameters from:', resolvedPath ?? parametersPath)
       if (!resolvedPath) {
-        if (keepLastParametersDuringFlowReload()) return
+        if (keepLastParametersDuringFlowReload() || originalConfig) return
         resetParametersState()
         return
       }
@@ -680,7 +720,9 @@ export function useParameters() {
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return
       console.error('Failed to load parameters:', err)
       error.value = err instanceof Error ? err.message : String(err)
-      resetParametersState()
+      if (!originalConfig) {
+        resetParametersState()
+      }
     } finally {
       if (workspaceLifecycle.isCurrentSession(sessionId)) {
         isLoading.value = false
