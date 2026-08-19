@@ -36,7 +36,7 @@ describe('useParameters helpers', () => {
       }),
     )
 
-    expect(parsed).toEqual({
+    expect(parsed).toMatchObject({
       PDK: 'ics55',
       Design: 'demo',
       'Top module': 'top',
@@ -65,6 +65,8 @@ describe('useParameters helpers', () => {
 
   it('round-trips the current config schema without dropping supported fields', () => {
     const config: ConfigData = {
+      designTool: 'backend',
+      description: '',
       pdk: 'ics55',
       pdkRoot: '/pdks/ics55',
       design: 'chip_top',
@@ -88,11 +90,66 @@ describe('useParameters helpers', () => {
       frequencyMax: 500,
       bottomLayer: 'MET2',
       topLayer: 'MET5',
+      frontend: {
+        coreId: '',
+        cpuWrapperId: '',
+        cpuWrapperContract: '',
+        cpuSocketContract: '',
+        cpuWrapperTop: '',
+        socHarnessId: '',
+        socWrapperId: '',
+        socWrapperContract: '',
+        socVariant: '',
+        toolchainId: '',
+        testSuiteId: '',
+        cpuFilelist: '',
+        socFilelist: '',
+        inputFilelist: '',
+        simProgramNames: [],
+        simAllTests: false,
+      },
     }
 
     expect(transformParametersToConfig(transformConfigToParameters(config))).toEqual(
       config,
     )
+  })
+
+  it('round-trips frontend workspace metadata', () => {
+    const parsed = parseParametersData(
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        design: 'cpu-demo',
+        top_module: 'ecos_sim_top',
+        clock: 'clk',
+        frequency_max: 100,
+        frontend_core_id: 'custom-filelist',
+        cpu_filelist: '/work/cpu/filelist.f',
+        soc_harness_id: 'ysyx-am',
+        toolchain_id: 'riscv64-unknown-elf',
+        test_suite_id: 'am-tests',
+        sim_program_names: ['cpu-tests'],
+        sim_all_tests: true,
+      }),
+    )
+    const config = transformParametersToConfig(parsed)
+
+    expect(config.designTool).toBe('frontend')
+    expect(config.frontend).toMatchObject({
+      coreId: 'custom-filelist',
+      cpuFilelist: '/work/cpu/filelist.f',
+      socHarnessId: 'ysyx-am',
+      toolchainId: 'riscv64-unknown-elf',
+      testSuiteId: 'am-tests',
+      simProgramNames: ['cpu-tests'],
+      simAllTests: true,
+    })
+    expect(transformConfigToParameters(config)).toMatchObject({
+      'Design Tool': 'frontend',
+      frontend_core_id: 'custom-filelist',
+      cpu_filelist: '/work/cpu/filelist.f',
+      soc_harness_id: 'ysyx-am',
+    })
   })
 
   it('pins routing layer fields to the ics55 MET2-MET5 route window', () => {

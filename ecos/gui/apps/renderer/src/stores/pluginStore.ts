@@ -3,11 +3,11 @@ import { computed, ref } from 'vue'
 import {
   activatePdkApi,
   cancelResourceApi,
+  checkResourceUpdatesApi,
   importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
   removePdkReferenceApi,
-  refreshRegistryApi,
   resourceListToTools,
   subscribeResourceProgress,
   uninstallResourceApi,
@@ -35,6 +35,8 @@ export const usePluginStore = defineStore('plugin', () => {
   const _pendingProgress = new Map<string, InstallProgress>()
   const _progressTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const _cancelledResources = new Set<string>()
+  let _fetchSequence = 0
+  let _visibleFetchCount = 0
 
   const categories = computed(() => {
     const cats = new Set(tools.value.map((t) => t.category))
@@ -160,19 +162,26 @@ export const usePluginStore = defineStore('plugin', () => {
 
   async function fetchTools(options?: { silent?: boolean }): Promise<void> {
     const silent = options?.silent === true
+    const fetchSequence = ++_fetchSequence
     if (!silent) {
+      _visibleFetchCount += 1
       loading.value = true
     }
     error.value = null
     try {
       const nextResources = await listResourcesApi()
-      resources.value = nextResources
-      _syncLegacyTools()
+      if (fetchSequence === _fetchSequence) {
+        resources.value = nextResources
+        _syncLegacyTools()
+      }
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to fetch tools'
+      if (fetchSequence === _fetchSequence) {
+        error.value = e instanceof Error ? e.message : 'Failed to fetch tools'
+      }
     } finally {
       if (!silent) {
-        loading.value = false
+        _visibleFetchCount -= 1
+        loading.value = _visibleFetchCount > 0
       }
     }
   }
@@ -357,7 +366,7 @@ export const usePluginStore = defineStore('plugin', () => {
     refreshing.value = true
     error.value = null
     try {
-      await refreshRegistryApi()
+      await checkResourceUpdatesApi({ force: true, refreshRegistry: true })
       await fetchTools({ silent: true })
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to refresh registry'

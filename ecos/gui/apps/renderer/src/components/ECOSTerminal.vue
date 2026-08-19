@@ -539,7 +539,7 @@ async function deleteTerminal(localId: string) {
 
   if (!replacementRecord) {
     activeTerminalId.value = null
-    await createAndActivateTerminal()
+    closePanel()
     return
   }
 

@@ -45,6 +45,17 @@ The renderer dev server prefers port `1420`. If another ECOS Studio dev
 instance is already using it, Vite automatically picks the next free port and
 electron-vite passes that URL to the Electron shell.
 
+Frontend commands use the ECC-FE runtime installed by Resource Manager. To
+deliberately run the Electron GUI against an ECC-FE source checkout, set the
+development override explicitly:
+
+```bash
+ECOS_FE_DEV_ROOT=/absolute/path/to/ecc-fe pnpm run dev
+```
+
+Without this variable, a nearby `ecc-fe` checkout never overrides the installed
+runtime.
+
 ```bash
 # Linux VM / sandbox-restricted environment
 pnpm run dev:vm

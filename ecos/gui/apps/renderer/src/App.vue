@@ -69,10 +69,7 @@
         >
           <p class="workspace-update-backup-eyebrow">Update Workspace</p>
           <h2 id="workspace-update-backup-title">Backup Original Workspace?</h2>
-          <p>
-            Keep a copy of the current workspace before replacing it. If backup is
-            selected, the backup workspace will be recorded in project.json.
-          </p>
+          <p>Keep a copy of the current workspace before replacing it.</p>
           <div class="workspace-update-backup-actions">
             <button
               type="button"
@@ -204,12 +201,15 @@ import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuer
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
+  resolveProjectRouteContextForWorkspace,
+  type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
 
 type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
   deriveDirectoryFromDesign?: boolean
   lockWorkspaceDirectory?: boolean
+  standaloneWorkspace?: boolean
   suggestedWorkspaceName?: string
 }
 
@@ -476,12 +476,16 @@ async function openWorkspaceReconfigureWizard() {
     const api = desktopApi.value ?? (await waitForDesktopApi())
     desktopApi.value = api
     await api.workspace.registerProjectRoot(normalizedWorkspacePath)
-    await api.workspace.registerProjectReadRoot(
-      queryString(route.query.projectRoot) || parentLocalPath(normalizedWorkspacePath),
+    const projectContext = await resolveProjectRouteContextForWorkspace(
+      normalizedWorkspacePath,
     )
+    if (projectContext) {
+      await api.workspace.registerProjectReadRoot(projectContext.projectRoot)
+    }
 
     workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
       normalizedWorkspacePath,
+      projectContext,
     )
     reconfigureWorkspacePath.value = normalizedWorkspacePath
     showNewProjectWizard.value = true
@@ -498,7 +502,12 @@ async function openWorkspaceReconfigureWizard() {
 
 async function buildReconfigureWizardInitialConfig(
   workspacePath: string,
+  projectContext?: ProjectRouteContext | null,
 ): Promise<WorkspaceWizardInitialConfig> {
+  const resolvedProjectContext =
+    projectContext === undefined
+      ? await resolveProjectRouteContextForWorkspace(workspacePath)
+      : projectContext
   const [parametersText, pdkText, dbConfigText, flowText] = await Promise.all([
     readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
     readOptionalProjectTextFile('home/pdk.json', { projectPath: workspacePath }),
@@ -519,9 +528,6 @@ async function buildReconfigureWizardInitialConfig(
     optionalString(parametersJson?.Design) ||
     optionalString(parametersJson?.design) ||
     getPathLeafName(workspacePath)
-  const projectRoot =
-    queryString(route.query.projectRoot) || parentLocalPath(workspacePath)
-  const projectName = queryString(route.query.projectName) || getPathLeafName(projectRoot)
   const originInputs = await scanWorkspaceOriginDesignInputs(workspacePath)
   const rtlList =
     flowConfig.start_step === 'Synthesis'
@@ -582,6 +588,7 @@ async function buildReconfigureWizardInitialConfig(
   return {
     directory: workspacePath,
     lockWorkspaceDirectory: true,
+    standaloneWorkspace: !resolvedProjectContext,
     pdk:
       optionalString(parametersJson?.PDK) ||
       optionalString(parametersJson?.pdk) ||
@@ -600,12 +607,16 @@ async function buildReconfigureWizardInitialConfig(
     pdk_config: pdkConfig,
     pdk_json: pdkText ? `${workspacePath}/home/pdk.json` : '',
     flow_config: flowConfig,
-    project_context: {
-      mode: 'select',
-      project_name: projectName,
-      project_root: projectRoot,
-      project_json_path: `${projectRoot}/project.json`,
-    },
+    project_context: resolvedProjectContext
+      ? {
+          mode: 'select',
+          project_name:
+            resolvedProjectContext.projectName ||
+            getPathLeafName(resolvedProjectContext.projectRoot),
+          project_root: resolvedProjectContext.projectRoot,
+          project_json_path: `${resolvedProjectContext.projectRoot}/project.json`,
+        }
+      : undefined,
   }
 }
 
@@ -868,22 +879,9 @@ function numberList(value: unknown): number[] {
   return value.map(Number).filter(Number.isFinite)
 }
 
-function queryString(value: unknown): string {
-  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
-  return typeof value === 'string' ? value : ''
-}
-
 function normalizeLocalPath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
   return normalized.length > 1 ? normalized.replace(/\/+$/g, '') : normalized
-}
-
-function parentLocalPath(path: string): string {
-  const normalized = normalizeLocalPath(path)
-  const parts = normalized.split('/').filter(Boolean)
-  if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
-  const parent = parts.slice(0, -1).join('/')
-  return normalized.startsWith('/') ? `/${parent}` : parent
 }
 
 function getPathLeafName(path: string): string {

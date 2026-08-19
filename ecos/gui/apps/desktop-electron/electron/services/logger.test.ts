@@ -1,3 +1,4 @@
+import { lstatSync, readlinkSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -175,5 +176,7 @@ describe('createElectronLogger', () => {
     const latestContent = await readFile(latestFilePath, 'utf8')
     expect(sessionContent).toContain('INFO [desktop] Launch message for debugging')
     expect(latestContent).toBe(sessionContent)
+    expect(lstatSync(latestFilePath).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(latestFilePath)).toBe(sessionFilePath)
   })
 })

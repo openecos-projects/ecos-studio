@@ -8,6 +8,7 @@ import {
   drcInsights,
   floorplanInsights,
   hardenOutputInsights,
+  lvsInsights,
   mapHighlights,
   prioritizeQorMetricComparisons,
   qorSummary,
@@ -37,6 +38,92 @@ describe('step dashboard data', () => {
       { label: 'Buffer area', value: 8.4 },
       { label: 'Clock wirelength', value: 266102 },
     ])
+  })
+
+  it('reads published LVS count from the feature section or violation list', () => {
+    expect(
+      stepKeyMetrics('lvs', {
+        lvs: { lvs_count: 3 },
+      }),
+    ).toMatchObject([{ id: 'lvs-count', label: 'LVS count', value: 3 }])
+    expect(
+      stepKeyMetrics('lvs', {
+        lvs: {},
+        violations: [{ id: 'short' }, { id: 'open' }],
+      }),
+    ).toMatchObject([{ id: 'lvs-count', label: 'LVS count', value: 2 }])
+    expect(
+      stepKeyMetrics('lvs', {
+        entity: [],
+        connectivity: [],
+        violations: [{ id: 'short' }, { id: 'open' }],
+      }),
+    ).toMatchObject([{ id: 'lvs-count', label: 'LVS count', value: 2 }])
+    expect(stepKeyMetrics('lvs', { lvs: {} })).toEqual([])
+  })
+
+  it('builds LVS entity, connectivity, and violation tables from step.json', () => {
+    const insights = lvsInsights({
+      entity: [
+        { entity: 'IO(without pg)', netlist: 54, def: 54, difference: 0 },
+        { entity: 'Instance', netlist: 396, def: 394, difference: 2 },
+      ],
+      connectivity: [
+        {
+          connectivity: 'Routing',
+          open: { count: 1, percentage: 0.3 },
+          short: { count: 0, percentage: 0 },
+          connected: { count: 306, percentage: 99.7 },
+          total: 307,
+        },
+      ],
+      violations: [
+        {
+          type: 'RoutingOpen',
+          net: 'n12',
+          instance: 'U0',
+          terminals: ['A', 'Y'],
+          components: [3, 8],
+        },
+      ],
+      run: { state: 'Success' },
+    })
+
+    expect(insights?.entities).toEqual([
+      expect.objectContaining({ entity: 'IO(without pg)', difference: 0 }),
+      expect.objectContaining({
+        entity: 'Instance',
+        netlist: 396,
+        def: 394,
+        difference: 2,
+      }),
+    ])
+    expect(insights?.connections).toEqual([
+      expect.objectContaining({
+        connectivity: 'Routing',
+        open: 1,
+        short: 0,
+        connected: 306,
+        total: 307,
+      }),
+    ])
+    expect(insights?.violations).toEqual([
+      expect.objectContaining({
+        type: 'RoutingOpen',
+        net: 'n12',
+        instance: 'U0',
+        terminals: 'A, Y',
+        components: '3, 8',
+      }),
+    ])
+    expect(
+      lvsInsights({
+        lvs: {
+          entity: [{ entity: 'Net', netlist: 10, def: 10, difference: 0 }],
+        },
+      })?.entities,
+    ).toEqual([expect.objectContaining({ entity: 'Net', difference: 0 })])
+    expect(lvsInsights({ lvs: { lvs_count: 0 }, run: { state: 'Success' } })).toBeNull()
   })
 
   it('uses the final routing iteration rather than an intermediate result', () => {

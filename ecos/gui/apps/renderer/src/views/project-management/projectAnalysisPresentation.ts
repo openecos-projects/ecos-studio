@@ -15,6 +15,7 @@ export const DASHBOARD_METRIC_ORDER = [
   'hold_wns',
   'hold_tns',
   'drc',
+  'lvs',
 ] as const satisfies readonly ProjectMetricId[]
 
 export const BEST_WORKSPACE_PPA_METRIC_ORDER = [
@@ -24,6 +25,7 @@ export const BEST_WORKSPACE_PPA_METRIC_ORDER = [
   'hold_wns',
   'hold_tns',
   'drc',
+  'lvs',
   'die_area',
   'core_util',
 ] as const satisfies readonly ProjectMetricId[]
@@ -127,6 +129,7 @@ export type MetricTableSortKey = 'workspace' | ProjectMetricId | (string & {})
 const ASCENDING_FIRST_SORT_KEYS = new Set<string>([
   'workspace',
   'drc',
+  'lvs',
   'runtime',
   'memory',
 ])

@@ -111,6 +111,32 @@ function createService(
 }
 
 describe('EccWorkspaceRuntime', () => {
+  it('creates a workspace from a runtime-specific payload', async () => {
+    const { client, service } = createService('/work/frontend')
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/frontend', workspaceId: 'frontend-1' },
+    )
+
+    await expect(
+      service.createWorkspacePayload({
+        cpu_filelist: '/work/cpu.f',
+        directory: '/work/frontend',
+        soc_harness_id: 'ysyx-am-soc',
+      }),
+    ).resolves.toMatchObject({ directory: '/work/frontend' })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.create',
+      options: { timeoutMs: 0 },
+      params: {
+        cpu_filelist: '/work/cpu.f',
+        directory: '/work/frontend',
+        soc_harness_id: 'ysyx-am-soc',
+      },
+    })
+  })
+
   it('opens an idle workspace from a bounded snapshot without spawning ECC', async () => {
     let loaderCalls = 0
     const { service, sidecar } = createService('/work/demo', {
@@ -252,6 +278,124 @@ describe('EccWorkspaceRuntime', () => {
         workspaceId: 'workspace-1',
       },
     })
+  })
+
+  it('binds sidecar progress events to the active GUI operation', async () => {
+    const { client, events, service, sidecarEvent } = createService()
+    const flowResult = deferred<{ rerun: boolean }>()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      flowResult.promise,
+    )
+
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    const running = service.runFlow({
+      rerun: false,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+    const started = events.find(
+      (event): event is Extract<EccRuntimeEvent, { type: 'operation.started' }> =>
+        event.type === 'operation.started' && event.method === 'flow.run',
+    )
+
+    sidecarEvent({
+      data: { state: 'Success', step: 'prepare' },
+      method: 'flow.run',
+      phase: 'stdout',
+      step: 'prepare',
+      type: 'operation.progress',
+    })
+
+    expect(events).toContainEqual({
+      data: { state: 'Success', step: 'prepare' },
+      method: 'flow.run',
+      operationId: started?.operationId,
+      phase: 'stdout',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    flowResult.resolve({ rerun: false })
+    await expect(running).resolves.toEqual({ rerun: false })
+  })
+
+  it('binds a late sidecar progress event to the active workspace session', async () => {
+    const { client, events, service, sidecarEvent } = createService('/work/frontend')
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/frontend', workspaceId: 'frontend-1' },
+    )
+
+    const workspace = await service.openWorkspace({ directory: '/work/frontend' })
+    sidecarEvent({
+      data: { directory: '/work/frontend', step: 'prepare' },
+      method: 'flow.run',
+      phase: 'started',
+      step: 'prepare',
+      type: 'operation.progress',
+    })
+
+    expect(events).toContainEqual({
+      data: { directory: '/work/frontend', step: 'prepare' },
+      method: 'flow.run',
+      phase: 'started',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+  })
+
+  it('cancels the matching in-flight operation and emits a cancelled event', async () => {
+    const { client, events, service, sidecar } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    const blockedFlow = deferred<{ rerun: boolean }>()
+    client.responses.push(blockedFlow.promise)
+
+    const flow = service.runFlow({
+      rerun: false,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+    const started = events.find(
+      (event): event is Extract<EccRuntimeEvent, { type: 'operation.started' }> =>
+        event.type === 'operation.started' && event.method === 'flow.run',
+    )
+
+    await expect(service.cancelOperationLegacy(started?.operationId)).resolves.toEqual({
+      cancelled: true,
+      operationId: started?.operationId,
+    })
+    expect(sidecar.shutdownCount).toBe(1)
+
+    blockedFlow.reject(new Error('RPC sidecar exited.'))
+    await expect(flow).rejects.toThrow('RPC sidecar exited.')
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        method: 'flow.run',
+        operationId: started?.operationId,
+        type: 'operation.cancelled',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    )
+  })
+
+  it('does not cancel an operation when the requested id does not match', async () => {
+    const { service, sidecar } = createService()
+
+    await expect(service.cancelOperationLegacy('operation-other')).resolves.toEqual({
+      cancelled: false,
+      operationId: 'operation-other',
+    })
+    expect(sidecar.shutdownCount).toBe(0)
   })
 
   it('forwards GUI single-step rerun reset intent to ECC', async () => {

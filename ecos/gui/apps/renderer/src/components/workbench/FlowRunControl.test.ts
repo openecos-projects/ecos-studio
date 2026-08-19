@@ -4,6 +4,7 @@ import source from './FlowRunControl.vue?raw'
 describe('FlowRunControl', () => {
   it('keeps full-flow and per-step execution controls after removing the old sidebar', () => {
     expect(source).toContain('runAllFlow({ rerun })')
+    expect(source).toContain('setFirstRunStepOngoing({ resetAll: rerun })')
     expect(source).toContain('runFlow({ rerun, resetDependents: rerun })')
     expect(source).toContain("currentStage.value === 'home'")
   })

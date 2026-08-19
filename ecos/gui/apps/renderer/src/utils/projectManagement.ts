@@ -21,6 +21,7 @@ export const FLOW_STEPS = [
   'Legal',
   'Route',
   'DRC',
+  'LVS',
   'Filler',
   'RCX',
   'STA',
@@ -49,6 +50,7 @@ export type ProjectMetricId =
   | 'hold_wns'
   | 'hold_tns'
   | 'drc'
+  | 'lvs'
   | 'area'
   | 'runtime'
   | 'memory'
@@ -243,6 +245,7 @@ export interface ProjectSummaryMetric {
 
 export interface ProjectWorkspaceFinalMetrics {
   drcCount?: ProjectSummaryMetric
+  lvsCount?: ProjectSummaryMetric
   setupWns?: ProjectSummaryMetric
   setupTns?: ProjectSummaryMetric
   holdWns?: ProjectSummaryMetric
@@ -418,6 +421,7 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
+  lvs: 'LVS',
   filler: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
@@ -441,6 +445,7 @@ const RUNTIME_STEP_ARTIFACTS: Record<
   Legal: { directory: 'legalization_dreamplace', outputName: 'legalization' },
   Route: { directory: 'route_ecc', outputName: 'route' },
   DRC: { directory: 'drc_ecc', outputName: 'drc' },
+  LVS: { directory: 'lvs_ecc', outputName: 'lvs' },
   Filler: { directory: 'filler_ecc', outputName: 'filler' },
   RCX: { directory: 'RCX_ecc', outputName: 'RCX' },
   STA: { directory: 'sta_ecc', outputName: 'sta' },
@@ -710,6 +715,7 @@ function v3FinalMetrics(
   const records = workspace?.records ?? []
   return {
     drcCount: v3MetricByName(records, 'drc_count'),
+    lvsCount: v3MetricByName(records, 'lvs_count'),
     setupWns: v3MetricByName(records, 'sta_setup_wns'),
     setupTns: v3MetricByName(records, 'sta_setup_tns'),
     holdWns: v3MetricByName(records, 'sta_hold_wns'),
@@ -749,6 +755,7 @@ function v3MetricState(record: ProjectQorMetricRecord): ProjectMetricPoint['stat
   if (record.value === null) return 'pending'
   if (
     record.metricName.includes('drc') ||
+    record.metricName.includes('lvs') ||
     record.metricName.includes('violation') ||
     record.metricName.includes('missing_corner') ||
     record.metricName.includes('parse_failure')
@@ -843,6 +850,7 @@ function buildV3MetricRows(summaries: ProjectWorkspaceSummary[]): ProjectMetricR
       metric: 'holdTns',
     },
     { id: 'drc', label: 'DRC', hint: 'V3 DRC metric', metric: 'drcCount' },
+    { id: 'lvs', label: 'LVS', hint: 'V3 LVS metric', metric: 'lvsCount' },
     { id: 'area', label: 'Area', hint: 'V3 final physical metric', metric: 'area' },
     {
       id: 'runtime',
@@ -982,6 +990,7 @@ export function createProjectManifestDraft(
         tns: 'maximize',
         area: 'minimize',
         drc_count: 'minimize',
+        lvs_count: 'minimize',
         power: 'minimize',
       },
     },
@@ -1399,7 +1408,7 @@ function buildProjectWorkspace(
     startStep,
     endStep,
     depth,
-    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep),
+    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep, flowStateMap),
     steps,
   }
 }
@@ -1477,12 +1486,15 @@ function buildFlowStatusHint(
   steps: ProjectStepCell[],
   startStep: FlowStep,
   endStep: FlowStep,
+  flowStateMap: ProjectWorkspaceFlowStateMap,
 ): ProjectFlowStatusHint {
   const startIndex = FLOW_STEPS.indexOf(startStep)
   const endIndex = FLOW_STEPS.indexOf(endStep)
+  const recordedFlow = Object.keys(flowStateMap).length > 0
   const configuredSteps = steps.filter((cell) => {
     const stepIndex = FLOW_STEPS.indexOf(cell.step)
-    return stepIndex >= startIndex && stepIndex <= endIndex
+    if (stepIndex < startIndex || stepIndex > endIndex) return false
+    return !recordedFlow || flowStateMap[cell.step] !== undefined
   })
   const firstIncomplete = configuredSteps.find(
     (cell) => !isCompletedStepStatus(cell.status),
@@ -1541,6 +1553,8 @@ function buildStepCell(
         ? 'reused'
         : 'skipped'
   } else if (isAfterEnd) {
+    status = 'skipped'
+  } else if (Object.keys(flowStateMap).length > 0) {
     status = 'skipped'
   } else if (workspace.status === 'running') {
     status = 'running'
@@ -1876,6 +1890,7 @@ const STEP_ANALYSIS_METRIC_IDS: Record<FlowStep, readonly string[]> = {
     'route_wirelength',
   ],
   DRC: ['drc_count'],
+  LVS: ['lvs_count'],
   Filler: [],
   RCX: [
     'rcx_missing_corner_count',
@@ -1934,6 +1949,7 @@ function detailHintForStep(step: FlowStep): string {
     Legal: 'Open workspace Legalization for placement cleanup details.',
     Route: 'Open workspace Route for route iterations and layer pressure.',
     DRC: 'Open workspace DRC for rule/layer heatmaps and violation maps.',
+    LVS: 'Open workspace LVS for netlist-to-layout connectivity and violation count.',
     Filler: 'Open workspace Filler for final filler impact details.',
     RCX: 'Open workspace RCX for extraction readiness details.',
     STA: 'Open workspace STA for path detail and corner matrix.',

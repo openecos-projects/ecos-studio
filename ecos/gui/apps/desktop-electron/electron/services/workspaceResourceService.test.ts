@@ -406,6 +406,7 @@ describe('WorkspaceResourceService', () => {
     ['legalization', 'dreamplace'],
     ['route', 'ecc'],
     ['drc', 'ecc'],
+    ['lvs', 'ecc'],
     ['filler', 'ecc'],
     ['RCX', 'ecc'],
   ])('marks %s layout available from native renderer inputs', async (stepName, tool) => {
@@ -526,6 +527,7 @@ describe('WorkspaceResourceService', () => {
   it.each([
     ['Timing optimization', []],
     ['Signoff', []],
+    ['lvs', ['drc_default_config.json', 'flow_config.json']],
     ['Harden', ['sta.json']],
   ])(
     'does not expose configuration for ECC %s even when unrelated config files exist',
@@ -575,6 +577,83 @@ describe('WorkspaceResourceService', () => {
       response: 'available',
       info: {},
       missing: [],
+    })
+  })
+
+  it('returns frontend simulation cases with waveform paths from cases.json', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'sim', tool: 'verilator' }])
+    await mkdir(join(root, 'sim_verilator', 'log'), { recursive: true })
+    await mkdir(join(root, 'sim_verilator', 'report'), { recursive: true })
+    await writeFile(join(root, 'sim_verilator', 'log', 'log.txt'), 'sim log', 'utf8')
+    await writeFile(
+      join(root, 'sim_verilator', 'report', 'sim.rpt'),
+      'sim report',
+      'utf8',
+    )
+    await writeFile(join(root, 'sim_verilator', 'subflow.json'), '{}', 'utf8')
+    await writeJson(join(root, 'sim_verilator', 'report', 'cases.json'), {
+      suite: 'cpu_tests',
+      cases: [
+        {
+          name: 'add.soc',
+          ok: true,
+          returncode: 0,
+          wave: join(root, 'sim_verilator', 'output', 'cases', 'add.soc', 'wave.vcd'),
+          log: join(root, 'sim_verilator', 'output', 'cases', 'add.soc', 'log.txt'),
+        },
+      ],
+    })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.resolveStepInfo({ step: 'sim', id: 'frontend_detail' })
+
+    expect(result).toMatchObject({
+      step: 'sim',
+      id: 'frontend_detail',
+      response: 'available',
+      info: {
+        step: 'sim',
+        cases: [
+          {
+            name: 'add.soc',
+            ok: true,
+            wave: join(root, 'sim_verilator', 'output', 'cases', 'add.soc', 'wave.vcd'),
+          },
+        ],
+      },
+      missing: [],
+    })
+  })
+
+  it('returns a completed frontend detail snapshot without runtime RPC', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'review', tool: 'fe', state: 'Ongoing' }])
+    await mkdir(join(root, 'review_fe', 'report'), { recursive: true })
+    const snapshot = {
+      artifacts: [],
+      logs: [],
+      reports: [],
+      review: {
+        path: join(root, 'review_fe', 'report', 'rtl_review.json'),
+        summary: { status: 'needs_attention', warnings: 2 },
+      },
+      state: 'Success',
+      step: 'review',
+      summary: { status: 'Success' },
+      tool: 'fe',
+    }
+    await writeJson(join(root, 'review_fe', 'report', 'frontend_detail.json'), snapshot)
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.resolveStepInfo({
+      step: 'review',
+      id: 'frontend_detail',
+    })
+
+    expect(result).toMatchObject({
+      response: 'available',
+      info: snapshot,
     })
   })
 

@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   createProjectManifestDraft,
+  projectManagementWorkspaceSummaryPaths,
   registerWorkspaceInManifest,
 } from '@ecos-studio/shared'
 import { ProjectManagementReadService } from './projectManagementReadService'
@@ -72,6 +73,19 @@ describe('ProjectManagementReadService', () => {
         'home/flow.json': '{"steps":[]}',
         'sta_ecc/analysis/qor_metrics.json': null,
       },
+      unavailablePaths: [],
+    })
+    await expect(
+      service.readWorkspaceTexts({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        paths: [...projectManagementWorkspaceSummaryPaths],
+      }),
+    ).resolves.toMatchObject({
+      texts: expect.objectContaining({
+        'home/flow.json': '{"steps":[]}',
+        'lvs_ecc/analysis/qor_metrics.json': null,
+      }),
       unavailablePaths: [],
     })
   })

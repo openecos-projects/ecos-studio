@@ -37,7 +37,7 @@ describe('workspace desktop bridge', () => {
 
     setWindow({
       ecosDesktop: {
-        ecc: {
+        runtime: {
           workspace: {
             create,
           },
@@ -86,32 +86,73 @@ describe('workspace desktop bridge', () => {
     })
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        parameters: expect.objectContaining({
-          design: 'demo',
+        designTool: 'backend',
+        payload: expect.objectContaining({
+          parameters: expect.objectContaining({
+            design: 'demo',
+          }),
+          rtlList: ['/rtl/top.v'],
+          flowConfig: {
+            start_step: 'Synthesis',
+            end_step: 'Harden',
+            steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+          },
+          pdkJson: {
+            name: 'ics55',
+            root: '/pdks/ics55',
+            tech: '/pdks/ics55/tech.lef',
+            lefs: ['/pdks/ics55/stdcells.lef'],
+            libs: ['/pdks/ics55/stdcells.lib'],
+          },
+          sdc: '/constraints/top.sdc',
         }),
-        rtlList: ['/rtl/top.v'],
-        flowConfig: {
-          start_step: 'Synthesis',
-          end_step: 'Harden',
-          steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
-        },
-        pdkJson: {
-          name: 'ics55',
-          root: '/pdks/ics55',
-          tech: '/pdks/ics55/tech.lef',
-          lefs: ['/pdks/ics55/stdcells.lef'],
-          libs: ['/pdks/ics55/stdcells.lib'],
-        },
-        sdc: '/constraints/top.sdc',
       }),
     )
+  })
+
+  it('forwards the CPU module independently from the frontend SoC top', async () => {
+    const create = vi.fn(async () => ({
+      directory: '/workspace/frontend-demo',
+      workspaceHandle: 'workspace-frontend-1',
+    }))
+    setWindow({
+      ecosDesktop: {
+        runtime: {
+          workspace: {
+            create,
+          },
+        },
+      },
+    })
+
+    const { createWorkspaceApi } = await import('./workspace')
+    await createWorkspaceApi({
+      cpu_top_module: 'ysyx_00000000',
+      designTool: 'frontend',
+      directory: '/workspace/frontend-demo',
+      parameters: {
+        'Top module': 'ecos_sim_top',
+        cpu_top_module: 'ysyx_00000000',
+      },
+    })
+
+    expect(create).toHaveBeenCalledWith({
+      designTool: 'frontend',
+      payload: expect.objectContaining({
+        cpu_top_module: 'ysyx_00000000',
+        parameters: {
+          'Top module': 'ecos_sim_top',
+          cpu_top_module: 'ysyx_00000000',
+        },
+      }),
+    })
   })
 
   it('forwards workspace close requests with the GUI handle', async () => {
     const close = vi.fn(async () => ({ ok: true }))
     setWindow({
       ecosDesktop: {
-        ecc: {
+        runtime: {
           workspace: {
             close,
           },
@@ -122,6 +163,9 @@ describe('workspace desktop bridge', () => {
     const { closeWorkspaceApi } = await import('./workspace')
 
     await expect(closeWorkspaceApi('workspace-handle-1')).resolves.toEqual({ ok: true })
-    expect(close).toHaveBeenCalledWith({ workspaceHandle: 'workspace-handle-1' })
+    expect(close).toHaveBeenCalledWith({
+      designTool: 'backend',
+      workspaceHandle: 'workspace-handle-1',
+    })
   })
 })

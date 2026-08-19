@@ -27,11 +27,16 @@ describe('configureGpuMode', () => {
       platform: 'linux',
     })
 
-    expect(appDouble.disableHardwareAcceleration).toHaveBeenCalledTimes(1)
+    expect(appDouble.disableHardwareAcceleration).not.toHaveBeenCalled()
+    expect(appDouble.commandLine.appendSwitch).toHaveBeenCalledWith(
+      'enable-unsafe-swiftshader',
+    )
     expect(appDouble.commandLine.appendSwitch).toHaveBeenCalledWith(
       'use-angle',
       'swiftshader',
     )
+    expect(appDouble.commandLine.appendSwitch).toHaveBeenCalledWith('use-gl', 'angle')
+    expect(appDouble.commandLine.appendSwitch).not.toHaveBeenCalledWith('disable-gpu')
     expect(env.LIBGL_ALWAYS_SOFTWARE).toBe('1')
   })
 
@@ -48,8 +53,12 @@ describe('configureGpuMode', () => {
       platform: 'linux',
     })
 
-    expect(appDouble.disableHardwareAcceleration).toHaveBeenCalledTimes(1)
-    expect(appDouble.commandLine.appendSwitch).toHaveBeenCalledWith('disable-gpu')
+    expect(appDouble.disableHardwareAcceleration).not.toHaveBeenCalled()
+    expect(appDouble.commandLine.appendSwitch).toHaveBeenCalledWith(
+      'use-angle',
+      'swiftshader',
+    )
+    expect(appDouble.commandLine.appendSwitch).not.toHaveBeenCalledWith('disable-gpu')
     expect(env.LIBGL_ALWAYS_SOFTWARE).toBe('1')
   })
 

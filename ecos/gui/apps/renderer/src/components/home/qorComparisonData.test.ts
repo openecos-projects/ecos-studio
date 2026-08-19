@@ -93,6 +93,8 @@ describe('Home QoR comparison data', () => {
     expect(homeQorFlowStepForLabel('Synthesis')).toBe('Synth')
     expect(homeQorFlowStepForLabel('Floorplan')).toBe('Floor')
     expect(homeQorFlowStepForLabel('fixFanout')).toBe('Fanout')
+    expect(homeQorFlowStepForLabel('LVS')).toBe('LVS')
+    expect(homeQorFlowStepForLabel('lvs')).toBe('LVS')
     expect(homeQorFlowStepForLabel('unknown')).toBeNull()
   })
 

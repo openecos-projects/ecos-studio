@@ -1,5 +1,6 @@
 import { ref, getCurrentInstance } from 'vue'
 import type {
+  DesignTool,
   DesktopSettingsValue,
   WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
@@ -46,6 +47,7 @@ interface SerializedProject {
   name: string
   path: string
   lastOpened: string
+  designTool?: DesignTool
   pdk?: string
   topModule?: string
   frequencyTarget?: number
@@ -102,6 +104,14 @@ function workspaceHandleFromResponseData(
   fallback?: string,
 ): string {
   return data.workspaceHandle || data.workspace_handle || data.directory || fallback || ''
+}
+
+function workspaceRuntimeIdFromResponseData(
+  data: { directory?: string; workspace_handle?: string; workspaceHandle?: string },
+  _designTool: DesignTool,
+  fallback?: string,
+): string {
+  return workspaceHandleFromResponseData(data, fallback)
 }
 
 function scheduleStepRenderedAck(options: {
@@ -254,12 +264,15 @@ export function useWorkspace() {
     }
   }
 
-  const releaseWorkspaceHandle = async (workspaceHandle: string): Promise<void> => {
+  const releaseWorkspaceHandle = async (
+    workspaceHandle: string,
+    designTool: DesignTool = 'backend',
+  ): Promise<void> => {
     if (!workspaceHandle) return
     try {
-      await closeWorkspaceApi(workspaceHandle)
+      await closeWorkspaceApi(workspaceHandle, designTool)
     } catch (error) {
-      console.warn('Failed to close ECC workspace session:', error)
+      console.warn('Failed to close design workspace session:', error)
     }
   }
 
@@ -552,7 +565,11 @@ export function useWorkspace() {
       try {
         if (!(await ensureApiReady())) return
         workspaceLifecycle.setSessionLoading(session.sessionId)
-        const response = await loadWorkspaceApi(normalizedBoundPath)
+        const restoredDesignTool = restored.designTool ?? 'backend'
+        const response =
+          restoredDesignTool === 'frontend'
+            ? await loadWorkspaceApi(normalizedBoundPath, restoredDesignTool)
+            : await loadWorkspaceApi(normalizedBoundPath)
         if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
         if (response.response === 'success') {
           const resolvedPath = normalizePath(
@@ -568,18 +585,20 @@ export function useWorkspace() {
           currentProject.value = {
             ...restored,
             path: canonicalProjectRoot,
+            designTool: restoredDesignTool,
           }
           await bindWorkspaceWindow(canonicalProjectRoot)
           await updateWindowTitle(restored.name)
-          const workspaceId = workspaceHandleFromResponseData(
+          const workspaceId = workspaceRuntimeIdFromResponseData(
             response.data,
+            restoredDesignTool,
             normalizedBoundPath,
           )
           workspaceLifecycle.activateSession(session.sessionId, {
             workspaceId,
             projectRoot: canonicalProjectRoot,
           })
-          connectRuntimeEvents(workspaceId, session.sessionId)
+          connectRuntimeEvents(workspaceId, restoredDesignTool, session.sessionId)
         } else {
           workspaceLifecycle.failSession(session.sessionId)
           await router.replace('/')
@@ -632,7 +651,10 @@ export function useWorkspace() {
       return false
     }
   }
-  const openProject = async (project?: Project, options: { quiet?: boolean } = {}) => {
+  const openProject = async (
+    project?: Project,
+    options: { designTool?: DesignTool; quiet?: boolean } = {},
+  ) => {
     const quiet = Boolean(options.quiet)
     const openProjectRequestId = ++openProjectRequestSequence
     const isLatestOpenProjectRequest = () =>
@@ -641,6 +663,8 @@ export function useWorkspace() {
       workspaceLifecycle.session.value.state === 'active'
         ? workspaceLifecycle.session.value.workspaceId
         : ''
+    const previousDesignTool = currentProject.value?.designTool ?? 'backend'
+    let candidateDesignTool: DesignTool = 'backend'
     let candidateWorkspaceHandle = ''
     let candidateWorkspaceCommitted = false
     let candidateProjectPathPersisted = false
@@ -674,9 +698,18 @@ export function useWorkspace() {
       if (!isLatestOpenProjectRequest()) return false
 
       const normalizedSelectedPath = normalizePath(selectedPath)
+      const knownProject =
+        project ??
+        recentProjects.value.find(
+          (candidate) => normalizePath(candidate.path) === normalizedSelectedPath,
+        )
+      const requestedDesignTool =
+        options.designTool ?? knownProject?.designTool ?? 'backend'
+      candidateDesignTool = requestedDesignTool
       if (
         currentProject.value &&
-        normalizePath(currentProject.value.path) === normalizedSelectedPath
+        normalizePath(currentProject.value.path) === normalizedSelectedPath &&
+        (currentProject.value.designTool ?? 'backend') === requestedDesignTool
       ) {
         return true
       }
@@ -736,10 +769,17 @@ export function useWorkspace() {
         workspaceLifecycle.setSessionLoading(activeSession.sessionId)
       }
 
-      // 3. 通过 ECC RPC 加载项目状态
-      const response = await loadWorkspaceApi(selectedPath)
+      // 3. Load project state through the selected persistent RPC runtime.
+      const response =
+        requestedDesignTool === 'frontend'
+          ? await loadWorkspaceApi(selectedPath, requestedDesignTool)
+          : await loadWorkspaceApi(selectedPath)
       if (response.response === 'success') {
-        candidateWorkspaceHandle = workspaceHandleFromResponseData(response.data)
+        candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
+          response.data,
+          requestedDesignTool,
+          selectedPath,
+        )
       }
       if (!isLatestOpenProjectRequest()) return false
       if (session && !workspaceLifecycle.isCurrentSession(session.sessionId)) return false
@@ -776,6 +816,7 @@ export function useWorkspace() {
           id: canonicalProjectRoot,
           name: resolvedName,
           path: canonicalProjectRoot,
+          designTool: requestedDesignTool,
           lastOpened: new Date(),
         }
 
@@ -803,15 +844,19 @@ export function useWorkspace() {
         // 建立 runtime event 连接
         const workspaceId =
           candidateWorkspaceHandle ||
-          workspaceHandleFromResponseData(response.data, canonicalProjectRoot)
+          workspaceRuntimeIdFromResponseData(
+            response.data,
+            requestedDesignTool,
+            canonicalProjectRoot,
+          )
         workspaceLifecycle.activateSession(activeSession.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
         })
         candidateWorkspaceCommitted = true
-        connectRuntimeEvents(workspaceId, activeSession.sessionId)
+        connectRuntimeEvents(workspaceId, requestedDesignTool, activeSession.sessionId)
         if (previousWorkspaceHandle !== workspaceId) {
-          await releaseWorkspaceHandle(previousWorkspaceHandle)
+          await releaseWorkspaceHandle(previousWorkspaceHandle, previousDesignTool)
         }
 
         // 更新窗口标题
@@ -859,7 +904,7 @@ export function useWorkspace() {
           await rollbackCurrentProjectPath(openProjectRequestId)
         }
         if (candidateWorkspaceHandle) {
-          await releaseWorkspaceHandle(candidateWorkspaceHandle)
+          await releaseWorkspaceHandle(candidateWorkspaceHandle, candidateDesignTool)
         }
       }
       if (isLatestOpenProjectRequest()) {
@@ -879,6 +924,7 @@ export function useWorkspace() {
     let committedReplacement = false
     let candidateWorkspaceCommitted = false
     let candidateWorkspaceHandle = ''
+    let candidateDesignTool: DesignTool = config?.designTool ?? 'backend'
     let claimedCreatePath: string | null = null
     let previousCreatePath: string | null = null
     let selectedPath = ''
@@ -1021,87 +1067,162 @@ export function useWorkspace() {
       const desktopApiForCreate = await waitForDesktopApi()
       existedBeforeCreate = await desktopApiForCreate.workspace.pathExists(selectedPath)
 
-      // 3. 通过 ECC RPC 创建工作区（传递 Wizard 配置信息）
+      // 3. Create the workspace through the selected persistent RPC runtime.
+      const designTool = creationConfig?.designTool ?? 'backend'
+      candidateDesignTool = designTool
       const frontendParams = creationConfig?.parameters || {}
-      const pdkName = creationConfig?.pdk || 'ics55'
-      const toNumber = (value: unknown, fallback: number) => {
-        const parsed = Number(value)
-        return Number.isFinite(parsed) ? parsed : fallback
-      }
-      const dieAreaMode =
-        frontendParams.die_area_mode === 'width_height'
-          ? 'width_height'
-          : 'utilitization_margin'
-      const dieArea =
-        dieAreaMode === 'width_height'
-          ? {
-              mode: dieAreaMode,
-              width: toNumber(frontendParams.die_width, 100),
-              height: toNumber(frontendParams.die_height, 100),
-            }
-          : {
-              mode: dieAreaMode,
-              utilitization: toNumber(
-                frontendParams.utilitization ?? frontendParams.core_utilization,
-                0.6,
-              ),
-              margin: toNumber(frontendParams.margin, 0),
-            }
-      const backendParameters = {
-        Design:
-          frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
-        'Top module': frontendParams.top_module || 'top',
-        Clock: frontendParams.clock || 'clk',
-        'Die Area': dieArea,
-        'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
-        'Max fanout': toNumber(frontendParams.max_fanout, 20),
-        'Target density': toNumber(frontendParams.target_density, 0.2),
-        'Target overflow': toNumber(frontendParams.target_overflow, 0.1),
-        PDK: pdkName,
-        Core: {
-          Utilitization:
-            dieAreaMode === 'utilitization_margin'
-              ? toNumber(
+      const designName = String(
+        frontendParams.design ||
+          frontendParams.Design ||
+          selectedPath.split('/').filter(Boolean).pop() ||
+          'New_Chip_Design',
+      )
+      const stringArray = (value: unknown): string[] =>
+        Array.isArray(value) ? (value as string[]) : []
+      let response: Awaited<ReturnType<typeof createWorkspaceApi>>
+      let createdProjectName = designName
+
+      if (designTool === 'frontend') {
+        const parameters = {
+          ...frontendParams,
+          Design: designName,
+          'Design Tool': 'frontend',
+          'Top module':
+            frontendParams.top_module || frontendParams['Top module'] || 'ecos_sim_top',
+          Clock: frontendParams.clock || frontendParams.Clock || 'clk',
+          'Frequency max [MHz]':
+            frontendParams.frequency_max || frontendParams['Frequency max [MHz]'] || 100,
+        }
+
+        response = await createWorkspaceApi({
+          cpu_filelist: String(frontendParams.cpu_filelist || ''),
+          cpu_rtl_files: creationConfig?.cpu_rtl_files || [],
+          cpu_top_module: String(frontendParams.cpu_top_module || ''),
+          designTool: 'frontend',
+          directory: selectedPath,
+          parameters,
+          sim_build_all_programs: Boolean(frontendParams.sim_build_all_programs),
+          sim_build_test_script: String(frontendParams.sim_build_test_script || ''),
+          sim_cflags: stringArray(frontendParams.sim_cflags),
+          sim_compile_extra_cflags: stringArray(frontendParams.sim_compile_extra_cflags),
+          sim_compile_mabi: String(frontendParams.sim_compile_mabi || ''),
+          sim_compile_march: String(frontendParams.sim_compile_march || ''),
+          sim_compile_opt_level: String(frontendParams.sim_compile_opt_level || ''),
+          sim_compile_preset: String(frontendParams.sim_compile_preset || ''),
+          sim_coremark_has_float: Boolean(frontendParams.sim_coremark_has_float),
+          sim_coremark_iterations: String(frontendParams.sim_coremark_iterations || ''),
+          sim_coremark_total_data_size: String(
+            frontendParams.sim_coremark_total_data_size || '',
+          ),
+          sim_cpp_sources: stringArray(frontendParams.sim_cpp_sources),
+          sim_images: stringArray(frontendParams.sim_images),
+          sim_ldflags: stringArray(frontendParams.sim_ldflags),
+          sim_program_names: stringArray(frontendParams.sim_program_names),
+          sim_program_sources: stringArray(frontendParams.sim_program_sources),
+          sim_program_link_base: String(frontendParams.sim_program_link_base || ''),
+          sim_programs_dir: String(frontendParams.sim_programs_dir || ''),
+          sim_run_args: stringArray(frontendParams.sim_run_args),
+          sim_soc_root: String(frontendParams.sim_soc_root || ''),
+          sim_tests_dir: String(frontendParams.sim_tests_dir || ''),
+          sim_tests_out_dir: String(frontendParams.sim_tests_out_dir || ''),
+          soc_harness_id: String(frontendParams.soc_harness_id || ''),
+          soc_filelist: String(frontendParams.soc_filelist || ''),
+          soc_variant: String(frontendParams.soc_variant || 'soc1'),
+          testbench: String(frontendParams.testbench || ''),
+          toolchain_id: String(frontendParams.toolchain_id || ''),
+          test_suite_id: String(frontendParams.test_suite_id || ''),
+          core_id: String(
+            frontendParams.frontend_core_id || frontendParams.core_id || '',
+          ),
+        })
+      } else {
+        const pdkName = creationConfig?.pdk || 'ics55'
+        const toNumber = (value: unknown, fallback: number) => {
+          const parsed = Number(value)
+          return Number.isFinite(parsed) ? parsed : fallback
+        }
+        const dieAreaMode =
+          frontendParams.die_area_mode === 'width_height'
+            ? 'width_height'
+            : 'utilitization_margin'
+        const dieArea =
+          dieAreaMode === 'width_height'
+            ? {
+                mode: dieAreaMode,
+                width: toNumber(frontendParams.die_width, 100),
+                height: toNumber(frontendParams.die_height, 100),
+              }
+            : {
+                mode: dieAreaMode,
+                utilitization: toNumber(
                   frontendParams.utilitization ?? frontendParams.core_utilization,
                   0.6,
-                )
-              : toNumber(frontendParams.core_utilization, 0.5),
-        },
-        ...(creationConfig?.mpc ? { MPC: creationConfig.mpc } : {}),
+                ),
+                margin: toNumber(frontendParams.margin, 0),
+              }
+        const backendParameters = {
+          Design:
+            frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
+          'Top module': frontendParams.top_module || 'top',
+          Clock: frontendParams.clock || 'clk',
+          'Die Area': dieArea,
+          'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
+          'Max fanout': toNumber(frontendParams.max_fanout, 20),
+          'Target density': toNumber(frontendParams.target_density, 0.2),
+          'Target overflow': toNumber(frontendParams.target_overflow, 0.1),
+          PDK: pdkName,
+          Core: {
+            Utilitization:
+              dieAreaMode === 'utilitization_margin'
+                ? toNumber(
+                    frontendParams.utilitization ?? frontendParams.core_utilization,
+                    0.6,
+                  )
+                : toNumber(frontendParams.core_utilization, 0.5),
+          },
+          ...(creationConfig?.mpc ? { MPC: creationConfig.mpc } : {}),
+        }
+
+        const resolvedPdkRoot = creationConfig?.pdk_root || ''
+        const manualPdkConfig = creationConfig?.pdk_config
+        const pdkJson =
+          creationConfig?.pdk_config_mode === 'manual' ||
+          manualPdkConfig?.mode === 'manual'
+            ? {
+                name: pdkName,
+                root: resolvedPdkRoot,
+                tech: manualPdkConfig?.tech_lef[0] ?? '',
+                lefs: manualPdkConfig?.cell_lef ?? [],
+                libs: manualPdkConfig?.liberty ?? [],
+              }
+            : creationConfig?.pdk_json
+
+        response = await createWorkspaceApi({
+          directory: selectedPath,
+          designTool: 'backend',
+          pdk: pdkName,
+          pdk_root: resolvedPdkRoot,
+          parameters: backendParameters,
+          origin_def: creationConfig?.origin_def,
+          origin_verilog: creationConfig?.origin_verilog,
+          rtl_list: creationConfig?.rtl_list || [],
+          filelist: creationConfig?.filelist,
+          design_input_mode: creationConfig?.design_input_mode,
+          sdc: creationConfig?.sdc,
+          flow_config: creationConfig?.flow_config,
+          pdk_config_mode: creationConfig?.pdk_config_mode,
+          pdk_config: creationConfig?.pdk_config,
+          pdk_json: pdkJson,
+          project_context: creationConfig?.project_context,
+        })
+        createdProjectName = backendParameters.Design as string
       }
-
-      const resolvedPdkRoot = creationConfig?.pdk_root || ''
-      const manualPdkConfig = creationConfig?.pdk_config
-      const pdkJson =
-        creationConfig?.pdk_config_mode === 'manual' || manualPdkConfig?.mode === 'manual'
-          ? {
-              name: pdkName,
-              root: resolvedPdkRoot,
-              tech: manualPdkConfig?.tech_lef[0] ?? '',
-              lefs: manualPdkConfig?.cell_lef ?? [],
-              libs: manualPdkConfig?.liberty ?? [],
-            }
-          : creationConfig?.pdk_json
-
-      const response = await createWorkspaceApi({
-        directory: selectedPath,
-        pdk: pdkName,
-        pdk_root: resolvedPdkRoot,
-        parameters: backendParameters,
-        origin_def: creationConfig?.origin_def,
-        origin_verilog: creationConfig?.origin_verilog,
-        rtl_list: creationConfig?.rtl_list || [],
-        filelist: creationConfig?.filelist,
-        design_input_mode: creationConfig?.design_input_mode,
-        sdc: creationConfig?.sdc,
-        flow_config: creationConfig?.flow_config,
-        pdk_config_mode: creationConfig?.pdk_config_mode,
-        pdk_config: creationConfig?.pdk_config,
-        pdk_json: pdkJson,
-        project_context: creationConfig?.project_context,
-      })
       if (response.response === 'success') {
-        candidateWorkspaceHandle = workspaceHandleFromResponseData(response.data)
+        candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
+          response.data,
+          designTool,
+          selectedPath,
+        )
       }
       if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
         await restoreReplacement()
@@ -1142,8 +1263,9 @@ export function useWorkspace() {
 
         const createdProject: Project = {
           id: canonicalProjectRoot,
-          name: backendParameters['Design'] as string,
+          name: createdProjectName,
           path: canonicalProjectRoot,
+          designTool,
           lastOpened: new Date(),
         }
 
@@ -1161,8 +1283,9 @@ export function useWorkspace() {
         await persistCurrentProjectPath(createdProject.path)
 
         // 建立 runtime event 连接
-        const workspaceId = workspaceHandleFromResponseData(
+        const workspaceId = workspaceRuntimeIdFromResponseData(
           response.data,
+          designTool,
           canonicalProjectRoot,
         )
         workspaceLifecycle.activateSession(session.sessionId, {
@@ -1174,7 +1297,7 @@ export function useWorkspace() {
           sessionId: session.sessionId,
           reason: 'workspace-created',
         })
-        connectRuntimeEvents(workspaceId, session.sessionId)
+        connectRuntimeEvents(workspaceId, designTool, session.sessionId)
 
         // 更新窗口标题
         await updateWindowTitle(createdProject.name)
@@ -1225,7 +1348,7 @@ export function useWorkspace() {
           }
         }
         if (candidateWorkspaceHandle) {
-          await releaseWorkspaceHandle(candidateWorkspaceHandle)
+          await releaseWorkspaceHandle(candidateWorkspaceHandle, candidateDesignTool)
         }
       }
       runtimeBackendConnecting.value = false
@@ -1393,6 +1516,7 @@ export function useWorkspace() {
       workspaceLifecycle.session.value.state === 'active'
         ? workspaceLifecycle.session.value.workspaceId
         : ''
+    const closingDesignTool = currentProject.value?.designTool ?? 'backend'
     if (currentProject.value) {
       try {
         await snapshotCurrentProject(isCurrentCloseRequest)
@@ -1416,7 +1540,7 @@ export function useWorkspace() {
       ? clearCurrentProjectPathIfMatches(closingProjectPath)
       : clearCurrentProjectPath()
     const unbindWindowPromise = unbindWorkspaceWindow(closingProjectPath)
-    await releaseWorkspaceHandle(closingWorkspaceHandle)
+    await releaseWorkspaceHandle(closingWorkspaceHandle, closingDesignTool)
     await Promise.all([
       clearProjectRootPromise,
       clearCurrentProjectPathPromise,
@@ -1432,13 +1556,20 @@ export function useWorkspace() {
    */
   function connectRuntimeEvents(
     workspaceId: string,
+    designTool: DesignTool = 'backend',
     sessionId = workspaceLifecycle.session.value.sessionId,
   ) {
     // 如果已有连接，先关闭
     disconnectRuntimeEvents()
     handledRuntimeProtocolEvents.clear()
 
-    const client = runtimeEventApi.createRuntimeEventClient(workspaceId)
+    const client =
+      designTool === 'frontend'
+        ? runtimeEventApi.createRuntimeEventClient(workspaceId, {
+            designTool,
+            workspaceDirectory: currentProject.value?.path,
+          })
+        : runtimeEventApi.createRuntimeEventClient(workspaceId)
 
     // 注册通用处理器，收集所有通知到 runtimeEvents
     client.onAll((response) => {
@@ -1567,6 +1698,7 @@ export function useWorkspace() {
     const event = response.data
     const eventType = event?.type as string | undefined
     const protocolType = asString(event?.runtimeProtocolType)
+    const eventDesignTool = asString(event?.designTool)
     // GUI flow steps already update their visible state and log from the runtime
     // event. Reading Home, snapshots, reports, and maps here would start several
     // independent NFS scans before the renderer can acknowledge the step.
@@ -1585,17 +1717,41 @@ export function useWorkspace() {
       return null
     }
 
-    const refreshKey = [event.jobId, eventType, event.step, cmd]
-      .filter((part): part is string => typeof part === 'string' && part.length > 0)
-      .join('|')
+    // A frontend full-flow step is already reflected by the live runtime
+    // event. Its flow.json write can lag behind that event, so reloading the
+    // resource here would immediately roll the visible step back. The final
+    // task_complete event still performs the broad authoritative refresh.
+    if (
+      (eventDesignTool === 'frontend' ||
+        currentProject.value?.designTool === 'frontend') &&
+      cmd === 'rtl2gds' &&
+      eventType === 'step_complete'
+    ) {
+      return null
+    }
+
+    // Legacy ECC-FE progress can be emitted after the wrapper operation has
+    // already completed, so it has no jobId/runtimeEventId. Do not create a
+    // cross-run dedupe key from only the step name: the next rerun must refresh
+    // the same step again.
+    const refreshIdentity = asString(event.runtimeEventId) ?? asString(event.jobId)
+    const refreshKey = refreshIdentity
+      ? [refreshIdentity, eventType, event.step, cmd]
+          .filter((part): part is string => typeof part === 'string' && part.length > 0)
+          .join('|')
+      : ''
 
     if (refreshKey && handledRefreshRuntimeEvents.has(refreshKey)) {
       return null
     }
 
-    // A successful step updates the same Home data sources as a full flow. Keeping
-    // this broad also lets Home refresh before the RPC caller regains control.
-    const scopes = new Set<WorkspaceInvalidationScope>(['all'])
+    // A direct step run can update every Home data source. Backend full-flow
+    // steps retain their incremental resource refresh; frontend full-flow
+    // steps returned above and reconcile once the task reaches its terminal event.
+    const isIntermediateFullFlowStep = cmd === 'rtl2gds' && eventType === 'step_complete'
+    const scopes = new Set<WorkspaceInvalidationScope>(
+      isIntermediateFullFlowStep ? ['flow', 'step', 'maps', 'logs'] : ['all'],
+    )
 
     const info = event.info
     if (info && typeof info === 'object') {

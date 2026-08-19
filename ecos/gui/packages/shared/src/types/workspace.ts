@@ -7,11 +7,14 @@ export type WorkspaceStatus =
   | 'in_progress'
   | 'not_started'
 
+export type DesignTool = 'backend' | 'frontend'
+
 export interface WorkspaceSummary {
   id: string
   name: string
   path: string
   lastOpened: string
+  designTool?: DesignTool
   workspaceRecognized?: boolean
   pdk?: string
   topModule?: string
@@ -44,6 +47,8 @@ export interface WorkspaceParameters {
 
 export interface WorkspaceConfig {
   directory: string
+  designTool?: DesignTool
+  cpu_rtl_files?: string[]
   pdk: string
   pdk_root: string
   parameters: Partial<WorkspaceParameters> & Record<string, unknown>

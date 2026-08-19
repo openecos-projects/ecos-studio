@@ -92,6 +92,8 @@ export class EccWorkspaceRuntime {
   private readonly sidecar: EccRpcRuntimeSidecar
   private client: EccRpcRuntimeClient | null = null
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
+  /** Compatibility cancellation state for the legacy frontend RPC facade. */
+  private readonly cancelledOperationIds = new Set<string>()
   private helloResult: EccRpcHelloResult | null = null
   private inFlightOperation: InFlightOperation | null = null
   private inFlightCount = 0
@@ -176,6 +178,53 @@ export class EccWorkspaceRuntime {
 
   isActive(): boolean {
     return this.inFlightCount > 0 || this.operationTracker.hasActiveOperations()
+  }
+
+  hasInFlightOperation(operationId?: string): boolean {
+    const operation = this.inFlightOperation
+    return Boolean(operation && (!operationId || operation.operationId === operationId))
+  }
+
+  async cancelOperationLegacy(
+    operationId?: string,
+  ): Promise<{ cancelled: boolean; operationId?: string }> {
+    const operation = this.inFlightOperation
+    if (!operation || (operationId && operation.operationId !== operationId)) {
+      return { cancelled: false, ...(operationId ? { operationId } : {}) }
+    }
+    this.cancelledOperationIds.add(operation.operationId)
+    // The legacy frontend sidecar has no operation-level cancel contract. Its
+    // established cancellation behavior is to stop the sidecar; the main
+    // runtime API uses `cancelOperation(request)` below for protocol-aware
+    // cancellation and therefore remains unchanged.
+    await this.shutdown()
+    return { cancelled: true, operationId: operation.operationId }
+  }
+
+  callRuntime<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    options: { timeoutMs?: number } = {},
+  ): Promise<T> {
+    return this.enqueue(method, undefined, async () => {
+      const client = await this.ensureStarted()
+      return await client.call<T>(method, params, options)
+    })
+  }
+
+  async createWorkspacePayload(
+    payload: Record<string, unknown> & { directory: string },
+  ): Promise<EccWorkspaceCreateResult> {
+    return this.enqueue('workspace.create', undefined, async () => {
+      const client = await this.ensureStarted()
+      const response = await client.call<EccWorkspaceSessionResult>(
+        'workspace.create',
+        payload,
+        { timeoutMs: 0 },
+      )
+      const session = this.sessions.activate(response.directory, response.workspaceId)
+      return { directory: session.directory, workspaceHandle: session.workspaceHandle }
+    })
   }
 
   hasPendingRuntimeWork(): boolean {
@@ -313,6 +362,28 @@ export class EccWorkspaceRuntime {
 
   runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult> {
     return this.commands.runStep(request)
+  }
+
+  runStepPayload(
+    workspaceHandle: string,
+    payload: Record<string, unknown> & { step: string },
+  ): Promise<EccFlowRunStepResult> {
+    const rerun = Boolean(payload.rerun)
+    return this.enqueue(
+      'flow.run_step',
+      workspaceHandle,
+      async () => {
+        const client = await this.ensureStarted()
+        if (rerun) this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
+        const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
+        return await client.call<EccFlowRunStepResult>(
+          'flow.run_step',
+          { ...payload, rerun, workspaceId },
+          { timeoutMs: 0 },
+        )
+      },
+      { rerun, step: payload.step },
+    )
   }
 
   async startFlowOperation(
@@ -558,18 +629,31 @@ export class EccWorkspaceRuntime {
           operationId,
           workspaceHandle,
         })
-        this.emit({
-          logFile: normalized.logFile,
-          message: normalized.message,
-          method,
-          operationId,
-          ...metadata,
-          type: 'operation.failed',
-          workspaceDirectory: runtimeDirectory ?? undefined,
-          workspaceHandle,
-        })
+        if (this.cancelledOperationIds.has(operationId)) {
+          this.emit({
+            logFile: normalized.logFile,
+            method,
+            operationId,
+            ...metadata,
+            type: 'operation.cancelled',
+            workspaceDirectory: runtimeDirectory ?? undefined,
+            workspaceHandle,
+          })
+        } else {
+          this.emit({
+            logFile: normalized.logFile,
+            message: normalized.message,
+            method,
+            operationId,
+            ...metadata,
+            type: 'operation.failed',
+            workspaceDirectory: runtimeDirectory ?? undefined,
+            workspaceHandle,
+          })
+        }
         throw normalized
       } finally {
+        this.cancelledOperationIds.delete(operationId)
         if (this.inFlightOperation?.operationId === operationId) {
           this.inFlightOperation = null
         }
@@ -586,6 +670,22 @@ export class EccWorkspaceRuntime {
   }
 
   private handleSidecarEvent(event: EccRuntimeEvent): void {
+    if (event.type === 'operation.progress') {
+      const inFlight = this.inFlightOperation
+      const sessionHandle = this.sessions.active?.workspaceHandle
+      const workspaceHandle = inFlight?.workspaceHandle ?? sessionHandle
+      this.emit({
+        ...event,
+        ...(inFlight?.operationId ? { operationId: inFlight.operationId } : {}),
+        workspaceDirectory:
+          event.workspaceDirectory ??
+          this.runtimeDirectoryForHandle(workspaceHandle) ??
+          this.boundDirectory ??
+          undefined,
+        ...(workspaceHandle ? { workspaceHandle } : {}),
+      })
+      return
+    }
     if (event.type === 'runtime.exited') {
       this.stepLogBridge?.handleSidecarClose()
       this.client = null

@@ -5,6 +5,7 @@ import {
 } from '../../../../packages/shared/src/constants/ipcChannels.ts'
 import type {
   DesktopApi,
+  DesignRuntimeEvent,
   DesktopDirectoryDialogOptions,
   EccRuntimeEvent,
   DesktopFileDialogOptions,
@@ -166,6 +167,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceClearProjectRoot),
     requestProjectPathAccess: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRequestProjectPathAccess, path),
+    authorizeWaveform: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceAuthorizeWaveform, path),
     readProjectTextFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectTextFile, path),
     readOptionalProjectTextFile: (path) =>
@@ -325,6 +328,8 @@ const desktopApi: DesktopApi = {
     importLocalPath: (request: ResourceImportLocalRequest) =>
       invokeDesktop(desktopApiIpcChannels.resourcesImportLocalPath, request),
     refreshRegistry: () => invokeDesktop(desktopApiIpcChannels.resourcesRefreshRegistry),
+    checkUpdates: (options) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesCheckUpdates, options),
     onProgress: (listener) =>
       subscribeToDesktopEvent(
         desktopApiEventChannels.resourcesProgress,
@@ -332,6 +337,56 @@ const desktopApi: DesktopApi = {
           listener(payload as ResourceJob)
         },
       ),
+  },
+  runtime: {
+    cancel: (request) =>
+      invokeDesktop(desktopApiIpcChannels.designRuntimeCancel, request),
+    events: {
+      onEvent: (listener) =>
+        subscribeToDesktopEvent(
+          desktopApiEventChannels.designRuntimeEvent,
+          (_event, payload: unknown) => {
+            listener(payload as DesignRuntimeEvent)
+          },
+        ),
+    },
+    flow: {
+      run: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeFlowRun, request),
+      runStep: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeFlowRunStep, request),
+    },
+    frontend: {
+      catalog: () => invokeDesktop(desktopApiIpcChannels.designRuntimeFrontendCatalog),
+      validateConfig: (payload) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeFrontendValidateConfig, payload),
+    },
+    rpc: {
+      hello: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeRpcHello, request),
+      ping: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeRpcPing, request),
+      shutdown: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeRpcShutdown, request),
+    },
+    workspace: {
+      close: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceClose, request),
+      create: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceCreate, request),
+      home: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceHome, request),
+      info: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceInfo, request),
+      open: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceOpen, request),
+      refreshConfig: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceRefreshConfig, request),
+      resetFlow: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceResetFlow, request),
+      syncConfig: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceSyncConfig, request),
+    },
   },
   ecc: {
     events: {

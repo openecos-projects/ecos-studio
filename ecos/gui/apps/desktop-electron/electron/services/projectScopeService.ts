@@ -11,6 +11,12 @@ import { isPathWithinRoot } from './pathScope'
 
 const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
+const FRONTEND_EXTRA_ROOT_PATH_FIELDS = [
+  'sim_soc_root',
+  'sim_programs_dir',
+  'sim_tests_dir',
+]
+const FRONTEND_FILELIST_FIELDS = ['cpu_filelist', 'soc_filelist']
 
 interface ProjectReadScope {
   projectRoot: string
@@ -177,6 +183,7 @@ function getPathLeafName(path: string): string | null {
 export class ProjectScopeService {
   private readonly rootsByWindowId = new Map<number, string>()
   private readonly readScopesByWindowId = new Map<number, ProjectReadScope>()
+  private readonly extraRootsByWindowId = new Map<number, string[]>()
 
   async resolveProjectRoot(path: string): Promise<string> {
     return await canonicalizeExistingDirectory(path)
@@ -194,7 +201,9 @@ export class ProjectScopeService {
   async registerProjectRoot(path: string): Promise<string> {
     const windowId = requireWindowScopeId()
     const canonicalPath = await this.resolveProjectRoot(path)
+    const extraRoots = await detectFrontendExtraRoots(canonicalPath)
     this.rootsByWindowId.set(windowId, canonicalPath)
+    this.extraRootsByWindowId.set(windowId, extraRoots)
     this.readScopesByWindowId.delete(windowId)
     return canonicalPath
   }
@@ -252,11 +261,13 @@ export class ProjectScopeService {
   async clearProjectRoot(): Promise<void> {
     const windowId = requireWindowScopeId()
     this.rootsByWindowId.delete(windowId)
+    this.extraRootsByWindowId.delete(windowId)
     this.readScopesByWindowId.delete(windowId)
   }
 
   clearWindow(windowId: number): void {
     this.rootsByWindowId.delete(windowId)
+    this.extraRootsByWindowId.delete(windowId)
     this.readScopesByWindowId.delete(windowId)
   }
 
@@ -269,7 +280,8 @@ export class ProjectScopeService {
 
     const candidatePath = resolve(path)
     const readScope = this.readScopesByWindowId.get(windowId)
-    const roots = [activeProjectRoot]
+    const extraRoots = this.extraRootsByWindowId.get(windowId) ?? []
+    const roots = [activeProjectRoot, ...extraRoots]
     if (readScope) {
       if (pathsEqual(candidatePath, join(readScope.projectRoot, 'project.json'))) {
         roots.push(readScope.projectRoot)
@@ -278,10 +290,18 @@ export class ProjectScopeService {
       }
     }
 
+    let matchedLexicalRoot = false
     for (const root of roots) {
       if (!isPathWithinRoot(candidatePath, root)) continue
+      matchedLexicalRoot = true
       const canonicalPath = await canonicalizePotentialPathWithinRoot(path, root)
       if (isPathWithinRoot(canonicalPath, root)) return canonicalPath
+    }
+
+    if (matchedLexicalRoot || extraRoots.length > 0) {
+      throw new Error(
+        `Refusing to grant access outside current project scope: ${candidatePath}`,
+      )
     }
 
     throw new Error(
@@ -363,4 +383,141 @@ export class ProjectScopeService {
       detectedFiles,
     }
   }
+}
+
+async function detectFrontendExtraRoots(projectRoot: string): Promise<string[]> {
+  const parametersPath = join(projectRoot, 'home', 'parameters.json')
+  let parameters: Record<string, unknown>
+  try {
+    parameters = JSON.parse(await readFile(parametersPath, 'utf8')) as Record<
+      string,
+      unknown
+    >
+  } catch {
+    return []
+  }
+
+  if (parameters['Design Tool'] !== 'frontend') return []
+
+  const roots = new Set<string>()
+  await Promise.all(
+    FRONTEND_EXTRA_ROOT_PATH_FIELDS.map(async (field) => {
+      const value = parameters[field]
+      if (typeof value !== 'string' || !value.trim()) return
+      try {
+        const path = resolve(value)
+        const pathStats = await stat(path)
+        roots.add(
+          await canonicalizeExistingDirectory(
+            pathStats.isDirectory() ? path : dirname(path),
+          ),
+        )
+      } catch {
+        // Optional frontend inputs may be stale; ecc-fe reports required inputs.
+      }
+    }),
+  )
+  await Promise.all(
+    FRONTEND_FILELIST_FIELDS.map(async (field) => {
+      const value = parameters[field]
+      if (typeof value !== 'string' || !value.trim()) return
+      try {
+        const filelistPath = resolve(value)
+        const filelistRoot = dirname(await canonicalizeExistingPath(filelistPath))
+        for (const sourceRoot of await readFrontendFilelistSourceRoots(
+          filelistPath,
+          filelistRoot,
+        )) {
+          roots.add(sourceRoot)
+        }
+      } catch {
+        // Optional frontend filelists may be stale; ecc-fe reports required inputs.
+      }
+    }),
+  )
+
+  roots.delete(projectRoot)
+  return [...roots].filter((root) => !isPathWithinRoot(root, projectRoot))
+}
+
+async function readFrontendFilelistSourceRoots(
+  filelistPath: string,
+  filelistRoot: string,
+): Promise<string[]> {
+  const raw = await readFile(filelistPath, 'utf8')
+  const roots = new Set<string>()
+  const pending: Array<{ path: string; root: string }> = [
+    { path: filelistPath, root: filelistRoot },
+  ]
+  const visited = new Set<string>()
+
+  while (pending.length) {
+    const current = pending.pop()
+    if (!current) break
+    let canonicalFilelist: string
+    try {
+      canonicalFilelist = await canonicalizeExistingPath(current.path)
+    } catch {
+      continue
+    }
+    if (visited.has(canonicalFilelist)) continue
+    visited.add(canonicalFilelist)
+
+    let content: string
+    try {
+      content =
+        current.path === filelistPath ? raw : await readFile(canonicalFilelist, 'utf8')
+    } catch {
+      continue
+    }
+    for (const line of content.split(/\r?\n/)) {
+      const token = normalizeFrontendFilelistToken(line)
+      if (!token) continue
+      if (token.startsWith('+incdir+')) {
+        const incdir = token.slice('+incdir+'.length).trim()
+        if (incdir) {
+          try {
+            roots.add(await canonicalizeExistingDirectory(resolve(current.root, incdir)))
+          } catch {
+            // Ignore stale include directories.
+          }
+        }
+        continue
+      }
+      if (token.startsWith('-f')) {
+        const includePath = token.slice(2).trim()
+        if (includePath) {
+          const resolvedInclude = resolve(current.root, includePath)
+          pending.push({
+            path: resolvedInclude,
+            root: dirname(resolvedInclude),
+          })
+        }
+        continue
+      }
+      if (!/\.(sv|svh|v|vh|f|fl|filelist)$/i.test(token)) continue
+      const resolvedPath = resolve(current.root, token)
+      if (/\.(f|fl|filelist)$/i.test(token)) {
+        pending.push({ path: resolvedPath, root: dirname(resolvedPath) })
+        continue
+      }
+      try {
+        roots.add(dirname(await canonicalizeExistingPath(resolvedPath)))
+      } catch {
+        // Ignore stale entries; ecc-fe reports required missing inputs.
+      }
+    }
+  }
+
+  return [...roots]
+}
+
+function normalizeFrontendFilelistToken(line: string): string {
+  const withoutComment = line.replace(/\/\/.*$/, '').trim()
+  if (!withoutComment || withoutComment.startsWith('+define+')) return ''
+  const parts = withoutComment.split(/\s+/)
+  const first = parts[0] ?? ''
+  const second = parts[1] ?? ''
+  if (first === '-f' && second) return `-f${second}`
+  return first.replace(/^['"]|['"]$/g, '')
 }

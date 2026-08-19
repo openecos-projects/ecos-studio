@@ -1159,10 +1159,12 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .constraint-list dd {
   color: var(--text-primary);
   flex: 0 0 auto;
+  font-family: inherit;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.25;
   margin: 0;
   min-width: 0;
 }

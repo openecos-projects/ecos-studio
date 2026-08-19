@@ -93,6 +93,20 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('normalizePath(props.initialConfig.directory)')
   })
 
+  it('updates standalone workspaces without inventing a project context', () => {
+    expect(source).toContain('standaloneWorkspace?: boolean')
+    expect(source).toContain('v-if="standaloneWorkspace"')
+    expect(source).toContain('Review the standalone workspace that will be updated.')
+    expect(source).toContain('if (standaloneWorkspace.value) return')
+    expect(source).toContain('delete config.value.project_context')
+
+    const configStart = source.indexOf('function createInitialConfig')
+    const configEnd = source.indexOf('function createInitialProjectContext', configStart)
+    const configSource = source.slice(configStart, configEnd)
+    expect(configSource).toContain('initialConfig?.standaloneWorkspace')
+    expect(configSource).toContain('? undefined')
+  })
+
   it('shows project branch source context for derived workspaces', () => {
     expect(source).toContain('sourceContext')
     expect(source).toContain('Created from')
@@ -210,7 +224,6 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).not.toContain('New Project')
 
     for (const title of [
-      'Project Setup',
       'Basic Info',
       'Flow Setup',
       'Design Files',
@@ -219,6 +232,8 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     ]) {
       expect(source).toContain(`title: '${title}'`)
     }
+
+    expect(source).toContain("'Workspace Setup' : 'Project Setup'")
 
     expect(source).toContain('Create Workspace')
     expect(source).not.toContain('Review & Create')
@@ -242,6 +257,7 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'legalization',
       'route',
       'drc',
+      'lvs',
       'filler',
       'RCX',
       'sta',

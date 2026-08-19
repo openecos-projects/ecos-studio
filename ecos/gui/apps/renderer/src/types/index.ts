@@ -1,4 +1,5 @@
 import type {
+  DesignTool,
   DesktopAgentChoice,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
@@ -72,6 +73,7 @@ export interface Thumbnail {
 }
 
 export type ProjectStatus = SharedWorkspaceStatus
+export type { DesignTool }
 
 export interface Project extends Omit<WorkspaceSummary, 'lastOpened'> {
   lastOpened: Date

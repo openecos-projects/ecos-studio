@@ -180,6 +180,13 @@ export function refreshRegistryApi() {
   return getDesktopApi().resources.refreshRegistry()
 }
 
+export function checkResourceUpdatesApi(options?: {
+  force?: boolean
+  refreshRegistry?: boolean
+}) {
+  return getDesktopApi().resources.checkUpdates(options)
+}
+
 export function subscribeResourceProgress(
   resourceId: string,
   onProgress: (progress: InstallProgress) => void,

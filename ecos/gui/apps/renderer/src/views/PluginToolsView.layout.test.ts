@@ -37,6 +37,41 @@ describe('PluginToolsView resource table layout', () => {
     )
   })
 
+  it('shows frontend readiness only as non-interactive frontend category content', () => {
+    const readinessStrip = pluginToolsViewSource.slice(
+      pluginToolsViewSource.indexOf('<section\n            v-if="categoryFilter'),
+      pluginToolsViewSource.indexOf('<div\n            v-if="managerErrorText"'),
+    )
+
+    expect(pluginToolsViewSource).toMatch(
+      /<section\s+v-if="categoryFilter === 'frontend'"\s+class="frontend-flow-strip"/,
+    )
+    expect(readinessStrip).toContain('role="list"')
+    expect(readinessStrip).toContain('role="listitem"')
+    expect(readinessStrip).not.toContain('<button')
+    expect(readinessStrip).not.toContain('@click')
+    expect(pluginToolsViewSource).toMatch(
+      /\.frontend-flow-step\s*\{[\s\S]*cursor:\s*default;/,
+    )
+  })
+
+  it('does not present disabled resource controls as clickable on hover', () => {
+    expect(pluginToolsViewSource).not.toContain('cursor: not-allowed;')
+    expect(pluginToolsViewSource).toMatch(
+      /\.manager-table-meta button:disabled\s*\{[\s\S]*cursor:\s*default;/,
+    )
+    expect(pluginToolsViewSource).toMatch(
+      /\.row-action-btn:disabled\s*\{[\s\S]*cursor:\s*default;/,
+    )
+    expect(pluginToolsViewSource).toMatch(
+      /\.download-button:disabled\s*\{[\s\S]*cursor:\s*default;/,
+    )
+    expect(pluginToolsViewSource).toContain(
+      '.row-action-btn[data-title]:not(:disabled):hover::after',
+    )
+    expect(pluginToolsViewSource).toContain('.row-action-btn.info:not(:disabled):hover')
+  })
+
   it('lets the selected resources list shrink so footer actions remain visible', () => {
     expect(pluginToolsViewSource).toMatch(
       /\.selected-list\s*\{[\s\S]*flex:\s*1 1 0;[\s\S]*min-height:\s*0;/,

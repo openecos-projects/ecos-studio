@@ -175,6 +175,7 @@ describe('ProjectAnalysisPanel recommendation', () => {
       'Frequency [MHz]',
       'WNS',
       'DRC',
+      'LVS',
       'Die Area',
       'Core Util',
     ])
@@ -298,9 +299,9 @@ describe('ProjectAnalysisPanel workspace comparison', () => {
 
     expect(grid.attributes('role')).toBe('grid')
     expect(grid.attributes('aria-rowcount')).toBe('4')
-    // Five fixed columns, seven metric columns (runtime and memory are appended), one action.
-    expect(grid.attributes('aria-colcount')).toBe('13')
-    expect(wrapper.findAll('[role="columnheader"]')).toHaveLength(13)
+    // Five fixed columns, eight metric columns (runtime and memory are appended), one action.
+    expect(grid.attributes('aria-colcount')).toBe('14')
+    expect(wrapper.findAll('[role="columnheader"]')).toHaveLength(14)
     expect(rowFor(wrapper, 'ws_a')?.find('[role="rowheader"]').exists()).toBe(true)
   })
 

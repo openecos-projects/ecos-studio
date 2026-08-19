@@ -650,8 +650,8 @@ describe('useWorkspace openProject', () => {
     expect(workspace.runtimeBackendConnecting.value).toBe(false)
     expect(activeProjectRoot).toBeNull()
     expect(settingsData.has('current_project_path')).toBe(false)
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old')
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new', 'backend')
   })
 
   it('does not let a delayed close clear a newer project root or persisted path', async () => {
@@ -694,7 +694,7 @@ describe('useWorkspace openProject', () => {
 
     const closeOldProject = workspace.closeProject()
     await vi.waitFor(() => {
-      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old')
+      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
     })
     await expect(workspace.openProject(newProject)).resolves.toBe(true)
     releaseOldWorkspace?.()
@@ -746,7 +746,7 @@ describe('useWorkspace openProject', () => {
     await expect(workspace.openProject(newProject)).resolves.toBe(true)
 
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
     expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-new')
   })
 
@@ -1488,8 +1488,8 @@ describe('useWorkspace openProject', () => {
       expect.anything(),
     ])
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('/work/a')
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('/work/b')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('/work/a', 'backend')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('/work/b', 'backend')
   })
 
   it('keeps the latest project when an older provided-project switch stalls before session creation', async () => {
@@ -1868,8 +1868,8 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value?.path).toBe('/work/b')
     expect(activeProjectRoot).toBe('/work/b')
     expect(settingsData.get('current_project_path')).toBe('/work/b')
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-a')
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-b')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-a', 'backend')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-b', 'backend')
   })
 
   it('keeps the active workspace when the selected workspace fails to load', async () => {
@@ -1993,8 +1993,8 @@ describe('useWorkspace openProject', () => {
       state: 'active',
     })
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('/work/new')
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('/work/old')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('/work/new', 'backend')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('/work/old', 'backend')
   })
 
   it('rolls back the candidate when persisting its project path fails', async () => {
@@ -2047,8 +2047,8 @@ describe('useWorkspace openProject', () => {
     expect(activeProjectRoot).toBe('/work/old')
     expect(settingsData.get('current_project_path')).toBe('/work/old')
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new')
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-old')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new', 'backend')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-old', 'backend')
   })
 
   it('checks only desktop bridge availability before workspace operations', async () => {
@@ -2147,7 +2147,7 @@ describe('useWorkspace openProject', () => {
 
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-demo')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-demo', 'backend')
     expect(workspace.workspaceSession.value.state).toBe('idle')
   })
 
@@ -2160,9 +2160,9 @@ describe('useWorkspace openProject', () => {
     try {
       await expect(workspace.closeProject()).resolves.toBeUndefined()
 
-      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-demo')
+      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-demo', 'backend')
       expect(warn).toHaveBeenCalledWith(
-        'Failed to close ECC workspace session:',
+        'Failed to close design workspace session:',
         closeError,
       )
       expect(workspace.currentProject.value).toBeNull()
@@ -2273,6 +2273,83 @@ describe('useWorkspace openProject', () => {
       logs: before.logs + 1,
       all: before.all + 1,
     })
+  })
+
+  it('refreshes a completed rtl2gds step before the full flow completes', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const before = { ...workspace.resourceVersions.value }
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        jobId: 'job-rtl2gds',
+        cmd: 'rtl2gds',
+        home_page: '/work/demo/home/home.json',
+        log_file: '/work/demo/prepare/log.txt',
+        state: 'Success',
+        step: 'prepare',
+        subflow_path: '/work/demo/prepare/subflow.json',
+      },
+    })
+
+    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
+    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
+    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
+    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
+    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
+    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
+    expect(workspace.resourceVersions.value.all).toBe(before.all)
+  })
+
+  it('does not reload stale resources for a frontend full-flow step completion', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const before = { ...workspace.resourceVersions.value }
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        cmd: 'rtl2gds',
+        designTool: 'frontend',
+        home_page: '/work/frontend/home/home.json',
+        jobId: 'frontend-flow-operation',
+        state: 'Success',
+        step: 'prepare',
+      },
+    })
+
+    expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(workspace.resourceVersions.value).toEqual(before)
+  })
+
+  it('refreshes id-less frontend step completions again on the next rerun', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const before = { ...workspace.resourceVersions.value }
+    const completedStep = {
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        cmd: 'rtl2gds',
+        state: 'Success',
+        step: 'prepare',
+      },
+    }
+
+    onRuntimeEvent?.(completedStep)
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_start',
+        cmd: 'rtl2gds',
+        step: 'prepare',
+      },
+    })
+    onRuntimeEvent?.(completedStep)
+
+    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 2)
+    expect(workspace.resourceVersions.value.step).toBe(before.step + 2)
+    expect(workspace.resourceVersions.value.all).toBe(before.all)
   })
 
   it('invalidates all workspace resources when rtl2gds completes', async () => {
@@ -2519,6 +2596,86 @@ describe('useWorkspace openProject', () => {
     expect(workspace.runtimeBackendConnecting.value).toBe(false)
   })
 
+  it('opens and closes frontend workspaces through the unified runtime scope', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/frontend-project',
+      name: 'frontend-project',
+      path: '/work/frontend-project',
+      designTool: 'frontend',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/frontend-project',
+        workspace_handle: 'workspace-frontend',
+      },
+      message: [],
+    })
+
+    await expect(workspace.openProject(project)).resolves.toBe(true)
+
+    expect(loadWorkspaceApiMock).toHaveBeenCalledWith(
+      '/work/frontend-project',
+      'frontend',
+    )
+    expect(workspace.currentProject.value?.designTool).toBe('frontend')
+    expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-frontend')
+    expect(createRuntimeEventClientMock).toHaveBeenCalledWith('workspace-frontend', {
+      designTool: 'frontend',
+      workspaceDirectory: '/work/frontend-project',
+    })
+
+    await workspace.closeProject()
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-frontend', 'frontend')
+  })
+
+  it('forwards selected CPU RTL files when creating a frontend workspace', async () => {
+    const workspace = useWorkspace()
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: { directory: '/work/frontend-project' },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/frontend-project',
+        designTool: 'frontend',
+        cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
+        pdk: '',
+        pdk_root: '',
+        parameters: {
+          cpu_filelist: '',
+          cpu_top_module: 'ysyx_00000000',
+          design: 'frontend_project',
+          frontend_core_id: 'custom-filelist',
+          soc_harness_id: 'ysyx-am-soc',
+          test_suite_id: 'cpu-tests',
+          toolchain_id: 'riscv32-unknown-elf',
+          top_module: 'ecos_sim_top',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(true)
+
+    expect(createWorkspaceApiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cpu_filelist: '',
+        cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
+        cpu_top_module: 'ysyx_00000000',
+        designTool: 'frontend',
+        parameters: expect.objectContaining({
+          'Top module': 'ecos_sim_top',
+          cpu_top_module: 'ysyx_00000000',
+        }),
+      }),
+    )
+  })
+
   it('invalidates freshly created workspace resources after activating the session', async () => {
     const workspace = useWorkspace()
     const before = { ...workspace.resourceVersions.value }
@@ -2628,7 +2785,7 @@ describe('useWorkspace openProject', () => {
       }),
     ).resolves.toBe(false)
 
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new-project')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new-project', 'backend')
   })
 
   it('replaces an existing workspace by creating from a temporary backup directory', async () => {
@@ -2764,6 +2921,52 @@ describe('useWorkspace openProject', () => {
     })
     expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
     expect(desktopApi.workspace.retainProjectDirectoryReplacement).not.toHaveBeenCalled()
+  })
+
+  it('keeps a standalone workspace backup without writing project.json', async () => {
+    const workspace = useWorkspace()
+    const replacement = {
+      id: 'replacement-standalone-1',
+      targetPath: '/work/standalone',
+      backupPath: '/work/.standalone.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/standalone',
+        workspace_id: 'workspace-standalone',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/standalone',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'standalone',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(true)
+
+    expect(desktopApi.workspace.retainProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement.id,
+    )
+    expect(desktopApi.projectManifest.mutate).not.toHaveBeenCalled()
+    expect(
+      desktopApi.workspace.finalizeProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
   })
 
   it('restores the original workspace when replacement finalization fails', async () => {

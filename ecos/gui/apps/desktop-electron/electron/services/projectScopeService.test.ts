@@ -188,7 +188,7 @@ describe('ProjectScopeService', () => {
       await service.registerProjectRoot(root)
 
       await expect(service.requestProjectPathAccess(linkedPath)).rejects.toThrow(
-        'outside current project root',
+        'outside current project scope',
       )
     })
   })
@@ -206,6 +206,68 @@ describe('ProjectScopeService', () => {
           join(root, 'Synthesis_yosys', 'log', 'Synthesis.log'),
         ),
       ).resolves.toBe(join(root, 'Synthesis_yosys', 'log', 'Synthesis.log'))
+    })
+  })
+
+  it('allows frontend source roots declared by workspace parameters', async () => {
+    const root = await createTempDir('ecos-project-root-')
+    const sourceRoot = await createTempDir('ecos-frontend-source-')
+    const sourceFile = join(sourceRoot, 'rtl', 'cpu.sv')
+    const outside = await createTempDir('ecos-unrelated-source-')
+    const outsideFile = join(outside, 'cpu.sv')
+    await mkdir(join(root, 'home'), { recursive: true })
+    await mkdir(join(sourceRoot, 'rtl'), { recursive: true })
+    await writeFile(sourceFile, 'module cpu; endmodule')
+    await writeFile(outsideFile, 'module other; endmodule')
+    await writeFile(join(sourceRoot, 'filelist.cpu.f'), 'rtl/cpu.sv')
+    await writeFile(
+      join(root, 'home', 'parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        cpu_filelist: join(sourceRoot, 'filelist.cpu.f'),
+      }),
+    )
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(root)
+
+      await expect(service.requestProjectPathAccess(sourceFile)).resolves.toBe(sourceFile)
+      await expect(service.requestProjectPathAccess(outsideFile)).rejects.toThrow(
+        'outside current project scope',
+      )
+    })
+  })
+
+  it('keeps frontend filelist access scoped to discovered source directories', async () => {
+    const root = await createTempDir('ecos-project-root-')
+    const sourceRoot = await createTempDir('ecos-frontend-source-')
+    const rtlDir = join(sourceRoot, 'rtl')
+    const notesDir = join(sourceRoot, 'notes')
+    const sourceFile = join(rtlDir, 'cpu.sv')
+    const siblingFile = join(notesDir, 'private.txt')
+    await mkdir(join(root, 'home'), { recursive: true })
+    await mkdir(rtlDir, { recursive: true })
+    await mkdir(notesDir, { recursive: true })
+    await writeFile(sourceFile, 'module cpu; endmodule')
+    await writeFile(siblingFile, 'do not expose whole source root')
+    await writeFile(join(sourceRoot, 'filelist.cpu.f'), 'rtl/cpu.sv')
+    await writeFile(
+      join(root, 'home', 'parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        cpu_filelist: join(sourceRoot, 'filelist.cpu.f'),
+      }),
+    )
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(root)
+
+      await expect(service.requestProjectPathAccess(sourceFile)).resolves.toBe(sourceFile)
+      await expect(service.requestProjectPathAccess(siblingFile)).rejects.toThrow(
+        'outside current project scope',
+      )
     })
   })
 

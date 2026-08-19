@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { EccRuntimeEvent } from '@ecos-studio/shared'
+import type { DesignRuntimeEvent } from '@ecos-studio/shared'
 
 // Companion to runtimeEvents.desktop-rpc.test.ts (which stays byte-for-byte
 // stable as the contract regression net). These cases pin the shape of the
@@ -31,12 +31,12 @@ describe('synthesized step.log events (Electron archiver producer)', () => {
   })
 
   it('maps synthesized step.log events from a full flow onto rtl2gds', async () => {
-    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    const listeners: Array<(event: DesignRuntimeEvent) => void> = []
     setWindow({
       ecosDesktop: {
-        ecc: {
+        runtime: {
           events: {
-            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+            onEvent: (listener: (event: DesignRuntimeEvent) => void) => {
               listeners.push(listener)
               return () => undefined
             },
@@ -70,6 +70,7 @@ describe('synthesized step.log events (Electron archiver producer)', () => {
         type: 'step.log',
         workspaceId: 'workspace-1',
       },
+      designTool: 'backend',
       type: 'runtime.protocol',
       workspaceHandle: 'workspace-handle-1',
     })
@@ -90,12 +91,12 @@ describe('synthesized step.log events (Electron archiver producer)', () => {
   })
 
   it('accepts repeated sequence values on synthesized step.log events', async () => {
-    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    const listeners: Array<(event: DesignRuntimeEvent) => void> = []
     setWindow({
       ecosDesktop: {
-        ecc: {
+        runtime: {
           events: {
-            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+            onEvent: (listener: (event: DesignRuntimeEvent) => void) => {
               listeners.push(listener)
               return () => undefined
             },
@@ -128,6 +129,7 @@ describe('synthesized step.log events (Electron archiver producer)', () => {
         },
         type: 'runtime.protocol',
         workspaceHandle: 'workspace-handle-1',
+        designTool: 'backend',
       })
     }
 

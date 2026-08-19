@@ -90,6 +90,7 @@ export interface WorkspaceStepInfoRequest {
     | 'checklist'
     | 'sta'
     | 'config'
+    | 'frontend_detail'
 }
 
 export interface WorkspaceStepInfoResult {

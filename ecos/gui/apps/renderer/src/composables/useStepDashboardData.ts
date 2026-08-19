@@ -23,6 +23,7 @@ import {
   drcInsights,
   floorplanInsights,
   hardenOutputInsights,
+  lvsInsights,
   mapHighlights,
   qorSummary,
   record,
@@ -40,6 +41,7 @@ import {
   type StepDashboardDistribution,
   type StepDashboardFloorplanInsights,
   type StepDashboardHardenInsights,
+  type StepDashboardLvsInsights,
   type StepDashboardMetric,
   type StepDashboardQor,
   type StepDashboardRcxInsights,
@@ -72,6 +74,7 @@ export interface StepDashboardData {
   drcInsights: StepDashboardDrcInsights | null
   floorplanInsights: StepDashboardFloorplanInsights | null
   hardenInsights: StepDashboardHardenInsights | null
+  lvsInsights: StepDashboardLvsInsights | null
   rcxInsights: StepDashboardRcxInsights | null
   staInsights: StepDashboardStaInsights | null
   stepInsights: StepDashboardFloorplanInsights | null
@@ -337,6 +340,7 @@ export function useStepDashboardData() {
       const isPlace = resourceStep.name.trim().toLowerCase() === 'place'
       const isRcx = resourceStep.name.trim().toLowerCase() === 'rcx'
       const isDrc = resourceStep.name.trim().toLowerCase() === 'drc'
+      const isLvs = resourceStep.name.trim().toLowerCase() === 'lvs'
       const isSta = resourceStep.name.trim().toLowerCase() === 'sta'
       const isFloorplanStyleStep = usesFloorplanStyleInsights(resourceStep.name)
       const stepPath =
@@ -440,6 +444,7 @@ export function useStepDashboardData() {
         hardenInsights: isHarden
           ? hardenOutputInsights(resourceStep.resources.output)
           : null,
+        lvsInsights: isLvs ? lvsInsights(stepJson) : null,
         rcxInsights: isRcx ? rcxInsights(stepJson) : null,
         staInsights: isSta ? staInsights(stepJson, staTimingSummaries) : null,
         stepInsights: isFloorplanStyleStep

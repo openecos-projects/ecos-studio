@@ -44,6 +44,7 @@ export interface FlowStage {
   state: string
   runtime: string
   'peak memory (mb)': number
+  virtual?: boolean
 }
 
 // ============ 常量配置 ============
@@ -61,6 +62,8 @@ const FIXED_SETUP_STAGES: FlowStage[] = Object.entries(STEP_METADATA)
     runtime: '',
     'peak memory (mb)': 0,
   }))
+
+const FRONTEND_FLOW_RETRY_DELAYS_MS = [120, 300, 600] as const
 
 /**
  * 将 flow.json 数据转换为 FlowStage 格式（与侧边栏加载逻辑一致）
@@ -146,6 +149,26 @@ function flowDataHasStartedRun(flowData: FlowData): boolean {
   })
 }
 
+async function readFrontendFlowWithRetry(
+  isCurrent: () => boolean,
+): Promise<FlowData | null | undefined> {
+  for (let attempt = 0; attempt <= FRONTEND_FLOW_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const flowData = (await readWorkspaceFlowResourceApi()) as FlowData | null
+      if (flowData || attempt === FRONTEND_FLOW_RETRY_DELAYS_MS.length) return flowData
+    } catch (error) {
+      if (attempt === FRONTEND_FLOW_RETRY_DELAYS_MS.length) throw error
+    }
+
+    await new Promise<void>((resolve) =>
+      globalThis.setTimeout(resolve, FRONTEND_FLOW_RETRY_DELAYS_MS[attempt] ?? 600),
+    )
+    if (!isCurrent()) return undefined
+  }
+
+  return null
+}
+
 // ============ Composable ============
 
 /**
@@ -166,14 +189,61 @@ export function useFlowStages() {
   let unregisterFlowJsonLifecycleCleanup: (() => void) | null = null
   let unregisterHomeRunArtifactReset: (() => void) | null = null
   let unregisterWorkspaceRerunPrepared: (() => void) | null = null
+  // Resource invalidations can arrive in bursts during a frontend rerun. Keep
+  // only the result of the newest read; an older NFS response must not roll a
+  // completed step back to its pre-rerun state.
+  let flowLoadGeneration = 0
   let pendingRerunFlowStartProjectPath = ''
   const handledRuntimeEventObjects = new WeakSet<object>()
+  const runtimeStepOverrides = new Map<string, Partial<FlowStage>>()
+  let runtimeOverrideWorkspaceKey = ''
+
+  function invalidateFlowStageLoads(): void {
+    flowLoadGeneration += 1
+    // Runtime events are already authoritative for the visible stage state.
+    // Do not leave a superseded resource read showing a permanent spinner.
+    isLoading.value = false
+  }
 
   function stageMatchesRuntimeStep(stage: FlowStage, stepName: string): boolean {
-    const key = stepName.trim().toLowerCase()
-    return (
-      stage.label.trim().toLowerCase() === key || stage.path.trim().toLowerCase() === key
+    const key = runtimeStepKey(stepName)
+    return runtimeStepKey(stage.label) === key || runtimeStepKey(stage.path) === key
+  }
+
+  function runtimeStepKey(value: string): string {
+    return value.trim().toLowerCase()
+  }
+
+  function applyRuntimeStepOverrides(stages: FlowStage[]): FlowStage[] {
+    return stages.map((stage) => {
+      const runtimeOverride =
+        runtimeStepOverrides.get(runtimeStepKey(stage.path)) ??
+        runtimeStepOverrides.get(runtimeStepKey(stage.label))
+      return runtimeOverride ? { ...stage, ...runtimeOverride } : stage
+    })
+  }
+
+  function rememberRuntimeStepState(stepName: string, state: string, tool: string): void {
+    const key = runtimeStepKey(stepName)
+    if (!key) return
+    const previous = runtimeStepOverrides.get(key)
+    runtimeStepOverrides.set(key, {
+      ...previous,
+      state: normalizeFlowStageState(state),
+      ...(tool ? { tool } : {}),
+    })
+  }
+
+  function forgetRuntimeStepState(stepName: string): void {
+    const key = runtimeStepKey(stepName)
+    if (!key) return
+    runtimeStepOverrides.delete(key)
+    const stage = dynamicFlowStages.value.find((candidate) =>
+      stageMatchesRuntimeStep(candidate, stepName),
     )
+    if (!stage) return
+    runtimeStepOverrides.delete(runtimeStepKey(stage.path))
+    runtimeStepOverrides.delete(runtimeStepKey(stage.label))
   }
 
   function applyRuntimeStepState(
@@ -182,6 +252,17 @@ export function useFlowStages() {
     state: string,
     isStarted: boolean,
   ): void {
+    if (isStarted) {
+      for (const stage of dynamicFlowStages.value) {
+        if (
+          !stageMatchesRuntimeStep(stage, stepName) &&
+          normalizeFlowStageState(stage.state) === 'Ongoing'
+        ) {
+          rememberRuntimeStepState(stage.path, 'Unstart', stage.tool)
+        }
+      }
+    }
+    rememberRuntimeStepState(stepName, state, tool)
     const matchingIndex = dynamicFlowStages.value.findIndex((stage) =>
       stageMatchesRuntimeStep(stage, stepName),
     )
@@ -210,7 +291,7 @@ export function useFlowStages() {
       }
       // A flow has one active step. Keep a stale delayed start event from
       // rendering two Ongoing states at the same time.
-      return isStarted && stage.state === 'Ongoing'
+      return isStarted && normalizeFlowStageState(stage.state) === 'Ongoing'
         ? { ...stage, state: 'Unstart' }
         : stage
     })
@@ -220,6 +301,19 @@ export function useFlowStages() {
         { ...runtimeStage, state: normalizeFlowStageState(state) },
       ]
     }
+  }
+
+  function markOngoingRunStagesIncomplete(): void {
+    for (const stage of dynamicFlowStages.value) {
+      if (normalizeFlowStageState(stage.state) === 'Ongoing') {
+        rememberRuntimeStepState(stage.path, 'Incomplete', stage.tool)
+      }
+    }
+    dynamicFlowStages.value = dynamicFlowStages.value.map((stage) =>
+      normalizeFlowStageState(stage.state) === 'Ongoing'
+        ? { ...stage, state: 'Incomplete' }
+        : stage,
+    )
   }
 
   // 合并后的完整流程步骤
@@ -244,13 +338,16 @@ export function useFlowStages() {
    * 从指定的 flow.json 路径加载流程步骤
    */
   async function loadFlowStagesFromPath(flowJsonPath: string): Promise<void> {
+    const loadGeneration = ++flowLoadGeneration
     if (!isDesktopRuntimeAvailable || !flowJsonPath) {
       console.warn('Cannot load flow.json: desktop bridge unavailable or path is empty')
       return
     }
 
     const sessionId = workspaceLifecycle.currentSessionId.value
-    const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
+    const isCurrent = () =>
+      workspaceLifecycle.isCurrentSession(sessionId) &&
+      loadGeneration === flowLoadGeneration
     isLoading.value = true
     error.value = null
 
@@ -272,7 +369,7 @@ export function useFlowStages() {
 
       console.log('Loaded flow data from path:', flowData)
 
-      dynamicFlowStages.value = transformFlowData(flowData)
+      dynamicFlowStages.value = applyRuntimeStepOverrides(transformFlowData(flowData))
       console.log('Flow stages loaded from path:', dynamicFlowStages.value)
     } catch (err) {
       if (!isCurrent()) return
@@ -291,6 +388,7 @@ export function useFlowStages() {
    * 通过共享缓存获取 home.json 数据（不重复调用 API），从中提取 flow 路径
    */
   async function loadFlowStages(): Promise<void> {
+    const loadGeneration = ++flowLoadGeneration
     if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
       console.warn(
         'Cannot load flow.json: desktop bridge unavailable or no project is open',
@@ -300,15 +398,30 @@ export function useFlowStages() {
     }
 
     const sessionId = workspaceLifecycle.currentSessionId.value
-    const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
+    const activeWorkspace = workspaceSession?.value
+    if (
+      activeWorkspace &&
+      typeof activeWorkspace.state === 'string' &&
+      (activeWorkspace.state !== 'active' || !activeWorkspace.workspaceId)
+    ) {
+      dynamicFlowStages.value = []
+      isLoading.value = false
+      return
+    }
+    const isCurrent = () =>
+      workspaceLifecycle.isCurrentSession(sessionId) &&
+      loadGeneration === flowLoadGeneration
     isLoading.value = true
     error.value = null
 
     try {
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
       const flowData = await workspaceLifecycle.runForSession(sessionId, async () => {
-        if (!workspaceHandle) {
-          return (await readWorkspaceFlowResourceApi()) as FlowData | null
+        // ECC-FE owns its workspace handle through DesignRuntime. The shared
+        // ECC snapshot API only understands backend workspace handles, so
+        // frontend projects must continue to read their complete flow.json.
+        if (!workspaceHandle || currentProject.value?.designTool === 'frontend') {
+          return await readFrontendFlowWithRetry(isCurrent)
         }
         const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
         return {
@@ -332,7 +445,7 @@ export function useFlowStages() {
 
       console.log('Loaded flow data:', flowData)
 
-      dynamicFlowStages.value = transformFlowData(flowData)
+      dynamicFlowStages.value = applyRuntimeStepOverrides(transformFlowData(flowData))
       console.log('Flow stages loaded:', dynamicFlowStages.value)
     } catch (err) {
       if (!isCurrent()) return
@@ -361,6 +474,12 @@ export function useFlowStages() {
   }
 
   function resetRunStagesForRerun(affectedSteps: readonly string[] = []): void {
+    invalidateFlowStageLoads()
+    if (affectedSteps.length === 0) {
+      runtimeStepOverrides.clear()
+    } else {
+      for (const step of affectedSteps) forgetRuntimeStepState(step)
+    }
     if (dynamicFlowStages.value.length === 0) return
     const affectedStepNames = new Set(
       affectedSteps.map((step) => step.trim().toLowerCase()).filter(Boolean),
@@ -391,18 +510,57 @@ export function useFlowStages() {
       typeof eventData.runtimeProtocolType === 'string'
         ? eventData.runtimeProtocolType
         : ''
-    if (protocolType !== 'step.started' && protocolType !== 'step.completed') return
+    const legacyType = typeof eventData.type === 'string' ? eventData.type : ''
+    const isProtocolStart = protocolType === 'step.started'
+    const isProtocolComplete = protocolType === 'step.completed'
+    const isFlowComplete =
+      protocolType === 'operation.completed' ||
+      (!protocolType && legacyType === 'task_complete')
+    if (isFlowComplete) {
+      runtimeStepOverrides.clear()
+      return
+    }
+    const isTerminalFailure =
+      protocolType === 'operation.failed' ||
+      protocolType === 'operation.cancelled' ||
+      (!protocolType && (legacyType === 'error' || legacyType === 'cancelled'))
+    if (isTerminalFailure) {
+      const command = typeof eventData.cmd === 'string' ? eventData.cmd : ''
+      if (command && command !== 'rtl2gds' && command !== 'run_step') return
+      invalidateFlowStageLoads()
+      markOngoingRunStagesIncomplete()
+      return
+    }
+    // Keep the legacy notification shape as a compatibility fallback for
+    // older sidecars. Current ECC-FE events arrive as the shared protocol and
+    // are handled by the branches above.
+    const isLegacyStart = !protocolType && legacyType === 'step_start'
+    const isLegacyComplete = !protocolType && legacyType === 'step_complete'
+    if (!isProtocolStart && !isProtocolComplete && !isLegacyStart && !isLegacyComplete) {
+      return
+    }
     const stepName = typeof eventData.step === 'string' ? eventData.step : ''
     if (!stepName) return
+    // Runtime notifications are newer than any resource read that was
+    // already in flight when the step event arrived.
+    invalidateFlowStageLoads()
+    const eventResponse = (event as { response?: unknown }).response
+    const phase = typeof eventData.phase === 'string' ? eventData.phase : ''
+    const state =
+      typeof eventData.state === 'string'
+        ? eventData.state
+        : isProtocolStart || isLegacyStart
+          ? 'Ongoing'
+          : eventResponse === 'failed' || phase === 'failed'
+            ? 'Incomplete'
+            : eventResponse === 'error'
+              ? 'Invalid'
+              : 'Success'
     applyRuntimeStepState(
       stepName,
       typeof eventData.tool === 'string' ? eventData.tool : '',
-      typeof eventData.state === 'string'
-        ? eventData.state
-        : protocolType === 'step.started'
-          ? 'Ongoing'
-          : 'Success',
-      protocolType === 'step.started',
+      state,
+      isProtocolStart || isLegacyStart,
     )
   }
 
@@ -434,13 +592,23 @@ export function useFlowStages() {
    * 乐观更新：将第一个非 Success 的 run 步骤设为 Ongoing
    * 在用户点击 Run RTL2GDS 时调用，立即反映运行状态
    */
-  function setFirstRunStepOngoing(): void {
+  function setFirstRunStepOngoing(options: { resetAll?: boolean } = {}): void {
+    if (options.resetAll) {
+      resetRunStagesForRerun()
+    } else {
+      runtimeStepOverrides.clear()
+    }
     const idx = dynamicFlowStages.value.findIndex((s) => s.state !== 'Success')
     if (idx !== -1) {
       dynamicFlowStages.value[idx] = {
         ...dynamicFlowStages.value[idx],
         state: 'Ongoing',
       }
+      rememberRuntimeStepState(
+        dynamicFlowStages.value[idx].path,
+        'Ongoing',
+        dynamicFlowStages.value[idx].tool,
+      )
     }
   }
 
@@ -450,6 +618,7 @@ export function useFlowStages() {
    */
   function setRunStepOngoingByPath(stepPath: string): void {
     if (!stepPath) return
+    forgetRuntimeStepState(stepPath)
     const key = stepPath.toLowerCase()
     const idx = dynamicFlowStages.value.findIndex((s) => s.path.toLowerCase() === key)
     if (idx !== -1) {
@@ -457,6 +626,11 @@ export function useFlowStages() {
         ...dynamicFlowStages.value[idx],
         state: 'Ongoing',
       }
+      rememberRuntimeStepState(
+        dynamicFlowStages.value[idx].path,
+        'Ongoing',
+        dynamicFlowStages.value[idx].tool,
+      )
     }
   }
 
@@ -471,15 +645,27 @@ export function useFlowStages() {
    * 清空流程步骤
    */
   function clearFlowStages(): void {
+    invalidateFlowStageLoads()
+    runtimeStepOverrides.clear()
+    runtimeOverrideWorkspaceKey = ''
     dynamicFlowStages.value = []
     error.value = null
   }
 
   // 监听当前项目变化，自动重新加载
   watch(
-    () => currentProject.value?.path,
-    async (newPath) => {
+    () => [
+      currentProject.value?.path,
+      workspaceSession.value?.state,
+      workspaceSession.value?.workspaceId,
+    ],
+    async ([newPath, , newWorkspaceId]) => {
       if (newPath) {
+        const nextWorkspaceKey = `${normalizeProjectPath(newPath)}\u001f${newWorkspaceId ?? ''}`
+        if (runtimeOverrideWorkspaceKey !== nextWorkspaceKey) {
+          runtimeStepOverrides.clear()
+          runtimeOverrideWorkspaceKey = nextWorkspaceKey
+        }
         await loadFlowStages()
         await startFlowJsonWatchForCurrentProject()
       } else {
@@ -491,7 +677,7 @@ export function useFlowStages() {
   )
 
   watch(
-    () => resourceVersions.value.all,
+    () => [resourceVersions.value.flow, resourceVersions.value.all],
     async () => {
       if (!currentProject.value?.path) return
       await refreshFlowStages()

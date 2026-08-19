@@ -7,3 +7,6 @@
 [submodule "ecc"]
 	path = ecc
 	url = https://github.com/openecos-projects/ecc.git
+[submodule "ecc-fe"]
+	path = ecc-fe
+	url = https://github.com/openecos-projects/ecc-fe.git

@@ -223,6 +223,8 @@ export class WorkspaceResourceService {
         join(root, 'config', 'dreamplace.json'),
         'config',
       )
+    } else if (isFrontendTool(toolKey)) {
+      addFrontendResources(resources, directory, design, step.name)
     } else {
       addUnknownResources(resources, directory, step.name)
     }
@@ -486,7 +488,40 @@ export class WorkspaceResourceService {
         return await this.buildDensityMapInfo(step)
       case 'sta':
         return stepInfo({ sta: nestedResourcePaths(step.resources.report.sta) })
+      case 'frontend_detail':
+        return await this.buildFrontendDetailInfo(step)
     }
+  }
+
+  private async buildFrontendDetailInfo(
+    step: WorkspaceStepResource,
+  ): Promise<StepInfoBuildResult> {
+    const detailPath = nestedResource(step.resources.report, 'frontend_detail')?.path
+    if (detailPath) {
+      const detail = await this.readJsonOrNull(detailPath)
+      if (detail) return stepInfo(detail)
+    }
+
+    const cases = await this.readFrontendCases(
+      nestedResource(step.resources.report, 'cases')?.path,
+    )
+    return stepInfo({
+      step: step.name,
+      tool: step.tool,
+      state: step.state,
+      runtime: step.runtime,
+      directory: step.directory,
+      log: step.resources.log.file?.path,
+      report: step.resources.report.step?.path,
+      subflow: step.resources.subflow.path?.path,
+      cases,
+    })
+  }
+
+  private async readFrontendCases(path: string | undefined): Promise<unknown[]> {
+    if (!path) return []
+    const report = await this.readJsonOrNull(path)
+    return Array.isArray(report?.cases) ? report.cases : []
   }
 
   private async buildDensityMapInfo(
@@ -560,6 +595,15 @@ export class WorkspaceResourceService {
         return []
       case 'sta':
         return resourceRecordValues(step.resources.report.sta)
+      case 'frontend_detail': {
+        const snapshot = nestedResource(step.resources.report, 'frontend_detail')
+        if (snapshot?.exists) return [snapshot]
+        return existingResourceRefs([
+          step.resources.log.file,
+          nestedResource(step.resources.report, 'step'),
+          step.resources.subflow.path,
+        ])
+      }
     }
   }
 }
@@ -846,6 +890,72 @@ function configResourceForEccStep(
     default:
       return undefined
   }
+}
+
+function isFrontendTool(tool: string): boolean {
+  return tool === 'fe' || tool === 'slang' || tool === 'verilator'
+}
+
+function addFrontendResources(
+  resources: StepFileBuckets,
+  directory: string,
+  design: string,
+  stepName: string,
+): void {
+  resources.output.dir = createFile(join(directory, 'output'), 'output')
+  resources.output.json = createFile(
+    join(directory, 'output', `${design}_${stepName}.json`),
+    'layout-json',
+  )
+  resources.output.merged_filelist = createFile(
+    join(directory, 'output', 'merged_rtl.f'),
+    'output',
+  )
+  resources.output.prepared_inputs = createFile(
+    join(directory, 'output', 'prepared_inputs.json'),
+    'output',
+  )
+  resources.output.sim_binary = createFile(
+    join(directory, 'output', `${design}_sim`),
+    'output',
+  )
+  resources.output.cases = createFile(join(directory, 'output', 'cases'), 'output')
+  resources.data.dir = createFile(join(directory, 'data'), 'unknown')
+  resources.feature.dir = createFile(join(directory, 'feature'), 'analysis')
+  resources.report.dir = createFile(join(directory, 'report'), 'report')
+  resources.report.step = createFile(
+    join(directory, 'report', `${stepName}.rpt`),
+    'report',
+  )
+  resources.report.log = createFile(join(directory, 'report', 'log.txt'), 'log')
+  resources.report.cases = createFile(join(directory, 'report', 'cases.json'), 'report')
+  resources.report.frontend_detail = createFile(
+    join(directory, 'report', 'frontend_detail.json'),
+    'report',
+  )
+  resources.report.build_programs = createFile(
+    join(directory, 'report', 'build_programs.log.txt'),
+    'log',
+  )
+  resources.log.file = createFile(join(directory, 'log', 'log.txt'), 'log')
+  resources.script.main = createFile(
+    join(directory, 'script', `${stepName}_main.tcl`),
+    'script',
+  )
+  resources.analysis.metrics = createFile(
+    join(directory, 'analysis', `${stepName}_metrics.json`),
+    'metrics',
+  )
+  resources.analysis.statis_csv = createFile(
+    join(directory, 'analysis', `${stepName}_statis.csv`),
+    'analysis',
+  )
+  resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
+  resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
+  resources.config.flow = createFile(
+    join(directory, 'config', 'flow_config.json'),
+    'config',
+  )
 }
 
 function addUnknownResources(

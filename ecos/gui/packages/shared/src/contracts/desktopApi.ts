@@ -1,3 +1,4 @@
+import type { DesignRuntimeApi } from './designRuntime.ts'
 import type {
   WorkspaceResourceIndex,
   WorkspaceStepInfoRequest,
@@ -16,6 +17,7 @@ import type {
   ResourceList,
   MpcSpecReadResult,
   ResourceOperationResult,
+  ResourceUpdateCheckResult,
 } from './resources.ts'
 import type { EccRuntimeApi } from './eccRuntime.ts'
 import type {
@@ -268,6 +270,7 @@ export interface DesktopApi {
     registerProjectReadRoot(path: string): Promise<string>
     clearProjectRoot(): Promise<void>
     requestProjectPathAccess(path: string): Promise<string>
+    authorizeWaveform(path: string): Promise<string>
     readProjectTextFile(path: string): Promise<string>
     readOptionalProjectTextFile(path: string): Promise<string | null>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
@@ -338,8 +341,13 @@ export interface DesktopApi {
     importPdkPath(request: ResourceImportPdkRequest): Promise<ResourceInfo>
     importLocalPath(request: ResourceImportLocalRequest): Promise<ResourceInfo>
     refreshRegistry(): Promise<{ status: string; tools_count: number }>
+    checkUpdates(options?: {
+      force?: boolean
+      refreshRegistry?: boolean
+    }): Promise<ResourceUpdateCheckResult>
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
   }
+  runtime: DesignRuntimeApi
   ecc: EccRuntimeApi
   agent?: {
     interrupt(request: DesktopAgentInterruptRequest): Promise<void>

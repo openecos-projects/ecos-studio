@@ -17,7 +17,11 @@ import { CMDEnum, ResponseEnum } from '@/api/type'
 export interface ParametersData {
   PDK: string
   Design: string
+  design?: string
+  description?: string
+  'Design Tool'?: string
   'Top module': string
+  top_module?: string
   Die: {
     Size: number[]
     Area?: number
@@ -37,14 +41,54 @@ export interface ParametersData {
   'Cell padding x': number
   'Routability opt flag': number
   Clock: string
+  clock?: string
   'Frequency max [MHz]': number
+  frequency_max?: number
   'Bottom layer': string
   'Top layer': string
   'PDK Root'?: string
+  cpu_filelist?: string
+  soc_filelist?: string
+  soc_variant?: string
+  soc_harness_id?: string
+  soc_wrapper_id?: string
+  soc_wrapper_contract?: string
+  frontend_core_id?: string
+  core_id?: string
+  cpu_wrapper_id?: string
+  cpu_wrapper_contract?: string
+  cpu_socket_contract?: string
+  cpu_wrapper_top?: string
+  toolchain_id?: string
+  test_suite_id?: string
+  input_filelist?: string
+  sim_program_names?: string[]
+  sim_all_tests?: boolean
 }
 
 /** 前端编辑用（驼峰） */
+export interface FrontendConfigData {
+  coreId: string
+  cpuWrapperId: string
+  cpuWrapperContract: string
+  cpuSocketContract: string
+  cpuWrapperTop: string
+  socHarnessId: string
+  socWrapperId: string
+  socWrapperContract: string
+  socVariant: string
+  toolchainId: string
+  testSuiteId: string
+  cpuFilelist: string
+  socFilelist: string
+  inputFilelist: string
+  simProgramNames: string[]
+  simAllTests: boolean
+}
+
 export interface ConfigData {
+  designTool: string
+  description: string
   pdk: string
   pdkRoot: string
   design: string
@@ -68,6 +112,7 @@ export interface ConfigData {
   frequencyMax: number
   bottomLayer: string
   topLayer: string
+  frontend: FrontendConfigData
 }
 
 // ============ 工具函数 ============
@@ -81,6 +126,8 @@ const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
 
 function getDefaultConfig(): ConfigData {
   return {
+    designTool: 'backend',
+    description: '',
     pdk: '',
     pdkRoot: '',
     design: '',
@@ -104,6 +151,24 @@ function getDefaultConfig(): ConfigData {
     frequencyMax: 100,
     bottomLayer: FIXED_BOTTOM_LAYER,
     topLayer: FIXED_TOP_LAYER,
+    frontend: {
+      coreId: '',
+      cpuWrapperId: '',
+      cpuWrapperContract: '',
+      cpuSocketContract: '',
+      cpuWrapperTop: '',
+      socHarnessId: '',
+      socWrapperId: '',
+      socWrapperContract: '',
+      socVariant: '',
+      toolchainId: '',
+      testSuiteId: '',
+      cpuFilelist: '',
+      socFilelist: '',
+      inputFilelist: '',
+      simProgramNames: [],
+      simAllTests: false,
+    },
   }
 }
 
@@ -154,12 +219,22 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
   }
 }
 
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item)).filter((item) => item.length > 0)
+    : []
+}
+
 export function parseParametersData(fileContent: string): ParametersData {
   const raw = JSON.parse(fileContent) as Record<string, unknown>
   return {
     PDK: String(raw.PDK ?? ''),
-    Design: String(raw.Design ?? ''),
-    'Top module': String(raw['Top module'] ?? ''),
+    Design: String(raw.Design ?? raw.design ?? ''),
+    design: raw.design != null ? String(raw.design) : undefined,
+    description: raw.description != null ? String(raw.description) : undefined,
+    'Design Tool': raw['Design Tool'] != null ? String(raw['Design Tool']) : undefined,
+    'Top module': String(raw['Top module'] ?? raw.top_module ?? ''),
+    top_module: raw.top_module != null ? String(raw.top_module) : undefined,
     Die: normalizeDie(raw.Die),
     Core: normalizeCore(raw.Core),
     'Max fanout': Number(raw['Max fanout'] ?? 20),
@@ -168,16 +243,42 @@ export function parseParametersData(fileContent: string): ParametersData {
     'Global right padding': Number(raw['Global right padding'] ?? 0),
     'Cell padding x': Number(raw['Cell padding x'] ?? 600),
     'Routability opt flag': Number(raw['Routability opt flag'] ?? 1),
-    Clock: String(raw.Clock ?? ''),
-    'Frequency max [MHz]': Number(raw['Frequency max [MHz]'] ?? 100),
+    Clock: String(raw.Clock ?? raw.clock ?? ''),
+    clock: raw.clock != null ? String(raw.clock) : undefined,
+    'Frequency max [MHz]': Number(raw['Frequency max [MHz]'] ?? raw.frequency_max ?? 100),
+    frequency_max: raw.frequency_max != null ? Number(raw.frequency_max) : undefined,
     'Bottom layer': String(raw['Bottom layer'] ?? FIXED_BOTTOM_LAYER),
     'Top layer': String(raw['Top layer'] ?? FIXED_TOP_LAYER),
     'PDK Root': raw['PDK Root'] != null ? String(raw['PDK Root']) : undefined,
+    cpu_filelist: raw.cpu_filelist != null ? String(raw.cpu_filelist) : undefined,
+    soc_filelist: raw.soc_filelist != null ? String(raw.soc_filelist) : undefined,
+    soc_variant: raw.soc_variant != null ? String(raw.soc_variant) : undefined,
+    soc_harness_id: raw.soc_harness_id != null ? String(raw.soc_harness_id) : undefined,
+    soc_wrapper_id: raw.soc_wrapper_id != null ? String(raw.soc_wrapper_id) : undefined,
+    soc_wrapper_contract:
+      raw.soc_wrapper_contract != null ? String(raw.soc_wrapper_contract) : undefined,
+    frontend_core_id:
+      raw.frontend_core_id != null ? String(raw.frontend_core_id) : undefined,
+    core_id: raw.core_id != null ? String(raw.core_id) : undefined,
+    cpu_wrapper_id: raw.cpu_wrapper_id != null ? String(raw.cpu_wrapper_id) : undefined,
+    cpu_wrapper_contract:
+      raw.cpu_wrapper_contract != null ? String(raw.cpu_wrapper_contract) : undefined,
+    cpu_socket_contract:
+      raw.cpu_socket_contract != null ? String(raw.cpu_socket_contract) : undefined,
+    cpu_wrapper_top:
+      raw.cpu_wrapper_top != null ? String(raw.cpu_wrapper_top) : undefined,
+    toolchain_id: raw.toolchain_id != null ? String(raw.toolchain_id) : undefined,
+    test_suite_id: raw.test_suite_id != null ? String(raw.test_suite_id) : undefined,
+    input_filelist: raw.input_filelist != null ? String(raw.input_filelist) : undefined,
+    sim_program_names: normalizeStringArray(raw.sim_program_names),
+    sim_all_tests: Boolean(raw.sim_all_tests),
   }
 }
 
 export function transformParametersToConfig(data: ParametersData): ConfigData {
   return {
+    designTool: data['Design Tool'] || 'backend',
+    description: data.description || '',
     pdk: data.PDK || '',
     pdkRoot: data['PDK Root'] ?? '',
     design: data.Design || '',
@@ -204,6 +305,24 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     frequencyMax: data['Frequency max [MHz]'] ?? 100,
     bottomLayer: FIXED_BOTTOM_LAYER,
     topLayer: FIXED_TOP_LAYER,
+    frontend: {
+      coreId: data.frontend_core_id || data.core_id || '',
+      cpuWrapperId: data.cpu_wrapper_id || data.frontend_core_id || data.core_id || '',
+      cpuWrapperContract: data.cpu_wrapper_contract || '',
+      cpuSocketContract: data.cpu_socket_contract || '',
+      cpuWrapperTop: data.cpu_wrapper_top || '',
+      socHarnessId: data.soc_harness_id || '',
+      socWrapperId: data.soc_wrapper_id || data.soc_harness_id || '',
+      socWrapperContract: data.soc_wrapper_contract || '',
+      socVariant: data.soc_variant || '',
+      toolchainId: data.toolchain_id || '',
+      testSuiteId: data.test_suite_id || '',
+      cpuFilelist: data.cpu_filelist || '',
+      socFilelist: data.soc_filelist || '',
+      inputFilelist: data.input_filelist || '',
+      simProgramNames: [...(data.sim_program_names || [])],
+      simAllTests: Boolean(data.sim_all_tests),
+    },
   }
 }
 
@@ -236,6 +355,31 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
     'Top layer': FIXED_TOP_LAYER,
   }
   out['PDK Root'] = config.pdkRoot ?? ''
+  out['Design Tool'] = config.designTool
+  out.description = config.description
+  if (config.designTool === 'frontend') {
+    out.design = config.design
+    out.top_module = config.topModule
+    out.clock = config.clock
+    out.frequency_max = config.frequencyMax
+    out.frontend_core_id = config.frontend.coreId
+    out.core_id = config.frontend.coreId
+    out.cpu_wrapper_id = config.frontend.cpuWrapperId
+    out.cpu_wrapper_contract = config.frontend.cpuWrapperContract
+    out.cpu_socket_contract = config.frontend.cpuSocketContract
+    out.cpu_wrapper_top = config.frontend.cpuWrapperTop
+    out.soc_harness_id = config.frontend.socHarnessId
+    out.soc_wrapper_id = config.frontend.socWrapperId
+    out.soc_wrapper_contract = config.frontend.socWrapperContract
+    out.soc_variant = config.frontend.socVariant
+    out.toolchain_id = config.frontend.toolchainId
+    out.test_suite_id = config.frontend.testSuiteId
+    out.cpu_filelist = config.frontend.cpuFilelist
+    out.soc_filelist = config.frontend.socFilelist
+    out.input_filelist = config.frontend.inputFilelist
+    out.sim_program_names = [...config.frontend.simProgramNames]
+    out.sim_all_tests = config.frontend.simAllTests
+  }
   return out
 }
 
@@ -363,7 +507,7 @@ export function useParameters() {
 
     try {
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
-      if (workspaceHandle) {
+      if (workspaceHandle && currentProject.value?.designTool !== 'frontend') {
         const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
           getWorkspaceRuntimeSnapshotApi(workspaceHandle),
         )
@@ -460,6 +604,7 @@ export function useParameters() {
           projectPath,
           isDesktopRuntimeAvailable,
           workspaceSession?.value?.workspaceId ?? '',
+          currentProject.value?.designTool ?? 'backend',
         ),
       )
       if (homeData === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
@@ -480,7 +625,7 @@ export function useParameters() {
 
       const parametersPath = convertToLocalPath(homeData.parameters)
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
-      if (workspaceHandle) {
+      if (workspaceHandle && currentProject.value?.designTool !== 'frontend') {
         const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
           getWorkspaceRuntimeSnapshotApi(workspaceHandle),
         )
@@ -628,6 +773,9 @@ export function useParameters() {
         refreshConfigApi({
           cmd: CMDEnum.refresh_config,
           data: {
+            ...(currentProject.value?.designTool === 'frontend'
+              ? { designTool: 'frontend' as const }
+              : {}),
             directory: saveProjectPath,
             workspaceHandle: workspaceLifecycle.session.value.workspaceId,
           },
