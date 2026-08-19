@@ -1,4 +1,10 @@
-import { appendFileSync, mkdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname } from 'node:path'
 import { format } from 'node:util'
 

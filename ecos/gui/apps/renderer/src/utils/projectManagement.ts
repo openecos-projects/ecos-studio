@@ -1408,7 +1408,7 @@ function buildProjectWorkspace(
     startStep,
     endStep,
     depth,
-    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep),
+    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep, flowStateMap),
     steps,
   }
 }
@@ -1486,12 +1486,15 @@ function buildFlowStatusHint(
   steps: ProjectStepCell[],
   startStep: FlowStep,
   endStep: FlowStep,
+  flowStateMap: ProjectWorkspaceFlowStateMap,
 ): ProjectFlowStatusHint {
   const startIndex = FLOW_STEPS.indexOf(startStep)
   const endIndex = FLOW_STEPS.indexOf(endStep)
+  const recordedFlow = Object.keys(flowStateMap).length > 0
   const configuredSteps = steps.filter((cell) => {
     const stepIndex = FLOW_STEPS.indexOf(cell.step)
-    return stepIndex >= startIndex && stepIndex <= endIndex
+    if (stepIndex < startIndex || stepIndex > endIndex) return false
+    return !recordedFlow || flowStateMap[cell.step] !== undefined
   })
   const firstIncomplete = configuredSteps.find(
     (cell) => !isCompletedStepStatus(cell.status),
@@ -1550,6 +1553,8 @@ function buildStepCell(
         ? 'reused'
         : 'skipped'
   } else if (isAfterEnd) {
+    status = 'skipped'
+  } else if (Object.keys(flowStateMap).length > 0) {
     status = 'skipped'
   } else if (workspace.status === 'running') {
     status = 'running'

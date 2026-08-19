@@ -599,9 +599,11 @@ describe('project management V3 model', () => {
     const withoutLvs = Object.fromEntries(
       FLOW_STEPS.filter((step) => step !== 'LVS').map((step) => [step, 'success']),
     ) as Partial<Record<FlowStep, 'success'>>
+    const successManifest = manifestWithWorkspace()
+    successManifest.workspaces[0]!.status = 'success'
     const modelWithoutLvs = buildProjectManagementProject(
       project,
-      manifestWithWorkspace(),
+      successManifest,
       { ws_0004: withoutLvs },
       { ws_0004: v3Inputs() },
     )
@@ -609,6 +611,19 @@ describe('project management V3 model', () => {
     expect(modelWithoutLvs.qorTrendSummary.workspaces[0]?.missingMetrics).not.toContain(
       'lvs_count',
     )
+    expect(
+      modelWithoutLvs.workspaces[0]?.steps.find((step) => step.step === 'LVS'),
+    ).toMatchObject({ status: 'skipped', canCreateWorkspace: false })
+    expect(modelWithoutLvs.workspaces[0]?.flowStatusHint.state).toBe('success')
+
+    const runningManifest = manifestWithWorkspace()
+    runningManifest.workspaces[0]!.status = 'running'
+    const runningWithoutLvs = buildProjectManagementProject(project, runningManifest, {
+      ws_0004: withoutLvs,
+    })
+    expect(
+      runningWithoutLvs.workspaces[0]?.steps.find((step) => step.step === 'LVS'),
+    ).toMatchObject({ status: 'skipped', canCreateWorkspace: false })
 
     const model = buildProjectManagementProject(
       project,

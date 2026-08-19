@@ -246,7 +246,9 @@ export class EccRpcSidecarProcess {
       this.clearForceKillTimer()
       const reason = this.shuttingDown ? 'shutdown' : 'unexpected'
       const message =
-        reason === 'unexpected' ? this.formatUnexpectedExitMessage(code, signal) : undefined
+        reason === 'unexpected'
+          ? this.formatUnexpectedExitMessage(code, signal)
+          : undefined
       if (message) {
         this.logUnexpectedExit(message)
       }

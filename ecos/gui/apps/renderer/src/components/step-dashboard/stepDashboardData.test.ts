@@ -52,6 +52,13 @@ describe('step dashboard data', () => {
         violations: [{ id: 'short' }, { id: 'open' }],
       }),
     ).toMatchObject([{ id: 'lvs-count', label: 'LVS count', value: 2 }])
+    expect(
+      stepKeyMetrics('lvs', {
+        entity: [],
+        connectivity: [],
+        violations: [{ id: 'short' }, { id: 'open' }],
+      }),
+    ).toMatchObject([{ id: 'lvs-count', label: 'LVS count', value: 2 }])
     expect(stepKeyMetrics('lvs', { lvs: {} })).toEqual([])
   })
 

@@ -416,9 +416,9 @@ export function runSummary(value: unknown): {
 export function stepKeyMetrics(step: string, value: unknown): StepDashboardMetric[] {
   const source = record(value)
   if (!source) return []
-  const section = stepSection(step, source)
-  if (!section) return []
   const canonical = step.trim().toLowerCase()
+  const section = stepSection(step, source) ?? (canonical === 'lvs' ? source : null)
+  if (!section) return []
   const output: StepDashboardMetric[] = []
 
   if (canonical === 'cts') {
