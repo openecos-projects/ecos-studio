@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 
 PLACE_SOURCE_PATHS = {
-    "dreamplace.config": "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace.json",
+    "dreamplace.config": "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json",
     "dreamplace.overrides": "ecc/chipcompiler/tools/ecc_dreamplace/parameter_overrides.py",
     "ecos.params": "ecc/chipcompiler/cli/project/params.py",
     "dreamplace.runner": "ecc/chipcompiler/tools/ecc_dreamplace/runner.py",

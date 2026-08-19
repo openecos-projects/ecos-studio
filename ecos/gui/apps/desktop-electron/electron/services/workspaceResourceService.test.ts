@@ -468,11 +468,11 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
-  it('does not expose configuration for Synthesis even when flow_config.json exists', async () => {
+  it('does not expose configuration for Synthesis even when flow_ecc.json exists', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'Synthesis', tool: 'yosys' }])
     await mkdir(join(root, 'config'), { recursive: true })
-    await writeFile(join(root, 'config', 'flow_config.json'), '{}', 'utf8')
+    await writeFile(join(root, 'config', 'flow_ecc.json'), '{}', 'utf8')
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const result = await service.resolveStepInfo({ step: 'synthesis', id: 'config' })
@@ -488,15 +488,15 @@ describe('WorkspaceResourceService', () => {
   })
 
   it.each([
-    ['Floorplan', 'fp_default_config.json'],
-    ['fixFanout', 'no_default_config_fixfanout.json'],
-    ['CTS', 'cts_default_config.json'],
-    ['route', 'rt_default_config.json'],
-    ['drc', 'drc_default_config.json'],
-    ['filler', 'pl_default_config.json'],
-    ['RCX', 'rcx.json'],
-    ['sta', 'sta.json'],
-    ['db', 'db_default_config.json'],
+    ['Floorplan', 'floorplan_ecc.json'],
+    ['fixFanout', 'fixfanout_ecc.json'],
+    ['CTS', 'cts_ecc.json'],
+    ['route', 'route_ecc.json'],
+    ['drc', 'drc_ecc.json'],
+    ['filler', 'filler_ecc.json'],
+    ['RCX', 'rcx_ecc.json'],
+    ['sta', 'sta_ecc.json'],
+    ['db', 'db_ecc.json'],
   ])(
     'maps ECC %s config to the workspace config directory',
     async (stepName, configFile) => {
@@ -526,20 +526,16 @@ describe('WorkspaceResourceService', () => {
     ['Timing optimization', []],
     ['Signoff', []],
     ['lvs', ['drc_default_config.json', 'flow_config.json']],
-    ['Harden', ['sta.json']],
-    ['place', ['pl_default_config.json']],
-    ['legalization', ['pl_default_config.json']],
+    ['Harden', ['sta_ecc.json']],
+    ['place', ['filler_ecc.json']],
+    ['legalization', ['filler_ecc.json']],
   ])(
     'does not expose configuration for ECC %s even when unrelated config files exist',
     async (stepName, extraConfigFiles) => {
       const root = await tempWorkspace()
       await writeWorkspace(root, [{ name: stepName, tool: 'ecc' }])
       await mkdir(join(root, 'config'), { recursive: true })
-      await writeFile(
-        join(root, 'config', 'flow_config.json'),
-        '{"ConfigPath":{}}',
-        'utf8',
-      )
+      await writeFile(join(root, 'config', 'flow_ecc.json'), '{"ConfigPath":{}}', 'utf8')
       await Promise.all(
         extraConfigFiles.map((filename) =>
           writeFile(join(root, 'config', filename), '{}', 'utf8'),

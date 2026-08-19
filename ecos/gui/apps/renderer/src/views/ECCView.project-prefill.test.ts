@@ -58,9 +58,7 @@ describe('ECCView project management handoff', () => {
     expect(source).toContain("readOptionalProjectTextFile('home/parameters.json'")
     expect(source).not.toContain("readOptionalProjectTextFile('home/flow.json'")
     expect(source).toContain("readOptionalProjectTextFile('home/pdk.json'")
-    expect(source).toContain(
-      "readOptionalProjectTextFile('config/db_default_config.json'",
-    )
+    expect(source).toContain("readOptionalProjectTextFile('config/db_ecc.json'")
     expect(source).toContain('tech_lef_path')
     expect(source).toContain('lef_paths')
     expect(source).toContain('lib_path')

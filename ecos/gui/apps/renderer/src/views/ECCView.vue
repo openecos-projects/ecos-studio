@@ -399,7 +399,7 @@ async function loadSourceWorkspaceInitialConfig(
         projectPath: sourceWorkspacePath,
       }),
       readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
-      readOptionalProjectTextFile('config/db_default_config.json', {
+      readOptionalProjectTextFile('config/db_ecc.json', {
         projectPath: sourceWorkspacePath,
       }),
     ])

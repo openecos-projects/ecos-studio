@@ -47,7 +47,7 @@ describe('flow API desktop bridge payloads', () => {
     const syncConfig = vi.fn(async (request: unknown) => {
       expect(() => structuredClone(request)).not.toThrow()
       return {
-        configPath: '/work/demo/config/rt_default_config.json',
+        configPath: '/work/demo/config/route_ecc.json',
         directory: '/work/demo',
         parametersChanged: true,
         refreshed: true,
@@ -117,7 +117,7 @@ describe('flow API desktop bridge payloads', () => {
       reactive({
         cmd: CMDEnum.sync_config,
         data: {
-          config_path: '/work/demo/config/rt_default_config.json',
+          config_path: '/work/demo/config/route_ecc.json',
           directory: '/work/demo',
           workspaceHandle: 'workspace-handle-1',
         },
@@ -147,7 +147,7 @@ describe('flow API desktop bridge payloads', () => {
       workspaceHandle: 'workspace-handle-1',
     })
     expect(syncConfig).toHaveBeenCalledWith({
-      configPath: '/work/demo/config/rt_default_config.json',
+      configPath: '/work/demo/config/route_ecc.json',
       designTool: 'backend',
       workspaceHandle: 'workspace-handle-1',
     })

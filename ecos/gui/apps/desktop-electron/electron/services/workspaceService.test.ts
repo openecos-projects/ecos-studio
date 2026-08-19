@@ -728,7 +728,7 @@ describe('WorkspaceService', () => {
 
   it('blocks step config writes while the workspace runtime is active', async () => {
     const directory = await createTempDir('ecos-workspace-service-step-config-lock-')
-    const filePath = join(directory, 'config', 'cts_default_config.json')
+    const filePath = join(directory, 'config', 'cts_ecc.json')
     const runtimeMutationGuard = {
       isWorkspaceRuntimeActive: vi.fn().mockReturnValue(true),
     }
@@ -739,7 +739,7 @@ describe('WorkspaceService', () => {
 
     await expect(
       service.writeProjectTextFile(
-        '/workspace/config/cts_default_config.json',
+        '/workspace/config/cts_ecc.json',
         '{"skew_bound":0.1}',
       ),
     ).rejects.toThrow('workspace flow is running')

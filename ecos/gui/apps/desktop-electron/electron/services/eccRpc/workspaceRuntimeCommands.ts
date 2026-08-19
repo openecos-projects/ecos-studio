@@ -31,6 +31,7 @@ import type {
 
 import { EccJsonRpcError } from './jsonRpcClient'
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
+import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
 
 export interface EccWorkspaceSessionResult {
@@ -100,6 +101,7 @@ export class WorkspaceRuntimeCommands {
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     return this.context.enqueue('workspace.open', undefined, async () => {
+      await migrateWorkspaceConfigFilenames(request.directory)
       if (this.context.lazyWorkspaceOpen) {
         const existing = this.context.sessions.findByDirectory(request.directory)
         const session =

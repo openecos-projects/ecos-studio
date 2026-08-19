@@ -22,7 +22,7 @@ def _load_place_knowledge(root: Path = BUNDLE_ROOT) -> StepKnowledge:
 def test_published_bundle_covers_every_default_dreamplace_parameter() -> None:
     knowledge = _load_place_knowledge()
     config = json.loads(
-        (ECOS_ROOT / "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace.json").read_text(
+        (ECOS_ROOT / "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json").read_text(
             encoding="utf-8"
         )
     )

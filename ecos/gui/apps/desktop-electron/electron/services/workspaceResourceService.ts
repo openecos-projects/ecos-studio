@@ -10,6 +10,7 @@ import type {
   WorkspaceTechResources,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
+import { migrateWorkspaceConfigFilenames } from './eccRpc/workspaceConfigMigration'
 
 type WorkspaceResourceFileKind = WorkspaceResourceFile['kind']
 type ResourceBucketName = keyof WorkspaceStepResource['resources']
@@ -53,21 +54,21 @@ export class WorkspaceResourceService {
   }
 
   async readHome(): Promise<Record<string, unknown> | null> {
-    return await this.readJsonOrNull(
-      join(await this.projectScopeProvider.getProjectRoot(), 'home', 'home.json'),
-    )
+    const root = await this.projectScopeProvider.getProjectRoot()
+    await migrateWorkspaceConfigFilenames(root)
+    return await this.readJsonOrNull(join(root, 'home', 'home.json'))
   }
 
   async readFlow(): Promise<Record<string, unknown> | null> {
-    return await this.readJsonOrNull(
-      join(await this.projectScopeProvider.getProjectRoot(), 'home', 'flow.json'),
-    )
+    const root = await this.projectScopeProvider.getProjectRoot()
+    await migrateWorkspaceConfigFilenames(root)
+    return await this.readJsonOrNull(join(root, 'home', 'flow.json'))
   }
 
   async readParameters(): Promise<Record<string, unknown> | null> {
-    return await this.readJsonOrNull(
-      join(await this.projectScopeProvider.getProjectRoot(), 'home', 'parameters.json'),
-    )
+    const root = await this.projectScopeProvider.getProjectRoot()
+    await migrateWorkspaceConfigFilenames(root)
+    return await this.readJsonOrNull(join(root, 'home', 'parameters.json'))
   }
 
   async resolveStepInfo(
@@ -132,6 +133,7 @@ export class WorkspaceResourceService {
 
   private async buildIndex(): Promise<IndexBuildResult> {
     const root = await this.projectScopeProvider.getProjectRoot()
+    await migrateWorkspaceConfigFilenames(root)
     const messages: string[] = []
     const statErrors: string[] = []
     const homePath = join(root, 'home', 'home.json')
@@ -220,7 +222,7 @@ export class WorkspaceResourceService {
     } else if (toolKey === 'dreamplace') {
       addEccLikeResources(resources, root, directory, design, topModule, step.name)
       resources.config.dreamplace = createFile(
-        join(root, 'config', 'dreamplace.json'),
+        join(root, 'config', 'dreamplace_ecc.json'),
         'config',
       )
     } else if (isFrontendTool(toolKey)) {
@@ -817,37 +819,22 @@ function addEccConfigResources(
   stepName: string,
 ): void {
   resources.config.dir = createFile(join(root, 'config'), 'config')
-  resources.config.flow = createFile(join(root, 'config', 'flow_config.json'), 'config')
-  resources.config.db = createFile(
-    join(root, 'config', 'db_default_config.json'),
-    'config',
-  )
-  resources.config.cts = createFile(
-    join(root, 'config', 'cts_default_config.json'),
-    'config',
-  )
-  resources.config.drc = createFile(
-    join(root, 'config', 'drc_default_config.json'),
-    'config',
-  )
+  resources.config.flow = createFile(join(root, 'config', 'flow_ecc.json'), 'config')
+  resources.config.db = createFile(join(root, 'config', 'db_ecc.json'), 'config')
+  resources.config.cts = createFile(join(root, 'config', 'cts_ecc.json'), 'config')
+  resources.config.drc = createFile(join(root, 'config', 'drc_ecc.json'), 'config')
   resources.config.floorplan = createFile(
-    join(root, 'config', 'fp_default_config.json'),
+    join(root, 'config', 'floorplan_ecc.json'),
     'config',
   )
   resources.config.netlist_opt = createFile(
-    join(root, 'config', 'no_default_config_fixfanout.json'),
+    join(root, 'config', 'fixfanout_ecc.json'),
     'config',
   )
-  resources.config.routing = createFile(
-    join(root, 'config', 'rt_default_config.json'),
-    'config',
-  )
-  resources.config.rcx = createFile(join(root, 'config', 'rcx.json'), 'config')
-  resources.config.sta = createFile(join(root, 'config', 'sta.json'), 'config')
-  resources.config.filler = createFile(
-    join(root, 'config', 'pl_default_config.json'),
-    'config',
-  )
+  resources.config.routing = createFile(join(root, 'config', 'route_ecc.json'), 'config')
+  resources.config.rcx = createFile(join(root, 'config', 'rcx_ecc.json'), 'config')
+  resources.config.sta = createFile(join(root, 'config', 'sta_ecc.json'), 'config')
+  resources.config.filler = createFile(join(root, 'config', 'filler_ecc.json'), 'config')
   const stepConfig = configResourceForEccStep(resources.config, stepName)
   if (stepConfig) resources.config.config = stepConfig
 }

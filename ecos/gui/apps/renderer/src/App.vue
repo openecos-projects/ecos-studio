@@ -531,7 +531,7 @@ async function buildReconfigureWizardInitialConfig(
   const [parametersText, pdkText, dbConfigText, flowText] = await Promise.all([
     readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
     readOptionalProjectTextFile('home/pdk.json', { projectPath: workspacePath }),
-    readOptionalProjectTextFile('config/db_default_config.json', {
+    readOptionalProjectTextFile('config/db_ecc.json', {
       projectPath: workspacePath,
     }),
     readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
