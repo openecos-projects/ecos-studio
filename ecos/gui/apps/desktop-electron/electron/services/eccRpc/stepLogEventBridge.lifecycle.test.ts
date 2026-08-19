@@ -193,6 +193,57 @@ describe('StepLogEventBridge lifecycle', () => {
     expect(synthesized.at(-1)?.payload.chunk).toBe('second attempt\n')
   })
 
+  it('does not let a previous operation’s end token satisfy a new completion', () => {
+    vi.useFakeTimers()
+    const h = harness({ holdTimeoutMs: 2000 })
+    writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
+    startOperation(h)
+    startStep(h, 'Synthesis', 'yosys')
+    // The end marker arrives but the executor crashes before step.completed;
+    // the terminal forwards and must clear the unmatched token with it.
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('crashed run\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    h.bridge.handleProtocolEvent(
+      protocolEvent('operation.failed', { error: 'executor crashed' }, { sequence: 3 }),
+      h.forward,
+    )
+    expect(h.forwarded.map((event) => event.type)).toContain('operation.failed')
+
+    // The next operation completes the same step with its own markers; the
+    // stale token is gone, so this completion waits for its own StepEnded.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'operation.started',
+        {},
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 4 },
+      ),
+      h.forward,
+    )
+    startStep(h, 'Synthesis', 'yosys', 5)
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('second run\n'))
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Success' },
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 6 },
+      ),
+      h.forward,
+    )
+    expect(
+      h.forwarded.filter(
+        (event) => event.type === 'step.completed' && event.operationId === 'operation-2',
+      ),
+    ).toHaveLength(0)
+
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    const completed = h.forwarded.filter(
+      (event) => event.type === 'step.completed' && event.operationId === 'operation-2',
+    )
+    expect(completed).toHaveLength(1)
+    expect(completed[0]!.payload.finalLog).toBe('second run\n')
+    expect(h.unscoped.join('')).not.toContain('did not arrive')
+  })
+
   it('tracks attempts across reruns when completion precedes the end marker', () => {
     const h = harness()
     writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])

@@ -301,7 +301,8 @@ describe('StepLogEventBridge', () => {
   })
 
   it('releases pre-operation.started segments with the current operation identity', () => {
-    const h = harness()
+    vi.useFakeTimers()
+    const h = harness({ holdTimeoutMs: 2000 })
     writeFlowJson(h.workspace, [{ name: 'Synthesis', tool: 'yosys' }])
     // The workspace-open path loads the allowlist before any operation.
     h.bridge.refreshAllowlist()
@@ -321,6 +322,24 @@ describe('StepLogEventBridge', () => {
       type: 'step.log',
     })
     expect(h.emitted[0]!.payload.chunk).toBe('raced output\n')
+
+    // The end that raced ahead is preserved as a pending token: the later
+    // step.completed forwards immediately with the complete finalLog, no
+    // hold timeout involved.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Success' },
+        { sequence: 3 },
+      ),
+      h.forward,
+    )
+    const completed = h.forwarded.filter((event) => event.type === 'step.completed')
+    expect(completed).toHaveLength(1)
+    expect(completed[0]!.payload.finalLog).toBe('raced output\n')
+    vi.advanceTimersByTime(2000)
+    expect(h.forwarded.filter((event) => event.type === 'step.completed')).toHaveLength(1)
+    expect(h.unscoped.join('')).not.toContain('did not arrive')
   })
 
   it('attributes segments to the operation that produced them across operations', () => {

@@ -76,8 +76,13 @@ export class StepLogEventBridge {
   private lastSequence = 0
   private readonly startedSteps = new Set<string>()
   private readonly bufferedSegments = new Map<string, StepLogSegment[]>()
-  private readonly endedStepCounts = new Map<string, number>()
-  private readonly completedStepCounts = new Map<string, number>()
+  // Per-key pending-end tokens: a matched StepEnded adds one, a forwarded
+  // step.completed consumes one. Tokens belong to byte evidence, not to an
+  // operation boundary, so operation.started never clears them (the stderr
+  // stream can race ahead of it); they are cleared only when the previous
+  // operation's terminal event is actually forwarded, so a stale operation
+  // cannot satisfy the next one.
+  private readonly pendingEndTokens = new Map<string, number>()
   private heldCompleted: HeldStepCompleted | null = null
   private pendingTerminal: PendingTerminalEvent | null = null
   private heldTerminal: HeldTerminalEvent | null = null
@@ -155,10 +160,9 @@ export class StepLogEventBridge {
       }
       // Segments that arrived before operation.started (the stderr stream
       // races the RPC channel) stay buffered: they belong to this operation
-      // and are released by their step.started with the new context.
+      // and are released by their step.started with the new context. End
+      // tokens from the same race likewise stay pending for this operation.
       this.startedSteps.clear()
-      this.endedStepCounts.clear()
-      this.completedStepCounts.clear()
       this.refreshAllowlist()
       forward(event)
       return
@@ -191,7 +195,7 @@ export class StepLogEventBridge {
                 `[step-log] end marker for step ${this.archiver.activeStep?.step ?? 'unknown'} did not arrive before ${event.type}; releasing after ${this.holdTimeoutMs}ms\n`,
               )
               this.archiver.abandonActiveStep()
-              this.bufferedSegments.clear()
+              this.clearCorrelationState()
               this.operationContext = null
               held.forward(held.event)
             }
@@ -204,7 +208,7 @@ export class StepLogEventBridge {
       // Any segment still buffered at a terminal boundary belongs to a step
       // whose step.started never arrived (crash); the archive file holds the
       // bytes, so only synthesis is dropped.
-      this.bufferedSegments.clear()
+      this.clearCorrelationState()
       this.operationContext = null
       forward(event)
       return
@@ -252,10 +256,15 @@ export class StepLogEventBridge {
     }
     this.operationContext = null
     this.lastSequence = 0
+    this.clearCorrelationState()
+  }
+
+  /** Drop per-step correlation state; called when an operation terminal is
+   * forwarded (or the sidecar closes), never at operation start. */
+  private clearCorrelationState(): void {
     this.startedSteps.clear()
     this.bufferedSegments.clear()
-    this.endedStepCounts.clear()
-    this.completedStepCounts.clear()
+    this.pendingEndTokens.clear()
   }
 
   private handleSegment(segment: StepLogSegment): void {
@@ -278,14 +287,14 @@ export class StepLogEventBridge {
 
   private handleStepEnded(ref: StepLogStepRef): void {
     const key = stepLogKey(ref.step, ref.tool)
-    this.endedStepCounts.set(key, (this.endedStepCounts.get(key) ?? 0) + 1)
+    this.pendingEndTokens.set(key, (this.pendingEndTokens.get(key) ?? 0) + 1)
     const heldTerminal = this.heldTerminal
     if (heldTerminal) {
       // The end marker arrived: the archive is complete and the terminal
       // event can forward in lifecycle order.
       this.heldTerminal = null
       clearTimeout(heldTerminal.timer)
-      this.bufferedSegments.clear()
+      this.clearCorrelationState()
       this.operationContext = null
       heldTerminal.forward(heldTerminal.event)
     }
@@ -317,12 +326,11 @@ export class StepLogEventBridge {
       return
     }
     const key = stepLogKey(step, tool)
-    const ended = this.endedStepCounts.get(key) ?? 0
-    const completed = this.completedStepCounts.get(key) ?? 0
-    if (ended > completed) {
+    const tokens = this.pendingEndTokens.get(key) ?? 0
+    if (tokens > 0) {
       // Common case: the end marker arrived before step.completed, so the
       // archive already holds every byte of this attempt.
-      this.completedStepCounts.set(key, completed + 1)
+      this.pendingEndTokens.set(key, tokens - 1)
       this.forwardWithFinalLog(event, forward)
       return
     }
@@ -362,14 +370,18 @@ export class StepLogEventBridge {
     const tool =
       typeof held.event.payload.tool === 'string' ? held.event.payload.tool : ''
     this.archiver.flushStep(step)
-    // Every forwarded completion consumes one attempt, however it released.
+    // A held completion released by its StepEnded consumes that token
+    // (timeout/supersede releases have no token to consume).
     const key = stepLogKey(step, tool)
-    this.completedStepCounts.set(key, (this.completedStepCounts.get(key) ?? 0) + 1)
+    const tokens = this.pendingEndTokens.get(key) ?? 0
+    if (tokens > 0) {
+      this.pendingEndTokens.set(key, tokens - 1)
+    }
     this.forwardWithFinalLog(held.event, held.forward)
     const pending = this.pendingTerminal
     if (pending) {
       this.pendingTerminal = null
-      this.bufferedSegments.clear()
+      this.clearCorrelationState()
       this.operationContext = null
       pending.forward(pending.event)
     }
