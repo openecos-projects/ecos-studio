@@ -18,6 +18,7 @@ import type {
   EccRuntimeEvent,
   EccRuntimeOperation,
   EccRuntimeOperationRequest,
+  EccRuntimeProtocolPayload,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccRuntimeStepRenderedAckRequest,
@@ -47,7 +48,10 @@ import {
   isRuntimeProtocolPayload,
 } from './runtimeOperationTracker'
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
+import { shutdownBarrierFrom } from './runtimeClient'
 import { RuntimeSidecarLifecycle } from './runtimeSidecarLifecycle'
+import { StepLogEventBridge } from './stepLogEventBridge'
+import { attachStepLogBridge, wrapProtocolEvent } from './runtimeProtocolFanout'
 import {
   WorkspaceRuntimeCommands,
   type EccWorkspaceSessionResult,
@@ -100,6 +104,7 @@ export class EccWorkspaceRuntime {
   private queue = Promise.resolve()
   private ready = false
   private boundDirectory: string | null
+  private stepLogBridge: StepLogEventBridge | null = null
 
   constructor(private readonly options: EccWorkspaceRuntimeOptions) {
     this.boundDirectory = options.directory
@@ -108,6 +113,12 @@ export class EccWorkspaceRuntime {
       (event) => this.handleSidecarEvent(event),
       (notification) => this.handleNotification(notification),
     )
+    this.stepLogBridge = attachStepLogBridge({
+      directory: this.boundDirectory,
+      sidecar: this.sidecar,
+      emitProtocolEvent: (event) => this.emitProtocolEvent(event),
+      emitRuntimeEvent: (event) => this.handleSidecarEvent(event),
+    })
     this.sidecarLifecycle = new RuntimeSidecarLifecycle({
       captureFinalSnapshot: async (workspaceId) => {
         const client = this.client
@@ -281,7 +292,10 @@ export class EccWorkspaceRuntime {
   }
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
-    return this.commands.openWorkspace(request)
+    return this.commands.openWorkspace(request).then((result) => {
+      this.stepLogBridge?.refreshAllowlist()
+      return result
+    })
   }
 
   closeWorkspace(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult> {
@@ -673,6 +687,7 @@ export class EccWorkspaceRuntime {
       return
     }
     if (event.type === 'runtime.exited') {
+      this.stepLogBridge?.handleSidecarClose()
       this.client = null
       this.ready = false
       this.helloResult = null
@@ -717,10 +732,19 @@ export class EccWorkspaceRuntime {
       return
     }
     const protocolEvent = notification.params
+    if (this.stepLogBridge) {
+      this.stepLogBridge.handleProtocolEvent(protocolEvent, (event) =>
+        this.trackAndEmitProtocolEvent(event),
+      )
+      return
+    }
+    this.trackAndEmitProtocolEvent(protocolEvent)
+  }
+
+  private trackAndEmitProtocolEvent(protocolEvent: EccRuntimeProtocolPayload): void {
     const terminalAlreadyRecorded = this.operationTracker.hasTerminalOperation(
       protocolEvent.operationId,
     )
-    const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     const isTerminal = this.operationTracker.track(protocolEvent)
     if (
       protocolEvent.type === 'operation.completed' &&
@@ -740,19 +764,11 @@ export class EccWorkspaceRuntime {
     ) {
       this.sidecarLifecycle.retainFailedOperationForDiagnostics()
     }
-    this.emit({
-      event: protocolEvent,
-      type: 'runtime.protocol',
-      ...(session
-        ? {
-            workspaceDirectory: session.directory,
-            workspaceHandle: session.workspaceHandle,
-          }
-        : {}),
-      ...(this.boundDirectory && !session
-        ? { workspaceDirectory: this.boundDirectory }
-        : {}),
-    })
+    this.emitProtocolEvent(protocolEvent)
+  }
+
+  private emitProtocolEvent(protocolEvent: EccRuntimeProtocolPayload): void {
+    this.emit(wrapProtocolEvent(this.sessions, this.boundDirectory, protocolEvent))
   }
 
   private runtimeDirectoryForHandle(workspaceHandle: string | undefined): string | null {
@@ -772,20 +788,4 @@ export class EccWorkspaceRuntime {
       listener(event)
     }
   }
-}
-
-function shutdownBarrierFrom(
-  error: unknown,
-): NonNullable<EccRpcShutdownResult['shutdownBarrier']> | null {
-  if (!(error instanceof Error) || !('shutdownBarrier' in error)) return null
-  const barrier = (error as Error & { shutdownBarrier?: unknown }).shutdownBarrier
-  if (typeof barrier !== 'object' || barrier === null || Array.isArray(barrier))
-    return null
-  const value = barrier as Record<string, unknown>
-  return typeof value.operationId === 'string' &&
-    typeof value.state === 'string' &&
-    typeof value.step === 'string' &&
-    typeof value.workspaceId === 'string'
-    ? (value as NonNullable<EccRpcShutdownResult['shutdownBarrier']>)
-    : null
 }

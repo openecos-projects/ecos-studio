@@ -16,6 +16,7 @@ import type { EccRuntimeEvent } from '@ecos-studio/shared'
 
 import { electronLogger } from '../logger'
 import { EccJsonRpcClient, type JsonRpcNotificationPayload } from './jsonRpcClient'
+import type { StepLogArchiver } from './stepLogArchiver'
 
 const STDERR_TAIL_CHARS = 8000
 
@@ -129,6 +130,7 @@ export class EccRpcSidecarProcess {
   private forceKillTimer: ReturnType<typeof setTimeout> | null = null
   private shuttingDown = false
   private spawnEnv: NodeJS.ProcessEnv | null = null
+  private stepLogArchiver: StepLogArchiver | null = null
   private stderrTail = ''
   private spawnLaunchKey: string | null = null
   logFile: string | null = null
@@ -227,13 +229,12 @@ export class EccRpcSidecarProcess {
     })
 
     child.stderr?.on('data', (chunk) => {
-      const text = dataToString(chunk)
-      this.captureOutput(text)
-      this.options.onEvent?.({
-        logFile: this.logFile ?? undefined,
-        text,
-        type: 'runtime.stderr',
-      })
+      const archiver = this.stepLogArchiver
+      if (archiver) {
+        archiver.feed(chunk as Buffer)
+        return
+      }
+      this.appendStderrText(dataToString(chunk))
     })
 
     child.once('error', (error) => {
@@ -279,6 +280,26 @@ export class EccRpcSidecarProcess {
       return
     }
     await this.stopForRestart(child)
+  }
+
+  /**
+   * Route the sidecar's raw stderr bytes through the step log archiver.
+   * Until an archiver is attached, all stderr keeps the default handling
+   * (sidecar log file plus runtime.stderr events); after attachment, only
+   * bytes the archiver classifies as unscoped take that path.
+   */
+  attachStepLogArchiver(archiver: StepLogArchiver): void {
+    this.stepLogArchiver = archiver
+  }
+
+  /** Default handling for stderr text that is not attributed to any step. */
+  appendStderrText(text: string): void {
+    this.captureOutput(text)
+    this.options.onEvent?.({
+      logFile: this.logFile ?? undefined,
+      text,
+      type: 'runtime.stderr',
+    })
   }
 
   /**

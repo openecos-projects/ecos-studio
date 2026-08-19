@@ -22,6 +22,7 @@ import {
   EccRpcSidecarProcess,
   type SpawnedEccRpcSidecar,
 } from './sidecarProcess'
+import { readFlowJsonStepAllowlist, StepLogArchiver } from './stepLogArchiver'
 import { encodeContentLengthFrame } from './transport'
 
 class FakeWritable extends Writable {
@@ -489,6 +490,67 @@ describe('EccRpcSidecarProcess', () => {
       '[runtime] %s\n%s',
       `ECC RPC sidecar exited with code 1. See ${sidecar.logFile}`,
       'CMake Error: missing evaluation/test directory',
+    )
+  })
+
+  it('routes scoped bytes only to the step archive while unscoped bytes reach the log, stderr event, and exit tail', async () => {
+    const child = new FakeChild()
+    const tempDir = mkdtempSync(join(tmpdir(), 'ecc-rpc-sidecar-'))
+    const workspaceDirectory = join(tempDir, 'workspace')
+    mkdirSync(join(workspaceDirectory, 'home'), { recursive: true })
+    writeFileSync(
+      join(workspaceDirectory, 'home', 'flow.json'),
+      JSON.stringify({ steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Unstart' }] }),
+    )
+    const events: unknown[] = []
+    const sidecar = new EccRpcSidecarProcess({
+      onEvent: (event) => events.push(event),
+      spawn: () => child,
+      tempDir,
+    })
+    const client = await sidecar.start()
+    const archiver = new StepLogArchiver({
+      workspaceDirectory,
+      onSegment: () => {},
+      onStepEnded: () => {},
+      // The fanout wiring: archiver-rejected bytes take the default path.
+      onUnscoped: (text) => sidecar.appendStderrText(text),
+    })
+    archiver.refreshAllowlist(readFlowJsonStepAllowlist(workspaceDirectory))
+    sidecar.attachStepLogArchiver(archiver)
+
+    child.stderr.write(
+      '\x1eECC-STEP {"v":1,"event":"begin","step":"Synthesis","tool":"yosys"}\n',
+    )
+    child.stderr.write('scoped tool bytes\n')
+    child.stderr.write(
+      '\x1eECC-STEP {"v":1,"event":"end","step":"Synthesis","tool":"yosys"}\n',
+    )
+    child.stderr.write('unscoped noise\n')
+
+    // Scoped bytes land in the step archive only — never in the sidecar
+    // log, the stderr events, or the exit diagnostic tail.
+    const stepLog = join(workspaceDirectory, 'Synthesis_yosys', 'log', 'Synthesis.log')
+    expect(readFileSync(stepLog, 'utf8')).toBe('scoped tool bytes\n')
+    const logFile = sidecar.logFile!
+    expect(readFileSync(logFile, 'utf8')).not.toContain('scoped tool bytes')
+    expect(readFileSync(logFile, 'utf8')).toContain('unscoped noise')
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining('scoped tool bytes') }),
+    )
+    expect(events).toContainEqual({
+      logFile,
+      text: 'unscoped noise\n',
+      type: 'runtime.stderr',
+    })
+
+    const promise = client.call('rpc.ping')
+    child.emit('close', 1, null)
+    await expect(promise).rejects.toThrow('ECC RPC sidecar exited')
+    expect(electronLogger.error).toHaveBeenCalledWith(
+      '[runtime] %s\n%s',
+      `ECC RPC sidecar exited with code 1. See ${logFile}`,
+      'unscoped noise',
     )
   })
 
