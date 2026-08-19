@@ -276,7 +276,7 @@ export class StepLogArchiver {
       }
       const newline = this.buffer.indexOf(0x0a)
       if (newline < 0) {
-        if (this.buffer.length < MARKER_HOLDBACK_BYTES) {
+        if (this.buffer.length <= MARKER_HOLDBACK_BYTES) {
           return
         }
         // An overlong candidate without a newline is not a marker: emit the

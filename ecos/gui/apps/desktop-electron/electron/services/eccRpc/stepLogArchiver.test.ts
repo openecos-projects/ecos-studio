@@ -254,6 +254,42 @@ describe('StepLogArchiver marker state machine', () => {
     expect(h.unscoped).toEqual([])
   })
 
+  it('holds a candidate at exactly 512 bytes, then consumes the frame', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
+    const prefix = Buffer.from('\x1eECC-STEP ', 'utf8')
+    // Pad via an extra JSON field (protocol-legal) so the step name stays
+    // short enough for the filesystem.
+    const wrapper = '{"v":1,"event":"begin","step":"S","tool":"T","pad":""}'
+    const pad = 512 - prefix.length - wrapper.length
+    const frameHead = Buffer.concat([
+      prefix,
+      Buffer.from(
+        `{"v":1,"event":"begin","step":"S","tool":"T","pad":"${'a'.repeat(pad)}"}`,
+        'utf8',
+      ),
+    ])
+    expect(frameHead.length).toBe(512)
+    h.archiver.feed(frameHead)
+    expect(h.unscoped).toEqual([])
+    h.archiver.feed(Buffer.from('\nbody\n'))
+    h.archiver.feed(
+      Buffer.from('\x1eECC-STEP {"v":1,"event":"end","step":"S","tool":"T"}\n', 'utf8'),
+    )
+    expect(h.ended).toEqual([{ step: 'S', tool: 'T' }])
+    expect(h.unscoped.join('')).toBe('')
+    expect(h.readArchive('S', 'T').toString()).toBe('body\n')
+  })
+
+  it('degrades a candidate longer than 512 bytes without a newline', () => {
+    const h = harness({ allowlist: [] })
+    const overlong = Buffer.concat([
+      Buffer.from('\x1eECC-STEP ', 'utf8'),
+      Buffer.alloc(503, 0x61),
+    ])
+    h.archiver.feed(overlong)
+    expect(h.unscoped.join('')).toBe(overlong.toString('utf8'))
+  })
+
   it('emits an overlong marker-less prefix fragment as data', () => {
     const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
     const fragment = Buffer.concat([
