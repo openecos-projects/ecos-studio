@@ -144,6 +144,41 @@ describe('ProjectManifestService', () => {
     })
   })
 
+  it('creates frontend manifests and rejects backend-only QoR baseline mutations', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspacePath = join(projectRoot, 'ws_0001')
+    const service = createService(projectRoot)
+
+    const created = await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'create',
+        name: 'cpu',
+        designName: 'cpu_top',
+        projectType: 'frontend',
+      },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'register-workspace',
+        input: { projectRoot, workspacePath },
+      },
+    })
+
+    expect(parseProjectManifest(created.content)).toMatchObject({
+      project_type: 'frontend',
+      objectives: { primary: 'verification' },
+      qor_baseline: null,
+    })
+    await expect(
+      service.mutate({
+        projectRoot,
+        mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
+      }),
+    ).rejects.toThrow('QoR baselines are only available for backend projects')
+  })
+
   it('atomically synchronizes the selected baseline without replacing project design_name', async () => {
     const projectRoot = await createTemporaryProject()
     const workspaceOne = join(projectRoot, 'ws_0001')
@@ -319,6 +354,18 @@ describe('ProjectManifestService', () => {
         },
       }),
     ).rejects.toThrow('MPC spec_path must reference spec/spec.json.in')
+
+    await expect(
+      service.mutate({
+        projectRoot,
+        mutation: {
+          type: 'create',
+          name: 'gcd',
+          designName: 'gcd',
+          projectType: 'unsupported',
+        } as never,
+      }),
+    ).rejects.toThrow('Project manifest create mutation projectType is invalid')
 
     await expect(
       readFile(join(projectRoot, 'project.json'), 'utf8'),

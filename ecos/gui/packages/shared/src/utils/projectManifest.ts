@@ -15,6 +15,52 @@ export const projectManifestFlowSteps = [
 
 export type ProjectManifestFlowStep = (typeof projectManifestFlowSteps)[number]
 
+export const projectManifestFrontendFlowSteps = [
+  'prepare',
+  'review',
+  'elab',
+  'lint',
+  'sim',
+] as const
+
+export type ProjectManifestFrontendFlowStep =
+  (typeof projectManifestFrontendFlowSteps)[number]
+
+export const projectManifestTypes = ['backend', 'frontend'] as const
+
+export type ProjectManifestType = (typeof projectManifestTypes)[number]
+export type ProjectManifestStage =
+  | ProjectManifestFlowStep
+  | ProjectManifestFrontendFlowStep
+
+export interface ProjectManifestProfile {
+  projectType: ProjectManifestType
+  flowSteps: readonly ProjectManifestStage[]
+  defaultStartStep: ProjectManifestStage
+  defaultEndStep: ProjectManifestStage
+}
+
+const PROJECT_MANIFEST_PROFILES: Record<ProjectManifestType, ProjectManifestProfile> = {
+  backend: {
+    projectType: 'backend',
+    flowSteps: projectManifestFlowSteps,
+    defaultStartStep: 'Synth',
+    defaultEndStep: 'Harden',
+  },
+  frontend: {
+    projectType: 'frontend',
+    flowSteps: projectManifestFrontendFlowSteps,
+    defaultStartStep: 'prepare',
+    defaultEndStep: 'sim',
+  },
+}
+
+export function projectManifestProfileFor(
+  projectType: ProjectManifestType,
+): ProjectManifestProfile {
+  return PROJECT_MANIFEST_PROFILES[projectType]
+}
+
 export type ProjectManifestWorkspaceStatus =
   | 'success'
   | 'failed'
@@ -50,18 +96,18 @@ export interface ProjectManifestWorkspace {
   source_workspace_id: string | null
   branch_from: {
     source_workspace_id: string
-    source_step: ProjectManifestFlowStep | string
+    source_step: ProjectManifestStage | string
     source_output_type?: string
     source_output_path?: string
   } | null
-  start_step: ProjectManifestFlowStep | string
-  end_step: ProjectManifestFlowStep | string
+  start_step: ProjectManifestStage | string
+  end_step: ProjectManifestStage | string
   status: ProjectManifestWorkspaceStatus
   created_at: string
   updated_at: string
   parameter_patch: Record<string, unknown>
-  metrics_summary: ProjectManifestMetricSummary
-  step_metrics: Record<string, Record<string, unknown>>
+  metrics_summary?: ProjectManifestMetricSummary
+  step_metrics?: Record<string, Record<string, unknown>>
 }
 
 export interface ProjectManifestMpc {
@@ -82,6 +128,7 @@ export interface ProjectManifestMpcDesign {
 
 export interface ProjectManifest {
   schema_version: 1
+  project_type: ProjectManifestType
   project_id: string
   name: string
   design_name: string
@@ -110,6 +157,7 @@ export interface ProjectManifestDraftInput {
   rootPath: string
   name: string
   designName: string
+  projectType?: ProjectManifestType
   mpc?: ProjectManifestMpc | null
   now?: string
 }
@@ -119,11 +167,11 @@ export interface ProjectManifestWorkspaceRegistrationInput {
   projectName?: string
   workspacePath: string
   sourceWorkspaceId?: string
-  sourceStep?: ProjectManifestFlowStep | string
+  sourceStep?: ProjectManifestStage | string
   sourceOutputPath?: string
   sourceOutputType?: string
-  startStep?: ProjectManifestFlowStep | string
-  endStep?: ProjectManifestFlowStep | string
+  startStep?: ProjectManifestStage | string
+  endStep?: ProjectManifestStage | string
   now?: string
   config?: {
     pdk?: string
@@ -136,15 +184,15 @@ export interface ProjectManifestWorkspaceRegistrationInput {
 }
 
 export interface ProjectManifestReplacementBackupInput {
-  fallbackEndStep?: ProjectManifestFlowStep | string
-  fallbackStartStep?: ProjectManifestFlowStep | string
+  fallbackEndStep?: ProjectManifestStage | string
+  fallbackStartStep?: ProjectManifestStage | string
   replacementId: string
 }
 
 export interface ProjectManifestResolvedReplacementBackupInput {
   backupPath: string
-  fallbackEndStep?: ProjectManifestFlowStep | string
-  fallbackStartStep?: ProjectManifestFlowStep | string
+  fallbackEndStep?: ProjectManifestStage | string
+  fallbackStartStep?: ProjectManifestStage | string
   targetPath: string
 }
 
@@ -160,6 +208,7 @@ export type ProjectManifestMutation =
       type: 'create'
       name: string
       designName: string
+      projectType?: ProjectManifestType
       mpc?: ProjectManifestMpc | null
     }
   | { input: ProjectManifestWorkspaceRegistrationInput; type: 'register-workspace' }
@@ -209,6 +258,18 @@ const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   harden: 'Harden',
 }
 
+const FRONTEND_FLOW_STEP_ALIASES: Record<string, ProjectManifestFrontendFlowStep> = {
+  prepare: 'prepare',
+  review: 'review',
+  rtlreview: 'review',
+  rtl_review: 'review',
+  elab: 'elab',
+  elaborate: 'elab',
+  lint: 'lint',
+  sim: 'sim',
+  simulation: 'sim',
+}
+
 const PROJECT_MANIFEST_WORKSPACE_STATUSES = new Set<ProjectManifestWorkspaceStatus>([
   'success',
   'failed',
@@ -222,6 +283,7 @@ export function createProjectManifestDraft(
   input: ProjectManifestDraftInput,
 ): ProjectManifest {
   const now = input.now ?? new Date().toISOString()
+  const projectType = normalizeProjectManifestType(input.projectType)
   const rootPath = normalizeProjectManifestPath(input.rootPath)
   const name =
     optionalString(input.name) || basenameProjectManifestPath(rootPath) || 'project'
@@ -229,6 +291,7 @@ export function createProjectManifestDraft(
   if (!designName) throw new Error('Project manifest design_name is required.')
   return {
     schema_version: 1,
+    project_type: projectType,
     project_id: `proj_${slugify(name)}`,
     name,
     design_name: designName,
@@ -240,16 +303,7 @@ export function createProjectManifestDraft(
       parameters: { design: designName },
       rtl_list: [],
     },
-    objectives: {
-      primary: 'timing',
-      directions: {
-        wns: 'maximize',
-        tns: 'maximize',
-        area: 'minimize',
-        drc_count: 'minimize',
-        power: 'minimize',
-      },
-    },
+    objectives: defaultProjectObjectives(projectType),
     workspaces: [],
     mpc: normalizeProjectManifestMpc(input.mpc),
     best_workspace: null,
@@ -285,14 +339,16 @@ export function parseProjectManifest(content: string): ProjectManifest {
 
   const name =
     optionalString(source.name) || basenameProjectManifestPath(rootPath) || 'project'
+  const projectType = normalizeProjectManifestType(source.project_type)
   const createdAt = optionalString(source.created_at) || new Date(0).toISOString()
   const updatedAt = optionalString(source.updated_at) || createdAt
   const baseDesign = normalizeBaseDesign(source.base_design)
-  const objectives = normalizeObjectives(source.objectives)
+  const objectives = normalizeObjectives(source.objectives, projectType)
 
   return {
     ...source,
     schema_version: 1,
+    project_type: projectType,
     project_id: optionalString(source.project_id) || `proj_${slugify(name)}`,
     name,
     design_name: designName,
@@ -303,11 +359,12 @@ export function parseProjectManifest(content: string): ProjectManifest {
     base_design: withProjectDesignName(baseDesign, designName),
     objectives,
     workspaces: source.workspaces.map((workspace, index) =>
-      normalizeWorkspace(workspace, index, createdAt),
+      normalizeWorkspace(workspace, index, createdAt, projectType),
     ),
     mpc: normalizeProjectManifestMpc(source.mpc),
     best_workspace: normalizeBestWorkspace(source.best_workspace),
-    qor_baseline: normalizeQorBaseline(source.qor_baseline),
+    qor_baseline:
+      projectType === 'backend' ? normalizeQorBaseline(source.qor_baseline) : null,
   }
 }
 
@@ -322,6 +379,7 @@ export function applyProjectManifestMutation(
         name: mutation.name,
         designName: mutation.designName,
         rootPath: projectRoot,
+        projectType: mutation.projectType,
         mpc: mutation.mpc,
       })
     case 'register-workspace': {
@@ -357,6 +415,7 @@ export function registerWorkspaceInManifest(
   input: ProjectManifestWorkspaceRegistrationInput,
 ): ProjectManifest {
   const now = input.now ?? new Date().toISOString()
+  const profile = projectManifestProfileFor(manifest.project_type)
   const workspacePath = normalizeProjectManifestPath(input.workspacePath)
   const workspaceId =
     basenameProjectManifestPath(workspacePath) || nextManifestWorkspaceId(manifest)
@@ -366,7 +425,7 @@ export function registerWorkspaceInManifest(
       normalizeProjectManifestPath(workspace.workspace_path) === workspacePath,
   )
   const sourceStep = input.sourceStep
-    ? normalizeProjectManifestFlowStep(input.sourceStep)
+    ? normalizeProjectManifestStage(manifest.project_type, input.sourceStep)
     : null
   const sourceWorkspaceId =
     input.sourceWorkspaceId || existingWorkspace?.source_workspace_id || null
@@ -378,19 +437,25 @@ export function registerWorkspaceInManifest(
           source_output_type:
             input.sourceOutputType ||
             existingWorkspace?.branch_from?.source_output_type ||
-            defaultSourceOutputType(sourceStep),
+            defaultSourceOutputType(manifest.project_type, sourceStep),
           source_output_path:
             input.sourceOutputPath || existingWorkspace?.branch_from?.source_output_path,
         }
       : (existingWorkspace?.branch_from ?? null)
   const startStep = input.startStep
-    ? normalizeProjectManifestFlowStep(input.startStep)
+    ? normalizeProjectManifestStage(manifest.project_type, input.startStep)
     : sourceStep
-      ? nextProjectManifestFlowStep(sourceStep)
-      : normalizeProjectManifestFlowStep(existingWorkspace?.start_step ?? 'Synth')
+      ? nextProjectManifestStage(manifest.project_type, sourceStep)
+      : normalizeProjectManifestStage(
+          manifest.project_type,
+          existingWorkspace?.start_step ?? profile.defaultStartStep,
+        )
   const endStep = input.endStep
-    ? normalizeProjectManifestFlowStep(input.endStep)
-    : normalizeProjectManifestFlowStep(existingWorkspace?.end_step ?? 'Harden')
+    ? normalizeProjectManifestStage(manifest.project_type, input.endStep)
+    : normalizeProjectManifestStage(
+        manifest.project_type,
+        existingWorkspace?.end_step ?? profile.defaultEndStep,
+      )
   const workspaceName = manifest.design_name
   const workspaceParameters = {
     ...input.config?.parameters,
@@ -418,17 +483,28 @@ export function registerWorkspaceInManifest(
     created_at: existingWorkspace?.created_at ?? now,
     updated_at: now,
     parameter_patch: parameterPatch,
-    metrics_summary: existingWorkspace?.metrics_summary ?? {},
-    step_metrics: existingWorkspace?.step_metrics ?? {},
+    ...(existingWorkspace?.metrics_summary
+      ? { metrics_summary: existingWorkspace.metrics_summary }
+      : {}),
+    ...(existingWorkspace?.step_metrics
+      ? { step_metrics: existingWorkspace.step_metrics }
+      : {}),
   }
   const workspaces = existingWorkspace
     ? manifest.workspaces.map((item) =>
         item.workspace_id === existingWorkspace.workspace_id ? workspace : item,
       )
     : [...manifest.workspaces, workspace]
-  const qorBaseline = ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
+  const qorBaseline =
+    manifest.project_type === 'backend'
+      ? ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
+      : null
   const shouldSyncBaseDesign =
-    manifest.qor_baseline === null || manifest.qor_baseline.workspace_id === workspaceId
+    manifest.project_type === 'backend'
+      ? manifest.qor_baseline === null ||
+        manifest.qor_baseline.workspace_id === workspaceId
+      : manifest.workspaces[0]?.workspace_id === workspaceId ||
+        manifest.workspaces.length === 0
 
   return {
     ...manifest,
@@ -453,6 +529,9 @@ export function synchronizeProjectBaseline(
   manifest: ProjectManifest,
   input: ProjectManifestBaselineSyncInput,
 ): ProjectManifest {
+  if (manifest.project_type !== 'backend') {
+    throw new Error('QoR baselines are only available for backend projects.')
+  }
   const workspace = manifest.workspaces.find(
     (candidate) =>
       candidate.workspace_id === input.workspaceId && candidate.status !== 'archived',
@@ -491,7 +570,10 @@ export function archiveWorkspaceInManifest(
       manifest.best_workspace?.workspace_id === workspaceId
         ? null
         : manifest.best_workspace,
-    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
+    qor_baseline:
+      manifest.project_type === 'backend'
+        ? ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
+        : null,
     workspaces,
   }
 }
@@ -528,8 +610,34 @@ export function deleteWorkspaceFromManifest(
       manifest.best_workspace?.workspace_id === workspaceId
         ? null
         : manifest.best_workspace,
-    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
+    qor_baseline:
+      manifest.project_type === 'backend'
+        ? ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
+        : null,
     workspaces,
+  }
+}
+
+export function setQorBaselineInManifest(
+  manifest: ProjectManifest,
+  workspaceId: string,
+  reason = 'Selected from Project QoR Trend',
+  now = new Date().toISOString(),
+): ProjectManifest {
+  if (manifest.project_type !== 'backend') return manifest
+  const hasWorkspace = manifest.workspaces.some(
+    (workspace) =>
+      workspace.workspace_id === workspaceId && workspace.status !== 'archived',
+  )
+  if (!hasWorkspace) return manifest
+
+  return {
+    ...manifest,
+    updated_at: now,
+    qor_baseline: {
+      workspace_id: workspaceId,
+      reason,
+    },
   }
 }
 
@@ -538,6 +646,7 @@ export function recordReplacementBackupInManifest(
   input: ProjectManifestResolvedReplacementBackupInput,
 ): ProjectManifest {
   const now = new Date().toISOString()
+  const profile = projectManifestProfileFor(manifest.project_type)
   const backupPath = normalizeProjectManifestPath(input.backupPath)
   const targetPath = normalizeProjectManifestPath(input.targetPath)
   const backupWorkspaceId = basenameProjectManifestPath(backupPath)
@@ -564,14 +673,27 @@ export function recordReplacementBackupInManifest(
     workspace_path: backupPath,
     source_workspace_id: replacedWorkspace?.source_workspace_id ?? null,
     branch_from: replacedWorkspace?.branch_from ?? null,
-    start_step: replacedWorkspace?.start_step || input.fallbackStartStep || 'Synth',
-    end_step: replacedWorkspace?.end_step || input.fallbackEndStep || 'Harden',
+    start_step:
+      replacedWorkspace?.start_step ||
+      input.fallbackStartStep ||
+      profile.defaultStartStep,
+    end_step:
+      replacedWorkspace?.end_step || input.fallbackEndStep || profile.defaultEndStep,
     status: 'archived',
     created_at: existingBackup?.created_at ?? now,
     updated_at: now,
     parameter_patch: replacedWorkspace?.parameter_patch ?? {},
-    metrics_summary: replacedWorkspace?.metrics_summary ?? {},
-    step_metrics: replacedWorkspace?.step_metrics ?? {},
+    ...(existingBackup?.metrics_summary || replacedWorkspace?.metrics_summary
+      ? {
+          metrics_summary:
+            existingBackup?.metrics_summary ?? replacedWorkspace?.metrics_summary,
+        }
+      : {}),
+    ...(existingBackup?.step_metrics || replacedWorkspace?.step_metrics
+      ? {
+          step_metrics: existingBackup?.step_metrics ?? replacedWorkspace?.step_metrics,
+        }
+      : {}),
   }
   return {
     ...manifest,
@@ -595,10 +717,34 @@ export function normalizeProjectManifestFlowStep(
   return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? 'Synth'
 }
 
+export function normalizeProjectManifestStage(
+  projectType: ProjectManifestType,
+  step: ProjectManifestStage | string,
+): ProjectManifestStage {
+  if (projectType === 'backend') return normalizeProjectManifestFlowStep(step)
+  return (
+    FRONTEND_FLOW_STEP_ALIASES[String(step).trim().toLowerCase()] ??
+    projectManifestProfileFor(projectType).defaultStartStep
+  )
+}
+
+export function nextProjectManifestStage(
+  projectType: ProjectManifestType,
+  step: ProjectManifestStage | string,
+): ProjectManifestStage {
+  const profile = projectManifestProfileFor(projectType)
+  const normalized = normalizeProjectManifestStage(projectType, step)
+  const index = profile.flowSteps.indexOf(normalized)
+  return profile.flowSteps[
+    Math.min(Math.max(index, 0) + 1, profile.flowSteps.length - 1)
+  ]!
+}
+
 function normalizeWorkspace(
   value: unknown,
   index: number,
   fallbackTimestamp: string,
+  projectType: ProjectManifestType,
 ): ProjectManifestWorkspace {
   const source = recordValue(value)
   if (!source)
@@ -612,6 +758,9 @@ function normalizeWorkspace(
   }
   const branch = recordValue(source.branch_from)
   const sourceWorkspaceId = optionalString(source.source_workspace_id) || null
+  const profile = projectManifestProfileFor(projectType)
+  const metricsSummary = recordValue(source.metrics_summary)
+  const stepMetrics = recordValue(source.step_metrics)
   return {
     ...source,
     workspace_id: workspaceId,
@@ -623,7 +772,7 @@ function normalizeWorkspace(
         ? {
             ...branch,
             source_workspace_id: optionalString(branch.source_workspace_id),
-            source_step: optionalString(branch.source_step) || 'Synth',
+            source_step: optionalString(branch.source_step) || profile.defaultStartStep,
             ...(optionalString(branch.source_output_type)
               ? { source_output_type: optionalString(branch.source_output_type) }
               : {}),
@@ -632,14 +781,14 @@ function normalizeWorkspace(
               : {}),
           }
         : null,
-    start_step: optionalString(source.start_step) || 'Synth',
-    end_step: optionalString(source.end_step) || 'Harden',
+    start_step: optionalString(source.start_step) || profile.defaultStartStep,
+    end_step: optionalString(source.end_step) || profile.defaultEndStep,
     status: normalizeWorkspaceStatus(source.status),
     created_at: optionalString(source.created_at) || fallbackTimestamp,
     updated_at: optionalString(source.updated_at) || fallbackTimestamp,
     parameter_patch: recordValue(source.parameter_patch) ?? {},
-    metrics_summary: recordValue(source.metrics_summary) ?? {},
-    step_metrics: normalizeStepMetrics(source.step_metrics),
+    ...(metricsSummary ? { metrics_summary: metricsSummary } : {}),
+    ...(stepMetrics ? { step_metrics: normalizeStepMetrics(stepMetrics) } : {}),
   }
 }
 
@@ -736,18 +885,55 @@ function normalizeBaseDesign(value: unknown): ProjectManifestBaseDesign {
   }
 }
 
-function normalizeObjectives(value: unknown): ProjectManifest['objectives'] {
+function normalizeObjectives(
+  value: unknown,
+  projectType: ProjectManifestType,
+): ProjectManifest['objectives'] {
   const source = recordValue(value) ?? {}
   const directions = recordValue(source.directions) ?? {}
+  const defaults = defaultProjectObjectives(projectType)
   return {
     ...source,
-    primary: optionalString(source.primary) || 'timing',
+    primary: optionalString(source.primary) || defaults.primary,
     directions: Object.fromEntries(
       Object.entries(directions).flatMap(([key, direction]) =>
         direction === 'maximize' || direction === 'minimize' ? [[key, direction]] : [],
       ),
     ),
   }
+}
+
+function defaultProjectObjectives(
+  projectType: ProjectManifestType,
+): ProjectManifest['objectives'] {
+  if (projectType === 'frontend') {
+    return {
+      primary: 'verification',
+      directions: {
+        errors: 'minimize',
+        warnings: 'minimize',
+        failed_cases: 'minimize',
+        pass_rate: 'maximize',
+        cycles: 'minimize',
+      },
+    }
+  }
+  return {
+    primary: 'timing',
+    directions: {
+      wns: 'maximize',
+      tns: 'maximize',
+      area: 'minimize',
+      drc_count: 'minimize',
+      power: 'minimize',
+    },
+  }
+}
+
+function normalizeProjectManifestType(value: unknown): ProjectManifestType {
+  if (value === undefined || value === null || value === '') return 'backend'
+  if (value === 'backend' || value === 'frontend') return value
+  throw new Error('Invalid project manifest: project_type must be backend or frontend.')
 }
 
 function normalizeBestWorkspace(value: unknown): ProjectManifest['best_workspace'] {
@@ -808,15 +994,6 @@ function normalizeWorkspaceStatus(value: unknown): ProjectManifestWorkspaceStatu
 function requireManifest(manifest: ProjectManifest | null): ProjectManifest {
   if (!manifest) throw new Error('Project manifest does not exist.')
   return manifest
-}
-
-function nextProjectManifestFlowStep(
-  step: ProjectManifestFlowStep,
-): ProjectManifestFlowStep {
-  const index = projectManifestFlowSteps.indexOf(step)
-  return projectManifestFlowSteps[
-    Math.min(index + 1, projectManifestFlowSteps.length - 1)
-  ]
 }
 
 function nextManifestWorkspaceId(manifest: ProjectManifest): string {
@@ -888,7 +1065,11 @@ function buildParameterPatch(
   )
 }
 
-function defaultSourceOutputType(step: ProjectManifestFlowStep): 'verilog' | 'def' {
+function defaultSourceOutputType(
+  projectType: ProjectManifestType,
+  step: ProjectManifestStage,
+): 'verilog' | 'def' | 'report' {
+  if (projectType === 'frontend') return 'report'
   return step === 'Synth' ? 'verilog' : 'def'
 }
 

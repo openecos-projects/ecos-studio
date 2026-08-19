@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProjectManifest } from '@/utils/projectManagement'
+import type { ProjectManifest } from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
   readProjectManagementWorkspaceTexts: vi.fn(),

@@ -1,4 +1,9 @@
-import { ensureProjectQorBaseline, type ResourceInfo } from '@ecos-studio/shared'
+import type {
+  ProjectManifest,
+  ProjectManifestBaseDesign,
+  ProjectManifestWorkspace,
+  ResourceInfo,
+} from '@ecos-studio/shared'
 import type { Project } from '@/types'
 import {
   buildProjectQorTrendSummary,
@@ -57,17 +62,6 @@ export type ProjectMetricId =
   | 'frequency'
 export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
-export interface ProjectManifestBaseDesign {
-  pdk?: string
-  pdk_root?: string
-  top_module?: string
-  clock?: string
-  rtl_list?: string[]
-  origin_verilog?: string
-  origin_def?: string
-  parameters?: Record<string, unknown>
-}
-
 export interface ProjectWorkspaceAnalysisInput {
   stepMetricTexts?: Partial<Record<FlowStep, string | null>>
   stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
@@ -81,73 +75,12 @@ export type ProjectWorkspaceAnalysisInputsById = Record<
   ProjectWorkspaceAnalysisInput
 >
 
-export interface ProjectWorkspaceManifest {
-  workspace_id: string
-  name: string
-  workspace_path: string
-  source_workspace_id: string | null
-  branch_from: {
-    source_workspace_id: string
-    source_step: FlowStep | string
-    source_output_type?: string
-    source_output_path?: string
-  } | null
-  start_step: FlowStep | string
-  end_step: FlowStep | string
-  status: ProjectWorkspaceStatus
-  created_at: string
-  updated_at: string
-  parameter_patch: Record<string, unknown>
-}
-
-export interface ProjectManifestMpc {
-  resource_id: string
-  display_name: string
-  installed_version: string
-  path: string
-  spec_path: string
-  design: ProjectManifestMpcDesign
-  core_template: Record<string, unknown>
-}
-
-export interface ProjectManifestMpcDesign {
-  index: number
-  design_name: string
-  directory?: string
-}
-
 export interface ProjectManifestMpcCandidate {
   resource_id: string
   display_name: string
   installed_version: string
   path: string
   spec_path: string
-}
-
-export interface ProjectManifest {
-  schema_version: 1
-  project_id: string
-  name: string
-  design_name: string
-  description: string
-  root_path: string
-  created_at: string
-  updated_at: string
-  base_design: ProjectManifestBaseDesign
-  objectives: {
-    primary: string
-    directions: Record<string, 'maximize' | 'minimize'>
-  }
-  workspaces: ProjectWorkspaceManifest[]
-  mpc: ProjectManifestMpc | null
-  best_workspace: {
-    workspace_id: string
-    reason: string
-  } | null
-  qor_baseline: {
-    workspace_id: string
-    reason: string
-  } | null
 }
 
 export type ProjectQorBaselineSource = 'selected' | 'default'
@@ -357,35 +290,6 @@ export interface ProjectManagementProject {
 export interface ProjectSelectionState {
   selectedWorkspaceId: string
   selectedStep: FlowStep
-}
-
-export interface ProjectManifestDraftInput {
-  rootPath: string
-  name: string
-  designName: string
-  mpc?: ProjectManifestMpc | null
-  now?: string
-}
-
-export interface ProjectWorkspaceRegistrationInput {
-  projectRoot: string
-  projectName?: string
-  workspacePath: string
-  sourceWorkspaceId?: string
-  sourceStep?: FlowStep | string
-  sourceOutputPath?: string
-  sourceOutputType?: string
-  startStep?: FlowStep | string
-  endStep?: FlowStep | string
-  now?: string
-  config?: {
-    pdk?: string
-    pdk_root?: string
-    rtl_list?: string[]
-    origin_verilog?: string
-    origin_def?: string
-    parameters?: Record<string, unknown>
-  }
 }
 
 export interface WorkspaceBranchDraft {
@@ -604,7 +508,7 @@ export function buildProjectManagementProject(
 }
 
 function buildProjectAnalysisSnapshots(
-  manifestWorkspaces: ProjectWorkspaceManifest[],
+  manifestWorkspaces: ProjectManifestWorkspace[],
   inputs: ProjectWorkspaceAnalysisInputsById,
   flowStates: ProjectWorkspaceFlowStatesById,
 ): Map<string, ProjectAnalysisSnapshot> {
@@ -635,7 +539,7 @@ function buildProjectAnalysisSnapshots(
 }
 
 function buildV3WorkspaceSummaries(
-  manifestWorkspaces: ProjectWorkspaceManifest[],
+  manifestWorkspaces: ProjectManifestWorkspace[],
   workspaces: ProjectWorkspace[],
   snapshots: Map<string, ProjectAnalysisSnapshot>,
   qorTrendSummary: ProjectQorTrendSummary,
@@ -887,7 +791,7 @@ function buildV3MetricRows(summaries: ProjectWorkspaceSummary[]): ProjectMetricR
 
 function buildV3ComparisonSummary(
   manifest: ProjectManifest | null | undefined,
-  workspaces: ProjectWorkspaceManifest[],
+  workspaces: ProjectManifestWorkspace[],
   qorTrendSummary: ProjectQorTrendSummary,
 ): ProjectComparisonSummary {
   const bestRatedWorkspace = qorTrendSummary.workspaces
@@ -956,70 +860,6 @@ export function resolveProjectSelectionUpdate(
   }
 }
 
-export function createProjectManifestDraft(
-  input: ProjectManifestDraftInput,
-): ProjectManifest {
-  const now = input.now ?? new Date().toISOString()
-  const designName = input.designName.trim()
-  if (!designName) throw new Error('Project manifest design_name is required.')
-  return {
-    schema_version: 1,
-    project_id: `proj_${slugify(input.name || basenamePath(input.rootPath) || 'project')}`,
-    name: input.name || basenamePath(input.rootPath) || 'project',
-    design_name: designName,
-    description: '',
-    root_path: normalizePath(input.rootPath),
-    created_at: now,
-    updated_at: now,
-    base_design: {
-      parameters: { design: designName },
-      rtl_list: [],
-    },
-    objectives: {
-      primary: 'timing',
-      directions: {
-        wns: 'maximize',
-        tns: 'maximize',
-        area: 'minimize',
-        drc_count: 'minimize',
-        power: 'minimize',
-      },
-    },
-    workspaces: [],
-    mpc: normalizeProjectManifestMpc(input.mpc),
-    best_workspace: null,
-    qor_baseline: null,
-  }
-}
-
-export function serializeProjectManifest(manifest: ProjectManifest): string {
-  return `${JSON.stringify(manifest, null, 2)}\n`
-}
-
-export function parseProjectManifest(content: string): ProjectManifest {
-  const parsed = JSON.parse(content) as ProjectManifest
-  if (
-    parsed.schema_version !== 1 ||
-    !Array.isArray(parsed.workspaces) ||
-    !optionalString(parsed.design_name)
-  ) {
-    throw new Error('Invalid project manifest.')
-  }
-  return {
-    ...parsed,
-    design_name: optionalString(parsed.design_name),
-    base_design: {
-      ...parsed.base_design,
-      parameters: {
-        ...parsed.base_design.parameters,
-        design: optionalString(parsed.design_name),
-      },
-    },
-    mpc: normalizeProjectManifestMpc(parsed.mpc),
-    qor_baseline: parsed.qor_baseline ?? null,
-  }
-}
-
 export function projectMpcOptionFromResource(
   resource: ResourceInfo,
 ): ProjectManifestMpcCandidate | null {
@@ -1047,66 +887,6 @@ export function projectMpcOptionFromResource(
     path,
     spec_path: joinPath(path, 'spec', 'spec.json.in'),
   }
-}
-
-function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null {
-  if (value === undefined || value === null) return null
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid project manifest MPC.')
-  }
-
-  const source = value as Record<string, unknown>
-  const resourceId = optionalString(source.resource_id)
-  const displayName = optionalString(source.display_name)
-  const installedVersion = optionalString(source.installed_version)
-  const mpcPath = optionalString(source.path)
-  const specPath = optionalString(source.spec_path)
-  const design = recordValue(source.design)
-  const coreTemplate = recordValue(source.core_template)
-  if (!resourceId || !resourceId.startsWith('mpc:') || resourceId.length === 4) {
-    throw new Error('Invalid project manifest MPC resource_id.')
-  }
-  if (!displayName || !installedVersion || !mpcPath || !specPath) {
-    throw new Error('Invalid project manifest MPC fields.')
-  }
-
-  const normalizedPath = normalizeProjectManifestMpcPath(mpcPath)
-  const normalizedSpecPath = normalizeProjectManifestMpcPath(specPath)
-  if (normalizedSpecPath !== `${normalizedPath}/spec/spec.json.in`) {
-    throw new Error('Invalid project manifest MPC spec_path.')
-  }
-  if (
-    !design ||
-    !Number.isInteger(design.index) ||
-    (design.index as number) < 0 ||
-    !optionalString(design.design_name)
-  ) {
-    throw new Error('Invalid project manifest MPC design.')
-  }
-  if (!coreTemplate) {
-    throw new Error('Invalid project manifest MPC core_template.')
-  }
-
-  return {
-    resource_id: resourceId,
-    display_name: displayName,
-    installed_version: installedVersion,
-    path: normalizedPath,
-    spec_path: normalizedSpecPath,
-    design: {
-      index: design.index as number,
-      design_name: optionalString(design.design_name),
-      ...(optionalString(design.directory)
-        ? { directory: optionalString(design.directory) }
-        : {}),
-    },
-    core_template: coreTemplate,
-  }
-}
-
-function normalizeProjectManifestMpcPath(path: string): string {
-  const normalized = path.replace(/\\/g, '/')
-  return normalized.length <= 1 ? normalized : normalized.replace(/\/+$/g, '')
 }
 
 export function parseWorkspaceFlowStateMap(
@@ -1186,179 +966,6 @@ export function createWorkspaceBranchDraft(
   }
 }
 
-export function registerWorkspaceInManifest(
-  manifest: ProjectManifest,
-  input: ProjectWorkspaceRegistrationInput,
-): ProjectManifest {
-  const now = input.now ?? new Date().toISOString()
-  const workspacePath = normalizePath(input.workspacePath)
-  const workspaceId = basenamePath(workspacePath) || nextManifestWorkspaceId(manifest)
-  const existingWorkspace = manifest.workspaces.find(
-    (workspace) =>
-      workspace.workspace_id === workspaceId ||
-      normalizePath(workspace.workspace_path) === workspacePath,
-  )
-  const sourceStep = input.sourceStep ? normalizeFlowStep(input.sourceStep) : null
-  const sourceWorkspaceId =
-    input.sourceWorkspaceId || existingWorkspace?.source_workspace_id || null
-  const branchFrom =
-    sourceWorkspaceId && sourceStep
-      ? {
-          source_workspace_id: sourceWorkspaceId,
-          source_step: sourceStep,
-          source_output_type:
-            input.sourceOutputType ||
-            existingWorkspace?.branch_from?.source_output_type ||
-            defaultSourceOutputType(sourceStep),
-          source_output_path:
-            input.sourceOutputPath || existingWorkspace?.branch_from?.source_output_path,
-        }
-      : (existingWorkspace?.branch_from ?? null)
-  const startStep = input.startStep
-    ? normalizeFlowStep(input.startStep)
-    : sourceStep
-      ? nextFlowStep(sourceStep)
-      : normalizeFlowStep(existingWorkspace?.start_step ?? 'Synth')
-  const endStep = input.endStep
-    ? normalizeFlowStep(input.endStep)
-    : normalizeFlowStep(existingWorkspace?.end_step ?? 'Harden')
-  const workspaceName = manifest.design_name
-  const workspaceParameters = {
-    ...input.config?.parameters,
-    design: manifest.design_name,
-  }
-  const parameterPatch = input.config
-    ? {
-        ...existingWorkspace?.parameter_patch,
-        ...buildParameterPatch(
-          manifest.base_design.parameters ?? {},
-          workspaceParameters,
-        ),
-      }
-    : { ...existingWorkspace?.parameter_patch }
-
-  const workspace: ProjectWorkspaceManifest = {
-    workspace_id: workspaceId,
-    name: workspaceName,
-    workspace_path: workspacePath,
-    source_workspace_id: sourceWorkspaceId,
-    branch_from: branchFrom,
-    start_step: startStep,
-    end_step: endStep,
-    status: existingWorkspace?.status ?? 'not_started',
-    created_at: existingWorkspace?.created_at ?? now,
-    updated_at: now,
-    parameter_patch: parameterPatch,
-  }
-
-  const workspaces = existingWorkspace
-    ? manifest.workspaces.map((item) =>
-        item.workspace_id === existingWorkspace.workspace_id ? workspace : item,
-      )
-    : [...manifest.workspaces, workspace]
-  const qorBaseline = ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
-
-  return {
-    ...manifest,
-    name: input.projectName || manifest.name,
-    root_path: normalizePath(input.projectRoot || manifest.root_path),
-    updated_at: now,
-    base_design: withProjectDesignName(
-      manifest.qor_baseline === null || manifest.qor_baseline.workspace_id === workspaceId
-        ? mergeBaseDesignConfig(manifest.base_design, {
-            ...input.config,
-            parameters: workspaceParameters,
-          })
-        : manifest.base_design,
-      manifest.design_name,
-    ),
-    workspaces,
-    qor_baseline: qorBaseline,
-  }
-}
-
-export function archiveWorkspaceInManifest(
-  manifest: ProjectManifest,
-  workspaceId: string,
-  now = new Date().toISOString(),
-): ProjectManifest {
-  const workspaces = manifest.workspaces.map((workspace) =>
-    workspace.workspace_id === workspaceId
-      ? { ...workspace, status: 'archived' as const, updated_at: now }
-      : workspace,
-  )
-  return {
-    ...manifest,
-    updated_at: now,
-    best_workspace:
-      manifest.best_workspace?.workspace_id === workspaceId
-        ? null
-        : manifest.best_workspace,
-    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
-    workspaces,
-  }
-}
-
-export function setQorBaselineInManifest(
-  manifest: ProjectManifest,
-  workspaceId: string,
-  reason = 'Selected from Project QoR Trend',
-  now = new Date().toISOString(),
-): ProjectManifest {
-  const hasWorkspace = manifest.workspaces.some(
-    (workspace) =>
-      workspace.workspace_id === workspaceId && workspace.status !== 'archived',
-  )
-  if (!hasWorkspace) return manifest
-
-  return {
-    ...manifest,
-    updated_at: now,
-    qor_baseline: {
-      workspace_id: workspaceId,
-      reason,
-    },
-  }
-}
-
-export function deleteWorkspaceFromManifest(
-  manifest: ProjectManifest,
-  workspaceId: string,
-  now = new Date().toISOString(),
-): ProjectManifest {
-  const workspaces = manifest.workspaces
-    .filter((workspace) => workspace.workspace_id !== workspaceId)
-    .map((workspace) => {
-      const clearsSource =
-        workspace.source_workspace_id === workspaceId ||
-        workspace.branch_from?.source_workspace_id === workspaceId
-      if (!clearsSource) return workspace
-
-      return {
-        ...workspace,
-        source_workspace_id:
-          workspace.source_workspace_id === workspaceId
-            ? null
-            : workspace.source_workspace_id,
-        branch_from:
-          workspace.branch_from?.source_workspace_id === workspaceId
-            ? null
-            : workspace.branch_from,
-        updated_at: now,
-      }
-    })
-  return {
-    ...manifest,
-    updated_at: now,
-    best_workspace:
-      manifest.best_workspace?.workspace_id === workspaceId
-        ? null
-        : manifest.best_workspace,
-    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
-    workspaces,
-  }
-}
-
 function buildObjective(
   project?: Project | null,
   manifest?: ProjectManifest | null,
@@ -1370,7 +977,7 @@ function buildObjective(
 }
 
 function buildProjectWorkspace(
-  workspace: ProjectWorkspaceManifest,
+  workspace: ProjectManifestWorkspace,
   flowStateMap: ProjectWorkspaceFlowStateMap,
   depth = 0,
   artifactDesignName = '',
@@ -1418,19 +1025,19 @@ export function workspaceStatusFromFlow(
   return manifestStatus
 }
 
-function workspaceDisplayName(workspace: ProjectWorkspaceManifest): string {
+function workspaceDisplayName(workspace: ProjectManifestWorkspace): string {
   return (
     basenamePath(workspace.workspace_path) || workspace.name || workspace.workspace_id
   )
 }
 
-function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<{
-  workspace: ProjectWorkspaceManifest
+function sortWorkspacesByLineage(workspaces: ProjectManifestWorkspace[]): Array<{
+  workspace: ProjectManifestWorkspace
   depth: number
 }> {
   const byId = new Map(workspaces.map((workspace) => [workspace.workspace_id, workspace]))
-  const childrenBySource = new Map<string, ProjectWorkspaceManifest[]>()
-  const roots: ProjectWorkspaceManifest[] = []
+  const childrenBySource = new Map<string, ProjectManifestWorkspace[]>()
+  const roots: ProjectManifestWorkspace[] = []
 
   for (const workspace of workspaces) {
     const sourceWorkspaceId =
@@ -1445,8 +1052,8 @@ function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<
   }
 
   const sortByCreatedAt = (
-    left: ProjectWorkspaceManifest,
-    right: ProjectWorkspaceManifest,
+    left: ProjectManifestWorkspace,
+    right: ProjectManifestWorkspace,
   ) =>
     new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
     left.workspace_id.localeCompare(right.workspace_id)
@@ -1455,8 +1062,8 @@ function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<
   for (const children of childrenBySource.values()) children.sort(sortByCreatedAt)
 
   const visited = new Set<string>()
-  const sorted: Array<{ workspace: ProjectWorkspaceManifest; depth: number }> = []
-  const visit = (workspace: ProjectWorkspaceManifest, depth: number) => {
+  const sorted: Array<{ workspace: ProjectManifestWorkspace; depth: number }> = []
+  const visit = (workspace: ProjectManifestWorkspace, depth: number) => {
     if (visited.has(workspace.workspace_id)) return
     visited.add(workspace.workspace_id)
     sorted.push({ workspace, depth })
@@ -1516,7 +1123,7 @@ function flowHintStatusLabel(status: ProjectStepStatus): string {
 }
 
 function buildStepCell(
-  workspace: ProjectWorkspaceManifest,
+  workspace: ProjectManifestWorkspace,
   step: FlowStep,
   startStep: FlowStep,
   endStep: FlowStep,
@@ -1580,7 +1187,7 @@ function projectStepStatusFromFlowState(state: unknown): ProjectStepStatus | nul
   return null
 }
 
-function buildBranchLinks(workspaces: ProjectWorkspaceManifest[]): ProjectBranchLink[] {
+function buildBranchLinks(workspaces: ProjectManifestWorkspace[]): ProjectBranchLink[] {
   return workspaces.flatMap((workspace) => {
     if (!workspace.branch_from) return []
     return [
@@ -1595,7 +1202,7 @@ function buildBranchLinks(workspaces: ProjectWorkspaceManifest[]): ProjectBranch
 }
 
 function buildStepCompareSummaries(
-  manifestWorkspaces: ProjectWorkspaceManifest[],
+  manifestWorkspaces: ProjectManifestWorkspace[],
   workspaces: ProjectWorkspace[],
   workspaceSummaries: ProjectWorkspaceSummary[],
 ): ProjectStepCompareSummary[] {
@@ -1943,7 +1550,7 @@ function detailHintForStep(step: FlowStep): string {
 }
 
 function buildParameterDiffs(
-  workspaces: ProjectWorkspaceManifest[],
+  workspaces: ProjectManifestWorkspace[],
 ): ProjectComparisonParameterDiff[] {
   return workspaces.flatMap((workspace) =>
     Object.entries(workspace.parameter_patch ?? {}).map(([name, patch]) => {
@@ -2023,7 +1630,7 @@ function projectArtifactDesignName(name: string, topModule?: string): string {
 }
 
 function workspaceArtifactDesignName(
-  workspace: ProjectWorkspaceManifest,
+  workspace: ProjectManifestWorkspace,
   baseDesign: ProjectManifestBaseDesign | undefined,
   fallback: string,
 ): string {
@@ -2050,25 +1657,6 @@ function defaultSourceOutputType(step: FlowStep): 'verilog' | 'def' {
   return step === 'Synth' ? 'verilog' : 'def'
 }
 
-function buildParameterPatch(
-  baseParameters: Record<string, unknown>,
-  nextParameters: Record<string, unknown>,
-): Record<string, { from: unknown; to: unknown }> {
-  return Object.fromEntries(
-    Object.entries(nextParameters)
-      .filter(([key, value]) => baseParameters[key] !== value)
-      .map(([key, value]) => [
-        key,
-        {
-          from: Object.prototype.hasOwnProperty.call(baseParameters, key)
-            ? baseParameters[key]
-            : undefined,
-          to: value,
-        },
-      ]),
-  )
-}
-
 function normalizeFlowStep(step: FlowStep | string): FlowStep {
   return knownFlowStep(step) ?? 'Synth'
 }
@@ -2085,59 +1673,6 @@ function isCompletedStepStatus(status: ProjectStepStatus): boolean {
 function nextFlowStep(step: FlowStep): FlowStep {
   const index = FLOW_STEPS.indexOf(step)
   return FLOW_STEPS[Math.min(index + 1, FLOW_STEPS.length - 1)]
-}
-
-function nextManifestWorkspaceId(manifest: ProjectManifest): string {
-  const numbers = manifest.workspaces
-    .map((workspace) => Number(workspace.workspace_id.replace(/^ws_/, '')))
-    .filter(Number.isFinite)
-  const next = Math.max(0, ...numbers) + 1
-  return `ws_${String(next).padStart(4, '0')}`
-}
-
-function mergeBaseDesignConfig(
-  baseDesign: ProjectManifestBaseDesign,
-  config: ProjectWorkspaceRegistrationInput['config'],
-): ProjectManifestBaseDesign {
-  if (!config) return baseDesign
-
-  const parameters = config.parameters ?? {}
-  const next: ProjectManifestBaseDesign = {
-    ...baseDesign,
-    parameters: {
-      ...baseDesign.parameters,
-      ...parameters,
-    },
-  }
-  const pdk = optionalString(config.pdk)
-  const pdkRoot = optionalString(config.pdk_root)
-  const topModule = optionalString(parameters.top_module)
-  const clock = optionalString(parameters.clock)
-  const originVerilog = optionalString(config.origin_verilog)
-  const originDef = optionalString(config.origin_def)
-
-  if (pdk) next.pdk = pdk
-  if (pdkRoot) next.pdk_root = pdkRoot
-  if (topModule) next.top_module = topModule
-  if (clock) next.clock = clock
-  if (originVerilog) next.origin_verilog = originVerilog
-  if (originDef) next.origin_def = originDef
-  if (config.rtl_list && config.rtl_list.length > 0) next.rtl_list = [...config.rtl_list]
-
-  return next
-}
-
-function withProjectDesignName(
-  baseDesign: ProjectManifestBaseDesign,
-  designName: string,
-): ProjectManifestBaseDesign {
-  return {
-    ...baseDesign,
-    parameters: {
-      ...baseDesign.parameters,
-      design: designName,
-    },
-  }
 }
 
 function formatRuntimeLabel(seconds: number): string {
@@ -2164,12 +1699,6 @@ function optionalString(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value.trim() : ''
 }
 
-function recordValue(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-
 function labelForStepStatus(status: ProjectStepStatus): string {
   const map: Record<ProjectStepStatus, string> = {
     success: 'S',
@@ -2180,15 +1709,6 @@ function labelForStepStatus(status: ProjectStepStatus): string {
     failed: '!',
   }
   return map[status]
-}
-
-function slugify(value: string): string {
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-  return slug || 'project'
 }
 
 function normalizePath(path: string): string {

@@ -769,6 +769,11 @@ import { waitForDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import {
+  parseProjectManifest,
+  type ProjectManifest,
+  type ProjectManifestMpc,
+} from '@ecos-studio/shared'
+import {
   FLOW_STEPS,
   buildProjectManagementProject,
   createWorkspaceBranchDraft,
@@ -776,11 +781,8 @@ import {
   projectMpcOptionFromResource,
   resolveProjectSelectionUpdate,
   nextWorkspaceId,
-  parseProjectManifest,
   type FlowStep,
   type ProjectFlowStatusHint,
-  type ProjectManifest,
-  type ProjectManifestMpc,
   type ProjectManagementProject,
   type ProjectStepStatus,
   type ProjectWorkspace,
