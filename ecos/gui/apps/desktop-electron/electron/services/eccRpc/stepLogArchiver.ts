@@ -79,7 +79,9 @@ export function parseStepMarker(line: Buffer): StepMarker | null {
   }
   let data: unknown
   try {
-    data = JSON.parse(payload.toString('utf8'))
+    // Strict decode, matching the Python reader's UnicodeDecodeError
+    // rejection: a non-UTF-8 payload is ordinary stream bytes, not a marker.
+    data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(payload))
   } catch {
     return null
   }

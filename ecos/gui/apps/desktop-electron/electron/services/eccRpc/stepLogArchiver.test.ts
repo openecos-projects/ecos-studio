@@ -150,6 +150,15 @@ describe('parseStepMarker', () => {
       parseStepMarker(markerLine('{"v":true,"event":"begin","step":"S","tool":"T"}')),
     ).toBeNull()
   })
+
+  it('rejects a non-UTF-8 payload (normative parity with the Python reader)', () => {
+    const line = Buffer.concat([
+      Buffer.from('\x1eECC-STEP {"v":1,"event":"begin","step":"S', 'utf8'),
+      Buffer.from([0xff]),
+      Buffer.from('","tool":"T"}\n', 'utf8'),
+    ])
+    expect(parseStepMarker(line)).toBeNull()
+  })
 })
 
 describe('StepLogArchiver marker state machine', () => {
