@@ -226,6 +226,34 @@ describe('StepLogArchiver marker state machine', () => {
     expect(h.readArchive('S', 'T')).toEqual(raw)
   })
 
+  it('reconstructs a multibyte character split across segment flushes', () => {
+    const h = harness({ allowlist: [{ step: 'S', tool: 'T' }], batchBytes: 4 })
+    const text = 'ab中cd\n'
+    const bytes = Buffer.from(text, 'utf8') // 8 bytes; 中 straddles byte 4
+    h.archiver.feed(v1Marker('begin', 'S', 'T'))
+    h.archiver.feed(bytes.subarray(0, 4)) // size-triggered flush mid-character
+    h.archiver.feed(bytes.subarray(4))
+    h.archiver.feed(v1Marker('end', 'S', 'T'))
+
+    const synthesized = h.segments.map((segment) => segment.chunk).join('')
+    expect(synthesized).toBe(text)
+    expect(synthesized).not.toContain('\uFFFD')
+    expect(h.readArchive('S', 'T')).toEqual(bytes)
+  })
+
+  it('reconstructs a multibyte character split across unscoped chunks', () => {
+    const h = harness()
+    const text = 'noise 中文 tail\n'
+    const bytes = Buffer.from(text, 'utf8')
+    const cut = bytes.indexOf(0xe4) + 1 // split after the first byte of 中
+    h.archiver.feed(bytes.subarray(0, cut))
+    h.archiver.feed(bytes.subarray(cut))
+    h.archiver.close()
+
+    expect(h.unscoped.join('')).toBe(text)
+    expect(h.unscoped.join('')).not.toContain('\uFFFD')
+  })
+
   it('treats a malformed marker line as data', () => {
     const h = harness({ allowlist: [{ step: 'S', tool: 'T' }] })
     h.archiver.feed(v1Marker('begin', 'S', 'T'))

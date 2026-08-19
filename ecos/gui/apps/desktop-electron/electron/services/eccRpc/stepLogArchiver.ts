@@ -159,6 +159,11 @@ export class StepLogArchiver {
   private buffer = Buffer.alloc(0)
   private flushTimer: NodeJS.Timeout | null = null
   private readonly tails = new Map<string, TailChunks>()
+  // Streaming decoders retain a multibyte character split across flush or
+  // chunk boundaries; independent per-flush decoding would emit replacement
+  // glyphs into synthesized step.log text (the archived bytes stay correct).
+  private segmentDecoder = new TextDecoder('utf-8')
+  private readonly unscopedDecoder = new TextDecoder('utf-8')
 
   constructor(private readonly options: StepLogArchiverOptions) {
     this.batchBytes = options.batchBytes ?? DEFAULT_BATCH_BYTES
@@ -202,6 +207,12 @@ export class StepLogArchiver {
     if (this.buffer.length > 0) {
       this.emitData(this.buffer)
       this.buffer = Buffer.alloc(0)
+    }
+    // Flush the unscoped decoder so a trailing multibyte character split at
+    // the final chunk boundary is not silently swallowed.
+    const unscopedRest = this.unscopedDecoder.decode()
+    if (unscopedRest) {
+      this.options.onUnscoped(unscopedRest)
     }
     this.clearFlushTimer()
     const active = this.active
@@ -372,6 +383,9 @@ export class StepLogArchiver {
       step: marker.step,
       tool: marker.tool,
     }
+    // Each step attempt is an independent byte stream: restart the
+    // streaming decoder so a rerun never inherits a split character.
+    this.segmentDecoder = new TextDecoder('utf-8')
     this.tails.set(stepLogKey(marker.step, marker.tool), { bytes: 0, chunks: [] })
     return true
   }
@@ -379,7 +393,7 @@ export class StepLogArchiver {
   private emitData(data: Buffer): void {
     const active = this.active
     if (!active) {
-      this.options.onUnscoped(data.toString('utf8'))
+      this.options.onUnscoped(this.unscopedDecoder.decode(data, { stream: true }))
       return
     }
     const key = stepLogKey(active.step, active.tool)
@@ -428,7 +442,7 @@ export class StepLogArchiver {
     }
     active.cursor += chunk.length
     this.options.onSegment({
-      chunk: chunk.toString('utf8'),
+      chunk: this.segmentDecoder.decode(chunk, { stream: true }),
       cursor: active.cursor,
       step: active.step,
       tool: active.tool,
