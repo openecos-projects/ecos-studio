@@ -30,6 +30,12 @@ const DEFAULT_OPTIONS: Required<Omit<ImagePreviewControllerOptions, 'theme'>> & 
 
 const RESIZE_DEBOUNCE_DELAY = 16
 
+/** Zoom change applied per wheel notch (100px of deltaY), kept in sync with toolbar zoomIn/zoomOut. */
+const WHEEL_ZOOM_STEP_PER_NOTCH = 0.1
+const WHEEL_PIXELS_PER_NOTCH = 100
+const WHEEL_LINES_TO_PIXELS = 16
+const WHEEL_MAX_NOTCHES_PER_EVENT = 3
+
 export class ImagePreviewController {
   readonly canvas: HTMLCanvasElement
 
@@ -399,9 +405,25 @@ export class ImagePreviewController {
 
   private onWheel(event: WheelEvent): void {
     event.preventDefault()
-    const step = 0.1
-    const factor = event.deltaY < 0 ? 1 + step : 1 / (1 + step)
+    const notches = this.wheelNotches(event)
+    const factor = Math.pow(1 + WHEEL_ZOOM_STEP_PER_NOTCH, -notches)
     this.setZoomAt(this.transform.scale * factor, event.offsetX, event.offsetY)
+  }
+
+  /**
+   * Converts a wheel delta into signed notches (positive = scroll down = zoom out)
+   * so high-resolution wheels and trackpads zoom proportionally to the actual
+   * scroll distance instead of jumping a full step per event.
+   */
+  private wheelNotches(event: WheelEvent): number {
+    let delta = event.deltaY
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      delta *= WHEEL_LINES_TO_PIXELS
+    } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      delta *= Math.max(this.screenHeight, 1)
+    }
+    const notches = delta / WHEEL_PIXELS_PER_NOTCH
+    return Math.max(-WHEEL_MAX_NOTCHES_PER_EVENT, Math.min(WHEEL_MAX_NOTCHES_PER_EVENT, notches))
   }
 
   private clampScale(scale: number): number {

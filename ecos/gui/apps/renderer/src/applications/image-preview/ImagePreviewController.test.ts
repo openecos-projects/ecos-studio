@@ -22,6 +22,14 @@ describe('ImagePreviewController', () => {
     expect(controllerSource).toContain('onWheel')
     expect(controllerSource).toContain('setZoomAt')
   })
+
+  it('scales wheel zoom with scroll distance instead of a fixed step per event', () => {
+    expect(controllerSource).toContain('WHEEL_PIXELS_PER_NOTCH')
+    expect(controllerSource).toContain('wheelNotches')
+    expect(controllerSource).toContain('deltaMode')
+    expect(controllerSource).toContain('Math.pow')
+    expect(controllerSource).toContain('WHEEL_MAX_NOTCHES_PER_EVENT')
+  })
 })
 
 describe('rulerDrawing', () => {
