@@ -14,7 +14,7 @@ if ! [[ "$cpu_count" =~ ^[1-9][0-9]*$ ]]; then
   cpu_count=1
 fi
 
-build_jobs=$((cpu_count > 3 ? cpu_count - 3 : 1))
+build_jobs=$((cpu_count > 2 ? cpu_count - 2 : 1))
 export CMAKE_BUILD_PARALLEL_LEVEL="$build_jobs"
 export MAKEFLAGS="-j${build_jobs}"
 export NINJAFLAGS="-j${build_jobs}"
