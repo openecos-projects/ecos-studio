@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import type { ResourceInfo } from '@ecos-studio/shared'
+import {
+  archiveWorkspaceInManifest,
+  createProjectManifestDraft,
+  deleteWorkspaceFromManifest,
+  parseProjectManifest,
+  registerWorkspaceInManifest,
+  setQorBaselineInManifest,
+  type ResourceInfo,
+} from '@ecos-studio/shared'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
-  createProjectManifestDraft,
   createSelectionState,
-  archiveWorkspaceInManifest,
-  deleteWorkspaceFromManifest,
-  parseProjectManifest,
   parseWorkspaceFlowStateMap,
   projectMpcOptionFromResource,
   resolveProjectQorBaselineWorkspace,
-  registerWorkspaceInManifest,
-  setQorBaselineInManifest,
   workspaceStatusFromFlow,
   type FlowStep,
   type ProjectStepStatus,
@@ -355,7 +357,7 @@ describe('project management V3 model', () => {
           },
         }),
       ),
-    ).toThrow('Invalid project manifest MPC spec_path.')
+    ).toThrow('mpc.spec_path must reference spec/spec.json.in')
   })
 
   it('uses the fixed project flow step order', () => {

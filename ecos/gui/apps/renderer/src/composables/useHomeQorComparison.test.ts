@@ -4,7 +4,7 @@ import {
   createProjectManifestDraft,
   registerWorkspaceInManifest,
   setQorBaselineInManifest,
-} from '@/utils/projectManagement'
+} from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
