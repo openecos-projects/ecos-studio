@@ -701,6 +701,15 @@ describe('step dashboard data', () => {
     ])
   })
 
+  it('keeps a zero-violation DRC total available when no violation types exist', () => {
+    const insights = drcInsights(['Type,MET1,VIA1,total', 'total,0,0,0'].join('\n'))
+
+    expect(insights?.snapshots).toEqual([
+      expect.objectContaining({ id: 'drc-layer-total', total: 0 }),
+      expect.objectContaining({ id: 'drc-type-total', total: 0, slices: [] }),
+    ])
+  })
+
   it('associates each STA corner with its own metrics and timing summary', () => {
     const step = {
       sta: {

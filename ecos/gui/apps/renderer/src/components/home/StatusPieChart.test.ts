@@ -25,4 +25,12 @@ describe('StatusPieChart', () => {
     expect(statusPieChartSource).toContain("appendTo: 'body'")
     expect(statusPieChartSource).toContain('confine: false')
   })
+
+  it('shows a supplied total when a valid empty distribution has no slices', () => {
+    expect(statusPieChartSource).toContain('v-else-if="centerPrimary"')
+    expect(statusPieChartSource).toContain('{{ centerPrimary }}')
+    expect(statusPieChartSource).toContain(
+      '<div v-else class="status-pie-empty">No data</div>',
+    )
+  })
 })
