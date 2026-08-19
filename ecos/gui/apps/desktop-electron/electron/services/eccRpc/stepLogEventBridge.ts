@@ -140,7 +140,7 @@ export class StepLogEventBridge {
         this.heldTerminal = null
         clearTimeout(heldTerminal.timer)
         this.archiver.abandonActiveStep()
-        this.bufferedSegments.clear()
+        this.clearCorrelationState()
         this.operationContext = null
         heldTerminal.forward(heldTerminal.event)
       }

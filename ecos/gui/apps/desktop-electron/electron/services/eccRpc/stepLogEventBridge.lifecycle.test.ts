@@ -193,6 +193,66 @@ describe('StepLogEventBridge lifecycle', () => {
     expect(synthesized.at(-1)?.payload.chunk).toBe('second attempt\n')
   })
 
+  it('clears leftover tokens when a superseded heldTerminal releases at the next operation start', () => {
+    vi.useFakeTimers()
+    const h = harness({ holdTimeoutMs: 2000 })
+    writeFlowJson(h.workspace, [
+      { name: 'Synthesis', tool: 'yosys' },
+      { name: 'Floorplan', tool: 'ecc' },
+    ])
+    startOperation(h)
+    startStep(h, 'Synthesis', 'yosys')
+    // Synthesis ends cleanly (token pending, completion never arrives);
+    // Floorplan begins and is still archiving when the operation fails, so
+    // the terminal holds behind the active archive.
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('synthesis\n'))
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    startStep(h, 'Floorplan', 'ecc', 3)
+    h.feed(v1Marker('begin', 'Floorplan', 'ecc'), Buffer.from('floorplan\n'))
+    h.bridge.handleProtocolEvent(
+      protocolEvent('operation.failed', { error: 'executor crashed' }, { sequence: 4 }),
+      h.forward,
+    )
+    expect(h.forwarded.map((event) => event.type)).not.toContain('operation.failed')
+
+    // The next operation starts before the hold times out: the stale
+    // terminal forwards now, and the Synthesis token must go with it.
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'operation.started',
+        {},
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 5 },
+      ),
+      h.forward,
+    )
+    expect(h.forwarded.map((event) => event.type)).toContain('operation.failed')
+
+    startStep(h, 'Synthesis', 'yosys', 6)
+    h.feed(v1Marker('begin', 'Synthesis', 'yosys'), Buffer.from('fresh run\n'))
+    h.bridge.handleProtocolEvent(
+      protocolEvent(
+        'step.completed',
+        { step: 'Synthesis', tool: 'yosys', state: 'Success' },
+        { operationId: 'operation-2', runSessionId: 'run-session-2', sequence: 7 },
+      ),
+      h.forward,
+    )
+    // Without the clear, the leftover token would have forwarded this
+    // completion immediately, before its own end marker.
+    expect(
+      h.forwarded.filter(
+        (event) => event.type === 'step.completed' && event.operationId === 'operation-2',
+      ),
+    ).toHaveLength(0)
+
+    h.feed(v1Marker('end', 'Synthesis', 'yosys'))
+    const completed = h.forwarded.filter(
+      (event) => event.type === 'step.completed' && event.operationId === 'operation-2',
+    )
+    expect(completed).toHaveLength(1)
+    expect(completed[0]!.payload.finalLog).toBe('fresh run\n')
+  })
+
   it('does not let a previous operation’s end token satisfy a new completion', () => {
     vi.useFakeTimers()
     const h = harness({ holdTimeoutMs: 2000 })
