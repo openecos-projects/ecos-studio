@@ -1249,9 +1249,28 @@ export function buildStaCriticalPathsModel(
   pathGroups: Array<{ corner: string; source: Record<string, unknown> | null }>,
   limit = 5,
 ): StaCriticalPathsModel {
-  const paths = pathGroups.flatMap(({ corner, source }) =>
-    parseStaTimingPaths(source, corner),
+  return selectStaCriticalPaths(
+    pathGroups.map(({ corner, source }) => ({
+      corner,
+      paths: parseStaTimingPaths(source, corner),
+    })),
+    null,
+    limit,
   )
+}
+
+/** Worst setup/hold paths across all corners, or scoped to one corner when given. */
+export function selectStaCriticalPaths(
+  pathsByCorner: ReadonlyArray<{
+    corner: string
+    paths: readonly StaCriticalPath[]
+  }>,
+  corner: string | null,
+  limit = 5,
+): StaCriticalPathsModel {
+  const paths = pathsByCorner
+    .filter((group) => corner === null || group.corner === corner)
+    .flatMap((group) => group.paths)
   const bySlack = (left: StaCriticalPath, right: StaCriticalPath): number => {
     const leftSlack = left.slackNs ?? Number.POSITIVE_INFINITY
     const rightSlack = right.slackNs ?? Number.POSITIVE_INFINITY

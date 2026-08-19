@@ -303,20 +303,20 @@
               <i class="ri-map-2-line" aria-hidden="true" />
             </button>
           </header>
-          <div v-if="data.synthesisInsights" class="data-body synthesis-data-body">
+          <div v-if="isSynthesisStep" class="data-body synthesis-data-body">
             <section class="synthesis-insight-column">
               <header class="synthesis-insight-header">
                 <div>
                   <i class="ri-stack-line" aria-hidden="true" />
                   <h3>Metrics</h3>
                 </div>
-                <span>{{ data.synthesisInsights.metrics.length }} values</span>
+                <span>{{ data.synthesisInsights?.metrics.length ?? 0 }} values</span>
               </header>
               <dl
-                v-if="data.synthesisInsights.metrics.length"
+                v-if="data.synthesisInsights?.metrics.length"
                 class="synthesis-value-grid"
               >
-                <div v-for="metric in data.synthesisInsights.metrics" :key="metric.id">
+                <div v-for="metric in data.synthesisInsights?.metrics" :key="metric.id">
                   <dt>{{ metric.label }}</dt>
                   <dd :title="metric.value">{{ metric.value }}</dd>
                 </div>
@@ -333,57 +333,32 @@
                   <i class="ri-timer-line" aria-hidden="true" />
                   <h3>Timing Analysis</h3>
                 </div>
-                <span>{{ data.synthesisInsights.timingModules.length }} modules</span>
+                <span>{{ timingCornerLabel }}</span>
               </header>
-              <div
-                v-if="data.synthesisInsights.timingModules.length"
-                class="synthesis-timing-content"
-              >
-                <div
-                  class="synthesis-timing-tabs"
-                  role="tablist"
-                  aria-label="Synthesis timing analysis modules"
-                >
-                  <button
-                    v-for="(module, index) in data.synthesisInsights.timingModules"
-                    :id="`synthesis-timing-tab-${module.id}`"
-                    :key="module.id"
-                    type="button"
-                    role="tab"
-                    :aria-selected="index === synthesisTimingTabIndex"
-                    :class="{ 'is-active': index === synthesisTimingTabIndex }"
-                    @click="synthesisTimingTabIndex = index"
-                  >
-                    {{ module.label }}
-                  </button>
-                </div>
-                <dl
-                  v-if="selectedSynthesisTimingModule"
-                  class="synthesis-value-grid synthesis-timing-parameter-grid"
-                  role="tabpanel"
-                  :aria-labelledby="`synthesis-timing-tab-${selectedSynthesisTimingModule.id}`"
-                >
-                  <div
-                    v-for="value in selectedSynthesisTimingModule.values"
-                    :key="value.id"
-                  >
-                    <dt>{{ value.label }}</dt>
-                    <dd :title="value.value">{{ value.value }}</dd>
-                  </div>
-                </dl>
-              </div>
+              <template v-if="data.timingAnalysis">
+                <TimingKpis
+                  class="synthesis-timing-kpis"
+                  :overview="data.timingAnalysis.overview"
+                  compact
+                />
+                <TimingCornerTable
+                  class="synthesis-timing-table"
+                  :overview="data.timingAnalysis.overview"
+                  :rows="data.timingAnalysis.overview.corners"
+                  compact
+                />
+              </template>
               <div v-else class="synthesis-empty-state">
                 <i class="ri-timer-line" aria-hidden="true" />
                 <span>No post-synthesis timing summary</span>
               </div>
               <button
                 type="button"
-                class="status-detail-link synthesis-timing-path-link"
-                title="View all post-synthesis timing paths"
-                @click="showSynthesisTimingPaths = true"
+                class="status-detail-link timing-detail-link"
+                title="View timing analysis details"
+                @click="openTimingAnalysis()"
               >
-                Timing paths
-                <span>{{ data.synthesisInsights.timingPaths.length }}</span>
+                Timing details
                 <i class="ri-arrow-right-up-line" aria-hidden="true" />
               </button>
             </section>
@@ -653,40 +628,55 @@
             </section>
           </div>
           <div v-else-if="data.staInsights" class="data-body sta-data-body">
-            <div class="sta-corner-tabs" role="tablist" aria-label="STA corners">
-              <button
-                v-for="(corner, index) in data.staInsights.corners"
-                :id="`sta-corner-tab-${index}`"
-                :key="corner.id"
-                type="button"
-                role="tab"
-                :aria-selected="index === staCornerTabIndex"
-                :class="{ 'is-active': index === staCornerTabIndex }"
-                :title="corner.staCorner"
-                @click="selectStaCorner(index)"
-              >
-                {{ corner.staCorner }}
-              </button>
-            </div>
-
             <section class="sta-insight-column">
               <header class="floorplan-insight-header">
                 <div>
                   <i class="ri-stack-line" aria-hidden="true" />
-                  <h3>Metrics</h3>
+                  <h3>Corner Summary</h3>
                 </div>
-                <span>{{ selectedStaCorner?.metrics.length ?? 0 }} values</span>
+                <span>{{ staCorners.length }} corners</span>
               </header>
-              <dl v-if="selectedStaCorner" class="synthesis-value-grid sta-metrics-grid">
-                <div v-for="metric in selectedStaCorner.metrics" :key="metric.id">
-                  <dt>{{ metric.label }}</dt>
-                  <dd :title="metric.value">{{ metric.value }}</dd>
-                </div>
-              </dl>
-              <div v-else class="synthesis-empty-state">
-                <i class="ri-timer-line" aria-hidden="true" />
-                <span>No STA corner data</span>
+              <div class="insight-table-wrap sta-corner-summary-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Corner</th>
+                      <th>Role</th>
+                      <th>PVT</th>
+                      <th>RC</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="corner in staCorners"
+                      :key="corner.id"
+                      :class="{
+                        'is-unavailable': !isStaCornerAvailable(corner.availability),
+                      }"
+                    >
+                      <th :title="corner.staCorner">{{ corner.staCorner }}</th>
+                      <td>{{ corner.role }}</td>
+                      <td>{{ staCornerPvt(corner) }}</td>
+                      <td>{{ corner.rcCorner }}</td>
+                      <td
+                        :class="{ 'is-good': isStaCornerAvailable(corner.availability) }"
+                      >
+                        {{ corner.availability }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
+              <button
+                type="button"
+                class="status-detail-link timing-detail-link"
+                title="View all STA corner details"
+                @click="showStaCornerDetails = true"
+              >
+                Corner details
+                <i class="ri-arrow-right-up-line" aria-hidden="true" />
+              </button>
             </section>
 
             <section class="sta-insight-column">
@@ -695,46 +685,34 @@
                   <i class="ri-timer-line" aria-hidden="true" />
                   <h3>Timing Analysis</h3>
                 </div>
-                <span>{{ selectedStaCorner?.timingModules.length ?? 0 }} modules</span>
+                <span>{{ timingCornerLabel }}</span>
               </header>
-              <div
-                v-if="selectedStaCorner?.timingModules.length"
-                class="synthesis-timing-content"
-              >
-                <div
-                  class="synthesis-timing-tabs sta-timing-tabs"
-                  role="tablist"
-                  aria-label="STA timing analysis modules"
-                >
-                  <button
-                    v-for="(module, index) in selectedStaCorner.timingModules"
-                    :id="`sta-timing-tab-${module.id}`"
-                    :key="module.id"
-                    type="button"
-                    role="tab"
-                    :aria-selected="index === staTimingTabIndex"
-                    :class="{ 'is-active': index === staTimingTabIndex }"
-                    @click="staTimingTabIndex = index"
-                  >
-                    {{ module.label }}
-                  </button>
-                </div>
-                <dl
-                  v-if="selectedStaTimingModule"
-                  class="synthesis-value-grid synthesis-timing-parameter-grid"
-                  role="tabpanel"
-                  :aria-labelledby="`sta-timing-tab-${selectedStaTimingModule.id}`"
-                >
-                  <div v-for="value in selectedStaTimingModule.values" :key="value.id">
-                    <dt>{{ value.label }}</dt>
-                    <dd :title="value.value">{{ value.value }}</dd>
-                  </div>
-                </dl>
-              </div>
+              <template v-if="data.timingAnalysis">
+                <TimingKpis
+                  class="synthesis-timing-kpis"
+                  :overview="data.timingAnalysis.overview"
+                  compact
+                />
+                <TimingCornerTable
+                  class="synthesis-timing-table"
+                  :overview="data.timingAnalysis.overview"
+                  :rows="data.timingAnalysis.overview.corners"
+                  compact
+                />
+              </template>
               <div v-else class="synthesis-empty-state">
                 <i class="ri-timer-line" aria-hidden="true" />
                 <span>No corner timing summary</span>
               </div>
+              <button
+                type="button"
+                class="status-detail-link timing-detail-link"
+                title="View timing analysis details"
+                @click="openTimingAnalysis()"
+              >
+                Timing details
+                <i class="ri-arrow-right-up-line" aria-hidden="true" />
+              </button>
             </section>
           </div>
           <div v-else-if="data.hardenInsights" class="data-body harden-data-body">
@@ -1069,72 +1047,42 @@
     </div>
   </Dialog>
 
+  <TimingAnalysisDialog
+    :visible="showTimingAnalysis"
+    :header="timingDialogTitle"
+    :overview="data?.timingAnalysis?.overview ?? null"
+    :paths-by-corner="data?.timingAnalysis?.pathsByCorner ?? null"
+    :run-info="data?.timingAnalysis?.runInfo ?? []"
+    empty-hint="No timing summary is available for this step."
+    @update:visible="showTimingAnalysis = $event"
+  />
+
   <Dialog
-    v-model:visible="showSynthesisTimingPaths"
+    v-model:visible="showStaCornerDetails"
     modal
-    header="Post-Synthesis Timing Paths"
-    :style="{ width: 'min(1180px, calc(100vw - 32px))' }"
+    :header="staCornerDialogTitle"
+    :style="{ width: 'min(760px, calc(100vw - 32px))' }"
     :draggable="false"
   >
-    <div v-if="data?.synthesisInsights" class="timing-paths-dialog">
+    <div v-if="data?.staInsights?.corners.length" class="corner-detail-list">
       <section
-        v-if="data.synthesisInsights.timingPathSummary.length"
-        class="timing-path-summary"
+        v-for="corner in data.staInsights.corners"
+        :key="corner.id"
+        :class="{ 'is-unavailable': !isStaCornerAvailable(corner.availability) }"
       >
-        <header>
-          <div>
-            <i class="ri-information-line" aria-hidden="true" />
-            <h3>Run Information</h3>
-          </div>
-        </header>
-        <dl class="timing-path-summary-grid">
-          <div v-for="value in data.synthesisInsights.timingPathSummary" :key="value.id">
-            <dt>{{ value.label }}</dt>
-            <dd :title="value.value">{{ value.value }}</dd>
+        <div>
+          <span>{{ staCornerDetailSubtitle(corner) }}</span>
+          <strong>{{ corner.staCorner }}</strong>
+        </div>
+        <dl>
+          <div v-for="metric in corner.metrics" :key="metric.id">
+            <dt>{{ metric.label }}</dt>
+            <dd :title="metric.value">{{ metric.value }}</dd>
           </div>
         </dl>
       </section>
-
-      <section v-if="data.synthesisInsights.timingPaths.length" class="timing-path-list">
-        <header class="timing-path-list-header">
-          <div>
-            <i class="ri-git-branch-line" aria-hidden="true" />
-            <h3>Timing Paths</h3>
-          </div>
-          <span>{{ data.synthesisInsights.timingPaths.length }} paths</span>
-        </header>
-        <div class="timing-path-waterfall">
-          <article v-for="path in data.synthesisInsights.timingPaths" :key="path.id">
-            <header>
-              <span>{{ path.label }}</span>
-              <small>{{ path.stages.length }} stages</small>
-            </header>
-            <dl class="timing-path-values">
-              <div v-for="value in path.values" :key="value.id">
-                <dt>{{ value.label }}</dt>
-                <dd :title="value.value">{{ value.value }}</dd>
-              </div>
-            </dl>
-            <section v-if="path.stages.length" class="timing-path-stages">
-              <h4>Stage List</h4>
-              <ol>
-                <li v-for="(stage, index) in path.stages" :key="`${path.id}-${index}`">
-                  <span>{{ index + 1 }}</span>
-                  <dl>
-                    <div v-for="value in stage" :key="value.id">
-                      <dt>{{ value.label }}</dt>
-                      <dd :title="value.value">{{ value.value }}</dd>
-                    </div>
-                  </dl>
-                </li>
-              </ol>
-            </section>
-          </article>
-        </div>
-      </section>
-      <p v-else class="dialog-empty">No post-synthesis timing paths are available.</p>
     </div>
-    <p v-else class="dialog-empty">No post-synthesis timing paths are available.</p>
+    <p v-else class="dialog-empty">No STA corner details are available.</p>
   </Dialog>
 
   <Dialog
@@ -1231,6 +1179,9 @@ import { buildChipViewerOpenRequest, canOpenChipViewer } from './drawingAreaChip
 import StatusPieChart from './home/StatusPieChart.vue'
 import { homeQorFlowStepForLabel } from './home/qorComparisonData'
 import StepConfigPanel from './StepConfigPanel.vue'
+import TimingAnalysisDialog from './step-insights/TimingAnalysisDialog.vue'
+import TimingCornerTable from './step-insights/TimingCornerTable.vue'
+import TimingKpis from './step-insights/TimingKpis.vue'
 import {
   formatDashboardValue,
   formatRuntime,
@@ -1242,6 +1193,7 @@ import {
   type StepDashboardMetric,
   type StepDashboardQor,
   type StepDashboardQorMetricComparison,
+  type StepDashboardStaCorner,
 } from './step-dashboard/stepDashboardData'
 
 const { currentStep, data, error, loading, refresh } = useStepDashboardData()
@@ -1255,12 +1207,10 @@ const {
 } = useStepConfigInfo()
 const chipViewerBusy = ref(false)
 const dataChartIndex = ref(0)
-const synthesisTimingTabIndex = ref(0)
-const staCornerTabIndex = ref(0)
-const staTimingTabIndex = ref(0)
 const showChecklistDetails = ref(false)
 const showQorDetails = ref(false)
-const showSynthesisTimingPaths = ref(false)
+const showTimingAnalysis = ref(false)
+const showStaCornerDetails = ref(false)
 const showFloorplanSnapshot = ref(false)
 const showStepConfiguration = ref(false)
 const selectedFloorplanSnapshot = ref<StepDashboardFloorplanSnapshot | null>(null)
@@ -1337,17 +1287,35 @@ const selectedDataChart = computed(() => {
   const charts = data.value?.dataCharts ?? []
   return charts[dataChartIndex.value] ?? charts[0] ?? null
 })
-const selectedSynthesisTimingModule = computed(() => {
-  const modules = data.value?.synthesisInsights?.timingModules ?? []
-  return modules[synthesisTimingTabIndex.value] ?? modules[0] ?? null
-})
-const selectedStaCorner = computed(() => {
+/** Corner rows follow the timing overview order so both tables align. */
+const staCorners = computed(() => {
   const corners = data.value?.staInsights?.corners ?? []
-  return corners[staCornerTabIndex.value] ?? corners[0] ?? null
+  const order = new Map(
+    (data.value?.timingAnalysis?.overview.corners ?? []).map(
+      (corner, index) => [corner.corner, index] as const,
+    ),
+  )
+  return [...corners].sort(
+    (left, right) =>
+      (order.get(left.id) ?? corners.length) - (order.get(right.id) ?? corners.length),
+  )
 })
-const selectedStaTimingModule = computed(() => {
-  const modules = selectedStaCorner.value?.timingModules ?? []
-  return modules[staTimingTabIndex.value] ?? modules[0] ?? null
+const isSynthesisStep = computed(
+  () => (data.value?.step ?? currentStep.value).trim().toLowerCase() === 'synthesis',
+)
+const timingCornerCount = computed(
+  () => data.value?.timingAnalysis?.overview.corners.length ?? 0,
+)
+const timingCornerLabel = computed(() =>
+  timingCornerCount.value === 1 ? '1 corner' : `${timingCornerCount.value} corners`,
+)
+const timingDialogTitle = computed(() => {
+  const stepName = data.value?.step ?? currentStep.value
+  return `Timing Analysis · ${stepName}`
+})
+const staCornerDialogTitle = computed(() => {
+  const stepName = data.value?.step ?? currentStep.value
+  return `STA Corners · ${stepName}`
 })
 const insightData = computed(
   () => data.value?.floorplanInsights ?? data.value?.stepInsights ?? null,
@@ -1369,9 +1337,22 @@ function insightTableValue(value: number | null): string {
   return value === null ? '--' : formatDashboardValue(value, '')
 }
 
-function selectStaCorner(index: number): void {
-  staCornerTabIndex.value = index
-  staTimingTabIndex.value = 0
+function isStaCornerAvailable(availability: string): boolean {
+  return availability.trim().toLowerCase() === 'available'
+}
+
+function staCornerPvt(corner: StepDashboardStaCorner): string {
+  const voltage = corner.voltageV === null ? '--' : `${corner.voltageV.toFixed(2)} V`
+  const temperature = corner.temperatureC === null ? '--' : `${corner.temperatureC} °C`
+  return `${corner.process} · ${voltage} · ${temperature}`
+}
+
+function staCornerDetailSubtitle(corner: StepDashboardStaCorner): string {
+  return [corner.role, corner.availability].filter((part) => part !== '--').join(' · ')
+}
+
+function openTimingAnalysis(): void {
+  showTimingAnalysis.value = true
 }
 
 function metricTone(metric: StepDashboardMetric): string {
@@ -1491,9 +1472,6 @@ watch(
   () => data.value?.step,
   () => {
     dataChartIndex.value = 0
-    synthesisTimingTabIndex.value = 0
-    staCornerTabIndex.value = 0
-    staTimingTabIndex.value = 0
   },
 )
 
@@ -2228,7 +2206,6 @@ function fileName(path: string): string {
 }
 .sta-data-body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: auto minmax(0, 1fr);
 }
 .synthesis-insight-column,
 .floorplan-insight-column,
@@ -2267,41 +2244,31 @@ function fileName(path: string): string {
   padding: 5px 8px;
 }
 .synthesis-insight-header > div,
-.floorplan-insight-header > div,
-.timing-path-summary header > div,
-.timing-path-list-header > div {
+.floorplan-insight-header > div {
   align-items: center;
   display: flex;
   gap: 5px;
   min-width: 0;
 }
 .synthesis-insight-header i,
-.floorplan-insight-header i,
-.timing-path-summary header i,
-.timing-path-list-header i {
+.floorplan-insight-header i {
   color: var(--accent-color);
   font-size: 12px;
 }
 .synthesis-insight-header h3,
-.floorplan-insight-header h3,
-.timing-path-summary h3,
-.timing-path-list h3 {
+.floorplan-insight-header h3 {
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 700;
   margin: 0;
 }
 .synthesis-insight-header > span,
-.floorplan-insight-header > span,
-.timing-path-list-header > span {
+.floorplan-insight-header > span {
   color: var(--text-secondary);
   font-size: 12px;
   white-space: nowrap;
 }
-.synthesis-value-grid,
-.timing-path-summary-grid,
-.timing-path-values,
-.timing-path-stages dl {
+.synthesis-value-grid {
   margin: 0;
 }
 .synthesis-value-grid {
@@ -2316,10 +2283,7 @@ function fileName(path: string): string {
   overflow-y: auto;
   padding: 6px;
 }
-.synthesis-value-grid > div,
-.timing-path-summary-grid > div,
-.timing-path-values > div,
-.timing-path-stages dl > div {
+.synthesis-value-grid > div {
   min-width: 0;
 }
 .synthesis-value-grid > div {
@@ -2332,10 +2296,7 @@ function fileName(path: string): string {
   min-height: min-content;
   padding: 5px 7px;
 }
-.synthesis-value-grid dt,
-.timing-path-summary-grid dt,
-.timing-path-values dt,
-.timing-path-stages dt {
+.synthesis-value-grid dt {
   color: var(--text-secondary);
   font-size: 12px;
   margin: 0;
@@ -2345,10 +2306,7 @@ function fileName(path: string): string {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.synthesis-value-grid dd,
-.timing-path-summary-grid dd,
-.timing-path-values dd,
-.timing-path-stages dd {
+.synthesis-value-grid dd {
   color: var(--text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 12px;
@@ -2368,43 +2326,14 @@ function fileName(path: string): string {
   text-align: left;
   white-space: normal;
 }
-.synthesis-timing-content {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-.synthesis-timing-tabs {
+.synthesis-timing-kpis {
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-  display: grid;
   flex: 0 0 auto;
-  gap: 2px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  min-width: 0;
   padding: 5px 6px;
 }
-.synthesis-timing-tabs button {
-  background: var(--bg-secondary);
-  border: 1px solid transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  min-height: 21px;
-  min-width: 0;
-  overflow: hidden;
-  padding: 3px 4px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.synthesis-timing-tabs button:hover,
-.synthesis-timing-tabs button.is-active {
-  background: color-mix(in srgb, var(--accent-color) 16%, var(--bg-secondary));
-  border-color: color-mix(in srgb, var(--accent-color) 44%, transparent);
-  color: var(--accent-color);
-  font-weight: 700;
-}
-.synthesis-timing-parameter-grid {
-  padding-top: 5px;
+.synthesis-timing-table {
+  flex: 1;
+  min-height: 0;
 }
 .floorplan-metrics-grid {
   grid-auto-rows: minmax(min-content, 1fr);
@@ -2651,36 +2580,16 @@ function fileName(path: string): string {
 .harden-output-table tr.is-missing .harden-output-state {
   color: var(--danger-color);
 }
-.sta-corner-tabs {
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-  display: grid;
-  gap: 3px;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  padding: 5px 6px;
+.sta-corner-summary-table tbody tr {
+  height: 1.5rem;
 }
-.sta-corner-tabs button {
-  background: var(--bg-secondary);
-  border: 1px solid transparent;
+.sta-corner-summary-table tr.is-unavailable th,
+.sta-corner-summary-table tr.is-unavailable td {
   color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  min-height: 21px;
-  min-width: 0;
-  overflow: hidden;
-  padding: 3px 4px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  opacity: 0.72;
 }
-.sta-corner-tabs button:hover,
-.sta-corner-tabs button.is-active {
-  background: color-mix(in srgb, var(--accent-color) 16%, var(--bg-secondary));
-  border-color: color-mix(in srgb, var(--accent-color) 44%, transparent);
-  color: var(--accent-color);
-  font-weight: 700;
-}
-.sta-metrics-grid {
-  padding-top: 5px;
+.sta-corner-summary-table td.is-good {
+  color: var(--success-color);
 }
 .floorplan-snapshot-dialog {
   display: grid;
@@ -2803,7 +2712,7 @@ function fileName(path: string): string {
   font-size: 12px;
   text-align: right;
 }
-.synthesis-timing-path-link {
+.timing-detail-link {
   align-items: center;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
   display: flex;
@@ -2812,10 +2721,6 @@ function fileName(path: string): string {
   justify-content: flex-end;
   margin: 0;
   padding: 0 8px;
-}
-.synthesis-timing-path-link span {
-  color: var(--text-secondary);
-  font-size: 12px;
 }
 .synthesis-empty-state {
   align-items: center;
@@ -3007,120 +2912,6 @@ function fileName(path: string): string {
   min-height: 420px;
 }
 
-.timing-paths-dialog {
-  display: grid;
-  gap: 12px;
-  max-height: min(68vh, 760px);
-  overflow: auto;
-  padding-right: 4px;
-}
-.timing-path-summary,
-.timing-path-list {
-  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-  min-width: 0;
-}
-.timing-path-summary > header,
-.timing-path-list-header {
-  align-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
-  display: flex;
-  justify-content: space-between;
-  min-height: 31px;
-  padding: 5px 8px;
-}
-.timing-path-summary-grid {
-  display: grid;
-  gap: 5px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 7px;
-}
-.timing-path-summary-grid > div {
-  background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
-  padding: 4px 6px;
-}
-.timing-path-waterfall {
-  column-count: 2;
-  column-gap: 10px;
-  padding: 8px;
-}
-.timing-path-waterfall > article {
-  background: color-mix(in srgb, var(--bg-secondary) 54%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
-  break-inside: avoid;
-  display: inline-block;
-  margin: 0 0 10px;
-  min-width: 0;
-  vertical-align: top;
-  width: 100%;
-}
-.timing-path-waterfall > article > header {
-  align-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  padding: 5px 7px;
-}
-.timing-path-waterfall > article > header > span {
-  color: var(--accent-color);
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 12px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.timing-path-waterfall > article > header small {
-  color: var(--text-secondary);
-  flex: 0 0 auto;
-  font-size: 12px;
-}
-.timing-path-values {
-  display: grid;
-  gap: 4px 7px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 7px;
-}
-.timing-path-values dd {
-  font-size: 12px;
-}
-.timing-path-stages {
-  border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-  padding: 7px;
-}
-.timing-path-stages h4 {
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-.timing-path-stages ol {
-  display: grid;
-  gap: 4px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.timing-path-stages li {
-  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
-  display: grid;
-  gap: 5px;
-  grid-template-columns: 17px minmax(0, 1fr);
-  padding: 4px;
-}
-.timing-path-stages li > span {
-  color: var(--text-secondary);
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 12px;
-  padding-top: 1px;
-  text-align: right;
-}
-.timing-path-stages dl {
-  display: grid;
-  gap: 3px 5px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.timing-path-stages dd {
-  font-size: 12px;
-  margin-top: 1px;
-}
-
 .card-empty,
 .step-dashboard-state {
   align-items: center;
@@ -3252,6 +3043,60 @@ function fileName(path: string): string {
   display: block;
   margin-top: 4px;
 }
+.corner-detail-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(64vh, 640px);
+  overflow: auto;
+  padding-right: 4px;
+}
+.corner-detail-list section {
+  border-left: 3px solid var(--success-color);
+  padding: 7px 9px;
+}
+.corner-detail-list section.is-unavailable {
+  border-left-color: var(--danger-color);
+}
+.corner-detail-list section > div {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+}
+.corner-detail-list section > div span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.corner-detail-list section > div strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.corner-detail-list dl {
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  margin: 6px 0 0;
+}
+.corner-detail-list dl > div {
+  background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
+  min-width: 0;
+  padding: 4px 6px;
+}
+.corner-detail-list dt {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.corner-detail-list dd {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
 .qor-gate-list {
   display: grid;
   gap: 5px;
@@ -3315,9 +3160,6 @@ function fileName(path: string): string {
 }
 
 @media (max-width: 640px) {
-  .sta-corner-tabs {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
   .floorplan-snapshot-dialog {
     grid-template-columns: 1fr;
     height: min(72vh, 620px);

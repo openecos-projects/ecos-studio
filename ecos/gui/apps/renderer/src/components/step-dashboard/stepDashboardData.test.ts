@@ -10,6 +10,7 @@ import {
   hardenOutputInsights,
   lvsInsights,
   mapHighlights,
+  POST_SYNTHESIS_TIMING_CORNER,
   prioritizeQorMetricComparisons,
   qorSummary,
   rcxInsights,
@@ -17,6 +18,7 @@ import {
   staCornerSummaryPaths,
   staInsights,
   stepFeatureInsights,
+  stepTimingAnalysis,
   synthesisInsights,
   stepDistribution,
   stepKeyMetrics,
@@ -460,54 +462,15 @@ describe('step dashboard data', () => {
     ])
   })
 
-  it('keeps Synthesis statistics and post-synthesis timing paths structured by module', () => {
-    const insights = synthesisInsights(
-      {
-        design: {
-          num_wires: 343,
-          num_cells: 307,
-          area: 777.84,
-          num_cells_by_type: { DFFQX1: 35, NAND2X1: 22 },
-        },
+  it('keeps Synthesis statistics separate from the unified timing analysis', () => {
+    const insights = synthesisInsights({
+      design: {
+        num_wires: 343,
+        num_cells: 307,
+        area: 777.84,
+        num_cells_by_type: { DFFQX1: 35, NAND2X1: 22 },
       },
-      {
-        path_groups: [
-          {
-            name: 'clk',
-            setup: { wns: 18.732, tns: 0, frequency_mhz: 789 },
-            hold: { wns: 0.245, tns: 0 },
-          },
-        ],
-        summary: { setup: { wns: 18.732 }, hold: { wns: 0.245 } },
-        design_statistics: { cella: 777, cap: 0 },
-      },
-      {
-        schema_version: 1,
-        corner: 'post_synthesis',
-        path_limit: 20,
-        paths: [
-          {
-            path_id: 'timing_path_1',
-            analysis_type: 'setup',
-            slack_ns: 18.7324353939,
-            stages: [
-              {
-                kind: 'point',
-                pin: 'source:CK',
-                cell: 'DFFQX1',
-                arrival_ns: 0,
-              },
-              {
-                kind: 'cell_arc',
-                pin: 'source:Q',
-                cell: 'DFFQX1',
-                arrival_ns: 0.18,
-              },
-            ],
-          },
-        ],
-      },
-    )
+    })
 
     expect(insights?.metrics).toEqual([
       { id: 'synthesis-metric-num_wires', label: 'Num Wires', value: '343' },
@@ -517,35 +480,86 @@ describe('step dashboard data', () => {
     expect(insights?.metrics.some((metric) => metric.label.includes('By Type'))).toBe(
       false,
     )
-    expect(insights?.timingModules).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: 'Path Groups' }),
-        expect.objectContaining({ label: 'Summary' }),
-        expect.objectContaining({ label: 'Design Statistics' }),
-      ]),
+  })
+
+  it('wraps the post-synthesis timing files as a single-corner timing analysis', () => {
+    const timingSummary = {
+      path_groups: [
+        {
+          name: 'clk',
+          setup: { wns: 18.732, tns: 0, frequency_mhz: 789 },
+          hold: { wns: 0.245, tns: 0 },
+        },
+      ],
+      summary: { setup: { wns: 18.732 }, hold: { wns: 0.245 } },
+      design_statistics: { cella: 777, cap: 0 },
+    }
+    const timingPaths = {
+      schema_version: 1,
+      corner: 'post_synthesis',
+      path_limit: 20,
+      paths: [
+        {
+          path_id: 'timing_path_1',
+          analysis_type: 'setup',
+          slack_ns: 18.7324353939,
+          stages: [
+            { kind: 'point', pin: 'source:CK', cell: 'DFFQX1', arrival_ns: 0 },
+            { kind: 'cell_arc', pin: 'source:Q', cell: 'DFFQX1', arrival_ns: 0.18 },
+          ],
+        },
+      ],
+    }
+
+    const analysis = stepTimingAnalysis(
+      [{ corner: POST_SYNTHESIS_TIMING_CORNER, summary: timingSummary }],
+      [{ corner: POST_SYNTHESIS_TIMING_CORNER, source: timingPaths }],
     )
-    expect(insights?.timingModules).toHaveLength(3)
-    expect(insights?.timingPathSummary).toEqual([
-      { id: 'timing-path-summary-schema_version', label: 'Schema Version', value: '1' },
-      { id: 'timing-path-summary-corner', label: 'Corner', value: 'post_synthesis' },
-      { id: 'timing-path-summary-path_limit', label: 'Path Limit', value: '20' },
-    ])
-    expect(insights?.timingPaths).toEqual([
+    expect(analysis).not.toBeNull()
+    expect(analysis?.overview.corners).toEqual([
       expect.objectContaining({
-        id: 'timing_path_1',
-        values: expect.arrayContaining([
-          expect.objectContaining({ label: 'Slack Ns', value: '18.7324353939' }),
-        ]),
-        stages: [
-          expect.arrayContaining([
-            expect.objectContaining({ label: 'Pin', value: 'source:CK' }),
-          ]),
-          expect.arrayContaining([
-            expect.objectContaining({ label: 'Arrival Ns', value: '0.18' }),
-          ]),
-        ],
+        corner: POST_SYNTHESIS_TIMING_CORNER,
+        missing: false,
+        firstPath: expect.objectContaining({
+          pathId: 'timing_path_1',
+          analysisType: 'setup',
+        }),
       }),
     ])
+    expect(analysis?.overview.worstSetup).toEqual({
+      corner: POST_SYNTHESIS_TIMING_CORNER,
+      wns: 18.732,
+    })
+    expect(analysis?.overview.pathGroups).toEqual(['clk'])
+    expect(analysis?.pathsByCorner).toEqual([
+      {
+        corner: POST_SYNTHESIS_TIMING_CORNER,
+        paths: [
+          expect.objectContaining({
+            id: `${POST_SYNTHESIS_TIMING_CORNER}:timing_path_1`,
+            corner: POST_SYNTHESIS_TIMING_CORNER,
+            analysisType: 'setup',
+            slackNs: 18.7324353939,
+            stageCount: 2,
+          }),
+        ],
+      },
+    ])
+    expect(analysis?.runInfo).toEqual([
+      { id: 'timing-run-info-schema_version', label: 'Schema Version', value: '1' },
+      { id: 'timing-run-info-corner', label: 'Corner', value: 'post_synthesis' },
+      { id: 'timing-run-info-path_limit', label: 'Path Limit', value: '20' },
+    ])
+  })
+
+  it('marks STA timing corners missing when their summaries cannot be read', () => {
+    const analysis = stepTimingAnalysis([{ corner: 'MAX_125/Cworst', summary: null }], [])
+    expect(analysis?.overview.corners).toEqual([
+      expect.objectContaining({ corner: 'MAX_125/Cworst', missing: true }),
+    ])
+    expect(analysis?.overview.worstSetup).toBeNull()
+    expect(analysis?.pathsByCorner).toEqual([])
+    expect(stepTimingAnalysis([], [])).toBeNull()
   })
 
   it('keeps the Harden output artifact paths and existence state explicit', () => {
@@ -734,15 +748,11 @@ describe('step dashboard data', () => {
       {
         id: 'MAX_125/Cworst',
         path: '/workspace/sta/feature/MAX_125/Cworst/qor_summary.json',
+        timingPathsPath: '/workspace/sta/feature/MAX_125/Cworst/timing_paths.json',
       },
     ])
 
-    const insights = staInsights(step, [
-      {
-        path_groups: [{ name: 'clk', setup: { wns: -0.12, tns: -0.5 } }],
-        summary: { setup: { wns: -0.12 } },
-      },
-    ])
+    const insights = staInsights(step)
     expect(insights?.corners).toEqual([
       expect.objectContaining({
         id: 'MAX_125/Cworst',
@@ -750,10 +760,12 @@ describe('step dashboard data', () => {
           expect.objectContaining({ label: 'Sta Corner', value: 'MAX_125/Cworst' }),
           expect.objectContaining({ label: 'Voltage V', value: '0.72' }),
         ]),
-        timingModules: expect.arrayContaining([
-          expect.objectContaining({ label: 'Path Groups' }),
-          expect.objectContaining({ label: 'Summary' }),
-        ]),
+        role: 'max',
+        process: 'ss',
+        voltageV: 0.72,
+        temperatureC: 125,
+        rcCorner: 'Cworst',
+        availability: 'available',
       }),
     ])
   })

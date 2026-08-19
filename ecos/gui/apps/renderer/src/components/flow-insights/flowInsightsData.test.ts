@@ -25,6 +25,7 @@ import {
   parseRuntimeSeconds,
   parseStaCornerSummaries,
   peakMemoryFromFlowStep,
+  selectStaCriticalPaths,
   selectStaPathGroup,
 } from './flowInsightsData'
 
@@ -414,6 +415,55 @@ describe('flow insights data', () => {
     expect(model.hold[0]?.slackNs).toBe(0.07)
     expect(model.setup[0]?.stages[0]?.delayNs).toBe(0.1)
     expect(model.hold[0]?.stages[1]?.delayNs).toBeCloseTo(0.05)
+  })
+
+  it('scopes worst paths to the requested corner while keeping slack order', () => {
+    const pathsByCorner = [
+      {
+        corner: 'MAX_125/Cworst',
+        paths: [
+          {
+            id: 'MAX_125/Cworst:setup_slow',
+            corner: 'MAX_125/Cworst',
+            analysisType: 'setup' as const,
+            slackNs: -0.12,
+            stageCount: 1,
+            stages: [],
+          },
+        ],
+      },
+      {
+        corner: 'TYP/Cbest',
+        paths: [
+          {
+            id: 'TYP/Cbest:setup_ok',
+            corner: 'TYP/Cbest',
+            analysisType: 'setup' as const,
+            slackNs: 1.4,
+            stageCount: 1,
+            stages: [],
+          },
+          {
+            id: 'TYP/Cbest:hold_bad',
+            corner: 'TYP/Cbest',
+            analysisType: 'hold' as const,
+            slackNs: -0.03,
+            stageCount: 1,
+            stages: [],
+          },
+        ],
+      },
+    ]
+
+    const acrossCorners = selectStaCriticalPaths(pathsByCorner, null)
+    expect(acrossCorners.setup.map((path) => path.id)).toEqual([
+      'MAX_125/Cworst:setup_slow',
+      'TYP/Cbest:setup_ok',
+    ])
+
+    const scoped = selectStaCriticalPaths(pathsByCorner, 'TYP/Cbest')
+    expect(scoped.setup.map((path) => path.id)).toEqual(['TYP/Cbest:setup_ok'])
+    expect(scoped.hold.map((path) => path.id)).toEqual(['TYP/Cbest:hold_bad'])
   })
 
   it('hides cross-run convergence until a baseline workspace is available', () => {
