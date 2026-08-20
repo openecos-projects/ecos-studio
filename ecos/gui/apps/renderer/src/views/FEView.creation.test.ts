@@ -21,4 +21,16 @@ describe('frontend workspace creation lifecycle', () => {
     )
     expect(wizardSource).toContain("if (!isCreating.value) emit('close')")
   })
+
+  it('creates a project-managed frontend workspace from route context', () => {
+    expect(viewSource).toContain(':initial-config="initialWizardConfig"')
+    expect(viewSource).toContain('prefillManagedProjectWorkspace()')
+    expect(viewSource).toContain("designTool: 'frontend'")
+    expect(viewSource).toContain('registerProjectManagedWorkspace({')
+    expect(viewSource).toContain('routeQuery: route.query')
+    expect(viewSource).toContain("path: '/workspace/home'")
+    expect(viewSource).toContain("void router.push('/projects')")
+    expect(wizardSource).toContain('initialConfig?: Partial<WorkspaceConfig>')
+    expect(wizardSource).toContain('createFrontendWorkspaceConfig(props.initialConfig)')
+  })
 })

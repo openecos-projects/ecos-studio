@@ -132,13 +132,21 @@
                     @click="selectProject(project.model.id)"
                   >
                     <span class="resource-icon">
-                      <i class="ri-layout-grid-line" aria-hidden="true"></i>
+                      <i
+                        :class="
+                          project.model.projectType === 'frontend'
+                            ? 'ri-code-s-slash-line'
+                            : 'ri-layout-grid-line'
+                        "
+                        aria-hidden="true"
+                      ></i>
                     </span>
                     <span class="resource-copy">
                       <strong>{{ project.model.name }}</strong>
-                      <small>{{
-                        workspaceCountLabel(project.model.workspaces.length)
-                      }}</small>
+                      <small>
+                        {{ projectTypeLabel(project.model.projectType) }} &middot;
+                        {{ workspaceCountLabel(project.model.workspaces.length) }}
+                      </small>
                     </span>
                   </button>
                   <div
@@ -267,6 +275,7 @@
                           :aria-label="`More actions for ${workspace.id}`"
                         >
                           <button
+                            v-if="project.model.projectType === 'backend'"
                             type="button"
                             class="row-action-menu-item workspace-flow-trigger"
                             @click="toggleWorkspaceFlowPopover(workspace.id)"
@@ -508,6 +517,30 @@
           <input v-model="projectRootDraft.designName" type="text" placeholder="gcd" />
         </label>
 
+        <fieldset class="project-type-field">
+          <legend>Project Type</legend>
+          <div class="project-type-segmented">
+            <button
+              type="button"
+              class="project-type-option"
+              :aria-pressed="projectRootDraft.projectType === 'backend'"
+              @click="projectRootDraft.projectType = 'backend'"
+            >
+              <i class="ri-layout-grid-line" aria-hidden="true"></i>
+              <span>Backend</span>
+            </button>
+            <button
+              type="button"
+              class="project-type-option"
+              :aria-pressed="projectRootDraft.projectType === 'frontend'"
+              @click="projectRootDraft.projectType = 'frontend'"
+            >
+              <i class="ri-code-s-slash-line" aria-hidden="true"></i>
+              <span>Frontend</span>
+            </button>
+          </div>
+        </fieldset>
+
         <label class="form-field">
           <span>Project Storage Location</span>
           <div class="path-picker">
@@ -522,46 +555,49 @@
           </div>
         </label>
 
-        <label class="form-field">
-          <span>Managed MPC</span>
-          <select v-model="projectRootDraft.mpcId" :disabled="isLoadingProjectMpcs">
-            <option value="">No MPC</option>
-            <option
-              v-for="mpc in projectMpcs"
-              :key="mpc.resource_id"
-              :value="mpc.resource_id"
-            >
-              {{ mpc.display_name }} ({{ mpc.installed_version }})
-            </option>
-          </select>
-        </label>
-        <p v-if="isLoadingProjectMpcs" class="modal-help">Loading managed MPCs...</p>
-        <p v-else-if="projectMpcLoadError" class="modal-help">
-          Managed MPCs could not be loaded. You can still create this project without one.
-        </p>
-        <p v-else-if="projectMpcs.length === 0" class="modal-help">
-          No eligible managed MPCs are installed.
-        </p>
-        <p v-if="isLoadingProjectMpcSpec" class="modal-help">
-          Loading MPC design specification...
-        </p>
-        <p v-else-if="projectMpcSpecError" class="modal-error">
-          {{ projectMpcSpecError }}
-        </p>
-        <template v-else-if="selectedProjectMpcCandidate && selectedProjectMpcDesign">
-          <label v-if="projectMpcDesigns.length > 1" class="form-field">
-            <span>MPC Design</span>
-            <select v-model="selectedProjectMpcDesignIndex">
+        <template v-if="projectRootDraft.projectType === 'backend'">
+          <label class="form-field">
+            <span>Managed MPC</span>
+            <select v-model="projectRootDraft.mpcId" :disabled="isLoadingProjectMpcs">
+              <option value="">No MPC</option>
               <option
-                v-for="design in projectMpcDesigns"
-                :key="design.index"
-                :value="design.index"
+                v-for="mpc in projectMpcs"
+                :key="mpc.resource_id"
+                :value="mpc.resource_id"
               >
-                {{ design.designName }}
+                {{ mpc.display_name }} ({{ mpc.installed_version }})
               </option>
             </select>
           </label>
-          <MpcTemplatePreview :design="selectedProjectMpcDesign" />
+          <p v-if="isLoadingProjectMpcs" class="modal-help">Loading managed MPCs...</p>
+          <p v-else-if="projectMpcLoadError" class="modal-help">
+            Managed MPCs could not be loaded. You can still create this project without
+            one.
+          </p>
+          <p v-else-if="projectMpcs.length === 0" class="modal-help">
+            No eligible managed MPCs are installed.
+          </p>
+          <p v-if="isLoadingProjectMpcSpec" class="modal-help">
+            Loading MPC design specification...
+          </p>
+          <p v-else-if="projectMpcSpecError" class="modal-error">
+            {{ projectMpcSpecError }}
+          </p>
+          <template v-else-if="selectedProjectMpcCandidate && selectedProjectMpcDesign">
+            <label v-if="projectMpcDesigns.length > 1" class="form-field">
+              <span>MPC Design</span>
+              <select v-model="selectedProjectMpcDesignIndex">
+                <option
+                  v-for="design in projectMpcDesigns"
+                  :key="design.index"
+                  :value="design.index"
+                >
+                  {{ design.designName }}
+                </option>
+              </select>
+            </label>
+            <MpcTemplatePreview :design="selectedProjectMpcDesign" />
+          </template>
         </template>
 
         <p class="modal-help">Project manifest: {{ projectManifestPreview }}</p>
@@ -775,6 +811,7 @@ import {
   parseProjectManifest,
   type ProjectManifest,
   type ProjectManifestMpc,
+  type ProjectManifestType,
 } from '@ecos-studio/shared'
 import {
   FLOW_STEPS,
@@ -852,6 +889,7 @@ const projectRootDraft = ref({
   name: '',
   designName: '',
   directory: '',
+  projectType: 'backend' as ProjectManifestType,
   mpcId: '',
 })
 const projectMpcs = ref<ProjectManifestMpcCandidate[]>([])
@@ -1043,6 +1081,7 @@ const selectedProjectMpcDesign = computed<MpcSpecDesign | null>(() => {
   )
 })
 const selectedProjectMpc = computed<ProjectManifestMpc | null>(() => {
+  if (projectRootDraft.value.projectType !== 'backend') return null
   const candidate = selectedProjectMpcCandidate.value
   const design = selectedProjectMpcDesign.value
   return candidate && design ? createProjectManifestMpcSnapshot(candidate, design) : null
@@ -1464,6 +1503,7 @@ async function openWorkspace(workspace: ProjectWorkspace) {
     name: `${selectedProject.value.name}/${workspace.id}`,
     path: workspace.workspacePath,
     lastOpened: new Date(),
+    designTool: selectedProject.value.projectType,
   })
   if (success) {
     await router.push({
@@ -1633,7 +1673,7 @@ async function createWorkspaceForProject(project: ProjectManagementProject) {
   const workspaceId = await nextAvailableWorkspaceId(project)
   if (!workspaceId) return
   await router.push({
-    path: '/ecc',
+    path: project.projectType === 'frontend' ? '/fe' : '/ecc',
     query: {
       projectRoot: project.path,
       projectName: project.name,
@@ -1764,6 +1804,7 @@ function openNewProjectDialog() {
     name: '',
     designName: '',
     directory: '',
+    projectType: 'backend',
     mpcId: '',
   }
   projectMpcs.value = []
@@ -1869,12 +1910,20 @@ async function createProjectFolderDraft() {
     return
   }
 
-  if (projectRootDraft.value.mpcId && isLoadingProjectMpcSpec.value) {
+  if (
+    projectRootDraft.value.projectType === 'backend' &&
+    projectRootDraft.value.mpcId &&
+    isLoadingProjectMpcSpec.value
+  ) {
     projectRootError.value = 'Wait for the selected MPC specification to load.'
     return
   }
 
-  if (projectRootDraft.value.mpcId && !selectedProjectMpc.value) {
+  if (
+    projectRootDraft.value.projectType === 'backend' &&
+    projectRootDraft.value.mpcId &&
+    !selectedProjectMpc.value
+  ) {
     projectRootError.value =
       projectMpcSpecError.value ||
       'Select a valid MPC design before creating the project.'
@@ -1887,6 +1936,7 @@ async function createProjectFolderDraft() {
     type: 'create',
     name,
     designName,
+    projectType: projectRootDraft.value.projectType,
     mpc: selectedProjectMpc.value,
   })
   await applyProjectManifestForProject(manifest, manifest.root_path)
@@ -1898,6 +1948,10 @@ const goBack = () => router.push('/')
 
 function workspaceCountLabel(count: number): string {
   return `${count} workspace${count === 1 ? '' : 's'}`
+}
+
+function projectTypeLabel(projectType: ProjectManifestType): string {
+  return projectType === 'frontend' ? 'Frontend' : 'Backend'
 }
 
 function workspaceDepthStyle(workspace: ProjectWorkspace) {

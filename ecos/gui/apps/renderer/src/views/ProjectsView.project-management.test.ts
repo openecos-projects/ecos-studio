@@ -420,6 +420,9 @@ describe('ProjectsView project management surface', () => {
 
   it('lets New Project create a root manifest with an optional managed MPC association', () => {
     expect(source).toContain('Project Storage Location')
+    expect(source).toContain('Project Type')
+    expect(source).toContain("projectRootDraft.projectType === 'backend'")
+    expect(source).toContain("projectRootDraft.projectType === 'frontend'")
     expect(source).toContain('Managed MPC')
     expect(source).toContain('listResourcesApi')
     expect(source).toContain('projectMpcOptionFromResource')
@@ -438,10 +441,24 @@ describe('ProjectsView project management surface', () => {
     expect(createSource).not.toContain("path: '/ecc'")
     expect(createSource).not.toContain('workspacePath')
     expect(createSource).not.toContain("workspaces', 'ws_0001'")
+    expect(createSource).toContain('projectType: projectRootDraft.value.projectType')
     expect(createSource).toContain('mpc: selectedProjectMpc.value')
     expect(createSource).toContain(
       'Select a valid MPC design before creating the project.',
     )
+  })
+
+  it('routes new and existing workspaces through the owning project type', () => {
+    const createStart = source.indexOf('async function createWorkspaceForProject')
+    const createEnd = source.indexOf('function requestDeleteWorkspace', createStart)
+    const createSource = source.slice(createStart, createEnd)
+    const openStart = source.indexOf('async function openWorkspace')
+    const openEnd = source.indexOf('function refreshProjectManifests', openStart)
+    const openSource = source.slice(openStart, openEnd)
+
+    expect(createSource).toContain("project.projectType === 'frontend' ? '/fe' : '/ecc'")
+    expect(openSource).toContain('designTool: selectedProject.value.projectType')
+    expect(source).toContain('projectType: manifest.project_type')
   })
 
   it('renders an empty state instead of generated demo workspace data', () => {

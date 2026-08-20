@@ -885,6 +885,7 @@ interface Emits {
 
 interface Props {
   creating?: boolean
+  initialConfig?: Partial<WorkspaceConfig>
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -938,29 +939,39 @@ const steps = [
 
 const catalog = ref<FrontendCatalogPayload>(createEmptyCatalog())
 
-const config = ref<FrontendWorkspaceConfig>({
-  directory: '',
-  designTool: 'frontend',
-  pdk: '',
-  pdk_root: '',
-  parameters: {
-    design: '',
-    description: '',
-    top_module: 'ecos_sim_top',
-    cpu_top_module: CUSTOM_CPU_TOP_MODULE,
-    clock: 'clk',
-    frequency_max: 100,
-    cpu_filelist: '',
-    soc_variant: '',
-    soc_harness_id: '',
-    frontend_core_id: '',
-    toolchain_id: '',
-    test_suite_id: '',
-  },
-  origin_def: '',
-  origin_verilog: '',
-  rtl_list: [],
-})
+const config = ref<FrontendWorkspaceConfig>(
+  createFrontendWorkspaceConfig(props.initialConfig),
+)
+
+function createFrontendWorkspaceConfig(
+  initialConfig?: Partial<WorkspaceConfig>,
+): FrontendWorkspaceConfig {
+  return {
+    ...initialConfig,
+    directory: initialConfig?.directory ?? '',
+    designTool: 'frontend',
+    pdk: initialConfig?.pdk ?? '',
+    pdk_root: initialConfig?.pdk_root ?? '',
+    parameters: {
+      design: '',
+      description: '',
+      top_module: 'ecos_sim_top',
+      cpu_top_module: CUSTOM_CPU_TOP_MODULE,
+      clock: 'clk',
+      frequency_max: 100,
+      cpu_filelist: '',
+      soc_variant: '',
+      soc_harness_id: '',
+      frontend_core_id: '',
+      toolchain_id: '',
+      test_suite_id: '',
+      ...initialConfig?.parameters,
+    },
+    origin_def: initialConfig?.origin_def ?? '',
+    origin_verilog: initialConfig?.origin_verilog ?? '',
+    rtl_list: [...(initialConfig?.rtl_list ?? [])],
+  }
+}
 
 const selectedCore = computed(() =>
   normalizeCoreEntry(entryById(catalog.value.cores, selectedCoreId.value)),
