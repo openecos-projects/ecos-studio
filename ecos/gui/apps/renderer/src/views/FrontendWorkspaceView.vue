@@ -4501,7 +4501,7 @@ function waveRouteQuery(path: string, caseName?: string): Record<string, string>
 
 async function openWaveExternal(path: string): Promise<void> {
   try {
-    await getDesktopApi().system.openExternal(pathToFileUrl(path))
+    await getDesktopApi().workspace.openWaveformExternal(path)
   } catch {
     showToast({
       severity: 'error',
@@ -4510,11 +4510,6 @@ async function openWaveExternal(path: string): Promise<void> {
       life: 5000,
     })
   }
-}
-
-function pathToFileUrl(path: string): string {
-  const normalized = path.startsWith('/') ? path : `/${path}`
-  return `file://${normalized.split('/').map(encodeURIComponent).join('/')}`
 }
 
 function handleSurferFrameChange(frame: HTMLIFrameElement | null): void {

@@ -70,6 +70,7 @@ async function loadDesktopBridge() {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
     workspace: {
+      openWaveformExternal(path: string): Promise<void>
       readProjectTextFile(path: string): Promise<unknown>
       listProjectDirectory(path: string): Promise<unknown>
       prepareProjectDirectoryReplacement(path: string): Promise<unknown>
@@ -208,6 +209,20 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccFlowRunStep,
       request,
+    )
+  })
+
+  it('routes external waveform opens through the scoped workspace channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const waveformPath = String.raw`C:\work\cpu\trace.vcd`
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(
+      bridge.workspace.openWaveformExternal(waveformPath),
+    ).resolves.toBeUndefined()
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.workspaceOpenWaveformExternal,
+      waveformPath,
     )
   })
 

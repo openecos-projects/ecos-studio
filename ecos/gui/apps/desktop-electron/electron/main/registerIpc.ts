@@ -220,6 +220,7 @@ export interface DesktopBridgeServices {
   }
   surferProtocolService: {
     authorizeWaveform(path: string): Promise<string>
+    resolveWaveformPath(path: string): Promise<string>
   }
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
@@ -1313,6 +1314,14 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.workspaceAuthorizeWaveform, async (_event, path) => {
     return await services.surferProtocolService.authorizeWaveform(path as string)
+  })
+
+  handle(desktopApiIpcChannels.workspaceOpenWaveformExternal, async (_event, path) => {
+    const canonicalPath = await services.surferProtocolService.resolveWaveformPath(
+      path as string,
+    )
+    const error = await shell.openPath(canonicalPath)
+    if (error) throw new Error(`Unable to open waveform: ${error}`)
   })
 
   handle(desktopApiIpcChannels.workspaceReadProjectTextFile, async (_event, path) => {
