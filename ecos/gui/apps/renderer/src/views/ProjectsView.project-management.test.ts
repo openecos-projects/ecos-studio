@@ -471,7 +471,8 @@ describe('ProjectsView project management surface', () => {
     expect(analysisDataSource).toContain('readProjectManagementWorkspaceTexts')
     expect(analysisDataSource).toContain('parseWorkspaceFlowStateMap')
     expect(source).toContain('workspaceAnalysisInputs')
-    expect(source).toContain('readProjectManagementWorkspaceData')
+    expect(source).toContain('readProjectWorkspaceFlowStates')
+    expect(source).toContain('readProjectWorkspaceAnalysisInputs')
     expect(source).toContain('ProjectWorkspaceAnalysisInputsById')
     expect(analysisDataSource).toContain('projectManagementWorkspaceStepAnalysisSpecs')
     expect(analysisDataSource).toContain('WORKSPACE_STEP_ANALYSIS_SPECS')
@@ -569,7 +570,8 @@ describe('ProjectsView project management surface', () => {
 
   it('uses the dedicated read-only Project Management API for historical projects', () => {
     expect(source).toContain('readProjectManagementManifest')
-    expect(source).toContain('readProjectManagementWorkspaceData')
+    expect(source).toContain('readProjectWorkspaceFlowStates')
+    expect(source).toContain('readProjectWorkspaceAnalysisInputs')
     expect(source).toContain('listProjectManagementEntries')
     expect(source).not.toContain('registerProjectRootForProjectManagement')
     expect(source).not.toContain('registerProjectReadRootForProjectManagement')

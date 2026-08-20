@@ -30,6 +30,10 @@ export type ProjectManifestFrontendFlowStep =
 export const projectManifestTypes = ['backend', 'frontend'] as const
 
 export type ProjectManifestType = (typeof projectManifestTypes)[number]
+
+export function isProjectManifestType(value: unknown): value is ProjectManifestType {
+  return value === 'backend' || value === 'frontend'
+}
 export type ProjectManifestStage =
   | ProjectManifestFlowStep
   | ProjectManifestFrontendFlowStep

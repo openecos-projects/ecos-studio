@@ -8,18 +8,13 @@ import {
   readProjectWorkspaceAnalysisInputs,
   readProjectWorkspaceFlowStates,
 } from './projectWorkspaceData'
-import {
-  readBackendProjectWorkspaceAnalysisInputs,
-  readBackendProjectWorkspaceFlowStates,
-} from './projectWorkspaceAnalysisData'
+import { readProjectManagementWorkspaceData } from './projectWorkspaceAnalysisData'
 import { readFrontendProjectWorkspaceFlowStates } from './frontendProjectWorkspaceData'
 
 vi.mock('./projectWorkspaceAnalysisData', () => ({
-  readBackendProjectWorkspaceAnalysisInputs: vi.fn(async () => ({
-    ws_backend: { flowText: '{}' },
-  })),
-  readBackendProjectWorkspaceFlowStates: vi.fn(async () => ({
-    ws_backend: { Synth: 'success' },
+  readProjectManagementWorkspaceData: vi.fn(async () => ({
+    analysisInputs: { ws_backend: { flowText: '{}' } },
+    flowStates: { ws_backend: { Synth: 'success' } },
   })),
 }))
 
@@ -29,8 +24,7 @@ vi.mock('./frontendProjectWorkspaceData', () => ({
   })),
 }))
 
-const readBackendAnalysisMock = vi.mocked(readBackendProjectWorkspaceAnalysisInputs)
-const readBackendFlowMock = vi.mocked(readBackendProjectWorkspaceFlowStates)
+const readBackendDataMock = vi.mocked(readProjectManagementWorkspaceData)
 const readFrontendFlowMock = vi.mocked(readFrontendProjectWorkspaceFlowStates)
 
 function manifest(projectType: 'backend' | 'frontend') {
@@ -38,6 +32,7 @@ function manifest(projectType: 'backend' | 'frontend') {
     createProjectManifestDraft({
       rootPath: `/projects/${projectType}`,
       name: projectType,
+      designName: projectType,
       projectType,
     }),
     {
@@ -49,8 +44,7 @@ function manifest(projectType: 'backend' | 'frontend') {
 
 describe('project workspace data readers', () => {
   beforeEach(() => {
-    readBackendAnalysisMock.mockClear()
-    readBackendFlowMock.mockClear()
+    readBackendDataMock.mockClear()
     readFrontendFlowMock.mockClear()
   })
 
@@ -67,11 +61,7 @@ describe('project workspace data readers', () => {
     ).resolves.toEqual({
       ws_backend: { flowText: '{}' },
     })
-    expect(readBackendFlowMock).toHaveBeenCalledWith('/projects/backend', backendManifest)
-    expect(readBackendAnalysisMock).toHaveBeenCalledWith(
-      '/projects/backend',
-      backendManifest,
-    )
+    expect(readBackendDataMock).toHaveBeenCalledWith('/projects/backend', backendManifest)
   })
 
   it('keeps frontend workspaces away from backend artifact paths', async () => {
@@ -85,8 +75,7 @@ describe('project workspace data readers', () => {
     ).resolves.toEqual({
       ws_0001: {},
     })
-    expect(readBackendFlowMock).not.toHaveBeenCalled()
-    expect(readBackendAnalysisMock).not.toHaveBeenCalled()
+    expect(readBackendDataMock).not.toHaveBeenCalled()
     expect(readFrontendFlowMock).toHaveBeenCalledWith(
       '/projects/frontend',
       frontendManifest,

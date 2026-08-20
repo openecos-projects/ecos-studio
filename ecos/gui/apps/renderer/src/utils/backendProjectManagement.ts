@@ -1,6 +1,7 @@
 import type {
   ProjectManifest,
   ProjectManifestBaseDesign,
+  ProjectManifestStage,
   ProjectManifestType,
   ProjectManifestWorkspace,
   ResourceInfo,
@@ -63,7 +64,9 @@ export type ProjectMetricId =
   | 'die_area'
   | 'core_util'
   | 'frequency'
-export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
+export type ProjectWorkspaceFlowStateMap = Partial<
+  Record<ProjectManifestStage, ProjectStepStatus>
+>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
 export interface ProjectWorkspaceAnalysisInput {
   stepMetricTexts?: Partial<Record<FlowStep, string | null>>
@@ -327,6 +330,7 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
+  lvs: 'LVS',
   filler: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
@@ -350,6 +354,7 @@ const RUNTIME_STEP_ARTIFACTS: Record<
   Legal: { directory: 'legalization_dreamplace', outputName: 'legalization' },
   Route: { directory: 'route_ecc', outputName: 'route' },
   DRC: { directory: 'drc_ecc', outputName: 'drc' },
+  LVS: { directory: 'lvs_ecc', outputName: 'lvs' },
   Filler: { directory: 'filler_ecc', outputName: 'filler' },
   RCX: { directory: 'RCX_ecc', outputName: 'RCX' },
   STA: { directory: 'sta_ecc', outputName: 'sta' },
@@ -1015,7 +1020,7 @@ function buildProjectWorkspace(
     startStep,
     endStep,
     depth,
-    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep),
+    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep, flowStateMap),
     steps,
   }
 }
@@ -1093,12 +1098,15 @@ function buildFlowStatusHint(
   steps: ProjectStepCell[],
   startStep: FlowStep,
   endStep: FlowStep,
+  flowStateMap: ProjectWorkspaceFlowStateMap,
 ): ProjectFlowStatusHint {
   const startIndex = FLOW_STEPS.indexOf(startStep)
   const endIndex = FLOW_STEPS.indexOf(endStep)
+  const recordedFlow = Object.keys(flowStateMap).length > 0
   const configuredSteps = steps.filter((cell) => {
     const stepIndex = FLOW_STEPS.indexOf(cell.step)
-    return stepIndex >= startIndex && stepIndex <= endIndex
+    if (stepIndex < startIndex || stepIndex > endIndex) return false
+    return !recordedFlow || flowStateMap[cell.step] !== undefined
   })
   const firstIncomplete = configuredSteps.find(
     (cell) => !isCompletedStepStatus(cell.status),
@@ -1157,6 +1165,10 @@ function buildStepCell(
         ? 'reused'
         : 'skipped'
   } else if (isAfterEnd) {
+    status = 'skipped'
+  } else if (Object.keys(flowStateMap).length > 0) {
+    // A partially written flow.json is authoritative for execution state.
+    // Steps absent from it have not run in this workspace yet.
     status = 'skipped'
   } else if (workspace.status === 'running') {
     status = 'running'
@@ -1492,6 +1504,7 @@ const STEP_ANALYSIS_METRIC_IDS: Record<FlowStep, readonly string[]> = {
     'route_wirelength',
   ],
   DRC: ['drc_count'],
+  LVS: ['lvs_count'],
   Filler: [],
   RCX: [
     'rcx_missing_corner_count',
@@ -1550,6 +1563,7 @@ function detailHintForStep(step: FlowStep): string {
     Legal: 'Open workspace Legalization for placement cleanup details.',
     Route: 'Open workspace Route for route iterations and layer pressure.',
     DRC: 'Open workspace DRC for rule/layer heatmaps and violation maps.',
+    LVS: 'Open workspace LVS for netlist-to-layout connectivity and violation count.',
     Filler: 'Open workspace Filler for final filler impact details.',
     RCX: 'Open workspace RCX for extraction readiness details.',
     STA: 'Open workspace STA for path detail and corner matrix.',

@@ -181,6 +181,7 @@ export function projectFixture(
 
   return {
     id: 'demo',
+    projectType: 'backend',
     name: 'demo',
     path: '/projects/demo',
     pdk: 'sky130A',

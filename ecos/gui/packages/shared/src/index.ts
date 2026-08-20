@@ -229,6 +229,7 @@ export {
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
   ensureProjectQorBaseline,
+  isProjectManifestType,
   nextProjectManifestStage,
   normalizeProjectManifestStage,
   parseProjectManifest,
