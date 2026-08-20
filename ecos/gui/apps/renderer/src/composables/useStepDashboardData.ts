@@ -25,6 +25,7 @@ import {
   hardenOutputInsights,
   lvsInsights,
   mapHighlights,
+  POST_SYNTHESIS_TIMING_CORNER,
   qorSummary,
   record,
   rcxInsights,
@@ -32,6 +33,7 @@ import {
   staCornerSummaryPaths,
   staInsights,
   stepFeatureInsights,
+  stepTimingAnalysis,
   synthesisInsights,
   stepDistribution,
   stepKeyMetrics,
@@ -47,6 +49,7 @@ import {
   type StepDashboardRcxInsights,
   type StepDashboardStaInsights,
   type StepDashboardSynthesisInsights,
+  type StepDashboardTimingAnalysis,
 } from '@/components/step-dashboard/stepDashboardData'
 
 export interface StepDashboardReport {
@@ -79,6 +82,7 @@ export interface StepDashboardData {
   staInsights: StepDashboardStaInsights | null
   stepInsights: StepDashboardFloorplanInsights | null
   synthesisInsights: StepDashboardSynthesisInsights | null
+  timingAnalysis: StepDashboardTimingAnalysis | null
   layoutUrl: string | null
   mapUrl: string | null
   placeDensityMapUrl: string | null
@@ -403,13 +407,15 @@ export function useStepDashboardData() {
       ])
       if (version !== requestVersion) return
 
-      const staTimingSummaries = await Promise.all(
-        isSta
-          ? staCornerSummaryPaths(stepJson, resourceStep.directory).map(({ path }) =>
-              readJson(path),
-            )
-          : [],
-      )
+      const staCornerRefs = isSta
+        ? staCornerSummaryPaths(stepJson, resourceStep.directory)
+        : []
+      const [staTimingSummaries, staTimingPathsSources] = await Promise.all([
+        Promise.all(staCornerRefs.map(({ path }) => readJson(path))),
+        Promise.all(
+          staCornerRefs.map(({ timingPathsPath }) => readJson(timingPathsPath)),
+        ),
+      ])
       if (version !== requestVersion) return
 
       const [layoutUrl, mapUrl, placeDensityMapUrl] = await Promise.all([
@@ -446,17 +452,44 @@ export function useStepDashboardData() {
           : null,
         lvsInsights: isLvs ? lvsInsights(stepJson) : null,
         rcxInsights: isRcx ? rcxInsights(stepJson) : null,
-        staInsights: isSta ? staInsights(stepJson, staTimingSummaries) : null,
+        staInsights: isSta ? staInsights(stepJson) : null,
         stepInsights: isFloorplanStyleStep
           ? stepFeatureInsights(resourceStep.name, stepJson, dbJson, mapJson)
           : null,
         synthesisInsights: isSynthesis
-          ? synthesisInsights(
-              synthesisStatJson ?? dbJson,
-              synthesisTimingSummaryJson,
-              synthesisTimingPathsJson,
-            )
+          ? synthesisInsights(synthesisStatJson ?? dbJson)
           : null,
+        timingAnalysis: isSta
+          ? stepTimingAnalysis(
+              staCornerRefs.map(({ id }, index) => ({
+                corner: id,
+                summary: staTimingSummaries[index],
+              })),
+              staCornerRefs.map(({ id }, index) => ({
+                corner: id,
+                source: staTimingPathsSources[index],
+              })),
+            )
+          : isSynthesis
+            ? stepTimingAnalysis(
+                synthesisTimingSummaryJson
+                  ? [
+                      {
+                        corner: POST_SYNTHESIS_TIMING_CORNER,
+                        summary: synthesisTimingSummaryJson,
+                      },
+                    ]
+                  : [],
+                synthesisTimingPathsJson
+                  ? [
+                      {
+                        corner: POST_SYNTHESIS_TIMING_CORNER,
+                        source: synthesisTimingPathsJson,
+                      },
+                    ]
+                  : [],
+              )
+            : null,
         layoutUrl,
         mapUrl,
         placeDensityMapUrl,

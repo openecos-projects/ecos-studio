@@ -23,20 +23,21 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('chartTabLabel')
   })
 
-  it('uses the dedicated Synthesis insight layout and timing-path detail surface', () => {
+  it('uses the dedicated Synthesis insight layout and unified timing analysis surface', () => {
     expect(componentSource).toContain('data.synthesisInsights')
     expect(componentSource).toContain('<h3>Metrics</h3>')
     expect(componentSource).toContain('<h3>Timing Analysis</h3>')
-    expect(componentSource).toContain('Timing paths')
-    expect(componentSource).toContain('showSynthesisTimingPaths')
-    expect(componentSource).toContain('Post-Synthesis Timing Paths')
-    expect(componentSource).toContain('synthesis-timing-tabs')
-    expect(componentSource).toContain('synthesisTimingTabIndex')
-    expect(componentSource).toContain('selectedSynthesisTimingModule')
-    expect(componentSource).toContain('timing-path-waterfall')
-    expect(componentSource).toContain('Stage List')
+    expect(componentSource).toContain('data.timingAnalysis')
+    expect(componentSource).toContain('TimingKpis')
+    expect(componentSource).toContain('TimingCornerTable')
+    expect(componentSource).toContain('synthesis-timing-kpis')
+    expect(componentSource).toContain('Timing details')
+    expect(componentSource).toContain('timing-detail-link')
+    expect(componentSource).toContain('openTimingAnalysis()')
+    expect(componentSource).toContain('showTimingAnalysis')
+    expect(componentSource).toContain('TimingAnalysisDialog')
+    expect(componentSource).toContain('No post-synthesis timing summary')
     expect(componentSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
-    expect(componentSource).toContain('column-count: 2')
   })
 
   it('uses the Floorplan-style layout for physical-step metrics and expandable snapshots', () => {
@@ -78,10 +79,16 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('lvs-connectivity-table')
     expect(componentSource).toContain('lvs-violation-table')
     expect(componentSource).toContain('data.staInsights')
-    expect(componentSource).toContain('sta-corner-tabs')
-    expect(componentSource).toContain('selectedStaCorner')
-    expect(componentSource).toContain('selectedStaTimingModule')
-    expect(componentSource).toContain('selectStaCorner(index)')
+    expect(componentSource).toContain('<h3>Corner Summary</h3>')
+    expect(componentSource).toContain('sta-corner-summary-table')
+    expect(componentSource).toContain('staCorners')
+    expect(componentSource).toContain('staCornerPvt(corner)')
+    expect(componentSource).toContain('Corner details')
+    expect(componentSource).toContain('showStaCornerDetails')
+    expect(componentSource).toContain('staCornerDialogTitle')
+    expect(componentSource).toContain('corner-detail-list')
+    expect(componentSource).toContain('openTimingAnalysis()')
+    expect(componentSource).toContain('No corner timing summary')
   })
 
   it('renders Harden outputs with explicit artifact state and expands STA report rows', () => {
@@ -136,7 +143,9 @@ describe('StepDashboard', () => {
     expect(componentSource).not.toContain('No configuration data')
     expect(componentSource).toContain('showStepConfiguration')
     expect(componentSource).toContain('Details <i class="ri-arrow-right-up-line"')
-    expect(componentSource).toContain('<StepConfigPanel />')
+    expect(componentSource).toContain(
+      '<StepConfigPanel :tool="currentFlowStage?.tool" />',
+    )
   })
 
   it('uses STA terminology for Liberty corners and signoff matrices', () => {

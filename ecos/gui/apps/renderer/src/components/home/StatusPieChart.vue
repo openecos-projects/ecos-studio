@@ -19,7 +19,10 @@
         <strong>{{ slice.value }}</strong>
       </li>
     </ul>
-    <div v-else-if="!slices.length" class="status-pie-empty">No data</div>
+    <div v-else-if="centerPrimary" class="status-pie-empty">
+      {{ centerPrimary }}<span v-if="centerSecondary"> {{ centerSecondary }}</span>
+    </div>
+    <div v-else class="status-pie-empty">No data</div>
   </div>
 </template>
 

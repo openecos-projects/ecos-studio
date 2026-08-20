@@ -72,7 +72,7 @@ def test_parameters_surface_wins_over_the_derived_step_config() -> None:
     # ECC regenerates step configs from parameters.json, so a knob present in
     # both surfaces must be written to parameters.json.
     spec = knob_spec("place.target_density")
-    assert spec.read_target.file == "config/dreamplace.json"
+    assert spec.read_target.file == "config/dreamplace_ecc.json"
     assert spec.write_target.file == "home/parameters.json"
     assert spec.write_target.json_path == ("Target density",)
 
@@ -80,7 +80,7 @@ def test_parameters_surface_wins_over_the_derived_step_config() -> None:
 def test_step_config_only_knobs_write_to_their_tool_config() -> None:
     spec = knob_spec("cts.skew_bound")
     assert spec.write_target.surface == "step_config"
-    assert spec.write_target.file == "config/cts_default_config.json"
+    assert spec.write_target.file == "config/cts_ecc.json"
 
 
 def test_resolve_write_emits_a_complete_execution_instruction() -> None:

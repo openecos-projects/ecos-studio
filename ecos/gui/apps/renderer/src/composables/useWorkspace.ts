@@ -16,7 +16,11 @@ import {
 } from '../api'
 import * as runtimeEventApi from '../api/runtimeEvents'
 import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
-import { clearFlowExecutionActiveForWorkspace } from './flowExecutionState'
+import {
+  clearFlowExecutionActiveForWorkspace,
+  isFlowExecutionActiveForWorkspace,
+  markFlowExecutionActiveForWorkspace,
+} from './flowExecutionState'
 import { finishRuntimeStepRender } from './runtimeStepRenderSync'
 import { setDesktopWindowTitle } from './windowTitle'
 import { useAgentShellStore } from '@/stores/agentShellStore'
@@ -320,6 +324,9 @@ export function useWorkspace() {
     return normalized
   }
 
+  const workspaceNameFromPath = (path: string): string =>
+    path.split('/').filter(Boolean).pop() || path
+
   type WorkspaceAffinityResult =
     | { action: 'focused' }
     | { action: 'proceed'; previousPath: string | null }
@@ -547,8 +554,7 @@ export function useWorkspace() {
         ) ??
         ({
           id: normalizedBoundPath,
-          name:
-            normalizedBoundPath.split('/').filter(Boolean).pop() || normalizedBoundPath,
+          name: workspaceNameFromPath(normalizedBoundPath),
           path: normalizedBoundPath,
           lastOpened: new Date(),
         } satisfies Project)
@@ -809,7 +815,7 @@ export function useWorkspace() {
         const existingProject = recentProjects.value.find(
           (p) => normalizePath(p.path) === resolvedPath,
         )
-        const fallbackName = resolvedPath.split('/').filter(Boolean).pop() || resolvedPath
+        const fallbackName = workspaceNameFromPath(resolvedPath)
         const resolvedName = project?.name || existingProject?.name || fallbackName
 
         const loadedProject: Project = {
@@ -855,6 +861,41 @@ export function useWorkspace() {
         })
         candidateWorkspaceCommitted = true
         connectRuntimeEvents(workspaceId, requestedDesignTool, activeSession.sessionId)
+
+        // 恢复运行状态：检查ECC runtime中是否有正在运行的operations
+        if (!isFlowExecutionActiveForWorkspace(canonicalProjectRoot)) {
+          try {
+            const desktopApi = await waitForDesktopApi()
+            if (desktopApi.ecc.runtime?.snapshot) {
+              const snapshot = await desktopApi.ecc.runtime.snapshot({
+                workspaceHandle: workspaceId,
+              })
+
+              // 检查是否有活跃的operations（运行中、排队中或等待GUI同步）
+              const hasActiveOperations = snapshot.operations?.some(
+                (op: import('@ecos-studio/shared').EccRuntimeOperation) =>
+                  op.state === 'running' ||
+                  op.state === 'queued' ||
+                  op.state === 'waiting_for_gui_sync' ||
+                  op.state === 'paused_for_gui_recovery',
+              )
+
+              if (hasActiveOperations) {
+                markFlowExecutionActiveForWorkspace(canonicalProjectRoot)
+                console.log(
+                  `[useWorkspace] Restored running state for workspace: ${canonicalProjectRoot}`,
+                )
+              }
+            }
+          } catch (error) {
+            // 静默失败，不影响workspace打开流程
+            console.warn(
+              `[useWorkspace] Failed to check runtime operations for ${canonicalProjectRoot}:`,
+              error,
+            )
+          }
+        }
+
         if (previousWorkspaceHandle !== workspaceId) {
           await releaseWorkspaceHandle(previousWorkspaceHandle, previousDesignTool)
         }
@@ -1080,7 +1121,6 @@ export function useWorkspace() {
       const stringArray = (value: unknown): string[] =>
         Array.isArray(value) ? (value as string[]) : []
       let response: Awaited<ReturnType<typeof createWorkspaceApi>>
-      let createdProjectName = designName
 
       if (designTool === 'frontend') {
         const parameters = {
@@ -1215,7 +1255,6 @@ export function useWorkspace() {
           pdk_json: pdkJson,
           project_context: creationConfig?.project_context,
         })
-        createdProjectName = backendParameters.Design as string
       }
       if (response.response === 'success') {
         candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
@@ -1263,7 +1302,7 @@ export function useWorkspace() {
 
         const createdProject: Project = {
           id: canonicalProjectRoot,
-          name: createdProjectName,
+          name: workspaceNameFromPath(canonicalProjectRoot),
           path: canonicalProjectRoot,
           designTool,
           lastOpened: new Date(),

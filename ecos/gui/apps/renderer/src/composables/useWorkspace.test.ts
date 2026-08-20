@@ -21,6 +21,8 @@ const {
   clearHomeRunArtifactResetAwaitingBackendStartMock,
   notifyWorkspaceRerunPreparedMock,
   clearFlowExecutionActiveForWorkspaceMock,
+  isFlowExecutionActiveForWorkspaceMock,
+  markFlowExecutionActiveForWorkspaceMock,
 } = vi.hoisted(() => ({
   createRuntimeEventClientMock: vi.fn(),
   closeWorkspaceApiMock: vi.fn(),
@@ -40,6 +42,8 @@ const {
   clearHomeRunArtifactResetAwaitingBackendStartMock: vi.fn(),
   notifyWorkspaceRerunPreparedMock: vi.fn(),
   clearFlowExecutionActiveForWorkspaceMock: vi.fn(),
+  isFlowExecutionActiveForWorkspaceMock: vi.fn(() => false),
+  markFlowExecutionActiveForWorkspaceMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -105,6 +109,8 @@ vi.mock('./homeRunArtifacts', () => ({
 
 vi.mock('./flowExecutionState', () => ({
   clearFlowExecutionActiveForWorkspace: clearFlowExecutionActiveForWorkspaceMock,
+  isFlowExecutionActiveForWorkspace: isFlowExecutionActiveForWorkspaceMock,
+  markFlowExecutionActiveForWorkspace: markFlowExecutionActiveForWorkspaceMock,
 }))
 
 import { useWorkspace } from './useWorkspace'
@@ -185,6 +191,11 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       addDesignFiles: vi.fn(),
       removeDesignFile: vi.fn(),
       watchProjectFile: vi.fn(),
+    },
+    ecc: {
+      runtime: {
+        snapshot: vi.fn(async () => ({ operations: [] })),
+      },
     },
     ...overrides,
   } as DesktopApi
@@ -2708,6 +2719,40 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
     expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
+  })
+
+  it('names a newly created workspace from its directory, not the design parameter', async () => {
+    const workspace = useWorkspace()
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/project/ws_0002',
+        workspace_id: 'workspace-ws-0002',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/project/ws_0002',
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'gcd',
+          top_module: 'gcd',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(true)
+
+    expect(workspace.currentProject.value).toMatchObject({
+      name: 'ws_0002',
+      path: '/work/project/ws_0002',
+    })
+    expect(setDesktopWindowTitleMock).toHaveBeenCalledWith('ws_0002')
   })
 
   it('creates an external PDK JSON from manual PDK resources', async () => {

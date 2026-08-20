@@ -4,6 +4,14 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
 } from '@/components/home/dashboardData'
+import {
+  attachStaFirstPaths,
+  buildStaOverviewModel,
+  parseFirstStaPathPreview,
+  parseStaTimingPaths,
+  type StaCriticalPath,
+  type StaOverviewModel,
+} from '@/components/flow-insights/flowInsightsData'
 
 export type StepDashboardTone = 'good' | 'warn' | 'bad' | 'neutral'
 
@@ -33,24 +41,19 @@ export interface StepDashboardSynthesisValue {
   value: string
 }
 
-export interface StepDashboardSynthesisTimingModule {
-  id: string
-  label: string
-  values: StepDashboardSynthesisValue[]
-}
-
-export interface StepDashboardSynthesisTimingPath {
-  id: string
-  label: string
-  values: StepDashboardSynthesisValue[]
-  stages: StepDashboardSynthesisValue[][]
-}
-
 export interface StepDashboardSynthesisInsights {
   metrics: StepDashboardSynthesisValue[]
-  timingModules: StepDashboardSynthesisTimingModule[]
-  timingPathSummary: StepDashboardSynthesisValue[]
-  timingPaths: StepDashboardSynthesisTimingPath[]
+}
+
+/** Corner label used for the single synthesis timing summary. */
+export const POST_SYNTHESIS_TIMING_CORNER = 'Post-Synthesis'
+
+export interface StepDashboardTimingAnalysis {
+  overview: StaOverviewModel
+  /** Worst paths per corner; the dialog can scope them to one corner. */
+  pathsByCorner: Array<{ corner: string; paths: StaCriticalPath[] }>
+  /** Scalar run metadata from timing_paths.json (schema, corner, path limit…). */
+  runInfo: StepDashboardSynthesisValue[]
 }
 
 export interface StepDashboardFloorplanSnapshot {
@@ -146,7 +149,12 @@ export interface StepDashboardStaCorner {
   id: string
   staCorner: string
   metrics: StepDashboardSynthesisValue[]
-  timingModules: StepDashboardSynthesisTimingModule[]
+  role: string
+  process: string
+  voltageV: number | null
+  temperatureC: number | null
+  rcCorner: string
+  availability: string
 }
 
 export interface StepDashboardStaInsights {
@@ -156,6 +164,7 @@ export interface StepDashboardStaInsights {
 export interface StepDashboardStaSummaryPath {
   id: string
   path: string
+  timingPathsPath: string
 }
 
 export interface StepDashboardQor {
@@ -674,90 +683,59 @@ function synthesisValues(
   )
 }
 
-function timingModules(value: unknown): StepDashboardSynthesisTimingModule[] {
+function timingRunInfo(value: unknown): StepDashboardSynthesisValue[] {
   const source = record(value)
   if (!source) return []
-
-  const scalarValues: StepDashboardSynthesisValue[] = []
-  const modules: StepDashboardSynthesisTimingModule[] = []
-  for (const [key, item] of Object.entries(source)) {
-    if (item === null || typeof item !== 'object') {
-      scalarValues.push(...synthesisValues(item, 'timing-summary', [key]))
-      continue
-    }
-    if (Array.isArray(item)) {
-      modules.push({
-        id: `timing-${key}`,
-        label: humanize(key),
-        values: synthesisValues(item, `timing-${key}`),
-      })
-      continue
-    }
-    modules.push({
-      id: `timing-${key}`,
-      label: humanize(key),
-      values: synthesisValues(item, `timing-${key}`),
-    })
-  }
-  return scalarValues.length
-    ? [{ id: 'timing-overview', label: 'Overview', values: scalarValues }, ...modules]
-    : modules
+  return Object.entries(source)
+    .filter(([key]) => key !== 'paths')
+    .flatMap(([key, item]) => synthesisValues(item, 'timing-run-info', [key]))
 }
 
-function timingPathData(
-  value: unknown,
-): Pick<StepDashboardSynthesisInsights, 'timingPathSummary' | 'timingPaths'> {
-  const source = record(value)
-  if (!source) return { timingPathSummary: [], timingPaths: [] }
+/**
+ * Builds the unified timing-analysis model shared by the Synthesis and STA step
+ * dashboards. Corner summaries feed the WNS/TNS/NVP overview; per-corner timing
+ * path files feed the critical paths and the run-info scalars.
+ */
+export function stepTimingAnalysis(
+  cornerSummaries: ReadonlyArray<{ corner: string; summary: unknown }>,
+  pathSources: ReadonlyArray<{ corner: string; source: unknown }>,
+): StepDashboardTimingAnalysis | null {
+  const summaries = cornerSummaries.map(({ corner, summary }) => ({
+    corner,
+    summary: record(summary),
+  }))
+  const sources = pathSources.map(({ corner, source }) => ({
+    corner,
+    source: record(source),
+  }))
+  if (!summaries.length && !sources.length) return null
 
-  const timingPathSummary = Object.entries(source)
-    .filter(([key]) => key !== 'paths')
-    .flatMap(([key, item]) => synthesisValues(item, 'timing-path-summary', [key]))
-  const rawPaths = Array.isArray(source.paths) ? source.paths : []
-  const timingPaths = rawPaths.flatMap((candidate, index) => {
-    const path = record(candidate)
-    if (!path) return []
-    const pathId = typeof path.path_id === 'string' ? path.path_id : ''
-    const rawStages = Array.isArray(path.stages) ? path.stages : []
-    return [
-      {
-        id: pathId || `timing-path-${index + 1}`,
-        label: pathId || `Timing path ${index + 1}`,
-        values: Object.entries(path)
-          .filter(([key]) => key !== 'stages')
-          .flatMap(([key, item]) =>
-            synthesisValues(item, `timing-path-${index + 1}`, [key]),
-          ),
-        stages: rawStages.map((stage, stageIndex) =>
-          synthesisValues(stage, `timing-path-${index + 1}-stage-${stageIndex + 1}`),
-        ),
-      },
-    ]
-  })
-  return { timingPathSummary, timingPaths }
+  const overview = attachStaFirstPaths(
+    buildStaOverviewModel(summaries),
+    sources.map(({ corner, source }) => parseFirstStaPathPreview(source, corner)),
+  )
+  const runInfoSource = sources[0]?.source
+  return {
+    overview,
+    pathsByCorner: sources.map(({ corner, source }) => ({
+      corner,
+      paths: parseStaTimingPaths(source, corner),
+    })),
+    runInfo: timingRunInfo(runInfoSource),
+  }
 }
 
 export function synthesisInsights(
   statValue: unknown,
-  timingSummaryValue: unknown,
-  timingPathsValue: unknown,
 ): StepDashboardSynthesisInsights | null {
   const stat = record(statValue)
   const design = record(stat?.design)
-  const timingSummary = record(timingSummaryValue)
-  const timingPaths = record(timingPathsValue)
-  if (!design && !timingSummary && !timingPaths) return null
+  if (!design) return null
 
-  const metrics = design
-    ? Object.entries(design)
-        .filter(([key]) => key !== 'num_cells_by_type')
-        .flatMap(([key, value]) => synthesisValues(value, 'synthesis-metric', [key]))
-    : []
-  return {
-    metrics,
-    timingModules: timingModules(timingSummary),
-    ...timingPathData(timingPaths),
-  }
+  const metrics = Object.entries(design)
+    .filter(([key]) => key !== 'num_cells_by_type')
+    .flatMap(([key, value]) => synthesisValues(value, 'synthesis-metric', [key]))
+  return { metrics }
 }
 
 function textValue(value: unknown, fallback = '--'): string {
@@ -1046,18 +1024,27 @@ export function staCornerSummaryPaths(
   return staCornerRecords(value).map((corner, index) => {
     const id = staCornerId(corner, index)
     const sourcePath = textValue(corner.summary_file, `feature/${id}/qor_summary.json`)
+    const timingPathsFile = textValue(corner.timing_paths_file, '')
+    const timingPathsPath = timingPathsFile
+      ? timingPathsFile
+      : sourcePath.replace(/qor_summary\.json$/i, 'timing_paths.json')
     return {
       id,
-      path: sourcePath.startsWith('/') ? sourcePath : `${baseDirectory}/${sourcePath}`,
+      path: resolveStepPath(baseDirectory, sourcePath),
+      timingPathsPath: resolveStepPath(baseDirectory, timingPathsPath),
     }
   })
+}
+
+function resolveStepPath(baseDirectory: string, relativePath: string): string {
+  return relativePath.startsWith('/') ? relativePath : `${baseDirectory}/${relativePath}`
 }
 
 function staCornerMetrics(
   corner: Record<string, unknown>,
   index: number,
 ): StepDashboardSynthesisValue[] {
-  const excluded = new Set(['summary_file', 'reason'])
+  const excluded = new Set(['summary_file', 'timing_paths_file'])
   return Object.entries(corner).flatMap(([key, value]) =>
     excluded.has(key) || value === null || typeof value === 'object'
       ? []
@@ -1071,22 +1058,21 @@ function staCornerMetrics(
   )
 }
 
-export function staInsights(
-  value: unknown,
-  timingSummaries: readonly unknown[],
-): StepDashboardStaInsights | null {
+export function staInsights(value: unknown): StepDashboardStaInsights | null {
   const rawCorners = staCornerRecords(value)
   if (!rawCorners.length) return null
   return {
-    corners: rawCorners.map((corner, index) => {
-      const staCorner = staCornerId(corner, index)
-      return {
-        id: staCorner,
-        staCorner,
-        metrics: staCornerMetrics(corner, index),
-        timingModules: timingModules(timingSummaries[index]),
-      }
-    }),
+    corners: rawCorners.map((corner, index) => ({
+      id: staCornerId(corner, index),
+      staCorner: staCornerId(corner, index),
+      metrics: staCornerMetrics(corner, index),
+      role: textValue(corner.configured_role),
+      process: textValue(corner.process_corner),
+      voltageV: finiteNumber(corner.voltage_v),
+      temperatureC: finiteNumber(corner.temperature_c),
+      rcCorner: textValue(corner.rc_corner),
+      availability: textValue(corner.availability),
+    })),
   }
 }
 

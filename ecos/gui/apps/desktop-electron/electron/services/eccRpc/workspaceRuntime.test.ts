@@ -2,6 +2,16 @@ import type {
   EccRuntimeEvent,
   EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -135,6 +145,39 @@ describe('EccWorkspaceRuntime', () => {
         soc_harness_id: 'ysyx-am-soc',
       },
     })
+  })
+
+  it('migrates legacy configs before a lazy workspace open returns', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ecos-workspace-runtime-open-'))
+    const configDirectory = join(directory, 'config')
+    mkdirSync(configDirectory)
+    writeFileSync(
+      join(configDirectory, 'flow_config.json'),
+      JSON.stringify({
+        ConfigPath: {
+          idb_path: join(configDirectory, 'db_default_config.json'),
+        },
+      }),
+    )
+    writeFileSync(join(configDirectory, 'db_default_config.json'), '{}')
+
+    try {
+      const { service, sidecar } = createService(directory, { lazyWorkspaceOpen: true })
+      await service.openWorkspace({ directory })
+
+      expect(existsSync(join(configDirectory, 'flow_config.json'))).toBe(false)
+      expect(existsSync(join(configDirectory, 'db_default_config.json'))).toBe(false)
+      expect(existsSync(join(configDirectory, 'flow_ecc.json'))).toBe(true)
+      expect(existsSync(join(configDirectory, 'db_ecc.json'))).toBe(true)
+      expect(
+        JSON.parse(readFileSync(join(configDirectory, 'flow_ecc.json'), 'utf8')),
+      ).toMatchObject({
+        ConfigPath: { idb_path: join(configDirectory, 'db_ecc.json') },
+      })
+      expect(sidecar.startCount).toBe(0)
+    } finally {
+      rmSync(directory, { force: true, recursive: true })
+    }
   })
 
   it('opens an idle workspace from a bounded snapshot without spawning ECC', async () => {

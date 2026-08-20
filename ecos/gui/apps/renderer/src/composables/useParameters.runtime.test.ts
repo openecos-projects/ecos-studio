@@ -4,17 +4,23 @@ import { effectScope } from 'vue'
 const {
   currentProject,
   fetchSharedHomeData,
+  getWorkspaceRuntimeSnapshotApi,
   invalidateWorkspaceResources,
   readProjectTextFile,
   refreshConfigApi,
   runtimeEvents,
   resourceVersions,
+  workspaceSession,
   writeProjectTextFile,
   resolveProjectPathAccess,
 } = vi.hoisted(() => ({
   currentProject: {
     value: { path: '/workspace/demo' } as { path: string } | null,
   },
+  workspaceSession: {
+    value: null as { workspaceId: string } | null,
+  },
+  getWorkspaceRuntimeSnapshotApi: vi.fn(),
   fetchSharedHomeData: vi.fn(),
   invalidateWorkspaceResources: vi.fn(
     (scopes: string | string[], options?: { sessionId?: string }) => {
@@ -50,6 +56,7 @@ vi.mock('./useWorkspace', () => ({
     invalidateWorkspaceResources,
     runtimeEvents,
     resourceVersions,
+    workspaceSession,
   }),
 }))
 
@@ -75,6 +82,10 @@ vi.mock('@/utils/projectFs', () => ({
 
 vi.mock('@/api/flow', () => ({
   refreshConfigApi,
+}))
+
+vi.mock('@/api/workspaceResources', () => ({
+  getWorkspaceRuntimeSnapshotApi,
 }))
 
 import { useParameters } from './useParameters'
@@ -155,6 +166,8 @@ describe('useParameters desktop bridge integration', () => {
       logs: 0,
       all: 0,
     }
+    workspaceSession.value = null
+    getWorkspaceRuntimeSnapshotApi.mockReset()
     fetchSharedHomeData.mockReset()
     invalidateWorkspaceResources.mockClear()
     readProjectTextFile.mockReset()
@@ -425,6 +438,52 @@ describe('useParameters desktop bridge integration', () => {
     expect(parameters.hasChanges.value).toBe(false)
 
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
+  })
+
+  it('loads chip identity from parameters.json when post-rerun home.json omits the path', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '',
+    })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.pdk).toBe('ics55')
+    })
+    expect(parameters.config.design).toBe('demo')
+    expect(parameters.config.topModule).toBe('chip_top')
+    expect(parameters.config.clock).toBe('clk')
+    expect(parameters.config.die.area).toBe(10000)
+    expect(readProjectTextFile).toHaveBeenCalledWith(
+      '/workspace/demo/home/parameters.json',
+    )
+  })
+
+  it('ignores an empty runtime snapshot after harden and reloads parameters.json', async () => {
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
+      parameters: {},
+      home: { parameters: '' },
+    })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.design).toBe('demo')
+    })
+    expect(parameters.config.pdk).toBe('ics55')
+    expect(parameters.config.topModule).toBe('chip_top')
+    expect(parameters.config.clock).toBe('clk')
+    expect(parameters.config.die.area).toBe(10000)
+    expect(getWorkspaceRuntimeSnapshotApi).toHaveBeenCalledWith('workspace-demo')
+    expect(readProjectTextFile).toHaveBeenCalledWith(
+      '/workspace/demo/home/parameters.json',
+    )
   })
 
   it('keeps the last parameters snapshot while a flow is running', async () => {
