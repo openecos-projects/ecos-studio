@@ -61,6 +61,11 @@ export interface StepDashboardFloorplanSnapshot {
   label: string
   total: number
   unit: 'count' | 'um2' | ''
+  /**
+   * How the snapshot should be drawn: a few named parts of one whole, or many
+   * bins of one measure. Drives the data-summary dialog visuals.
+   */
+  kind: 'composition' | 'distribution'
   slices: DashboardPieSlice[]
 }
 
@@ -989,6 +994,7 @@ export function drcInsights(value: unknown): StepDashboardDrcInsights | null {
         label: 'Layer Totals',
         total: layerSlices.reduce((sum, slice) => sum + slice.value, 0),
         unit: 'count',
+        kind: 'distribution',
         slices: layerSlices,
       },
       {
@@ -996,6 +1002,7 @@ export function drcInsights(value: unknown): StepDashboardDrcInsights | null {
         label: 'Type Totals',
         total: typeSlices.reduce((sum, slice) => sum + slice.value, 0),
         unit: 'count',
+        kind: 'distribution',
         slices: typeSlices,
       },
     ],
@@ -1115,6 +1122,7 @@ function instanceCompositionSnapshot(
     label,
     total,
     unit,
+    kind: 'composition',
     slices: [
       { id: `${field}-macros`, label: 'Macros', value: macros, tone: 'warn' },
       { id: `${field}-logic`, label: 'Logic', value: logic, tone: 'good' },
@@ -1160,6 +1168,7 @@ function pinDistributionSnapshot(
     label,
     total: slices.reduce((sum, slice) => sum + slice.value, 0),
     unit: 'count',
+    kind: 'distribution',
     slices,
   }
 }
@@ -1193,6 +1202,7 @@ function layerDistributionSnapshot(
     label,
     total: layers.reduce((sum, layer) => sum + layer.value, 0),
     unit,
+    kind: 'distribution',
     slices: layers,
   }
 }

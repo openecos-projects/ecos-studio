@@ -40,30 +40,33 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
   })
 
-  it('uses the Floorplan-style layout for physical-step metrics and expandable snapshots', () => {
+  it('uses the Floorplan-style layout for physical-step metrics and a single snapshot Summary entry', () => {
     expect(componentSource).toContain('insightData')
     expect(componentSource).toContain('stepInsights')
     expect(componentSource).toContain('<h3>Snapshot</h3>')
     expect(componentSource).toContain('floorplan-metrics-grid')
     expect(componentSource).toContain('floorplan-metric-label')
-    expect(componentSource).toContain('floorplan-snapshot-grid')
-    expect(componentSource).toContain('floorplan-snapshot-card')
-    expect(componentSource).toContain('floorplan-snapshot-pie')
-    expect(componentSource).toContain('openFloorplanSnapshot(snapshot)')
-    expect(componentSource).toContain('showFloorplanSnapshot')
-    expect(componentSource).toContain('floorplan-snapshot-dialog')
-    expect(componentSource).toContain('floorplan-snapshot-detail-list')
-    expect(componentSource).toContain('floorplanSnapshotPercent')
-    expect(componentSource).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))')
-    expect(componentSource).toContain('grid-template-rows: repeat(3, minmax(0, 1fr))')
+    expect(componentSource).toContain('StepSnapshotPanel')
+    expect(componentSource).toContain('@open="openDataSummary()"')
     expect(componentSource).toContain('grid-template-rows: minmax(0, 1fr) auto')
     expect(componentSource).toContain('justify-content: space-between')
-    expect(componentSource).toContain('data.placeDensityMapUrl')
-    expect(componentSource).toContain(
-      "openImagePreview('All Cell Density', data.placeDensityMapUrl)",
-    )
-    expect(componentSource).toContain('floorplan-snapshot-image-card')
-    expect(componentSource).toContain('Place all-cell density map')
+    expect(componentSource).toContain('All Cell Density')
+    expect(componentSource).toContain('openPlaceDensityMap')
+    // The per-snapshot tiles and the header counter are gone; one entry remains.
+    expect(componentSource).not.toContain('StepSnapshotGrid')
+    expect(componentSource).not.toContain('summaries')
+    expect(componentSource).not.toContain('floorplan-snapshot-pie')
+  })
+
+  it('opens the redesigned data summary dialog with the step snapshot sources', () => {
+    expect(componentSource).toContain('StepDataSummaryDialog')
+    expect(componentSource).toContain('showDataSummary')
+    expect(componentSource).toContain('dataSummarySnapshots')
+    expect(componentSource).toContain('dataSummaryTitle')
+    expect(componentSource).toContain('dataSummaryFocusId')
+    expect(componentSource).toContain('openDataSummary(snapshotId')
+    expect(componentSource).not.toContain('showFloorplanSnapshot')
+    expect(componentSource).not.toContain('floorplan-snapshot-dialog')
   })
 
   it('uses dedicated RCX, DRC, LVS, and STA insight layouts for their specialized artifacts', () => {
@@ -73,7 +76,11 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('rcx-corner-table')
     expect(componentSource).toContain('data.drcInsights')
     expect(componentSource).toContain('drc-statistics-table')
-    expect(componentSource).toContain('data.drcInsights.snapshots')
+    expect(componentSource).toContain('data.value?.drcInsights?.snapshots')
+    expect(componentSource).toContain('drcSnapshotActions')
+    expect(componentSource).toContain('ri-shield-check-line')
+    expect(componentSource).toContain('Violations by layer / type')
+    expect(componentSource).toContain('onSnapshotAction')
     expect(componentSource).toContain('data.lvsInsights')
     expect(componentSource).toContain('Entity comparison')
     expect(componentSource).toContain('lvs-connectivity-table')

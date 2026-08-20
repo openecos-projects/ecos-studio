@@ -676,7 +676,7 @@ describe('step dashboard data', () => {
     ])
   })
 
-  it('parses DRC CSV data into a grid and layer/type pie distributions', () => {
+  it('parses DRC CSV data into a grid and layer/type distributions', () => {
     const insights = drcInsights(
       [
         'Type,MET1,VIA1,MET2,total',
@@ -700,6 +700,7 @@ describe('step dashboard data', () => {
         id: 'drc-layer-total',
         label: 'Layer Totals',
         total: 14,
+        kind: 'distribution',
         slices: expect.arrayContaining([
           expect.objectContaining({ label: 'MET2', value: 14 }),
         ]),
@@ -708,6 +709,7 @@ describe('step dashboard data', () => {
         id: 'drc-type-total',
         label: 'Type Totals',
         total: 14,
+        kind: 'distribution',
         slices: [
           expect.objectContaining({ label: 'parallel_run_length_spacing', value: 14 }),
         ],
@@ -830,18 +832,20 @@ describe('step dashboard data', () => {
       expect.objectContaining({
         id: 'instance-area',
         total: 948,
+        kind: 'composition',
         slices: [
           expect.objectContaining({ label: 'Macros', value: 100 }),
           expect.objectContaining({ label: 'Logic', value: 700 }),
           expect.objectContaining({ label: 'Others', value: 148 }),
         ],
       }),
-      expect.objectContaining({ id: 'instance-num', total: 423 }),
+      expect.objectContaining({ id: 'instance-num', total: 423, kind: 'composition' }),
       expect.objectContaining({ id: 'instance-pin_num', total: 1132 }),
     ])
     expect(insights?.snapshots[3]).toMatchObject({
       id: 'pin-distribution-inst_num',
       total: 27,
+      kind: 'distribution',
       slices: expect.arrayContaining([
         expect.objectContaining({ label: '0', value: 4 }),
         expect.objectContaining({ label: '2', value: 20 }),
@@ -859,6 +863,7 @@ describe('step dashboard data', () => {
       label: 'Cut Layer Vias',
       total: 111,
       unit: 'count',
+      kind: 'distribution',
       slices: [
         expect.objectContaining({ label: 'VIA1', value: 93 }),
         expect.objectContaining({ label: 'VIA2', value: 18 }),

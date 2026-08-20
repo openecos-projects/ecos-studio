@@ -444,7 +444,22 @@
                         class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
                         >Start Step</span
                       >
-                      <p class="mt-1 font-semibold text-(--text-primary)">
+                      <select
+                        v-if="canChooseFlowStartStep"
+                        :value="flowStartStep"
+                        class="mt-1 w-full cursor-pointer rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-2.5 py-1.5 text-sm font-semibold text-(--text-primary) transition-colors duration-200 outline-none focus:border-(--accent-color)"
+                        @change="selectFlowStartStep"
+                      >
+                        <option
+                          v-for="step in hardenFlowSteps"
+                          :key="step.name"
+                          :value="step.name"
+                          :disabled="isFlowStepLocked(step.name)"
+                        >
+                          {{ step.name }}
+                        </option>
+                      </select>
+                      <p v-else class="mt-1 font-semibold text-(--text-primary)">
                         {{ flowStartStep }}
                       </p>
                     </div>
@@ -2140,6 +2155,9 @@ const lockedFlowStepNames = computed(() => {
   if (startIndex <= 0) return []
   return hardenFlowSteps.slice(0, startIndex).map((step) => step.name)
 })
+const canChooseFlowStartStep = computed(
+  () => !sourceContext.value && !lockWorkspaceDirectory.value,
+)
 const selectedFlowSteps = computed(() => {
   const start = Math.min(flowStartIndex.value, flowEndIndex.value)
   const end = Math.max(flowStartIndex.value, flowEndIndex.value)
@@ -2377,6 +2395,8 @@ watch([flowStartStep, flowEndStep], () => {
     config.value.origin_verilog = ''
   } else {
     config.value.rtl_list = []
+    manuallyAddedFiles.value = []
+    directorySelectedFiles.value = []
     filelistPath.value = ''
     if (startsFromFloorplan.value) {
       config.value.origin_def = ''
@@ -2802,9 +2822,35 @@ function setFlowBoundary(stepName: FlowStepName) {
 
   const start = flowStartIndex.value
   const end = flowEndIndex.value
+  if (canChooseFlowStartStep.value && index < start) {
+    applyFlowStartStep(stepName)
+    return
+  }
   const nextEndIndex = index === end && end > start ? end - 1 : index
   const boundedEndIndex = Math.max(start, nextEndIndex)
   flowEndStep.value = hardenFlowSteps[boundedEndIndex].name
+}
+
+function selectFlowStartStep(event: Event) {
+  const target = event.target as HTMLSelectElement
+  const stepName = normalizeFlowStepName(target.value, flowStartStep.value)
+  if (stepName === flowStartStep.value) return
+  if (!canChooseFlowStartStep.value || isFlowStepLocked(stepName)) {
+    target.value = flowStartStep.value
+    return
+  }
+  applyFlowStartStep(stepName)
+}
+
+function applyFlowStartStep(stepName: FlowStepName) {
+  const index = hardenFlowSteps.findIndex((step) => step.name === stepName)
+  if (index < 0) return
+
+  flowStartStep.value = stepName
+  if (flowEndIndex.value < index) {
+    flowEndStep.value = stepName
+  }
+  activeDesignInputType.value = initialDesignInputType(stepName)
 }
 
 async function ensurePdksLoaded() {

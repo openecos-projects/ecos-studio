@@ -483,33 +483,15 @@
             <section class="floorplan-insight-column">
               <header class="floorplan-insight-header">
                 <div>
-                  <i class="ri-pie-chart-2-line" aria-hidden="true" />
+                  <i class="ri-bar-chart-grouped-line" aria-hidden="true" />
                   <h3>Snapshot</h3>
                 </div>
-                <span>{{ data.drcInsights.snapshots.length }} charts</span>
               </header>
-              <div class="floorplan-snapshot-grid">
-                <button
-                  v-for="snapshot in data.drcInsights.snapshots"
-                  :key="snapshot.id"
-                  type="button"
-                  class="floorplan-snapshot-card"
-                  :title="`View ${snapshot.label} distribution`"
-                  @click="openFloorplanSnapshot(snapshot)"
-                >
-                  <StatusPieChart
-                    class="floorplan-snapshot-pie"
-                    :label="`${snapshot.label} distribution`"
-                    :slices="snapshot.slices"
-                    :center-primary="formatDashboardValue(snapshot.total, snapshot.unit)"
-                    center-secondary="total"
-                  />
-                  <span class="floorplan-snapshot-copy">
-                    <strong>{{ snapshot.label }}</strong>
-                    <span>{{ formatDashboardValue(snapshot.total, snapshot.unit) }}</span>
-                  </span>
-                </button>
-              </div>
+              <StepSnapshotPanel
+                :actions="drcSnapshotActions"
+                @open="openDataSummary()"
+                @action="onSnapshotAction"
+              />
             </section>
           </div>
           <div v-else-if="data.lvsInsights" class="data-body lvs-data-body">
@@ -790,46 +772,25 @@
             <section class="floorplan-insight-column">
               <header class="floorplan-insight-header">
                 <div>
-                  <i class="ri-pie-chart-2-line" aria-hidden="true" />
+                  <i class="ri-bar-chart-grouped-line" aria-hidden="true" />
                   <h3>Snapshot</h3>
                 </div>
-                <span>{{ insightData.snapshots.length }} charts</span>
               </header>
-              <div class="floorplan-snapshot-grid">
+              <StepSnapshotPanel @open="openDataSummary()">
                 <button
                   v-if="data.placeDensityMapUrl"
                   type="button"
-                  class="floorplan-snapshot-card floorplan-snapshot-image-card"
+                  class="snapshot-extra-image"
                   title="View all cell density map"
-                  @click="openImagePreview('All Cell Density', data.placeDensityMapUrl)"
+                  @click="openPlaceDensityMap()"
                 >
                   <img :src="data.placeDensityMapUrl" alt="Place all-cell density map" />
-                  <span class="floorplan-snapshot-copy">
+                  <span class="snapshot-extra-copy">
                     <strong>All Cell Density</strong>
                     <span>Density map</span>
                   </span>
                 </button>
-                <button
-                  v-for="snapshot in insightData.snapshots"
-                  :key="snapshot.id"
-                  type="button"
-                  class="floorplan-snapshot-card"
-                  :title="`View ${snapshot.label} distribution`"
-                  @click="openFloorplanSnapshot(snapshot)"
-                >
-                  <StatusPieChart
-                    class="floorplan-snapshot-pie"
-                    :label="`${snapshot.label} distribution`"
-                    :slices="snapshot.slices"
-                    :center-primary="formatDashboardValue(snapshot.total, snapshot.unit)"
-                    center-secondary="total"
-                  />
-                  <span class="floorplan-snapshot-copy">
-                    <strong>{{ snapshot.label }}</strong>
-                    <span>{{ formatDashboardValue(snapshot.total, snapshot.unit) }}</span>
-                  </span>
-                </button>
-              </div>
+              </StepSnapshotPanel>
             </section>
           </div>
           <div v-else class="data-body">
@@ -1085,63 +1046,14 @@
     <p v-else class="dialog-empty">No STA corner details are available.</p>
   </Dialog>
 
-  <Dialog
-    v-model:visible="showFloorplanSnapshot"
-    modal
-    :header="
-      selectedFloorplanSnapshot
-        ? `${selectedFloorplanSnapshot.label} Distribution`
-        : 'Floorplan Snapshot'
-    "
-    :style="{ width: 'min(980px, calc(100vw - 32px))' }"
-    :draggable="false"
-  >
-    <div v-if="selectedFloorplanSnapshot" class="floorplan-snapshot-dialog">
-      <section class="floorplan-snapshot-large-chart">
-        <StatusPieChart
-          class="floorplan-snapshot-large-pie"
-          :label="`${selectedFloorplanSnapshot.label} distribution`"
-          :slices="selectedFloorplanSnapshot.slices"
-          :center-primary="
-            formatDashboardValue(
-              selectedFloorplanSnapshot.total,
-              selectedFloorplanSnapshot.unit,
-            )
-          "
-          center-secondary="total"
-          :show-labels="selectedFloorplanSnapshot.slices.length <= 3"
-        />
-      </section>
-
-      <section class="floorplan-snapshot-detail-list">
-        <header>
-          <div>
-            <i class="ri-list-check-2" aria-hidden="true" />
-            <h3>Distribution</h3>
-          </div>
-          <span>{{ selectedFloorplanSnapshot.slices.length }} bins</span>
-        </header>
-        <ul>
-          <li v-for="slice in selectedFloorplanSnapshot.slices" :key="slice.label">
-            <span
-              class="floorplan-snapshot-swatch"
-              :class="`is-${slice.tone}`"
-              :style="slice.color ? { backgroundColor: slice.color } : undefined"
-              aria-hidden="true"
-            />
-            <strong :title="slice.label">{{ slice.label }}</strong>
-            <span>{{
-              formatDashboardValue(slice.value, selectedFloorplanSnapshot.unit)
-            }}</span>
-            <small>{{
-              floorplanSnapshotPercent(slice.value, selectedFloorplanSnapshot.total)
-            }}</small>
-          </li>
-        </ul>
-      </section>
-    </div>
-    <p v-else class="dialog-empty">No Floorplan snapshot is available.</p>
-  </Dialog>
+  <StepDataSummaryDialog
+    :visible="showDataSummary"
+    :header="dataSummaryTitle"
+    :snapshots="dataSummarySnapshots"
+    :focus-id="dataSummaryFocusId"
+    empty-hint="No data snapshot is available for this step."
+    @update:visible="showDataSummary = $event"
+  />
 
   <Dialog
     v-model:visible="reportDialog.visible"
@@ -1182,6 +1094,10 @@ import StepConfigPanel from './StepConfigPanel.vue'
 import TimingAnalysisDialog from './step-insights/TimingAnalysisDialog.vue'
 import TimingCornerTable from './step-insights/TimingCornerTable.vue'
 import TimingKpis from './step-insights/TimingKpis.vue'
+import StepDataSummaryDialog from './step-dashboard/StepDataSummaryDialog.vue'
+import StepSnapshotPanel, {
+  type StepSnapshotAction,
+} from './step-dashboard/StepSnapshotPanel.vue'
 import {
   formatDashboardValue,
   formatRuntime,
@@ -1189,7 +1105,6 @@ import {
   statusLabel,
   statusTone,
   type StepDashboardChecklist,
-  type StepDashboardFloorplanSnapshot,
   type StepDashboardMetric,
   type StepDashboardQor,
   type StepDashboardQorMetricComparison,
@@ -1211,9 +1126,9 @@ const showChecklistDetails = ref(false)
 const showQorDetails = ref(false)
 const showTimingAnalysis = ref(false)
 const showStaCornerDetails = ref(false)
-const showFloorplanSnapshot = ref(false)
+const showDataSummary = ref(false)
 const showStepConfiguration = ref(false)
-const selectedFloorplanSnapshot = ref<StepDashboardFloorplanSnapshot | null>(null)
+const dataSummaryFocusId = ref<string | null>(null)
 const imagePreview = ref({ label: '', url: '', visible: false })
 const reportDialog = ref({
   label: '',
@@ -1320,6 +1235,22 @@ const staCornerDialogTitle = computed(() => {
 const insightData = computed(
   () => data.value?.floorplanInsights ?? data.value?.stepInsights ?? null,
 )
+/** Snapshot sources are mutually exclusive per step (DRC CSV vs data.json db). */
+const dataSummarySnapshots = computed(
+  () => data.value?.drcInsights?.snapshots ?? insightData.value?.snapshots ?? [],
+)
+const dataSummaryTitle = computed(
+  () => `Data Summary · ${data.value?.step ?? currentStep.value}`,
+)
+/** Mirrors the Home dashboard's Data Snapshot DRC module tile. */
+const drcSnapshotActions = computed<StepSnapshotAction[]>(() => [
+  {
+    id: 'drc',
+    icon: 'ri-shield-check-line',
+    label: 'DRC',
+    caption: 'Violations by layer / type',
+  },
+])
 const largestBar = computed(() =>
   Math.max(1, ...(selectedDataChart.value?.bars.map((bar) => bar.value) ?? [1])),
 )
@@ -1479,14 +1410,19 @@ function openImagePreview(label: string, url: string): void {
   imagePreview.value = { label, url, visible: true }
 }
 
-function openFloorplanSnapshot(snapshot: StepDashboardFloorplanSnapshot): void {
-  selectedFloorplanSnapshot.value = snapshot
-  showFloorplanSnapshot.value = true
+/** Opens the redesigned data summary, optionally focused on one snapshot. */
+function openDataSummary(snapshotId: string | null = null): void {
+  dataSummaryFocusId.value = snapshotId
+  showDataSummary.value = true
 }
 
-function floorplanSnapshotPercent(value: number, total: number): string {
-  if (total <= 0) return '0%'
-  return `${((value / total) * 100).toFixed(1)}%`
+function onSnapshotAction(actionId: string): void {
+  if (actionId === 'drc') openDataSummary()
+}
+
+function openPlaceDensityMap(): void {
+  const url = data.value?.placeDensityMapUrl
+  if (url) openImagePreview('All Cell Density', url)
 }
 
 async function openChipViewer(): Promise<void> {
@@ -2356,82 +2292,6 @@ function fileName(path: string): string {
   font-size: 12px;
   line-height: 1.2;
 }
-.floorplan-snapshot-grid {
-  display: grid;
-  flex: 1;
-  gap: 4px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: repeat(3, minmax(0, 1fr));
-  min-height: 0;
-  padding: 6px;
-}
-.floorplan-snapshot-card {
-  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
-  color: inherit;
-  cursor: pointer;
-  display: grid;
-  font: inherit;
-  gap: 3px;
-  grid-template-rows: minmax(0, 1fr) auto;
-  margin: 0;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  padding: 4px;
-  text-align: left;
-}
-.floorplan-snapshot-card:hover {
-  border-color: color-mix(in srgb, var(--accent-color) 62%, var(--border-color));
-}
-.floorplan-snapshot-card:focus-visible {
-  outline: 1px solid var(--accent-color);
-  outline-offset: -2px;
-}
-.floorplan-snapshot-image-card img {
-  display: block;
-  height: 100%;
-  min-height: 0;
-  object-fit: contain;
-  width: 100%;
-}
-.floorplan-snapshot-copy {
-  align-items: center;
-  display: flex;
-  gap: 4px;
-  justify-content: space-between;
-  min-width: 0;
-}
-.floorplan-snapshot-copy strong {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 400;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.floorplan-snapshot-copy span {
-  color: var(--text-primary);
-  flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-}
-.floorplan-snapshot-pie {
-  min-height: 0;
-}
-.floorplan-snapshot-pie :deep(.status-pie-chart-wrap) {
-  min-height: 0;
-}
-.floorplan-snapshot-pie :deep(.status-pie-center strong) {
-  font-size: 12px;
-}
-.floorplan-snapshot-pie :deep(.status-pie-center span) {
-  font-size: 7px;
-  margin-top: 1px;
-}
 .rcx-summary-grid {
   flex: 0 0 86px;
   grid-template-rows: repeat(2, minmax(0, 1fr));
@@ -2591,127 +2451,62 @@ function fileName(path: string): string {
 .sta-corner-summary-table td.is-good {
   color: var(--success-color);
 }
-.floorplan-snapshot-dialog {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(270px, 0.9fr) minmax(0, 1.1fr);
-  height: min(64vh, 580px);
-  min-height: 320px;
-}
-.floorplan-snapshot-large-chart,
-.floorplan-snapshot-detail-list {
+/* Extra snapshot data fills the next free cell of the panel's 4x4 grid. */
+.snapshot-extra-image {
   background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
   border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
-  min-height: 0;
-  min-width: 0;
-}
-.floorplan-snapshot-large-chart {
-  padding: 12px;
-}
-.floorplan-snapshot-large-pie,
-.floorplan-snapshot-large-pie :deep(.status-pie-chart-wrap) {
-  min-height: 0;
-}
-.floorplan-snapshot-large-pie :deep(.status-pie-center strong) {
-  font-size: 26px;
-}
-.floorplan-snapshot-large-pie :deep(.status-pie-center span) {
-  font-size: 12px;
-}
-.floorplan-snapshot-detail-list {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.floorplan-snapshot-detail-list > header {
-  align-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-  display: flex;
-  flex: 0 0 auto;
-  justify-content: space-between;
-  min-height: 36px;
-  padding: 7px 9px;
-}
-.floorplan-snapshot-detail-list > header > div {
-  align-items: center;
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-}
-.floorplan-snapshot-detail-list > header i {
-  color: var(--accent-color);
-  font-size: 13px;
-}
-.floorplan-snapshot-detail-list h3 {
-  color: var(--text-primary);
-  font-size: 12px;
+  color: inherit;
+  cursor: zoom-in;
+  display: grid;
+  font: inherit;
+  gap: 4px;
+  grid-template-rows: minmax(0, 1fr) auto;
   margin: 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px;
+  text-align: left;
 }
-.floorplan-snapshot-detail-list > header > span {
+.snapshot-extra-image:hover {
+  border-color: color-mix(in srgb, var(--accent-color) 62%, var(--border-color));
+}
+.snapshot-extra-image:focus-visible {
+  outline: 1px solid var(--accent-color);
+  outline-offset: -2px;
+}
+.snapshot-extra-image img {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  width: 100%;
+}
+.snapshot-extra-copy {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.snapshot-extra-copy strong {
   color: var(--text-secondary);
   font-size: 12px;
-  white-space: nowrap;
-}
-.floorplan-snapshot-detail-list ul {
-  display: grid;
-  flex: 1;
-  gap: 5px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  list-style: none;
-  margin: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 8px;
-}
-.floorplan-snapshot-detail-list li {
-  align-items: center;
-  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
-  display: grid;
-  gap: 5px;
-  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+  font-weight: 400;
   min-width: 0;
-  padding: 5px;
-}
-.floorplan-snapshot-swatch {
-  background: var(--text-secondary);
-  border-radius: 2px;
-  display: block;
-  height: 7px;
-  width: 7px;
-}
-.floorplan-snapshot-swatch.is-good {
-  background: var(--success-color);
-}
-.floorplan-snapshot-swatch.is-warn {
-  background: var(--warn-color);
-}
-.floorplan-snapshot-swatch.is-bad {
-  background: var(--danger-color);
-}
-.floorplan-snapshot-detail-list li strong,
-.floorplan-snapshot-detail-list li > span:not(.floorplan-snapshot-swatch),
-.floorplan-snapshot-detail-list li small {
-  font-variant-numeric: tabular-nums;
-  min-width: 0;
-}
-.floorplan-snapshot-detail-list li strong {
-  color: var(--text-primary);
-  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.floorplan-snapshot-detail-list li > span:not(.floorplan-snapshot-swatch) {
+.snapshot-extra-copy span {
   color: var(--text-primary);
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  flex: 0 0 auto;
   font-size: 12px;
-  text-align: right;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
-.floorplan-snapshot-detail-list li small {
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-align: right;
-}
+
 .timing-detail-link {
   align-items: center;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
@@ -3160,16 +2955,6 @@ function fileName(path: string): string {
 }
 
 @media (max-width: 640px) {
-  .floorplan-snapshot-dialog {
-    grid-template-columns: 1fr;
-    height: min(72vh, 620px);
-  }
-  .floorplan-snapshot-large-chart {
-    min-height: 220px;
-  }
-  .floorplan-snapshot-detail-list ul {
-    grid-template-columns: 1fr;
-  }
   .step-qor-overview {
     grid-template-columns: minmax(96px, 0.36fr) minmax(0, 0.64fr);
   }
