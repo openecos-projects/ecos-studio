@@ -73,4 +73,11 @@ describe('FrontendWorkspaceView simulation layout', () => {
     expect(frontendWorkspaceViewSource).toContain('...loadedDetail,')
     expect(frontendWorkspaceViewSource).not.toContain('...detail.value,\n      cases:')
   })
+
+  it('opens waveform files through the scoped desktop path API', () => {
+    expect(frontendWorkspaceViewSource).toContain(
+      'getDesktopApi().workspace.openWaveformExternal(path)',
+    )
+    expect(frontendWorkspaceViewSource).not.toContain('pathToFileUrl')
+  })
 })

@@ -18,6 +18,7 @@ const {
   fromWebContents,
   getAllWindows,
   openExternal,
+  openPath,
   showMessageBox,
   showOpenDialog,
   showSaveDialog,
@@ -28,6 +29,7 @@ const {
   getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
   mkdirMock: vi.fn(),
   openExternal: vi.fn(),
+  openPath: vi.fn(),
   showMessageBox: vi.fn(),
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock('electron', () => ({
   },
   shell: {
     openExternal,
+    openPath,
   },
 }))
 
@@ -169,6 +172,7 @@ function registerHandlers(
     },
     surferProtocolService: {
       authorizeWaveform: vi.fn(),
+      resolveWaveformPath: vi.fn(),
     },
     appInfoService: {
       getVersions: vi.fn(),
@@ -269,6 +273,7 @@ describe('registerIpc', () => {
     getAllWindows.mockReturnValue([])
     electronLogger.warn.mockReset()
     openExternal.mockReset()
+    openPath.mockReset()
     executeWorkspaceRerunMock.mockReset()
     prepareWorkspaceRerunMock.mockReset()
     showOpenDialog.mockReset()
@@ -1081,6 +1086,47 @@ describe('registerIpc', () => {
     )
 
     expect(openExternal).toHaveBeenCalledWith('https://openecos.org')
+  })
+
+  it('opens validated waveform paths without converting Windows paths to URLs', async () => {
+    const { handlers, services } = registerHandlers()
+    const requestedPath = String.raw`C:\work\cpu\trace.vcd`
+    const canonicalPath = String.raw`C:\work\cpu\trace.vcd`
+    services.surferProtocolService.resolveWaveformPath.mockResolvedValue(canonicalPath)
+    openPath.mockResolvedValue('')
+
+    await handlers.get(desktopApiIpcChannels.workspaceOpenWaveformExternal)?.(
+      { sender: { id: 'web-contents' } },
+      requestedPath,
+    )
+
+    expect(services.surferProtocolService.resolveWaveformPath).toHaveBeenCalledWith(
+      requestedPath,
+    )
+    expect(openPath).toHaveBeenCalledWith(canonicalPath)
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('rejects waveform opens when the operating system reports an error', async () => {
+    const { handlers, services } = registerHandlers()
+    services.surferProtocolService.resolveWaveformPath.mockResolvedValue(
+      '/work/trace.vcd',
+    )
+    openPath.mockResolvedValue('No application is associated with this file type')
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceOpenWaveformExternal)?.(
+        { sender: { id: 'web-contents' } },
+        '/work/trace.vcd',
+      ),
+    ).resolves.toEqual({
+      error: {
+        message:
+          'Unable to open waveform: No application is associated with this file type',
+        name: 'Error',
+      },
+      ok: false,
+    })
   })
 
   it('shows a Save As dialog for the requesting window and returns its path', async () => {
