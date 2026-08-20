@@ -62,4 +62,15 @@ describe('FrontendWorkspaceView simulation layout', () => {
       '...liveRuntimeStepOverrides.get(step.name.trim().toLowerCase())',
     )
   })
+
+  it('does not apply waveform case fallbacks from a stale detail request', () => {
+    expect(frontendWorkspaceViewSource).toContain(
+      'await hydrateWaveCasesFromWorkspaceResources(loadedDetail, isCurrentRequest)',
+    )
+    expect(frontendWorkspaceViewSource).toContain(
+      'if (!isCurrentRequest() || detail.value !== loadedDetail) return',
+    )
+    expect(frontendWorkspaceViewSource).toContain('...loadedDetail,')
+    expect(frontendWorkspaceViewSource).not.toContain('...detail.value,\n      cases:')
+  })
 })
