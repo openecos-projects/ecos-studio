@@ -763,8 +763,11 @@ import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
-import { readProjectManagementWorkspaceData } from './project-management/projectWorkspaceAnalysisData'
 import { mapWithConcurrency } from './project-management/asyncConcurrency'
+import {
+  readProjectWorkspaceAnalysisInputs,
+  readProjectWorkspaceFlowStates,
+} from './project-management/projectWorkspaceData'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
@@ -1524,7 +1527,10 @@ async function loadSelectedProjectWorkspaceData() {
   const projectId = project.id
   const loadGeneration = ++selectedProjectSummaryLoadGeneration
   try {
-    const summary = await readProjectManagementWorkspaceData(project.path, manifest)
+    const [flowStates, analysisInputs] = await Promise.all([
+      readProjectWorkspaceFlowStates(project.path, manifest),
+      readProjectWorkspaceAnalysisInputs(project.path, manifest),
+    ])
     if (
       selectedProjectSummaryLoadGeneration !== loadGeneration ||
       selectedProjectId.value !== projectId ||
@@ -1534,11 +1540,11 @@ async function loadSelectedProjectWorkspaceData() {
     }
     workspaceFlowStates.value = {
       ...workspaceFlowStates.value,
-      [project.path]: summary.flowStates,
+      [project.path]: flowStates,
     }
     workspaceAnalysisInputs.value = {
       ...workspaceAnalysisInputs.value,
-      [project.path]: summary.analysisInputs,
+      [project.path]: analysisInputs,
     }
   } catch (error) {
     if (
