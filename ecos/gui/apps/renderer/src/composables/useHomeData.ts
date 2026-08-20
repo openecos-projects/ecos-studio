@@ -1,4 +1,5 @@
 import { computed, ref, shallowRef, watch, onUnmounted } from 'vue'
+import type { DesignTool } from '@ecos-studio/shared'
 import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import {
@@ -506,6 +507,7 @@ export async function fetchSharedHomeData(
   projectPath: string,
   isDesktopRuntimeAvailable: boolean,
   workspaceHandle = '',
+  designTool: DesignTool = 'backend',
 ): Promise<HomeData | null> {
   // 项目切换时使缓存失效
   if (projectPath !== _cachedForProject) {
@@ -535,7 +537,7 @@ export async function fetchSharedHomeData(
       if (!isDesktopRuntimeAvailable || !projectPath) return null
 
       let data: HomeData | null = null
-      if (workspaceHandle) {
+      if (workspaceHandle && designTool !== 'frontend') {
         const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
         data = snapshot.home as unknown as HomeData
       } else {
@@ -1500,6 +1502,7 @@ export function useHomeData() {
           projectPath,
           isDesktopRuntimeAvailable,
           workspaceSession?.value?.workspaceId ?? '',
+          currentProject.value?.designTool ?? 'backend',
         ),
       )
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return
@@ -1579,6 +1582,7 @@ export function useHomeData() {
           projectPath,
           isDesktopRuntimeAvailable,
           workspaceSession?.value?.workspaceId ?? '',
+          currentProject.value?.designTool ?? 'backend',
         ),
       )
       if (!isCurrent()) return

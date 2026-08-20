@@ -5,7 +5,7 @@ import { useWorkspace } from './useWorkspace'
 import { convertRemoteToLocalPath } from './useHomeData'
 import { readProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { InfoEnum, StepEnum } from '@/api/type'
+import { FrontendStepEnum, InfoEnum, StepEnum, getStepMetadata } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
@@ -50,20 +50,26 @@ export type OverallStatus = 'pending' | 'running' | 'completed' | 'failed'
 // ============ 工具函数 ============
 
 /** 从 StepEnum 获取所有值 */
-const stepEnumValues = Object.values(StepEnum)
+type WorkspaceFlowStep = StepEnum | FrontendStepEnum
+
+const workspaceFlowStepValues: WorkspaceFlowStep[] = [
+  ...Object.values(StepEnum),
+  ...Object.values(FrontendStepEnum),
+]
 
 /**
  * 根据路由路径查找对应的 StepEnum（忽略大小写）
  */
-function getStepEnumFromPath(path: string): StepEnum | undefined {
-  return stepEnumValues.find((step) => step.toLowerCase() === path.toLowerCase())
+function getStepEnumFromPath(path: string): WorkspaceFlowStep | undefined {
+  return workspaceFlowStepValues.find((step) => step.toLowerCase() === path.toLowerCase())
 }
 
 /**
  * 根据 StepEnum 生成显示名称
  */
-function getStepDisplayName(stepEnum: StepEnum): string {
-  return `Run ${stepEnum.charAt(0).toUpperCase() + stepEnum.slice(1)}`
+function getStepDisplayName(stepEnum: WorkspaceFlowStep): string {
+  const label = getStepMetadata(stepEnum)?.label ?? stepEnum
+  return `Run ${label}`
 }
 
 /**
@@ -128,6 +134,8 @@ export function useSubflow() {
   const error = ref<string | null>(null)
   const currentStepTitle = ref('Run Flow')
   const currentStepEngine = ref('ECC Engine')
+  let runtimeUpdateRevision = 0
+  let stepExecutionActive = false
 
   function sameStepName(left: string, right: string): boolean {
     return left.trim().toLowerCase() === right.trim().toLowerCase()
@@ -151,7 +159,20 @@ export function useSubflow() {
     peakMemory: number | undefined,
   ): void {
     const index = subflowSteps.value.findIndex((step) => sameStepName(step.name, name))
-    if (index < 0) return
+    if (index < 0) {
+      subflowSteps.value = [
+        ...subflowSteps.value,
+        {
+          id: `step-${subflowSteps.value.length}`,
+          name,
+          description: `Peak Memory: ${peakMemory ?? 0} MB`,
+          status: mapState(state),
+          duration: runtime || undefined,
+          peakMemory,
+        },
+      ]
+      return
+    }
     const next = [...subflowSteps.value]
     const current = next[index]!
     next[index] = {
@@ -162,6 +183,18 @@ export function useSubflow() {
       status: mapState(state),
     }
     subflowSteps.value = next
+  }
+
+  function advanceRunningSubflowStage(): void {
+    if (!stepExecutionActive) return
+    if (subflowSteps.value.some((step) => step.status === 'running')) return
+    const nextPendingIndex = subflowSteps.value.findIndex(
+      (step) => step.status === 'pending',
+    )
+    if (nextPendingIndex < 0) return
+    subflowSteps.value = subflowSteps.value.map((step, index) =>
+      index === nextPendingIndex ? { ...step, status: 'running' } : step,
+    )
   }
 
   // ============ 计算属性 ============
@@ -206,8 +239,9 @@ export function useSubflow() {
   /**
    * 获取子流程信息
    */
-  async function fetchSubflowInfo(stepEnum: StepEnum): Promise<void> {
+  async function fetchSubflowInfo(stepEnum: WorkspaceFlowStep): Promise<void> {
     const sessionId = workspaceLifecycle.currentSessionId.value
+    const expectedRuntimeRevision = runtimeUpdateRevision
     const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
     isLoading.value = true
     error.value = null
@@ -272,7 +306,9 @@ export function useSubflow() {
       console.log('subflow data:', subflowData)
 
       // 3. 转换数据格式并更新步骤
-      subflowSteps.value = convertSubflowToSteps(subflowData)
+      if (expectedRuntimeRevision === runtimeUpdateRevision) {
+        subflowSteps.value = convertSubflowToSteps(subflowData)
+      }
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to fetch subflow info:', err)
@@ -297,6 +333,7 @@ export function useSubflow() {
     }
 
     const sessionId = workspaceLifecycle.currentSessionId.value
+    const expectedRuntimeRevision = runtimeUpdateRevision
     const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
     try {
       const localPath = currentProject.value?.path
@@ -318,7 +355,9 @@ export function useSubflow() {
 
       console.log('Subflow data from runtime event path:', subflowData)
 
-      subflowSteps.value = convertSubflowToSteps(subflowData)
+      if (expectedRuntimeRevision === runtimeUpdateRevision) {
+        subflowSteps.value = convertSubflowToSteps(subflowData)
+      }
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to load subflow from path:', subflowPath, err)
@@ -328,7 +367,7 @@ export function useSubflow() {
   /**
    * 获取当前路由对应的 step 名称
    */
-  function getCurrentRouteStep(): StepEnum | undefined {
+  function getCurrentRouteStep(): WorkspaceFlowStep | undefined {
     const pathParts = route.path.split('/')
     const currentPath = pathParts[pathParts.length - 1] || ''
     const stepEnum = getStepEnumFromPath(currentPath)
@@ -361,7 +400,7 @@ export function useSubflow() {
   /**
    * 更新当前步骤信息
    */
-  function updateCurrentStep(stepEnum: StepEnum): void {
+  function updateCurrentStep(stepEnum: WorkspaceFlowStep): void {
     currentStepTitle.value = getStepDisplayName(stepEnum)
     currentStepEngine.value = 'ECC Engine'
   }
@@ -448,15 +487,33 @@ export function useSubflow() {
         const payload = data as Record<string, unknown>
         if (!sameStepName(String(payload.step ?? ''), currentStep)) continue
 
-        if (payload.runtimeProtocolType === 'step.started') {
+        const protocolType =
+          typeof payload.runtimeProtocolType === 'string'
+            ? payload.runtimeProtocolType
+            : ''
+        const legacyType = typeof payload.type === 'string' ? payload.type : ''
+        if (
+          protocolType === 'step.started' ||
+          (!protocolType && legacyType === 'step_start')
+        ) {
+          stepExecutionActive = true
+          runtimeUpdateRevision += 1
           resetSubflowForRerun(true)
           continue
         }
-        if (payload.runtimeProtocolType !== 'subflow.stage') continue
+        if (
+          protocolType === 'step.completed' ||
+          (!protocolType && legacyType === 'step_complete')
+        ) {
+          stepExecutionActive = false
+          continue
+        }
+        if (protocolType !== 'subflow.stage') continue
 
         const subflowStep =
           typeof payload.subflowStep === 'string' ? payload.subflowStep : ''
         if (!subflowStep) continue
+        runtimeUpdateRevision += 1
         updateSubflowStage(
           subflowStep,
           typeof payload.state === 'string' ? payload.state : 'Unstart',
@@ -465,6 +522,13 @@ export function useSubflow() {
             ? payload.subflowPeakMemory
             : undefined,
         )
+        const subflowState =
+          typeof payload.state === 'string' ? payload.state.trim().toLowerCase() : ''
+        if (['incomplete', 'invalid', 'failed'].includes(subflowState)) {
+          stepExecutionActive = false
+        } else {
+          advanceRunningSubflowStage()
+        }
       }
     },
     { deep: true, flush: 'sync' },

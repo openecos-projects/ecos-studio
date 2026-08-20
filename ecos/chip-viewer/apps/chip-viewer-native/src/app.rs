@@ -8647,17 +8647,25 @@ fn nice_ruler_interval(target: f64) -> f64 {
     nice * magnitude
 }
 
+/// Zoom multiplier applied per physical wheel notch, kept small so wheel zoom
+/// stays precise across the layout's wide zoom range.
+const WHEEL_ZOOM_PER_NOTCH: f32 = 1.2;
+/// Raw scroll delta (points) produced by one wheel notch: winit reports a
+/// notch as one scroll line and egui multiplies lines by its native
+/// line_scroll_speed (40), so a notch arrives as ~40 points on Linux and up to
+/// ~120 on Windows.
+const WHEEL_SCROLL_UNITS_PER_NOTCH: f32 = 40.0;
+/// Caps the notches applied per wheel event so fast flicks and inertial
+/// trackpad scrolls cannot jump several zoom levels at once.
+const WHEEL_MAX_NOTCHES_PER_EVENT: f32 = 3.0;
+
 fn scroll_zoom_factor(scroll: f32) -> f32 {
     if scroll.abs() < f32::EPSILON {
         return 1.0;
     }
-    let steps = if scroll.abs() <= 5.0 {
-        scroll
-    } else {
-        scroll / 25.0
-    };
-    let base: f32 = 1.35;
-    base.powf(steps).clamp(0.05, 20.0)
+    let notches = (scroll / WHEEL_SCROLL_UNITS_PER_NOTCH)
+        .clamp(-WHEEL_MAX_NOTCHES_PER_EVENT, WHEEL_MAX_NOTCHES_PER_EVENT);
+    WHEEL_ZOOM_PER_NOTCH.powf(notches)
 }
 
 fn zoom_at_screen_pos(
@@ -10224,12 +10232,17 @@ mod tests {
     #[test]
     fn scroll_zoom_factor_keeps_directional_zoom() {
         assert_eq!(scroll_zoom_factor(0.0), 1.0);
-        assert!((scroll_zoom_factor(1.0) - 1.35).abs() < 1e-4);
-        assert!((scroll_zoom_factor(-1.0) - (1.0 / 1.35)).abs() < 1e-4);
-        assert!(scroll_zoom_factor(2.0) > scroll_zoom_factor(1.0));
-        assert!(scroll_zoom_factor(-2.0) < scroll_zoom_factor(-1.0));
-        assert!(scroll_zoom_factor(50.0) > scroll_zoom_factor(25.0));
-        assert!(scroll_zoom_factor(-50.0) < scroll_zoom_factor(-25.0));
+        // One physical wheel notch on Linux: winit reports a line and egui
+        // scales it by the native line_scroll_speed of 40.
+        assert!((scroll_zoom_factor(40.0) - 1.2).abs() < 1e-4);
+        assert!((scroll_zoom_factor(-40.0) - (1.0 / 1.2)).abs() < 1e-4);
+        assert!(scroll_zoom_factor(80.0) > scroll_zoom_factor(40.0));
+        assert!(scroll_zoom_factor(-80.0) < scroll_zoom_factor(-40.0));
+        // Fast flicks are capped so one event cannot jump several zoom levels.
+        assert!((scroll_zoom_factor(500.0) - 1.2f32.powf(3.0)).abs() < 1e-4);
+        assert!((scroll_zoom_factor(-500.0) - 1.2f32.powf(-3.0)).abs() < 1e-4);
+        // Trackpad-style pixel deltas scale proportionally, not a notch per event.
+        assert!((scroll_zoom_factor(8.0) - 1.2f32.powf(0.2)).abs() < 1e-4);
     }
 
     #[test]

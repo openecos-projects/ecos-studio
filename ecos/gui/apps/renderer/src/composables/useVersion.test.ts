@@ -69,6 +69,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       registerProjectReadRoot: async (path: string) => path,
       clearProjectRoot: async () => undefined,
       requestProjectPathAccess: async (path: string) => path,
+      authorizeWaveform: async (path: string) => path,
       readProjectTextFile: async () => '',
       readOptionalProjectTextFile: async () => null,
       readProjectTextFileTail: async () => null,
@@ -169,8 +170,16 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         throw new Error('not implemented')
       },
       refreshRegistry: async () => ({ status: 'refreshed', tools_count: 0 }),
+      checkUpdates: async () => ({
+        status: 'checked',
+        checked_count: 0,
+        update_count: 0,
+        diagnostics: [],
+        resources: [],
+      }),
       onProgress: () => () => undefined,
     },
+    runtime: {} as DesktopApi['runtime'],
     ecc: {
       events: {
         onEvent: () => () => undefined,

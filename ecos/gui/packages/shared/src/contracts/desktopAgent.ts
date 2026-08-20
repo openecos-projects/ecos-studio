@@ -110,9 +110,9 @@ export interface DesktopAgentWorkspaceContinueContract {
  */
 export const desktopAgentParameterWriteFiles = [
   'home/parameters.json',
-  'config/dreamplace.json',
-  'config/cts_default_config.json',
-  'config/rt_default_config.json',
+  'config/dreamplace_ecc.json',
+  'config/cts_ecc.json',
+  'config/route_ecc.json',
 ] as const
 
 export type DesktopAgentParameterWriteFile =

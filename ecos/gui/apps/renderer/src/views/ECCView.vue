@@ -208,6 +208,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
+import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
@@ -398,7 +399,7 @@ async function loadSourceWorkspaceInitialConfig(
         projectPath: sourceWorkspacePath,
       }),
       readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
-      readOptionalProjectTextFile('config/db_default_config.json', {
+      readOptionalProjectTextFile('config/db_ecc.json', {
         projectPath: sourceWorkspacePath,
       }),
     ])
@@ -590,6 +591,7 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
       })
     },
   })
+  requestOpenStepConfigAfterCreate()
   router.push({
     path: '/workspace/home',
     query: workspaceRouteQuery(workspacePath, projectContext),

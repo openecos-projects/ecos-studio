@@ -23,7 +23,10 @@
           @click="selectStep(item.step)"
         >
           <i :class="item.icon" aria-hidden="true" />
-          <span>{{ item.label }}</span>
+          <span class="workspace-step-config-step">
+            <span>{{ item.label }}</span>
+            <small v-if="item.tool">{{ item.tool }}</small>
+          </span>
         </button>
       </div>
     </aside>
@@ -34,6 +37,7 @@
         ref="stepConfigPanel"
         :key="selectedStep"
         :step="selectedStep"
+        :tool="selectedTool"
       />
       <div v-else class="workspace-step-config-empty">
         Select a step to edit its parameters.
@@ -44,7 +48,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { StepEnum } from '@/api/type'
+import { formatStepToolName, StepEnum } from '@/api/type'
 import StepConfigPanel from '@/components/StepConfigPanel.vue'
 import { useFlowStages } from '@/composables/useFlowStages'
 
@@ -63,9 +67,21 @@ const configurableSteps = computed(() => {
     )
     if (!step || seen.has(step)) return []
     seen.add(step)
-    return [{ step, label: stage.label, icon: stage.icon }]
+    return [
+      {
+        step,
+        label: stage.label,
+        icon: stage.icon,
+        tool: formatStepToolName(stage.tool),
+      },
+    ]
   })
 })
+
+const selectedTool = computed(
+  () =>
+    configurableSteps.value.find((item) => item.step === selectedStep.value)?.tool ?? '',
+)
 
 watch(
   configurableSteps,
@@ -135,17 +151,42 @@ defineExpose({ hasUnsavedChanges })
 .workspace-step-config-list button {
   display: flex;
   width: 100%;
-  min-height: 32px;
+  min-height: 36px;
   align-items: center;
   gap: 8px;
   border: 1px solid transparent;
   border-radius: 4px;
-  padding: 0 8px;
+  padding: 4px 8px;
   background: transparent;
   color: var(--text-secondary);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+}
+
+.workspace-step-config-step {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workspace-step-config-step span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-step-config-step small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .workspace-step-config-list button:hover {

@@ -14,7 +14,10 @@
 
       <header class="manager-header">
         <h1 id="resource-manager-title">Resource Manager</h1>
-        <p>Discover, install, and manage EDA tools, PDKs, and MPC projects</p>
+        <p>
+          Manage frontend resources, EDA tools, compiler toolchains, PDKs, and MPC
+          projects
+        </p>
       </header>
 
       <div class="manager-grid">
@@ -100,6 +103,41 @@
             </div>
           </div>
 
+          <section
+            v-if="categoryFilter === 'frontend'"
+            class="frontend-flow-strip"
+            aria-label="Frontend flow tool readiness"
+          >
+            <div class="frontend-flow-summary">
+              <strong>Frontend Flow</strong>
+              <span
+                >{{ frontendInstalledCount }}/{{
+                  frontendToolRows.length
+                }}
+                installed</span
+              >
+              <em v-if="frontendAvailableCount">
+                {{ frontendAvailableCount }} ready to install
+              </em>
+            </div>
+            <div
+              class="frontend-flow-steps"
+              role="list"
+              aria-label="Frontend tool readiness by workflow stage"
+            >
+              <div
+                v-for="item in frontendFlowItems"
+                :key="item.label"
+                class="frontend-flow-step"
+                :class="item.status"
+                role="listitem"
+              >
+                <span>{{ item.label }}</span>
+                <b>{{ item.installed }}/{{ item.total }}</b>
+              </div>
+            </div>
+          </section>
+
           <div
             v-if="managerErrorText"
             class="resource-error"
@@ -155,6 +193,15 @@
                       <small :title="row.descriptionTitle || undefined">{{
                         row.description
                       }}</small>
+                      <span v-if="row.flowTags.length" class="resource-flow-tags">
+                        <b v-for="tag in row.flowTags.slice(0, 4)" :key="tag">{{
+                          tag
+                        }}</b>
+                      </span>
+                      <span v-if="row.dependencyLabel" class="resource-dependency">
+                        <i class="ri-node-tree" aria-hidden="true"></i>
+                        <span>{{ row.dependencyLabel }}</span>
+                      </span>
                     </span>
                   </span>
 
@@ -352,6 +399,15 @@
                 <small class="selected-item-meta" :title="resolveInstallPath(row)">
                   <span>{{ selectedResourceMetaText(row) }}</span>
                 </small>
+                <span v-if="row.flowTags.length" class="selected-flow-tags">
+                  {{ row.flowTags.slice(0, 3).join(' / ') }}
+                </span>
+                <span
+                  v-if="row.missingRequires.length"
+                  class="selected-flow-tags dependency"
+                >
+                  +{{ row.missingRequires.length }} required
+                </span>
               </span>
               <em>{{ row.sizeLabel }}</em>
               <button
@@ -409,6 +465,7 @@ import {
 import {
   canImportLocalResource,
   compactResourceMessage,
+  isEdaToolRow,
   primaryActionForRow,
   resourceToRow,
   removalActionForRow,
@@ -420,7 +477,7 @@ import {
 } from './pluginToolsRows'
 import type { ResourceRow } from './pluginToolsRows'
 
-type CategoryFilter = 'all' | 'tools' | 'pdks' | 'mpc' | 'installed'
+type CategoryFilter = 'all' | 'frontend' | 'tools' | 'pdks' | 'mpc' | 'installed'
 type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
 
 const router = useRouter()
@@ -459,7 +516,8 @@ const filteredRows = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
 
   return resourceRows.value.filter((row) => {
-    if (categoryFilter.value === 'tools' && row.type !== 'tool') return false
+    if (categoryFilter.value === 'frontend' && !row.isFrontendTool) return false
+    if (categoryFilter.value === 'tools' && !isEdaToolRow(row)) return false
     if (categoryFilter.value === 'pdks' && row.type !== 'pdk') return false
     if (categoryFilter.value === 'mpc' && row.type !== 'mpc') return false
     if (categoryFilter.value === 'installed' && !isInstalledLike(row)) return false
@@ -469,7 +527,9 @@ const filteredRows = computed(() => {
     if (statusFilter.value === 'updates' && row.statusKind !== 'update') return false
 
     if (!q) return true
-    return `${row.name} ${row.description} ${row.version}`.toLowerCase().includes(q)
+    return `${row.name} ${row.description} ${row.version} ${row.requires.join(' ')}`
+      .toLowerCase()
+      .includes(q)
   })
 })
 
@@ -492,6 +552,23 @@ const updatesCount = computed(
   () => resourceRows.value.filter((row) => row.statusKind === 'update').length,
 )
 const installedCount = computed(() => resourceRows.value.filter(isInstalledLike).length)
+const frontendToolRows = computed(() =>
+  resourceRows.value.filter((row) => row.isFrontendTool),
+)
+const edaToolRows = computed(() => resourceRows.value.filter(isEdaToolRow))
+const frontendInstalledCount = computed(
+  () => frontendToolRows.value.filter(isInstalledLike).length,
+)
+const frontendAvailableCount = computed(
+  () => frontendToolRows.value.filter((row) => row.statusKind === 'available').length,
+)
+const frontendFlowItems = computed(() => [
+  frontendFlowItem('Review', ['Yosys']),
+  frontendFlowItem('Elab', ['Elab']),
+  frontendFlowItem('Lint', ['Lint']),
+  frontendFlowItem('Sim', ['Sim']),
+  frontendFlowItem('Wave', ['Wave']),
+])
 
 const sidebarItems = computed(() => [
   {
@@ -501,10 +578,16 @@ const sidebarItems = computed(() => [
     count: resourceRows.value.length,
   },
   {
+    id: 'frontend' as const,
+    label: 'Frontend Flow',
+    icon: 'ri-flow-chart',
+    count: frontendToolRows.value.length,
+  },
+  {
     id: 'tools' as const,
     label: 'EDA Tools',
     icon: 'ri-tools-line',
-    count: resourceRows.value.filter((row) => row.type === 'tool').length,
+    count: edaToolRows.value.length,
   },
   {
     id: 'pdks' as const,
@@ -578,6 +661,22 @@ onUnmounted(() => {
 
 function isInstalledLike(row: ResourceRow): boolean {
   return row.statusKind === 'installed' || row.statusKind === 'update'
+}
+
+function frontendFlowItem(
+  label: string,
+  tags: string[],
+): { label: string; installed: number; total: number; status: string } {
+  const rows = frontendToolRows.value.filter((row) =>
+    tags.some((tag) => row.flowTags.includes(tag)),
+  )
+  const installed = rows.filter(isInstalledLike).length
+  return {
+    label,
+    installed,
+    total: rows.length,
+    status: rows.length > 0 && installed === rows.length ? 'ready' : 'missing',
+  }
 }
 
 function isSelected(id: string): boolean {
@@ -1071,8 +1170,82 @@ async function openDocs(): Promise<void> {
 }
 
 .manager-table-meta button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.55;
+}
+
+.frontend-flow-strip {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+}
+
+.frontend-flow-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.frontend-flow-summary strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.frontend-flow-summary span,
+.frontend-flow-summary em {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frontend-flow-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.frontend-flow-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  cursor: default;
+  font-size: 11px;
+}
+
+.frontend-flow-step.ready {
+  border-color: color-mix(in srgb, var(--success-color) 36%, var(--border-color));
+  color: var(--success-color);
+  background: var(--success-bg);
+}
+
+.frontend-flow-step span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frontend-flow-step b {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  font-weight: 750;
 }
 
 .resource-error {
@@ -1223,6 +1396,51 @@ async function openDocs(): Promise<void> {
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-flow-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.resource-flow-tags b,
+.selected-flow-tags {
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 11%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.resource-flow-tags b {
+  min-height: 18px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  line-height: 1.2;
+}
+
+.resource-dependency {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  gap: 4px;
+}
+
+.resource-dependency i {
+  flex: 0 0 auto;
+  color: var(--accent-color);
+  font-size: 12px;
+}
+
+.resource-dependency span {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1398,8 +1616,8 @@ async function openDocs(): Promise<void> {
   z-index: 10;
 }
 
-.row-action-btn[data-title]:hover::after,
-.row-action-btn[data-title]:hover::before {
+.row-action-btn[data-title]:not(:disabled):hover::after,
+.row-action-btn[data-title]:not(:disabled):hover::before {
   opacity: 1;
   transform: translateX(-50%) scale(1);
 }
@@ -1409,7 +1627,7 @@ async function openDocs(): Promise<void> {
   background: var(--accent-color);
 }
 
-.row-action-btn.primary:hover {
+.row-action-btn.primary:not(:disabled):hover {
   opacity: 0.9;
 }
 
@@ -1419,7 +1637,7 @@ async function openDocs(): Promise<void> {
   border: 1px solid var(--danger-color);
 }
 
-.row-action-btn.danger-outlined:hover {
+.row-action-btn.danger-outlined:not(:disabled):hover {
   background: var(--danger-bg);
 }
 
@@ -1428,7 +1646,7 @@ async function openDocs(): Promise<void> {
   background: var(--info-bg);
 }
 
-.row-action-btn.info:hover {
+.row-action-btn.info:not(:disabled):hover {
   opacity: 0.85;
 }
 
@@ -1438,12 +1656,12 @@ async function openDocs(): Promise<void> {
 }
 
 .row-action-btn.warn:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.7;
 }
 
 .row-action-btn:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.65;
 }
 
@@ -1620,6 +1838,21 @@ async function openDocs(): Promise<void> {
   font-style: normal;
 }
 
+.selected-flow-tags {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 5px;
+  border-radius: 5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-flow-tags.dependency {
+  color: var(--info-color);
+  background: var(--info-bg);
+}
+
 .selected-item em {
   color: var(--text-secondary);
   font-size: 11px;
@@ -1720,7 +1953,7 @@ async function openDocs(): Promise<void> {
 }
 
 .download-button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.5;
 }
 
@@ -1887,6 +2120,14 @@ async function openDocs(): Promise<void> {
     align-items: flex-start;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .frontend-flow-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .frontend-flow-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .resource-table-head,

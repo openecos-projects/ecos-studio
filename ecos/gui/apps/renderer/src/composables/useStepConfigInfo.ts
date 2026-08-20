@@ -457,6 +457,9 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
             cmd: CMDEnum.sync_config,
             data: {
               config_path: resolvedPath,
+              ...(currentProject.value?.designTool === 'frontend'
+                ? { designTool: 'frontend' as const }
+                : {}),
               directory: projectPath,
               workspaceHandle: workspaceLifecycle.session.value.workspaceId,
             },

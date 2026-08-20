@@ -155,11 +155,15 @@ function registerHandlers(
       installResource: vi.fn(),
       listResources: vi.fn(),
       refreshRegistry: vi.fn(),
+      checkResourceUpdates: vi.fn(),
       removePdkReference: vi.fn(),
       uninstallResource: vi.fn(),
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
       validatePdkRootForWorkspace: vi.fn(),
+    },
+    surferProtocolService: {
+      authorizeWaveform: vi.fn(),
     },
     appInfoService: {
       getVersions: vi.fn(),
@@ -169,6 +173,7 @@ function registerHandlers(
       acknowledgeDetachedStepRendered: vi.fn(),
       acknowledgeStepRendered: vi.fn(),
       cancelOperation: vi.fn(),
+      cancelOperationLegacy: vi.fn(),
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
       exportSignoff: vi.fn(),
@@ -190,6 +195,25 @@ function registerHandlers(
       workspaceHome: vi.fn(),
       workspaceInfo: vi.fn(),
       workspaceSnapshot: vi.fn(),
+    },
+    frontendRpcRuntimeService: {
+      cancelOperationLegacy: vi.fn(),
+      catalogList: vi.fn(),
+      closeWorkspace: vi.fn(),
+      createWorkspace: vi.fn(),
+      onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
+      openWorkspace: vi.fn(),
+      refreshConfig: vi.fn(),
+      resetFlow: vi.fn(),
+      rpcHello: vi.fn(),
+      rpcPing: vi.fn(),
+      rpcShutdown: vi.fn(),
+      runFlow: vi.fn(),
+      runStep: vi.fn(),
+      syncConfig: vi.fn(),
+      validateConfig: vi.fn(),
+      workspaceHome: vi.fn(),
+      workspaceInfo: vi.fn(),
     },
     shellService: {
       createSession: vi.fn(),
@@ -1931,6 +1955,99 @@ describe('registerIpc', () => {
     expect(getAllWindows).not.toHaveBeenCalled()
   })
 
+  it('streams frontend subflow progress to its subscribed workspace window', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSend = vi.fn()
+    const otherSend = vi.fn()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: ownerSend,
+    })
+    const otherSender = Object.assign(new EventEmitter(), {
+      id: 22,
+      isDestroyed: vi.fn(() => false),
+      send: otherSend,
+    })
+    services.frontendRpcRuntimeService.openWorkspace
+      .mockResolvedValueOnce({
+        directory: '/work/frontend',
+        workspaceHandle: 'workspace-frontend-1',
+      })
+      .mockResolvedValueOnce({
+        directory: '/work/other',
+        workspaceHandle: 'workspace-frontend-2',
+      })
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender: ownerSender },
+      { designTool: 'frontend', directory: '/work/frontend' },
+    )
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender: otherSender },
+      { designTool: 'frontend', directory: '/work/other' },
+    )
+
+    const listener = services.frontendRpcRuntimeService.onEvent.mock.calls[0]?.[0]
+    const progress: EccRuntimeEvent = {
+      data: {
+        runtimeProtocolType: 'subflow.stage',
+        state: 'Success',
+        step: 'prepare',
+        subflowStep: 'collect inputs',
+      },
+      method: 'flow.run_step',
+      phase: 'subflow.stage',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+      workspaceHandle: 'workspace-frontend-1',
+    }
+    listener?.(progress)
+
+    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.designRuntimeEvent, {
+      ...progress,
+      designTool: 'frontend',
+    })
+    expect(otherSend).not.toHaveBeenCalled()
+  })
+
+  it('routes frontend progress by directory when a sidecar handle is unavailable', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSend = vi.fn()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: ownerSend,
+    })
+    services.frontendRpcRuntimeService.openWorkspace.mockResolvedValueOnce({
+      directory: '/work/frontend',
+      workspaceHandle: 'workspace-frontend-1',
+    })
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender: ownerSender },
+      { designTool: 'frontend', directory: '/work/frontend' },
+    )
+
+    const listener = services.frontendRpcRuntimeService.onEvent.mock.calls[0]?.[0]
+    listener?.({
+      data: { step: 'prepare' },
+      method: 'flow.run',
+      phase: 'started',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+    })
+
+    expect(ownerSend).toHaveBeenCalledWith(
+      desktopApiEventChannels.designRuntimeEvent,
+      expect.objectContaining({
+        designTool: 'frontend',
+        phase: 'started',
+        step: 'prepare',
+      }),
+    )
+  })
+
   it('focuses an existing workspace window instead of proceeding to open', async () => {
     const { handlers } = registerHandlers()
     const existing = {
@@ -2345,7 +2462,7 @@ describe('registerIpc', () => {
     expect(services.shellService.resize).toHaveBeenCalledWith('shell-1', 100, 28)
   })
 
-  it('logs missing project binary files in a single normalized warning before returning an IPC error result', async () => {
+  it('returns a missing project binary file as an IPC error without warning', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     const path = '/tmp/project/place_dreamplace/output/minirv_place.png'
@@ -2369,11 +2486,7 @@ describe('registerIpc', () => {
       ok: false,
     })
 
-    expect(electronLogger.warn).toHaveBeenCalledTimes(1)
-    expect(electronLogger.warn).toHaveBeenCalledWith(
-      `[workspace] Missing project binary file: ${path}`,
-      error,
-    )
+    expect(electronLogger.warn).not.toHaveBeenCalled()
   })
 
   it('sends project file change notifications to the requesting renderer', async () => {

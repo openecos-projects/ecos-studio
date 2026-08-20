@@ -77,7 +77,7 @@ describe('WorkspaceSnapshotLoader', () => {
       JSON.stringify({ tech_lef: ['/pdks/ics55/tech.lef'] }),
     )
     writeFileSync(
-      join(directory, 'config', 'db_default_config.json'),
+      join(directory, 'config', 'db_ecc.json'),
       JSON.stringify({ INPUT: { rtl_list: ['/sources/gcd.sv'] } }),
     )
 

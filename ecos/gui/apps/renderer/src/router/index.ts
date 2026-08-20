@@ -9,6 +9,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', name: 'ECOS', component: () => import('../views/ECOSView.vue') },
       { path: 'ecc', name: 'ECC', component: () => import('../views/ECCView.vue') },
+      { path: 'fe', name: 'FE', component: () => import('../views/FEView.vue') },
       {
         path: 'tools',
         name: 'PluginTools',
@@ -36,7 +37,11 @@ const routes: RouteRecordRaw[] = [
     redirect: '/workspace/home',
     children: [
       // 固定的设置页面
-      { path: 'home', name: 'Home', component: () => import('../views/HomeView.vue') },
+      {
+        path: 'home',
+        name: 'Home',
+        component: () => import('../views/WorkspaceRouteView.vue'),
+      },
       {
         path: 'tech',
         name: 'TechLibrary',
@@ -52,7 +57,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: ':step',
         name: ':step',
-        component: () => import('../views/WorkspaceView.vue'),
+        component: () => import('../views/WorkspaceRouteView.vue'),
       },
     ],
     meta: {

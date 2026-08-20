@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
@@ -14,12 +14,18 @@ import {
   getElectronLatestMainLogFile,
   getElectronMainLogFile,
   getLogSessionDirectory,
+  pruneOldLogSessions,
 } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
+import {
+  createFrontendRpcLaunchResolver,
+  frontendRuntimeEventFromNotification,
+} from '../services/frontendRpcRuntime'
+import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { ChipViewerService } from '../services/chipViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
@@ -33,6 +39,10 @@ import { ProjectManagementReadService } from '../services/projectManagementReadS
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
+import {
+  registerSurferProtocolSchemes,
+  SurferProtocolService,
+} from '../services/surferProtocolService'
 import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceResourceService } from '../services/workspaceResourceService'
 import { WorkspaceService } from '../services/workspaceService'
@@ -54,12 +64,14 @@ let services: {
   appInfoService: AppInfoService
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
+  frontendRpcRuntimeService: FrontendRpcRuntimeService
   projectManagementReadService: ProjectManagementReadService
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
   chipViewerService: ChipViewerService
   shellService: ShellPtyService
+  surferProtocolService: SurferProtocolService
   workspaceResourceService: WorkspaceResourceService
   workspaceService: WorkspaceService
 } | null = null
@@ -87,9 +99,11 @@ configureElectronLoggerFile({
   latestFilePath: mainLatestLogFile,
   sessionFilePath: mainLogFile,
 })
+pruneOldLogSessions()
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
-electronLogger.status('[runtime] Runtime: ECC RPC')
+electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')
+registerSurferProtocolSchemes(protocol)
 
 if (process.env.ECOS_ELECTRON_SMOKE === '1') {
   ipcMain.on('ecos-smoke:complete', () => {
@@ -163,10 +177,40 @@ function getDesktopServices() {
     },
     runtime: eccRuntimeService,
   })
+  const frontendRpcCore = new EccRpcRuntimeService({
+    createSidecar: (directory, onEvent) =>
+      new EccRpcSidecarProcess({
+        env: runtimeEnv,
+        envProvider: runtimeEnvProvider,
+        logDirectoryProvider: () =>
+          resolveEccSidecarLogDirectory(getLogSessionDirectory()),
+        onEvent,
+        onNotification: (notification) => {
+          const event = frontendRuntimeEventFromNotification(
+            notification.method,
+            notification.params,
+          )
+          if (event) onEvent(event)
+        },
+        resolveLaunch: createFrontendRpcLaunchResolver({
+          env: runtimeEnv,
+          frontendRootSearchRoots: app.isPackaged
+            ? []
+            : [process.cwd(), app.getAppPath()],
+        }),
+      }),
+  })
+  const frontendRpcRuntimeService = new FrontendRpcRuntimeService({
+    runtime: frontendRpcCore,
+  })
   const workspaceService = new WorkspaceService({
     projectScopeProvider: projectScopeService,
     replacementJournalDirectory: join(app.getPath('userData'), 'workspace-replacements'),
-    runtimeMutationGuard: eccRuntimeService,
+    runtimeMutationGuard: {
+      isWorkspaceRuntimeActive: async (directory) =>
+        eccRuntimeService.isWorkspaceRuntimeActive(directory) ||
+        frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory),
+    },
   })
   const projectManifestService = new ProjectManifestService(
     projectScopeService,
@@ -177,6 +221,18 @@ function getDesktopServices() {
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
   })
+  const surferProtocolService = new SurferProtocolService({
+    appPath: app.getAppPath(),
+    env: runtimeEnv,
+    isPackaged: app.isPackaged,
+    projectScopeProvider: projectScopeService,
+    resourcesPath: process.resourcesPath,
+    surferAssetsPathProvider: async () => {
+      const env = await runtimeEnvProvider()
+      return env.ECOS_SURFER_ASSETS_PATH
+    },
+  })
+  surferProtocolService.register(protocol)
   const chipViewerService = new ChipViewerService({
     appPath: app.getAppPath(),
     cwd: process.cwd(),
@@ -199,6 +255,7 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
+    frontendRpcRuntimeService,
     chipViewerService,
     codexDependencyService,
     eccRuntimeService,
@@ -207,6 +264,7 @@ function getDesktopServices() {
     resourceManagerService,
     settingsStore,
     shellService,
+    surferProtocolService,
     workspaceResourceService,
     workspaceService,
   }
@@ -244,12 +302,14 @@ async function ensureDesktopBridgeReady(): Promise<void> {
         })
       },
       eccRuntimeService: desktopServices.eccRuntimeService,
+      frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
       projectManagementReadService: desktopServices.projectManagementReadService,
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
       chipViewerService: desktopServices.chipViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
+      surferProtocolService: desktopServices.surferProtocolService,
       workspaceResourceService: desktopServices.workspaceResourceService,
       workspaceService: desktopServices.workspaceService,
     })

@@ -85,7 +85,7 @@ Agent 的参数更新路径写完 `home/parameters.json` 后**直接上报成功
 
 ### 2.4 读写面不一致
 
-- 合同中展示的「旧值」由 Python 侧 `_current_parameter_value` 从 `config/dreamplace.json`、`config/cts_default_config.json`、`config/rt_default_config.json` 读取。
+- 合同中展示的「旧值」由 Python 侧 `_current_parameter_value` 从 `config/dreamplace_ecc.json`、`config/cts_ecc.json`、`config/route_ecc.json` 读取。
 - 实际写入落在 `home/parameters.json`。
 
 两者不同步时，合同展示的 `旧值 → 新值` 中的旧值不可信。
@@ -169,7 +169,7 @@ Agent 的参数更新路径写完 `home/parameters.json` 后**直接上报成功
 ECOS 存在两套参数存储：
 
 - `home/parameters.json`：全局设计参数，ICS55 扁平模板。字段如 `Clock`、`Frequency max [MHz]`、`Max fanout`、`Core.Utilitization`、`Core.Margin`、`Die.Size`、`Target density`、`Target overflow`、`Cell padding x`、`Routability opt flag`、`Bottom layer`、`Top layer`。
-- `config/*.json`：每步工具配置，如 `dreamplace.json`、`cts_default_config.json`、`rt_default_config.json`。
+- `config/*.json`：每步工具配置，如 `dreamplace_ecc.json`、`cts_ecc.json`、`route_ecc.json`。
 
 ECC 提供双向同步：
 

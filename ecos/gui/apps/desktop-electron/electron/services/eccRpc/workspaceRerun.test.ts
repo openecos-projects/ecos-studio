@@ -50,7 +50,10 @@ async function writeSourceWorkspace(): Promise<{
   await mkdir(join(source, 'legalization_dreamplace', 'output'), { recursive: true })
   await writeFile(join(source, 'home', 'flow.json'), flow)
   await writeFile(join(source, 'home', 'parameters.json'), '{"Target density":0.45}\n')
-  await writeFile(join(source, 'config', 'dreamplace.json'), '{"density_weight":0.01}\n')
+  await writeFile(
+    join(source, 'config', 'dreamplace_ecc.json'),
+    '{"density_weight":0.01}\n',
+  )
   await writeFile(
     join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'),
     'checkpoint',
@@ -322,7 +325,7 @@ describe('prepareWorkspaceRerun', () => {
     contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
     contract.writes = [
       {
-        file: 'config/dreamplace.json',
+        file: 'config/dreamplace_ecc.json',
         json_path: ['density_weight'],
         knob_id: 'place.density_weight',
         surface: 'step_config',
@@ -333,7 +336,7 @@ describe('prepareWorkspaceRerun', () => {
     await prepareWorkspaceRerun(contract)
 
     await expect(
-      readFile(`${contract.target_workspace}/config/dreamplace.json`, 'utf8'),
+      readFile(`${contract.target_workspace}/config/dreamplace_ecc.json`, 'utf8'),
     ).resolves.toContain('0.1')
   })
 
@@ -345,7 +348,7 @@ describe('prepareWorkspaceRerun', () => {
     contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
     contract.writes = [
       {
-        file: 'config/dreamplace.json',
+        file: 'config/dreamplace_ecc.json',
         json_path: ['density_weight'],
         knob_id: 'place.density_weight',
         surface: 'step_config',
@@ -367,7 +370,7 @@ describe('prepareWorkspaceRerun', () => {
     await executeWorkspaceRerun(contract, runtime, 'target-gui-handle')
 
     expect(runtime.syncConfig).toHaveBeenCalledWith({
-      configPath: `${contract.target_workspace}/config/dreamplace.json`,
+      configPath: `${contract.target_workspace}/config/dreamplace_ecc.json`,
       workspaceHandle: 'target-gui-handle',
     })
     expect(runtime.startStepOperation).not.toHaveBeenCalled()
@@ -458,6 +461,7 @@ describe('prepareWorkspaceRerun', () => {
       'legalization',
       'route',
       'drc',
+      'lvs',
       'filler',
       'RCX',
       'sta',

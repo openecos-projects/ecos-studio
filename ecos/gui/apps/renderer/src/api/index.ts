@@ -15,6 +15,15 @@ export {
 } from './workspace'
 
 export {
+  listFrontendCatalogApi,
+  validateFrontendConfigApi,
+  type FrontendCatalogEntry,
+  type FrontendCatalogPayload,
+  type FrontendValidationIssue,
+  type FrontendValidationResult,
+} from './frontendCatalog'
+
+export {
   createRuntimeEventClient,
   type RuntimeEventClient,
   type RuntimeEventResponse,
@@ -27,6 +36,7 @@ export {
 
 export {
   activatePdkApi,
+  checkResourceUpdatesApi,
   getToolStatusApi,
   importLocalResourcePathApi,
   importPdkPathApi,

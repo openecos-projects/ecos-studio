@@ -209,6 +209,93 @@ describe('useSubflow runtime refresh', () => {
     })
   })
 
+  it('resets the rerun skeleton for legacy ecc-fe step-start events', async () => {
+    const subflow = useSubflow()
+
+    await vi.waitFor(() => {
+      expect(subflow.subflowSteps.value[0]?.status).toBe('completed')
+    })
+
+    testState.runtimeEvents!.value.push({
+      data: {
+        step: 'Floorplan',
+        type: 'step_start',
+      },
+    })
+    await nextTick()
+
+    expect(subflow.subflowSteps.value[0]?.status).toBe('running')
+  })
+
+  it('builds and advances a first-run frontend subflow from live stages', async () => {
+    testState.route.path = '/workspace/prepare'
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: { path: '/workspace/demo/prepare_fe/subflow.json' },
+      missing: [],
+      message: [],
+      id: 'subflow',
+      step: 'prepare',
+    })
+    testState.readProjectTextFile.mockResolvedValue(
+      JSON.stringify({
+        path: '/workspace/demo/prepare_fe/subflow.json',
+        steps: [],
+      }),
+    )
+    const subflow = useSubflow()
+
+    await vi.waitFor(() => {
+      expect(testState.readProjectTextFile).toHaveBeenCalled()
+    })
+
+    testState.runtimeEvents!.value.push({
+      data: {
+        step: 'prepare',
+        type: 'step_start',
+      },
+    })
+
+    for (const name of ['collect inputs', 'merge filelist', 'persist state', 'report']) {
+      testState.runtimeEvents!.value.push({
+        data: {
+          runtimeProtocolType: 'subflow.stage',
+          state: 'Unstart',
+          step: 'prepare',
+          subflowPeakMemory: 0,
+          subflowRuntime: '',
+          subflowStep: name,
+        },
+      })
+    }
+    await nextTick()
+    expect(subflow.subflowSteps.value.map((step) => step.status)).toEqual([
+      'running',
+      'pending',
+      'pending',
+      'pending',
+    ])
+
+    testState.runtimeEvents!.value.push({
+      data: {
+        runtimeProtocolType: 'subflow.stage',
+        state: 'Success',
+        step: 'prepare',
+        subflowPeakMemory: 8,
+        subflowRuntime: '0:0:1',
+        subflowStep: 'collect inputs',
+      },
+    })
+    await nextTick()
+
+    expect(subflow.subflowSteps.value.map((step) => step.status)).toEqual([
+      'completed',
+      'running',
+      'pending',
+      'pending',
+    ])
+  })
+
   it('ignores a stale subflow read after the workspace session changes', async () => {
     let resolveFirstRead: ((content: string) => void) | undefined
     testState.readProjectTextFile

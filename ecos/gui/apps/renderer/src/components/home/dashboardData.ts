@@ -144,6 +144,62 @@ export function checklistStatusSummary(
   })
 }
 
+const FLOW_COMPLETED_SUMMARY = 'Required flow stage completed successfully.'
+
+function flowStepLookupKeys(step: {
+  name?: string
+  label?: string
+  path?: string
+  step?: string
+}): string[] {
+  return [step.name, step.label, step.path, step.step]
+    .filter(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    )
+    .map((value) => value.trim().toLowerCase())
+}
+
+export function reconcileFlowChecklistItems<
+  T extends {
+    category?: string
+    step?: string
+    state: string
+    blocked?: boolean
+    summary?: string
+  },
+>(
+  items: readonly T[],
+  flowSteps: readonly {
+    name?: string
+    label?: string
+    path?: string
+    step?: string
+    state?: string
+  }[],
+): T[] {
+  const states = new Map<string, string>()
+  for (const step of flowSteps) {
+    const state = typeof step.state === 'string' ? step.state.trim() : ''
+    if (!state) continue
+    for (const key of flowStepLookupKeys(step)) {
+      states.set(key, state)
+    }
+  }
+  return items.map((item) => {
+    if (item.category !== 'flow') return item
+    const flowState = flowStepLookupKeys(item)
+      .map((key) => states.get(key)?.toLowerCase())
+      .find((state) => state)
+    if (flowState !== 'success' || item.state === 'pass') return item
+    return {
+      ...item,
+      state: 'pass',
+      blocked: false,
+      summary: FLOW_COMPLETED_SUMMARY,
+    }
+  })
+}
+
 export function qorSummaryStatus(value: unknown): DashboardQorStep['status'] {
   const source = record(value)
   const status = stringValue(source?.quality_status || source?.status).toLowerCase()

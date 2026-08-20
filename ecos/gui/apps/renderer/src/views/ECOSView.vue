@@ -27,13 +27,16 @@
         </h3>
         <div class="grid grid-cols-2 gap-4">
           <!-- Frontend Design -->
-          <div
-            class="group relative flex cursor-default flex-col items-center justify-center overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary) py-8 opacity-50 transition-all duration-200"
+          <button
+            @click="navigateToFE"
+            class="group flex cursor-pointer flex-col items-center justify-center rounded-xl border border-(--border-color) bg-(--bg-secondary) py-8 transition-all duration-200 hover:scale-[1.02] hover:border-(--accent-color) hover:shadow-(--accent-color)/5 hover:shadow-lg"
           >
             <div
               class="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-(--bg-primary)"
             >
-              <i class="ri-code-s-slash-line text-2xl text-(--text-secondary)"></i>
+              <i
+                class="ri-code-s-slash-line text-2xl text-(--text-secondary) transition-colors group-hover:text-(--accent-color)"
+              ></i>
             </div>
             <span class="mb-1 text-sm font-medium text-(--text-primary)"
               >Frontend Design</span
@@ -41,15 +44,7 @@
             <span class="text-xs text-(--text-secondary)"
               >RTL / Verilog / SystemVerilog</span
             >
-            <div
-              class="absolute inset-0 flex items-center justify-center bg-(--bg-primary)/60"
-            >
-              <span
-                class="rounded-full border border-(--border-color) bg-(--bg-secondary) px-3 py-1 text-xs font-medium text-(--text-secondary)"
-                >Coming Soon</span
-              >
-            </div>
-          </div>
+          </button>
           <!-- Backend Design -->
           <button
             @click="navigateToECC"
@@ -157,6 +152,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 const navigateToECC = () => router.push('/ecc')
+const navigateToFE = () => router.push('/fe')
 const navigateToProjects = () => router.push('/projects')
 const navigateToTools = () => router.push('/tools')
 const navigateToMpcResources = () => router.push('/mpc')

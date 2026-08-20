@@ -30,9 +30,9 @@ from ecos_agent.ecc_contracts import ECCParameterPatchItem, ECCStepName
 KnobSurface = Literal["parameters", "step_config"]
 
 PARAMETERS_FILE = "home/parameters.json"
-DREAMPLACE_FILE = "config/dreamplace.json"
-CTS_FILE = "config/cts_default_config.json"
-ROUTE_FILE = "config/rt_default_config.json"
+DREAMPLACE_FILE = "config/dreamplace_ecc.json"
+CTS_FILE = "config/cts_ecc.json"
+ROUTE_FILE = "config/route_ecc.json"
 
 WRITABLE_FILES = frozenset({PARAMETERS_FILE, DREAMPLACE_FILE, CTS_FILE, ROUTE_FILE})
 

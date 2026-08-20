@@ -497,6 +497,7 @@ const workspaceSetupFlowSteps = [
   'legalization',
   'route',
   'drc',
+  'lvs',
   'filler',
   'RCX',
   'sta',

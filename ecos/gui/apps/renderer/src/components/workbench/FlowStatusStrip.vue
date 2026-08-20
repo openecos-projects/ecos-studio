@@ -9,7 +9,7 @@
     </header>
 
     <div class="flow-status-track-shell">
-      <div class="flow-status-run-control">
+      <div v-if="$slots.actions" class="flow-status-run-control">
         <slot name="actions" />
       </div>
       <div v-if="nodes.length" class="flow-status-track" :style="trackStyle">

@@ -58,9 +58,7 @@ describe('ECCView project management handoff', () => {
     expect(source).toContain("readOptionalProjectTextFile('home/parameters.json'")
     expect(source).not.toContain("readOptionalProjectTextFile('home/flow.json'")
     expect(source).toContain("readOptionalProjectTextFile('home/pdk.json'")
-    expect(source).toContain(
-      "readOptionalProjectTextFile('config/db_default_config.json'",
-    )
+    expect(source).toContain("readOptionalProjectTextFile('config/db_ecc.json'")
     expect(source).toContain('tech_lef_path')
     expect(source).toContain('lef_paths')
     expect(source).toContain('lib_path')
@@ -216,5 +214,34 @@ describe('ECCView project management handoff', () => {
     const routeSource = source.slice(routeStart, routeEnd)
     expect(routeSource).toContain('projectContext?.projectRoot')
     expect(routeSource).toContain('projectContext?.projectName')
+  })
+
+  it('opens Edit/Config after a successful Backend Design workspace create', () => {
+    expect(source).toContain('requestOpenStepConfigAfterCreate')
+
+    const createStart = source.indexOf('const handleWizardCreate')
+    const createEnd = source.indexOf(
+      'async function resolveOpenProjectContext',
+      createStart,
+    )
+    const createSource = source.slice(createStart, createEnd)
+    expect(createSource).toContain('if (!success) return')
+    expect(createSource).toContain('requestOpenStepConfigAfterCreate()')
+    expect(createSource.indexOf('requestOpenStepConfigAfterCreate()')).toBeGreaterThan(
+      createSource.indexOf('await registerProjectManagedWorkspace({'),
+    )
+    expect(createSource.indexOf("path: '/workspace/home'")).toBeGreaterThan(
+      createSource.indexOf('requestOpenStepConfigAfterCreate()'),
+    )
+  })
+
+  it('does not open Edit/Config when opening an existing workspace from Backend Design', () => {
+    const openProjectStart = source.indexOf('const handleOpenProject')
+    const openRecentStart = source.indexOf('const handleOpenRecent')
+    const openRecentEnd = source.indexOf('const handleRemoveRecent', openRecentStart)
+    const openProjectSource = source.slice(openProjectStart, openRecentStart)
+    const openRecentSource = source.slice(openRecentStart, openRecentEnd)
+    expect(openProjectSource).not.toContain('requestOpenStepConfigAfterCreate')
+    expect(openRecentSource).not.toContain('requestOpenStepConfigAfterCreate')
   })
 })

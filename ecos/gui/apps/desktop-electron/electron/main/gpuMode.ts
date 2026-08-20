@@ -2,7 +2,6 @@ type ElectronAppLike = {
   commandLine: {
     appendSwitch: (name: string, value?: string) => void
   }
-  disableHardwareAcceleration: () => void
 }
 
 type ConfigureGpuModeOptions = {
@@ -47,13 +46,10 @@ export function configureGpuMode(options: ConfigureGpuModeOptions): void {
     return
   }
 
-  options.app.commandLine.appendSwitch('disable-gpu')
-  options.app.commandLine.appendSwitch('disable-gpu-compositing')
-  options.app.commandLine.appendSwitch('disable-gpu-process-crash-limit')
-  options.app.commandLine.appendSwitch('in-process-gpu')
+  // Surfer requires WebGL. Force Chromium's bundled CPU renderer without
+  // disabling the GPU process, because --disable-gpu also disables WebGL.
   options.app.commandLine.appendSwitch('enable-unsafe-swiftshader')
   options.app.commandLine.appendSwitch('use-angle', 'swiftshader')
-  options.app.commandLine.appendSwitch('use-gl', 'swiftshader')
+  options.app.commandLine.appendSwitch('use-gl', 'angle')
   options.env.LIBGL_ALWAYS_SOFTWARE ??= '1'
-  options.app.disableHardwareAcceleration()
 }

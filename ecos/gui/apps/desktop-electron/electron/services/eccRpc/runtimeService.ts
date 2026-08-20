@@ -76,6 +76,46 @@ export class EccRpcRuntimeService {
 
   constructor(private readonly options: EccRpcRuntimeServiceOptions) {}
 
+  get activeWorkspaceDirectory(): string | null {
+    return this.handleToDirectory.values().next().value ?? null
+  }
+
+  callRuntime<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    options: { timeoutMs?: number } = {},
+  ): Promise<T> {
+    return this.getOrCreateControlRuntime().callRuntime(method, params, options)
+  }
+
+  async cancelOperationLegacy(
+    operationId?: string,
+  ): Promise<{ cancelled: boolean; operationId?: string }> {
+    const runtime = this.uniqueRuntimes().find((candidate) =>
+      candidate.hasInFlightOperation(operationId),
+    )
+    if (!runtime) return { cancelled: false, ...(operationId ? { operationId } : {}) }
+    return await runtime.cancelOperationLegacy(operationId)
+  }
+
+  createWorkspacePayload(
+    payload: Record<string, unknown> & { directory: string },
+  ): Promise<EccWorkspaceCreateResult> {
+    const requestKey = normalizeWorkspacePath(payload.directory)
+    const runtime = this.getOrCreateRuntime(payload.directory)
+    return runtime.createWorkspacePayload(payload).then((result) => {
+      this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+      return result
+    })
+  }
+
+  runStepPayload(
+    workspaceHandle: string,
+    payload: Record<string, unknown> & { step: string },
+  ): Promise<EccFlowRunStepResult> {
+    return this.runtimeForHandle(workspaceHandle).runStepPayload(workspaceHandle, payload)
+  }
+
   onEvent(listener: (event: EccRuntimeEvent) => void): () => void {
     this.eventListeners.add(listener)
     return () => {

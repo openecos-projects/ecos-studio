@@ -390,6 +390,7 @@ export type EccRuntimeEvent =
       method: string
       operationId: string
       rerun?: boolean
+      step?: string
       type: 'operation.started'
       workspaceDirectory?: string
       workspaceHandle?: string
@@ -400,7 +401,20 @@ export type EccRuntimeEvent =
       method: string
       operationId: string
       rerun?: boolean
+      step?: string
       type: 'operation.completed'
+      workspaceDirectory?: string
+      workspaceHandle?: string
+    }
+  | {
+      data?: Record<string, unknown>
+      logFile?: string
+      message?: string
+      method: string
+      operationId?: string
+      phase: string
+      step?: string
+      type: 'operation.progress'
       workspaceDirectory?: string
       workspaceHandle?: string
     }
@@ -411,7 +425,18 @@ export type EccRuntimeEvent =
       method: string
       operationId: string
       rerun?: boolean
+      step?: string
       type: 'operation.failed'
+      workspaceDirectory?: string
+      workspaceHandle?: string
+    }
+  | {
+      logFile?: string
+      method: string
+      operationId: string
+      rerun?: boolean
+      step?: string
+      type: 'operation.cancelled'
       workspaceDirectory?: string
       workspaceHandle?: string
     }

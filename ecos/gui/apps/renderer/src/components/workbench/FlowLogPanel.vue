@@ -41,10 +41,14 @@
         </button>
       </div>
     </header>
-    <div v-if="expanded" class="flow-log-panel-body">
+    <div v-if="expanded" class="flow-log-panel-body monaco-widget-overflow-host">
       <div v-if="error" class="flow-log-message is-error">{{ error }}</div>
-      <div v-else-if="selectedSegment" class="flow-log-viewer">
+      <div
+        v-else-if="selectedSegment"
+        class="flow-log-viewer monaco-widget-overflow-host"
+      >
         <FlowLogCodeViewer
+          :channel-key="keyFor(selectedSegment)"
           :content="selectedContent"
           :live="Boolean(selectedSegment.live)"
           :loading="loading || Boolean(selectedSegment.contentLoading)"
@@ -88,13 +92,18 @@
         </div>
       </div>
     </template>
-    <FlowLogCodeViewer
-      class="flow-log-dialog-content"
-      :content="selectedContent"
-      :live="Boolean(selectedSegment?.live)"
-      :loading="loading || Boolean(selectedSegment?.contentLoading)"
-      :missing="Boolean(selectedSegment?.missing)"
-    />
+    <div class="flow-log-dialog-content monaco-widget-overflow-host">
+      <FlowLogCodeViewer
+        v-if="dialogVisible && selectedSegment"
+        :channel-key="`${keyFor(selectedSegment)}\u001fdialog`"
+        :content="selectedContent"
+        :live="Boolean(selectedSegment.live)"
+        :loading="loading || Boolean(selectedSegment.contentLoading)"
+        :missing="Boolean(selectedSegment.missing)"
+        aria-label="Expanded flow step log"
+      />
+      <div v-else class="flow-log-message">No log content yet.</div>
+    </div>
   </Dialog>
 </template>
 
@@ -350,10 +359,13 @@ onBeforeUnmount(() => {
 }
 
 .flow-log-dialog-content {
+  display: flex;
   flex: 1 1 auto;
   height: min(70vh, 760px);
-  min-height: 0;
+  max-height: min(70vh, 760px);
+  min-height: min(280px, 70vh);
   min-width: 0;
+  overflow: hidden;
 }
 
 .flow-log-dialog-header {

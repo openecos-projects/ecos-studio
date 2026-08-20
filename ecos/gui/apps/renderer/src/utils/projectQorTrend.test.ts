@@ -537,6 +537,116 @@ describe('project QoR trend V3 model', () => {
     ).toEqual([])
   })
 
+  it('blocks a workspace whose flow includes a failed LVS gate', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspace(
+        'ws_with_lvs',
+        {
+          DRC: v3Metrics('DRC', [
+            metric('drc_count', 0, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'signoff',
+              analysisGroup: 'drc',
+            }),
+          ]),
+          LVS: v3Metrics('LVS', [
+            metric('lvs_count', 2, {
+              category: 'clock_robustness_dfm',
+              direction: 'lower_is_better',
+              scope: 'signoff',
+              analysisGroup: 'lvs',
+            }),
+          ]),
+        },
+        {
+          DRC: JSON.stringify({
+            schema_version: 4,
+            analysis_status: 'valid',
+            quality_status: 'pass',
+            gates: [],
+          }),
+          LVS: JSON.stringify({
+            schema_version: 4,
+            analysis_status: 'valid',
+            quality_status: 'blocked',
+            gates: [
+              {
+                id: 'qor.lvs.clean',
+                title: 'Final LVS clean',
+                state: 'failed',
+                blocking: true,
+                metrics: [{ id: 'lvs_count', actual: 2, operator: '==', expected: 0 }],
+              },
+            ],
+          }),
+        },
+        { DRC: 'success', LVS: 'success', RCX: 'success', STA: 'success' },
+      ),
+    ])
+
+    expect(summary.workspaces[0]).toMatchObject({
+      gateStatus: 'blocked',
+      missingMetrics: expect.not.arrayContaining(['lvs_count']),
+    })
+    expect(summary.workspaces[0]?.blockingIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          step: 'LVS',
+          metric: 'qor.lvs.clean',
+        }),
+      ]),
+    )
+  })
+
+  it('does not gate or expect lvs_count on a workspace whose flow has no LVS', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspace(
+        'ws_without_lvs',
+        {
+          DRC: v3Metrics('DRC', [
+            metric('drc_count', 0, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'signoff',
+              analysisGroup: 'drc',
+            }),
+          ]),
+          Route: v3Metrics('Route', [
+            metric('route_wirelength', 5200, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'route',
+              analysisGroup: 'route_quality',
+            }),
+            metric('route_via_count', 1526, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'route',
+              analysisGroup: 'route_quality',
+            }),
+          ]),
+        },
+        {
+          DRC: JSON.stringify({
+            schema_version: 4,
+            analysis_status: 'valid',
+            quality_status: 'pass',
+            gates: [],
+          }),
+        },
+        { DRC: 'success', RCX: 'success', STA: 'success' },
+      ),
+    ])
+
+    expect(summary.workspaces[0]?.missingMetrics).not.toContain('lvs_count')
+    expect(summary.workspaces[0]?.missingAnalysisSteps).not.toContain('LVS')
+    expect(summary.workspaces[0]?.gateStatus).not.toBe('blocked')
+    expect(summary.workspaces[0]?.blockingIssues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ step: 'LVS' })]),
+    )
+  })
+
   it('serializes readiness and corner-comparison fingerprints in the project report', () => {
     const summary = buildProjectQorTrendSummary([
       workspace('ws_0004', {

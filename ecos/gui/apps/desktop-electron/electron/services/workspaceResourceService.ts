@@ -10,6 +10,7 @@ import type {
   WorkspaceTechResources,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
+import { migrateWorkspaceConfigFilenames } from './eccRpc/workspaceConfigMigration'
 
 type WorkspaceResourceFileKind = WorkspaceResourceFile['kind']
 type ResourceBucketName = keyof WorkspaceStepResource['resources']
@@ -53,21 +54,21 @@ export class WorkspaceResourceService {
   }
 
   async readHome(): Promise<Record<string, unknown> | null> {
-    return await this.readJsonOrNull(
-      join(await this.projectScopeProvider.getProjectRoot(), 'home', 'home.json'),
-    )
+    const root = await this.projectScopeProvider.getProjectRoot()
+    await migrateWorkspaceConfigFilenames(root)
+    return await this.readJsonOrNull(join(root, 'home', 'home.json'))
   }
 
   async readFlow(): Promise<Record<string, unknown> | null> {
-    return await this.readJsonOrNull(
-      join(await this.projectScopeProvider.getProjectRoot(), 'home', 'flow.json'),
-    )
+    const root = await this.projectScopeProvider.getProjectRoot()
+    await migrateWorkspaceConfigFilenames(root)
+    return await this.readJsonOrNull(join(root, 'home', 'flow.json'))
   }
 
   async readParameters(): Promise<Record<string, unknown> | null> {
-    return await this.readJsonOrNull(
-      join(await this.projectScopeProvider.getProjectRoot(), 'home', 'parameters.json'),
-    )
+    const root = await this.projectScopeProvider.getProjectRoot()
+    await migrateWorkspaceConfigFilenames(root)
+    return await this.readJsonOrNull(join(root, 'home', 'parameters.json'))
   }
 
   async resolveStepInfo(
@@ -132,6 +133,7 @@ export class WorkspaceResourceService {
 
   private async buildIndex(): Promise<IndexBuildResult> {
     const root = await this.projectScopeProvider.getProjectRoot()
+    await migrateWorkspaceConfigFilenames(root)
     const messages: string[] = []
     const statErrors: string[] = []
     const homePath = join(root, 'home', 'home.json')
@@ -220,9 +222,11 @@ export class WorkspaceResourceService {
     } else if (toolKey === 'dreamplace') {
       addEccLikeResources(resources, root, directory, design, topModule, step.name)
       resources.config.dreamplace = createFile(
-        join(root, 'config', 'dreamplace.json'),
+        join(root, 'config', 'dreamplace_ecc.json'),
         'config',
       )
+    } else if (isFrontendTool(toolKey)) {
+      addFrontendResources(resources, directory, design, step.name)
     } else {
       addUnknownResources(resources, directory, step.name)
     }
@@ -486,7 +490,40 @@ export class WorkspaceResourceService {
         return await this.buildDensityMapInfo(step)
       case 'sta':
         return stepInfo({ sta: nestedResourcePaths(step.resources.report.sta) })
+      case 'frontend_detail':
+        return await this.buildFrontendDetailInfo(step)
     }
+  }
+
+  private async buildFrontendDetailInfo(
+    step: WorkspaceStepResource,
+  ): Promise<StepInfoBuildResult> {
+    const detailPath = nestedResource(step.resources.report, 'frontend_detail')?.path
+    if (detailPath) {
+      const detail = await this.readJsonOrNull(detailPath)
+      if (detail) return stepInfo(detail)
+    }
+
+    const cases = await this.readFrontendCases(
+      nestedResource(step.resources.report, 'cases')?.path,
+    )
+    return stepInfo({
+      step: step.name,
+      tool: step.tool,
+      state: step.state,
+      runtime: step.runtime,
+      directory: step.directory,
+      log: step.resources.log.file?.path,
+      report: step.resources.report.step?.path,
+      subflow: step.resources.subflow.path?.path,
+      cases,
+    })
+  }
+
+  private async readFrontendCases(path: string | undefined): Promise<unknown[]> {
+    if (!path) return []
+    const report = await this.readJsonOrNull(path)
+    return Array.isArray(report?.cases) ? report.cases : []
   }
 
   private async buildDensityMapInfo(
@@ -560,6 +597,15 @@ export class WorkspaceResourceService {
         return []
       case 'sta':
         return resourceRecordValues(step.resources.report.sta)
+      case 'frontend_detail': {
+        const snapshot = nestedResource(step.resources.report, 'frontend_detail')
+        if (snapshot?.exists) return [snapshot]
+        return existingResourceRefs([
+          step.resources.log.file,
+          nestedResource(step.resources.report, 'step'),
+          step.resources.subflow.path,
+        ])
+      }
     }
   }
 }
@@ -773,45 +819,22 @@ function addEccConfigResources(
   stepName: string,
 ): void {
   resources.config.dir = createFile(join(root, 'config'), 'config')
-  resources.config.flow = createFile(join(root, 'config', 'flow_config.json'), 'config')
-  resources.config.db = createFile(
-    join(root, 'config', 'db_default_config.json'),
-    'config',
-  )
-  resources.config.cts = createFile(
-    join(root, 'config', 'cts_default_config.json'),
-    'config',
-  )
-  resources.config.drc = createFile(
-    join(root, 'config', 'drc_default_config.json'),
-    'config',
-  )
+  resources.config.flow = createFile(join(root, 'config', 'flow_ecc.json'), 'config')
+  resources.config.db = createFile(join(root, 'config', 'db_ecc.json'), 'config')
+  resources.config.cts = createFile(join(root, 'config', 'cts_ecc.json'), 'config')
+  resources.config.drc = createFile(join(root, 'config', 'drc_ecc.json'), 'config')
   resources.config.floorplan = createFile(
-    join(root, 'config', 'fp_default_config.json'),
+    join(root, 'config', 'floorplan_ecc.json'),
     'config',
   )
   resources.config.netlist_opt = createFile(
-    join(root, 'config', 'no_default_config_fixfanout.json'),
+    join(root, 'config', 'fixfanout_ecc.json'),
     'config',
   )
-  resources.config.placement = createFile(
-    join(root, 'config', 'pl_default_config.json'),
-    'config',
-  )
-  resources.config.routing = createFile(
-    join(root, 'config', 'rt_default_config.json'),
-    'config',
-  )
-  resources.config.rcx = createFile(join(root, 'config', 'rcx.json'), 'config')
-  resources.config.sta = createFile(join(root, 'config', 'sta.json'), 'config')
-  resources.config.legalization = createFile(
-    join(root, 'config', 'pl_default_config.json'),
-    'config',
-  )
-  resources.config.filler = createFile(
-    join(root, 'config', 'pl_default_config.json'),
-    'config',
-  )
+  resources.config.routing = createFile(join(root, 'config', 'route_ecc.json'), 'config')
+  resources.config.rcx = createFile(join(root, 'config', 'rcx_ecc.json'), 'config')
+  resources.config.sta = createFile(join(root, 'config', 'sta_ecc.json'), 'config')
+  resources.config.filler = createFile(join(root, 'config', 'filler_ecc.json'), 'config')
   const stepConfig = configResourceForEccStep(resources.config, stepName)
   if (stepConfig) resources.config.config = stepConfig
 }
@@ -823,8 +846,6 @@ function configResourceForEccStep(
   switch (stepName.toLowerCase()) {
     case 'floorplan':
       return config.floorplan
-    case 'place':
-      return config.placement
     case 'cts':
       return config.cts
     case 'route':
@@ -833,8 +854,6 @@ function configResourceForEccStep(
       return config.drc
     case 'fixfanout':
       return config.netlist_opt
-    case 'legalization':
-      return config.legalization
     case 'filler':
       return config.filler
     case 'rcx':
@@ -846,6 +865,72 @@ function configResourceForEccStep(
     default:
       return undefined
   }
+}
+
+function isFrontendTool(tool: string): boolean {
+  return tool === 'fe' || tool === 'slang' || tool === 'verilator'
+}
+
+function addFrontendResources(
+  resources: StepFileBuckets,
+  directory: string,
+  design: string,
+  stepName: string,
+): void {
+  resources.output.dir = createFile(join(directory, 'output'), 'output')
+  resources.output.json = createFile(
+    join(directory, 'output', `${design}_${stepName}.json`),
+    'layout-json',
+  )
+  resources.output.merged_filelist = createFile(
+    join(directory, 'output', 'merged_rtl.f'),
+    'output',
+  )
+  resources.output.prepared_inputs = createFile(
+    join(directory, 'output', 'prepared_inputs.json'),
+    'output',
+  )
+  resources.output.sim_binary = createFile(
+    join(directory, 'output', `${design}_sim`),
+    'output',
+  )
+  resources.output.cases = createFile(join(directory, 'output', 'cases'), 'output')
+  resources.data.dir = createFile(join(directory, 'data'), 'unknown')
+  resources.feature.dir = createFile(join(directory, 'feature'), 'analysis')
+  resources.report.dir = createFile(join(directory, 'report'), 'report')
+  resources.report.step = createFile(
+    join(directory, 'report', `${stepName}.rpt`),
+    'report',
+  )
+  resources.report.log = createFile(join(directory, 'report', 'log.txt'), 'log')
+  resources.report.cases = createFile(join(directory, 'report', 'cases.json'), 'report')
+  resources.report.frontend_detail = createFile(
+    join(directory, 'report', 'frontend_detail.json'),
+    'report',
+  )
+  resources.report.build_programs = createFile(
+    join(directory, 'report', 'build_programs.log.txt'),
+    'log',
+  )
+  resources.log.file = createFile(join(directory, 'log', 'log.txt'), 'log')
+  resources.script.main = createFile(
+    join(directory, 'script', `${stepName}_main.tcl`),
+    'script',
+  )
+  resources.analysis.metrics = createFile(
+    join(directory, 'analysis', `${stepName}_metrics.json`),
+    'metrics',
+  )
+  resources.analysis.statis_csv = createFile(
+    join(directory, 'analysis', `${stepName}_statis.csv`),
+    'analysis',
+  )
+  resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
+  resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
+  resources.config.flow = createFile(
+    join(directory, 'config', 'flow_config.json'),
+    'config',
+  )
 }
 
 function addUnknownResources(

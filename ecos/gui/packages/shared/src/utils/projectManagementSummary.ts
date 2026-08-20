@@ -48,6 +48,12 @@ export const projectManagementWorkspaceStepAnalysisSpecs = [
     hotspotsPath: 'drc_ecc/analysis/qor_hotspots.json',
   },
   {
+    step: 'LVS',
+    metricsPath: 'lvs_ecc/analysis/qor_metrics.json',
+    summaryPath: 'lvs_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'lvs_ecc/analysis/qor_hotspots.json',
+  },
+  {
     step: 'Filler',
     metricsPath: 'filler_ecc/analysis/qor_metrics.json',
     summaryPath: 'filler_ecc/analysis/qor_summary.json',

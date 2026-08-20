@@ -36,8 +36,8 @@
               </div>
               <div>
                 <dt>Workspace</dt>
-                <dd :title="valueOrNA(currentProject?.name)">
-                  {{ valueOrNA(currentProject?.name) }}
+                <dd :title="valueOrNA(currentWorkspaceName)">
+                  {{ valueOrNA(currentWorkspaceName) }}
                 </dd>
               </div>
               <div>
@@ -421,8 +421,12 @@
     :style="{ width: 'min(920px, calc(100vw - 32px))' }"
     :draggable="false"
   >
-    <div v-if="checklistItems.length" class="checklist-detail-list">
-      <section v-for="item in checklistItems" :key="item.id" :class="`is-${item.state}`">
+    <div v-if="resolvedChecklistItems.length" class="checklist-detail-list">
+      <section
+        v-for="item in resolvedChecklistItems"
+        :key="item.id"
+        :class="`is-${item.state}`"
+      >
         <div>
           <strong>{{ item.title }}</strong
           ><span>{{ item.step }}</span>
@@ -561,6 +565,7 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
+  reconcileFlowChecklistItems,
 } from '@/components/home/dashboardData'
 import {
   buildHomeQorDetailModel,
@@ -590,6 +595,10 @@ const { config } = useParameters()
 const router = useRouter()
 const route = useRoute()
 const { currentProject } = useWorkspace()
+const currentWorkspaceName = computed(() => {
+  const pathName = currentProject.value?.path?.split(/[/\\]/).filter(Boolean).pop()
+  return pathName || currentProject.value?.name || null
+})
 const { flowStages, isLoading: flowLoading } = useFlowStages()
 const {
   checklistItems,
@@ -647,8 +656,13 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
         : null,
     })),
 )
-const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
-const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
+const resolvedChecklistItems = computed(() =>
+  reconcileFlowChecklistItems(checklistItems.value, flowStages.value),
+)
+const checklistSlices = computed(() => checklistPieSlices(resolvedChecklistItems.value))
+const checklistSummary = computed(() =>
+  checklistStatusSummary(resolvedChecklistItems.value),
+)
 const qorComparisonSummary = computed(() =>
   summarizeHomeQorComparison(qorComparisonState.value.comparison),
 )
@@ -998,7 +1012,7 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 }
 
 .home-dashboard-top {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .home-dashboard-middle {
@@ -1159,10 +1173,12 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
 .constraint-list dd {
   color: var(--text-primary);
   flex: 0 0 auto;
+  font-family: inherit;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.25;
   margin: 0;
   min-width: 0;
 }

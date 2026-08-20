@@ -29,4 +29,11 @@ describe('agent workspace creation', () => {
     expect(source).toContain('<WorkspaceStepConfigDialog')
     expect(source).toContain('>\n          Cancel\n        </button>')
   })
+
+  it('does not auto-open Edit/Config after agent workspace creation', () => {
+    const createStart = source.indexOf('async function createWorkspaceFromAgent')
+    const createEnd = source.indexOf('provide(agentWorkspaceSetupKey', createStart)
+    const createSource = source.slice(createStart, createEnd)
+    expect(createSource).not.toContain('requestOpenStepConfigAfterCreate')
+  })
 })
