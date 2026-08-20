@@ -3440,6 +3440,7 @@ async function isUsableExecutable(
   platform: NodeJS.Platform,
 ): Promise<boolean> {
   try {
+    if (!(await stat(path)).isFile()) return false
     await access(path, platform === 'win32' ? constants.F_OK : constants.X_OK)
     return true
   } catch {
@@ -3800,7 +3801,9 @@ async function assertStagedToolHealth(
 async function checkToolEntryHealth(
   entry: ToolInventoryEntry,
 ): Promise<ToolHealthStatus> {
-  const requiredMarkers = requiredToolMarkers(normalizeToolName(entry.name))
+  const normalizedName = normalizeToolName(entry.name)
+  const requiredMarkers = requiredToolMarkers(normalizedName)
+  const executableMarkers = requiredToolExecutableMarkers(normalizedName)
   const rootExists = await isExistingDirectory(entry.path)
   if (!rootExists) {
     return {
@@ -3813,7 +3816,11 @@ async function checkToolEntryHealth(
 
   const missingMarkers: string[] = []
   for (const marker of requiredMarkers) {
-    if (!(await pathExists(join(entry.path, marker)))) {
+    const markerPath = join(entry.path, marker)
+    const isValid = executableMarkers.has(marker)
+      ? await isUsableExecutable(markerPath, process.platform)
+      : await pathExists(markerPath)
+    if (!isValid) {
       missingMarkers.push(marker)
     }
   }
@@ -3899,6 +3906,24 @@ function requiredToolMarkers(normalizedName: string): string[] {
     return ['index.html', 'integration.js', 'surfer.js', 'surfer_bg.wasm']
   }
   return []
+}
+
+function requiredToolExecutableMarkers(normalizedName: string): ReadonlySet<string> {
+  if (normalizedName === 'verilator') {
+    return new Set(['bin/verilator', 'bin/verilator_bin'])
+  }
+  if (normalizedName === 'riscv-toolchain') {
+    return new Set([
+      'bin/riscv64-unknown-elf-gcc',
+      'bin/riscv64-unknown-elf-ld',
+      'bin/riscv64-unknown-elf-objdump',
+      'bin/riscv64-unknown-elf-objcopy',
+    ])
+  }
+  if (normalizedName === 'ecc-fe') {
+    return new Set(['bin/ecc-fe'])
+  }
+  return new Set()
 }
 
 function executableHealthMarkers(entry: ToolInventoryEntry): string[] {
