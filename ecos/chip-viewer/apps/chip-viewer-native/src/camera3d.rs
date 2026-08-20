@@ -186,7 +186,7 @@ impl Mat4 {
 
         let det =
             m[0][0] * inv[0][0] + m[0][1] * inv[1][0] + m[0][2] * inv[2][0] + m[0][3] * inv[3][0];
-        if det.abs() <= 1e-8 {
+        if !det.is_finite() || det.abs() <= 1e-30 {
             return None;
         }
         let inv_det = 1.0 / det;
@@ -218,6 +218,15 @@ impl Ray3 {
         (t >= 0.0).then(|| self.point_at(t))
     }
 
+    pub fn intersect_plane(self, point: Vec3, normal: Vec3) -> Option<Vec3> {
+        let denom = self.direction.dot(normal);
+        if denom.abs() <= 1e-6 {
+            return None;
+        }
+        let t = point.sub(self.origin).dot(normal) / denom;
+        (t >= 0.0).then(|| self.point_at(t))
+    }
+
     pub fn intersect_aabb(self, min: Vec3, max: Vec3) -> Option<f32> {
         let mut tmin = 0.0_f32;
         let mut tmax = f32::INFINITY;
@@ -246,6 +255,51 @@ impl Ray3 {
         }
         let t = if tmin >= 0.0 { tmin } else { tmax };
         (t >= 0.0).then_some(t)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrustumPlanes {
+    pub planes: [[f32; 4]; 6],
+}
+
+impl FrustumPlanes {
+    pub fn from_view_proj(vp: &Mat4) -> Self {
+        let m = &vp.cols;
+        let row = |i: usize| [m[0][i], m[1][i], m[2][i], m[3][i]];
+        let (r0, r1, r2, r3) = (row(0), row(1), row(2), row(3));
+        let add = |a: [f32; 4], b: [f32; 4]| [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
+        let sub = |a: [f32; 4], b: [f32; 4]| [a[0] - b[0], a[1] - b[1], a[2] - b[2], a[3] - b[3]];
+        let mut planes = [
+            add(r3, r0),
+            sub(r3, r0),
+            add(r3, r1),
+            sub(r3, r1),
+            add(r3, r2),
+            sub(r3, r2),
+        ];
+        for p in &mut planes {
+            let len = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+            if len > 1e-6 {
+                p[0] /= len;
+                p[1] /= len;
+                p[2] /= len;
+                p[3] /= len;
+            }
+        }
+        Self { planes }
+    }
+
+    pub fn intersects_aabb(&self, min: [f32; 3], max: [f32; 3]) -> bool {
+        for p in &self.planes {
+            let px = if p[0] > 0.0 { max[0] } else { min[0] };
+            let py = if p[1] > 0.0 { max[1] } else { min[1] };
+            let pz = if p[2] > 0.0 { max[2] } else { min[2] };
+            if p[0] * px + p[1] * py + p[2] * pz + p[3] < 0.0 {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -320,6 +374,11 @@ impl OrbitCamera {
         self.pitch = 12_f32.to_radians();
     }
 
+    pub fn set_bottom(&mut self) {
+        self.yaw = -90_f32.to_radians();
+        self.pitch = Self::MIN_PITCH;
+    }
+
     pub fn focus_xy(&mut self, x: f32, y: f32, span: f32, stack_height: f32) {
         self.target.x = x;
         self.target.y = y;
@@ -370,8 +429,8 @@ impl OrbitCamera {
     pub fn view_proj(self, aspect: f32) -> Mat4 {
         let eye = self.eye();
         let view = look_at(eye, self.target, Vec3::UNIT_Z);
-        let near = (self.distance * 0.01).max(1.0);
-        let far = (self.distance * 20.0).max(near * 10.0);
+        let near = (self.distance * 0.001).clamp(0.01, 50.0);
+        let far = (self.distance * 50.0).max(50_000_000.0);
         perspective(self.fov_y, aspect.max(0.05), near, far).mul(view)
     }
 
@@ -393,6 +452,146 @@ impl OrbitCamera {
             origin: near,
             direction: far.sub(near).normalized(),
         })
+    }
+
+    pub fn cursor_pivot(
+        self,
+        pos: [f32; 2],
+        canvas_min: [f32; 2],
+        canvas_size: [f32; 2],
+        world: chipgeom_format::Rect32,
+        stack_height: f32,
+    ) -> Option<Vec3> {
+        let ray = self.ray_from_screen(pos, canvas_min, canvas_size)?;
+        let max_z = (stack_height * self.z_scale).max(100.0);
+        let world_min = Vec3::new(world.lx as f32, world.ly as f32, 0.0);
+        let world_max = Vec3::new(world.hx as f32, world.hy as f32, max_z);
+
+        // 1. If ray hits the chip 3D bounding box, pivot on the exact hit point
+        if let Some(t_hit) = ray.intersect_aabb(world_min, world_max) {
+            return Some(ray.point_at(t_hit));
+        }
+
+        // 2. If looking from top/overhead (pitch >= 35 deg), intersect with target's Z-plane
+        if self.pitch >= 35.0_f32.to_radians() {
+            if let Some(hit) = ray
+                .intersect_z_plane(self.target.z)
+                .or_else(|| ray.intersect_z_plane(0.0))
+            {
+                let margin =
+                    ((world.hx - world.lx).max(world.hy - world.ly) as f32 * 0.5).max(1000.0);
+                if hit.x >= world_min.x - margin
+                    && hit.x <= world_max.x + margin
+                    && hit.y >= world_min.y - margin
+                    && hit.y <= world_max.y + margin
+                {
+                    return Some(hit);
+                }
+            }
+        }
+
+        // 3. Focal plane intersection (orthogonal to look direction passing through target)
+        let eye = self.eye();
+        let forward = self.target.sub(eye).normalized();
+        if let Some(hit) = ray.intersect_plane(self.target, forward) {
+            let margin = ((world.hx - world.lx).max(world.hy - world.ly) as f32 * 1.0).max(5000.0);
+            return Some(Vec3::new(
+                hit.x.clamp(world_min.x - margin, world_max.x + margin),
+                hit.y.clamp(world_min.y - margin, world_max.y + margin),
+                hit.z.clamp(-margin, max_z + margin),
+            ));
+        }
+
+        None
+    }
+
+    pub fn visible_ground_rect(
+        self,
+        aspect: f32,
+        stack_height: f32,
+        world: chipgeom_format::Rect32,
+    ) -> chipgeom_format::Rect32 {
+        if self.pitch < 30.0_f32.to_radians() {
+            return world;
+        }
+
+        let inv = match self.view_proj(aspect).invert() {
+            Some(inv) => inv,
+            None => return world,
+        };
+        let ndc_corners = [
+            [-1.0_f32, -1.0],
+            [1.0, -1.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+            [0.0, -1.0],
+            [0.0, 1.0],
+            [-1.0, 0.0],
+            [1.0, 0.0],
+        ];
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        let mut hits = 0;
+
+        let max_z = (stack_height * self.z_scale).max(0.0);
+
+        for [nx, ny] in ndc_corners {
+            let near = unproject(inv, [nx, ny, 0.0]);
+            let far = unproject(inv, [nx, ny, 1.0]);
+            if let (Some(near), Some(far)) = (near, far) {
+                let ray = Ray3 {
+                    origin: near,
+                    direction: far.sub(near).normalized(),
+                };
+                for z in [0.0, max_z] {
+                    if let Some(hit) = ray.intersect_z_plane(z) {
+                        min_x = min_x.min(hit.x);
+                        min_y = min_y.min(hit.y);
+                        max_x = max_x.max(hit.x);
+                        max_y = max_y.max(hit.y);
+                        hits += 1;
+                    }
+                }
+            }
+        }
+
+        let world_w = (world.hx - world.lx).max(1) as f32;
+        let world_h = (world.hy - world.ly).max(1) as f32;
+
+        if hits < 4
+            || !min_x.is_finite()
+            || !min_y.is_finite()
+            || !max_x.is_finite()
+            || !max_y.is_finite()
+            || (max_x - min_x) > world_w * 2.5
+            || (max_y - min_y) > world_h * 2.5
+        {
+            return world;
+        }
+
+        let clamped_min_x = min_x.max(world.lx as f32 - world_w * 0.5);
+        let clamped_min_y = min_y.max(world.ly as f32 - world_h * 0.5);
+        let clamped_max_x = max_x.min(world.hx as f32 + world_w * 0.5);
+        let clamped_max_y = max_y.min(world.hy as f32 + world_h * 0.5);
+
+        let width = (clamped_max_x - clamped_min_x).max(1.0);
+        let height = (clamped_max_y - clamped_min_y).max(1.0);
+        let pad_x = width * 0.35;
+        let pad_y = height * 0.35;
+
+        let lx = (clamped_min_x - pad_x).floor().max(world.lx as f32) as i32;
+        let ly = (clamped_min_y - pad_y).floor().max(world.ly as f32) as i32;
+        let hx = (clamped_max_x + pad_x).ceil().min(world.hx as f32) as i32;
+        let hy = (clamped_max_y + pad_y).ceil().min(world.hy as f32) as i32;
+
+        chipgeom_format::Rect32 {
+            lx: lx.min(hx),
+            ly: ly.min(hy),
+            hx: hx.max(lx),
+            hy: hy.max(ly),
+        }
     }
 }
 
@@ -435,7 +634,51 @@ pub fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> Mat4 {
     ])
 }
 
-fn unproject(inv_view_proj: Mat4, ndc: [f32; 3]) -> Option<Vec3> {
+pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> Mat4 {
+    let r_l = right - left;
+    let t_b = top - bottom;
+    let f_n = far - near;
+    let inv_rl = if r_l.abs() > 1e-6 { 2.0 / r_l } else { 1.0 };
+    let inv_tb = if t_b.abs() > 1e-6 { 2.0 / t_b } else { 1.0 };
+    let inv_fn = if f_n.abs() > 1e-6 {
+        1.0 / (near - far)
+    } else {
+        1.0
+    };
+    Mat4::from_cols([
+        [inv_rl, 0.0, 0.0, 0.0],
+        [0.0, inv_tb, 0.0, 0.0],
+        [0.0, 0.0, inv_fn, 0.0],
+        [
+            -(right + left) / r_l.max(1e-6),
+            -(top + bottom) / t_b.max(1e-6),
+            near * inv_fn,
+            1.0,
+        ],
+    ])
+}
+
+pub fn orthographic_top_view_proj(
+    world_min: Vec3,
+    world_max: Vec3,
+    stack_height: f32,
+    z_scale: f32,
+) -> Mat4 {
+    let width = (world_max.x - world_min.x).max(1.0);
+    let height = (world_max.y - world_min.y).max(1.0);
+    let half_w = width * 0.5;
+    let half_h = height * 0.5;
+    let cx = (world_min.x + world_max.x) * 0.5;
+    let cy = (world_min.y + world_max.y) * 0.5;
+    let max_z = (stack_height * z_scale).max(100.0);
+    let eye = Vec3::new(cx, cy, max_z + 1000.0);
+    let target = Vec3::new(cx, cy, 0.0);
+    let view = look_at(eye, target, Vec3::new(0.0, 1.0, 0.0));
+    let ortho = orthographic(-half_w, half_w, -half_h, half_h, 0.1, max_z + 2000.0);
+    ortho.mul(view)
+}
+
+pub fn unproject(inv_view_proj: Mat4, ndc: [f32; 3]) -> Option<Vec3> {
     let clip = inv_view_proj.transform_point([ndc[0], ndc[1], ndc[2], 1.0]);
     if clip[3].abs() <= 1e-8 {
         return None;
@@ -450,6 +693,78 @@ fn unproject(inv_view_proj: Mat4, ndc: [f32; 3]) -> Option<Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orthographic_matrix_inverts_and_transforms_bounds() {
+        let ortho = orthographic(-100.0, 100.0, -50.0, 50.0, 0.1, 1000.0);
+        let inv = ortho.invert().expect("ortho must be invertible");
+        let p_max = ortho.transform_point([100.0, 50.0, 0.1, 1.0]);
+        assert!((p_max[0] - 1.0).abs() < 1e-4);
+        assert!((p_max[1] - 1.0).abs() < 1e-4);
+        let unproj = unproject(inv, [1.0, 1.0, 0.0]).expect("unproject max");
+        assert!((unproj.x - 100.0).abs() < 1e-3);
+        assert!((unproj.y - 50.0).abs() < 1e-3);
+
+        let top_proj = orthographic_top_view_proj(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1000.0, 1000.0, 0.0),
+            100.0,
+            1.0,
+        );
+        assert!(top_proj.invert().is_some());
+    }
+
+    #[test]
+    fn visible_ground_rect_tightens_when_zoomed_in() {
+        let world = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100_000,
+            hy: 100_000,
+        };
+        let mut camera = OrbitCamera::default();
+        camera.fit_world_with_aspect(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(100_000.0, 100_000.0, 0.0),
+            1000.0,
+            1.33,
+        );
+        let fit_rect = camera.visible_ground_rect(1.33, 1000.0, world);
+        assert_eq!(fit_rect.lx, world.lx);
+        assert_eq!(fit_rect.hx, world.hx);
+
+        // Zoom deeply into center
+        camera.focus_xy(50_000.0, 50_000.0, 2_000.0, 1000.0);
+        let zoomed_rect = camera.visible_ground_rect(1.33, 1000.0, world);
+        let zoomed_span = (zoomed_rect.hx - zoomed_rect.lx) as f32;
+        let world_span = (world.hx - world.lx) as f32;
+        assert!(zoomed_span < world_span * 0.25);
+    }
+
+    #[test]
+    fn cursor_pivot_is_finite_and_contained_from_front_view() {
+        let world = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100_000,
+            hy: 100_000,
+        };
+        let mut camera = OrbitCamera::default();
+        camera.set_front();
+        camera.distance = 50_000.0;
+        camera.target = Vec3::new(50_000.0, 50_000.0, 500.0);
+
+        let canvas_min = [0.0, 0.0];
+        let canvas_size = [800.0, 600.0];
+        let center_pos = [400.0, 300.0];
+
+        let pivot = camera.cursor_pivot(center_pos, canvas_min, canvas_size, world, 1000.0);
+        assert!(pivot.is_some());
+        let p = pivot.unwrap();
+        assert!(p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
+        assert!((p.x - 50_000.0).abs() < 10_000.0);
+        assert!((p.y - 50_000.0).abs() < 10_000.0);
+    }
 
     #[test]
     fn orbit_eye_sits_above_target_at_top_view() {
