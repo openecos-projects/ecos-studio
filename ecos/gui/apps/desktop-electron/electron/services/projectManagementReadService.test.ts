@@ -19,7 +19,9 @@ import { ProjectManagementReadService } from './projectManagementReadService'
 
 const temporaryDirectories: string[] = []
 
-async function createProject(): Promise<{ projectRoot: string; workspaceRoot: string }> {
+async function createProject(
+  projectType: 'backend' | 'frontend' = 'backend',
+): Promise<{ projectRoot: string; workspaceRoot: string }> {
   const projectRoot = await mkdtemp(join(tmpdir(), 'ecos-project-management-read-'))
   temporaryDirectories.push(projectRoot)
   const workspaceRoot = join(projectRoot, 'ws_0001')
@@ -30,6 +32,7 @@ async function createProject(): Promise<{ projectRoot: string; workspaceRoot: st
       rootPath: projectRoot,
       name: 'gcd',
       designName: 'gcd',
+      projectType,
     }),
     {
       projectRoot,
@@ -125,6 +128,50 @@ describe('ProjectManagementReadService', () => {
         paths: ['../../settings.json'],
       }),
     ).rejects.toThrow('not allowed')
+  })
+
+  it('uses a project-type-specific summary allowlist', async () => {
+    const { projectRoot, workspaceRoot } = await createProject('frontend')
+    const detailPath = 'lint_verilator/report/frontend_detail.json'
+    await mkdir(join(workspaceRoot, 'lint_verilator', 'report'), { recursive: true })
+    await writeFile(join(workspaceRoot, detailPath), '{"step":"lint"}')
+    const service = new ProjectManagementReadService()
+
+    await expect(
+      service.readWorkspaceTexts({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        paths: ['home/flow.json', detailPath],
+      }),
+    ).resolves.toMatchObject({
+      texts: {
+        'home/flow.json': '{"steps":[]}',
+        [detailPath]: '{"step":"lint"}',
+      },
+    })
+    await expect(
+      service.readWorkspaceTexts({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        paths: ['sta_ecc/analysis/qor_metrics.json'],
+      }),
+    ).rejects.toThrow('not allowed')
+  })
+
+  it('accepts bounded frontend detail reports larger than backend QoR summaries', async () => {
+    const { projectRoot, workspaceRoot } = await createProject('frontend')
+    const detailPath = 'lint_verilator/report/frontend_detail.json'
+    const detail = JSON.stringify({ diagnostics: 'x'.repeat(300 * 1024) })
+    await mkdir(join(workspaceRoot, 'lint_verilator', 'report'), { recursive: true })
+    await writeFile(join(workspaceRoot, detailPath), detail)
+
+    await expect(
+      new ProjectManagementReadService().readWorkspaceTexts({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        paths: [detailPath],
+      }),
+    ).resolves.toMatchObject({ texts: { [detailPath]: detail } })
   })
 
   it('requires a valid manifest before listing project root entries', async () => {

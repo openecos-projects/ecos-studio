@@ -91,3 +91,24 @@ export const projectManagementWorkspaceSummaryPaths = [
   ]),
   projectManagementStaTimingIssuesPath,
 ]
+
+export const projectManagementFrontendWorkspaceStepAnalysisSpecs = [
+  { step: 'prepare', detailPath: 'prepare_fe/report/frontend_detail.json' },
+  { step: 'review', detailPath: 'review_fe/report/frontend_detail.json' },
+  { step: 'elab', detailPath: 'elab_slang/report/frontend_detail.json' },
+  { step: 'lint', detailPath: 'lint_verilator/report/frontend_detail.json' },
+  { step: 'sim', detailPath: 'sim_verilator/report/frontend_detail.json' },
+] as const
+
+export const projectManagementFrontendWorkspaceSummaryPaths = [
+  'home/flow.json',
+  ...projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => spec.detailPath),
+]
+
+export function projectManagementWorkspaceSummaryPathsFor(
+  projectType: 'backend' | 'frontend',
+): readonly string[] {
+  return projectType === 'frontend'
+    ? projectManagementFrontendWorkspaceSummaryPaths
+    : projectManagementWorkspaceSummaryPaths
+}

@@ -4,29 +4,23 @@ import type {
   ProjectWorkspaceFlowStatesById,
 } from '@/utils/projectManagement'
 import { readProjectManagementWorkspaceData } from './projectWorkspaceAnalysisData'
-import { readFrontendProjectWorkspaceFlowStates } from './frontendProjectWorkspaceData'
+import { readFrontendProjectWorkspaceData } from './frontendProjectWorkspaceData'
+
+export interface ProjectWorkspaceData {
+  analysisInputs: ProjectWorkspaceAnalysisInputsById
+  flowStates: ProjectWorkspaceFlowStatesById
+}
 
 export interface ProjectWorkspaceDataReader {
-  readAnalysisInputs(
-    projectRoot: string,
-    manifest: ProjectManifest,
-  ): Promise<ProjectWorkspaceAnalysisInputsById>
-  readFlowStates(
-    projectRoot: string,
-    manifest: ProjectManifest,
-  ): Promise<ProjectWorkspaceFlowStatesById>
+  readData(projectRoot: string, manifest: ProjectManifest): Promise<ProjectWorkspaceData>
 }
 
 const backendProjectWorkspaceDataReader: ProjectWorkspaceDataReader = {
-  readAnalysisInputs: async (projectRoot, manifest) =>
-    (await readProjectManagementWorkspaceData(projectRoot, manifest)).analysisInputs,
-  readFlowStates: async (projectRoot, manifest) =>
-    (await readProjectManagementWorkspaceData(projectRoot, manifest)).flowStates,
+  readData: readProjectManagementWorkspaceData,
 }
 
 const frontendProjectWorkspaceDataReader: ProjectWorkspaceDataReader = {
-  readAnalysisInputs: emptyWorkspaceEntries,
-  readFlowStates: readFrontendProjectWorkspaceFlowStates,
+  readData: readFrontendProjectWorkspaceData,
 }
 
 const projectWorkspaceDataReaders: Record<
@@ -47,27 +41,22 @@ export async function readProjectWorkspaceFlowStates(
   projectRoot: string,
   manifest: ProjectManifest,
 ): Promise<ProjectWorkspaceFlowStatesById> {
-  return await projectWorkspaceDataReaderFor(manifest.project_type).readFlowStates(
-    projectRoot,
-    manifest,
-  )
+  return (await readProjectWorkspaceData(projectRoot, manifest)).flowStates
 }
 
 export async function readProjectWorkspaceAnalysisInputs(
   projectRoot: string,
   manifest: ProjectManifest,
 ): Promise<ProjectWorkspaceAnalysisInputsById> {
-  return await projectWorkspaceDataReaderFor(manifest.project_type).readAnalysisInputs(
-    projectRoot,
-    manifest,
-  )
+  return (await readProjectWorkspaceData(projectRoot, manifest)).analysisInputs
 }
 
-async function emptyWorkspaceEntries(
-  _projectRoot: string,
+export async function readProjectWorkspaceData(
+  projectRoot: string,
   manifest: ProjectManifest,
-): Promise<Record<string, Record<string, never>>> {
-  return Object.fromEntries(
-    manifest.workspaces.map((workspace) => [workspace.workspace_id, {}]),
+): Promise<ProjectWorkspaceData> {
+  return await projectWorkspaceDataReaderFor(manifest.project_type).readData(
+    projectRoot,
+    manifest,
   )
 }

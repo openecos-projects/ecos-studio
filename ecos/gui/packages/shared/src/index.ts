@@ -217,9 +217,12 @@ export {
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
 export {
+  projectManagementFrontendWorkspaceStepAnalysisSpecs,
+  projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManagementWorkspaceSummaryPaths,
+  projectManagementWorkspaceSummaryPathsFor,
 } from './utils/projectManagementSummary.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'
 export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'

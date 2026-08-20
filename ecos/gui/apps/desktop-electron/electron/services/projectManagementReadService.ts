@@ -2,7 +2,9 @@ import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import {
   parseProjectManifest,
+  projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementWorkspaceSummaryPaths,
+  projectManagementWorkspaceSummaryPathsFor,
 } from '@ecos-studio/shared'
 import type {
   DesktopProjectManagementWorkspaceTextsRequest,
@@ -12,10 +14,12 @@ import { isPathWithinRoot } from './pathScope'
 
 const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
 const PROJECT_WORKSPACE_TEXT_MAX_BYTES = 256 * 1024
+const PROJECT_FRONTEND_WORKSPACE_TEXT_MAX_BYTES = 1024 * 1024
 const PROJECT_WORKSPACE_READ_CONCURRENCY = 4
-const PROJECT_WORKSPACE_READ_LIMIT = projectManagementWorkspaceSummaryPaths.length
-
-const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(projectManagementWorkspaceSummaryPaths)
+const PROJECT_WORKSPACE_READ_LIMIT = Math.max(
+  projectManagementWorkspaceSummaryPaths.length,
+  projectManagementFrontendWorkspaceSummaryPaths.length,
+)
 
 class ProjectManagementWorkspacePathError extends Error {}
 
@@ -104,11 +108,15 @@ export class ProjectManagementReadService {
   async readWorkspaceTexts(
     request: DesktopProjectManagementWorkspaceTextsRequest,
   ): Promise<DesktopProjectManagementWorkspaceTextsResult> {
-    const paths = normalizeRequestedPaths(request.paths)
     const project = await this.loadProject(request.projectRoot)
     if (!project.manifest) {
       throw new Error('Project manifest does not exist.')
     }
+    const paths = normalizeRequestedPaths(request.paths, project.manifest.project_type)
+    const maxWorkspaceTextBytes =
+      project.manifest.project_type === 'frontend'
+        ? PROJECT_FRONTEND_WORKSPACE_TEXT_MAX_BYTES
+        : PROJECT_WORKSPACE_TEXT_MAX_BYTES
     const workspacePath = await this.resolveDeclaredWorkspace(
       project.root,
       project.manifest.workspaces.map((workspace) => workspace.workspace_path),
@@ -124,7 +132,7 @@ export class ProjectManagementReadService {
             text: await this.readWorkspaceTextFile(
               workspacePath,
               path,
-              PROJECT_WORKSPACE_TEXT_MAX_BYTES,
+              maxWorkspaceTextBytes,
             ),
             unavailable: false,
           }
@@ -209,13 +217,17 @@ export class ProjectManagementReadService {
   }
 }
 
-function normalizeRequestedPaths(paths: string[]): string[] {
+function normalizeRequestedPaths(
+  paths: string[],
+  projectType: 'backend' | 'frontend',
+): string[] {
   const uniquePaths = [...new Set(paths)]
   if (uniquePaths.length === 0 || uniquePaths.length > PROJECT_WORKSPACE_READ_LIMIT) {
     throw new Error('Project management workspace read has an invalid path count.')
   }
+  const allowedPaths = new Set(projectManagementWorkspaceSummaryPathsFor(projectType))
   for (const path of uniquePaths) {
-    if (!PROJECT_MANAGEMENT_WORKSPACE_PATHS.has(path)) {
+    if (!allowedPaths.has(path)) {
       throw new Error(`Project management workspace path is not allowed: ${path}`)
     }
   }

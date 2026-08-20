@@ -5,11 +5,10 @@ import {
 } from '@ecos-studio/shared'
 import {
   projectWorkspaceDataReaderFor,
-  readProjectWorkspaceAnalysisInputs,
-  readProjectWorkspaceFlowStates,
+  readProjectWorkspaceData,
 } from './projectWorkspaceData'
 import { readProjectManagementWorkspaceData } from './projectWorkspaceAnalysisData'
-import { readFrontendProjectWorkspaceFlowStates } from './frontendProjectWorkspaceData'
+import { readFrontendProjectWorkspaceData } from './frontendProjectWorkspaceData'
 
 vi.mock('./projectWorkspaceAnalysisData', () => ({
   readProjectManagementWorkspaceData: vi.fn(async () => ({
@@ -19,13 +18,14 @@ vi.mock('./projectWorkspaceAnalysisData', () => ({
 }))
 
 vi.mock('./frontendProjectWorkspaceData', () => ({
-  readFrontendProjectWorkspaceFlowStates: vi.fn(async () => ({
-    ws_frontend: { prepare: 'success' },
+  readFrontendProjectWorkspaceData: vi.fn(async () => ({
+    analysisInputs: { ws_frontend: { frontendDetailTexts: { prepare: '{}' } } },
+    flowStates: { ws_frontend: { prepare: 'success' } },
   })),
 }))
 
 const readBackendDataMock = vi.mocked(readProjectManagementWorkspaceData)
-const readFrontendFlowMock = vi.mocked(readFrontendProjectWorkspaceFlowStates)
+const readFrontendDataMock = vi.mocked(readFrontendProjectWorkspaceData)
 
 function manifest(projectType: 'backend' | 'frontend') {
   return registerWorkspaceInManifest(
@@ -45,21 +45,17 @@ function manifest(projectType: 'backend' | 'frontend') {
 describe('project workspace data readers', () => {
   beforeEach(() => {
     readBackendDataMock.mockClear()
-    readFrontendFlowMock.mockClear()
+    readFrontendDataMock.mockClear()
   })
 
   it('delegates backend workspace data to the physical-design reader', async () => {
     const backendManifest = manifest('backend')
 
     await expect(
-      readProjectWorkspaceFlowStates('/projects/backend', backendManifest),
+      readProjectWorkspaceData('/projects/backend', backendManifest),
     ).resolves.toEqual({
-      ws_backend: { Synth: 'success' },
-    })
-    await expect(
-      readProjectWorkspaceAnalysisInputs('/projects/backend', backendManifest),
-    ).resolves.toEqual({
-      ws_backend: { flowText: '{}' },
+      analysisInputs: { ws_backend: { flowText: '{}' } },
+      flowStates: { ws_backend: { Synth: 'success' } },
     })
     expect(readBackendDataMock).toHaveBeenCalledWith('/projects/backend', backendManifest)
   })
@@ -68,15 +64,15 @@ describe('project workspace data readers', () => {
     const frontendManifest = manifest('frontend')
 
     await expect(
-      readProjectWorkspaceFlowStates('/projects/frontend', frontendManifest),
-    ).resolves.toEqual({ ws_frontend: { prepare: 'success' } })
-    await expect(
-      readProjectWorkspaceAnalysisInputs('/projects/frontend', frontendManifest),
+      readProjectWorkspaceData('/projects/frontend', frontendManifest),
     ).resolves.toEqual({
-      ws_0001: {},
+      analysisInputs: {
+        ws_frontend: { frontendDetailTexts: { prepare: '{}' } },
+      },
+      flowStates: { ws_frontend: { prepare: 'success' } },
     })
     expect(readBackendDataMock).not.toHaveBeenCalled()
-    expect(readFrontendFlowMock).toHaveBeenCalledWith(
+    expect(readFrontendDataMock).toHaveBeenCalledWith(
       '/projects/frontend',
       frontendManifest,
     )

@@ -1,6 +1,7 @@
 import type {
   ProjectManifest,
   ProjectManifestBaseDesign,
+  ProjectManifestFrontendFlowStep,
   ProjectManifestStage,
   ProjectManifestType,
   ProjectManifestWorkspace,
@@ -73,6 +74,7 @@ export interface ProjectWorkspaceAnalysisInput {
   stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   staTimingIssuesText?: string | null
+  frontendDetailTexts?: Partial<Record<ProjectManifestFrontendFlowStep, string | null>>
   flowText?: string | null
 }
 

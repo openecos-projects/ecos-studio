@@ -800,10 +800,7 @@ import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
 import { mapWithConcurrency } from './project-management/asyncConcurrency'
-import {
-  readProjectWorkspaceAnalysisInputs,
-  readProjectWorkspaceFlowStates,
-} from './project-management/projectWorkspaceData'
+import { readProjectWorkspaceData } from './project-management/projectWorkspaceData'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
@@ -1567,10 +1564,10 @@ async function loadSelectedProjectWorkspaceData() {
   const projectId = project.id
   const loadGeneration = ++selectedProjectSummaryLoadGeneration
   try {
-    const [flowStates, analysisInputs] = await Promise.all([
-      readProjectWorkspaceFlowStates(project.path, manifest),
-      readProjectWorkspaceAnalysisInputs(project.path, manifest),
-    ])
+    const { flowStates, analysisInputs } = await readProjectWorkspaceData(
+      project.path,
+      manifest,
+    )
     if (
       selectedProjectSummaryLoadGeneration !== loadGeneration ||
       selectedProjectId.value !== projectId ||
