@@ -1996,6 +1996,7 @@ function projectFromManifest(manifest: ProjectManifest, fallbackRoot: string): P
     name: manifest.name || basenamePath(path) || 'project',
     path,
     lastOpened: new Date(),
+    projectType: manifest.project_type,
     pdk: manifest.base_design.pdk,
     topModule: manifest.base_design.top_module,
     status: projectStatusFromManifest(manifest),

@@ -3,8 +3,8 @@ import type {
   ProjectWorkspaceAnalysisInputsById,
   ProjectWorkspaceFlowStatesById,
 } from '@/utils/projectManagement'
-import { readProjectManagementWorkspaceTexts } from '@/utils/projectManagementRead'
 import { readProjectManagementWorkspaceData } from './projectWorkspaceAnalysisData'
+import { readFrontendProjectWorkspaceFlowStates } from './frontendProjectWorkspaceData'
 
 export interface ProjectWorkspaceDataReader {
   readAnalysisInputs(
@@ -70,62 +70,4 @@ async function emptyWorkspaceEntries(
   return Object.fromEntries(
     manifest.workspaces.map((workspace) => [workspace.workspace_id, {}]),
   )
-}
-
-async function readFrontendProjectWorkspaceFlowStates(
-  projectRoot: string,
-  manifest: ProjectManifest,
-): Promise<ProjectWorkspaceFlowStatesById> {
-  const entries = await Promise.all(
-    manifest.workspaces.map(async (workspace) => {
-      try {
-        const result = await readProjectManagementWorkspaceTexts(
-          projectRoot,
-          workspace.workspace_path,
-          ['home/flow.json'],
-        )
-        const flowText = result.texts['home/flow.json']
-        return [
-          workspace.workspace_id,
-          flowText ? parseFrontendWorkspaceFlowStateMap(flowText) : {},
-        ] as const
-      } catch (error) {
-        console.warn(
-          `Failed to load frontend workspace flow.json: ${workspace.workspace_path}`,
-          error,
-        )
-        return [workspace.workspace_id, {}] as const
-      }
-    }),
-  )
-  return Object.fromEntries(entries)
-}
-
-function parseFrontendWorkspaceFlowStateMap(
-  content: string,
-): Record<string, import('@/utils/projectManagement').ProjectStepStatus> {
-  const parsed = JSON.parse(content) as {
-    steps?: Array<{ name?: unknown; state?: unknown }>
-  }
-  if (!Array.isArray(parsed.steps)) return {}
-  const allowed = new Set(['prepare', 'review', 'elab', 'lint', 'sim'])
-  return parsed.steps.reduce<
-    Record<string, import('@/utils/projectManagement').ProjectStepStatus>
-  >((stateMap, step) => {
-    const name = typeof step.name === 'string' ? step.name.trim().toLowerCase() : ''
-    if (!allowed.has(name) || typeof step.state !== 'string') return stateMap
-    const state = step.state.trim().toLowerCase()
-    const status =
-      state === 'success'
-        ? 'success'
-        : state === 'ongoing' || state === 'pending'
-          ? 'running'
-          : state === 'incomplete' || state === 'invalid'
-            ? 'failed'
-            : state === 'unstart'
-              ? 'unstart'
-              : null
-    if (status) stateMap[name] = status
-    return stateMap
-  }, {})
 }

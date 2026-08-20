@@ -1,6 +1,7 @@
 import type {
   ProjectManifest,
   ProjectManifestBaseDesign,
+  ProjectManifestType,
   ProjectManifestWorkspace,
   ResourceInfo,
 } from '@ecos-studio/shared'
@@ -273,6 +274,7 @@ export interface ProjectDashboardSummary {
 
 export interface ProjectManagementProject {
   id: string
+  projectType: ProjectManifestType
   name: string
   designName: string
   path: string
@@ -485,6 +487,7 @@ export function buildProjectManagementProject(
 
   return {
     id: path,
+    projectType: manifest?.project_type ?? project?.projectType ?? 'backend',
     name,
     designName,
     path,
