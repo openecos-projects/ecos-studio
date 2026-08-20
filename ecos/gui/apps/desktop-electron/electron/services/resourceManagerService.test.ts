@@ -1371,6 +1371,73 @@ describe('ResourceManagerService', () => {
     })
   })
 
+  it('marks installed tools as invalid when an executable marker is unusable', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const eccFeRoot = join(toolsDir, 'ecc-fe', 'latest')
+    await mkdir(join(eccFeRoot, 'bin', 'ecc-fe'), { recursive: true })
+    await mkdir(join(eccFeRoot, 'fecompiler'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(
+      registryPath,
+      JSON.stringify({ schema_version: 2, tools: [], pdks: [] }),
+      'utf8',
+    )
+    await writeFile(
+      join(resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 1,
+        installed: {
+          'tool:ecc-fe': {
+            type: 'tool',
+            name: 'ecc-fe',
+            version: 'latest',
+            path: eccFeRoot,
+            executable: 'bin/ecc-fe',
+            detected_executables: ['bin/ecc-fe'],
+            active: true,
+            managed: true,
+          },
+        },
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      id: 'tool:ecc-fe',
+      status: 'invalid',
+      active: false,
+      error: 'Installed resource is missing required files: bin/ecc-fe',
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['bin/ecc-fe'],
+      }),
+    })
+
+    if (process.platform !== 'win32') {
+      await rm(join(eccFeRoot, 'bin', 'ecc-fe'), { recursive: true })
+      await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+      await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o644)
+
+      await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+        status: 'invalid',
+        active: false,
+        health: expect.objectContaining({
+          status: 'invalid',
+          missing_markers: ['bin/ecc-fe'],
+        }),
+      })
+    }
+  })
+
   it('marks the RISC-V toolchain invalid when objdump is missing', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
@@ -2573,9 +2640,9 @@ describe('ResourceManagerService', () => {
     const sourceRoot = join(root, 'incomplete-ecc-fe-source')
     const sourceDir = join(sourceRoot, 'ecc-fe-runtime')
     const archivePath = join(root, 'incomplete-ecc-fe.tar')
-    await mkdir(join(sourceDir, 'bin'), { recursive: true })
-    await writeFile(join(sourceDir, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
-    await chmod(join(sourceDir, 'bin', 'ecc-fe'), 0o755)
+    await mkdir(join(sourceDir, 'bin', 'ecc-fe'), { recursive: true })
+    await mkdir(join(sourceDir, 'fecompiler'), { recursive: true })
+    await writeFile(join(sourceDir, 'fecompiler', '__init__.py'), '', 'utf8')
     await runFixtureCommand('tar', [
       '-cf',
       archivePath,
@@ -2649,7 +2716,7 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.updateResource('tool:ecc-fe')).rejects.toThrow(
-      'Extracted ecc-fe archive failed health validation: fecompiler',
+      'Extracted ecc-fe archive failed health validation: bin/ecc-fe',
     )
     await expect(
       readFile(join(destination, 'previous-version.txt'), 'utf8'),
