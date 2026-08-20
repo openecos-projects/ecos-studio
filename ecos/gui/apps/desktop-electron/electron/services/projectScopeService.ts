@@ -23,6 +23,15 @@ interface ProjectReadScope {
   workspaceRoots: string[]
 }
 
+export interface ProjectReadGrantProvider {
+  get(projectRoot: string): Promise<string[]>
+  set(projectRoot: string, roots: string[]): Promise<void>
+}
+
+export interface ProjectScopeServiceOptions {
+  readGrantProvider?: ProjectReadGrantProvider
+}
+
 async function canonicalizeExistingPath(path: string): Promise<string> {
   return await realpath(path)
 }
@@ -46,6 +55,20 @@ function isNodeErrorWithCode(error: unknown, code: string): boolean {
 
 function pathsEqual(leftPath: string, rightPath: string): boolean {
   return relative(resolve(leftPath), resolve(rightPath)) === ''
+}
+
+function uniquePaths(paths: string[]): string[] {
+  const unique: string[] = []
+  for (const path of paths) {
+    if (!unique.some((candidate) => pathsEqual(candidate, path))) unique.push(path)
+  }
+  return unique
+}
+
+function isSafeExternalReadRoot(path: string, projectRoot: string): boolean {
+  // An external source root must not contain the workspace itself. This rejects
+  // filesystem roots, home directories, and other overly broad ancestors.
+  return !isPathWithinRoot(projectRoot, path)
 }
 
 async function canonicalizePotentialPathWithinRoot(
@@ -184,6 +207,13 @@ export class ProjectScopeService {
   private readonly rootsByWindowId = new Map<number, string>()
   private readonly readScopesByWindowId = new Map<number, ProjectReadScope>()
   private readonly extraRootsByWindowId = new Map<number, string[]>()
+  private readonly pendingExtraRootsByWindowId = new Map<number, string[]>()
+  private readonly approvedExtraRootsByProject = new Map<string, string[]>()
+  private readonly readGrantProvider: ProjectReadGrantProvider | undefined
+
+  constructor(options: ProjectScopeServiceOptions = {}) {
+    this.readGrantProvider = options.readGrantProvider
+  }
 
   async resolveProjectRoot(path: string): Promise<string> {
     return await canonicalizeExistingDirectory(path)
@@ -201,11 +231,51 @@ export class ProjectScopeService {
   async registerProjectRoot(path: string): Promise<string> {
     const windowId = requireWindowScopeId()
     const canonicalPath = await this.resolveProjectRoot(path)
-    const extraRoots = await detectFrontendExtraRoots(canonicalPath)
+    const candidateExtraRoots = (await detectFrontendExtraRoots(canonicalPath)).filter(
+      (root) => isSafeExternalReadRoot(root, canonicalPath),
+    )
+    const persistedRoots = await this.readGrantProvider?.get(canonicalPath)
+    const approvedRoots = uniquePaths([
+      ...(this.approvedExtraRootsByProject.get(canonicalPath) ?? []),
+      ...(persistedRoots ?? []),
+    ]).filter((root) =>
+      candidateExtraRoots.some((candidate) => pathsEqual(candidate, root)),
+    )
+    const pendingRoots = candidateExtraRoots.filter(
+      (candidate) => !approvedRoots.some((root) => pathsEqual(candidate, root)),
+    )
+
     this.rootsByWindowId.set(windowId, canonicalPath)
-    this.extraRootsByWindowId.set(windowId, extraRoots)
+    this.extraRootsByWindowId.set(windowId, approvedRoots)
+    this.pendingExtraRootsByWindowId.set(windowId, pendingRoots)
+    this.approvedExtraRootsByProject.set(canonicalPath, approvedRoots)
     this.readScopesByWindowId.delete(windowId)
     return canonicalPath
+  }
+
+  async listPendingExternalReadRoots(): Promise<string[]> {
+    return [...(this.pendingExtraRootsByWindowId.get(requireWindowScopeId()) ?? [])]
+  }
+
+  async approvePendingExternalReadRoots(): Promise<string[]> {
+    const windowId = requireWindowScopeId()
+    const projectRoot = this.rootsByWindowId.get(windowId)
+    if (!projectRoot) {
+      throw new Error('Project root is not registered')
+    }
+
+    const pendingRoots = this.pendingExtraRootsByWindowId.get(windowId) ?? []
+    if (pendingRoots.length === 0) return []
+
+    const approvedRoots = uniquePaths([
+      ...(this.extraRootsByWindowId.get(windowId) ?? []),
+      ...pendingRoots,
+    ])
+    this.extraRootsByWindowId.set(windowId, approvedRoots)
+    this.pendingExtraRootsByWindowId.set(windowId, [])
+    this.approvedExtraRootsByProject.set(projectRoot, approvedRoots)
+    await this.readGrantProvider?.set(projectRoot, approvedRoots)
+    return [...pendingRoots]
   }
 
   /**
@@ -262,12 +332,14 @@ export class ProjectScopeService {
     const windowId = requireWindowScopeId()
     this.rootsByWindowId.delete(windowId)
     this.extraRootsByWindowId.delete(windowId)
+    this.pendingExtraRootsByWindowId.delete(windowId)
     this.readScopesByWindowId.delete(windowId)
   }
 
   clearWindow(windowId: number): void {
     this.rootsByWindowId.delete(windowId)
     this.extraRootsByWindowId.delete(windowId)
+    this.pendingExtraRootsByWindowId.delete(windowId)
     this.readScopesByWindowId.delete(windowId)
   }
 
