@@ -2964,6 +2964,117 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it('cancels the whole install chain from the parent resource row', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [
+          {
+            name: 'ecc-fe',
+            display_name: 'Parent Tool',
+            description: 'Depends on another tool',
+            category: 'frontend',
+            homepage: '',
+            versions: [
+              {
+                version: '1.0.0',
+                platforms: {
+                  'all-platform': {
+                    url: 'https://example.com/ecc-fe.tar',
+                    sha256: 'parent-sha',
+                    size: 9,
+                  },
+                },
+                requires: ['tool:ecc-fe-soc-ysyx-am'],
+              },
+            ],
+          },
+          {
+            name: 'ecc-fe-soc-ysyx-am',
+            display_name: 'Dependency Tool',
+            description: 'Blocking dependency download',
+            category: 'frontend',
+            homepage: '',
+            versions: [
+              {
+                version: '1.0.0',
+                platforms: {
+                  'all-platform': {
+                    url: 'https://example.com/ecc-fe-soc-ysyx-am.tar',
+                    sha256: 'dependency-sha',
+                    size: 9,
+                  },
+                },
+                requires: [],
+              },
+            ],
+          },
+        ],
+        pdks: [],
+      }),
+      'utf8',
+    )
+    let downloadController: ReadableStreamDefaultController<Uint8Array> | null = null
+    let dependencyStarted = false
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('https://example.com/ecc-fe-soc-ysyx-am.tar')
+      init?.signal?.addEventListener('abort', () => {
+        downloadController?.error(
+          new DOMException('The operation was aborted.', 'AbortError'),
+        )
+      })
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            dependencyStarted = true
+            downloadController = controller
+            controller.enqueue(new Uint8Array([1, 2, 3]))
+          },
+        }),
+        { status: 200 },
+      )
+    }) as typeof fetch
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      fetchImpl,
+    })
+    const progress = vi.fn()
+
+    const install = service.installResource('tool:ecc-fe', '1.0.0', progress)
+    await vi.waitFor(() => {
+      expect(dependencyStarted).toBe(true)
+    })
+
+    await expect(service.cancelResource('tool:ecc-fe')).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:ecc-fe',
+    })
+    await expect(install).rejects.toThrow('Cancelled installation for tool:ecc-fe')
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource_id: 'tool:ecc-fe-soc-ysyx-am',
+        phase: 'cancelled',
+      }),
+    )
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource_id: 'tool:ecc-fe',
+        phase: 'cancelled',
+        message: 'Cancelled installation for tool:ecc-fe',
+      }),
+    )
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await expect(service.cancelResource('tool:ecc-fe')).rejects.toThrow(
+      'No active job for tool:ecc-fe',
+    )
+  })
+
   it('updates healthy managed dependencies whose registry lock has changed', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)

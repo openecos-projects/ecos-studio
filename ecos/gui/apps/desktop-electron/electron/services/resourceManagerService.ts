@@ -338,6 +338,11 @@ interface ActiveResourceJob {
   listener?: (event: ResourceJob) => void
 }
 
+interface ResourceInstallContext {
+  controller: AbortController
+  rootResourceId: string
+}
+
 export interface ResourceManagerServiceOptions {
   archiveExtractor?: ArchiveExtractor
   cacheDir?: string
@@ -694,6 +699,7 @@ export class ResourceManagerService {
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
     visiting: Set<string>,
+    context?: ResourceInstallContext,
   ): Promise<ResourceOperationResult> {
     if (visiting.has(resourceId)) {
       throw new Error(`Resource dependency cycle detected at ${resourceId}`)
@@ -708,7 +714,27 @@ export class ResourceManagerService {
         progress: 0,
         message: `Waiting for active job: ${resourceNameFromAnyId(resourceId)}...`,
       })
-      return await existingOperation
+      return context
+        ? await waitForOperationWithAbort(existingOperation, context.controller.signal)
+        : await existingOperation
+    }
+
+    const ownsContext = context === undefined
+    const installContext =
+      context ??
+      ({
+        controller: new AbortController(),
+        rootResourceId: resourceId,
+      } satisfies ResourceInstallContext)
+    if (ownsContext) {
+      if (this.activeJobs.has(resourceId)) {
+        throw new Error(`Job already active for ${resourceId}`)
+      }
+      this.activeJobs.set(resourceId, {
+        action,
+        controller: installContext.controller,
+        listener,
+      })
     }
 
     const operation = this.runInstallResourceWithDependencies(
@@ -717,13 +743,41 @@ export class ResourceManagerService {
       action,
       listener,
       visiting,
+      installContext,
     )
     this.resourceOperationPromises.set(resourceId, operation)
     try {
       return await operation
+    } catch (error) {
+      if (!ownsContext || !installContext.controller.signal.aborted) throw error
+
+      const originalMessage = error instanceof Error ? error.message : String(error)
+      if (
+        originalMessage === `Cancelled download for ${resourceId}` ||
+        originalMessage === `Cancelled installation for ${resourceId}`
+      ) {
+        throw error
+      }
+
+      const cancelMessage = `Cancelled installation for ${resourceId}`
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'cancelled',
+        progress: 0,
+        message: cancelMessage,
+        error: cancelMessage,
+      })
+      throw new Error(cancelMessage, { cause: error })
     } finally {
       if (this.resourceOperationPromises.get(resourceId) === operation) {
         this.resourceOperationPromises.delete(resourceId)
+      }
+      if (
+        ownsContext &&
+        this.activeJobs.get(resourceId)?.controller === installContext.controller
+      ) {
+        this.activeJobs.delete(resourceId)
       }
     }
   }
@@ -734,10 +788,13 @@ export class ResourceManagerService {
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
     visiting: Set<string>,
+    context: ResourceInstallContext,
   ): Promise<ResourceOperationResult> {
     visiting.add(resourceId)
     try {
+      throwIfAborted(context.controller.signal)
       const state = await this.fetchRegistry()
+      throwIfAborted(context.controller.signal)
       const manifest = await this.readManifest()
       const toolHealth = await checkInstalledToolHealth(getInstalledTools(manifest))
       const dependencies = this.registryRequiresForResource(
@@ -765,6 +822,7 @@ export class ResourceManagerService {
       }
 
       for (const [index, dependencyId] of unsatisfiedDependencies.entries()) {
+        throwIfAborted(context.controller.signal)
         const latestManifest = await this.readManifest()
         const latestToolHealth = await checkInstalledToolHealth(
           getInstalledTools(latestManifest),
@@ -803,15 +861,19 @@ export class ResourceManagerService {
           dependencyAction,
           listener,
           visiting,
+          context,
         )
+        throwIfAborted(context.controller.signal)
       }
 
+      throwIfAborted(context.controller.signal)
       if (resourceId.startsWith('tool:')) {
         return await this.installTool(
           resourceId.slice('tool:'.length),
           version,
           action,
           listener,
+          context,
         )
       }
       if (resourceId.startsWith('pdk:')) {
@@ -820,6 +882,7 @@ export class ResourceManagerService {
           version,
           action,
           listener,
+          context,
         )
       }
       if (resourceId.startsWith('mpc:')) {
@@ -828,6 +891,7 @@ export class ResourceManagerService {
           version,
           action,
           listener,
+          context,
         )
       }
       throw new Error(`Install is not implemented for ${resourceId}`)
@@ -1280,18 +1344,42 @@ export class ResourceManagerService {
     )
   }
 
+  private trackInstallLeaf(
+    resourceId: string,
+    action: ResourceAction,
+    listener: ((event: ResourceJob) => void) | undefined,
+    context: ResourceInstallContext,
+  ): () => void {
+    const existingJob = this.activeJobs.get(resourceId)
+    if (existingJob) {
+      if (existingJob.controller !== context.controller) {
+        throw new Error(`Job already active for ${resourceId}`)
+      }
+      return () => undefined
+    }
+
+    this.activeJobs.set(resourceId, {
+      action,
+      controller: context.controller,
+      listener,
+    })
+    return () => {
+      if (this.activeJobs.get(resourceId)?.controller === context.controller) {
+        this.activeJobs.delete(resourceId)
+      }
+    }
+  }
+
   private async installTool(
     name: string,
     requestedVersion: string | undefined,
     action: ResourceAction,
-    listener?: (event: ResourceJob) => void,
+    listener: ((event: ResourceJob) => void) | undefined,
+    context: ResourceInstallContext,
   ): Promise<ResourceOperationResult> {
     const resourceId = `tool:${name}`
-    if (this.activeJobs.has(resourceId)) {
-      throw new Error(`Job already active for ${resourceId}`)
-    }
-    const controller = new AbortController()
-    this.activeJobs.set(resourceId, { action, controller, listener })
+    const releaseActiveJob = this.trackInstallLeaf(resourceId, action, listener, context)
+    const controller = context.controller
     let tempArchive = ''
     let partialArchive = ''
     let tempExtract = ''
@@ -1457,7 +1545,7 @@ export class ResourceManagerService {
       })
       throw error
     } finally {
-      this.activeJobs.delete(resourceId)
+      releaseActiveJob()
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
       if (tempExtract)
         await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
@@ -1468,14 +1556,12 @@ export class ResourceManagerService {
     pdkId: string,
     requestedVersion: string | undefined,
     action: ResourceAction,
-    listener?: (event: ResourceJob) => void,
+    listener: ((event: ResourceJob) => void) | undefined,
+    context: ResourceInstallContext,
   ): Promise<ResourceOperationResult> {
     const resourceId = `pdk:${pdkId}`
-    if (this.activeJobs.has(resourceId)) {
-      throw new Error(`Job already active for ${resourceId}`)
-    }
-    const controller = new AbortController()
-    this.activeJobs.set(resourceId, { action, controller, listener })
+    const releaseActiveJob = this.trackInstallLeaf(resourceId, action, listener, context)
+    const controller = context.controller
     let tempArchive = ''
     let partialArchive = ''
     let tempExtract = ''
@@ -1733,7 +1819,7 @@ export class ResourceManagerService {
       })
       throw error
     } finally {
-      this.activeJobs.delete(resourceId)
+      releaseActiveJob()
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
       if (tempExtract)
         await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
@@ -1744,14 +1830,12 @@ export class ResourceManagerService {
     mpcId: string,
     requestedVersion: string | undefined,
     action: ResourceAction,
-    listener?: (event: ResourceJob) => void,
+    listener: ((event: ResourceJob) => void) | undefined,
+    context: ResourceInstallContext,
   ): Promise<ResourceOperationResult> {
     const resourceId = `mpc:${mpcId}`
-    if (this.activeJobs.has(resourceId)) {
-      throw new Error(`Job already active for ${resourceId}`)
-    }
-    const controller = new AbortController()
-    this.activeJobs.set(resourceId, { action, controller, listener })
+    const releaseActiveJob = this.trackInstallLeaf(resourceId, action, listener, context)
+    const controller = context.controller
     let tempArchive = ''
     let partialArchive = ''
     let tempExtract = ''
@@ -1888,7 +1972,7 @@ export class ResourceManagerService {
       })
       throw error
     } finally {
-      this.activeJobs.delete(resourceId)
+      releaseActiveJob()
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
       if (tempExtract)
         await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
@@ -4509,6 +4593,21 @@ function isAbortError(error: unknown): boolean {
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return
   throw new DOMException('The operation was aborted.', 'AbortError')
+}
+
+async function waitForOperationWithAbort<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  throwIfAborted(signal)
+  return await new Promise<T>((resolve, reject) => {
+    const abort = () =>
+      reject(new DOMException('The operation was aborted.', 'AbortError'))
+    signal.addEventListener('abort', abort, { once: true })
+    operation.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', abort)
+    })
+  })
 }
 
 async function pathExists(path: string): Promise<boolean> {
