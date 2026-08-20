@@ -4612,13 +4612,8 @@ impl LoadedViewer {
         };
 
         let visibility_hash = layers_visibility_hash(&self.layers);
-        let using_overview_tiles =
-            current_camera.distance > die_diag * 4.5 && self.db.view_tile_count() > 0;
-        let overview_lod = if using_overview_tiles {
-            crate::canvas_gpu3d::overview_lod_level(current_camera, world)
-        } else {
-            0
-        };
+        let using_overview_tiles = false;
+        let overview_lod = 0;
         let pixels_per_point = ui.ctx().pixels_per_point();
 
         // Base key for cached 3D instance buffer (state that invalidates the whole cache)
