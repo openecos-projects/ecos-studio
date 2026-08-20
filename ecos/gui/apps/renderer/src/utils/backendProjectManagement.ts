@@ -297,6 +297,8 @@ export interface ProjectManagementProject {
   comparisonSummary: ProjectComparisonSummary
 }
 
+export type BackendProjectManagementProject = ProjectManagementProject
+
 export interface ProjectSelectionState {
   selectedWorkspaceId: string
   selectedStep: FlowStep
@@ -925,7 +927,7 @@ export function parseWorkspaceFlowStateMap(
 }
 
 export function nextWorkspaceId(
-  project: ProjectManagementProject,
+  project: { workspaces: ReadonlyArray<{ id: string }> },
   occupiedWorkspaceIds: string[] = [],
 ): string {
   const numbers = project.workspaces

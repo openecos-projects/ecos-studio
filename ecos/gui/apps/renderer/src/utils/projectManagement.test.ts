@@ -380,9 +380,74 @@ describe('project management V3 model', () => {
 
   it('builds an empty model without manufacturing metric rows', () => {
     const model = buildProjectManagementProject(project, null)
+    expect(model.projectType).toBe('backend')
     expect(model.workspaces).toEqual([])
     expect(model.metricsRows).toEqual([])
     expect(createSelectionState(model).selectedWorkspaceId).toBe('')
+    expect(createSelectionState(model).selectedStep).toBe('DRC')
+  })
+
+  it('uses the frontend profile for workspace steps and analysis', () => {
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/cpu',
+        name: 'cpu',
+        designName: 'cpu',
+        projectType: 'frontend',
+      }),
+      {
+        projectRoot: '/projects/cpu',
+        workspacePath: '/projects/cpu/ws_0001',
+      },
+    )
+    const flow = {
+      prepare: 'success',
+      review: 'success',
+      elab: 'success',
+      lint: 'success',
+      sim: 'success',
+    } as const
+    const model = buildProjectManagementProject(
+      { ...project, projectType: 'frontend' },
+      manifest,
+      { ws_0001: flow },
+      {
+        ws_0001: {
+          frontendDetailTexts: {
+            sim: JSON.stringify({
+              summary: { total_cases: 2, passed_cases: 2, failed_cases: 0 },
+              cases: [],
+            }),
+          },
+        },
+      },
+    )
+
+    expect(model.flowSteps).toEqual(['prepare', 'review', 'elab', 'lint', 'sim'])
+    expect(model.workspaces[0]).toMatchObject({
+      startStep: 'prepare',
+      endStep: 'sim',
+      status: 'success',
+      flowStatusHint: { state: 'success', label: 'Success' },
+    })
+    expect(model.workspaces[0]?.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          step: 'prepare',
+          status: 'success',
+          canCreateWorkspace: false,
+        }),
+        expect.objectContaining({
+          step: 'sim',
+          status: 'success',
+          canCreateWorkspace: false,
+        }),
+      ]),
+    )
+    expect(model.workspaceSummaries).toEqual([])
+    expect(model.stepCompareSummaries).toEqual([])
+    expect(model.frontendAnalysis).toMatchObject({ totalCases: 2, passedCases: 2 })
+    expect(createSelectionState(model).selectedStep).toBe('sim')
   })
 
   it('derives dashboard keys and step-specific Step Analysis metrics from schema v3 ids', () => {

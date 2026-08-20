@@ -812,6 +812,7 @@ import {
 } from '@ecos-studio/shared'
 import {
   FLOW_STEPS,
+  type BackendProjectManagementProject,
   buildProjectManagementProject,
   createWorkspaceBranchDraft,
   type ProjectManifestMpcCandidate,
@@ -819,6 +820,7 @@ import {
   resolveProjectSelectionUpdate,
   nextWorkspaceId,
   type FlowStep,
+  type ProjectStage,
   type ProjectFlowStatusHint,
   type ProjectManagementProject,
   type ProjectStepStatus,
@@ -860,7 +862,7 @@ const selectedWorkspaceId = ref('')
 const collapsedProjectIds = ref<Set<string>>(new Set())
 const workspacePreviewProjectIds = ref<Set<string>>(new Set())
 const projectPreviewShowsAll = ref(false)
-const selectedStep = ref<FlowStep>('DRC')
+const selectedStep = ref<ProjectStage>('DRC')
 const selectedIssueMetric = ref<string | null>(null)
 const selectedAnalysisTab = ref<'dashboard' | 'step'>('dashboard')
 const hasOpenedStepAnalysis = ref(false)
@@ -1247,7 +1249,7 @@ function cssEscape(value: string): string {
   return value.replace(/["\\]/g, '\\$&')
 }
 
-function selectStep(step: FlowStep) {
+function selectStep(step: ProjectStage) {
   selectedStep.value = step
   selectedIssueMetric.value = null
   hasOpenedStepAnalysis.value = true
@@ -1262,7 +1264,7 @@ function selectIssueMetric(metric: string | null) {
 function openStepAnalysis() {
   selectedAnalysisTab.value = 'step'
   if (!hasOpenedStepAnalysis.value) {
-    selectedStep.value = 'Synth'
+    selectedStep.value = selectedProject.value.flowSteps[0] ?? 'Synth'
     hasOpenedStepAnalysis.value = true
   }
 }
@@ -1306,13 +1308,18 @@ function toggleDialogMaximized() {
   isDialogMaximized.value = !isDialogMaximized.value
 }
 
-async function startWorkspaceFromCell(workspaceId: string, step: FlowStep) {
+async function startWorkspaceFromCell(workspaceId: string, step: ProjectStage) {
+  if (
+    selectedProject.value.projectType !== 'backend' ||
+    !(FLOW_STEPS as readonly ProjectStage[]).includes(step)
+  )
+    return
   const targetWorkspaceId = await nextAvailableWorkspaceId(selectedProject.value)
   if (!targetWorkspaceId) return
   branchDraft.value = createWorkspaceBranchDraft(
-    selectedProject.value,
+    selectedProject.value as BackendProjectManagementProject,
     workspaceId,
-    step,
+    step as FlowStep,
     targetWorkspaceId,
   )
 }
@@ -1448,7 +1455,7 @@ function handleWorkspacePopoverKeydown(event: KeyboardEvent) {
   if (projectActionMenuId.value || workspaceActionMenuId.value) closeRowActionMenus()
 }
 
-async function startWorkspaceFromPopoverStep(workspaceId: string, step: FlowStep) {
+async function startWorkspaceFromPopoverStep(workspaceId: string, step: ProjectStage) {
   await startWorkspaceFromCell(workspaceId, step)
   closeWorkspaceFlowPopover()
 }
@@ -1456,11 +1463,12 @@ async function startWorkspaceFromPopoverStep(workspaceId: string, step: FlowStep
 function workspaceConfiguredSteps(
   workspace: ProjectWorkspace,
 ): ProjectWorkspace['steps'] {
-  const startIndex = FLOW_STEPS.indexOf(workspace.startStep)
-  const endIndex = FLOW_STEPS.indexOf(workspace.endStep)
+  const flowSteps = workspace.steps.map((cell) => cell.step)
+  const startIndex = flowSteps.indexOf(workspace.startStep)
+  const endIndex = flowSteps.indexOf(workspace.endStep)
   if (startIndex < 0 || endIndex < startIndex) return workspace.steps
   return workspace.steps.filter((cell) => {
-    const stepIndex = FLOW_STEPS.indexOf(cell.step)
+    const stepIndex = flowSteps.indexOf(cell.step)
     return stepIndex >= startIndex && stepIndex <= endIndex
   })
 }

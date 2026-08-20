@@ -1,0 +1,502 @@
+.fe-analysis-panel {
+  min-width: 0;
+  min-height: 100%;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fe-analysis-heading {
+  min-height: 62px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));
+}
+
+.fe-analysis-subtitle,
+.fe-analysis-context,
+.fe-section-heading,
+.fe-step-detail-heading h3,
+.fe-step-findings p {
+  margin: 0;
+}
+
+.fe-analysis-subtitle {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.fe-analysis-context {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.fe-analysis-tabs {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-primary);
+}
+
+.fe-analysis-tabs button,
+.fe-stage-tabs button,
+.fe-show-more {
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.fe-analysis-tabs button {
+  min-height: 28px;
+  padding: 0 11px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.fe-analysis-tabs button.selected {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.fe-dashboard,
+.fe-step-analysis {
+  min-width: 0;
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.fe-health-band,
+.fe-workspace-compare,
+.fe-attention,
+.fe-step-detail {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.fe-health-band {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(480px, 2.1fr);
+}
+
+.fe-flow-progress {
+  padding: 16px;
+  border-right: 1px solid var(--border-color);
+}
+
+.fe-eyebrow,
+.fe-health-metrics dt,
+.fe-step-metrics dt,
+.fe-step-detail-heading label span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.fe-progress-headline {
+  margin-top: 7px;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.fe-progress-headline strong {
+  font-size: 27px;
+  font-weight: 680;
+}
+
+.fe-progress-headline span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.fe-progress-track,
+.fe-progress-cell i {
+  display: block;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+}
+
+.fe-progress-track {
+  height: 5px;
+  margin-top: 11px;
+  border-radius: 2px;
+}
+
+.fe-progress-track i,
+.fe-progress-cell b {
+  display: block;
+  height: 100%;
+  background: var(--accent-color);
+}
+
+.fe-health-metrics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.fe-health-metrics > div {
+  padding: 15px 13px;
+  border-right: 1px solid var(--border-color);
+}
+
+.fe-health-metrics > div:last-child {
+  border-right: 0;
+}
+
+.fe-health-metrics dd,
+.fe-step-metrics dd {
+  margin: 7px 0 2px;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.fe-health-metrics small,
+.fe-section-heading small {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.fe-section-heading {
+  min-height: 38px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.fe-compare-table {
+  overflow-x: auto;
+}
+
+.fe-compare-row {
+  min-width: 760px;
+  display: grid;
+  grid-template-columns: minmax(150px, 1.35fr) minmax(
+      110px,
+      1fr
+    ) 70px 115px 90px 80px 70px;
+  align-items: center;
+}
+
+.fe-compare-row.is-head {
+  min-height: 31px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 9px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.fe-compare-row > span {
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.fe-compare-row.is-data {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.fe-compare-row.is-data:last-child {
+  border-bottom: 0;
+}
+
+.fe-compare-row.is-data:hover,
+.fe-compare-row.is-data.selected {
+  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+.fe-workspace-cell {
+  display: grid;
+  grid-template-columns: 15px minmax(0, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.fe-workspace-cell small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-progress-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fe-progress-cell i {
+  width: 52px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.fe-attention-list,
+.fe-step-findings ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fe-attention-list li + li,
+.fe-step-findings li + li {
+  border-top: 1px solid var(--border-color);
+}
+
+.fe-attention-list button {
+  width: 100%;
+  min-height: 45px;
+  padding: 7px 11px;
+  display: grid;
+  grid-template-columns: 16px 112px minmax(100px, 0.7fr) minmax(180px, 1.5fr) 16px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  color: var(--text-primary);
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.fe-attention-list button:hover {
+  background: var(--bg-tertiary);
+}
+
+.fe-attention-list strong,
+.fe-attention-list small,
+.fe-finding-origin {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-finding-origin,
+.fe-attention-list small {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.fe-attention-empty,
+.fe-step-unavailable {
+  min-height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.fe-attention-empty i {
+  color: var(--success-color, #22a06b);
+  font-size: 17px;
+}
+
+.fe-attention-empty.compact {
+  min-height: 68px;
+}
+
+.fe-show-more {
+  width: 100%;
+  min-height: 30px;
+  border-top: 1px solid var(--border-color);
+  font-size: 10px;
+}
+
+.fe-stage-tabs {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.fe-stage-tabs button {
+  position: relative;
+  min-height: 48px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-right: 1px solid var(--border-color);
+  font-size: 11px;
+}
+
+.fe-stage-tabs button:last-child {
+  border-right: 0;
+}
+
+.fe-stage-tabs button.selected {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-secondary));
+}
+
+.fe-stage-tabs button.selected::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 2px;
+  background: var(--accent-color);
+}
+
+.fe-stage-tabs em {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.fe-stage-tabs em.status-success,
+.fe-stage-tabs em.status-reused {
+  background: var(--success-color, #22a06b);
+}
+
+.fe-stage-tabs em.status-running {
+  background: var(--warning-color, #d99b19);
+}
+
+.fe-stage-tabs em.status-failed {
+  background: var(--danger-color, #d94f4f);
+}
+
+.fe-step-detail-heading {
+  min-height: 62px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.fe-step-detail-heading h3 {
+  margin-top: 3px;
+  font-size: 15px;
+}
+
+.fe-step-detail-heading label {
+  display: grid;
+  gap: 4px;
+}
+
+.fe-step-detail-heading select {
+  min-width: 190px;
+  height: 28px;
+  padding: 0 25px 0 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  font-size: 11px;
+}
+
+.fe-step-metrics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border-color);
+}
+
+.fe-step-metrics > div {
+  min-height: 76px;
+  padding: 13px;
+  border-right: 1px solid var(--border-color);
+}
+
+.fe-step-metrics > div:last-child {
+  border-right: 0;
+}
+
+.fe-step-metrics dd {
+  font-size: 15px;
+}
+
+.fe-step-findings li {
+  padding: 11px 13px;
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.fe-step-findings p {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.fe-step-findings small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.fe-step-unavailable {
+  min-height: 210px;
+  flex-direction: column;
+}
+
+.tone-good {
+  color: var(--success-color, #22a06b) !important;
+}
+
+.tone-warn {
+  color: var(--warning-color, #d99b19) !important;
+}
+
+.tone-bad {
+  color: var(--danger-color, #d94f4f) !important;
+}
+
+.tone-neutral {
+  color: var(--text-secondary) !important;
+}
+
+@media (max-width: 1100px) {
+  .fe-health-band {
+    grid-template-columns: 1fr;
+  }
+
+  .fe-flow-progress {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .fe-step-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .fe-stage-tabs button span {
+    display: none;
+  }
+}

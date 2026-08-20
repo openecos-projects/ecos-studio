@@ -1,5 +1,19 @@
 <template>
-  <section class="analysis-panel mockup-analysis-panel" aria-label="Analysis">
+  <FrontendProjectAnalysisPanel
+    v-if="
+      project.projectType === 'frontend' &&
+      project.frontendAnalysis &&
+      project.workspaces.length > 0
+    "
+    :project="project"
+    :selected-analysis-tab="selectedAnalysisTab"
+    :selected-step="selectedStep"
+    :selected-workspace-id="selectedWorkspaceId"
+    @select-analysis-tab="selectAnalysisTab"
+    @select-step="selectStep"
+    @select-workspace="selectWorkspace"
+  />
+  <section v-else class="analysis-panel mockup-analysis-panel" aria-label="Analysis">
     <div class="analysis-heading">
       <div class="analysis-title-group">
         <p id="project-analysis-subtitle" class="analysis-subtitle">
@@ -456,7 +470,7 @@
         :project-objective="project.objective"
         :best-workspace-id="project.bestWorkspaceId"
         :best-workspace-reason="project.comparisonSummary.bestReason"
-        :selected-step="selectedStep"
+        :selected-step="backendSelectedStep"
         :selected-workspace-id="selectedWorkspaceId"
         :selected-issue-metric="selectedIssueMetric"
         @select-step="selectStep"
@@ -490,10 +504,12 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import ProjectQorScoreChart from '@/components/ProjectQorScoreChart.vue'
 import ProjectStepAnalysisPanel from '@/components/ProjectStepAnalysisPanel.vue'
+import FrontendProjectAnalysisPanel from './FrontendProjectAnalysisPanel.vue'
 import {
   type FlowStep,
   type ProjectManagementProject,
   type ProjectMetricPoint,
+  type ProjectStage,
 } from '@/utils/projectManagement'
 import type { QorGateStatus } from '@/utils/projectQorTrend'
 import {
@@ -546,14 +562,14 @@ const SIGNOFF_DISPLAY: Record<QorGateStatus, { label: string; tone: string }> = 
 const props = defineProps<{
   project: ProjectManagementProject
   selectedAnalysisTab: AnalysisTab
-  selectedStep: FlowStep
+  selectedStep: ProjectStage
   selectedWorkspaceId: string
   selectedIssueMetric?: string | null
 }>()
 
 const emit = defineEmits<{
   'select-analysis-tab': [tab: AnalysisTab]
-  'select-step': [step: FlowStep]
+  'select-step': [step: ProjectStage]
   'select-workspace': [workspaceId: string]
   'select-issue-metric': [metric: string | null]
   'set-baseline': [{ workspaceId: string }]
@@ -570,6 +586,12 @@ const dashboardCompareScrollTop = ref(0)
 const dashboardCompareTable = ref<HTMLElement | null>(null)
 
 const hasProjectData = computed(() => props.project.workspaces.length > 0)
+const backendSelectedStep = computed<FlowStep>(() =>
+  props.project.projectType === 'backend' &&
+  props.project.flowSteps.includes(props.selectedStep)
+    ? (props.selectedStep as FlowStep)
+    : 'Synth',
+)
 const analysisSubtitle = computed(() => {
   const count = props.project.workspaces.length
   const workspaceLabel = `${count} workspace${count === 1 ? '' : 's'}`
@@ -846,7 +868,7 @@ function handleAnalysisTabKeydown(event: KeyboardEvent, currentTab: AnalysisTab)
   document.getElementById(`analysis-tab-${nextTab}`)?.focus()
 }
 
-function selectStep(step: FlowStep): void {
+function selectStep(step: ProjectStage): void {
   emit('select-step', step)
 }
 

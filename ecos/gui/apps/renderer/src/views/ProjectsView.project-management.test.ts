@@ -530,7 +530,9 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('handleAnalysisTabSelection')
     expect(source).toContain('setQorBaseline')
     expect(source).toContain('function openStepAnalysis()')
-    expect(source).toContain("selectedStep.value = 'Synth'")
+    expect(source).toContain(
+      "selectedStep.value = selectedProject.value.flowSteps[0] ?? 'Synth'",
+    )
     expect(source).toContain('hasOpenedStepAnalysis.value = true')
     expect(source).not.toContain('selectedStepComparePoints')
   })
