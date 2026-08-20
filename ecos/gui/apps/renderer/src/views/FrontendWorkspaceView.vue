@@ -3854,8 +3854,9 @@ async function loadDetail(context?: DetailLoadContext): Promise<void> {
       detail.value = null
       return
     }
-    detail.value = info as unknown as FrontendStepDetail
-    await hydrateWaveCasesFromWorkspaceResources()
+    const loadedDetail = info as unknown as FrontendStepDetail
+    detail.value = loadedDetail
+    await hydrateWaveCasesFromWorkspaceResources(loadedDetail, isCurrentRequest)
     if (!isCurrentRequest()) return
     const previousCaseName = selectedCase.value?.name || ''
     selectedCase.value =
@@ -3917,25 +3918,37 @@ async function loadSelectedLog(): Promise<void> {
   }
 }
 
-async function hydrateWaveCasesFromWorkspaceResources(): Promise<void> {
-  if (!isGlobalWaveView.value || detailWaveItems.value.length > 0) return
+async function hydrateWaveCasesFromWorkspaceResources(
+  loadedDetail: FrontendStepDetail,
+  isCurrentRequest: () => boolean,
+): Promise<void> {
+  if (
+    !isCurrentRequest() ||
+    detail.value !== loadedDetail ||
+    !isGlobalWaveView.value ||
+    detailWaveItems.value.length > 0
+  )
+    return
 
   try {
     const response = await resolveWorkspaceStepInfoApi({
       step: 'sim',
       id: InfoEnum.frontend_detail,
     })
+    if (!isCurrentRequest() || detail.value !== loadedDetail) return
     if (response.response !== 'available') return
     const fallbackCases = Array.isArray(response.info?.cases)
       ? (response.info.cases as SimCase[])
       : []
-    if (!fallbackCases.some((testCase) => Boolean(testCase.wave)) || !detail.value) return
+    if (!fallbackCases.some((testCase) => Boolean(testCase.wave))) return
     detail.value = {
-      ...detail.value,
+      ...loadedDetail,
       cases: fallbackCases,
     }
   } catch (err) {
-    console.warn('Failed to load waveform cases from workspace resources:', err)
+    if (isCurrentRequest() && detail.value === loadedDetail) {
+      console.warn('Failed to load waveform cases from workspace resources:', err)
+    }
   }
 }
 
