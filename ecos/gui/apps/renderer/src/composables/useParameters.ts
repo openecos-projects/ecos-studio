@@ -243,7 +243,11 @@ export function parametersHaveChipIdentity(
   if (identityValues.some((value) => String(value ?? '').trim())) return true
   const die = record.Die ?? record.die
   if (!die || typeof die !== 'object' || Array.isArray(die)) return false
-  const area = Number((die as { Area?: unknown; area?: unknown }).Area ?? (die as { area?: unknown }).area ?? 0)
+  const area = Number(
+    (die as { Area?: unknown; area?: unknown }).Area ??
+      (die as { area?: unknown }).area ??
+      0,
+  )
   return Number.isFinite(area) && area > 0
 }
 

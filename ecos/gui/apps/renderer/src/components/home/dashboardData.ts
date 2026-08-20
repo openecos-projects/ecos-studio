@@ -153,7 +153,9 @@ function flowStepLookupKeys(step: {
   step?: string
 }): string[] {
   return [step.name, step.label, step.path, step.step]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .filter(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    )
     .map((value) => value.trim().toLowerCase())
 }
 

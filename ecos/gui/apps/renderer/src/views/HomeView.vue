@@ -422,7 +422,11 @@
     :draggable="false"
   >
     <div v-if="resolvedChecklistItems.length" class="checklist-detail-list">
-      <section v-for="item in resolvedChecklistItems" :key="item.id" :class="`is-${item.state}`">
+      <section
+        v-for="item in resolvedChecklistItems"
+        :key="item.id"
+        :class="`is-${item.state}`"
+      >
         <div>
           <strong>{{ item.title }}</strong
           ><span>{{ item.step }}</span>

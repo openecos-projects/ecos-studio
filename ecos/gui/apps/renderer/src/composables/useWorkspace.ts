@@ -1121,7 +1121,6 @@ export function useWorkspace() {
       const stringArray = (value: unknown): string[] =>
         Array.isArray(value) ? (value as string[]) : []
       let response: Awaited<ReturnType<typeof createWorkspaceApi>>
-      let createdProjectName = designName
 
       if (designTool === 'frontend') {
         const parameters = {
@@ -1256,7 +1255,6 @@ export function useWorkspace() {
           pdk_json: pdkJson,
           project_context: creationConfig?.project_context,
         })
-        createdProjectName = backendParameters.Design as string
       }
       if (response.response === 'success') {
         candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(

@@ -210,5 +210,4 @@ describe('useParameters helpers', () => {
     expect(parametersHaveChipIdentity({ pdk: 'ics55', design: 'demo' })).toBe(true)
     expect(parametersHaveChipIdentity({ die: { area: 1200 } })).toBe(true)
   })
-
 })

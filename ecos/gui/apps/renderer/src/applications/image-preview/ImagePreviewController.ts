@@ -423,7 +423,10 @@ export class ImagePreviewController {
       delta *= Math.max(this.screenHeight, 1)
     }
     const notches = delta / WHEEL_PIXELS_PER_NOTCH
-    return Math.max(-WHEEL_MAX_NOTCHES_PER_EVENT, Math.min(WHEEL_MAX_NOTCHES_PER_EVENT, notches))
+    return Math.max(
+      -WHEEL_MAX_NOTCHES_PER_EVENT,
+      Math.min(WHEEL_MAX_NOTCHES_PER_EVENT, notches),
+    )
   }
 
   private clampScale(scale: number): number {
