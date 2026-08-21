@@ -29,6 +29,7 @@ import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { electronLogger } from './logger'
 import { isRelativePathOutsideRoot } from './pathScope'
+import { requiredToolHealthMarkers } from './toolHealthPolicy'
 import {
   validateMpcSpec,
   type ResourceAction,
@@ -3802,8 +3803,8 @@ async function checkToolEntryHealth(
   entry: ToolInventoryEntry,
 ): Promise<ToolHealthStatus> {
   const normalizedName = normalizeToolName(entry.name)
-  const requiredMarkers = requiredToolMarkers(normalizedName)
-  const executableMarkers = requiredToolExecutableMarkers(normalizedName)
+  const markerDefinitions = requiredToolHealthMarkers(normalizedName)
+  const requiredMarkers = markerDefinitions.map((marker) => marker.path)
   const rootExists = await isExistingDirectory(entry.path)
   if (!rootExists) {
     return {
@@ -3815,13 +3816,14 @@ async function checkToolEntryHealth(
   }
 
   const missingMarkers: string[] = []
-  for (const marker of requiredMarkers) {
-    const markerPath = join(entry.path, marker)
-    const isValid = executableMarkers.has(marker)
-      ? await isUsableExecutable(markerPath, process.platform)
-      : await pathExists(markerPath)
+  for (const marker of markerDefinitions) {
+    const markerPath = join(entry.path, marker.path)
+    const isValid =
+      marker.kind === 'executable'
+        ? await isUsableExecutable(markerPath, process.platform)
+        : await pathExists(markerPath)
     if (!isValid) {
-      missingMarkers.push(marker)
+      missingMarkers.push(marker.path)
     }
   }
 
@@ -3852,78 +3854,6 @@ async function checkToolEntryHealth(
     required_markers: requiredMarkers,
     missing_markers: [],
   }
-}
-
-function requiredToolMarkers(normalizedName: string): string[] {
-  if (normalizedName === 'verilator') {
-    return ['bin/verilator', 'bin/verilator_bin', 'share/verilator/include/verilated.cpp']
-  }
-  if (normalizedName === 'riscv-toolchain') {
-    return [
-      'bin/riscv64-unknown-elf-gcc',
-      'bin/riscv64-unknown-elf-ld',
-      'bin/riscv64-unknown-elf-objdump',
-      'bin/riscv64-unknown-elf-objcopy',
-    ]
-  }
-  if (normalizedName === 'ecc-fe') {
-    return ['bin/ecc-fe', 'fecompiler']
-  }
-  if (normalizedName === 'ecc-fe-soc-ysyx-am') {
-    return ['manifest.json', 'catalog.json', 'filelist.soc.f', 'driver/main.cpp']
-  }
-  if (normalizedName === 'ecc-fe-cpu-rtl') {
-    return [
-      'thirdparty/README',
-      'thirdparty/cv32e40p',
-      'thirdparty/cva6',
-      'thirdparty/darkriscv',
-      'thirdparty/ibex',
-      'thirdparty/learn-fpga',
-      'thirdparty/picorv32',
-      'thirdparty/scr1',
-      'thirdparty/serv',
-      'thirdparty/vexriscv',
-    ]
-  }
-  if (normalizedName.startsWith('ecc-fe-cpu-')) {
-    return ['thirdparty']
-  }
-  if (normalizedName === 'ecc-fe-difftest-ref') {
-    return ['tools/riscv32-spike-so']
-  }
-  if (normalizedName === 'ecc-fe-examples') {
-    return [
-      'examples/ysyx_00000000/filelist.cpu.f',
-      'examples/ysyx_00000000/rtl/ysyx_00000000.sv',
-      'examples/ysyx_00000000/rtl/ysyx_00000000_difftest.sv',
-    ]
-  }
-  if (normalizedName.startsWith('ecc-fe-test-')) {
-    return ['tests']
-  }
-  if (normalizedName === 'surfer') {
-    return ['index.html', 'integration.js', 'surfer.js', 'surfer_bg.wasm']
-  }
-  return []
-}
-
-function requiredToolExecutableMarkers(normalizedName: string): ReadonlySet<string> {
-  if (normalizedName === 'verilator') {
-    return new Set(['bin/verilator', 'bin/verilator_bin'])
-  }
-  if (normalizedName === 'riscv-toolchain') {
-    return new Set([
-      'bin/riscv64-unknown-elf-gcc',
-      'bin/riscv64-unknown-elf-ld',
-      'bin/riscv64-unknown-elf-objdump',
-      'bin/riscv64-unknown-elf-objcopy',
-    ])
-  }
-  if (normalizedName === 'ecc-fe') {
-    return new Set(['bin/ecc-fe'])
-  }
-  return new Set()
 }
 
 function executableHealthMarkers(entry: ToolInventoryEntry): string[] {
