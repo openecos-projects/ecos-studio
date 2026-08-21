@@ -13284,12 +13284,30 @@ mod tests {
         assert!(is_filler_instance(Some("inst_tap"), Some("FILLTAPH7R")));
 
         // icsprout55-pdk IO fillers
-        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER0005")));
-        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER001")));
-        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER01")));
-        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER1")));
-        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER10")));
-        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER50")));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER0005")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER001")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER01")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER1")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER10")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER50")
+        ));
 
         // Instance name matches
         assert!(is_filler_instance(Some("FILLER_0_0"), None));
