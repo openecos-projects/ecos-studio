@@ -176,6 +176,50 @@ function createPool() {
 }
 
 describe('EccRpcRuntimeService pool', () => {
+  it('routes frontend-specific workspace payloads through the workspace pool', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.createWorkspacePayload({
+      cpu_filelist: '/work/cpu.f',
+      directory: '/work/frontend',
+    })
+    const client = pool.clientFor('/work/frontend')
+    client.responses.push({ state: 'Success', step: 'prepare' })
+
+    await expect(
+      pool.service.runStepPayload(workspace.workspaceHandle, {
+        cpu: 'ysyx_22050550',
+        rerun: true,
+        step: 'prepare',
+      }),
+    ).resolves.toEqual({ state: 'Success', step: 'prepare' })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'flow.run_step',
+      options: { timeoutMs: 0 },
+      params: {
+        cpu: 'ysyx_22050550',
+        rerun: true,
+        step: 'prepare',
+        workspaceId: 'id-/work/frontend',
+      },
+    })
+  })
+
+  it('routes generic frontend RPC calls through the control runtime', async () => {
+    const pool = createPool()
+    await pool.service.rpcHello()
+    pool.clientFor(null).responses.push({ cores: ['ysyx_22050550'] })
+
+    await expect(pool.service.callRuntime('frontend.catalog')).resolves.toEqual({
+      cores: ['ysyx_22050550'],
+    })
+    expect(pool.clientFor(null).calls.at(-1)).toEqual({
+      method: 'frontend.catalog',
+      options: {},
+      params: {},
+    })
+  })
+
   it('releases the one-shot workspace creation sidecar after the session is registered', async () => {
     const pool = createPool()
 

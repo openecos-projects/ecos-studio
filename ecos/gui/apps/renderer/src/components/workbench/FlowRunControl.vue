@@ -140,7 +140,7 @@ async function executeRun(rerun: boolean): Promise<void> {
   })
 
   if (isHomeStage.value) {
-    setFirstRunStepOngoing()
+    setFirstRunStepOngoing({ resetAll: rerun })
     if (!(await runAllFlow({ rerun }))) capture.stop()
     return
   }

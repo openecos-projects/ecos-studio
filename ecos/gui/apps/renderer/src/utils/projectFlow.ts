@@ -7,6 +7,7 @@ export const FLOW_STEPS = [
   'Legal',
   'Route',
   'DRC',
+  'LVS',
   'Filler',
   'RCX',
   'STA',

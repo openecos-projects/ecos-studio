@@ -64,7 +64,7 @@ STAGES = (
         "The ECC runner loads the design database, calls `init_fp` with the Floorplan configuration, runs the floorplanner, and records track creation, IO-pin placement, tap-cell insertion, and PDN as subflow steps. It destroys the floorplan engine, saves the updated database and geometry snapshot, then runs analysis and checklist generation.",
         "The step cannot proceed without an ECC database instance. Its subflow status is progress evidence only; inspect saved artifacts and analysis records before claiming a successful floorplan.",
         "ECC reads design-layout and design-statistics facts to publish die/core area, core utilization, instance count, and net count.",
-        "ecc/chipcompiler/tools/ecc/configs/fp_default_config.json",
+        "ecc/chipcompiler/tools/ecc/configs/floorplan_ecc.json",
     ),
     Stage(
         "fixfanout",
@@ -73,7 +73,7 @@ STAGES = (
         "The ECC runner loads the current database, marks the configured clock net when present, invokes `run_net_opt`, saves the resulting design and geometry snapshot, and then produces metrics and checklist evidence.",
         "The step cannot execute when ECC input loading fails. The reported maximum fanout is evidence from the saved feature database or workspace parameter, not proof that every timing or electrical constraint is closed.",
         "ECC publishes maximum fanout together with database instance and net counts after net optimization.",
-        "ecc/chipcompiler/tools/ecc/configs/no_default_config_fixfanout.json",
+        "ecc/chipcompiler/tools/ecc/configs/fixfanout_ecc.json",
     ),
     Stage(
         "place",
@@ -82,7 +82,7 @@ STAGES = (
         "The DreamPlace runner loads the current ECC design, constructs the placement engine, runs global placement with its acceptance gate, then optionally legalizes and refines the result before publishing maps, artifacts, and QoR analysis.",
         "A missing ECC module, a failed DreamPlace import, or infinite HPWL prevents a successful placement result. Subflow progress is not terminal evidence; inspect the tool result and published artifacts.",
         "DreamPlace and ECC publish placement wirelength, density, and congestion facts together with the placement-map resources consumed by the GUI.",
-        "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace.json",
+        "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json",
         ("dreamplace.runner", "dreamplace.module", "ecc.runner", "ecc.module"),
     ),
     Stage(
@@ -92,7 +92,7 @@ STAGES = (
         "The ECC runner loads the design, invokes `run_cts` for clock-tree synthesis with the CTS configuration and step data directory, writes a CTS report and map, saves the design, persists clock-timing feature facts, and then runs analysis and checklist generation.",
         "The step cannot execute without an ECC database instance. CTS metric availability depends on the persisted `CTS` feature facts; absent timing-quality facts must remain unavailable rather than be interpreted as zero skew.",
         "ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics.",
-        "ecc/chipcompiler/tools/ecc/configs/cts_default_config.json",
+        "ecc/chipcompiler/tools/ecc/configs/cts_ecc.json",
     ),
     Stage(
         "legalization",
@@ -101,7 +101,7 @@ STAGES = (
         "The DreamPlace runner loads ECC data, builds `DreamplaceModule`, forces legalization-only parameters, creates the placement engine, and runs it. In legalization-only mode global placement and fillers are disabled while `legalize_flag` is enabled; the runner then saves the design and runs analysis and checklist generation.",
         "A missing ECC instance prevents execution. DreamPlace reports failure when its PPA result has infinite HPWL, so subflow progress alone is not terminal legalization evidence.",
         "The standard GUI stage comparison has no legalization-specific numeric metric. Database and QoR artifacts are still produced by the shared analysis path when the run reaches it.",
-        "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace.json",
+        "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json",
         ("dreamplace.runner", "dreamplace.module", "ecc.runner", "ecc.module"),
     ),
     Stage(
@@ -111,7 +111,7 @@ STAGES = (
         "The ECC runner loads the design, initializes STA first only when routing timing is enabled by the route configuration, invokes `run_routing`, saves the resulting design and geometry snapshot, then runs analysis and checklist generation.",
         "The step cannot execute without an ECC database instance. Routing timing initialization is conditional on the configuration, so timing data must not be assumed from route completion alone.",
         "ECC collects database net wirelength and via counts plus route feature facts; the GUI exposes detailed-route patch, via, violation, wirelength, demand, and overflow records when available.",
-        "ecc/chipcompiler/tools/ecc/configs/rt_default_config.json",
+        "ecc/chipcompiler/tools/ecc/configs/route_ecc.json",
     ),
     Stage(
         "drc",
@@ -120,7 +120,7 @@ STAGES = (
         "The ECC runner loads the design, initializes the DRC engine in the step data directory, invokes `run_drc` with the configured report path, saves the design, persists DRC feature data, and then runs analysis and checklist generation.",
         "The step cannot execute without an ECC database instance. A DRC run needs its feature/report artifacts to distinguish zero reported violations from missing analysis output.",
         "ECC reads the `drc.number` feature fact to publish the DRC count used by the GUI.",
-        "ecc/chipcompiler/tools/ecc/configs/drc_default_config.json",
+        "ecc/chipcompiler/tools/ecc/configs/drc_ecc.json",
     ),
     Stage(
         "filler",
@@ -137,7 +137,7 @@ STAGES = (
         "The ECC runner loads the design, initializes RCX with the workspace PDK, runs and destroys RCX, copies generated SPEF files to the declared output paths, saves the design, persists bounded SPEF feature facts, and runs analysis and checklist generation.",
         "The step cannot execute without an ECC database instance. Missing SPEF outputs or unparseable corner files must remain visible through RCX feature and signoff metrics rather than being treated as a successful extraction.",
         "ECC derives SPEF file and expected-corner coverage, parses electrical totals by corner, and publishes missing-corner, parse-failure, worst-capacitance, and worst-resistance facts.",
-        "ecc/chipcompiler/tools/ecc/configs/rcx.json",
+        "ecc/chipcompiler/tools/ecc/configs/rcx_ecc.json",
     ),
     Stage(
         "sta",
@@ -146,7 +146,7 @@ STAGES = (
         "The ECC runner expands configured STA signoff items into Liberty and RCX-corner combinations. For each item it requires the SDC, SPEF, and Liberty files, runs timing into corner-specific report and feature directories, saves the design, and then builds multi-corner analysis and checklist evidence.",
         "No signoff items, a missing SDC, SPEF, Liberty file, or report/feature directory terminates STA as incomplete. The stage does not synthesize missing corners, and its aggregate results must preserve that coverage state.",
         "ECC reads all available corner QoR summaries, selects the worst setup/hold WNS and TNS and lowest frequency, records violation and coverage counts, then emits signoff facts and timing-issue artifacts.",
-        "ecc/chipcompiler/tools/ecc/configs/sta.json",
+        "ecc/chipcompiler/tools/ecc/configs/sta_ecc.json",
     ),
     Stage(
         "harden",
@@ -155,7 +155,7 @@ STAGES = (
         "The ECC runner loads the database, requires at least one configured STA signoff item, writes an abstract LEF, writes a timing-model LIB from the selected signoff inputs, exports hardened GDS, and then runs final package analysis.",
         "Without signoff STA items the runner returns failure before artifact generation. Final delivery evidence requires the generated GDS, LEF, and LIB package artifacts, not merely a completed subflow record.",
         "ECC checks hardened GDS, LEF, and LIB existence and publishes the count of missing required delivery artifacts.",
-        "ecc/chipcompiler/tools/ecc/configs/sta.json",
+        "ecc/chipcompiler/tools/ecc/configs/sta_ecc.json",
     ),
 )
 

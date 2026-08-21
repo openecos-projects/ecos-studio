@@ -1,20 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-vi.mock('@/api/plugin', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/plugin')>()
-
+vi.mock('@/api/plugin', () => {
   return {
-    ...actual,
     activatePdkApi: vi.fn(),
     cancelResourceApi: vi.fn(),
+    checkResourceUpdatesApi: vi.fn(),
     importLocalResourcePathApi: vi.fn(),
     installResourceApi: vi.fn(),
     installToolApi: vi.fn(),
     listResourcesApi: vi.fn(),
-    refreshRegistryApi: vi.fn(),
     removePdkReferenceApi: vi.fn(),
-    resourceListToTools: vi.fn(actual.resourceListToTools),
+    resourceListToTools: (payload: {
+      resources: Array<{
+        type: string
+        name: string
+        display_name: string
+        description: string
+        category: string
+        status: string
+        installed_version: string | null
+        available_versions: string[]
+        path: string | null
+      }>
+    }) =>
+      payload.resources
+        .filter((resource) => resource.type === 'tool')
+        .map((resource) => ({
+          name: resource.name,
+          display_name: resource.display_name,
+          description: resource.description,
+          category: resource.category,
+          status: resource.status,
+          installed_version: resource.installed_version,
+          available_versions: resource.available_versions,
+          install_path: resource.path,
+        })),
     subscribePluginProgress: vi.fn(),
     subscribeResourceProgress: vi.fn(),
     uninstallResourceApi: vi.fn(),
@@ -26,10 +47,10 @@ vi.mock('@/api/plugin', async (importOriginal) => {
 
 import {
   cancelResourceApi,
+  checkResourceUpdatesApi,
   importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
-  resourceListToTools,
   subscribeResourceProgress,
   uninstallResourceApi,
   updateResourceApi,
@@ -105,6 +126,7 @@ describe('pluginStore', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     vi.mocked(cancelResourceApi).mockReset()
+    vi.mocked(checkResourceUpdatesApi).mockReset()
     vi.mocked(importLocalResourcePathApi).mockReset()
     vi.mocked(installResourceApi).mockReset()
     vi.mocked(listResourcesApi).mockReset()
@@ -134,10 +156,6 @@ describe('pluginStore', () => {
     await store.fetchTools()
 
     expect(listResourcesApi).toHaveBeenCalledTimes(1)
-    expect(resourceListToTools).toHaveBeenCalledWith({
-      resources: unifiedResources,
-      diagnostics: [],
-    })
     expect(store.resources.map((resource) => resource.id)).toEqual([
       'tool:yosys',
       'pdk:ics55',
@@ -154,6 +172,62 @@ describe('pluginStore', () => {
         install_path: '/tmp/tools/yosys/0.61',
       },
     ])
+  })
+
+  it('keeps the newest resource list when overlapping fetches resolve out of order', async () => {
+    let resolveOlder!: (resources: ResourceItem[]) => void
+    let resolveNewer!: (resources: ResourceItem[]) => void
+    const older = new Promise<ResourceItem[]>((resolve) => {
+      resolveOlder = resolve
+    })
+    const newer = new Promise<ResourceItem[]>((resolve) => {
+      resolveNewer = resolve
+    })
+    const staleResources = [makeToolResource({ status: 'available' })]
+    const currentResources = [
+      makeToolResource({
+        status: 'installed',
+        installed_version: '0.61',
+        actions: ['uninstall'],
+      }),
+    ]
+    vi.mocked(listResourcesApi).mockReturnValueOnce(older).mockReturnValueOnce(newer)
+
+    const store = usePluginStore()
+    const olderFetch = store.fetchTools()
+    const newerFetch = store.fetchTools({ silent: true })
+
+    resolveNewer(currentResources)
+    await newerFetch
+    expect(store.resources).toEqual(currentResources)
+
+    resolveOlder(staleResources)
+    await olderFetch
+    expect(store.resources).toEqual(currentResources)
+    expect(store.loading).toBe(false)
+  })
+
+  it('refreshes the registry, checks rolling updates, and reloads resources', async () => {
+    const resources = [makeToolResource()]
+    vi.mocked(checkResourceUpdatesApi).mockResolvedValue({
+      status: 'ok',
+      checked_count: 0,
+      update_count: 0,
+      diagnostics: [],
+      resources: [],
+    })
+    vi.mocked(listResourcesApi).mockResolvedValue(resources)
+
+    const store = usePluginStore()
+    await store.refresh()
+
+    expect(checkResourceUpdatesApi).toHaveBeenCalledWith({
+      force: true,
+      refreshRegistry: true,
+    })
+    expect(listResourcesApi).toHaveBeenCalledTimes(1)
+    expect(store.resources).toEqual(resources)
+    expect(store.refreshing).toBe(false)
   })
 
   it('installs a PDK resource and subscribes by resourceId', async () => {

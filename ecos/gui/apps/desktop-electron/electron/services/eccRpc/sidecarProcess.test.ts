@@ -5,6 +5,18 @@ import { join } from 'node:path'
 import { PassThrough, Writable } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const electronLogger = vi.hoisted(() => ({
+  debug: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  status: vi.fn(),
+  warn: vi.fn(),
+}))
+
+vi.mock('../logger', () => ({
+  electronLogger,
+}))
+
 import {
   EccRpcShutdownDeferredError,
   EccRpcSidecarProcess,
@@ -42,6 +54,7 @@ class FakeChild extends EventEmitter implements SpawnedEccRpcSidecar {
 describe('EccRpcSidecarProcess', () => {
   afterEach(() => {
     vi.useRealTimers()
+    electronLogger.error.mockReset()
   })
 
   it('spawns ECC with persistent DB support for GUI edit sessions', async () => {
@@ -59,6 +72,33 @@ describe('EccRpcSidecarProcess', () => {
       ['rpc', 'serve', '--stdio', '--persistent-db'],
       {
         env: { PATH: '/bin' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
+  })
+
+  it('uses a runtime-specific launch resolver', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const resolveLaunch = vi.fn(() => ({
+      args: ['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'],
+      command: 'python3',
+      env: { PATH: '/bin', PYTHONPATH: '/work/ecc-fe' },
+    }))
+    const sidecar = new EccRpcSidecarProcess({
+      env: { PATH: '/bin' },
+      resolveLaunch,
+      spawn,
+    })
+
+    await sidecar.start()
+
+    expect(resolveLaunch).toHaveBeenCalledWith({ PATH: '/bin' })
+    expect(spawn).toHaveBeenCalledWith(
+      'python3',
+      ['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'],
+      {
+        env: { PATH: '/bin', PYTHONPATH: '/work/ecc-fe' },
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     )
@@ -422,13 +462,33 @@ describe('EccRpcSidecarProcess', () => {
     child.emit('close', 1, null)
 
     await expect(promise).rejects.toThrow('ECC RPC sidecar exited')
+    await expect(promise).rejects.toThrow(`See ${sidecar.logFile}`)
     expect(events).toContainEqual(
       expect.objectContaining({
         code: 1,
+        logFile: sidecar.logFile,
         reason: 'unexpected',
         signal: null,
         type: 'runtime.exited',
       }),
+    )
+  })
+
+  it('writes sidecar stderr into the desktop log when the process exits unexpectedly', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({
+      spawn: () => child,
+    })
+    const client = await sidecar.start()
+    const promise = client.call('rpc.ping')
+    child.stderr.write('CMake Error: missing evaluation/test directory\n')
+    child.emit('close', 1, null)
+
+    await expect(promise).rejects.toThrow(`See ${sidecar.logFile}`)
+    expect(electronLogger.error).toHaveBeenCalledWith(
+      '[runtime] %s\n%s',
+      `ECC RPC sidecar exited with code 1. See ${sidecar.logFile}`,
+      'CMake Error: missing evaluation/test directory',
     )
   })
 

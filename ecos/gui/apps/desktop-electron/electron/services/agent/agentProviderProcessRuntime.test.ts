@@ -404,6 +404,7 @@ describe('AgentProviderProcessRuntime', () => {
                 'legalization',
                 'route',
                 'drc',
+                'lvs',
                 'filler',
                 'RCX',
                 'sta',

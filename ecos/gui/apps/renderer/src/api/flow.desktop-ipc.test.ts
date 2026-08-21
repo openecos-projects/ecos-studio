@@ -47,7 +47,7 @@ describe('flow API desktop bridge payloads', () => {
     const syncConfig = vi.fn(async (request: unknown) => {
       expect(() => structuredClone(request)).not.toThrow()
       return {
-        configPath: '/work/demo/config/rt_default_config.json',
+        configPath: '/work/demo/config/route_ecc.json',
         directory: '/work/demo',
         parametersChanged: true,
         refreshed: true,
@@ -56,7 +56,7 @@ describe('flow API desktop bridge payloads', () => {
 
     setWindow({
       ecosDesktop: {
-        ecc: {
+        runtime: {
           flow: {
             run,
             runStep,
@@ -117,7 +117,7 @@ describe('flow API desktop bridge payloads', () => {
       reactive({
         cmd: CMDEnum.sync_config,
         data: {
-          config_path: '/work/demo/config/rt_default_config.json',
+          config_path: '/work/demo/config/route_ecc.json',
           directory: '/work/demo',
           workspaceHandle: 'workspace-handle-1',
         },
@@ -125,25 +125,55 @@ describe('flow API desktop bridge payloads', () => {
     )
 
     expect(runStep).toHaveBeenCalledWith({
+      designTool: 'backend',
+      options: {},
       rerun: false,
       step: StepEnum.PLACEMENT,
       workspaceHandle: 'workspace-handle-1',
     })
     expect(run).toHaveBeenCalledWith({
+      designTool: 'backend',
       rerun: true,
       workspaceHandle: 'workspace-handle-1',
     })
     expect(info).toHaveBeenCalledWith({
+      designTool: 'backend',
       id: InfoEnum.layout,
       step: StepEnum.ROUTING,
       workspaceHandle: 'workspace-handle-1',
     })
     expect(refreshConfig).toHaveBeenCalledWith({
+      designTool: 'backend',
       workspaceHandle: 'workspace-handle-1',
     })
     expect(syncConfig).toHaveBeenCalledWith({
-      configPath: '/work/demo/config/rt_default_config.json',
+      configPath: '/work/demo/config/route_ecc.json',
+      designTool: 'backend',
       workspaceHandle: 'workspace-handle-1',
     })
+  })
+
+  it('rejects runtime requests that only provide a workspace directory', async () => {
+    const run = vi.fn()
+    setWindow({
+      ecosDesktop: {
+        runtime: {
+          flow: { run },
+        },
+      },
+    })
+    const { rtl2gdsApi } = await import('./flow')
+
+    expect(() =>
+      rtl2gdsApi({
+        cmd: CMDEnum.rtl2gds,
+        data: {
+          designTool: 'frontend',
+          directory: '/work/frontend-demo',
+          rerun: false,
+        },
+      }),
+    ).toThrow('Workspace session handle is required')
+    expect(run).not.toHaveBeenCalled()
   })
 })

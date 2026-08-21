@@ -13,7 +13,7 @@ import { isPathWithinRoot } from './pathScope'
 const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
 const PROJECT_WORKSPACE_TEXT_MAX_BYTES = 256 * 1024
 const PROJECT_WORKSPACE_READ_CONCURRENCY = 4
-const PROJECT_WORKSPACE_READ_LIMIT = 40
+const PROJECT_WORKSPACE_READ_LIMIT = projectManagementWorkspaceSummaryPaths.length
 
 const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(projectManagementWorkspaceSummaryPaths)
 

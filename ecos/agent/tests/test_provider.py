@@ -879,7 +879,7 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     (output / "gcd_place.def.gz").write_bytes(b"def")
     config = workspace / "config"
     config.mkdir()
-    (config / "dreamplace.json").write_text(
+    (config / "dreamplace_ecc.json").write_text(
         '{"target_density": 0.2, "routability_opt_flag": true, "stop_overflow": 0.0}',
         encoding="utf-8",
     )
@@ -1211,7 +1211,7 @@ def _workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
         (output / f"gcd_{step}{suffix}").write_bytes(b"def")
     config = workspace / "config"
     config.mkdir()
-    (config / "dreamplace.json").write_text(
+    (config / "dreamplace_ecc.json").write_text(
         '{"target_density": 0.55, "routability_opt_flag": true, "stop_overflow": 0.1}',
         encoding="utf-8",
     )
@@ -1325,7 +1325,7 @@ def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
     (output / "gcd_place.def.gz").write_bytes(b"def")
     config = workspace / "config"
     config.mkdir()
-    (config / "dreamplace.json").write_text('{"target_density": 0.2}', encoding="utf-8")
+    (config / "dreamplace_ecc.json").write_text('{"target_density": 0.2}', encoding="utf-8")
     events: list[dict[str, object]] = []
 
     def mock_codex_timeout(_context: dict[str, object]) -> None:

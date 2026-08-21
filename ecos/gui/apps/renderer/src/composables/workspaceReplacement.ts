@@ -75,10 +75,13 @@ export async function recordWorkspaceReplacementBackup(
   config: WorkspaceConfig,
   notify: Notify,
 ): Promise<void> {
-  const projectRoot = normalizePath(
-    config.project_context?.project_root || workspaceParentPath(replacement.targetPath),
-  )
-  if (!projectRoot) return
+  const projectRoot = normalizePath(config.project_context?.project_root ?? '')
+
+  if (!projectRoot) {
+    const desktopApi = await waitForDesktopApi()
+    await desktopApi.workspace.retainProjectDirectoryReplacement(replacement.id)
+    return
+  }
 
   try {
     await mutateProjectManifest(projectRoot, {

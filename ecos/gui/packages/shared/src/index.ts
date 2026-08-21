@@ -5,6 +5,21 @@ export {
   type DesktopApiIpcChannel,
 } from './constants/ipcChannels.ts'
 export type {
+  DesignRuntimeApi,
+  DesignRuntimeCancelRequest,
+  DesignRuntimeCancelResult,
+  DesignRuntimeEvent,
+  DesignRuntimeFlowRunRequest,
+  DesignRuntimeFlowRunStepRequest,
+  DesignRuntimeHelloResult,
+  DesignRuntimeTargetRequest,
+  DesignRuntimeWorkspaceCreateRequest,
+  DesignRuntimeWorkspaceHandleRequest,
+  DesignRuntimeWorkspaceInfoRequest,
+  DesignRuntimeWorkspaceOpenRequest,
+  DesignRuntimeWorkspaceSyncConfigRequest,
+} from './contracts/designRuntime.ts'
+export type {
   DesktopApi,
   DesktopDirectoryDialogOptions,
   DesktopFileDialogFilter,
@@ -95,6 +110,8 @@ export type {
   ResourceOperationResult,
   ResourceStatus,
   ResourceType,
+  ResourceUpdateCheckItem,
+  ResourceUpdateCheckResult,
 } from './contracts/resources.ts'
 export type {
   DesktopShellDataEvent,
@@ -171,6 +188,7 @@ export type {
   VoidDesktopResult,
 } from './types/desktop.ts'
 export type {
+  DesignTool,
   WorkspaceConfig,
   WorkspaceParameters,
   WorkspaceStatus,

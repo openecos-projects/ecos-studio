@@ -228,6 +228,8 @@ describe('useStepDashboardData', () => {
     expect(source).toContain('feature/post_synthesis/qor_summary.json')
     expect(source).toContain('feature/post_synthesis/timing_paths.json')
     expect(source).toContain('synthesisInsights(')
+    expect(source).toContain('POST_SYNTHESIS_TIMING_CORNER')
+    expect(source).toContain('stepTimingAnalysis(')
   })
 
   it('uses the indexed Floorplan database feature for specialized insights', () => {
@@ -256,16 +258,19 @@ describe('useStepDashboardData', () => {
     expect(source).toContain('revokeBlobUrl(placeDensityMapUrl)')
   })
 
-  it('loads specialized RCX, DRC, and STA feature artifacts for their insight surfaces', () => {
+  it('loads specialized RCX, DRC, LVS, and STA feature artifacts for their insight surfaces', () => {
     expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'rcx'")
     expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'drc'")
+    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'lvs'")
     expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'sta'")
     expect(source).toContain('analysis/drc_statis.csv')
     expect(source).toContain('readText(drcStatisticsPath)')
     expect(source).toContain('rcxInsights(stepJson)')
     expect(source).toContain('drcInsights(drcStatisticsText)')
+    expect(source).toContain('lvsInsights(stepJson)')
     expect(source).toContain('staCornerSummaryPaths(stepJson, resourceStep.directory)')
-    expect(source).toContain('staInsights(stepJson, staTimingSummaries)')
+    expect(source).toContain('staInsights(stepJson)')
+    expect(source).toContain('readJson(timingPathsPath)')
   })
 
   it('uses indexed Harden output artifacts for the dedicated output surface', () => {

@@ -106,30 +106,12 @@
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
-<a id="parameter.floorplan.io_placer_depth_micron"></a>
-## parameter.floorplan.io_placer_depth_micron
-
-**Meaning:** The IO-pin depth in micrometers.
-
-**Role:** It defines the physical depth of generated IO-pin shapes.
-
-**Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
-
 <a id="parameter.floorplan.io_placer_io_layer_list"></a>
 ## parameter.floorplan.io_placer_io_layer_list
 
 **Meaning:** The routing layers eligible for IO-pin placement.
 
 **Role:** It constrains where the floorplan can place IO pins.
-
-**Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
-
-<a id="parameter.floorplan.io_placer_width_micron"></a>
-## parameter.floorplan.io_placer_width_micron
-
-**Meaning:** The IO-pin width in micrometers.
-
-**Role:** It defines the physical width of generated IO-pin shapes.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 

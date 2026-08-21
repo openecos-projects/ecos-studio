@@ -42,6 +42,8 @@ interface JsonRpcResponsePayload {
   error?: JsonRpcErrorPayload
   id?: unknown
   jsonrpc?: unknown
+  method?: unknown
+  params?: unknown
   result?: unknown
 }
 
@@ -140,6 +142,13 @@ export class EccJsonRpcClient {
 
   private handleResponse(payload: JsonRpcResponsePayload): void {
     if (payload.id === undefined || payload.id === null) {
+      if (typeof payload.method === 'string') {
+        this.options.onNotification?.({
+          jsonrpc: '2.0',
+          method: payload.method,
+          ...(payload.params === undefined ? {} : { params: payload.params }),
+        })
+      }
       return
     }
     if (typeof payload.id !== 'number' || !Number.isSafeInteger(payload.id)) {

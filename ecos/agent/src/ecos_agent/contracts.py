@@ -14,6 +14,7 @@ GUI_WORKSPACE_FLOW_STEPS = (
     "legalization",
     "route",
     "drc",
+    "lvs",
     "filler",
     "RCX",
     "sta",

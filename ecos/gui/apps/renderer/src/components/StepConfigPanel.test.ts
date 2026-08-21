@@ -5,6 +5,9 @@ describe('StepConfigPanel', () => {
   it('accepts an explicit flow step for a route-independent editor', () => {
     expect(componentSource).toContain('step?: StepEnum')
     expect(componentSource).toContain("useStepConfigInfo(toRef(props, 'step'))")
+    expect(componentSource).toContain('tool?: string')
+    expect(componentSource).toContain('formatStepToolName(props.tool)')
+    expect(componentSource).toContain('stepHeading')
   })
 
   it('uses N/A when the current step has no configuration file', () => {

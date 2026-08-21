@@ -4,7 +4,10 @@ import type { ResourceItem } from '@/api/plugin'
 import {
   compactResourceMessage,
   formatResourceSize,
+  formatResourceSizeMb,
+  formatResourceVersion,
   managedInstallLocation,
+  isEdaToolRow,
   primaryActionForRow,
   resourceToRow,
   removalActionForRow,
@@ -42,6 +45,50 @@ function resource(overrides: Partial<ResourceItem>): ResourceItem {
 }
 
 describe('pluginToolsRows', () => {
+  it('maps standalone Verilator into EDA tools with Lint and Sim flow tags', () => {
+    const row = resourceToRow(
+      resource({
+        id: 'tool:verilator',
+        type: 'tool',
+        name: 'verilator',
+        display_name: 'Verilator',
+        description: 'Pinned Verilator 5.050 SystemVerilog simulator',
+        category: 'simulation',
+        available_versions: ['5.050'],
+        size: 6413405,
+      }),
+      undefined,
+    )
+
+    expect(row).toMatchObject({
+      id: 'tool:verilator',
+      icon: 'V',
+      version: 'v5.050',
+      flowTags: ['Lint', 'Sim'],
+      isFrontendTool: true,
+    })
+    expect(isEdaToolRow(row)).toBe(true)
+  })
+
+  it('does not prefix the latest resource version with v', () => {
+    expect(formatResourceVersion('latest')).toBe('latest')
+    expect(formatResourceVersion('vlatest')).toBe('latest')
+    expect(formatResourceVersion('5.050')).toBe('v5.050')
+
+    const row = resourceToRow(
+      resource({
+        id: 'tool:surfer',
+        type: 'tool',
+        name: 'surfer',
+        display_name: 'Surfer',
+        available_versions: ['latest'],
+      }),
+      undefined,
+    )
+
+    expect(row.version).toBe('latest')
+  })
+
   it('maps an available registry PDK to an installable row', () => {
     const row = resourceToRow(resource({}), undefined)
 
@@ -50,8 +97,7 @@ describe('pluginToolsRows', () => {
       type: 'pdk',
       name: 'ICSPROUT 55nm PDK',
       version: 'v1.01',
-      sizeLabel: '412 MB',
-      sizeMb: 412,
+      sizeLabel: '411.99 MB',
       statusKind: 'available',
       statusText: 'Available',
     })
@@ -79,7 +125,7 @@ describe('pluginToolsRows', () => {
       icon: 'MPC',
       accent: '#3f7cac',
       statusKind: 'available',
-      sizeLabel: '< 1 MB',
+      sizeLabel: '0.45 MB',
     })
     expect(canImportLocalResource(row)).toBe(false)
   })
@@ -189,12 +235,22 @@ describe('pluginToolsRows', () => {
   })
 
   it('formats resource sizes from bytes', () => {
-    expect(formatResourceSize(null)).toEqual({ sizeLabel: '0 MB', sizeMb: 0 })
-    expect(formatResourceSize(432000000)).toEqual({ sizeLabel: '412 MB', sizeMb: 412 })
+    expect(formatResourceSize(null)).toEqual({ sizeLabel: '-', sizeMb: 0 })
+    expect(formatResourceSize(432000000)).toEqual({
+      sizeLabel: '411.99 MB',
+      sizeMb: 411.9873046875,
+    })
+    expect(formatResourceSize(300 * 1024)).toEqual({
+      sizeLabel: '0.29 MB',
+      sizeMb: 0.29296875,
+    })
     expect(formatResourceSize(2 * 1024 * 1024 * 1024)).toEqual({
       sizeLabel: '2.00 GB',
       sizeMb: 2048,
     })
+    expect(formatResourceSizeMb(0)).toBe('0.00 MB')
+    expect(formatResourceSizeMb(0.125)).toBe('0.13 MB')
+    expect(formatResourceSizeMb(2048)).toBe('2.00 GB')
   })
 
   it('chooses actions from resource action list', () => {
@@ -394,6 +450,49 @@ describe('pluginToolsRows', () => {
     expect(installResource).toHaveBeenCalledWith('pdk:ics55')
     expect(updateResource).toHaveBeenCalledTimes(1)
     expect(updateResource).toHaveBeenCalledWith('tool:yosys')
+  })
+
+  it('skips selected dependency rows when a selected parent installs them', async () => {
+    const installResource = vi.fn(async () => undefined)
+    const updateResource = vi.fn(async () => undefined)
+    const parent = resourceToRow(
+      resource({
+        id: 'tool:ecc-fe',
+        type: 'tool',
+        name: 'ecc-fe',
+        display_name: 'ECC-FE Frontend Flow',
+        description: 'Frontend flow runtime CLI.',
+        category: 'frontend',
+        status: 'available',
+        actions: ['install'],
+        requires: ['tool:ecc-fe-soc-ysyx-am'],
+        missing_requires: ['tool:ecc-fe-soc-ysyx-am'],
+      }),
+      undefined,
+    )
+    const dependency = resourceToRow(
+      resource({
+        id: 'tool:ecc-fe-soc-ysyx-am',
+        type: 'tool',
+        name: 'ecc-fe-soc-ysyx-am',
+        display_name: 'ECC-FE YSYX AM SoC Harness',
+        description: 'Frontend SoC harness resource.',
+        category: 'frontend',
+        status: 'available',
+        actions: ['install'],
+      }),
+      undefined,
+    )
+
+    await runBatchDownload([parent, dependency], {
+      installResource,
+      updateResource,
+    })
+
+    expect(parent.flowTags).toContain('Frontend CLI')
+    expect(parent.dependencyLabel).toContain('ecc-fe-soc-ysyx-am')
+    expect(installResource).toHaveBeenCalledTimes(1)
+    expect(installResource).toHaveBeenCalledWith('tool:ecc-fe')
   })
 
   it('allows local import for tool and PDK rows that are not currently mutating', () => {

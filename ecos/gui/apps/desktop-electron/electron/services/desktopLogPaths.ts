@@ -1,3 +1,4 @@
+import { readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 
@@ -35,4 +36,22 @@ export function getElectronLatestMainLogFile(): string {
 
 export function getElectronMainLogFile(): string {
   return join(getLogSessionDirectory(), 'main.log')
+}
+
+export function pruneOldLogSessions(keep = 20): void {
+  const directory = join(getLogsDirectory(), 'sessions')
+  let names: string[]
+  try {
+    names = readdirSync(directory)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return
+    }
+    throw error
+  }
+
+  const removable = names.filter((name) => name !== logSessionId).sort()
+  for (const name of removable.slice(0, Math.max(0, names.length - keep))) {
+    rmSync(join(directory, name), { force: true, recursive: true })
+  }
 }

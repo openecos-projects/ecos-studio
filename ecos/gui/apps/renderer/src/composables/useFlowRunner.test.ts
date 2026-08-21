@@ -8,11 +8,12 @@ const {
   invalidateWorkspaceResources,
   resourceVersions,
   workspaceSession,
+  runStepApi,
+  rtl2gdsApi,
   startFlowOperationApi,
   startStepOperationApi,
   waitForRuntimeOperation,
   currentProject,
-  requestHomeRunArtifactReset,
   markHomeRunArtifactResetAwaitingBackendStart,
   clearHomeRunArtifactResetAwaitingBackendStart,
 } = vi.hoisted(() => ({
@@ -36,30 +37,27 @@ const {
     value: {
       sessionId: 'session-1',
       workspaceId: 'workspace-demo',
+      state: undefined as string | undefined,
     },
   },
+  runStepApi: vi.fn(),
+  rtl2gdsApi: vi.fn(),
   startFlowOperationApi: vi.fn(),
   startStepOperationApi: vi.fn(),
   waitForRuntimeOperation: vi.fn(),
-  currentProject: { value: null as { path: string } | null },
-  requestHomeRunArtifactReset: vi.fn(),
+  currentProject: {
+    value: null as { path: string; designTool?: 'backend' | 'frontend' } | null,
+  },
   markHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
   clearHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({
-    params: {
-      step: StepEnum.FLOORPLAN,
-    },
-  }),
+  useRoute: () => ({ params: { step: StepEnum.FLOORPLAN } }),
 }))
 
 vi.mock('./useDesktopRuntime', () => ({
-  useDesktopRuntime: () => ({
-    isDesktopRuntimeAvailable: false,
-    ensureDesktopRuntime,
-  }),
+  useDesktopRuntime: () => ({ ensureDesktopRuntime }),
 }))
 
 vi.mock('./useWorkspace', () => ({
@@ -75,12 +73,13 @@ vi.mock('./useWorkspace', () => ({
 }))
 
 vi.mock('@/api/flow', () => ({
+  runStepApi,
+  rtl2gdsApi,
   startFlowOperationApi,
   startStepOperationApi,
 }))
 
 vi.mock('./homeRunArtifacts', () => ({
-  requestHomeRunArtifactReset,
   markHomeRunArtifactResetAwaitingBackendStart,
   clearHomeRunArtifactResetAwaitingBackendStart,
 }))
@@ -93,7 +92,7 @@ import {
   useFlowRunner,
 } from './useFlowRunner'
 
-describe('useFlowRunner desktop-only guard', () => {
+describe('useFlowRunner desktop and design-tool routing', () => {
   beforeEach(() => {
     ensureDesktopRuntime.mockReset()
     ensureDesktopRuntime.mockReturnValue(false)
@@ -101,6 +100,19 @@ describe('useFlowRunner desktop-only guard', () => {
     ensureApiReady.mockResolvedValue(true)
     showToast.mockReset()
     invalidateWorkspaceResources.mockReset()
+    runStepApi.mockReset()
+    rtl2gdsApi.mockReset()
+    startFlowOperationApi.mockReset()
+    startStepOperationApi.mockReset()
+    waitForRuntimeOperation.mockReset()
+    waitForRuntimeOperation.mockImplementation(() => new Promise<void>(() => undefined))
+    markHomeRunArtifactResetAwaitingBackendStart.mockReset()
+    clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
+    workspaceSession.value = {
+      sessionId: 'session-1',
+      workspaceId: 'workspace-demo',
+      state: undefined,
+    }
     resourceVersions.value = {
       home: 0,
       flow: 0,
@@ -111,17 +123,6 @@ describe('useFlowRunner desktop-only guard', () => {
       logs: 0,
       all: 0,
     }
-    workspaceSession.value = {
-      sessionId: 'session-1',
-      workspaceId: 'workspace-demo',
-    }
-    startFlowOperationApi.mockReset()
-    startStepOperationApi.mockReset()
-    waitForRuntimeOperation.mockReset()
-    waitForRuntimeOperation.mockImplementation(() => new Promise<void>(() => undefined))
-    requestHomeRunArtifactReset.mockReset()
-    markHomeRunArtifactResetAwaitingBackendStart.mockReset()
-    clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
     resetFlowExecutionState()
     currentProject.value = null
   })
@@ -160,34 +161,132 @@ describe('useFlowRunner desktop-only guard', () => {
     })
     expect(startFlowOperationApi).not.toHaveBeenCalled()
     expect(ensureApiReady).not.toHaveBeenCalled()
+    expect(startStepOperationApi).not.toHaveBeenCalled()
+    expect(startFlowOperationApi).not.toHaveBeenCalled()
     expect(result).toBeNull()
   })
 
-  it('starts a full flow as an asynchronous runtime operation', async () => {
+  it('starts backend flows through the main runtime operation tracker', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     startFlowOperationApi.mockResolvedValue({
-      operationId: 'operation-1',
+      operationId: 'operation-flow',
+      state: 'queued',
+    })
+    startStepOperationApi.mockResolvedValue({
+      operationId: 'operation-step',
       state: 'queued',
     })
 
-    const { runAllFlow, isRunning } = useFlowRunner()
+    const runner = useFlowRunner()
+    await expect(runner.runAllFlow({ rerun: true })).resolves.toMatchObject({
+      operationId: 'operation-flow',
+    })
+    clearFlowExecutionActiveForWorkspace('/work/demo')
+    await expect(runner.runFlow({ rerun: true })).resolves.toMatchObject({
+      state: StateEnum.Ongoing,
+    })
 
-    await expect(runAllFlow()).resolves.toMatchObject({ operationId: 'operation-1' })
     expect(startFlowOperationApi).toHaveBeenCalledWith({
       idempotencyKey: expect.any(String),
-      rerun: false,
+      rerun: true,
       workspaceHandle: 'workspace-demo',
     })
-    expect(isRunning.value).toBe(true)
-    expect(invalidateWorkspaceResources).not.toHaveBeenCalled()
+    expect(startStepOperationApi).toHaveBeenCalledWith({
+      idempotencyKey: expect.any(String),
+      rerun: true,
+      resetDependents: false,
+      step: StepEnum.FLOORPLAN,
+      workspaceHandle: 'workspace-demo',
+    })
+    expect(rtl2gdsApi).not.toHaveBeenCalled()
+    expect(runStepApi).not.toHaveBeenCalled()
   })
 
-  it('releases the workspace lock when the main operation waiter completes', async () => {
+  it('keeps frontend flow and step calls on the design-tool runtime bridge', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+    rtl2gdsApi.mockResolvedValue({
+      response: 'success',
+      data: { rerun: false },
+      message: [],
+    })
+    runStepApi.mockResolvedValue({
+      response: 'success',
+      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+      message: [],
+    })
+
+    const runner = useFlowRunner()
+    await runner.runAllFlow()
+    clearFlowExecutionActiveForWorkspace('/work/frontend-demo')
+    await runner.runFlow({ rerun: true })
+
+    expect(rtl2gdsApi).toHaveBeenCalledWith({
+      cmd: 'rtl2gds',
+      data: {
+        designTool: 'frontend',
+        directory: '/work/frontend-demo',
+        rerun: false,
+        workspaceHandle: 'workspace-demo',
+      },
+    })
+    expect(runStepApi).toHaveBeenCalledWith({
+      cmd: 'run_step',
+      data: {
+        designTool: 'frontend',
+        directory: '/work/frontend-demo',
+        rerun: true,
+        step: StepEnum.FLOORPLAN,
+        workspaceHandle: 'workspace-demo',
+      },
+    })
+    expect(startFlowOperationApi).not.toHaveBeenCalled()
+    expect(startStepOperationApi).not.toHaveBeenCalled()
+  })
+
+  it('does not use the backend rerun snapshot guard for synchronous frontend reruns', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+    rtl2gdsApi.mockResolvedValue({
+      response: 'success',
+      data: { rerun: true },
+      message: [],
+    })
+
+    const runner = useFlowRunner()
+    await expect(runner.runAllFlow({ rerun: true })).resolves.toEqual({ rerun: true })
+
+    expect(markHomeRunArtifactResetAwaitingBackendStart).not.toHaveBeenCalled()
+    expect(clearHomeRunArtifactResetAwaitingBackendStart).toHaveBeenCalledWith(
+      '/work/frontend-demo',
+    )
+  })
+
+  it('waits for a frontend workspace session to become active before running', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+    workspaceSession.value = {
+      sessionId: 'session-1',
+      workspaceId: '',
+      state: 'loading',
+    }
+
+    const runner = useFlowRunner()
+    await expect(runner.runAllFlow()).resolves.toBeNull()
+
+    expect(rtl2gdsApi).not.toHaveBeenCalled()
+    expect(startFlowOperationApi).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: 'No Workspace Open' }),
+    )
+  })
+
+  it('keeps the backend run lock until the operation waiter reaches a terminal state', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     startFlowOperationApi.mockResolvedValue({
-      operationId: 'operation-1',
+      operationId: 'operation-flow',
       state: 'queued',
     })
     let resolveOperation: (() => void) | undefined
@@ -198,106 +297,26 @@ describe('useFlowRunner desktop-only guard', () => {
         }),
     )
 
-    const { isRunning, runAllFlow } = useFlowRunner()
-
-    await runAllFlow()
-    expect(waitForRuntimeOperation).toHaveBeenCalledWith('operation-1')
-    expect(isRunning.value).toBe(true)
-
+    const runner = useFlowRunner()
+    await runner.runAllFlow()
+    expect(runner.isRunning.value).toBe(true)
     resolveOperation?.()
-    await vi.waitFor(() => expect(isRunning.value).toBe(false))
+    await vi.waitFor(() => expect(runner.isRunning.value).toBe(false))
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith('all')
   })
 
-  it('passes rerun=true when starting a full flow operation', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
-    currentProject.value = { path: '/work/demo' }
-    startFlowOperationApi.mockResolvedValue({
-      operationId: 'operation-1',
-      state: 'queued',
-    })
-
-    const { runAllFlow } = useFlowRunner()
-
-    await runAllFlow({ rerun: true })
-    expect(markHomeRunArtifactResetAwaitingBackendStart).toHaveBeenCalledWith(
-      '/work/demo',
-    )
-    expect(startFlowOperationApi).toHaveBeenCalledWith(
-      expect.objectContaining({ rerun: true }),
-    )
-  })
-
-  it('does not mark the full flow running when the runtime bridge is unavailable', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
-    ensureApiReady.mockResolvedValue(false)
-
-    const { runAllFlow, isRunning } = useFlowRunner()
-
-    await expect(runAllFlow()).resolves.toBeNull()
-
-    expect(ensureApiReady).toHaveBeenCalledTimes(1)
-    expect(startFlowOperationApi).not.toHaveBeenCalled()
-    expect(isRunning.value).toBe(false)
-  })
-
-  it('starts the active step through the asynchronous runtime operation API', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
-    currentProject.value = { path: '/work/demo' }
-    startStepOperationApi.mockResolvedValue({
-      operationId: 'operation-1',
-      state: 'queued',
-    })
-
-    const { runFlow } = useFlowRunner()
-
-    await runFlow()
-
-    expect(startStepOperationApi).toHaveBeenCalledWith({
-      idempotencyKey: expect.any(String),
-      rerun: false,
-      resetDependents: false,
-      step: StepEnum.FLOORPLAN,
-      workspaceHandle: 'workspace-demo',
-    })
-  })
-
-  it('passes rerun=true to the single step API when requested', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
-    currentProject.value = { path: '/work/demo' }
-    startStepOperationApi.mockResolvedValue({
-      operationId: 'operation-1',
-      state: 'queued',
-    })
-
-    const { runFlow } = useFlowRunner()
-
-    await runFlow({ rerun: true })
-
-    expect(startStepOperationApi).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rerun: true,
-        resetDependents: false,
-        step: StepEnum.FLOORPLAN,
-      }),
-    )
-  })
-
-  it('tracks running flow state per workspace', () => {
+  it('tracks flow activity independently per workspace', () => {
     currentProject.value = { path: '/work/a' }
     const workspaceA = useFlowRunner()
     currentProject.value = { path: '/work/b' }
     const workspaceB = useFlowRunner()
-
     markFlowExecutionActiveForWorkspace('/work/a')
-
     currentProject.value = { path: '/work/a' }
     expect(workspaceA.isRunning.value).toBe(true)
     currentProject.value = { path: '/work/b' }
     expect(workspaceB.isRunning.value).toBe(false)
     expect(flowExecutionActive.value).toBe(true)
-
     clearFlowExecutionActiveForWorkspace('/work/a')
-
     expect(flowExecutionActive.value).toBe(false)
   })
 })

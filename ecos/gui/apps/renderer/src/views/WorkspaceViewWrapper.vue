@@ -1,7 +1,8 @@
 <template>
   <div class="workspace-view">
     <main :key="workspaceViewKey" class="workspace-main">
-      <LeftSidebar />
+      <FrontendLeftSidebar v-if="currentProject?.designTool === 'frontend'" />
+      <LeftSidebar v-else />
       <div class="workspace-body">
         <div class="workspace-editor">
           <router-view class="editor-view" />
@@ -14,6 +15,7 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
+import FrontendLeftSidebar from '../components/FrontendLeftSidebar.vue'
 import LeftSidebar from '../components/LeftSidebar.vue'
 import { clearHomeQorComparisonCache } from '../composables/useHomeQorComparison'
 import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'

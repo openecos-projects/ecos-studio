@@ -28,7 +28,7 @@ describe('HomeView workspace dashboard layout', () => {
       bottomRow.indexOf('flow-insights-card'),
     )
     expect(homeViewSource).toContain(
-      '.home-dashboard-top {\n  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 3fr);',
+      '.home-dashboard-top {\n  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);',
     )
     expect(homeViewSource).toContain(
       '.home-dashboard-middle {\n  grid-template-columns: minmax(0, 5fr) minmax(0, 2fr);',
@@ -191,7 +191,10 @@ describe('HomeView workspace dashboard layout', () => {
     expect(chipCard).toContain('valueOrNA(mpcDisplayName)')
     expect(chipCard).toContain('valueOrNA(qorComparisonState.projectName)')
     expect(chipCard).toContain('valueOrNA(qorComparisonState.baselineWorkspaceName)')
-    expect(chipCard).toContain('valueOrNA(currentProject?.name)')
+    expect(chipCard).toContain('valueOrNA(currentWorkspaceName)')
+    expect(chipCard).not.toContain('valueOrNA(currentProject?.name)')
+    expect(homeViewSource).toContain('const currentWorkspaceName = computed')
+    expect(homeViewSource).toContain('currentProject.value?.path')
     expect(chipCard).toContain('positiveNumberOrNA(config.die.area)')
     expect(chipCard).toContain('frequencyOrNA(config.frequencyMax)')
     expect(homeViewSource).toContain('<dt>Max Fanout</dt>')

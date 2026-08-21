@@ -79,7 +79,7 @@ describe('useStepConfigInfo', () => {
     testState.syncConfigApi.mockResolvedValue({
       cmd: 'sync_config',
       data: {
-        config_path: '/workspace/demo/config/fp_default_config.json',
+        config_path: '/workspace/demo/config/floorplan_ecc.json',
         directory: '/workspace/demo',
         parameters_changed: false,
         refreshed: false,
@@ -168,9 +168,9 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'missing',
       info: {
-        config: '/workspace/demo/config/fp_default_config.json',
+        config: '/workspace/demo/config/floorplan_ecc.json',
       },
-      missing: ['config/fp_default_config.json'],
+      missing: ['config/floorplan_ecc.json'],
       message: ['Config file is missing'],
       id: 'config',
       step: 'Floorplan',
@@ -192,7 +192,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        path: '/workspace/demo/config/flow_config.json',
+        path: '/workspace/demo/config/flow_ecc.json',
       },
       missing: [],
       message: [],
@@ -205,7 +205,7 @@ describe('useStepConfigInfo', () => {
 
     await vi.waitFor(() => {
       expect(result.stepConfigPathResolved.value).toBe(
-        '/workspace/demo/config/flow_config.json',
+        '/workspace/demo/config/flow_ecc.json',
       )
     })
     expect(result.stepConfigParsed.value).toEqual({ SYNTHESIS: {} })
@@ -253,7 +253,7 @@ describe('useStepConfigInfo', () => {
       .mockResolvedValueOnce({
         response: 'available',
         info: {
-          config: '/workspace/demo/config/fp_default_config.json',
+          config: '/workspace/demo/config/floorplan_ecc.json',
         },
         missing: [],
         message: [],
@@ -263,7 +263,7 @@ describe('useStepConfigInfo', () => {
       .mockResolvedValueOnce({
         response: 'available',
         info: {
-          config: '/workspace/other/config/fp_default_config.json',
+          config: '/workspace/other/config/floorplan_ecc.json',
         },
         missing: [],
         message: [],
@@ -302,7 +302,7 @@ describe('useStepConfigInfo', () => {
 
     expect(result.stepConfigRaw.value).toBe('{"owner":"current"}')
     expect(result.stepConfigPathResolved.value).toBe(
-      '/workspace/other/config/fp_default_config.json',
+      '/workspace/other/config/floorplan_ecc.json',
     )
   })
 
@@ -376,7 +376,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/fp_default_config.json',
+        config: '/workspace/demo/config/floorplan_ecc.json',
       },
       missing: [],
       message: [],
@@ -411,7 +411,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/fp_default_config.json',
+        config: '/workspace/demo/config/floorplan_ecc.json',
       },
       missing: [],
       message: [],
@@ -437,13 +437,13 @@ describe('useStepConfigInfo', () => {
     await expect(result.saveStepConfig()).resolves.toBe(true)
 
     expect(testState.writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspace/demo/config/fp_default_config.json',
+      '/workspace/demo/config/floorplan_ecc.json',
       '{\n    "density": 0.6\n}',
     )
     expect(testState.syncConfigApi).toHaveBeenCalledWith({
       cmd: 'sync_config',
       data: {
-        config_path: '/workspace/demo/config/fp_default_config.json',
+        config_path: '/workspace/demo/config/floorplan_ecc.json',
         directory: '/workspace/demo',
         workspaceHandle: 'workspace-demo',
       },
@@ -462,7 +462,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/rt_default_config.json',
+        config: '/workspace/demo/config/route_ecc.json',
       },
       missing: [],
       message: [],
@@ -511,7 +511,7 @@ describe('useStepConfigInfo', () => {
   it('does not treat editor-created empty containers as unsaved changes', async () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
-      info: { config: '/workspace/demo/config/fp_default_config.json' },
+      info: { config: '/workspace/demo/config/floorplan_ecc.json' },
       missing: [],
       message: [],
       id: 'config',
@@ -550,7 +550,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/fp_default_config.json',
+        config: '/workspace/demo/config/floorplan_ecc.json',
       },
       missing: [],
       message: [],
@@ -578,7 +578,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/rt_default_config.json',
+        config: '/workspace/demo/config/route_ecc.json',
       },
       missing: [],
       message: [],
@@ -595,7 +595,7 @@ describe('useStepConfigInfo', () => {
     testState.syncConfigApi.mockResolvedValue({
       cmd: 'sync_config',
       data: {
-        config_path: '/workspace/demo/config/rt_default_config.json',
+        config_path: '/workspace/demo/config/route_ecc.json',
         directory: '/workspace/demo',
         parameters_changed: true,
         refreshed: true,
@@ -642,7 +642,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/fp_default_config.json',
+        config: '/workspace/demo/config/floorplan_ecc.json',
       },
       missing: [],
       message: [],
@@ -653,7 +653,7 @@ describe('useStepConfigInfo', () => {
     testState.syncConfigApi.mockResolvedValue({
       cmd: 'sync_config',
       data: {
-        config_path: '/workspace/demo/config/fp_default_config.json',
+        config_path: '/workspace/demo/config/floorplan_ecc.json',
         directory: '/workspace/demo',
         parameters_changed: false,
         refreshed: false,
@@ -686,7 +686,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/fp_default_config.json',
+        config: '/workspace/demo/config/floorplan_ecc.json',
       },
       missing: [],
       message: [],
@@ -737,7 +737,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/fp_default_config.json',
+        config: '/workspace/demo/config/floorplan_ecc.json',
       },
       missing: [],
       message: [],
@@ -796,7 +796,7 @@ describe('useStepConfigInfo', () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        config: '/workspace/demo/config/fp_default_config.json',
+        config: '/workspace/demo/config/floorplan_ecc.json',
       },
       missing: [],
       message: [],
@@ -804,7 +804,7 @@ describe('useStepConfigInfo', () => {
       step: 'Floorplan',
     })
     testState.resolveProjectPathAccess
-      .mockResolvedValueOnce('/workspace/demo/config/fp_default_config.json')
+      .mockResolvedValueOnce('/workspace/demo/config/floorplan_ecc.json')
       .mockReturnValueOnce(
         new Promise((resolve) => {
           resolveSavePath = resolve
@@ -827,11 +827,11 @@ describe('useStepConfigInfo', () => {
     })
 
     result.stepConfigDraft.value = { density: 0.8 }
-    resolveSavePath?.('/workspace/demo/config/fp_default_config.json')
+    resolveSavePath?.('/workspace/demo/config/floorplan_ecc.json')
 
     await expect(savePromise).resolves.toBe(true)
     expect(testState.writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspace/demo/config/fp_default_config.json',
+      '/workspace/demo/config/floorplan_ecc.json',
       '{\n    "density": 0.6\n}',
     )
   })

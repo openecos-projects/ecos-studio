@@ -15,6 +15,7 @@ import {
   qorStepsFromIndex,
   qorStatusSummary,
   qorSummaryStatus,
+  reconcileFlowChecklistItems,
   synthesisMetricsFromStat,
   timingMetricsFromQorSummary,
 } from './dashboardData'
@@ -52,6 +53,45 @@ describe('dashboard data presentation', () => {
     expect(maxFanoutFromParameters(parameters)).toBe(42)
     expect(mpcDisplayNameFromParameters({ MPC: { display_name: ' ' } })).toBeNull()
     expect(maxFanoutFromParameters({ 'Max fanout': '42' })).toBeNull()
+  })
+
+  it('promotes stale flow-complete items once flow.json reports success', () => {
+    expect(
+      reconcileFlowChecklistItems(
+        [
+          {
+            category: 'flow',
+            step: 'Harden',
+            state: 'failed',
+            blocked: true,
+            summary: 'Current flow state is Ongoing.',
+          },
+          {
+            category: 'artifact',
+            step: 'Harden',
+            state: 'failed',
+            blocked: true,
+            summary: 'Required file is missing.',
+          },
+        ],
+        [{ label: 'Harden', path: 'Harden', state: 'Success' }],
+      ),
+    ).toEqual([
+      {
+        category: 'flow',
+        step: 'Harden',
+        state: 'pass',
+        blocked: false,
+        summary: 'Required flow stage completed successfully.',
+      },
+      {
+        category: 'artifact',
+        step: 'Harden',
+        state: 'failed',
+        blocked: true,
+        summary: 'Required file is missing.',
+      },
+    ])
   })
 
   it('keeps checklist states visible in the pie data', () => {

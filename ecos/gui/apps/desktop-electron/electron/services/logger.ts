@@ -1,4 +1,10 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname } from 'node:path'
 import { format } from 'node:util'
 
@@ -240,8 +246,16 @@ export function createElectronLogger(
   }
 }
 
-function uniqueFilePaths(paths: string[]): string[] {
-  return [...new Set(paths)]
+function replaceWithSymlink(targetPath: string, linkPath: string): void {
+  mkdirSync(dirname(linkPath), { recursive: true })
+  try {
+    unlinkSync(linkPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+  }
+  symlinkSync(targetPath, linkPath)
 }
 
 export function configureElectronLoggerFile(
@@ -255,23 +269,15 @@ export function configureElectronLoggerFile(
     typeof filePathOrConfig === 'string'
       ? null
       : (filePathOrConfig.latestFilePath ?? null)
-  const filePaths = uniqueFilePaths(
-    latestFilePath ? [sessionFilePath, latestFilePath] : [sessionFilePath],
-  )
 
-  for (const filePath of filePaths) {
-    mkdirSync(dirname(filePath), { recursive: true })
-  }
-
-  if (latestFilePath) {
-    writeFileSync(sessionFilePath, '', 'utf8')
-    writeFileSync(latestFilePath, '', 'utf8')
+  mkdirSync(dirname(sessionFilePath), { recursive: true })
+  writeFileSync(sessionFilePath, '', 'utf8')
+  if (latestFilePath && latestFilePath !== sessionFilePath) {
+    replaceWithSymlink(sessionFilePath, latestFilePath)
   }
 
   activeFileSink = (line: string) => {
-    for (const filePath of filePaths) {
-      appendFileSync(filePath, `${line}\n`, 'utf8')
-    }
+    appendFileSync(sessionFilePath, `${line}\n`, 'utf8')
   }
 }
 

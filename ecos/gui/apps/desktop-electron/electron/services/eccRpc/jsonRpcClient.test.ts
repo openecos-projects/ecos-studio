@@ -182,4 +182,33 @@ describe('EccJsonRpcClient', () => {
 
     await expect(promise).rejects.toBe(closeError)
   })
+
+  it('forwards JSON-RPC notifications without affecting pending requests', async () => {
+    const onNotification = vi.fn()
+    const client = new EccJsonRpcClient({
+      onNotification,
+      writeFrame: () => undefined,
+    })
+    const pending = client.call<{ ok: boolean }>('rpc.ping')
+
+    client.feedStdout(
+      encodeContentLengthFrame(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'runtime.event',
+          params: { phase: 'started' },
+        }),
+      ),
+    )
+    client.feedStdout(
+      encodeContentLengthFrame('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'),
+    )
+
+    expect(onNotification).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: { phase: 'started' },
+    })
+    await expect(pending).resolves.toEqual({ ok: true })
+  })
 })

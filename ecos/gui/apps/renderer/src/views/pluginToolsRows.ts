@@ -34,6 +34,11 @@ export interface ResourceRow {
   statusKind: StatusKind
   icon: string
   accent: string
+  flowTags: string[]
+  isFrontendTool: boolean
+  requires: string[]
+  missingRequires: string[]
+  dependencyLabel: string
   progressPercent: number | null
   actions: ResourceAction[]
   resource: ResourceItem
@@ -42,6 +47,13 @@ export interface ResourceRow {
 const toolMeta: Record<string, { icon: string; accent: string }> = {
   openroad: { icon: 'O', accent: '#79c142' },
   yosys: { icon: 'Y', accent: '#63666d' },
+  slang: { icon: 'SV', accent: '#7c5fb4' },
+  surfer: { icon: 'W', accent: '#2f8f83' },
+  'ecc-fe-soc': { icon: 'SOC', accent: '#4f7f75' },
+  'ecc-fe-cpu': { icon: 'CPU', accent: '#4f7f75' },
+  'ecc-fe': { icon: 'FE', accent: '#4f7f75' },
+  'riscv-toolchain': { icon: 'RV', accent: '#b35f3a' },
+  riscv: { icon: 'RV', accent: '#b35f3a' },
   klayout: { icon: 'K', accent: '#d99427' },
   magic: { icon: 'M', accent: '#6b7078' },
   netgen: { icon: 'N', accent: '#607d8b' },
@@ -55,14 +67,22 @@ export function formatResourceSize(size: number | null): {
   sizeLabel: string
   sizeMb: number
 } {
-  if (!size || size <= 0) return { sizeLabel: '0 MB', sizeMb: 0 }
+  if (!size || size <= 0) return { sizeLabel: '-', sizeMb: 0 }
 
-  const sizeMb = Math.round(size / (1024 * 1024))
-  if (sizeMb === 0) return { sizeLabel: '< 1 MB', sizeMb: 0 }
-  if (sizeMb >= 1024) {
-    return { sizeLabel: `${(sizeMb / 1024).toFixed(2)} GB`, sizeMb }
-  }
-  return { sizeLabel: `${sizeMb} MB`, sizeMb }
+  const sizeMb = size / (1024 * 1024)
+  return { sizeLabel: formatResourceSizeMb(sizeMb), sizeMb }
+}
+
+export function formatResourceSizeMb(sizeMb: number): string {
+  if (!Number.isFinite(sizeMb) || sizeMb <= 0) return '0.00 MB'
+  if (sizeMb >= 1024) return `${(sizeMb / 1024).toFixed(2)} GB`
+  return `${sizeMb.toFixed(2)} MB`
+}
+
+export function formatResourceVersion(version: string): string {
+  const normalized = String(version).trim().replace(/^v/i, '')
+  if (!normalized) return '-'
+  return normalized.toLowerCase() === 'latest' ? 'latest' : `v${normalized}`
 }
 
 function versionLabel(resource: ResourceItem): string {
@@ -73,7 +93,7 @@ function versionLabel(resource: ResourceItem): string {
   if (!version) {
     return resource.source === 'local' ? 'Local' : '-'
   }
-  return `v${String(version).replace(/^v/i, '')}`
+  return formatResourceVersion(version)
 }
 
 function iconFor(resource: ResourceItem): string {
@@ -107,6 +127,31 @@ function accentFor(resource: ResourceItem): string {
     return match[1].accent
   }
   return '#68707d'
+}
+
+export function frontendFlowTagsFor(resource: ResourceItem): string[] {
+  if (resource.type !== 'tool') return []
+  const haystack =
+    `${resource.name} ${resource.display_name} ${resource.description}`.toLowerCase()
+  const tags: string[] = []
+
+  if (haystack.includes('yosys') || haystack.includes('oss cad')) {
+    tags.push('Review', 'Yosys')
+  }
+  if (haystack.includes('slang')) tags.push('Elab')
+  if (haystack.includes('verilator') || haystack.includes('oss cad')) {
+    tags.push('Lint', 'Sim')
+  }
+  if (haystack.includes('riscv')) tags.push('CPU Tests', 'CoreMark')
+  if (haystack.includes('surfer')) tags.push('Wave')
+  if (haystack.includes('ecc-fe') || haystack.includes('frontend flow runtime')) {
+    tags.push('Frontend CLI')
+  }
+  if (haystack.includes('soc harness')) tags.push('SoC Harness')
+  if (haystack.includes('example')) tags.push('Examples')
+  if (haystack.includes('cpu adapter')) tags.push('CPU Adapter')
+
+  return [...new Set(tags)]
 }
 
 function progressPercentFor(progress: InstallProgress | undefined): number | null {
@@ -294,6 +339,27 @@ export function canImportLocalResource(row: ResourceRow): boolean {
   return (row.type === 'tool' || row.type === 'pdk') && row.statusKind !== 'installing'
 }
 
+function isCompilerToolchainRow(row: ResourceRow): boolean {
+  if (row.type !== 'tool') return false
+  const category = row.resource.category.toLowerCase()
+  const haystack =
+    `${row.resource.name} ${row.resource.display_name} ${row.resource.description}`.toLowerCase()
+  return (
+    category.includes('toolchain') ||
+    category.includes('compiler') ||
+    haystack.includes('gnu toolchain') ||
+    haystack.includes('risc-v gnu') ||
+    haystack.includes('riscv-toolchain') ||
+    haystack.includes('bare-metal gcc') ||
+    haystack.includes('ecc-fe') ||
+    haystack.includes('frontend flow runtime')
+  )
+}
+
+export function isEdaToolRow(row: ResourceRow): boolean {
+  return row.type === 'tool' && !isCompilerToolchainRow(row)
+}
+
 export function createPrimaryActionTask(
   row: ResourceRow,
   executor: ResourceActionExecutor,
@@ -324,13 +390,41 @@ export async function runBatchDownload(
   executor: ResourceActionExecutor,
   concurrency: number = 2,
 ): Promise<void> {
+  const rowsById = new Map(rows.map((row) => [row.id, row]))
+  const selectedIds = new Set(rows.map((row) => row.id))
+  const rowsCoveredBySelectedParents = new Set<string>()
+  for (const row of rows) {
+    for (const dependencyId of dependencyClosure(rowsById, row)) {
+      if (selectedIds.has(dependencyId)) {
+        rowsCoveredBySelectedParents.add(dependencyId)
+      }
+    }
+  }
   const tasks = rows
+    .filter((row) => !rowsCoveredBySelectedParents.has(row.id))
     .map((row) => createPrimaryActionTask(row, executor))
     .filter((task): task is Promise<void> => task !== null)
 
   for (let i = 0; i < tasks.length; i += concurrency) {
     await Promise.all(tasks.slice(i, i + concurrency))
   }
+}
+
+function dependencyClosure(
+  rowsById: Map<string, ResourceRow>,
+  row: ResourceRow,
+): Set<string> {
+  const dependencies = new Set<string>()
+  const visit = (candidate: ResourceRow): void => {
+    for (const dependencyId of candidate.missingRequires) {
+      if (dependencies.has(dependencyId)) continue
+      dependencies.add(dependencyId)
+      const dependency = rowsById.get(dependencyId)
+      if (dependency) visit(dependency)
+    }
+  }
+  visit(row)
+  return dependencies
 }
 
 function targetVersionForRow(row: ResourceRow): string | null {
@@ -354,7 +448,7 @@ export function selectedResourceMetaText(row: ResourceRow): string {
   if (primaryActionForRow(row) === 'replace') {
     const version = row.resource.available_versions[0]
     return version
-      ? `Replace with managed v${String(version).replace(/^v/i, '')}`
+      ? `Replace with managed ${formatResourceVersion(version)}`
       : 'Replace with managed version'
   }
   if (row.statusKind === 'update') {
@@ -417,6 +511,22 @@ export function currentInstallLocation(rows: ResourceRow[]): string {
   return paths.join(', ')
 }
 
+function resourceDisplayNameFromId(resourceId: string): string {
+  return resourceId.replace(/^(tool|pdk):/, '')
+}
+
+function dependencyLabel(resource: ResourceItem): string {
+  const requirements = resource.requires ?? []
+  if (requirements.length === 0) return ''
+  const missing = resource.missing_requires ?? []
+  if (missing.length > 0) {
+    return `Installs ${missing.length} required: ${missing
+      .map(resourceDisplayNameFromId)
+      .join(', ')}`
+  }
+  return `Requires: ${requirements.map(resourceDisplayNameFromId).join(', ')}`
+}
+
 export function resourceToRow(
   resource: ResourceItem,
   progress: InstallProgress | undefined,
@@ -425,6 +535,7 @@ export function resourceToRow(
   const size = formatResourceSize(resource.size)
   const status = mapStatus(resource, progress)
   const description = rowDescription(resource)
+  const flowTags = frontendFlowTagsFor(resource)
 
   return {
     id: resource.id,
@@ -442,6 +553,11 @@ export function resourceToRow(
     statusKind: status.kind,
     icon: iconFor(resource),
     accent: accentFor(resource),
+    flowTags,
+    isFrontendTool: flowTags.length > 0,
+    requires: resource.requires ?? [],
+    missingRequires: resource.missing_requires ?? [],
+    dependencyLabel: dependencyLabel(resource),
     progressPercent,
     actions: resource.actions,
     resource,

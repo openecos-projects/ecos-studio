@@ -2,13 +2,20 @@ import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
-import { StateEnum, StepEnum } from '@/api/type'
+import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
 import {
+  runStepApi,
+  rtl2gdsApi,
   startFlowOperationApi,
   startStepOperationApi,
   type RunStepResponse,
 } from '@/api/flow'
-import { markHomeRunArtifactResetAwaitingBackendStart } from './homeRunArtifacts'
+import type { DesignTool } from '@ecos-studio/shared'
+import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
+import {
+  clearHomeRunArtifactResetAwaitingBackendStart,
+  markHomeRunArtifactResetAwaitingBackendStart,
+} from './homeRunArtifacts'
 import {
   clearFlowExecutionActiveForWorkspace,
   flowExecutionActive,
@@ -24,6 +31,11 @@ export interface FlowRunOptions {
   rerun?: boolean
   resetDependents?: boolean
 }
+
+// A completed backend or frontend flow can update every Home data source. Keep
+// one broad fallback for the legacy frontend RPC path when protocol events are
+// delayed or unavailable; backend operations reconcile through the waiter.
+const FLOW_COMPLETION_FALLBACK_SCOPES: WorkspaceInvalidationScope[] = ['all']
 
 export {
   clearFlowExecutionActiveForWorkspace,
@@ -53,8 +65,8 @@ function clearTransientInteractionLocks() {
  * 流程运行器 Hook
  * 负责处理流程的运行、停止、重置等操作
  *
- * Runtime lifecycle events 由 useWorkspace 管理（workspace 级别订阅），
- * 本 Hook 只负责调用 ECC RPC runtime command 并等待结果。
+ * Workspace lifecycle events 由 useWorkspace 管理。ECC-FE 与 backend 共用
+ * 同一套 renderer runtime protocol，状态更新由事件消费者直接完成。
  */
 export function useFlowRunner() {
   const { ensureDesktopRuntime } = useDesktopRuntime()
@@ -63,6 +75,7 @@ export function useFlowRunner() {
     ensureApiReady,
     showToast,
     invalidateWorkspaceResources,
+    resourceVersions,
     waitForRuntimeOperation,
     workspaceSession,
   } = useWorkspace()
@@ -106,7 +119,36 @@ export function useFlowRunner() {
   }
 
   function getCurrentWorkspaceHandle(): string | null {
-    return workspaceSession.value.workspaceId || null
+    const session = workspaceSession.value
+    // A new workspace can expose its project path before the runtime session
+    // has finished activation. Do not send flow commands with a stale or
+    // empty handle during that transition.
+    if (
+      typeof session.state === 'string' &&
+      (session.state !== 'active' || !session.workspaceId.trim())
+    ) {
+      return null
+    }
+    return session.workspaceId.trim() || null
+  }
+
+  function getCurrentDesignTool(): DesignTool {
+    return currentProject.value?.designTool ?? 'backend'
+  }
+
+  function runtimeRequestScope(
+    directory: string,
+  ):
+    | { designTool: 'frontend'; directory: string; workspaceHandle: string }
+    | { directory: string; workspaceHandle: string }
+    | null {
+    const designTool = getCurrentDesignTool()
+    const workspaceHandle = getCurrentWorkspaceHandle()
+    if (!workspaceHandle) return null
+    if (designTool === 'frontend') {
+      return { designTool, directory, workspaceHandle }
+    }
+    return { directory, workspaceHandle }
   }
 
   function observeRuntimeOperation(operationId: string, directory: string): void {
@@ -154,8 +196,8 @@ export function useFlowRunner() {
     }
 
     const directory = getCurrentWorkspacePath()
-    const workspaceHandle = getCurrentWorkspaceHandle()
-    if (!directory || !workspaceHandle) {
+    const requestScope = directory ? runtimeRequestScope(directory) : null
+    if (!directory || !requestScope) {
       showToast({
         severity: 'error',
         summary: 'No Workspace Open',
@@ -175,12 +217,50 @@ export function useFlowRunner() {
     error.value = null
     try {
       console.log('handleRunFlow', step)
+      const versionsBeforeRunStep = { ...resourceVersions.value }
+      const runSessionId = workspaceSession.value.sessionId
+
+      if (getCurrentDesignTool() === 'frontend') {
+        const result = await runStepApi({
+          cmd: CMDEnum.run_step,
+          data: {
+            ...requestScope,
+            step: step as StepEnum,
+            rerun: Boolean(options.rerun),
+          },
+        })
+        const allResourcesAlreadyInvalidated = FLOW_COMPLETION_FALLBACK_SCOPES.every(
+          (key) => resourceVersions.value[key] !== versionsBeforeRunStep[key],
+        )
+        if (!allResourcesAlreadyInvalidated) {
+          invalidateWorkspaceResources(FLOW_COMPLETION_FALLBACK_SCOPES, {
+            sessionId: runSessionId,
+          })
+        }
+        if (result.data?.state === StateEnum.Success) {
+          showToast({
+            severity: 'success',
+            summary: 'Step Completed',
+            detail: `${step} finished successfully`,
+            life: 4000,
+          })
+        } else {
+          showToast({
+            severity: 'error',
+            summary: 'Step Failed',
+            detail: `${step} did not complete successfully`,
+            life: 6000,
+          })
+        }
+        return result.data
+      }
+
       const operation = await startStepOperationApi({
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
         resetDependents: Boolean(options.resetDependents),
         step,
-        workspaceHandle,
+        workspaceHandle: requestScope.workspaceHandle,
       })
       observeRuntimeOperation(operation.operationId, directory)
       lastRunResult.value = { step: step as StepEnum, state: StateEnum.Ongoing }
@@ -190,7 +270,6 @@ export function useFlowRunner() {
         detail: `${step} is running`,
         life: 15000,
       })
-      void operation
       return lastRunResult.value
     } catch (err) {
       console.error('Single-step run failed:', err)
@@ -203,6 +282,11 @@ export function useFlowRunner() {
       })
     } finally {
       clearTransientInteractionLocks()
+      // Legacy frontend RPC calls resolve synchronously. Backend operations
+      // release this lock from observeRuntimeOperation after terminal state.
+      if (getCurrentDesignTool() === 'frontend') {
+        clearFlowExecutionActiveForWorkspace(directory)
+      }
     }
     return null
   }
@@ -229,8 +313,9 @@ export function useFlowRunner() {
     }
 
     const directory = getCurrentWorkspacePath()
-    const workspaceHandle = getCurrentWorkspaceHandle()
-    if (!directory || !workspaceHandle) {
+    const designTool = getCurrentDesignTool()
+    const requestScope = directory ? runtimeRequestScope(directory) : null
+    if (!directory || !requestScope) {
       showToast({
         severity: 'error',
         summary: 'No Workspace Open',
@@ -245,20 +330,61 @@ export function useFlowRunner() {
     }
 
     clearTransientInteractionLocks()
-    if (options.rerun) {
+    // Frontend RPC runs the complete flow synchronously and has no backend
+    // rerun-prepared boundary. The awaiting marker is only meaningful for the
+    // asynchronous ECC operation, where a stale Home snapshot can arrive
+    // before the first authoritative step event.
+    if (options.rerun && designTool !== 'frontend') {
       markHomeRunArtifactResetAwaitingBackendStart(directory)
     }
     markFlowExecutionActiveForWorkspace(directory)
     state.value = StateEnum.Ongoing
     error.value = null
-
     try {
-      console.log('Starting rtl2gds flow...')
+      const flowLabel = designTool === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'
+      console.log(`Starting ${flowLabel}...`)
+      const runSessionId = workspaceSession.value.sessionId
+
+      if (designTool === 'frontend') {
+        const result = await rtl2gdsApi({
+          cmd: CMDEnum.rtl2gds,
+          data: {
+            ...requestScope,
+            rerun: Boolean(options.rerun),
+          },
+        })
+        console.log('rtl2gds result:', result)
+        invalidateWorkspaceResources(FLOW_COMPLETION_FALLBACK_SCOPES, {
+          sessionId: runSessionId,
+        })
+        if (result.response === 'success') {
+          state.value = StateEnum.Success
+          showToast({
+            severity: 'success',
+            summary: `${flowLabel} Completed`,
+            detail: 'All flow steps finished successfully',
+            life: 5000,
+          })
+        } else {
+          state.value = StateEnum.Imcomplete
+          error.value = result.message?.[0] || `${flowLabel} failed`
+          showToast({
+            severity: 'error',
+            summary: `${flowLabel} Failed`,
+            detail: error.value ?? 'Unknown error',
+            life: 8000,
+          })
+        }
+        return result.data
+      }
+
       const operation = await startFlowOperationApi({
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
-        workspaceHandle,
+        workspaceHandle: requestScope.workspaceHandle,
       })
+      // Keep the rerun marker until the backend emits its authoritative
+      // rerun-prepared protocol event. A failed start must clear it below.
       observeRuntimeOperation(operation.operationId, directory)
       showToast({
         severity: 'info',
@@ -270,16 +396,24 @@ export function useFlowRunner() {
     } catch (err) {
       console.error('Run-all flow failed:', err)
       clearFlowExecutionActiveForWorkspace(directory)
+      clearHomeRunArtifactResetAwaitingBackendStart(directory)
       error.value = err instanceof Error ? err.message : String(err)
       state.value = StateEnum.Imcomplete
       showToast({
         severity: 'error',
-        summary: 'RTL2GDS Error',
+        summary: `${designTool === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'} Error`,
         detail: error.value ?? 'Unknown error',
         life: 15000,
       })
     } finally {
       clearTransientInteractionLocks()
+      // Frontend RPC completes synchronously and has no backend rerun-prepared
+      // event to consume the marker. Backend operations consume it from the
+      // runtime protocol (or the catch path when startFlow fails).
+      if (designTool === 'frontend') {
+        clearHomeRunArtifactResetAwaitingBackendStart(directory)
+        clearFlowExecutionActiveForWorkspace(directory)
+      }
     }
     return null
   }

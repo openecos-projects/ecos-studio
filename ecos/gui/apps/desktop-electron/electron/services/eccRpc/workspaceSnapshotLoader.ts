@@ -5,6 +5,8 @@ import type {
   EccRuntimeStepSnapshot,
 } from '@ecos-studio/shared'
 
+import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
+
 const MAX_SNAPSHOT_FILE_BYTES = 512 * 1024
 
 type DetachedWorkspaceSnapshot = Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
@@ -59,6 +61,7 @@ function flowStepsFrom(flow: Record<string, unknown>): EccRuntimeStepSnapshot[] 
  */
 export class WorkspaceSnapshotLoader {
   async load(directory: string): Promise<DetachedWorkspaceSnapshot> {
+    await migrateWorkspaceConfigFilenames(directory)
     const homeDirectory = join(directory, 'home')
     const [home, flow, parameters] = await Promise.all([
       readJsonObject(join(homeDirectory, 'home.json')),
@@ -80,10 +83,11 @@ export class WorkspaceSnapshotLoader {
    * baseline. The same per-file size limit as idle runtime recovery applies.
    */
   async loadBaselineSnapshot(directory: string): Promise<WorkspaceBaselineSnapshot> {
+    await migrateWorkspaceConfigFilenames(directory)
     const [parameters, pdk, db] = await Promise.all([
       readJsonObject(join(directory, 'home', 'parameters.json')),
       readJsonObject(join(directory, 'home', 'pdk.json')),
-      readJsonObject(join(directory, 'config', 'db_default_config.json')),
+      readJsonObject(join(directory, 'config', 'db_ecc.json')),
     ])
     return { db, parameters, pdk }
   }
