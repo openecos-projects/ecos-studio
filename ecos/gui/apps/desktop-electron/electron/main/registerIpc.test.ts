@@ -332,7 +332,7 @@ describe('registerIpc', () => {
     )
     expect(
       services.workspaceService.approvePendingExternalReadRoots,
-    ).toHaveBeenCalledOnce()
+    ).toHaveBeenCalledWith('/tmp/project', ['/tmp/external-rtl'])
   })
 
   it('keeps external frontend roots blocked when native confirmation is denied', async () => {

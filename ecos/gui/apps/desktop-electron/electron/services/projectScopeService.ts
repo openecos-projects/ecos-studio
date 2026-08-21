@@ -257,15 +257,29 @@ export class ProjectScopeService {
     return [...(this.pendingExtraRootsByWindowId.get(requireWindowScopeId()) ?? [])]
   }
 
-  async approvePendingExternalReadRoots(): Promise<string[]> {
+  async approvePendingExternalReadRoots(
+    expectedProjectRoot: string,
+    expectedRoots: string[],
+  ): Promise<string[]> {
     const windowId = requireWindowScopeId()
     const projectRoot = this.rootsByWindowId.get(windowId)
     if (!projectRoot) {
       throw new Error('Project root is not registered')
     }
+    if (!pathsEqual(projectRoot, expectedProjectRoot)) {
+      throw new Error('External read approval no longer matches the active project')
+    }
 
     const pendingRoots = this.pendingExtraRootsByWindowId.get(windowId) ?? []
     if (pendingRoots.length === 0) return []
+    if (
+      pendingRoots.length !== expectedRoots.length ||
+      pendingRoots.some(
+        (root) => !expectedRoots.some((expectedRoot) => pathsEqual(root, expectedRoot)),
+      )
+    ) {
+      throw new Error('External read approval no longer matches the pending roots')
+    }
 
     const approvedRoots = uniquePaths([
       ...(this.extraRootsByWindowId.get(windowId) ?? []),

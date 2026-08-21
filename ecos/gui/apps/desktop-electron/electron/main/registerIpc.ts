@@ -160,7 +160,10 @@ export interface DesktopBridgeServices {
     ): Promise<DesktopProjectManagementWorkspaceTextsResult>
   }
   workspaceService: {
-    approvePendingExternalReadRoots?(): Promise<string[]>
+    approvePendingExternalReadRoots?(
+      expectedProjectRoot: string,
+      expectedRoots: string[],
+    ): Promise<string[]>
     clearProjectRoot(): Promise<void>
     isProjectDirectory(path: string): Promise<boolean>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
@@ -1310,7 +1313,10 @@ export function registerIpc(
     })
     if (result.response === 1) {
       try {
-        await services.workspaceService.approvePendingExternalReadRoots?.()
+        await services.workspaceService.approvePendingExternalReadRoots?.(
+          projectRoot,
+          pendingRoots,
+        )
       } catch (error) {
         electronLogger.warn(
           '[workspace] Failed to persist external source approval: %s',
