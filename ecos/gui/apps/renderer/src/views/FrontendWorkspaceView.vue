@@ -3922,12 +3922,7 @@ async function hydrateWaveCasesFromWorkspaceResources(
   loadedDetail: FrontendStepDetail,
   isCurrentRequest: () => boolean,
 ): Promise<void> {
-  if (
-    !isCurrentRequest() ||
-    detail.value !== loadedDetail ||
-    !isGlobalWaveView.value ||
-    detailWaveItems.value.length > 0
-  )
+  if (!isCurrentRequest() || !isGlobalWaveView.value || detailWaveItems.value.length > 0)
     return
 
   try {
@@ -3935,7 +3930,7 @@ async function hydrateWaveCasesFromWorkspaceResources(
       step: 'sim',
       id: InfoEnum.frontend_detail,
     })
-    if (!isCurrentRequest() || detail.value !== loadedDetail) return
+    if (!isCurrentRequest() || !isGlobalWaveView.value) return
     if (response.response !== 'available') return
     const fallbackCases = Array.isArray(response.info?.cases)
       ? (response.info.cases as SimCase[])
@@ -3946,7 +3941,7 @@ async function hydrateWaveCasesFromWorkspaceResources(
       cases: fallbackCases,
     }
   } catch (err) {
-    if (isCurrentRequest() && detail.value === loadedDetail) {
+    if (isCurrentRequest() && isGlobalWaveView.value) {
       console.warn('Failed to load waveform cases from workspace resources:', err)
     }
   }

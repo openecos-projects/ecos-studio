@@ -68,8 +68,10 @@ describe('FrontendWorkspaceView simulation layout', () => {
       'await hydrateWaveCasesFromWorkspaceResources(loadedDetail, isCurrentRequest)',
     )
     expect(frontendWorkspaceViewSource).toContain(
-      'if (!isCurrentRequest() || detail.value !== loadedDetail) return',
+      'if (!isCurrentRequest() || !isGlobalWaveView.value) return',
     )
+    expect(frontendWorkspaceViewSource).not.toContain('detail.value !== loadedDetail')
+    expect(frontendWorkspaceViewSource).not.toContain('detail.value === loadedDetail')
     expect(frontendWorkspaceViewSource).toContain('...loadedDetail,')
     expect(frontendWorkspaceViewSource).not.toContain('...detail.value,\n      cases:')
   })
