@@ -2,7 +2,7 @@ import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import {
   parseProjectManifest,
-  projectManagementWorkspaceSummaryPaths,
+  projectManagementWorkspaceReadablePaths,
 } from '@ecos-studio/shared'
 import type {
   DesktopProjectManagementWorkspaceTextsRequest,
@@ -13,9 +13,9 @@ import { isPathWithinRoot } from './pathScope'
 const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
 const PROJECT_WORKSPACE_TEXT_MAX_BYTES = 256 * 1024
 const PROJECT_WORKSPACE_READ_CONCURRENCY = 4
-const PROJECT_WORKSPACE_READ_LIMIT = projectManagementWorkspaceSummaryPaths.length
+const PROJECT_WORKSPACE_READ_LIMIT = projectManagementWorkspaceReadablePaths.length
 
-const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(projectManagementWorkspaceSummaryPaths)
+const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(projectManagementWorkspaceReadablePaths)
 
 class ProjectManagementWorkspacePathError extends Error {}
 

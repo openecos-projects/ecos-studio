@@ -210,6 +210,68 @@ describe('useStepDashboardData cache', () => {
 
     expect(testState.getWorkspaceResourceIndexApi).toHaveBeenCalledTimes(2)
   })
+
+  it('loads this step\'s own congestion maps for the Place dashboard', async () => {
+    const placeRoot = '/projects/gcd/ws_0004/place_dreamplace'
+    const placeIndex = {
+      flow: {
+        steps: [
+          {
+            name: 'place',
+            tool: 'dreamplace',
+            state: 'Success',
+            runtime: '',
+            directory: placeRoot,
+            resources: {
+              feature: {
+                step: { path: `${placeRoot}/feature/place.step.json` },
+                map: { exists: true, path: `${placeRoot}/feature/place.map.json` },
+              },
+              output: {
+                geometryManifest: { exists: false },
+                image: { exists: false, path: '' },
+              },
+              report: {},
+            },
+          },
+        ],
+      },
+    }
+    testState.route.params.step = 'place'
+    testState.route.path = '/workspace/place'
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue(placeIndex)
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      info: {
+        metrics: `${placeRoot}/analysis/place/qor_metrics.json`,
+        'step feature': `${placeRoot}/feature/place.step.json`,
+        'data summary': `${placeRoot}/feature/place.db.json`,
+      },
+    })
+    const egrPng = `${placeRoot}/feature/egr_congestion_map/place_egr_union_overflow.png`
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => {
+      if (path === egrPng) return 'blob:egr-union'
+      throw new Error(`missing: ${path}`)
+    })
+    testState.readOptionalProjectTextFile.mockImplementation(async (path: string) => {
+      if (path === egrPng.replace(/\.png$/, '.csv')) return '0,2\n1,3\n'
+      return '{}'
+    })
+
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => {
+      expect(dashboard.data.value?.congestionTiles).toHaveLength(1)
+    })
+    const tile = dashboard.data.value!.congestionTiles[0]
+    expect(tile.id).toBe('place-egr-union')
+    expect(tile.pngPath).toBe(egrPng)
+    expect(tile.stats).toEqual({ max: 3, total: 6, hotspotCount: 3 })
+    expect(dashboard.data.value!.congestionTileUrls.get(egrPng)).toBe('blob:egr-union')
+    // Only the current step's candidates are probed
+    expect(testState.readProjectBlobUrl).not.toHaveBeenCalledWith(
+      expect.stringContaining('CTS_'),
+      expect.anything(),
+    )
+  })
 })
 
 describe('useStepDashboardData', () => {
@@ -251,11 +313,22 @@ describe('useStepDashboardData', () => {
     expect(source).toContain('feature/${resourceStep.name}.map.json')
   })
 
-  it('loads the optional Place all-cell density map and retains its cached Blob URL', () => {
-    expect(source).toContain('feature/density_map/place_allcell_density.png')
-    expect(source).toContain('readOptionalImage(placeDensityMapPath)')
-    expect(source).toContain('placeDensityMapUrl')
-    expect(source).toContain('revokeBlobUrl(placeDensityMapUrl)')
+  it('no longer loads a dedicated Place density map (covered by congestion tiles)', () => {
+    expect(source).not.toContain('placeDensityMapUrl')
+    expect(source).not.toContain('place_allcell_density.png')
+  })
+
+  it('loads the step\'s own congestion maps (place/CTS) into snapshot tiles', () => {
+    expect(source).toContain('congestionCandidatePngPaths(congestionCandidateStep)')
+    expect(source).toContain('buildCongestionTiles(')
+    expect(source).toContain('parseCongestionCsv(text)')
+    expect(source).toContain('congestionTiles')
+    expect(source).toContain('replacement.congestionTileUrls')
+  })
+
+  it('derives the Design Statis metric table from every step\'s db.json feature', () => {
+    expect(source).toContain('designStatisSummary(dbJson)')
+    expect(source).toContain('designStatis: StepDesignStatis | null')
   })
 
   it('loads specialized RCX, DRC, LVS, and STA feature artifacts for their insight surfaces', () => {

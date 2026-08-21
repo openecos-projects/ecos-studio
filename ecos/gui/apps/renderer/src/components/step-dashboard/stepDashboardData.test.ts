@@ -5,6 +5,7 @@ import {
   dataChartTitle,
   dbBars,
   dbHighlights,
+  designStatisSummary,
   drcInsights,
   floorplanInsights,
   hardenOutputInsights,
@@ -770,6 +771,44 @@ describe('step dashboard data', () => {
         availability: 'available',
       }),
     ])
+  })
+
+  it('summarizes Design Layout / Design Statis as metric-table groups', () => {
+    const summary = designStatisSummary({
+      'Design Layout': {
+        die_area: 2313.417604,
+        die_usage: 0.3358667,
+        die_bounding_width: 48.098,
+        design_dbu: 1000,
+      },
+      'Design Statis': { num_iopins: 54, num_instances: 423 },
+      Instances: { logic: { num: 300 } },
+    })
+    expect(summary).not.toBeNull()
+    expect(summary!.rowCount).toBe(6)
+    expect(summary!.groups.map((group) => group.id)).toEqual([
+      'design-layout',
+      'design-statis',
+    ])
+    expect(summary!.groups[0].rows).toEqual([
+      { id: 'design-layout-die_area', label: 'Die Area', value: '2313.418' },
+      { id: 'design-layout-die_usage', label: 'Die Usage', value: '0.336' },
+      { id: 'design-layout-die_bounding_width', label: 'Die Bounding Width', value: '48.098' },
+      { id: 'design-layout-design_dbu', label: 'Design Dbu', value: '1000' },
+    ])
+    expect(summary!.groups[1].rows).toEqual([
+      { id: 'design-statis-num_iopins', label: 'Num Iopins', value: '54' },
+      { id: 'design-statis-num_instances', label: 'Num Instances', value: '423' },
+    ])
+  })
+
+  it('returns null design statis for features without those db.json sections', () => {
+    expect(designStatisSummary(null)).toBeNull()
+    expect(designStatisSummary({})).toBeNull()
+    // Synthesis' yosys stat feature has a different shape entirely
+    expect(designStatisSummary({ modules: 12, cells: 3400 })).toBeNull()
+    // Sections with only nested objects contribute no rows
+    expect(designStatisSummary({ 'Design Layout': { nested: { a: 1 } } })).toBeNull()
   })
 
   it('builds Floorplan metrics and seven snapshot distributions from its database feature', () => {

@@ -776,21 +776,11 @@
                   <h3>Snapshot</h3>
                 </div>
               </header>
-              <StepSnapshotPanel @open="openDataSummary()">
-                <button
-                  v-if="data.placeDensityMapUrl"
-                  type="button"
-                  class="snapshot-extra-image"
-                  title="View all cell density map"
-                  @click="openPlaceDensityMap()"
-                >
-                  <img :src="data.placeDensityMapUrl" alt="Place all-cell density map" />
-                  <span class="snapshot-extra-copy">
-                    <strong>All Cell Density</strong>
-                    <span>Density map</span>
-                  </span>
-                </button>
-              </StepSnapshotPanel>
+              <StepSnapshotPanel
+                :actions="congestionSnapshotActions"
+                @open="openDataSummary()"
+                @action="onSnapshotAction"
+              />
             </section>
           </div>
           <div v-else class="data-body">
@@ -908,6 +898,22 @@
   </Dialog>
 
   <Dialog
+    v-model:visible="showCongestionDialog"
+    modal
+    maximizable
+    :header="congestionDialogTitle"
+    :style="{ width: 'min(1080px, calc(100vw - 40px))' }"
+    :content-style="{ height: 'min(72vh, 680px)', overflow: 'auto' }"
+    :draggable="false"
+  >
+    <CongestionPanel
+      v-if="data?.congestionTiles.length"
+      :tiles="data.congestionTiles"
+      :tile-urls="data.congestionTileUrls"
+    />
+  </Dialog>
+
+  <Dialog
     v-model:visible="showChecklistDetails"
     modal
     header="Checklist Details"
@@ -999,8 +1005,9 @@
   <Dialog
     v-model:visible="showStepConfiguration"
     modal
+    maximizable
     :header="configDialogTitle"
-    :style="{ width: 'min(1120px, calc(100vw - 32px))' }"
+    :style="{ width: 'min(1440px, calc(100vw - 32px))' }"
     :draggable="false"
   >
     <div class="step-config-dialog">
@@ -1050,6 +1057,7 @@
     :visible="showDataSummary"
     :header="dataSummaryTitle"
     :snapshots="dataSummarySnapshots"
+    :design-statis="data?.designStatis ?? null"
     :focus-id="dataSummaryFocusId"
     empty-hint="No data snapshot is available for this step."
     @update:visible="showDataSummary = $event"
@@ -1083,6 +1091,7 @@ import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
 import { useFlowStages } from '@/composables/useFlowStages'
 import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
 import { useWorkspace } from '@/composables/useWorkspace'
+import CongestionPanel from './flow-insights/CongestionPanel.vue'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { getDesktopApi } from '@/platform/desktop'
@@ -1127,6 +1136,7 @@ const showQorDetails = ref(false)
 const showTimingAnalysis = ref(false)
 const showStaCornerDetails = ref(false)
 const showDataSummary = ref(false)
+const showCongestionDialog = ref(false)
 const showStepConfiguration = ref(false)
 const dataSummaryFocusId = ref<string | null>(null)
 const imagePreview = ref({ label: '', url: '', visible: false })
@@ -1251,6 +1261,25 @@ const drcSnapshotActions = computed<StepSnapshotAction[]>(() => [
     caption: 'Violations by layer / type',
   },
 ])
+
+/** Mirrors the Home dashboard's Data Snapshot Congestion module tile, shown when
+ * this step's own feature congestion maps exist (place / CTS). */
+const congestionSnapshotActions = computed<StepSnapshotAction[]>(() =>
+  data.value?.congestionTiles.length
+    ? [
+        {
+          id: 'congestion',
+          icon: 'ri-fire-line',
+          label: 'Congestion',
+          caption: 'EGR / RUDY / density maps',
+        },
+      ]
+    : [],
+)
+
+const congestionDialogTitle = computed(
+  () => `Congestion · ${data.value?.step ?? currentStep.value}`,
+)
 const largestBar = computed(() =>
   Math.max(1, ...(selectedDataChart.value?.bars.map((bar) => bar.value) ?? [1])),
 )
@@ -1418,11 +1447,7 @@ function openDataSummary(snapshotId: string | null = null): void {
 
 function onSnapshotAction(actionId: string): void {
   if (actionId === 'drc') openDataSummary()
-}
-
-function openPlaceDensityMap(): void {
-  const url = data.value?.placeDensityMapUrl
-  if (url) openImagePreview('All Cell Density', url)
+  else if (actionId === 'congestion') showCongestionDialog.value = true
 }
 
 async function openChipViewer(): Promise<void> {
@@ -2451,61 +2476,6 @@ function fileName(path: string): string {
 .sta-corner-summary-table td.is-good {
   color: var(--success-color);
 }
-/* Extra snapshot data fills the next free cell of the panel's 4x4 grid. */
-.snapshot-extra-image {
-  background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
-  color: inherit;
-  cursor: zoom-in;
-  display: grid;
-  font: inherit;
-  gap: 4px;
-  grid-template-rows: minmax(0, 1fr) auto;
-  margin: 0;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  padding: 4px;
-  text-align: left;
-}
-.snapshot-extra-image:hover {
-  border-color: color-mix(in srgb, var(--accent-color) 62%, var(--border-color));
-}
-.snapshot-extra-image:focus-visible {
-  outline: 1px solid var(--accent-color);
-  outline-offset: -2px;
-}
-.snapshot-extra-image img {
-  display: block;
-  height: 100%;
-  min-height: 0;
-  object-fit: contain;
-  width: 100%;
-}
-.snapshot-extra-copy {
-  align-items: center;
-  display: flex;
-  gap: 4px;
-  justify-content: space-between;
-  min-width: 0;
-}
-.snapshot-extra-copy strong {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 400;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.snapshot-extra-copy span {
-  color: var(--text-primary);
-  flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-}
 
 .timing-detail-link {
   align-items: center;
@@ -2705,6 +2675,12 @@ function fileName(path: string): string {
 .step-config-dialog {
   height: min(72vh, 720px);
   min-height: 420px;
+}
+
+/* Maximized dialog: the config area fills the window (above the footer)
+   instead of stopping at the normal-mode height. */
+.p-dialog-maximized .step-config-dialog {
+  height: 100%;
 }
 
 .card-empty,

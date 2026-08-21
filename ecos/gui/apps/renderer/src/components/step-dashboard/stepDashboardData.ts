@@ -1343,6 +1343,60 @@ export function floorplanInsights(value: unknown): StepDashboardFloorplanInsight
   return { metrics: floorplanMetrics(source), snapshots: floorplanSnapshots(source) }
 }
 
+export interface StepDesignStatisRow {
+  id: string
+  label: string
+  value: string
+}
+
+export interface StepDesignStatisGroup {
+  id: 'design-layout' | 'design-statis'
+  label: string
+  rows: StepDesignStatisRow[]
+}
+
+export interface StepDesignStatis {
+  rowCount: number
+  groups: StepDesignStatisGroup[]
+}
+
+function designStatisGroup(
+  source: Record<string, unknown> | null,
+  id: StepDesignStatisGroup['id'],
+  label: string,
+): StepDesignStatisGroup | null {
+  if (!source) return null
+  const rows: StepDesignStatisRow[] = []
+  for (const [key, item] of Object.entries(source)) {
+    if (item === null || typeof item === 'object') continue
+    rows.push({
+      id: `${id}-${key}`,
+      label: humanize(key),
+      value: insightMetricValue(item),
+    })
+  }
+  return rows.length ? { id, label, rows } : null
+}
+
+/**
+ * Metric-table summary of the step database feature's `Design Layout` /
+ * `Design Statis` sections. Returns null when the step has no such data
+ * (e.g. Synthesis' yosys stat feature).
+ */
+export function designStatisSummary(value: unknown): StepDesignStatis | null {
+  const source = record(value)
+  if (!source) return null
+  const groups = [
+    designStatisGroup(record(source['Design Layout']), 'design-layout', 'Design Layout'),
+    designStatisGroup(record(source['Design Statis']), 'design-statis', 'Design Statis'),
+  ].filter((group): group is StepDesignStatisGroup => group !== null)
+  if (!groups.length) return null
+  return {
+    rowCount: groups.reduce((sum, group) => sum + group.rows.length, 0),
+    groups,
+  }
+}
+
 export function stepFeatureInsights(
   step: string,
   stepValue: unknown,

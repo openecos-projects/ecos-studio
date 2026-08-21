@@ -4,9 +4,28 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Select from 'primevue/select'
+import { useStepConfigDiff } from '../stepConfigDiff'
 
 const draft = defineModel<Record<string, unknown>>({ required: true })
 const emit = defineEmits<{ initialized: [] }>()
+
+withDefaults(
+  defineProps<{
+    readonly?: boolean
+  }>(),
+  { readonly: false },
+)
+
+const diff = useStepConfigDiff()
+
+/** Baseline-comparison highlighting; leaf-level for direct fields, container-level for panels. */
+function isChanged(path: string): boolean {
+  return diff?.isChanged(path) ?? false
+}
+
+function changedUnder(prefix: string): boolean {
+  return (diff?.changedCountUnder(prefix) ?? 0) > 0
+}
 
 onMounted(() => emit('initialized'))
 
@@ -155,13 +174,18 @@ function setDieMode(value: unknown): void {
 </script>
 
 <template>
-  <div class="sc-pro sc-cards" data-accent="indigo">
+  <div
+    class="sc-pro sc-cards"
+    :class="{ 'is-readonly': readonly }"
+    :inert="readonly"
+    data-accent="indigo"
+  >
     <div class="sc-pro-hero">
       <div class="sc-pro-hero__accent" />
       <div class="sc-pro-hero__body">
         <div class="sc-pro-hero__label">ifp</div>
         <div class="sc-pro-grid mt-2">
-          <div class="field">
+          <div class="field" :class="{ 'sc-diff': isChanged('ifp.thread_number') }">
             <label>thread_number</label>
             <InputNumber
               v-model="(ifp() as Record<string, number>).thread_number"
@@ -171,7 +195,10 @@ function setDieMode(value: unknown): void {
               class="w-full min-w-0"
             />
           </div>
-          <div class="field sc-pro-grid__full">
+          <div
+            class="field sc-pro-grid__full"
+            :class="{ 'sc-diff': isChanged('ifp.temp_directory_path') }"
+          >
             <label>temp_directory_path</label>
             <InputText
               v-model="(ifp() as Record<string, string>).temp_directory_path"
@@ -186,7 +213,7 @@ function setDieMode(value: unknown): void {
     </div>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
+      <div class="sc-pro-section__head" :class="{ 'sc-diff-panel': changedUnder('die_builder') }">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">die_builder</div>
@@ -197,7 +224,7 @@ function setDieMode(value: unknown): void {
       </div>
       <div class="sc-pro-section__body space-y-3">
         <div class="sc-pro-grid">
-          <div class="field">
+          <div class="field" :class="{ 'sc-diff': isChanged('die_builder.mode') }">
             <label>mode</label>
             <Select
               :model-value="die().mode as string"
@@ -210,7 +237,7 @@ function setDieMode(value: unknown): void {
               @update:model-value="setDieMode"
             />
           </div>
-          <div class="field">
+          <div class="field" :class="{ 'sc-diff': isChanged('die_builder.site_name') }">
             <label>site_name</label>
             <InputText
               v-model="(die() as Record<string, string>).site_name"
@@ -221,7 +248,7 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel">
+        <div class="sc-pro-subpanel" :class="{ 'sc-diff-panel': changedUnder('die_builder.margin') }">
           <div class="sc-pro-subpanel__title">margin</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -267,7 +294,7 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel">
+        <div class="sc-pro-subpanel" :class="{ 'sc-diff-panel': changedUnder('die_builder.die_util') }">
           <div class="sc-pro-subpanel__title">die_util</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -299,7 +326,7 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel">
+        <div class="sc-pro-subpanel" :class="{ 'sc-diff-panel': changedUnder('die_builder.die_size') }">
           <div class="sc-pro-subpanel__title">die_size</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -332,7 +359,7 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
+      <div class="sc-pro-section__head" :class="{ 'sc-diff-panel': changedUnder('macro_placer') }">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">macro_placer</div>
@@ -377,7 +404,7 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
+      <div class="sc-pro-section__head" :class="{ 'sc-diff-panel': changedUnder('io_placer') }">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">io_placer</div>
@@ -394,6 +421,7 @@ function setDieMode(value: unknown): void {
               v-for="(_layer, i) in stringList(io(), 'io_layer_list')"
               :key="'io-layer-' + i"
               class="flex w-full min-w-0 items-center gap-2"
+              :class="{ 'sc-diff': isChanged(`io_placer.io_layer_list[${i}]`) }"
             >
               <InputText
                 v-model="stringList(io(), 'io_layer_list')[i]"
@@ -422,7 +450,7 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
+      <div class="sc-pro-section__head" :class="{ 'sc-diff-panel': changedUnder('phy_placer') }">
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">phy_placer</div>
@@ -430,7 +458,7 @@ function setDieMode(value: unknown): void {
         </div>
       </div>
       <div class="sc-pro-section__body space-y-3">
-        <div class="sc-pro-subpanel">
+        <div class="sc-pro-subpanel" :class="{ 'sc-diff-panel': changedUnder('phy_placer.well_tap') }">
           <div class="sc-pro-subpanel__title">well_tap</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -457,7 +485,10 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel">
+        <div
+          class="sc-pro-subpanel"
+          :class="{ 'sc-diff-panel': changedUnder('phy_placer.side_endcap') }"
+        >
           <div class="sc-pro-subpanel__title">side_endcap</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -481,7 +512,10 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel">
+        <div
+          class="sc-pro-subpanel"
+          :class="{ 'sc-diff-panel': changedUnder('phy_placer.edge_endcap') }"
+        >
           <div class="sc-pro-subpanel__title">edge_endcap</div>
           <div class="space-y-3">
             <div class="field min-w-0">
@@ -491,6 +525,9 @@ function setDieMode(value: unknown): void {
                   v-for="(_cell, i) in stringList(edgeEndcap(), 'top_cell_name_list')"
                   :key="'edge-top-' + i"
                   class="flex w-full min-w-0 items-center gap-2"
+                  :class="{
+                    'sc-diff': isChanged(`phy_placer.edge_endcap.top_cell_name_list[${i}]`),
+                  }"
                 >
                   <InputText
                     v-model="stringList(edgeEndcap(), 'top_cell_name_list')[i]"
@@ -524,6 +561,11 @@ function setDieMode(value: unknown): void {
                   v-for="(_cell, i) in stringList(edgeEndcap(), 'bottom_cell_name_list')"
                   :key="'edge-bot-' + i"
                   class="flex w-full min-w-0 items-center gap-2"
+                  :class="{
+                    'sc-diff': isChanged(
+                      `phy_placer.edge_endcap.bottom_cell_name_list[${i}]`,
+                    ),
+                  }"
                 >
                   <InputText
                     v-model="stringList(edgeEndcap(), 'bottom_cell_name_list')[i]"
@@ -553,10 +595,16 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel">
+        <div
+          class="sc-pro-subpanel"
+          :class="{ 'sc-diff-panel': changedUnder('phy_placer.boundary_tap') }"
+        >
           <div class="sc-pro-subpanel__title">boundary_tap</div>
           <div class="space-y-3">
-            <div class="field max-w-xs">
+            <div
+              class="field max-w-xs"
+              :class="{ 'sc-diff': isChanged('phy_placer.boundary_tap.rule_micron') }"
+            >
               <label>rule_micron</label>
               <InputNumber
                 v-model="(boundaryTap() as Record<string, number>).rule_micron"
@@ -575,6 +623,11 @@ function setDieMode(value: unknown): void {
                   v-for="(_cell, i) in stringList(boundaryTap(), 'top_cell_name_list')"
                   :key="'bound-top-' + i"
                   class="flex w-full min-w-0 items-center gap-2"
+                  :class="{
+                    'sc-diff': isChanged(
+                      `phy_placer.boundary_tap.top_cell_name_list[${i}]`,
+                    ),
+                  }"
                 >
                   <InputText
                     v-model="stringList(boundaryTap(), 'top_cell_name_list')[i]"
@@ -608,6 +661,11 @@ function setDieMode(value: unknown): void {
                   v-for="(_cell, i) in stringList(boundaryTap(), 'bottom_cell_name_list')"
                   :key="'bound-bot-' + i"
                   class="flex w-full min-w-0 items-center gap-2"
+                  :class="{
+                    'sc-diff': isChanged(
+                      `phy_placer.boundary_tap.bottom_cell_name_list[${i}]`,
+                    ),
+                  }"
                 >
                   <InputText
                     v-model="stringList(boundaryTap(), 'bottom_cell_name_list')[i]"
@@ -640,7 +698,10 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
+      <div
+        class="sc-pro-section__head"
+        :class="{ 'sc-diff-panel': changedUnder('pdn_generator.global_connect') }"
+      >
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">pdn_generator · global_connect</div>
@@ -668,6 +729,9 @@ function setDieMode(value: unknown): void {
               <tr
                 v-for="(row, i) in pdn().global_connect as Record<string, unknown>[]"
                 :key="'gc-' + i"
+                :class="{
+                  'sc-diff-row': changedUnder(`pdn_generator.global_connect[${i}]`),
+                }"
               >
                 <td>
                   <InputText
@@ -710,7 +774,10 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
+      <div
+        class="sc-pro-section__head"
+        :class="{ 'sc-diff-panel': changedUnder('pdn_generator.rail') }"
+      >
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">pdn_generator · rail</div>
@@ -738,6 +805,7 @@ function setDieMode(value: unknown): void {
               <tr
                 v-for="(row, i) in pdn().rail as Record<string, unknown>[]"
                 :key="'rail-' + i"
+                :class="{ 'sc-diff-row': changedUnder(`pdn_generator.rail[${i}]`) }"
               >
                 <td>
                   <InputText
@@ -782,7 +850,10 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
+      <div
+        class="sc-pro-section__head"
+        :class="{ 'sc-diff-panel': changedUnder('pdn_generator.stripe') }"
+      >
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">pdn_generator · stripe</div>
@@ -811,6 +882,7 @@ function setDieMode(value: unknown): void {
               <tr
                 v-for="(row, i) in pdn().stripe as Record<string, unknown>[]"
                 :key="'stripe-' + i"
+                :class="{ 'sc-diff-row': changedUnder(`pdn_generator.stripe[${i}]`) }"
               >
                 <td>
                   <InputText
@@ -881,7 +953,10 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head">
+      <div
+        class="sc-pro-section__head"
+        :class="{ 'sc-diff-panel': changedUnder('pdn_generator.connect_layers') }"
+      >
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">pdn_generator · connect_layers</div>
@@ -909,6 +984,7 @@ function setDieMode(value: unknown): void {
               <tr
                 v-for="(row, i) in pdn().connect_layers as Record<string, unknown>[]"
                 :key="'cl-' + i"
+                :class="{ 'sc-diff-row': changedUnder(`pdn_generator.connect_layers[${i}]`) }"
               >
                 <td>
                   <InputText

@@ -10,51 +10,88 @@
     :draggable="false"
     @update:visible="onVisibleUpdate"
   >
-    <div v-if="models.length" class="data-summary">
+    <div v-if="railItems.length" class="data-summary">
       <nav class="data-summary-rail" aria-label="Data snapshot categories">
         <header>
           <i class="ri-dashboard-2-line" aria-hidden="true" />
           <h3>Snapshots</h3>
-          <span>{{ models.length }}</span>
+          <span>{{ railItems.length }}</span>
         </header>
         <ul>
-          <li v-for="model in models" :key="model.id">
+          <li v-for="item in railItems" :key="item.id">
             <button
               type="button"
-              :aria-current="model.id === active?.id"
-              :class="{ 'is-active': model.id === active?.id }"
-              @click="activeId = model.id"
+              :aria-current="item.id === activeRail?.id"
+              :class="{ 'is-active': item.id === activeRail?.id }"
+              @click="activeId = item.id"
             >
-              <i :class="model.icon" aria-hidden="true" />
-              <span :title="model.label">{{ model.label }}</span>
-              <strong>{{ formatDashboardValue(model.total, model.unit) }}</strong>
+              <i :class="item.icon" aria-hidden="true" />
+              <span :title="item.label">{{ item.label }}</span>
+              <strong>{{ item.badge }}</strong>
             </button>
           </li>
         </ul>
       </nav>
 
-      <section v-if="active" class="data-summary-pane">
+      <section v-if="designStatisActive && designStatis" class="data-summary-pane">
         <header class="data-summary-pane-header">
           <div>
-            <i :class="active.icon" aria-hidden="true" />
-            <h3>{{ active.label }}</h3>
+            <i class="ri-table-line" aria-hidden="true" />
+            <h3>Design Statis</h3>
           </div>
           <span class="data-summary-total">
-            {{ formatDashboardValue(active.total, active.unit) }}
+            {{ designStatis.rowCount }}
+            <small>metrics</small>
+          </span>
+        </header>
+
+        <div class="data-summary-pane-body data-summary-pane-body--table">
+          <section
+            v-for="group in designStatis.groups"
+            :key="group.id"
+            class="design-statis-group"
+          >
+            <header>
+              <div>
+                <i class="ri-list-check-2" aria-hidden="true" />
+                <h4>{{ group.label }}</h4>
+              </div>
+              <span>{{ group.rows.length }} metrics</span>
+            </header>
+            <table class="design-statis-table">
+              <tbody>
+                <tr v-for="row in group.rows" :key="row.id">
+                  <th scope="row" :title="row.label">{{ row.label }}</th>
+                  <td>{{ row.value }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </section>
+
+      <section v-else-if="activeModel" class="data-summary-pane">
+        <header class="data-summary-pane-header">
+          <div>
+            <i :class="activeModel.icon" aria-hidden="true" />
+            <h3>{{ activeModel.label }}</h3>
+          </div>
+          <span class="data-summary-total">
+            {{ formatDashboardValue(activeModel.total, activeModel.unit) }}
             <small>total</small>
           </span>
         </header>
 
         <div class="data-summary-pane-body">
-          <template v-if="active.kind === 'composition'">
+          <template v-if="activeModel.kind === 'composition'">
             <div class="data-summary-chart-card">
               <div
                 class="data-summary-composition-bar"
-                :aria-label="`${active.label} composition`"
+                :aria-label="`${activeModel.label} composition`"
                 role="img"
               >
                 <span
-                  v-for="row in active.chartRows"
+                  v-for="row in activeModel.chartRows"
                   :key="row.id"
                   :class="`snapshot-slot ${row.slotClass}`"
                   :style="{ width: `${row.percentValue}%` }"
@@ -67,13 +104,13 @@
                   <i class="ri-list-check-2" aria-hidden="true" />
                   <h4>Composition</h4>
                 </div>
-                <span>{{ active.rows.length }} parts</span>
+                <span>{{ activeModel.rows.length }} parts</span>
               </header>
               <ul>
-                <li v-for="row in active.rows" :key="row.id" class="has-swatch">
+                <li v-for="row in activeModel.rows" :key="row.id" class="has-swatch">
                   <i :class="`snapshot-slot ${row.slotClass}`" aria-hidden="true" />
                   <strong :title="row.label">{{ row.label }}</strong>
-                  <span>{{ formatDashboardValue(row.value, active.unit) }}</span>
+                  <span>{{ formatDashboardValue(row.value, activeModel.unit) }}</span>
                   <small>{{ row.percentLabel }}</small>
                 </li>
               </ul>
@@ -83,9 +120,9 @@
           <template v-else>
             <div class="data-summary-chart-card">
               <StepSnapshotBars
-                v-if="active.chartRows.length"
-                :label="`${active.label} distribution`"
-                :rows="active.chartRows"
+                v-if="activeModel.chartRows.length"
+                :label="`${activeModel.label} distribution`"
+                :rows="activeModel.chartRows"
                 :unit="barUnit"
                 height="100%"
               />
@@ -100,12 +137,12 @@
                   <i class="ri-list-check-2" aria-hidden="true" />
                   <h4>Distribution</h4>
                 </div>
-                <span>{{ active.rows.length }} bins</span>
+                <span>{{ activeModel.rows.length }} bins</span>
               </header>
               <ul>
-                <li v-for="row in active.rows" :key="row.id">
+                <li v-for="row in activeModel.rows" :key="row.id">
                   <strong :title="row.label">{{ row.label }}</strong>
-                  <span>{{ formatDashboardValue(row.value, active.unit) }}</span>
+                  <span>{{ formatDashboardValue(row.value, activeModel.unit) }}</span>
                   <small>{{ row.percentLabel }}</small>
                 </li>
               </ul>
@@ -121,21 +158,32 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
-import type { StepDashboardFloorplanSnapshot } from './stepDashboardData'
+import type {
+  StepDashboardFloorplanSnapshot,
+  StepDesignStatis,
+} from './stepDashboardData'
 import { formatDashboardValue } from './stepDashboardData'
 import { buildStepSnapshotViewModels } from './stepSnapshotSummary'
 import StepSnapshotBars from './StepSnapshotBars.vue'
+
+const DESIGN_STATIS_ID = 'design-statis'
 
 const props = withDefaults(
   defineProps<{
     visible: boolean
     header: string
     snapshots: StepDashboardFloorplanSnapshot[]
+    /** Metric table (Design Layout / Design Statis) from this step's db.json feature. */
+    designStatis?: StepDesignStatis | null
     /** Snapshot the dialog should focus on when it opens; null picks the first. */
     focusId?: string | null
     emptyHint?: string
   }>(),
-  { focusId: null, emptyHint: 'No data snapshot is available for this step.' },
+  {
+    designStatis: null,
+    focusId: null,
+    emptyHint: 'No data snapshot is available for this step.',
+  },
 )
 
 const emit = defineEmits<{
@@ -143,14 +191,52 @@ const emit = defineEmits<{
 }>()
 
 const models = computed(() => buildStepSnapshotViewModels(props.snapshots))
+
+interface RailItem {
+  id: string
+  icon: string
+  label: string
+  badge: string
+}
+
+/** Design Statis leads the rail, above Instance Area and the other snapshots. */
+const railItems = computed<RailItem[]>(() => {
+  const items: RailItem[] = []
+  if (props.designStatis) {
+    items.push({
+      id: DESIGN_STATIS_ID,
+      icon: 'ri-table-line',
+      label: 'Design Statis',
+      badge: `${props.designStatis.rowCount}`,
+    })
+  }
+  for (const model of models.value) {
+    items.push({
+      id: model.id,
+      icon: model.icon,
+      label: model.label,
+      badge: formatDashboardValue(model.total, model.unit),
+    })
+  }
+  return items
+})
+
 const activeId = ref<string | null>(null)
-const active = computed(
+const activeModel = computed(
+  () => models.value.find((model) => model.id === activeId.value) ?? null,
+)
+const designStatisActive = computed(
+  () => activeId.value === DESIGN_STATIS_ID && !!props.designStatis,
+)
+const activeRail = computed(
   () =>
-    models.value.find((model) => model.id === activeId.value) ?? models.value[0] ?? null,
+    railItems.value.find((item) => item.id === activeId.value) ??
+    railItems.value[0] ??
+    null,
 )
 /** formatDashboardValue already appends count/um² style units to values. */
 const barUnit = computed(() =>
-  active.value?.unit === 'count' ? '' : (active.value?.unit ?? ''),
+  activeModel.value?.unit === 'count' ? '' : (activeModel.value?.unit ?? ''),
 )
 
 watch(
@@ -158,8 +244,9 @@ watch(
   (visible) => {
     if (!visible) return
     const focused =
-      props.focusId && models.value.some((model) => model.id === props.focusId)
-    activeId.value = focused ? props.focusId : (models.value[0]?.id ?? null)
+      props.focusId &&
+      railItems.value.some((item) => item.id === props.focusId)
+    activeId.value = focused ? props.focusId : (railItems.value[0]?.id ?? null)
   },
   { immediate: true },
 )
@@ -372,6 +459,88 @@ function onVisibleUpdate(value: boolean): void {
 .data-summary-chart-empty i {
   font-size: 18px;
   opacity: 0.6;
+}
+
+/* Design Statis metric tables (Design Layout / Design Statis from db.json) */
+.data-summary-pane-body--table {
+  display: flex;
+  flex-direction: column;
+  grid-template-rows: none;
+  overflow-y: auto;
+}
+.design-statis-group {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.design-statis-group + .design-statis-group {
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+}
+.design-statis-group > header {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 5px 10px;
+}
+.design-statis-group > header > div {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.design-statis-group > header i {
+  color: var(--accent-color);
+  font-size: 13px;
+}
+.design-statis-group h4 {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+}
+.design-statis-group > header > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.design-statis-table {
+  border-collapse: collapse;
+  margin: 0 10px 10px;
+  min-width: 0;
+  table-layout: fixed;
+  width: calc(100% - 20px);
+}
+.design-statis-table tr {
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+}
+.design-statis-table tr:first-child {
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+}
+.design-statis-table th {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  overflow: hidden;
+  padding: 4px 8px 4px 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 62%;
+}
+.design-statis-table td {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  padding: 4px 0 4px 8px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .data-summary-rows {

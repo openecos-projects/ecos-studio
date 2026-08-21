@@ -10,6 +10,7 @@ import {
   buildRuntimeWaterfallModel,
   buildStaCriticalPathsModel,
   buildStaOverviewModel,
+  congestionCandidatePngPaths,
   buildStepResourcesModel,
   staConvergenceFromComparison,
   canonicalStepKey,
@@ -196,6 +197,29 @@ describe('flow insights data', () => {
       { stepKey: 'Place', stepName: 'place', total: 466, max: 18 },
       { stepKey: 'CTS', stepName: 'CTS', total: 20, max: 4 },
     ])
+  })
+
+  it('enumerates every congestion/density map candidate PNG for one step', () => {
+    const [place] = insightSteps(['place'])
+    expect(congestionCandidatePngPaths(place)).toEqual([
+      '/ws/place_ecc/feature/egr_congestion_map/place_egr_horizontal_overflow.png',
+      '/ws/place_ecc/feature/egr_congestion_map/place_egr_vertical_overflow.png',
+      '/ws/place_ecc/feature/egr_congestion_map/place_egr_union_overflow.png',
+      '/ws/place_ecc/feature/RUDY_map/place_rudy_horizontal.png',
+      '/ws/place_ecc/feature/RUDY_map/place_rudy_vertical.png',
+      '/ws/place_ecc/feature/RUDY_map/place_rudy_union.png',
+      '/ws/place_ecc/feature/RUDY_map/place_lut_rudy_horizontal.png',
+      '/ws/place_ecc/feature/RUDY_map/place_lut_rudy_vertical.png',
+      '/ws/place_ecc/feature/RUDY_map/place_lut_rudy_union.png',
+      '/ws/place_ecc/feature/density_map/place_allcell_density.png',
+    ])
+    // Candidates and tile derivation must agree on the path convention
+    const existing = new Set([
+      '/ws/place_ecc/feature/egr_congestion_map/place_egr_union_overflow.png',
+    ])
+    expect(
+      buildCongestionTiles([place], existing).map((tile) => tile.pngPath),
+    ).toEqual([...existing])
   })
 
   it('keeps DRC related route/LA cards independent of the CSV total', () => {

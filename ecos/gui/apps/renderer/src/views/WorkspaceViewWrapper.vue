@@ -18,6 +18,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import FrontendLeftSidebar from '../components/FrontendLeftSidebar.vue'
 import LeftSidebar from '../components/LeftSidebar.vue'
 import { clearHomeQorComparisonCache } from '../composables/useHomeQorComparison'
+import { clearBaselineStepConfigCache } from '../composables/useBaselineStepConfig'
 import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'
 import { clearStepDashboardDataCache } from '../composables/useStepDashboardData'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -46,6 +47,7 @@ onMounted(() => {
 onBeforeRouteLeave(() => {
   clearStepDashboardDataCache()
   clearHomeQorComparisonCache()
+  clearBaselineStepConfigCache()
   clearHomeSnapshotCache()
   // Keep Agent tabs across workspace navigation.
   agentShell.resetShell({ keepHomeOpen: false })

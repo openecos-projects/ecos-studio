@@ -8,11 +8,24 @@ describe('StepDataSummaryDialog', () => {
     expect(componentSource).toContain('aria-current')
     expect(componentSource).toContain('focusId')
     expect(componentSource).toContain('activeId')
-    expect(componentSource).toContain('props.focusId : (models.value[0]?.id ?? null)')
+    expect(componentSource).toContain('props.focusId : (railItems.value[0]?.id ?? null)')
+  })
+
+  it('leads the rail with the Design Statis metric table when the step db.json has it', () => {
+    expect(componentSource).toContain('designStatis?: StepDesignStatis | null')
+    expect(componentSource).toContain("const DESIGN_STATIS_ID = 'design-statis'")
+    expect(componentSource).toContain('ri-table-line')
+    // Rail entry renders above Instance Area (first item) and shows the metric count
+    expect(componentSource).toContain('Design Statis')
+    expect(componentSource).toContain('design-statis-group')
+    expect(componentSource).toContain('design-statis-table')
+    expect(componentSource).toContain('scope="row"')
+    // The pane renders every group (Design Layout / Design Statis) as tables
+    expect(componentSource).toContain('v-for="group in designStatis.groups"')
   })
 
   it('draws compositions as a single stacked proportion bar with a value legend', () => {
-    expect(componentSource).toContain("active.kind === 'composition'")
+    expect(componentSource).toContain("activeModel.kind === 'composition'")
     expect(componentSource).toContain('data-summary-composition-bar')
     expect(componentSource).toContain('snapshot-slot')
     expect(componentSource).toContain('gap: 2px')
@@ -22,10 +35,10 @@ describe('StepDataSummaryDialog', () => {
 
   it('draws distributions as single-hue horizontal bars plus the full bin table', () => {
     expect(componentSource).toContain('StepSnapshotBars')
-    expect(componentSource).toContain(':rows="active.chartRows"')
+    expect(componentSource).toContain(':rows="activeModel.chartRows"')
     expect(componentSource).toContain('No non-zero bins')
     expect(componentSource).toContain('Distribution')
-    expect(componentSource).toContain('{{ active.rows.length }} bins')
+    expect(componentSource).toContain('{{ activeModel.rows.length }} bins')
 
     // One series, one hue; the table is the always-readable twin of the chart.
     expect(barsSource).toContain('itemStyle: { color: tokens.accent')
