@@ -679,6 +679,11 @@ describe('registerIpc', () => {
         messageId: 'message-1',
         sessionId: request.sessionId,
       })),
+      answerInteraction: vi.fn(async (request) => ({
+        accepted: true,
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+      })),
       start: vi.fn(async () => {}),
       startSession: vi.fn(async (request) => {
         emitAgentEvent?.({
@@ -720,6 +725,18 @@ describe('registerIpc', () => {
       sessionId: session.sessionId,
     })
     await expect(
+      handlers.get(desktopApiIpcChannels.agentAnswerInteraction)?.(event, {
+        ...session,
+        kind: 'choice',
+        optionId: 'option-1',
+        requestId: 'request-1',
+      }),
+    ).resolves.toEqual({
+      accepted: true,
+      requestId: 'request-1',
+      sessionId: session.sessionId,
+    })
+    await expect(
       handlers.get(desktopApiIpcChannels.agentInterrupt)?.(event, session),
     ).resolves.toBeUndefined()
 
@@ -732,6 +749,12 @@ describe('registerIpc', () => {
     expect(agentRuntimeService?.sendMessage).toHaveBeenCalledWith({
       ...session,
       message: '',
+    })
+    expect(agentRuntimeService?.answerInteraction).toHaveBeenCalledWith({
+      ...session,
+      kind: 'choice',
+      optionId: 'option-1',
+      requestId: 'request-1',
     })
     expect(agentRuntimeService?.interrupt).toHaveBeenCalledWith(session)
   })

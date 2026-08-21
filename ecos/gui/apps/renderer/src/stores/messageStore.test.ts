@@ -133,57 +133,31 @@ describe('messageStore', () => {
     ])
   })
 
-  it('records one answer for the matching choice prompt', () => {
+  it('upserts one pending interaction by request id and consumes it once', () => {
     const store = useMessageStore()
-    const choice = {
-      promptId: 'prompt-1',
-      title: 'Choose a stage',
-      options: [
-        { id: 'prompt-1-1', label: 'place', value: '1' },
-        { id: 'prompt-1-2', label: 'route', value: '2' },
-      ],
-      variant: 'list' as const,
-    }
-
-    store.addChoice(choice, 'choice-message')
-
-    expect(store.answerChoice(choice.promptId, choice.options[0])).toBe(true)
-    expect(store.answerChoice(choice.promptId, choice.options[1])).toBe(false)
-    expect(store.messages[0]).toMatchObject({
-      answeredOptionId: 'prompt-1-1',
-      id: 'choice-message',
-      type: 'choice',
-    })
-  })
-
-  it('dismisses prior open choices when a new choice arrives or free-text advances', () => {
-    const store = useMessageStore()
-    const first = {
-      promptId: 'prompt-1',
+    const interaction = {
+      interaction: {
+        kind: 'choice' as const,
+        options: [{ id: 'option-1', label: 'Run' }],
+        variant: 'buttons' as const,
+      },
+      kind: 'choice' as const,
+      purpose: 'execution' as const,
+      requestId: 'request-1',
+      schema_version: 'flow-agent.interaction_request.v1' as const,
+      status: 'pending' as const,
       title: 'Choose an operation',
-      options: [{ id: 'prompt-1-1', label: 'Create', value: '1' }],
-      variant: 'list' as const,
-    }
-    const second = {
-      promptId: 'prompt-2',
-      title: 'Choose an operation',
-      options: [{ id: 'prompt-2-1', label: 'Create', value: '1' }],
-      variant: 'list' as const,
     }
 
-    store.addChoice(first, 'choice-1')
-    store.addChoice(second, 'choice-2')
+    store.addInteraction(interaction, 'interaction-1')
+    store.addInteraction(interaction, 'interaction-duplicate')
 
+    expect(store.messages).toHaveLength(1)
+    expect(store.answerInteraction('request-1')).toBe(true)
+    expect(store.answerInteraction('request-1')).toBe(false)
     expect(store.messages[0]).toMatchObject({
-      answeredOptionId: '__dismissed__',
-      id: 'choice-1',
-    })
-    expect(store.messages[1].answeredOptionId).toBeUndefined()
-
-    store.dismissOpenChoices()
-    expect(store.messages[1]).toMatchObject({
-      answeredOptionId: '__dismissed__',
-      id: 'choice-2',
+      interaction: { requestId: 'request-1', status: 'answered' },
+      interactionAnswered: true,
     })
   })
 

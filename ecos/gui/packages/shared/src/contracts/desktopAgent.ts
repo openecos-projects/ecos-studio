@@ -35,6 +35,7 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
 
 export interface DesktopAgentStartSessionResponse {
   sessionId: string
+  pendingInteraction?: DesktopAgentInteractionRequest
 }
 
 export interface DesktopAgentSendMessageRequest extends DesktopAgentProviderRequest {
@@ -47,6 +48,114 @@ export interface DesktopAgentSendMessageResponse {
   sessionId: string
   text?: string
   turnId?: string
+}
+
+export type DesktopAgentInteractionPurpose = 'execution' | 'clarification'
+export type DesktopAgentInteractionKind = 'choice' | 'confirm' | 'form'
+export type DesktopAgentInteractionStatus =
+  | 'pending'
+  | 'answered'
+  | 'cancelled'
+  | 'expired'
+  | 'superseded'
+
+export interface DesktopAgentInteractionOption {
+  id: string
+  label: string
+}
+
+export interface DesktopAgentChoiceInteraction {
+  kind: 'choice'
+  options: DesktopAgentInteractionOption[]
+  variant: 'buttons' | 'list'
+}
+
+export interface DesktopAgentConfirmInteraction {
+  cancel: DesktopAgentInteractionOption
+  confirm: DesktopAgentInteractionOption
+  kind: 'confirm'
+}
+
+export interface DesktopAgentTextField {
+  defaultValue?: string
+  id: string
+  kind: 'text'
+  label: string
+  required?: boolean
+}
+
+export interface DesktopAgentNumberField {
+  defaultValue?: number
+  id: string
+  kind: 'number'
+  label: string
+  max?: number
+  min?: number
+  required?: boolean
+}
+
+export interface DesktopAgentPathField {
+  defaultValue?: string
+  extensions?: string[]
+  id: string
+  kind: 'path'
+  label: string
+  required?: boolean
+}
+
+export interface DesktopAgentSelectField {
+  defaultValue?: string
+  id: string
+  kind: 'select'
+  label: string
+  options: DesktopAgentInteractionOption[]
+  required?: boolean
+}
+
+export type DesktopAgentInteractionField =
+  | DesktopAgentTextField
+  | DesktopAgentNumberField
+  | DesktopAgentPathField
+  | DesktopAgentSelectField
+
+export interface DesktopAgentFormInteraction {
+  fields: DesktopAgentInteractionField[]
+  kind: 'form'
+}
+
+export type DesktopAgentInteractionPayload =
+  | DesktopAgentChoiceInteraction
+  | DesktopAgentConfirmInteraction
+  | DesktopAgentFormInteraction
+
+export interface DesktopAgentInteractionRequest {
+  description?: string
+  interaction: DesktopAgentInteractionPayload
+  kind: DesktopAgentInteractionKind
+  purpose: DesktopAgentInteractionPurpose
+  requestId: string
+  schema_version: 'flow-agent.interaction_request.v1'
+  status: DesktopAgentInteractionStatus
+  title: string
+}
+
+export type DesktopAgentInteractionAnswerRequest = DesktopAgentProviderRequest & {
+  kind: DesktopAgentInteractionKind
+  requestId: string
+  sessionId: string
+} & (
+    | { kind: 'choice' | 'confirm'; optionId: string; values?: never }
+    | {
+        kind: 'form'
+        optionId?: never
+        values: Record<string, string | number | null>
+      }
+  )
+
+export interface DesktopAgentInteractionAnswerResponse {
+  accepted: true
+  requestId: string
+  sessionId: string
 }
 
 export interface DesktopAgentStatus {
@@ -83,6 +192,7 @@ export interface DesktopAgentResumeSessionRequest extends DesktopAgentProviderRe
 
 export interface DesktopAgentResumeSessionResponse {
   sessionId: string
+  pendingInteraction?: DesktopAgentInteractionRequest
 }
 
 export interface DesktopAgentContractField {
@@ -250,7 +360,8 @@ export type DesktopAgentEventType =
   | 'session'
   | 'message'
   | 'tool'
-  | 'choice'
+  | 'interaction'
+  | 'unsupported_interaction'
   | 'contract'
   | 'workspace_setup'
   | 'workspace_create'
@@ -264,23 +375,9 @@ export type DesktopAgentEventType =
 export type DesktopAgentRunStatus =
   | 'idle'
   | 'running'
-  | 'awaiting_choice'
+  | 'awaiting_interaction'
   | 'interrupted'
   | 'error'
-
-export interface DesktopAgentChoiceOption {
-  id: string
-  label: string
-  value: string
-}
-
-export interface DesktopAgentChoice {
-  promptId: string
-  title: string
-  options: DesktopAgentChoiceOption[]
-  allowFreeText?: boolean
-  variant: 'buttons' | 'list'
-}
 
 export interface DesktopAgentOptimizationPayload {
   action?: { direction: string; knob_id: string } | null
@@ -302,11 +399,10 @@ export interface DesktopAgentOptimizationPayload {
   turn?: number
   workspace?: string
 }
-
 export interface DesktopAgentEvent {
-  choice?: DesktopAgentChoice
   contract?: DesktopAgentExecutionContract
   delta?: string
+  interaction?: DesktopAgentInteractionRequest
   messageId?: string
   optimization?: DesktopAgentOptimizationPayload
   providerId?: string

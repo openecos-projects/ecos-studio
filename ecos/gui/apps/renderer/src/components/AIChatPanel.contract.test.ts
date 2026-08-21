@@ -2,29 +2,11 @@ import { describe, expect, it } from 'vitest'
 import source from './AIChatPanel.vue?raw'
 
 describe('AIChatPanel flow contracts', () => {
-  it('keeps slash commands in the same Agent Chat provider session', () => {
-    expect(source).not.toContain('codexCliTerminal')
-    expect(source).not.toContain('sendCodexCliInput')
-    expect(source).not.toContain('toggleCodexCliMode')
-    expect(source).toContain('await sendAgentMessage(message)')
-  })
-
-  it('separates manual workspace setup from bounded optimization on the home screen', () => {
-    expect(source).toContain(
-      "label: 'Start creating a Workspace and run a full RTL-to-GDS flow'",
-    )
-    expect(source).toContain("label: 'Start a bounded optimization episode'")
-    expect(source).toContain("value: '2'")
-  })
-
-  it('routes structured choices through their prompt id and compatible option value', () => {
-    expect(source).toContain("event.type === 'choice'")
-    expect(source).toContain(
-      'messageStore.addChoice(event.choice, event.messageId, event.sessionId)',
-    )
-    expect(source).toContain('candidate.choice?.promptId === promptId')
-    expect(source).toContain('await sendAgentMessage(option.value, false)')
-    expect(source).toContain('messageStore.addMessage(choiceSelectionText(option))')
+  it('routes structured interactions through request id and dedicated answers', () => {
+    expect(source).toContain("event.type === 'interaction'")
+    expect(source).toContain('messageStore.upsertAgentEvent(event)')
+    expect(source).toContain('messageStore.answerInteraction(requestId)')
+    expect(source).toContain('agent.answerInteraction(request)')
   })
 
   it('renders Cursor-style centered turns with sticky user cards', () => {
@@ -54,7 +36,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source.indexOf('v-for="msg in turn.responses"')).toBeLessThan(
       source.indexOf('mode="awaiting"'),
     )
-    expect(source).toContain('activeUi.value.workspaceSetupAnchorTurnId = turnId')
+    expect(source).toContain('markContractInteractionAnswered(sessionId, requestId)')
   })
 
   it('keeps tool activity and streaming updates on the structured message path', () => {
@@ -71,13 +53,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('scrollToBottomIfNeeded(force, false)')
   })
 
-  it('keeps the composer open during choices while retaining stop and one-message queue controls', () => {
-    expect(source).toContain(
-      'const composerLocked = computed(() => isInterruptPending.value || !agentSessionId.value)',
-    )
-    expect(source).not.toContain(
-      'activeChoice.value && !activeChoice.value.allowFreeText',
-    )
+  it('blocks the composer while an interaction is pending and retains stop controls', () => {
+    expect(source).toContain('const pendingInteraction = computed(')
+    expect(source).toContain('Boolean(pendingInteraction.value)')
     expect(source).toContain('if (isRunning.value) {')
     expect(source).toContain('queuedMessage.value = message')
     expect(source).toContain('watch(isRunning')
@@ -96,11 +74,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('run-status-dot')
     expect(source).toContain('@click="cancelQueuedMessage"')
     expect(source).toContain("return 'Add a follow-up…'")
-    expect(source).toContain('Enter a value, or choose above')
-    expect(source).toContain("activeChoice.value.variant === 'buttons'")
-    expect(source).toContain(
-      "if (activeChoice.value) return 'Ask anything, or choose above'",
-    )
+    expect(source).toContain("return 'Complete the request above'")
     expect(source).toContain("return 'Ask anything…'")
     expect(source).toContain("return 'Connecting…'")
     expect(source).toContain("return 'Unavailable'")
@@ -174,9 +148,8 @@ describe('AIChatPanel flow contracts', () => {
   it('runs signoff inspection before path-based export and reports checklist blocking', () => {
     expect(source).toContain("event.type === 'workspace_signoff'")
     expect(source).toContain("ui.lastContractSurface = 'signoff'")
-    expect(source).toContain('workspaceSignoffChoice')
-    expect(source).toContain('@signoff-select="handleWorkspaceSignoffChoice"')
-    expect(source).toContain("submitChoice(option, 'signoff')")
+    expect(source).toContain("event.type === 'interaction'")
+    expect(source).toContain('markContractInteractionAnswered(sessionId, requestId)')
     expect(source).toContain('inspectSignoff({ workspaceHandle })')
     expect(source).toContain("risk.severity === 'blocked'")
     expect(source).toContain('workspace_signoff_inspection:')
@@ -184,8 +157,8 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("contract.action === 'inspect'")
     expect(source).not.toContain('dialog.saveFile({')
     expect(source).toContain('workspaceSignoffOutputPath')
-    expect(source).toContain('handleWorkspaceSignoffPathConfirm')
-    expect(source).toContain('Enter a signoff package output path.')
+    expect(source).not.toContain('handleWorkspaceSignoffPathConfirm')
+    expect(source).toContain('signoff/signoff_package.tar.gz')
     expect(source).toContain('exportSignoff({')
     expect(source).toContain('workspace_signoff_result:')
     expect(source).toContain("canExportSignoffPackage(flow) ? 'Harden'")
@@ -302,15 +275,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('directory: tab.workspacePath')
   })
 
-  it('prevents replaying stale choice cards after the conversation moves on', () => {
-    expect(source).toContain('messageStore.dismissOpenChoices()')
-    expect(source).toContain('activeChoicePromptId')
-    expect(source).toContain(
-      ':choice-interactive="msg.choice?.promptId === activeChoicePromptId"',
-    )
-    expect(source).toContain(
-      'if (activeChoicePromptId.value && activeChoicePromptId.value !== promptId) return',
-    )
+  it('prevents replaying stale interactions after the conversation moves on', () => {
+    expect(source).toContain('messageStore.answerInteraction(requestId)')
+    expect(source).toContain('messageStore.restoreInteraction(requestId)')
   })
 
   it('shows a quiet pending cue while waiting for the next reply', () => {

@@ -32,6 +32,7 @@ from ecos_agent.step_knowledge import (
     load_default_step_knowledge,
 )
 from ecos_agent.messages import (
+    EMPTY_CHOICE_VALUE,
     cancellation_message,
     confirmation_choice,
     confirmation_menu,
@@ -342,6 +343,8 @@ class _Session:
     optimization_objective_sha256: str | None = None
     optimization_primary_metric: str | None = None
     codex_provider: CodexAppServerProposalProvider | None = None
+    pending_interaction: dict[str, Any] | None = None
+    interaction_history: dict[str, str] = field(default_factory=dict)
 
 
 class EcosAgentProvider:
@@ -395,7 +398,7 @@ class EcosAgentProvider:
         self.stopped = False
         self._started = True
 
-    def start_session(self, request: Mapping[str, Any]) -> dict[str, str]:
+    def start_session(self, request: Mapping[str, Any]) -> dict[str, Any]:
         session_id = _optional_text(request.get("sessionId")) or uuid.uuid4().hex
         session = self.sessions.setdefault(session_id, _Session(session_id=session_id))
         directory = _optional_text(request.get("directory"))
@@ -427,10 +430,15 @@ class EcosAgentProvider:
         if session.mode == "home":
             self._emit(session, "message", home_ready_prompt(session.language))
         self._emit_phase_choice(session)
-        return {"sessionId": session_id}
+        return {
+            "sessionId": session_id,
+            "pendingInteraction": session.pending_interaction and session.pending_interaction["request"],
+        }
 
     def send_message(self, request: Mapping[str, Any]) -> dict[str, str]:
         session = self._session(request)
+        if session.pending_interaction is not None:
+            raise ValueError("An interaction answer is required for this session.")
         message = _required_message(request.get("message"))
         if self._optimization_thread_active(session):
             self._handle_optimization_control(session, message)
@@ -441,6 +449,14 @@ class EcosAgentProvider:
             }
         if session.running:
             raise ValueError("An ECOS Agent turn is already running for this session.")
+        return self._run_turn(session, message)
+
+    def _run_turn(
+        self,
+        session: _Session,
+        message: str,
+        handler: Callable[[_Session, str], None] | None = None,
+    ) -> dict[str, str]:
         if not session.language_locked:
             session.language = language_for_text(message)
             session.language_locked = True
@@ -452,7 +468,7 @@ class EcosAgentProvider:
         self._emit_status(session, "running")
         interrupted = False
         try:
-            self._handle_input(session, message)
+            (handler or self._handle_input)(session, message)
             self._check_interrupted(session)
         except CodexProviderError as exc:
             if exc.failure_class != "interrupted":
@@ -474,6 +490,102 @@ class EcosAgentProvider:
         if not interrupted:
             self._emit_status(session, self._resting_status(session))
         return {"messageId": turn_id, "sessionId": session.session_id, "turnId": turn_id}
+
+    def answer_interaction(
+        self, request: Mapping[str, Any], *, defer: bool = False
+    ) -> dict[str, Any]:
+        session = self._session(request)
+        pending = session.pending_interaction
+        if pending is None:
+            request_id = _optional_text(request.get("requestId"))
+            if request_id and session.interaction_history.get(request_id) == "superseded":
+                raise ValueError("Interaction request was superseded.")
+            if request_id and session.interaction_history.get(request_id) == "answered":
+                raise ValueError("Interaction request was already answered.")
+            if request_id and session.interaction_history.get(request_id) == "cancelled":
+                raise ValueError("Interaction request was already cancelled.")
+            raise ValueError("Interaction is not pending.")
+        request_id = _optional_text(request.get("requestId"))
+        if request_id and session.interaction_history.get(request_id) == "superseded":
+            raise ValueError("Interaction request was superseded.")
+        if request_id and session.interaction_history.get(request_id) == "answered":
+            raise ValueError("Interaction request was already answered.")
+        if request_id and session.interaction_history.get(request_id) == "cancelled":
+            raise ValueError("Interaction request was already cancelled.")
+        if request.get("requestId") != pending["request"]["requestId"]:
+            raise ValueError("Interaction request is expired or superseded.")
+        if request.get("kind") != pending["request"]["kind"]:
+            raise ValueError("Interaction kind does not match the pending request.")
+        if session.running:
+            raise ValueError("An ECOS Agent turn is already running for this session.")
+
+        if pending["request"]["kind"] == "form":
+            values = request.get("values")
+            if not isinstance(values, dict):
+                raise ValueError("Form interaction values must be an object.")
+            field_ids = {field["id"] for field in pending["request"]["interaction"]["fields"]}
+            if set(values) != field_ids:
+                raise ValueError("Form interaction values do not match the request schema.")
+            for field in pending["request"]["interaction"]["fields"]:
+                value = values[field["id"]]
+                if field.get("required") and (value is None or value == ""):
+                    raise ValueError(f"Form field '{field['id']}' is required.")
+                if field["kind"] == "number" and value is not None and value != "":
+                    try:
+                        float(str(value))
+                    except ValueError as exc:
+                        raise ValueError(f"Form field '{field['id']}' must be a number.") from exc
+                if field["kind"] == "select" and (
+                    not isinstance(value, str)
+                    or value not in {option["id"] for option in field["options"]}
+                ):
+                    raise ValueError(f"Form field '{field['id']}' has an invalid option.")
+                if field["kind"] in {"text", "path"} and value is not None and not isinstance(value, str):
+                    raise ValueError(f"Form field '{field['id']}' must be text.")
+            if len(values) != 1:
+                raise ValueError("This execution phase accepts one form field at a time.")
+            message = str(next(iter(values.values()), "") or "")
+        else:
+            option_id = request.get("optionId")
+            if not isinstance(option_id, str):
+                raise ValueError("Interaction option is not available.")
+            message = pending["values"].get(option_id)
+            if message is None:
+                raise ValueError("Interaction option is not available.")
+
+        session.pending_interaction = None
+        session.interaction_history[pending["request"]["requestId"]] = (
+            "cancelled"
+            if pending["request"]["kind"] == "confirm" and str(message) == "2"
+            else "answered"
+        )
+        continuation = pending.get("continuation")
+        if pending["request"]["purpose"] == "clarification":
+            if not isinstance(continuation, str) or not continuation:
+                raise ValueError("Clarification continuation is unavailable.")
+            message = f"{continuation}\n\nUser clarification answer: {message}"
+            handler: Callable[[_Session, str], None] | None = (
+                lambda current, answer: self._answer_non_state_input(
+                    current, answer, allow_operations=False
+                )
+            )
+        else:
+            handler = None
+        if defer:
+            session.running = True
+            thread = threading.Thread(
+                target=self._run_turn,
+                args=(session, str(message), handler),
+                daemon=True,
+            )
+            thread.start()
+        else:
+            self._run_turn(session, str(message), handler)
+        return {
+            "accepted": True,
+            "requestId": pending["request"]["requestId"],
+            "sessionId": session.session_id,
+        }
 
     def interrupt(self, request: Mapping[str, Any] | None = None) -> None:
         session = self._session(request or {})
@@ -521,12 +633,15 @@ class EcosAgentProvider:
             ]
         }
 
-    def resume_session(self, request: Mapping[str, Any]) -> dict[str, str]:
+    def resume_session(self, request: Mapping[str, Any]) -> dict[str, Any]:
         session = self._session(request)
         self._emit_status(session, self._resting_status(session))
         self._emit(session, "message", _prompt_for_phase(session))
-        self._emit_phase_choice(session)
-        return {"sessionId": session.session_id}
+        self._emit_phase_choice(session, reuse_pending=True)
+        return {
+            "sessionId": session.session_id,
+            "pendingInteraction": session.pending_interaction and session.pending_interaction["request"],
+        }
 
     def stop(self, _request: Mapping[str, Any] | None = None) -> None:
         for session in self.sessions.values():
@@ -1095,6 +1210,9 @@ class EcosAgentProvider:
                     session, "message", knowledge_answer.text, contract=contract
                 )
             return
+        if response.clarification is not None:
+            self._emit_clarification(session, response.clarification, message)
+            return
         if response.operation is None:
             contract: dict[str, Any] = {
                 "schema_version": "flow-agent.gui_chat_response.v1",
@@ -1356,18 +1474,19 @@ class EcosAgentProvider:
     ) -> None:
         if not options:
             raise ValueError(f"{title}: no options are available")
-        self._emit(
+        request, values = self._interaction_for_choice(
             session,
-            "choice",
-            title,
-            choice={
+            {
                 "promptId": uuid.uuid4().hex,
                 "title": title,
                 "options": options,
-                "allowFreeText": True,
+                "allowFreeText": False,
                 "variant": "list",
             },
         )
+        self._validate_interaction_budget(request)
+        session.pending_interaction = {"request": request, "values": values}
+        self._emit(session, "interaction", title, interaction=request)
 
     def _begin_home_workspace_create(self, session: _Session, message: str) -> None:
         self._reset_workspace_setup(session)
@@ -2647,7 +2766,7 @@ class EcosAgentProvider:
         workspace_continue: dict[str, Any] | None = None,
         workspace_parameter_update: dict[str, Any] | None = None,
         workspace_signoff: dict[str, Any] | None = None,
-        choice: dict[str, Any] | None = None,
+        interaction: dict[str, Any] | None = None,
         delta: str | None = None,
         message_id: str | None = None,
     ) -> None:
@@ -2657,10 +2776,10 @@ class EcosAgentProvider:
             "text": text,
             "type": event_type,
         }
-        if event_type in {"message", "tool", "error", "choice", "optimization"}:
+        if event_type in {"message", "tool", "error", "interaction", "optimization"}:
             event["messageId"] = message_id or uuid.uuid4().hex
-        if choice is not None:
-            event["choice"] = choice
+        if interaction is not None:
+            event["interaction"] = interaction
         if delta is not None:
             event["delta"] = delta
         if contract is not None:
@@ -2692,7 +2811,14 @@ class EcosAgentProvider:
             }
         )
 
-    def _emit_phase_choice(self, session: _Session) -> None:
+    def _emit_phase_choice(self, session: _Session, *, reuse_pending: bool = False) -> None:
+        if reuse_pending and session.pending_interaction is not None:
+            request = session.pending_interaction["request"]
+            self._emit(session, "interaction", request["title"], interaction=request)
+            return
+        if session.pending_interaction is not None:
+            session.interaction_history[session.pending_interaction["request"]["requestId"]] = "superseded"
+        session.pending_interaction = None
         prompt_id = uuid.uuid4().hex
         choice = None
         if session.phase == "home_ready":
@@ -2852,7 +2978,162 @@ class EcosAgentProvider:
         }:
             choice = confirmation_choice(session.language, prompt_id, allow_free_text=False)
         if choice is not None:
-            self._emit(session, "choice", choice["title"], choice=choice)
+            request, values = self._interaction_for_choice(session, choice)
+            self._validate_interaction_budget(request)
+            session.pending_interaction = {"request": request, "values": values}
+            self._emit(session, "interaction", request["title"], interaction=request)
+
+    def _interaction_for_choice(
+        self, session: _Session, choice: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        request_id = uuid.uuid4().hex
+        options = choice["options"]
+        option_ids = {option["id"]: f"option-{uuid.uuid4().hex}" for option in options}
+        values = {option_ids[option["id"]]: option["value"] for option in options}
+        if session.phase in {
+            "workspace_confirmation",
+            "confirmation",
+            "workspace_continue_confirmation",
+            "workspace_parameter_confirmation",
+            "workspace_signoff_confirmation",
+        }:
+            interaction = {
+                "cancel": {"id": option_ids[options[1]["id"]], "label": options[1]["label"]},
+                "confirm": {"id": option_ids[options[0]["id"]], "label": options[0]["label"]},
+                "kind": "confirm",
+            }
+            kind = "confirm"
+        elif choice.get("allowFreeText") and session.phase not in {"home_ready", "operation"}:
+            field_kind = "number" if session.phase in {
+                "workspace_frequency",
+                "workspace_max_fanout",
+                "workspace_utilization",
+                "workspace_density",
+                "workspace_overflow",
+            } else "path" if session.phase in {
+                "workspace_project_root",
+                "workspace_rtl",
+                "workspace_filelist",
+                "workspace_sdc",
+                "workspace_pdk",
+                "rerun_source_run",
+                "rerun_workspace",
+            } else "text"
+            default = next(
+                (
+                    option["label"] if session.phase == "rerun_source_run" else option["value"]
+                    for option in options
+                    if option["value"] != EMPTY_CHOICE_VALUE
+                ),
+                "",
+            )
+            field: dict[str, Any] = {
+                "id": "value",
+                "kind": field_kind,
+                "label": choice["title"],
+                "required": session.phase not in {"workspace_filelist", "workspace_sdc", "rerun_parameter"},
+            }
+            if default:
+                field["defaultValue"] = (
+                    float(default)
+                    if field_kind == "number" and "." in str(default)
+                    else int(default)
+                    if field_kind == "number"
+                    else default
+                )
+            interaction = {"fields": [field], "kind": "form"}
+            kind = "form"
+        else:
+            interaction = {
+                "kind": "choice",
+                "options": [
+                    {"id": option_ids[option["id"]], "label": option["label"]} for option in options
+                ],
+                "variant": choice["variant"],
+            }
+            kind = "choice"
+        request = {
+            "interaction": interaction,
+            "kind": kind,
+            "purpose": "execution",
+            "requestId": request_id,
+            "schema_version": "flow-agent.interaction_request.v1",
+            "status": "pending",
+            "title": choice["title"],
+        }
+        return request, values
+
+    def _emit_clarification(
+        self, session: _Session, clarification: Any, continuation: str
+    ) -> None:
+        request_id = uuid.uuid4().hex
+        options = [
+            {"id": f"clarification-{uuid.uuid4().hex}", "label": option.label}
+            for option in clarification.options
+        ]
+        request = {
+            "description": clarification.description,
+            "interaction": {"kind": "choice", "options": options, "variant": "list"},
+            "kind": "choice",
+            "purpose": "clarification",
+            "requestId": request_id,
+            "schema_version": "flow-agent.interaction_request.v1",
+            "status": "pending",
+            "title": clarification.title,
+        }
+        self._validate_interaction_budget(request)
+        session.pending_interaction = {
+            "continuation": continuation,
+            "request": request,
+            "values": {
+                option["id"]: source.label
+                for option, source in zip(options, clarification.options, strict=True)
+            },
+        }
+        self._emit(
+            session,
+            "message",
+            clarification.description or clarification.title,
+        )
+        self._emit(session, "interaction", clarification.title, interaction=request)
+
+
+    @staticmethod
+    def _validate_interaction_budget(request: dict[str, Any]) -> None:
+        if len(str(request.get("title", ""))) > 512 or len(
+            str(request.get("description") or "")
+        ) > 512:
+            raise ValueError("Interaction text exceeds the protocol budget.")
+        interaction = request.get("interaction", {})
+        if request.get("kind") == "choice":
+            options = interaction.get("options", [])
+            if not 1 <= len(options) <= 32 or any(
+                len(str(option.get("id", ""))) > 128
+                or len(str(option.get("label", ""))) > 256
+                for option in options
+            ):
+                raise ValueError("Interaction options exceed the protocol budget.")
+        elif request.get("kind") == "confirm":
+            options = [interaction.get("confirm", {}), interaction.get("cancel", {})]
+            if any(
+                len(str(option.get("id", ""))) > 128
+                or len(str(option.get("label", ""))) > 256
+                for option in options
+            ):
+                raise ValueError("Interaction options exceed the protocol budget.")
+        elif request.get("kind") == "form":
+            fields = interaction.get("fields", [])
+            if not 1 <= len(fields) <= 16:
+                raise ValueError("Interaction fields exceed the protocol budget.")
+            for field in fields:
+                if len(str(field.get("label", ""))) > 256:
+                    raise ValueError("Interaction field text exceeds the protocol budget.")
+                options = field.get("options", [])
+                if len(options) > 32 or any(len(str(option.get("label", ""))) > 256 for option in options):
+                    raise ValueError("Interaction select options exceed the protocol budget.")
+        payload = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+        if len(payload.encode("utf-8")) > 64 * 1024:
+            raise ValueError("Interaction payload exceeds the protocol budget.")
 
     def _progress(self, session: _Session, text: str) -> None:
         self._check_interrupted(session)
@@ -2888,22 +3169,22 @@ class EcosAgentProvider:
             return "idle"
         if session.phase == "workspace_project_root":
             return (
-                "awaiting_choice"
+                "awaiting_interaction"
                 if not session.creating_project and session.known_projects
                 else "idle"
             )
         if session.phase == "workspace_name":
-            return "awaiting_choice" if session.workspace_inputs.project_root else "idle"
+            return "awaiting_interaction" if session.workspace_inputs.project_root else "idle"
         if session.phase == "workspace_design":
             return (
-                "awaiting_choice"
+                "awaiting_interaction"
                 if session.inherited_design_name or session.workspace_inputs.project_name
                 else "idle"
             )
         if session.phase == "rerun_workspace":
-            return "awaiting_choice" if session.rerun_workspace_path else "idle"
+            return "awaiting_interaction" if session.rerun_workspace_path else "idle"
         return (
-            "awaiting_choice"
+            "awaiting_interaction"
             if session.phase
             in {
                 "home_ready",

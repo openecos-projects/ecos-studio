@@ -17,6 +17,21 @@ from ecos_agent.provider_support import _tunable_workspace_parameters
 
 
 def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:
+    session = provider.sessions[session_id]
+    pending = session.pending_interaction
+    if pending is not None:
+        for option_id, value in pending["values"].items():
+            if value == message:
+                provider.answer_interaction(
+                    {
+                        "sessionId": session_id,
+                        "requestId": pending["request"]["requestId"],
+                        "kind": pending["request"]["kind"],
+                        "optionId": option_id,
+                    }
+                )
+                return
+        session.pending_interaction = None
     provider.send_message({"sessionId": session_id, "message": message})
 
 

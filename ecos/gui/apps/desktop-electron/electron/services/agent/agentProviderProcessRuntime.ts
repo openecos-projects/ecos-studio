@@ -3,7 +3,10 @@ import { randomUUID } from 'node:crypto'
 import type {
   DesktopAgentEventType,
   DesktopAgentEvent,
-  DesktopAgentChoice,
+  DesktopAgentInteractionRequest,
+  DesktopAgentInteractionField,
+  DesktopAgentInteractionAnswerRequest,
+  DesktopAgentInteractionAnswerResponse,
   DesktopAgentExecutionContract,
   DesktopAgentWorkspaceContinueContract,
   DesktopAgentWorkspaceParameterUpdateContract,
@@ -36,6 +39,7 @@ type AgentProviderMethod =
   | 'listSessions'
   | 'resumeSession'
   | 'sendMessage'
+  | 'answerInteraction'
   | 'setMode'
   | 'start'
   | 'startSession'
@@ -48,7 +52,7 @@ export interface AgentProviderProtocolRequest {
 }
 
 interface AgentProviderProtocolResponse {
-  error?: string | { message?: string }
+  error?: string | { code?: string; message?: string }
   id?: string
   result?: unknown
 }
@@ -133,6 +137,15 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       'sendMessage',
       request,
     )) as DesktopAgentSendMessageResponse
+  }
+
+  async answerInteraction(
+    request: DesktopAgentInteractionAnswerRequest,
+  ): Promise<DesktopAgentInteractionAnswerResponse> {
+    return (await this.sendRequest(
+      'answerInteraction',
+      request,
+    )) as DesktopAgentInteractionAnswerResponse
   }
 
   async interrupt(request?: DesktopAgentProviderRequest): Promise<void> {
@@ -319,7 +332,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.pendingRequests.delete(response.id)
 
     if (response.error) {
-      pending.reject(new Error(errorMessage(response.error)))
+      const error = new Error(errorMessage(response.error))
+      if (typeof response.error === 'object' && response.error.code) {
+        Object.assign(error, { code: response.error.code })
+      }
+      pending.reject(error)
       return
     }
     pending.resolve(response.result)
@@ -383,7 +400,8 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'session',
   'message',
   'tool',
-  'choice',
+  'interaction',
+  'unsupported_interaction',
   'contract',
   'workspace_setup',
   'workspace_create',
@@ -403,7 +421,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   }
   const contract = readExecutionContract(record.contract)
   const optimization = readOptimizationPayload(record.optimization)
-  const choice = readAgentChoice(record.choice)
+  const interaction = readAgentInteraction(record.interaction)
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
   const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
   const workspaceRerun = readWorkspaceRerunContract(record.workspaceRerun)
@@ -415,7 +433,17 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   const status = readAgentRunStatus(record.status)
   const delta = readEventText(record.delta)
   const messageId = readOptionalIdentifier(record.messageId)
-  if (type === 'choice' && !choice) return null
+  if (type === 'interaction' && !interaction) {
+    const providerId = readEventText(record.providerId)
+    const sessionId = readEventText(record.sessionId)
+    return {
+      ...(providerId ? { providerId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      messageId: messageId ?? randomUUID(),
+      text: 'This interaction is unavailable in the current GUI.',
+      type: 'unsupported_interaction',
+    }
+  }
   if (type === 'status' && !status) return null
   if (type === 'contract' && !contract) return null
   if (type === 'workspace_setup' && !workspaceSetup) return null
@@ -430,7 +458,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   const text = readEventText(record.text)
 
   return {
-    ...(choice ? { choice } : {}),
+    ...(interaction ? { interaction } : {}),
     ...(contract ? { contract } : {}),
     ...(delta ? { delta } : {}),
     ...(messageId ? { messageId } : {}),
@@ -554,48 +582,178 @@ function readWorkspaceSignoffContract(
   }
 }
 
-function readAgentChoice(value: unknown): DesktopAgentChoice | null {
+function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | null {
+  const serialized = JSON.stringify(value)
+  if (!serialized || Buffer.byteLength(serialized, 'utf8') > 64 * 1024) return null
   const record = readRecord(value)
-  const promptId = readOptionalIdentifier(record.promptId)
+  const requestId = readOptionalIdentifier(record.requestId)
   const title = readEventText(record.title)
-  const allowFreeText =
-    record.allowFreeText === undefined
-      ? undefined
-      : typeof record.allowFreeText === 'boolean'
-        ? record.allowFreeText
-        : null
+  const kind = record.kind
+  const purpose = record.purpose
+  const status = record.status
+  const interaction = readRecord(record.interaction)
+  const description = readEventText(record.description)
   if (
-    !promptId ||
+    record.schema_version !== 'flow-agent.interaction_request.v1' ||
+    !requestId ||
     !title ||
-    (record.variant !== 'buttons' && record.variant !== 'list') ||
-    !Array.isArray(record.options) ||
-    record.options.length < 1 ||
-    record.options.length > 32 ||
-    allowFreeText === null
-  ) {
+    (kind !== 'choice' && kind !== 'confirm' && kind !== 'form') ||
+    (purpose !== 'execution' && purpose !== 'clarification') ||
+    (status !== 'pending' &&
+      status !== 'answered' &&
+      status !== 'cancelled' &&
+      status !== 'expired' &&
+      status !== 'superseded') ||
+    interaction.kind !== kind
+  )
     return null
+
+  if (kind === 'choice') {
+    if (
+      (interaction.variant !== 'buttons' && interaction.variant !== 'list') ||
+      !Array.isArray(interaction.options) ||
+      interaction.options.length < 1 ||
+      interaction.options.length > 32
+    )
+      return null
+    const options = interaction.options.map((item) => {
+      const option = readRecord(item)
+      const id = readOptionalIdentifier(option.id)
+      const label = readEventText(option.label)
+      return id && label && !('value' in option) ? { id, label } : null
+    })
+    if (options.some((option) => option === null)) return null
+    return {
+      interaction: {
+        kind,
+        options: options as { id: string; label: string }[],
+        variant: interaction.variant,
+      },
+      kind,
+      purpose,
+      requestId,
+      schema_version: 'flow-agent.interaction_request.v1',
+      status,
+      ...(description ? { description } : {}),
+      title,
+    }
   }
-  const options = record.options.map((value) => {
-    const option = readRecord(value)
-    const id = readOptionalIdentifier(option.id)
-    const label = readEventText(option.label)
-    const optionValue = readEventText(option.value)
-    return id && label && optionValue ? { id, label, value: optionValue } : null
-  })
-  if (options.some((option) => option === null)) return null
+
+  if (kind === 'confirm') {
+    const confirm = readInteractionOption(interaction.confirm)
+    const cancel = readInteractionOption(interaction.cancel)
+    if (!confirm || !cancel) return null
+    return {
+      interaction: { cancel, confirm, kind },
+      kind,
+      purpose,
+      requestId,
+      schema_version: 'flow-agent.interaction_request.v1',
+      status,
+      title,
+    }
+  }
+
+  if (
+    !Array.isArray(interaction.fields) ||
+    interaction.fields.length < 1 ||
+    interaction.fields.length > 16
+  )
+    return null
+  const fields = interaction.fields.map(readInteractionField)
+  if (fields.some((field) => field === null)) return null
   return {
-    ...(allowFreeText === undefined ? {} : { allowFreeText }),
-    options: options as DesktopAgentChoice['options'],
-    promptId,
+    interaction: {
+      fields: fields as NonNullable<ReturnType<typeof readInteractionField>>[],
+      kind,
+    },
+    kind,
+    purpose,
+    requestId,
+    schema_version: 'flow-agent.interaction_request.v1',
+    status,
     title,
-    variant: record.variant,
+  }
+}
+
+function readInteractionOption(value: unknown): { id: string; label: string } | null {
+  const option = readRecord(value)
+  const id = readOptionalIdentifier(option.id)
+  const label = readEventText(option.label)
+  return id && label && !('value' in option) ? { id, label } : null
+}
+
+function readInteractionField(value: unknown): DesktopAgentInteractionField | null {
+  const field = readRecord(value)
+  const id = readOptionalIdentifier(field.id)
+  const label = readEventText(field.label)
+  const kind = field.kind
+  if (!id || !label || !['text', 'number', 'path', 'select'].includes(String(kind)))
+    return null
+  const fieldKind = kind as 'text' | 'number' | 'path' | 'select'
+  if (
+    field.defaultValue !== undefined &&
+    !['string', 'number'].includes(typeof field.defaultValue)
+  )
+    return null
+  if (fieldKind === 'select') {
+    if (
+      !Array.isArray(field.options) ||
+      field.options.length < 1 ||
+      field.options.length > 32
+    )
+      return null
+    const options = field.options.map(readInteractionOption)
+    if (options.some((option) => option === null)) return null
+    return {
+      id,
+      kind: fieldKind,
+      label,
+      options: options as { id: string; label: string }[],
+    }
+  }
+  const common = {
+    id,
+    label,
+    ...(typeof field.required === 'boolean' ? { required: field.required } : {}),
+  }
+  if (fieldKind === 'number') {
+    return {
+      ...common,
+      kind: fieldKind,
+      ...(typeof field.defaultValue === 'number'
+        ? { defaultValue: field.defaultValue }
+        : {}),
+      ...(typeof field.min === 'number' ? { min: field.min } : {}),
+      ...(typeof field.max === 'number' ? { max: field.max } : {}),
+    }
+  }
+  if (fieldKind === 'path') {
+    return {
+      ...common,
+      kind: fieldKind,
+      ...(typeof field.defaultValue === 'string'
+        ? { defaultValue: field.defaultValue }
+        : {}),
+      ...(Array.isArray(field.extensions) &&
+      field.extensions.every((item) => typeof item === 'string')
+        ? { extensions: field.extensions }
+        : {}),
+    }
+  }
+  return {
+    ...common,
+    kind: fieldKind,
+    ...(typeof field.defaultValue === 'string'
+      ? { defaultValue: field.defaultValue }
+      : {}),
   }
 }
 
 function readAgentRunStatus(value: unknown): DesktopAgentEvent['status'] | null {
   return value === 'idle' ||
     value === 'running' ||
-    value === 'awaiting_choice' ||
+    value === 'awaiting_interaction' ||
     value === 'interrupted' ||
     value === 'error'
     ? value

@@ -1,10 +1,9 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type {
-  DesktopAgentChoice,
-  DesktopAgentChoiceOption,
   DesktopAgentEvent,
   DesktopAgentExecutionContract,
+  DesktopAgentInteractionRequest,
 } from '@ecos-studio/shared'
 import type { Message, Thumbnail, InfoData, MapData } from '../types'
 import { isEphemeralToolContent } from '../components/agentToolSteps'
@@ -15,9 +14,6 @@ const generateId = (): string => {
 }
 
 const stripToolMarkdown = (text: string): string => text.replace(/\*/g, '')
-
-/** Marks a choice as closed without selecting a concrete option (free-text / superseded). */
-export const DISMISSED_CHOICE_OPTION_ID = '__dismissed__'
 
 export const useMessageStore = defineStore('messages', () => {
   const messagesBySessionId = ref<Record<string, Message[]>>({})
@@ -195,58 +191,64 @@ export const useMessageStore = defineStore('messages', () => {
     return id
   }
 
-  const dismissOpenChoices = (exceptPromptId?: string, sessionId?: string): void => {
-    const bucket = sessionId ? sessionMessages(sessionId) : tryActiveMessages()
-    if (!bucket) return
-    for (const message of bucket) {
-      if (
-        message.choice &&
-        !message.answeredOptionId &&
-        message.choice.promptId !== exceptPromptId
-      ) {
-        message.answeredOptionId = DISMISSED_CHOICE_OPTION_ID
-      }
-    }
-  }
-
-  const addChoice = (
-    choice: DesktopAgentChoice,
+  const addInteraction = (
+    interaction: DesktopAgentInteractionRequest,
     id = generateId(),
     sessionId?: string,
   ): string => {
     const targetSessionId = sessionId ?? activeSessionId.value ?? undefined
-    dismissOpenChoices(choice.promptId, targetSessionId)
     const bucket = targetSessionId
       ? sessionMessages(targetSessionId)
       : requireActiveMessages()
+    for (const message of bucket) {
+      if (message.interaction && message.interaction.status === 'pending') {
+        message.interaction = { ...message.interaction, status: 'superseded' }
+        message.interactionAnswered = true
+      }
+    }
+    const existing = bucket.find(
+      (message) => message.interaction?.requestId === interaction.requestId,
+    )
+    if (existing) {
+      existing.interaction = interaction
+      existing.interactionAnswered = interaction.status !== 'pending'
+      return existing.id
+    }
     bucket.push({
       id,
       role: 'assistant',
-      content: choice.title,
-      type: 'choice',
+      content: interaction.title,
+      type: 'interaction',
       status: 'done',
-      choice,
+      interaction,
     })
     return id
   }
 
-  const answerChoice = (promptId: string, option: DesktopAgentChoiceOption): boolean => {
-    const bucket = tryActiveMessages()
-    if (!bucket) return false
-    const message = bucket.find((candidate) => candidate.choice?.promptId === promptId)
-    if (
-      !message?.choice ||
-      message.answeredOptionId ||
-      !message.choice.options.some((candidate) => candidate.id === option.id)
-    ) {
-      return false
-    }
-    message.answeredOptionId = option.id
-    dismissOpenChoices(promptId)
+  const answerInteraction = (requestId: string): boolean => {
+    const message = tryActiveMessages()?.find(
+      (candidate) => candidate.interaction?.requestId === requestId,
+    )
+    if (!message?.interaction || message.interaction.status !== 'pending') return false
+    message.interactionAnswered = true
+    message.interaction = { ...message.interaction, status: 'answered' }
     return true
   }
 
+  const restoreInteraction = (requestId: string): void => {
+    const message = tryActiveMessages()?.find(
+      (candidate) => candidate.interaction?.requestId === requestId,
+    )
+    if (message?.interaction?.status === 'answered') {
+      message.interaction = { ...message.interaction, status: 'pending' }
+      message.interactionAnswered = false
+    }
+  }
+
   const upsertAgentEvent = (event: DesktopAgentEvent): string => {
+    if (event.type === 'interaction' && event.interaction) {
+      return addInteraction(event.interaction, event.messageId, event.sessionId)
+    }
     const sessionId = event.sessionId ?? activeSessionId.value
     if (!sessionId) {
       throw new Error('No Agent chat session available for event upsert.')
@@ -443,9 +445,9 @@ export const useMessageStore = defineStore('messages', () => {
     addImageMessage,
     addInfoMessage,
     addExecutionContract,
-    addChoice,
-    answerChoice,
-    dismissOpenChoices,
+    addInteraction,
+    answerInteraction,
+    restoreInteraction,
     upsertAgentEvent,
     finishStreamingMessages,
     appendToolProgress,

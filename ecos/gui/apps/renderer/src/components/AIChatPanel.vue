@@ -69,28 +69,18 @@
             <!-- Confirmed plans stay above the run progress they produced -->
             <AgentSessionContractPanels
               mode="committed"
-              :choice-disabled="isRunning"
               :is-last-turn="turnIndex === conversationTurns.length - 1"
               :turn-id="turn.id"
               v-bind="contractPanelBind"
               @create-workspace="createWorkspaceFromAgent"
-              @setup-select="handleWorkspaceSetupChoice"
-              @rerun-select="handleWorkspaceRerunChoice"
-              @continue-select="handleWorkspaceContinueChoice"
-              @parameter-select="handleWorkspaceParameterChoice"
-              @signoff-select="handleWorkspaceSignoffChoice"
-              @signoff-path-input="handleWorkspaceSignoffPathInput"
-              @signoff-path-confirm="handleWorkspaceSignoffPathConfirm"
-              @signoff-path-cancel="handleWorkspaceSignoffPathCancel"
             />
             <MessageItem
               v-for="msg in turn.responses"
               :key="msg.id"
               :message="msg"
-              :choice-interactive="msg.choice?.promptId === activeChoicePromptId"
-              :choice-disabled="isRunning"
+              :interaction-disabled="isRunning"
               @img-load="onImageLoad"
-              @choice="handleMessageChoice"
+              @interaction="handleInteraction"
               class="message-item w-full max-w-full min-w-0"
             />
             <div
@@ -108,19 +98,10 @@
             <AgentSessionContractPanels
               v-if="turnIndex === conversationTurns.length - 1"
               mode="awaiting"
-              :choice-disabled="isRunning"
               :is-last-turn="true"
               :turn-id="turn.id"
               v-bind="contractPanelBind"
               @create-workspace="createWorkspaceFromAgent"
-              @setup-select="handleWorkspaceSetupChoice"
-              @rerun-select="handleWorkspaceRerunChoice"
-              @continue-select="handleWorkspaceContinueChoice"
-              @parameter-select="handleWorkspaceParameterChoice"
-              @signoff-select="handleWorkspaceSignoffChoice"
-              @signoff-path-input="handleWorkspaceSignoffPathInput"
-              @signoff-path-confirm="handleWorkspaceSignoffPathConfirm"
-              @signoff-path-cancel="handleWorkspaceSignoffPathCancel"
             />
           </div>
         </section>
@@ -198,15 +179,12 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import type {
-  DesktopAgentChoice,
-  DesktopAgentChoiceOption,
   DesktopAgentEvent,
   DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
-import { joinLocalPath } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
@@ -218,10 +196,8 @@ import {
   navigateInputHistory,
   removeAgentSessionUi,
   resetInputHistoryNavigation,
-  type AgentContractSurface,
   type PendingGuiAction,
 } from './agentSessionUi'
-import { choiceSelectionText } from './agentChoiceDisplay'
 import { displayAgentContractTitle } from './agentContractDisplay'
 import { groupMessagesIntoTurns } from './chatTurns'
 import { useMessageStore } from '../stores/messageStore'
@@ -377,7 +353,6 @@ const isWorkspaceSignoffPending = computed({
 })
 const workspaceSetupContract = computed(() => activeUi.value.workspaceSetupContract)
 const workspaceSetupMessage = computed(() => activeUi.value.workspaceSetupMessage)
-const workspaceSetupChoice = computed(() => activeUi.value.workspaceSetupChoice)
 const workspaceSetupAnsweredOptionId = computed(
   () => activeUi.value.workspaceSetupAnsweredOptionId,
 )
@@ -389,13 +364,11 @@ const workspaceCreateSetupId = computed({
 })
 const workspaceRerunContract = computed(() => activeUi.value.workspaceRerunContract)
 const workspaceRerunMessage = computed(() => activeUi.value.workspaceRerunMessage)
-const workspaceRerunChoice = computed(() => activeUi.value.workspaceRerunChoice)
 const workspaceRerunAnsweredOptionId = computed(
   () => activeUi.value.workspaceRerunAnsweredOptionId,
 )
 const workspaceContinueContract = computed(() => activeUi.value.workspaceContinueContract)
 const workspaceContinueMessage = computed(() => activeUi.value.workspaceContinueMessage)
-const workspaceContinueChoice = computed(() => activeUi.value.workspaceContinueChoice)
 const workspaceContinueAnsweredOptionId = computed(
   () => activeUi.value.workspaceContinueAnsweredOptionId,
 )
@@ -403,21 +376,15 @@ const workspaceParameterContract = computed(
   () => activeUi.value.workspaceParameterContract,
 )
 const workspaceParameterMessage = computed(() => activeUi.value.workspaceParameterMessage)
-const workspaceParameterChoice = computed(() => activeUi.value.workspaceParameterChoice)
 const workspaceParameterAnsweredOptionId = computed(
   () => activeUi.value.workspaceParameterAnsweredOptionId,
 )
-const workspaceSignoffChoice = computed(() => activeUi.value.workspaceSignoffChoice)
 const workspaceSignoffAnsweredOptionId = computed(
   () => activeUi.value.workspaceSignoffAnsweredOptionId,
 )
 const workspaceSignoffOutputPath = computed(
   () => activeUi.value.workspaceSignoffOutputPath,
 )
-const workspaceSignoffPathInputVisible = computed(
-  () => activeUi.value.workspaceSignoffPathInputVisible,
-)
-const lastContractSurface = computed(() => activeUi.value.lastContractSurface)
 const workspaceRerunRows = computed<[string, string][]>(
   () =>
     workspaceRerunContract.value?.fields.map(({ label, value }) => [label, value]) ?? [],
@@ -436,49 +403,30 @@ const workspaceRerunExecutionState = computed(() =>
   isWorkspaceRerunPending.value
     ? 'Running'
     : workspaceRerunAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceRerunChoice.value,
-          workspaceRerunAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
 const workspaceContinueExecutionState = computed(() =>
   isWorkspaceContinuePending.value
     ? 'Running'
     : workspaceContinueAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceContinueChoice.value,
-          workspaceContinueAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
 const workspaceParameterExecutionState = computed(() =>
   isWorkspaceParameterPending.value
     ? 'Saving'
     : workspaceParameterAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceParameterChoice.value,
-          workspaceParameterAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
 const workspaceSignoffExecutionState = computed(() =>
   workspaceSignoffAnsweredOptionId.value ? 'Confirmed' : 'Review',
 )
 
-function contractAnswerState(
-  choice: DesktopAgentChoice | undefined,
-  answeredOptionId: string,
-): string {
-  const option = choice?.options.find((candidate) => candidate.id === answeredOptionId)
-  if (option?.value === '2' || /cancel/i.test(option?.label ?? '')) return 'Cancelled'
-  return 'Confirmed'
-}
-
 const contractPanelBind = computed(() => ({
   workspaceContinueAnsweredOptionId: workspaceContinueAnsweredOptionId.value,
   workspaceContinueAnchorTurnId: activeUi.value.workspaceContinueAnchorTurnId,
-  workspaceContinueChoice: workspaceContinueChoice.value,
   workspaceContinueExecutionState: workspaceContinueExecutionState.value,
   workspaceContinueMessage: workspaceContinueMessage.value,
   workspaceContinueRows: workspaceContinueRows.value,
@@ -488,7 +436,6 @@ const contractPanelBind = computed(() => ({
   workspaceCreateSetupId: workspaceCreateSetupId.value,
   workspaceParameterAnsweredOptionId: workspaceParameterAnsweredOptionId.value,
   workspaceParameterAnchorTurnId: activeUi.value.workspaceParameterAnchorTurnId,
-  workspaceParameterChoice: workspaceParameterChoice.value,
   workspaceParameterExecutionState: workspaceParameterExecutionState.value,
   workspaceParameterMessage: workspaceParameterMessage.value,
   workspaceParameterRows: workspaceParameterRows.value,
@@ -497,7 +444,6 @@ const contractPanelBind = computed(() => ({
   ),
   workspaceRerunAnsweredOptionId: workspaceRerunAnsweredOptionId.value,
   workspaceRerunAnchorTurnId: activeUi.value.workspaceRerunAnchorTurnId,
-  workspaceRerunChoice: workspaceRerunChoice.value,
   workspaceRerunExecutionState: workspaceRerunExecutionState.value,
   workspaceRerunMessage: workspaceRerunMessage.value,
   workspaceRerunRows: workspaceRerunRows.value,
@@ -506,14 +452,11 @@ const contractPanelBind = computed(() => ({
   ),
   workspaceSignoffAnsweredOptionId: workspaceSignoffAnsweredOptionId.value,
   workspaceSignoffAnchorTurnId: activeUi.value.workspaceSignoffAnchorTurnId,
-  workspaceSignoffChoice: workspaceSignoffChoice.value,
   workspaceSignoffExecutionState: workspaceSignoffExecutionState.value,
   workspaceSignoffOutputPath: workspaceSignoffOutputPath.value,
-  workspaceSignoffPathInputVisible: workspaceSignoffPathInputVisible.value,
-  workspaceSignoffTitle: workspaceSignoffChoice.value?.title ?? 'Signoff package export',
+  workspaceSignoffTitle: 'Signoff package export',
   workspaceSetupAnsweredOptionId: workspaceSetupAnsweredOptionId.value,
   workspaceSetupAnchorTurnId: activeUi.value.workspaceSetupAnchorTurnId,
-  workspaceSetupChoice: workspaceSetupChoice.value,
   workspaceSetupContract: workspaceSetupContract.value,
   workspaceSetupMessage: workspaceSetupMessage.value,
 }))
@@ -528,57 +471,37 @@ const isRunning = computed(
     isWorkspaceSignoffPending.value ||
     agentRunStatus.value === 'running',
 )
-const pendingMessageChoice = computed(
+const pendingInteraction = computed(
   () =>
     [...messages.value]
       .reverse()
-      .find((message) => message.choice && !message.answeredOptionId)?.choice,
+      .find((message) => message.interaction?.status === 'pending')?.interaction,
 )
-const activeChoicePromptId = computed(() => pendingMessageChoice.value?.promptId)
-const activeChoice = computed(
+const composerLocked = computed(
   () =>
-    (lastContractSurface.value === 'setup' && !workspaceSetupAnsweredOptionId.value
-      ? workspaceSetupChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'rerun' && !workspaceRerunAnsweredOptionId.value
-      ? workspaceRerunChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'continue' && !workspaceContinueAnsweredOptionId.value
-      ? workspaceContinueChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'parameter' &&
-    !workspaceParameterAnsweredOptionId.value
-      ? workspaceParameterChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'signoff' && !workspaceSignoffAnsweredOptionId.value
-      ? workspaceSignoffChoice.value
-      : undefined) ??
-    pendingMessageChoice.value,
+    isInterruptPending.value ||
+    !agentSessionId.value ||
+    Boolean(pendingInteraction.value),
 )
-const composerLocked = computed(() => isInterruptPending.value || !agentSessionId.value)
 const canSubmit = computed(
   () =>
     Boolean(agentSessionId.value) &&
     !isAgentConnecting.value &&
     !composerLocked.value &&
-    (Boolean(inputValue.value.trim()) ||
-      (!isRunning.value && Boolean(activeChoice.value?.allowFreeText))),
+    Boolean(inputValue.value.trim()),
 )
 const composerPlaceholder = computed(() => {
   if (isAgentConnecting.value) return 'Connecting…'
   if (!agentSessionId.value) return 'Unavailable'
+  if (pendingInteraction.value) return 'Complete the request above'
   if (isRunning.value) return 'Add a follow-up…'
-  if (activeChoice.value?.allowFreeText && activeChoice.value.variant === 'buttons') {
-    return 'Enter a value, or choose above'
-  }
-  if (activeChoice.value) return 'Ask anything, or choose above'
   return 'Ask anything…'
 })
 const statusLabel = computed(() => {
   if (isAgentConnecting.value) return 'Connecting'
   if (queuedMessage.value) return 'Agent is working, 1 message queued'
   if (isRunning.value) return isInterruptPending.value ? 'Stopping' : 'Agent is working'
-  if (agentRunStatus.value === 'awaiting_choice') return 'Waiting for your choice'
+  if (agentRunStatus.value === 'awaiting_interaction') return 'Waiting for your input'
   if (agentRunStatus.value === 'interrupted') return 'Interrupted'
   if (!agentSessionId.value) return 'Agent unavailable'
   return 'Ready'
@@ -742,7 +665,7 @@ async function startProviderSession(sessionId: string): Promise<void> {
       name: project.name,
       path: project.path,
     }))
-    await agent.startSession({
+    const response = await agent.startSession({
       providerId: AGENT_PROVIDER_ID,
       sessionId,
       mode: tab.mode,
@@ -750,6 +673,9 @@ async function startProviderSession(sessionId: string): Promise<void> {
       ...(tab.workspacePath ? { directory: tab.workspacePath } : {}),
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
     })
+    if (response.pendingInteraction) {
+      messageStore.addInteraction(response.pendingInteraction, undefined, sessionId)
+    }
     agentShell.markTabStarted(sessionId)
     codexSetupStatus.value = null
   } catch (error) {
@@ -1024,7 +950,6 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_rerun') {
       ui.workspaceRerunContract = event.contract
       ui.workspaceRerunMessage = event.text ?? ''
-      ui.workspaceRerunChoice = undefined
       ui.workspaceRerunAnsweredOptionId = ''
       ui.workspaceRerunAnchorTurnId = undefined
       ui.lastContractSurface = 'rerun'
@@ -1034,7 +959,6 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_continue') {
       ui.workspaceContinueContract = event.contract
       ui.workspaceContinueMessage = event.text ?? ''
-      ui.workspaceContinueChoice = undefined
       ui.workspaceContinueAnsweredOptionId = ''
       ui.workspaceContinueAnchorTurnId = undefined
       ui.lastContractSurface = 'continue'
@@ -1044,7 +968,6 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_parameter_update') {
       ui.workspaceParameterContract = event.contract
       ui.workspaceParameterMessage = event.text ?? ''
-      ui.workspaceParameterChoice = undefined
       ui.workspaceParameterAnsweredOptionId = ''
       ui.workspaceParameterAnchorTurnId = undefined
       ui.lastContractSurface = 'parameter'
@@ -1057,7 +980,6 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   if (event.type === 'workspace_setup' && event.workspaceSetup) {
     ui.workspaceSetupContract = event.workspaceSetup
     ui.workspaceSetupMessage = event.text ?? ''
-    ui.workspaceSetupChoice = undefined
     ui.workspaceSetupAnsweredOptionId = ''
     ui.workspaceSetupAnchorTurnId = undefined
     ui.workspaceSetupStartedId = undefined
@@ -1065,43 +987,13 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (isActive) scrollWorkspaceSetupIntoView()
     return
   }
-  if (event.type === 'choice' && event.choice) {
-    if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'setup') {
-      ui.workspaceSetupChoice = event.choice
-      ui.workspaceSetupAnsweredOptionId = ''
-    } else if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'rerun') {
-      ui.workspaceRerunChoice = event.choice
-      ui.workspaceRerunAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'continue'
-    ) {
-      ui.workspaceContinueChoice = event.choice
-      ui.workspaceContinueAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'parameter'
-    ) {
-      ui.workspaceParameterChoice = event.choice
-      ui.workspaceParameterAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'signoff'
-    ) {
-      ui.workspaceSignoffChoice = event.choice
-      ui.workspaceSignoffAnsweredOptionId = ''
-    } else {
-      if (event.choice.variant === 'list') {
-        ui.lastContractSurface = undefined
-        ui.workspaceSetupChoice = undefined
-        ui.workspaceRerunChoice = undefined
-        ui.workspaceContinueChoice = undefined
-        ui.workspaceParameterChoice = undefined
-        ui.workspaceSignoffChoice = undefined
-      }
-      messageStore.addChoice(event.choice, event.messageId, event.sessionId)
-    }
+  if (event.type === 'interaction' && event.interaction) {
+    messageStore.upsertAgentEvent(event)
     if (isActive) scrollWorkspaceSetupIntoView()
+    return
+  }
+  if (event.type === 'unsupported_interaction') {
+    messageStore.upsertAgentEvent(event)
     return
   }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
@@ -1172,11 +1064,8 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   if (event.type === 'workspace_signoff' && event.workspaceSignoff) {
     ui.lastContractSurface = 'signoff'
     if (event.workspaceSignoff.action === 'inspect') {
-      ui.workspaceSignoffChoice = undefined
       ui.workspaceSignoffAnsweredOptionId = ''
       ui.workspaceSignoffAnchorTurnId = undefined
-      ui.workspaceSignoffOutputPath = ''
-      ui.workspaceSignoffPathInputVisible = false
     }
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
@@ -1345,8 +1234,6 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isAgentRequestPending.value) return
 
-  // Any outbound user turn closes leftover choice cards so history cannot be replayed.
-  messageStore.dismissOpenChoices()
   if (addToHistory && message) messageStore.addMessage(message)
   inputValue.value = ''
   resetInputHistory()
@@ -1365,112 +1252,59 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   }
 }
 
-function handleMessageChoice(promptId: string, option: DesktopAgentChoiceOption): void {
-  if (isRunning.value) return
-  if (activeChoicePromptId.value && activeChoicePromptId.value !== promptId) return
-  const message = messages.value.find(
-    (candidate) => candidate.choice?.promptId === promptId,
-  )
-  if (!message?.choice || !messageStore.answerChoice(message.choice.promptId, option))
-    return
-  void submitChoice(option)
-}
-
-function handleWorkspaceSetupChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceSetupAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceSetupAnsweredOptionId = option.id
-  void submitChoice(option, 'setup')
-}
-
-function handleWorkspaceRerunChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceRerunAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceRerunAnsweredOptionId = option.id
-  void submitChoice(option, 'rerun')
-}
-
-function handleWorkspaceContinueChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceContinueAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceContinueAnsweredOptionId = option.id
-  void submitChoice(option, 'continue')
-}
-
-function handleWorkspaceParameterChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceParameterAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceParameterAnsweredOptionId = option.id
-  void submitChoice(option, 'parameter')
-}
-
-function handleWorkspaceSignoffChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceSignoffAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  if (option.value === '1') {
-    activeUi.value.workspaceSignoffOutputPath ||= defaultSignoffOutputPath(
-      currentProject.value?.path ?? '',
-    )
-    activeUi.value.workspaceSignoffPathInputVisible = true
-    return
-  }
-  activeUi.value.workspaceSignoffAnsweredOptionId = option.id
-  void submitChoice(option, 'signoff')
-}
-
-function handleWorkspaceSignoffPathInput(path: string): void {
-  activeUi.value.workspaceSignoffOutputPath = path
-}
-
-function handleWorkspaceSignoffPathCancel(): void {
-  activeUi.value.workspaceSignoffPathInputVisible = false
-}
-
-function handleWorkspaceSignoffPathConfirm(): void {
-  const path = activeUi.value.workspaceSignoffOutputPath.trim()
-  const option = activeUi.value.workspaceSignoffChoice?.options.find(
-    (candidate) => candidate.value === '1',
-  )
-  if (!path || !option) return
-  activeUi.value.workspaceSignoffOutputPath = path
-  activeUi.value.workspaceSignoffPathInputVisible = false
-  activeUi.value.workspaceSignoffAnsweredOptionId = option.id
-  void submitChoice(option, 'signoff')
-}
-
-async function submitChoice(
-  option: DesktopAgentChoiceOption,
-  contractSurface?: AgentContractSurface,
+async function handleInteraction(
+  requestId: string,
+  kind: 'choice' | 'confirm' | 'form',
+  answer: { optionId: string } | { values: Record<string, string | number | null> },
 ): Promise<void> {
-  messageStore.addMessage(choiceSelectionText(option))
-  const turns = conversationTurns.value
-  const turnId = turns[turns.length - 1]?.id
-  if (contractSurface && turnId) {
-    if (contractSurface === 'setup') activeUi.value.workspaceSetupAnchorTurnId = turnId
-    if (contractSurface === 'rerun') activeUi.value.workspaceRerunAnchorTurnId = turnId
-    if (contractSurface === 'continue')
-      activeUi.value.workspaceContinueAnchorTurnId = turnId
-    if (contractSurface === 'parameter')
-      activeUi.value.workspaceParameterAnchorTurnId = turnId
-    if (contractSurface === 'signoff')
-      activeUi.value.workspaceSignoffAnchorTurnId = turnId
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
+  const sessionId = agentSessionId.value
+  if (!agent || !sessionId || isAgentRequestPending.value || !isActiveGuiOwner(sessionId))
+    return
+  const interaction = messages.value.find(
+    (message) => message.interaction?.requestId === requestId,
+  )?.interaction
+  if (!interaction || !messageStore.answerInteraction(requestId)) return
+  isAgentRequestPending.value = true
+  try {
+    const request =
+      kind === 'form'
+        ? {
+            kind,
+            values: 'values' in answer ? answer.values : {},
+            providerId: AGENT_PROVIDER_ID,
+            requestId,
+            sessionId,
+          }
+        : {
+            kind,
+            optionId: 'optionId' in answer ? answer.optionId : '',
+            providerId: AGENT_PROVIDER_ID,
+            requestId,
+            sessionId,
+          }
+    await agent.answerInteraction(request)
+    markContractInteractionAnswered(sessionId, requestId)
+  } catch (error) {
+    messageStore.restoreInteraction(requestId)
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  } finally {
+    isAgentRequestPending.value = false
+    messageStore.finishStreamingMessages()
   }
-  await sendAgentMessage(option.value, false)
+}
+
+function markContractInteractionAnswered(sessionId: string, requestId: string): void {
+  const ui = sessionUi(sessionId)
+  if (ui.lastContractSurface === 'setup') ui.workspaceSetupAnsweredOptionId = requestId
+  if (ui.lastContractSurface === 'rerun') ui.workspaceRerunAnsweredOptionId = requestId
+  if (ui.lastContractSurface === 'continue')
+    ui.workspaceContinueAnsweredOptionId = requestId
+  if (ui.lastContractSurface === 'parameter')
+    ui.workspaceParameterAnsweredOptionId = requestId
+  if (ui.lastContractSurface === 'signoff')
+    ui.workspaceSignoffAnsweredOptionId = requestId
 }
 
 function sendSuggestion(suggestion: { label: string; value: string }): void {
@@ -1903,7 +1737,9 @@ async function executeWorkspaceSignoff(
       )
       return
     }
-    const outputPath = ui.workspaceSignoffOutputPath.trim()
+    const outputPath =
+      ui.workspaceSignoffOutputPath.trim() ||
+      `${normalizeWorkspaceRoot(currentProject.value?.path ?? '')}/signoff/signoff_package.tar.gz`
     if (!outputPath) throw new Error('Enter a signoff package output path.')
     const result = await desktopApi.ecc.workspace.exportSignoff({
       outputPath,
@@ -1949,11 +1785,6 @@ async function executeWorkspaceSignoff(
   } finally {
     ui.isWorkspaceSignoffPending = false
   }
-}
-
-function defaultSignoffOutputPath(workspacePath: string): string {
-  const workspace = normalizeWorkspaceRoot(workspacePath)
-  return workspace ? joinLocalPath(workspace, 'signoff/signoff_package.tar.gz') : ''
 }
 
 async function reportWorkspaceSignoffInspection(

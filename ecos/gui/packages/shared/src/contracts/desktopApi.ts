@@ -38,6 +38,8 @@ import type {
 } from './desktopShell.ts'
 import type {
   DesktopAgentEvent,
+  DesktopAgentInteractionAnswerRequest,
+  DesktopAgentInteractionAnswerResponse,
   DesktopAgentInterruptRequest,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
@@ -358,6 +360,9 @@ export interface DesktopApi {
     sendMessage(
       request: DesktopAgentSendMessageRequest,
     ): Promise<DesktopAgentSendMessageResponse>
+    answerInteraction(
+      request: DesktopAgentInteractionAnswerRequest,
+    ): Promise<DesktopAgentInteractionAnswerResponse>
     onEvent(listener: (event: DesktopAgentEvent) => void): DesktopEventUnsubscribe
     codex?: {
       getStatus(): Promise<DesktopCodexDependencyStatus>

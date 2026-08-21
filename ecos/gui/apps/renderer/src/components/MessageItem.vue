@@ -1,11 +1,18 @@
 <template>
   <div class="flex w-full min-w-0 justify-start">
-    <template v-if="message.type === 'choice'">
-      <AgentChoiceCard
-        v-if="message.choice && !message.answeredOptionId"
-        :choice="message.choice"
-        :disabled="!choiceInteractive || choiceDisabled"
-        @select="emit('choice', message.choice.promptId, $event)"
+    <template v-if="message.type === 'interaction'">
+      <AgentInteractionCard
+        v-if="message.interaction && !message.interactionAnswered"
+        :interaction="message.interaction"
+        :disabled="interactionDisabled"
+        @answer="
+          emit(
+            'interaction',
+            message.interaction.requestId,
+            message.interaction.kind,
+            $event,
+          )
+        "
       />
     </template>
     <AgentToolCard
@@ -438,9 +445,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
-import type { DesktopAgentChoiceOption } from '@ecos-studio/shared'
+import AgentInteractionCard from './AgentInteractionCard.vue'
 import type { Message } from '../types'
-import AgentChoiceCard from './AgentChoiceCard.vue'
 import AgentToolCard from './AgentToolCard.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
@@ -448,19 +454,22 @@ import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 
 const props = withDefaults(
   defineProps<{
-    choiceDisabled?: boolean
-    choiceInteractive?: boolean
+    interactionDisabled?: boolean
     message: Message
   }>(),
   {
-    choiceDisabled: false,
-    choiceInteractive: true,
+    interactionDisabled: false,
   },
 )
 
 const emit = defineEmits<{
   (e: 'img-load'): void
-  (e: 'choice', promptId: string, option: DesktopAgentChoiceOption): void
+  (
+    e: 'interaction',
+    requestId: string,
+    kind: 'choice' | 'confirm' | 'form',
+    answer: { optionId: string } | { values: Record<string, string | number | null> },
+  ): void
 }>()
 
 const md = new MarkdownIt({

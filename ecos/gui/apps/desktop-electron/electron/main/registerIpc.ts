@@ -56,6 +56,7 @@ import {
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
+  type DesktopAgentInteractionAnswerRequest,
   type DesktopAgentInterruptRequest,
   type DesktopAgentWorkspaceRerunContract,
   type DesktopAgentSendMessageRequest,
@@ -702,7 +703,10 @@ export function registerIpc(
 
   const requireAgentSessionOwner = (
     sender: IpcMainInvokeEvent['sender'],
-    request: DesktopAgentInterruptRequest | DesktopAgentSendMessageRequest,
+    request:
+      | DesktopAgentInterruptRequest
+      | DesktopAgentSendMessageRequest
+      | DesktopAgentInteractionAnswerRequest,
   ): void => {
     const providerId = readAgentProviderId(request)
     const subscription = agentSessionSubscriptions.get(
@@ -2107,6 +2111,12 @@ export function registerIpc(
     return await requireAgentRuntime(services).sendMessage(agentRequest)
   })
 
+  handle(desktopApiIpcChannels.agentAnswerInteraction, async (event, request) => {
+    const agentRequest = readAgentInteractionAnswerRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    return await requireAgentRuntime(services).answerInteraction(agentRequest)
+  })
+
   handle(desktopApiIpcChannels.agentInterrupt, async (event, request) => {
     const agentRequest = readAgentInterruptRequest(request)
     requireAgentSessionOwner(event.sender, agentRequest)
@@ -2272,6 +2282,56 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
   return {
     message,
     providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readAgentInteractionAnswerRequest(
+  value: unknown,
+): DesktopAgentInteractionAnswerRequest {
+  const record = readAgentRecord(value)
+  const kind = record.kind
+  const requestId = record.requestId
+  if (
+    (kind !== 'choice' && kind !== 'confirm' && kind !== 'form') ||
+    typeof requestId !== 'string' ||
+    !requestId.trim()
+  ) {
+    throw new Error('Invalid agent interaction answer request.')
+  }
+  if (kind === 'form') {
+    if (!isRecord(record.values))
+      throw new Error('Form interaction values must be an object.')
+    const entries = Object.entries(record.values)
+    if (entries.length > 16) throw new Error('Form interaction has too many fields.')
+    for (const [fieldId, fieldValue] of entries) {
+      if (
+        !fieldId.trim() ||
+        (typeof fieldValue !== 'string' &&
+          typeof fieldValue !== 'number' &&
+          fieldValue !== null) ||
+        (typeof fieldValue === 'string' && fieldValue.length > 4096) ||
+        (typeof fieldValue === 'number' && !Number.isFinite(fieldValue))
+      ) {
+        throw new Error('Invalid form interaction value.')
+      }
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      values: record.values as Record<string, string | number | null>,
+    }
+  }
+  if (typeof record.optionId !== 'string' || !record.optionId.trim()) {
+    throw new Error('Agent interaction optionId is required.')
+  }
+  return {
+    kind,
+    optionId: record.optionId.trim(),
+    providerId: readAgentProviderId(record),
+    requestId: requestId.trim(),
     sessionId: readAgentSessionId(record.sessionId),
   }
 }

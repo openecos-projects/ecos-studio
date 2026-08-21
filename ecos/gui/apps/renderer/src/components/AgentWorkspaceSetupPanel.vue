@@ -1,24 +1,17 @@
 <template>
   <AgentExecutionContractPanel
     :answered-option-id="answeredOptionId"
-    :choice="choice"
-    :choice-disabled="choiceDisabled"
     :confirmation-text="confirmationText"
     :execution-state="executionState"
     :rows="specRows"
     :summary="committedSummary"
     :title="displayTitle"
-    @select="emit('select', $event)"
   />
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type {
-  DesktopAgentChoice,
-  DesktopAgentChoiceOption,
-  DesktopAgentWorkspaceSetupContract,
-} from '@ecos-studio/shared'
+import type { DesktopAgentWorkspaceSetupContract } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
 import { installResourceApi, listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { projectMpcOptionFromResource } from '@/utils/projectManagement'
@@ -29,15 +22,12 @@ import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 
 const props = defineProps<{
   answeredOptionId?: string
-  choice?: DesktopAgentChoice
-  choiceDisabled?: boolean
   contract?: DesktopAgentWorkspaceSetupContract
   confirmationText?: string
   createSetupId?: string
 }>()
 const emit = defineEmits<{
   createWorkspace: [config: WorkspaceConfig, contract: DesktopAgentWorkspaceSetupContract]
-  select: [option: DesktopAgentChoiceOption]
 }>()
 
 const submittedSetupId = ref('')
@@ -49,18 +39,9 @@ const MPC_RESOLUTION_DELAY_MS = 500
 const displayTitle = computed(() =>
   displayAgentContractTitle(props.contract?.title ?? ''),
 )
-const answeredOption = computed(() =>
-  props.choice?.options.find((option) => option.id === props.answeredOptionId),
-)
-const isCancelled = computed(
-  () =>
-    answeredOption.value?.value === '2' ||
-    /cancel/i.test(answeredOption.value?.label ?? ''),
-)
 const executionState = computed(() => {
   if (props.createSetupId === props.contract?.setup_id) return 'Running'
   if (!props.answeredOptionId) return 'Review'
-  if (isCancelled.value) return 'Cancelled'
   return 'Confirmed'
 })
 const committedSummary = computed(() => {

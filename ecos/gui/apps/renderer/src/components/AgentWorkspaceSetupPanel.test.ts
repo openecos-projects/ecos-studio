@@ -236,7 +236,7 @@ describe('AgentWorkspaceSetupPanel', () => {
   })
 
   it('allows confirmation without an MPC template', () => {
-    expect(source).toContain(':choice-disabled="choiceDisabled"')
+    expect(source).not.toContain('choiceDisabled')
     expect(source).not.toContain("'Unavailable'")
   })
 
@@ -261,8 +261,8 @@ describe('AgentWorkspaceSetupPanel', () => {
   it('renders the confirmation after the resolved specification', () => {
     expect(source).toContain('confirmationText?: string')
     expect(source).toContain(':confirmation-text="confirmationText"')
-    expect(source).toContain(':choice="choice"')
-    expect(source).toContain(':choice-disabled="choiceDisabled"')
+    expect(source).not.toContain(':choice="choice"')
+    expect(source).not.toContain(':choice-disabled="choiceDisabled"')
   })
 
   it('collapses committed setups into a short summary with progressive status', () => {
@@ -272,7 +272,6 @@ describe('AgentWorkspaceSetupPanel', () => {
     )
     expect(source).toContain("return 'Running'")
     expect(source).toContain("return 'Review'")
-    expect(source).toContain("return 'Cancelled'")
     expect(source).toContain("return 'Confirmed'")
   })
 
