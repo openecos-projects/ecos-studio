@@ -850,7 +850,7 @@ impl Default for ObjectVisibility {
             gcells: false,
             obstructions: false,
             boundaries: true,
-            fill: false,
+            fill: true,
             regions: false,
         }
     }
@@ -946,7 +946,10 @@ impl DrawingCategory {
             Self::GCells => owner_type == OwnerType::GCellGrid,
             Self::Obstructions => matches!(owner_type, OwnerType::Blockage | OwnerType::Obs),
             Self::Boundaries => matches!(owner_type, OwnerType::Die | OwnerType::Core),
-            Self::Fill => owner_type == OwnerType::Fill,
+            Self::Fill => matches!(
+                owner_type,
+                OwnerType::Fill | OwnerType::InstanceBBox | OwnerType::InstanceHalo
+            ),
             Self::Regions => matches!(owner_type, OwnerType::Region | OwnerType::Slot),
         }
     }
@@ -956,6 +959,12 @@ impl ObjectVisibility {
     fn includes_owner_type(self, owner_type: u8) -> bool {
         if OwnerType::from_raw(owner_type) == Some(OwnerType::NetWireSegment) {
             return self.net_signal || self.net_clock || self.net_other;
+        }
+        if matches!(
+            OwnerType::from_raw(owner_type),
+            Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo)
+        ) {
+            return self.instances || self.fill;
         }
         OwnerType::from_raw(owner_type)
             .and_then(|owner_type| {
@@ -1031,6 +1040,40 @@ fn drawing_category_counts(db: &ChipViewDb) -> BTreeMap<DrawingCategory, usize> 
     counts
 }
 
+fn is_filler_instance(inst_name: Option<&str>, master_name: Option<&str>) -> bool {
+    let is_filler_str = |s: &str| -> bool {
+        let s = s.trim();
+        if s.is_empty() {
+            return false;
+        }
+        let lower = s.to_ascii_lowercase();
+        lower.contains("fill")
+            || lower.contains("decap")
+            || lower.contains("tapcell")
+            || lower.contains("welltap")
+            || lower.contains("tapvpwr")
+            || lower.contains("tapvgnd")
+            || lower.contains("endcap")
+            || lower.starts_with("tap_")
+            || (lower.starts_with("tap") && lower.contains('_'))
+            || lower.ends_with("_tap")
+            || lower.contains("__tap")
+            || lower.starts_with("phy_")
+            || lower.starts_with("filler")
+    };
+    if let Some(master) = master_name {
+        if is_filler_str(master) {
+            return true;
+        }
+    }
+    if let Some(inst) = inst_name {
+        if is_filler_str(inst) {
+            return true;
+        }
+    }
+    false
+}
+
 fn drawing_category_for_shape(db: &ChipViewDb, shape: &ShapeRecord) -> Option<DrawingCategory> {
     db.owner_for_shape(shape)
         .and_then(|owner| drawing_category_for_owner(db, owner))
@@ -1039,7 +1082,15 @@ fn drawing_category_for_shape(db: &ChipViewDb, shape: &ShapeRecord) -> Option<Dr
 fn drawing_category_for_owner(db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
     let owner_type = OwnerType::from_raw(owner.owner_type)?;
     Some(match owner_type {
-        OwnerType::InstanceBBox | OwnerType::InstanceHalo => DrawingCategory::Instances,
+        OwnerType::InstanceBBox | OwnerType::InstanceHalo => {
+            let inst_name = db.owner_name(owner);
+            let master_name = db.owner_local_name(owner);
+            if is_filler_instance(inst_name, master_name) {
+                DrawingCategory::Fill
+            } else {
+                DrawingCategory::Instances
+            }
+        }
         OwnerType::NetWireSegment => net_kind_drawing_category(
             db.owner_name(owner)
                 .and_then(|net_name| db.net_kind_for_name(net_name)),
@@ -1076,27 +1127,22 @@ fn net_kind_drawing_category(kind: Option<&str>) -> DrawingCategory {
 #[derive(Clone, Debug, Default)]
 struct OwnerCategoryCache {
     epoch: u64,
-    net_categories: std::collections::HashMap<u64, Option<DrawingCategory>>,
+    categories: std::collections::HashMap<(u8, u64, u32), Option<DrawingCategory>>,
 }
 
 impl OwnerCategoryCache {
     fn get(&mut self, epoch: u64, db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
         if self.epoch != epoch {
             self.epoch = epoch;
-            self.net_categories.clear();
+            self.categories.clear();
         }
-        let owner_type = OwnerType::from_raw(owner.owner_type)?;
-        if owner_type == OwnerType::NetWireSegment {
-            let owner_id = owner.owner_id;
-            if let Some(cat) = self.net_categories.get(&owner_id) {
-                return *cat;
-            }
-            let cat = drawing_category_for_owner(db, owner);
-            self.net_categories.insert(owner_id, cat);
-            cat
-        } else {
-            drawing_category_for_owner(db, owner)
+        let key = (owner.owner_type, owner.owner_id, owner.name_id);
+        if let Some(cat) = self.categories.get(&key) {
+            return *cat;
         }
+        let cat = drawing_category_for_owner(db, owner);
+        self.categories.insert(key, cat);
+        cat
     }
 }
 
@@ -10252,6 +10298,7 @@ fn shape_uses_layer_visibility(shape: &ShapeRecord, owner_type: Option<OwnerType
 
 fn object_visibility_needs_layout_layer(visibility: ObjectVisibility) -> bool {
     visibility.instances
+        || visibility.fill
         || visibility.boundaries
         || visibility.placement
         || visibility.tracks
@@ -12481,6 +12528,7 @@ mod tests {
                 DrawingCategory::Instances,
                 DrawingCategory::Placement,
                 DrawingCategory::Boundaries,
+                DrawingCategory::Fill,
             ]
         );
         assert!(!visibility.is_all_visible());
@@ -12490,6 +12538,7 @@ mod tests {
     fn object_visibility_hides_only_the_requested_owner_categories() {
         let visibility = ObjectVisibility {
             instances: false,
+            fill: false,
             io_pin: true,
             net_signal: false,
             net_clock: false,
@@ -13215,6 +13264,48 @@ mod tests {
     }
 
     #[test]
+    fn filler_instance_detection_matches_standard_asic_filler_cells() {
+        // icsprout55-pdk standard cell fillers & caps
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER1H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER2H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER4H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER8H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER16H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER32H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER64H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER1H7L")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER16H7R")));
+        assert!(is_filler_instance(Some("inst_cap"), Some("FILLCAP4H7H")));
+        assert!(is_filler_instance(Some("inst_cap"), Some("FILLCAP8H7H")));
+        assert!(is_filler_instance(Some("inst_cap"), Some("FILLCAP16H7H")));
+        assert!(is_filler_instance(Some("inst_cap"), Some("FILLCAP32H7H")));
+        assert!(is_filler_instance(Some("inst_tap"), Some("FILLTAPH7H")));
+        assert!(is_filler_instance(Some("inst_tap"), Some("FILLTAPH7L")));
+        assert!(is_filler_instance(Some("inst_tap"), Some("FILLTAPH7R")));
+
+        // icsprout55-pdk IO fillers
+        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER0005")));
+        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER001")));
+        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER01")));
+        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER1")));
+        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER10")));
+        assert!(is_filler_instance(Some("io_fill"), Some("P65_1233_FILLER50")));
+
+        // Instance name matches
+        assert!(is_filler_instance(Some("FILLER_0_0"), None));
+        assert!(is_filler_instance(Some("fill_123"), None));
+        assert!(is_filler_instance(Some("PHY_EDGE_0"), None));
+        assert!(is_filler_instance(Some("PHY_TAP_1"), None));
+
+        // Logic instances should NOT match
+        assert!(!is_filler_instance(Some("_042_"), Some("AND2X1H7H")));
+        assert!(!is_filler_instance(Some("u_dff"), Some("SDFFQX1H7H")));
+        assert!(!is_filler_instance(Some("clk_buf"), Some("BUFX4H7H")));
+        assert!(!is_filler_instance(Some("inv_1"), Some("INVX1H7H")));
+        assert!(!is_filler_instance(Some("core_inst"), Some("alu_top")));
+    }
+
+    #[test]
     fn dashed_line_segments_split_screen_line_into_dashes() {
         let segments = dashed_line_segments(egui::pos2(0.0, 0.0), egui::pos2(30.0, 0.0), 8.0, 4.0);
 
@@ -13404,6 +13495,7 @@ mod tests {
         visibility.set_category_visible(DrawingCategory::Boundaries, false);
         visibility.set_category_visible(DrawingCategory::Placement, false);
         visibility.set_category_visible(DrawingCategory::Regions, false);
+        visibility.set_category_visible(DrawingCategory::Fill, false);
         assert_eq!(render_query_layer_ids(&layers, visibility), vec![7]);
 
         layers[0].visible = true;
