@@ -23,7 +23,7 @@ import { clearStepDashboardDataCache } from '../composables/useStepDashboardData
 import { useWorkspace } from '../composables/useWorkspace'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 
-const { closeProject, currentProject } = useWorkspace()
+const { currentProject } = useWorkspace()
 const agentShell = useAgentShellStore()
 const workspaceViewKey = computed(() => currentProject.value?.path ?? '')
 
@@ -43,8 +43,7 @@ onMounted(() => {
   agentShell.closeHomeAgent()
 })
 
-onBeforeRouteLeave(async () => {
-  await closeProject()
+onBeforeRouteLeave(() => {
   clearStepDashboardDataCache()
   clearHomeQorComparisonCache()
   clearHomeSnapshotCache()
