@@ -453,6 +453,8 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'Top Module Name',
       'Clock Signal Name',
       'Die Area',
+      'Origin Core Utilization',
+      'Core Margin',
       'Frequency max [MHz]',
       'Max Fanout',
     ]) {

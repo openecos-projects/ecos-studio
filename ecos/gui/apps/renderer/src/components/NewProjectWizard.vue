@@ -1451,7 +1451,7 @@
                       <div>
                         <label
                           class="mb-2 block text-sm font-semibold text-(--text-primary)"
-                          >Utilitization</label
+                          >Origin Core Utilization</label
                         >
                         <input
                           v-model.number="config.parameters.utilitization"
@@ -1465,7 +1465,7 @@
                       <div>
                         <label
                           class="mb-2 block text-sm font-semibold text-(--text-primary)"
-                          >Margin</label
+                          >Core Margin</label
                         >
                         <input
                           v-model.number="config.parameters.margin"

@@ -45,6 +45,7 @@ import {
   rewriteWorkspaceConfigPathsForReplacement,
   workspaceParentPath,
 } from './workspaceReplacement'
+import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
 
 interface SerializedProject {
   id: string
@@ -426,6 +427,19 @@ export function useWorkspace() {
       }
     })
 
+  const registerProjectManagedReadScope = (workspacePath: string): Promise<void> =>
+    enqueueProjectRootMutation(async () => {
+      try {
+        const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
+        if (!projectContext) return
+
+        const desktopApi = await waitForDesktopApi()
+        await desktopApi.workspace.registerProjectReadRoot(projectContext.projectRoot)
+      } catch (error) {
+        console.warn('Failed to register managed project read scope:', error)
+      }
+    })
+
   const clearProjectRoot = (): Promise<void> =>
     enqueueProjectRootMutation(async () => {
       try {
@@ -588,6 +602,8 @@ export function useWorkspace() {
             await router.replace('/')
             return
           }
+          await registerProjectManagedReadScope(canonicalProjectRoot)
+          if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
           currentProject.value = {
             ...restored,
             path: canonicalProjectRoot,
@@ -811,6 +827,10 @@ export function useWorkspace() {
           }
           return false
         }
+        await registerProjectManagedReadScope(canonicalProjectRoot)
+        if (!isLatestOpenProjectRequest()) return false
+        if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
+          return false
 
         const existingProject = recentProjects.value.find(
           (p) => normalizePath(p.path) === resolvedPath,
@@ -1291,7 +1311,6 @@ export function useWorkspace() {
             'The project directory could not be registered for local file access.'
           return false
         }
-
         if (replacement && config?.keepReplacementBackup) {
           await recordWorkspaceReplacementBackup(replacement, config, showToast)
           committedReplacement = true

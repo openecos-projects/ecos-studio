@@ -23,6 +23,7 @@ const {
   clearFlowExecutionActiveForWorkspaceMock,
   isFlowExecutionActiveForWorkspaceMock,
   markFlowExecutionActiveForWorkspaceMock,
+  resolveProjectRouteContextForWorkspaceMock,
 } = vi.hoisted(() => ({
   createRuntimeEventClientMock: vi.fn(),
   closeWorkspaceApiMock: vi.fn(),
@@ -44,6 +45,7 @@ const {
   clearFlowExecutionActiveForWorkspaceMock: vi.fn(),
   isFlowExecutionActiveForWorkspaceMock: vi.fn(() => false),
   markFlowExecutionActiveForWorkspaceMock: vi.fn(),
+  resolveProjectRouteContextForWorkspaceMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -113,6 +115,10 @@ vi.mock('./flowExecutionState', () => ({
   markFlowExecutionActiveForWorkspace: markFlowExecutionActiveForWorkspaceMock,
 }))
 
+vi.mock('@/utils/projectManifestRegistration', () => ({
+  resolveProjectRouteContextForWorkspace: resolveProjectRouteContextForWorkspaceMock,
+}))
+
 import { useWorkspace } from './useWorkspace'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
@@ -166,6 +172,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       unbindWindow: vi.fn(async () => undefined),
       getBoundPath: vi.fn(async () => null),
       registerProjectRoot: vi.fn(async (path: string) => path),
+      registerProjectReadRoot: vi.fn(async (path: string) => path),
       clearProjectRoot: vi.fn(),
       requestProjectPathAccess: vi.fn(),
       readProjectTextFile: vi.fn(async () => {
@@ -240,6 +247,8 @@ describe('useWorkspace openProject', () => {
     requestHomeRunArtifactResetMock.mockReset()
     notifyWorkspaceRerunPreparedMock.mockReset()
     clearFlowExecutionActiveForWorkspaceMock.mockReset()
+    resolveProjectRouteContextForWorkspaceMock.mockReset()
+    resolveProjectRouteContextForWorkspaceMock.mockResolvedValue(null)
     settingsData.clear()
 
     desktopApi = createDesktopApiMock()
@@ -503,6 +512,33 @@ describe('useWorkspace openProject', () => {
     await workspace.closeProject()
 
     expect(desktopApi.workspace.unbindWindow).toHaveBeenCalledWith('/work/demo')
+  })
+
+  it('registers the managed parent as a read-only scope after opening a workspace', async () => {
+    const workspace = useWorkspace()
+    resolveProjectRouteContextForWorkspaceMock.mockResolvedValueOnce({
+      projectRoot: '/work',
+      projectName: 'work',
+    })
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_handle: 'workspace-demo',
+      },
+    })
+
+    await expect(
+      workspace.openProject({
+        id: '/work/demo',
+        name: 'demo',
+        path: '/work/demo',
+        lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(true)
+
+    expect(resolveProjectRouteContextForWorkspaceMock).toHaveBeenCalledWith('/work/demo')
+    expect(desktopApi.workspace.registerProjectReadRoot).toHaveBeenCalledWith('/work')
   })
 
   it('stops before loading when the selected directory is not an ECOS workspace', async () => {
