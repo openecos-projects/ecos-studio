@@ -204,8 +204,8 @@ export function validateFrontendConfigApi(config: FrontendValidationRequest) {
     .then((data) => ({
       cmd: CMDEnum.validate_frontend_config,
       data: data as unknown as FrontendValidationResult,
-      message: Array.isArray(data.message) ? (data.message as string[]) : [],
-      response: String(data.response ?? ResponseEnum.success),
+      message: responseMessages(data.message),
+      response: responseStatus(data.response),
     })) as Promise<ResponseData<FrontendValidationResult>>
 }
 
@@ -407,6 +407,7 @@ function responseMessages(value: unknown): string[] {
 }
 
 function responseStatus(value: unknown): ResponseEnum {
+  if (value === null || value === undefined) return ResponseEnum.success
   switch (value) {
     case ResponseEnum.error:
     case ResponseEnum.failed:
@@ -414,7 +415,7 @@ function responseStatus(value: unknown): ResponseEnum {
     case ResponseEnum.warning:
       return value
     default:
-      return ResponseEnum.success
+      return ResponseEnum.failed
   }
 }
 

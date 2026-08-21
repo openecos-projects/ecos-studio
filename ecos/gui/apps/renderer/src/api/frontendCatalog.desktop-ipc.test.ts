@@ -130,6 +130,29 @@ describe('frontend catalog desktop bridge', () => {
     })
   })
 
+  it('defaults a missing response status to success for older runtimes', async () => {
+    const catalog = vi.fn(async () => validCatalog())
+    setWindow({ ecosDesktop: { runtime: { frontend: { catalog } } } })
+
+    const { listFrontendCatalogApi } = await import('./frontendCatalog')
+    await expect(listFrontendCatalogApi()).resolves.toMatchObject({
+      response: 'success',
+    })
+  })
+
+  it('fails closed for an unknown non-null response status', async () => {
+    const catalog = vi.fn(async () => ({
+      ...validCatalog(),
+      response: 'cancelled',
+    }))
+    setWindow({ ecosDesktop: { runtime: { frontend: { catalog } } } })
+
+    const { listFrontendCatalogApi } = await import('./frontendCatalog')
+    await expect(listFrontendCatalogApi()).resolves.toMatchObject({
+      response: 'failed',
+    })
+  })
+
   it('rejects unsupported frontend catalog versions', async () => {
     setWindow({
       ecosDesktop: {
