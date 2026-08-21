@@ -407,13 +407,18 @@ function responseMessages(value: unknown): string[] {
 }
 
 function responseStatus(value: unknown): ResponseEnum {
-  if (value === null || value === undefined) return ResponseEnum.success
   switch (value) {
+    case null:
+    case undefined:
+      return ResponseEnum.success
     case ResponseEnum.error:
+      return ResponseEnum.error
     case ResponseEnum.failed:
+      return ResponseEnum.failed
     case ResponseEnum.success:
+      return ResponseEnum.success
     case ResponseEnum.warning:
-      return value
+      return ResponseEnum.warning
     default:
       return ResponseEnum.failed
   }
