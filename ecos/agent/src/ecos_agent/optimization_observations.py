@@ -9,17 +9,17 @@ from pathlib import Path
 from typing import Any
 
 from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_contracts import (
+    ROUTABILITY_OBJECTIVE_ORDER,
     BudgetSnapshot,
     GateResult,
-    ObjectiveMetric,
-    ROUTABILITY_OBJECTIVE_ORDER,
     SignoffGates,
     StageObservation,
     TerminalObservation,
 )
+from ecos_agent.optimization_controller import CandidateExecutionEvidence
 from ecos_agent.optimization_ledger import build_optimization_artifact_manifest
-
 
 _METRIC_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -127,6 +127,39 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
         ),
         metrics=terminal_metrics,
     )
+
+
+def build_candidate_terminal_observation(
+    parent_workspace_root: Path,
+    evidence: CandidateExecutionEvidence,
+) -> TerminalObservation:
+    """Build terminal evidence only from a verified child-workspace receipt."""
+    parent = _workspace_root(parent_workspace_root)
+    candidate_path = _workspace_path(parent, evidence.candidate_root_ref)
+    manifest_path = _workspace_path(parent, evidence.candidate_manifest_ref)
+    try:
+        candidate_root = candidate_path.resolve(strict=True)
+        resolved_manifest = manifest_path.resolve(strict=True)
+        candidate_root.relative_to(parent)
+        resolved_manifest.relative_to(candidate_root)
+    except (OSError, ValueError) as exc:
+        raise OptimizationObservationError(
+            "candidate evidence path is unsafe or unavailable"
+        ) from exc
+    if not candidate_root.is_dir() or not resolved_manifest.is_file():
+        raise OptimizationObservationError("candidate evidence path is unsafe or unavailable")
+    if file_sha256(resolved_manifest) != evidence.candidate_manifest_sha256:
+        raise OptimizationObservationError("candidate manifest hash does not match the receipt")
+    payload = _read_json(parent, evidence.candidate_manifest_ref)
+    if (
+        payload.get("schema") != "ecc.workspace.candidate_workspace.v1"
+        or payload.get("candidate_root_ref") != evidence.candidate_root_ref
+    ):
+        raise OptimizationObservationError("candidate workspace manifest is invalid")
+    parent_flow = _safe_file(parent, "home/flow.json")
+    if file_sha256(parent_flow) != payload.get("parent_flow_sha256"):
+        raise OptimizationObservationError("candidate parent flow does not match the baseline")
+    return build_terminal_observation(candidate_root)
 
 
 def _workspace_root(workspace_root: Path) -> Path:

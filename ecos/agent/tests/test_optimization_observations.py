@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
+from ecos_agent.hashing import file_sha256
 from ecos_agent.knowledge_bundle import KnowledgeAnswer
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     OptimizationKnob,
 )
+from ecos_agent.optimization_controller import CandidateExecutionEvidence
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_observations import (
     OptimizationObservationError,
+    build_candidate_terminal_observation,
     build_stage_observation,
     build_terminal_observation,
 )
@@ -186,6 +190,39 @@ def test_terminal_observation_keeps_evidence_but_marks_missing_harden_outputs_in
 
     assert observation.evidence_valid is True
     assert observation.harden_artifacts_complete is False
+
+
+def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
+    frozen_workspace: Path, tmp_path: Path
+) -> None:
+    source_copy = tmp_path / "candidate-source"
+    shutil.copytree(frozen_workspace, source_copy)
+    candidate_root = frozen_workspace / ".agent/candidates/candidate-1"
+    shutil.copytree(source_copy, candidate_root)
+    manifest_ref = ".agent/candidates/candidate-1/analysis/candidate_workspace.v1.json"
+    manifest_path = frozen_workspace / manifest_ref
+    parent_flow_hash = file_sha256(frozen_workspace / "home/flow.json")
+    _write_json(
+        manifest_path,
+        {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": "candidate-1",
+            "candidate_root_ref": ".agent/candidates/candidate-1",
+            "parent_flow_sha256": parent_flow_hash,
+            "candidate_flow_sha256": file_sha256(candidate_root / "home/flow.json"),
+        },
+    )
+    evidence = CandidateExecutionEvidence(
+        candidate_root_ref=".agent/candidates/candidate-1",
+        candidate_manifest_ref=manifest_ref,
+        candidate_manifest_sha256=file_sha256(manifest_path),
+    )
+
+    observation = build_candidate_terminal_observation(frozen_workspace, evidence)
+
+    assert observation.observation_id == "terminal-Harden"
+    assert observation.metrics["route_la_total_overflow"] == 1.0
 
 
 class _RecordingRetriever:
