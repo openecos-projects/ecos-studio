@@ -3,6 +3,19 @@ import { dirname, join } from 'node:path'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
 
+// PATH-style list of the bin directories the ECOS runtime layer added on top
+// of the inherited environment, in resolved-PATH order. Rebuilt from scratch
+// on every runtime env construction so nested launches (an ECOS Studio
+// started from an integrated terminal) never inherit stale entries. The
+// integrated terminal re-applies these entries after shell startup files that
+// reset PATH.
+export const runtimeBinPathEnvVariable = 'ECOS_ELECTRON_RUNTIME_BIN_PATH'
+
+// Internal handoff between the generated zsh wrapper startup files. Only the
+// terminal spawn plan may set it; a fresh launch env must never honor one
+// inherited from an outer session.
+export const userZdotdirEnvVariable = 'ECOS_USER_ZDOTDIR'
+
 export interface EccRuntimeEnvOptions {
   appPath: string
   cwd: string
@@ -135,15 +148,24 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
 }
 
 export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.ProcessEnv {
+  const {
+    [runtimeBinPathEnvVariable]: _inheritedRuntimeBinPath,
+    [userZdotdirEnvVariable]: _inheritedUserZdotdir,
+    ...cleanEnv
+  } = options.env
+
   if (options.isPackaged) {
-    const packagedRuntimeBin = resolvePackagedRuntimeBin(options)
+    const packagedRuntimeBin = resolvePackagedRuntimeBin({
+      ...options,
+      env: cleanEnv,
+    })
     const resourcesPath = resolvePackagedResourcesPath(options)
     const binariesPath = resolvePackagedBinariesPath(options)
     const {
       CHIPCOMPILER_OSS_CAD_DIR: _inheritedOssCadDir,
       ECOS_ELECTRON_OSS_CAD_DIR: _inheritedElectronOssCadDir,
       ...baseEnv
-    } = options.env
+    } = cleanEnv
     const libraryEnv = packagedEccLibraryEnv(baseEnv, binariesPath, options.platform)
 
     if (packagedRuntimeBin) {
@@ -153,6 +175,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
         ...baseEnv,
         ...libraryEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        [runtimeBinPathEnvVariable]: packagedRuntimeBin,
         [nextPath.key]: nextPath.value,
       }
     }
@@ -170,13 +193,14 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
 
   const developmentBinDir = resolveDevelopmentEccBinDir(options)
   if (!developmentBinDir) {
-    return { ...options.env }
+    return { ...cleanEnv }
   }
 
-  const nextPath = prependPath(options.env, developmentBinDir, options.platform)
+  const nextPath = prependPath(cleanEnv, developmentBinDir, options.platform)
 
   return {
-    ...options.env,
+    ...cleanEnv,
+    [runtimeBinPathEnvVariable]: developmentBinDir,
     [nextPath.key]: nextPath.value,
   }
 }

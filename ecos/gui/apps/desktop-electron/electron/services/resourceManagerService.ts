@@ -29,6 +29,7 @@ import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { electronLogger } from './logger'
 import { isRelativePathOutsideRoot } from './pathScope'
+import { runtimeBinPathEnvVariable } from './eccRpc/runtimeEnv'
 import {
   validateMpcSpec,
   type ResourceAction,
@@ -627,6 +628,27 @@ export class ResourceManagerService {
         [...preferredToolBinDirs, ...toolBinDirs],
         options.platform,
       )
+    }
+
+    // Rebuild the ECOS runtime bin marker in resolved-PATH order so terminal
+    // sessions can re-apply exactly these entries after shell startup files
+    // that reset PATH. Inherited (possibly stale) marker entries survive only
+    // if they are still on the merged PATH.
+    const pathKey = pathKeyForRuntimeEnv(env)
+    const runtimeBinDirs = new Set([
+      ...splitRuntimePath(env[runtimeBinPathEnvVariable] ?? '', options.platform),
+      ...preferredToolBinDirs,
+      ...toolBinDirs,
+    ])
+    const runtimeBinPath = splitRuntimePath(env[pathKey] ?? '', options.platform).filter(
+      (entry) => runtimeBinDirs.has(entry),
+    )
+    if (runtimeBinPath.length > 0) {
+      env[runtimeBinPathEnvVariable] = runtimeBinPath.join(
+        runtimePathSeparator(options.platform),
+      )
+    } else {
+      delete env[runtimeBinPathEnvVariable]
     }
 
     const activeVerilator = standaloneVerilator ?? bundledVerilator
