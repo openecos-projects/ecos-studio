@@ -52,7 +52,8 @@
         class="flex flex-col items-center justify-center px-2 py-12 text-center"
       >
         <i
-          class="ri-file-settings-line mb-3 text-4xl text-(--text-secondary) opacity-40"></i>
+          class="ri-file-settings-line mb-3 text-4xl text-(--text-secondary) opacity-40"
+        ></i>
         <p class="text-[12px] leading-relaxed text-(--text-secondary)">N/A</p>
         <p
           v-if="runtimeMessages.length"
@@ -78,7 +79,10 @@
 
         <!-- Resolved path + editor -->
         <template v-if="stepConfigPathResolved && !stepConfigReadError">
-          <div class="sc-compare min-h-0 flex-1" :class="{ 'is-split': baselineColumnVisible }">
+          <div
+            class="sc-compare min-h-0 flex-1"
+            :class="{ 'is-split': baselineColumnVisible }"
+          >
             <!-- Baseline column (read-only comparison) -->
             <div
               v-if="baselineColumnVisible"
@@ -95,10 +99,16 @@
                   <span class="divider">/</span>
                   <span class="subtitle">
                     Baseline · {{ baseline.baselineWorkspaceName.value ?? 'workspace'
-                    }}{{ baseline.baselineSource.value === 'default' ? ' (default)' : '' }}
+                    }}{{
+                      baseline.baselineSource.value === 'default' ? ' (default)' : ''
+                    }}
                     · read-only
                   </span>
-                  <span v-if="diffCount" class="sc-diff-badge" title="Changed vs baseline">
+                  <span
+                    v-if="diffCount"
+                    class="sc-diff-badge"
+                    title="Changed vs baseline"
+                  >
                     {{ diffCount }} differ
                   </span>
                 </div>
@@ -171,7 +181,9 @@
             </div>
 
             <!-- Current workspace column (editable) -->
-            <div class="sc-compare-col sc-compare-col--current sc-editor-body min-h-0 flex-1">
+            <div
+              class="sc-compare-col sc-compare-col--current sc-editor-body min-h-0 flex-1"
+            >
               <header class="topbar">
                 <div class="topbar-left">
                   <i class="ri-file-settings-line"></i>
@@ -232,7 +244,9 @@
                     @click="onSaveStepConfig"
                   >
                     <i
-                      :class="isSavingStepConfig ? 'ri-loader-4-line spin' : 'ri-save-line'"
+                      :class="
+                        isSavingStepConfig ? 'ri-loader-4-line spin' : 'ri-save-line'
+                      "
                     ></i>
                     {{ isSavingStepConfig ? 'Saving…' : 'Save' }}
                   </button>

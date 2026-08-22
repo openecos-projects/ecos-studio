@@ -38,7 +38,9 @@ describe('resolveStepConfigResource', () => {
       path: 'config/dreamplace_ecc.json',
       legacyPaths: ['config/dreamplace.json'],
     })
-    expect(resolveStepConfigResource({ name: 'legalization', tool: 'DreamPlace' })).toMatchObject({
+    expect(
+      resolveStepConfigResource({ name: 'legalization', tool: 'DreamPlace' }),
+    ).toMatchObject({
       path: 'config/dreamplace_ecc.json',
     })
   })
@@ -47,8 +49,12 @@ describe('resolveStepConfigResource', () => {
     expect(resolveStepConfigResource({ name: 'Synthesis', tool: 'yosys' })).toEqual({
       kind: 'none',
     })
-    expect(resolveStepConfigResource({ name: 'GDS', tool: 'ecc' })).toEqual({ kind: 'none' })
-    expect(resolveStepConfigResource({ name: 'Init', tool: 'unknown' })).toEqual({ kind: 'none' })
+    expect(resolveStepConfigResource({ name: 'GDS', tool: 'ecc' })).toEqual({
+      kind: 'none',
+    })
+    expect(resolveStepConfigResource({ name: 'Init', tool: 'unknown' })).toEqual({
+      kind: 'none',
+    })
   })
 
   it('describes frontend tool configs (not statically allowlistable)', () => {
@@ -57,14 +63,18 @@ describe('resolveStepConfigResource', () => {
       directoryName: 'Lint_verilator',
       path: 'Lint_verilator/config/flow_config.json',
     })
-    expect(resolveStepConfigResource({ name: 'Elab', tool: 'sland' })).toEqual({ kind: 'none' })
+    expect(resolveStepConfigResource({ name: 'Elab', tool: 'sland' })).toEqual({
+      kind: 'none',
+    })
   })
 })
 
 describe('baselineStepConfigReadPaths', () => {
   it('requests flow.json plus every allowlisted config file within the read limit', () => {
     expect(baselineStepConfigReadPaths[0]).toBe('home/flow.json')
-    expect(new Set(baselineStepConfigReadPaths).size).toBe(baselineStepConfigReadPaths.length)
+    expect(new Set(baselineStepConfigReadPaths).size).toBe(
+      baselineStepConfigReadPaths.length,
+    )
     for (const path of baselineStepConfigReadPaths) {
       expect(projectManagementWorkspaceReadablePaths).toContain(path)
     }
@@ -91,7 +101,9 @@ describe('pickConfigText', () => {
   })
 
   it('falls back to the legacy filename', () => {
-    expect(pickConfigText({ 'config/cts_default_config.json': '{"a":2}' }, resource)).toEqual({
+    expect(
+      pickConfigText({ 'config/cts_default_config.json': '{"a":2}' }, resource),
+    ).toEqual({
       path: 'config/cts_default_config.json',
       text: '{"a":2}',
     })
@@ -100,7 +112,10 @@ describe('pickConfigText', () => {
   it('returns null when no candidate exists', () => {
     expect(pickConfigText({}, resource)).toBeNull()
     expect(
-      pickConfigText({ 'config/cts_ecc.json': null, 'config/cts_default_config.json': null }, resource),
+      pickConfigText(
+        { 'config/cts_ecc.json': null, 'config/cts_default_config.json': null },
+        resource,
+      ),
     ).toBeNull()
   })
 })

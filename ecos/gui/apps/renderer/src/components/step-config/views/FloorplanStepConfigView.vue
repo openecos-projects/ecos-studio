@@ -213,7 +213,10 @@ function setDieMode(value: unknown): void {
     </div>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head" :class="{ 'sc-diff-panel': changedUnder('die_builder') }">
+      <div
+        class="sc-pro-section__head"
+        :class="{ 'sc-diff-panel': changedUnder('die_builder') }"
+      >
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">die_builder</div>
@@ -248,7 +251,10 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel" :class="{ 'sc-diff-panel': changedUnder('die_builder.margin') }">
+        <div
+          class="sc-pro-subpanel"
+          :class="{ 'sc-diff-panel': changedUnder('die_builder.margin') }"
+        >
           <div class="sc-pro-subpanel__title">margin</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -294,7 +300,10 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel" :class="{ 'sc-diff-panel': changedUnder('die_builder.die_util') }">
+        <div
+          class="sc-pro-subpanel"
+          :class="{ 'sc-diff-panel': changedUnder('die_builder.die_util') }"
+        >
           <div class="sc-pro-subpanel__title">die_util</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -326,7 +335,10 @@ function setDieMode(value: unknown): void {
           </div>
         </div>
 
-        <div class="sc-pro-subpanel" :class="{ 'sc-diff-panel': changedUnder('die_builder.die_size') }">
+        <div
+          class="sc-pro-subpanel"
+          :class="{ 'sc-diff-panel': changedUnder('die_builder.die_size') }"
+        >
           <div class="sc-pro-subpanel__title">die_size</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -359,7 +371,10 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head" :class="{ 'sc-diff-panel': changedUnder('macro_placer') }">
+      <div
+        class="sc-pro-section__head"
+        :class="{ 'sc-diff-panel': changedUnder('macro_placer') }"
+      >
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">macro_placer</div>
@@ -404,7 +419,10 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head" :class="{ 'sc-diff-panel': changedUnder('io_placer') }">
+      <div
+        class="sc-pro-section__head"
+        :class="{ 'sc-diff-panel': changedUnder('io_placer') }"
+      >
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">io_placer</div>
@@ -450,7 +468,10 @@ function setDieMode(value: unknown): void {
     </section>
 
     <section class="sc-pro-section">
-      <div class="sc-pro-section__head" :class="{ 'sc-diff-panel': changedUnder('phy_placer') }">
+      <div
+        class="sc-pro-section__head"
+        :class="{ 'sc-diff-panel': changedUnder('phy_placer') }"
+      >
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">phy_placer</div>
@@ -458,7 +479,10 @@ function setDieMode(value: unknown): void {
         </div>
       </div>
       <div class="sc-pro-section__body space-y-3">
-        <div class="sc-pro-subpanel" :class="{ 'sc-diff-panel': changedUnder('phy_placer.well_tap') }">
+        <div
+          class="sc-pro-subpanel"
+          :class="{ 'sc-diff-panel': changedUnder('phy_placer.well_tap') }"
+        >
           <div class="sc-pro-subpanel__title">well_tap</div>
           <div class="sc-pro-grid">
             <div class="field">
@@ -526,7 +550,9 @@ function setDieMode(value: unknown): void {
                   :key="'edge-top-' + i"
                   class="flex w-full min-w-0 items-center gap-2"
                   :class="{
-                    'sc-diff': isChanged(`phy_placer.edge_endcap.top_cell_name_list[${i}]`),
+                    'sc-diff': isChanged(
+                      `phy_placer.edge_endcap.top_cell_name_list[${i}]`,
+                    ),
                   }"
                 >
                   <InputText
@@ -984,7 +1010,9 @@ function setDieMode(value: unknown): void {
               <tr
                 v-for="(row, i) in pdn().connect_layers as Record<string, unknown>[]"
                 :key="'cl-' + i"
-                :class="{ 'sc-diff-row': changedUnder(`pdn_generator.connect_layers[${i}]`) }"
+                :class="{
+                  'sc-diff-row': changedUnder(`pdn_generator.connect_layers[${i}]`),
+                }"
               >
                 <td>
                   <InputText

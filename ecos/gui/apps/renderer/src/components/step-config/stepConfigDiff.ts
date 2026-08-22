@@ -108,7 +108,10 @@ function collectChangedPaths(
   if (leafSignature(baseline) !== leafSignature(current)) changed.add(path)
 }
 
-export function computeStepConfigDiff(baseline: unknown, current: unknown): StepConfigDiff {
+export function computeStepConfigDiff(
+  baseline: unknown,
+  current: unknown,
+): StepConfigDiff {
   const changed = new Set<string>()
   collectChangedPaths(baseline, current, '', changed)
   const sorted = [...changed]
@@ -121,7 +124,9 @@ export function computeStepConfigDiff(baseline: unknown, current: unknown): Step
       if (!prefix) return sorted.length
       return sorted.filter(
         (path) =>
-          path === prefix || path.startsWith(`${prefix}.`) || path.startsWith(`${prefix}[`),
+          path === prefix ||
+          path.startsWith(`${prefix}.`) ||
+          path.startsWith(`${prefix}[`),
       ).length
     },
   }
@@ -134,9 +139,8 @@ export interface StepConfigDiffContext {
   changedCountUnder(prefix: string): number
 }
 
-export const stepConfigDiffKey: InjectionKey<StepConfigDiffContext | null> = Symbol(
-  'step-config-diff',
-)
+export const stepConfigDiffKey: InjectionKey<StepConfigDiffContext | null> =
+  Symbol('step-config-diff')
 
 /** Diff context provided by StepConfigPanel when a baseline comparison is active. */
 export function useStepConfigDiff(): StepConfigDiffContext | null {

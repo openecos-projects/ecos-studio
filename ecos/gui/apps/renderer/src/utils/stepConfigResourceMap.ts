@@ -12,15 +12,24 @@ export type StepConfigResource =
   | { kind: 'none' }
 
 const ECC_STEP_CONFIG_FILES: Record<string, { path: string; legacyPaths: string[] }> = {
-  floorplan: { path: 'config/floorplan_ecc.json', legacyPaths: ['config/fp_default_config.json'] },
+  floorplan: {
+    path: 'config/floorplan_ecc.json',
+    legacyPaths: ['config/fp_default_config.json'],
+  },
   cts: { path: 'config/cts_ecc.json', legacyPaths: ['config/cts_default_config.json'] },
-  route: { path: 'config/route_ecc.json', legacyPaths: ['config/rt_default_config.json'] },
+  route: {
+    path: 'config/route_ecc.json',
+    legacyPaths: ['config/rt_default_config.json'],
+  },
   drc: { path: 'config/drc_ecc.json', legacyPaths: ['config/drc_default_config.json'] },
   fixfanout: {
     path: 'config/fixfanout_ecc.json',
     legacyPaths: ['config/no_default_config_fixfanout.json'],
   },
-  filler: { path: 'config/filler_ecc.json', legacyPaths: ['config/pl_default_config.json'] },
+  filler: {
+    path: 'config/filler_ecc.json',
+    legacyPaths: ['config/pl_default_config.json'],
+  },
   rcx: { path: 'config/rcx_ecc.json', legacyPaths: ['config/rcx.json'] },
   sta: { path: 'config/sta_ecc.json', legacyPaths: ['config/sta.json'] },
   db: { path: 'config/db_ecc.json', legacyPaths: ['config/db_default_config.json'] },
@@ -51,7 +60,11 @@ export function resolveStepConfigResource(step: {
   }
   if (isFrontendTool(tool)) {
     const directoryName = `${step.name.trim()}_${step.tool.trim()}`
-    return { kind: 'frontend', directoryName, path: `${directoryName}/config/flow_config.json` }
+    return {
+      kind: 'frontend',
+      directoryName,
+      path: `${directoryName}/config/flow_config.json`,
+    }
   }
   return { kind: 'none' }
 }

@@ -18,6 +18,12 @@ withDefaults(
     :inert="readonly"
     data-accent="indigo"
   >
-    <StepConfigValueBlock v-model="draft" :depth="0" :max-depth="6" accent="indigo" :readonly="readonly" />
+    <StepConfigValueBlock
+      v-model="draft"
+      :depth="0"
+      :max-depth="6"
+      accent="indigo"
+      :readonly="readonly"
+    />
   </div>
 </template>

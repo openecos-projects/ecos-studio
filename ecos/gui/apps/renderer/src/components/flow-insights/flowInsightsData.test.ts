@@ -217,9 +217,9 @@ describe('flow insights data', () => {
     const existing = new Set([
       '/ws/place_ecc/feature/egr_congestion_map/place_egr_union_overflow.png',
     ])
-    expect(
-      buildCongestionTiles([place], existing).map((tile) => tile.pngPath),
-    ).toEqual([...existing])
+    expect(buildCongestionTiles([place], existing).map((tile) => tile.pngPath)).toEqual([
+      ...existing,
+    ])
   })
 
   it('keeps DRC related route/LA cards independent of the CSV total', () => {

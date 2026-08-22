@@ -211,7 +211,7 @@ describe('useStepDashboardData cache', () => {
     expect(testState.getWorkspaceResourceIndexApi).toHaveBeenCalledTimes(2)
   })
 
-  it('loads this step\'s own congestion maps for the Place dashboard', async () => {
+  it("loads this step's own congestion maps for the Place dashboard", async () => {
     const placeRoot = '/projects/gcd/ws_0004/place_dreamplace'
     const placeIndex = {
       flow: {
@@ -318,7 +318,7 @@ describe('useStepDashboardData', () => {
     expect(source).not.toContain('place_allcell_density.png')
   })
 
-  it('loads the step\'s own congestion maps (place/CTS) into snapshot tiles', () => {
+  it("loads the step's own congestion maps (place/CTS) into snapshot tiles", () => {
     expect(source).toContain('congestionCandidatePngPaths(congestionCandidateStep)')
     expect(source).toContain('buildCongestionTiles(')
     expect(source).toContain('parseCongestionCsv(text)')
@@ -326,7 +326,7 @@ describe('useStepDashboardData', () => {
     expect(source).toContain('replacement.congestionTileUrls')
   })
 
-  it('derives the Design Statis metric table from every step\'s db.json feature', () => {
+  it("derives the Design Statis metric table from every step's db.json feature", () => {
     expect(source).toContain('designStatisSummary(dbJson)')
     expect(source).toContain('designStatis: StepDesignStatis | null')
   })

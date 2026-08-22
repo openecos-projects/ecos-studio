@@ -451,10 +451,9 @@ export function useStepDashboardData() {
       let congestionTileUrls = new Map<string, string>()
       if (congestionCandidateStep) {
         const probed = await Promise.all(
-          congestionCandidatePngPaths(congestionCandidateStep).map(async (pngPath) => [
-            pngPath,
-            await readOptionalImage(pngPath),
-          ] as const),
+          congestionCandidatePngPaths(congestionCandidateStep).map(
+            async (pngPath) => [pngPath, await readOptionalImage(pngPath)] as const,
+          ),
         )
         for (const [pngPath, url] of probed) {
           if (url) congestionTileUrls.set(pngPath, url)

@@ -62,10 +62,13 @@ function mountBlock(
 
 describe('StepConfigValueBlock', () => {
   it('highlights changed scalar leaves with the diff class', () => {
-    const wrapper = mountBlock({ keep: 'a', change: 'b' }, {
-      diff: ['group.change'],
-      path: 'group',
-    })
+    const wrapper = mountBlock(
+      { keep: 'a', change: 'b' },
+      {
+        diff: ['group.change'],
+        path: 'group',
+      },
+    )
     const fields = wrapper.findAll('.sc-field')
     expect(fields).toHaveLength(2)
     const changed = fields.filter((field) => field.classes().includes('sc-diff'))

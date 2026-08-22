@@ -44,10 +44,7 @@ describe('computeStepConfigDiff', () => {
   })
 
   it('flags positional array length mismatches', () => {
-    const diff = computeStepConfigDiff(
-      { list: ['a', 'b'] },
-      { list: ['a', 'b', 'c'] },
-    )
+    const diff = computeStepConfigDiff({ list: ['a', 'b'] }, { list: ['a', 'b', 'c'] })
     expect(diff.count).toBe(1)
     expect(diff.isChanged('list[2]')).toBe(true)
   })

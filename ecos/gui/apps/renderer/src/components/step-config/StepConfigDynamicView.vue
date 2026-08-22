@@ -46,5 +46,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <component :is="activeView" v-model="draft" :readonly="readonly" @initialized="emitInitialized" />
+  <component
+    :is="activeView"
+    v-model="draft"
+    :readonly="readonly"
+    @initialized="emitInitialized"
+  />
 </template>

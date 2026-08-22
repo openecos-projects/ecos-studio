@@ -17,7 +17,9 @@ describe('Step configuration dialog sizing', () => {
   })
 
   it('offers and fills on maximize in the Step Dashboard configuration dialog too', () => {
-    const dialogStart = stepDashboardSource.indexOf('v-model:visible="showStepConfiguration"')
+    const dialogStart = stepDashboardSource.indexOf(
+      'v-model:visible="showStepConfiguration"',
+    )
     const dialogEnd = stepDashboardSource.indexOf('</Dialog>', dialogStart)
     const dialogSource = stepDashboardSource.slice(dialogStart, dialogEnd)
     expect(dialogSource).toContain('maximizable')

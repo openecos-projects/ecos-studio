@@ -32,7 +32,9 @@ describe('StepConfigPanel', () => {
     expect(componentSource).not.toContain('saveStepConfig(baseline')
     expect(componentSource).toContain('baseline.viewDraft.value')
     // Baseline column renders the dynamic view in readonly mode only
-    expect(componentSource).toMatch(/v-model="baseline\.viewDraft\.value"[\s\S]*?readonly/)
+    expect(componentSource).toMatch(
+      /v-model="baseline\.viewDraft\.value"[\s\S]*?readonly/,
+    )
   })
 
   it('refreshes both sides on reload and keeps the baseline column toggleable', () => {

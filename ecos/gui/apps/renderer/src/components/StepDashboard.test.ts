@@ -59,7 +59,7 @@ describe('StepDashboard', () => {
     expect(componentSource).not.toContain('floorplan-snapshot-pie')
   })
 
-  it('offers a Congestion snapshot tile for the step\'s own feature maps (place/CTS)', () => {
+  it("offers a Congestion snapshot tile for the step's own feature maps (place/CTS)", () => {
     expect(componentSource).toContain('congestionSnapshotActions')
     expect(componentSource).toContain("id: 'congestion'")
     expect(componentSource).toContain('ri-fire-line')
@@ -67,7 +67,9 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain("else if (actionId === 'congestion')")
     expect(componentSource).toContain('showCongestionDialog')
     // The activated view reuses the Home Data Snapshot Congestion panel verbatim
-    expect(componentSource).toContain("import CongestionPanel from './flow-insights/CongestionPanel.vue'")
+    expect(componentSource).toContain(
+      "import CongestionPanel from './flow-insights/CongestionPanel.vue'",
+    )
     expect(componentSource).toContain(':tiles="data.congestionTiles"')
     expect(componentSource).toContain(':tile-urls="data.congestionTileUrls"')
     expect(componentSource).toContain('congestionDialogTitle')

@@ -244,8 +244,7 @@ watch(
   (visible) => {
     if (!visible) return
     const focused =
-      props.focusId &&
-      railItems.value.some((item) => item.id === props.focusId)
+      props.focusId && railItems.value.some((item) => item.id === props.focusId)
     activeId.value = focused ? props.focusId : (railItems.value[0]?.id ?? null)
   },
   { immediate: true },

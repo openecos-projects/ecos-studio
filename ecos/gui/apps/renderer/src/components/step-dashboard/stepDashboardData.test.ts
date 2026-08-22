@@ -793,7 +793,11 @@ describe('step dashboard data', () => {
     expect(summary!.groups[0].rows).toEqual([
       { id: 'design-layout-die_area', label: 'Die Area', value: '2313.418' },
       { id: 'design-layout-die_usage', label: 'Die Usage', value: '0.336' },
-      { id: 'design-layout-die_bounding_width', label: 'Die Bounding Width', value: '48.098' },
+      {
+        id: 'design-layout-die_bounding_width',
+        label: 'Die Bounding Width',
+        value: '48.098',
+      },
       { id: 'design-layout-design_dbu', label: 'Design Dbu', value: '1000' },
     ])
     expect(summary!.groups[1].rows).toEqual([

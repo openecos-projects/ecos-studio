@@ -40,7 +40,8 @@ vi.mock('@/utils/projectManagementRead', () => ({
 }))
 
 vi.mock('@/utils/projectManifestRegistration', () => ({
-  resolveProjectRouteContextForWorkspace: testState.resolveProjectRouteContextForWorkspace,
+  resolveProjectRouteContextForWorkspace:
+    testState.resolveProjectRouteContextForWorkspace,
 }))
 
 import {
@@ -87,10 +88,38 @@ function singleWorkspaceManifest() {
 
 const BASELINE_FLOW = {
   steps: [
-    { name: 'Synthesis', tool: 'yosys', state: 'done', runtime: '', 'peak memory (mb)': 0, info: {} },
-    { name: 'Floorplan', tool: 'ecc', state: 'done', runtime: '', 'peak memory (mb)': 0, info: {} },
-    { name: 'CTS', tool: 'ecc', state: 'done', runtime: '', 'peak memory (mb)': 0, info: {} },
-    { name: 'place', tool: 'dreamplace', state: 'done', runtime: '', 'peak memory (mb)': 0, info: {} },
+    {
+      name: 'Synthesis',
+      tool: 'yosys',
+      state: 'done',
+      runtime: '',
+      'peak memory (mb)': 0,
+      info: {},
+    },
+    {
+      name: 'Floorplan',
+      tool: 'ecc',
+      state: 'done',
+      runtime: '',
+      'peak memory (mb)': 0,
+      info: {},
+    },
+    {
+      name: 'CTS',
+      tool: 'ecc',
+      state: 'done',
+      runtime: '',
+      'peak memory (mb)': 0,
+      info: {},
+    },
+    {
+      name: 'place',
+      tool: 'dreamplace',
+      state: 'done',
+      runtime: '',
+      'peak memory (mb)': 0,
+      info: {},
+    },
   ],
 }
 

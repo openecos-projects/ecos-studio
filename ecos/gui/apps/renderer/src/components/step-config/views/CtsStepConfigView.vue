@@ -149,7 +149,11 @@ function setKey(k: string, v: unknown): void {
       <div class="sc-pro-section__body space-y-3">
         <template v-for="k in gr.keys" :key="k">
           <!-- OFF/ON -->
-          <div v-if="isOnOffVal(draft[k])" class="field" :class="{ 'sc-diff': isChanged(k) }">
+          <div
+            v-if="isOnOffVal(draft[k])"
+            class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
+          >
             <label>{{ k }}</label>
             <Select
               :model-value="draft[k] as string"
@@ -163,7 +167,11 @@ function setKey(k: string, v: unknown): void {
             />
           </div>
           <!-- Number -->
-          <div v-else-if="typeof draft[k] === 'number'" class="field" :class="{ 'sc-diff': isChanged(k) }">
+          <div
+            v-else-if="typeof draft[k] === 'number'"
+            class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
+          >
             <label>{{ k }}</label>
             <InputNumber
               v-model="(draft as Record<string, number>)[k]"
@@ -174,7 +182,11 @@ function setKey(k: string, v: unknown): void {
             />
           </div>
           <!-- String scalar -->
-          <div v-else-if="typeof draft[k] === 'string'" class="field" :class="{ 'sc-diff': isChanged(k) }">
+          <div
+            v-else-if="typeof draft[k] === 'string'"
+            class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
+          >
             <label>{{ k }}</label>
             <InputText
               v-model="(draft as Record<string, string>)[k]"
@@ -269,7 +281,11 @@ function setKey(k: string, v: unknown): void {
             </div>
           </div>
           <!-- Mixed level_* string arrays -->
-          <div v-else-if="Array.isArray(draft[k])" class="field" :class="{ 'sc-diff': isChanged(k) }">
+          <div
+            v-else-if="Array.isArray(draft[k])"
+            class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
+          >
             <label>{{ k }}</label>
             <div class="w-full min-w-0 space-y-1">
               <div
