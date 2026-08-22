@@ -6,13 +6,16 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
+    GateResult,
     KnowledgeReference,
     ObjectiveMetric,
     OptimizationDecision,
     OptimizationEpisodeState,
     ProposalReason,
+    SignoffGates,
     StageObservation,
     StrategyDirection,
+    TerminalObservation,
 )
 from ecos_agent.optimization_controller import (
     CandidateExecutionReceipt,
@@ -28,7 +31,6 @@ from ecos_agent.optimization_retrieval import (
     OptimizationRetrievalResult,
 )
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
-
 
 _HASH = "sha256:" + "a" * 64
 _CHUNK_HASH = "b" * 64
@@ -64,7 +66,13 @@ class _FakePlanner:
 
 class _FakeExecutor:
     def __init__(self) -> None:
-        self.receipts = iter(
+        self.start_receipts = iter(
+            (
+                CandidateExecutionReceipt(execution_id="execution-1", started=True),
+                CandidateExecutionReceipt(execution_id="execution-2", started=True),
+            )
+        )
+        self.terminal_receipts = iter(
             (
                 CandidateExecutionReceipt(
                     execution_id="execution-1",
@@ -80,10 +88,26 @@ class _FakeExecutor:
         )
 
     def start(self, request: object) -> CandidateExecutionReceipt:
-        return next(self.receipts)
+        return next(self.start_receipts)
+
+    def wait_for_terminal(self, execution_id: str) -> CandidateExecutionReceipt:
+        receipt = next(self.terminal_receipts)
+        assert receipt.execution_id == execution_id
+        return receipt
 
     def cancel(self, intervention_id: str) -> CandidateExecutionReceipt:
         raise AssertionError("the fake runner never cancels a terminal receipt")
+
+
+class _MissingTerminalExecutor(_FakeExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_receipts = iter(
+            (CandidateExecutionReceipt(execution_id="execution-1", started=True),)
+        )
+        self.terminal_receipts = iter(
+            (CandidateExecutionReceipt(execution_id="execution-1", started=True),)
+        )
 
 
 def _budget() -> BudgetSnapshot:
@@ -151,15 +175,34 @@ def _retrieval(
     return OptimizationRetrievalResult(request, (channel,), (reference,))
 
 
+def _terminal_observation(
+    observation: StageObservation, receipt: CandidateExecutionReceipt
+) -> TerminalObservation:
+    assert observation.stage == "place"
+    return TerminalObservation(
+        observation_id=f"terminal-{receipt.execution_id}",
+        evidence_manifest_sha256="sha256:" + receipt.execution_id[-1] * 64,
+        evidence_valid=True,
+        harden_artifacts_complete=True,
+        signoff_gates=SignoffGates.all(GateResult.PASS),
+        metrics={
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 2.0,
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 3.0,
+            ObjectiveMetric.ROUTE_WIRELENGTH: 4.0,
+        },
+    )
+
+
 def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_path: Path) -> None:
     planner = _FakePlanner()
+    executor = _FakeExecutor()
     controller = OptimizationEpisodeController(
         episode_id="episode-1",
         checkpoint_id="checkpoint-1",
         mode=OptimizationAgentMode.FULL_AGENT,
         budget=_budget(),
         planner=planner,
-        executor=_FakeExecutor(),
+        executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
     )
@@ -168,6 +211,8 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         observation_supplier=_observation,
         retrieval_supplier=_retrieval,
         current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=_terminal_observation,
     )
 
     first = runner.run_turn()
@@ -187,3 +232,39 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         OptimizationOutcomeKind.DEGRADED,
         OptimizationOutcomeKind.IMPROVED,
     ]
+    assert all(
+        outcome.terminal_observation_sha256 is not None
+        for outcome in controller.ledger.replay().terminal_outcomes
+    )
+
+
+def test_fake_runner_quarantines_missing_terminal_receipt(tmp_path: Path) -> None:
+    planner = _FakePlanner()
+    executor = _MissingTerminalExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+    )
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=_terminal_observation,
+    )
+
+    turn = runner.run_turn()
+
+    assert turn.execution is not None
+    assert turn.execution.state == OptimizationEpisodeState.QUARANTINED
+    assert turn.terminal_observation is None
+    assert controller.ledger.replay().terminal_outcomes[0].outcome == (
+        OptimizationOutcomeKind.INDETERMINATE
+    )

@@ -31,6 +31,7 @@ from ecos_agent.optimization_contracts import (
     ProposalContextRef,
     RequestedKnobValue,
     StageObservation,
+    TerminalObservation,
 )
 from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
@@ -41,7 +42,6 @@ from ecos_agent.optimization_ledger import (
 )
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization_rules import select_requested_value
-
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _STATE_FILE = "optimization-episode-state.v1.json"
@@ -190,6 +190,10 @@ class OptimizationEpisodeController:
         return self._state
 
     @property
+    def pending_execution_id(self) -> str | None:
+        return self._pending_execution_id
+
+    @property
     def budget(self) -> BudgetSnapshot:
         self._refresh_budget()
         return self._budget
@@ -316,7 +320,11 @@ class OptimizationEpisodeController:
             return self._complete(receipt.outcome, receipt)
         return self._quarantine_indeterminate()
 
-    def complete_terminal(self, receipt: CandidateExecutionReceipt) -> OptimizationControlResult:
+    def complete_terminal(
+        self,
+        receipt: CandidateExecutionReceipt,
+        terminal_observation: TerminalObservation | None = None,
+    ) -> OptimizationControlResult:
         """Record a terminal outcome produced from separately verified evidence."""
         if (
             self._state != OptimizationEpisodeState.EXECUTING
@@ -326,7 +334,7 @@ class OptimizationEpisodeController:
             or receipt.outcome is None
         ):
             raise OptimizationEpisodeControllerError("terminal receipt does not match pending execution")
-        return self._complete(receipt.outcome, receipt)
+        return self._complete(receipt.outcome, receipt, terminal_observation)
 
     @classmethod
     def recover(
@@ -535,6 +543,7 @@ class OptimizationEpisodeController:
         self,
         outcome: OptimizationOutcomeKind,
         receipt: CandidateExecutionReceipt,
+        terminal_observation: TerminalObservation | None = None,
     ) -> OptimizationControlResult:
         if self._pending_intervention_id is None:
             raise OptimizationEpisodeControllerError("terminal receipt has no pending intervention")
@@ -543,12 +552,21 @@ class OptimizationEpisodeController:
             "started": receipt.started,
             "outcome": outcome.value,
         }
+        if terminal_observation is not None:
+            details["terminal_observation_sha256"] = canonical_sha256(
+                terminal_observation.model_dump(mode="json")
+            )
         self.ledger.append_terminal(
             OptimizationTerminalOutcome(
                 intervention_id=self._pending_intervention_id,
                 outcome=outcome,
                 candidate_manifest_sha256=canonical_sha256(details),
                 receipt_sha256=canonical_sha256(details),
+                terminal_observation_sha256=(
+                    canonical_sha256(terminal_observation.model_dump(mode="json"))
+                    if terminal_observation is not None
+                    else None
+                ),
                 outcome_details_sha256=canonical_sha256(details),
             )
         )
