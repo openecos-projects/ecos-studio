@@ -1604,7 +1604,7 @@ def test_start_session_binds_project_root_and_welcome_shows_both_contexts(
     assert f"Project: {project}" in str(welcome)
     assert f"Workspace: {workspace}" in str(welcome)
     operation = _last_event(events, "choice")["choice"]
-    assert [option["value"] for option in operation["options"]] == ["1", "2", "3", "4"]
+    assert [option["value"] for option in operation["options"]] == ["1", "2", "3", "4", "5"]
 
 
 def test_standalone_workspace_hides_create_sibling_option(tmp_path: Path) -> None:
@@ -1614,7 +1614,7 @@ def test_standalone_workspace_hides_create_sibling_option(tmp_path: Path) -> Non
     provider = EcosAgentProvider(emit=events.append)
     provider.start_session({"directory": str(workspace), "mode": "workspace"})
     operation = _last_event(events, "choice")["choice"]
-    assert [option["value"] for option in operation["options"]] == ["1", "2", "3"]
+    assert [option["value"] for option in operation["options"]] == ["1", "2", "3", "4"]
 
 
 def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
@@ -2141,6 +2141,7 @@ def test_operation_codex_fallback_maps_nl_to_rerun(tmp_path: Path) -> None:
         "2",
         "3",
         "4",
+        "5",
     ]
 
 

@@ -5,12 +5,18 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from ecos_agent.codex_provider import CodexProviderError, validate_required_codex_cli
+from ecos_agent.codex_provider import (
+    CodexAppServerProposalProvider,
+    CodexProviderError,
+    create_required_codex_provider,
+    validate_required_codex_cli,
+)
 from ecos_agent.contracts import (
     GuiChatResponseProposal,
     GuiWorkspaceSetupProposal,
@@ -44,6 +50,8 @@ from ecos_agent.messages import (
     numbered_choice,
     operation_choice,
     operation_prompt,
+    optimization_authorization_prompt,
+    optimization_started_message,
     optional_file_choice,
     optional_file_prompt,
     pdk_prompt,
@@ -139,6 +147,8 @@ from ecos_agent.provider_support import (
     _workspace_inputs_payload,
     _workspace_rerun_execution_contract,
 )
+from ecos_agent.optimization_contracts import OptimizationEpisodeState
+from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 
 
 PROVIDER_ID = "ecos_agent"
@@ -148,6 +158,10 @@ _RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterPro
 _ChatResponseParser = Callable[[dict[str, Any]], GuiChatResponseProposal | dict[str, Any]]
 _SourceRetrievalParser = Callable[[dict[str, Any]], SourceSearchProposal | dict[str, Any]]
 _StageRoutingParser = Callable[[dict[str, Any]], StageRoutingProposal | dict[str, Any]]
+_OptimizationProviderFactory = Callable[..., CodexAppServerProposalProvider]
+_OptimizationRunnerFactory = Callable[
+    [Mapping[str, Any], CodexAppServerProposalProvider], OptimizationEpisodeRunner
+]
 _CHAT_GREETING_PREFIXES = ("hello", "hi", "hey", "你好", "您好", "嗨")
 _GREETING_PATTERN = re.compile(
     r"^(?:hello|hi|hey|你好|您好|嗨)[\s!,.?，。！？]*$", re.IGNORECASE
@@ -275,6 +289,14 @@ class _Session:
     active_turn_id: str | None = None
     interrupt_requested: bool = False
     running: bool = False
+    optimization_phase: str = "idle"
+    optimization_episode_id: str | None = None
+    optimization_runner: OptimizationEpisodeRunner | None = None
+    optimization_provider: CodexAppServerProposalProvider | None = None
+    optimization_thread: threading.Thread | None = None
+    optimization_stop: threading.Event = field(default_factory=threading.Event)
+    optimization_pause: threading.Event = field(default_factory=threading.Event)
+    optimization_turn_count: int = 0
 
 
 class EcosAgentProvider:
@@ -292,6 +314,8 @@ class EcosAgentProvider:
         stage_routing_parser: _StageRoutingParser | None = None,
         source_retrieval_parser: _SourceRetrievalParser | None = None,
         source_retriever: SourceCodeRetriever | None = None,
+        optimization_provider_factory: _OptimizationProviderFactory | None = None,
+        optimization_runner_factory: _OptimizationRunnerFactory | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
@@ -309,6 +333,10 @@ class EcosAgentProvider:
         self._uses_default_source_retrieval = source_retrieval_parser is None
         self.source_retrieval_parser = source_retrieval_parser or _propose_source_retrieval
         self.source_retriever = source_retriever or SourceCodeRetriever()
+        self.optimization_provider_factory = (
+            optimization_provider_factory or create_required_codex_provider
+        )
+        self.optimization_runner_factory = optimization_runner_factory
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
         self._started = False
@@ -355,6 +383,13 @@ class EcosAgentProvider:
     def send_message(self, request: Mapping[str, Any]) -> dict[str, str]:
         session = self._session(request)
         message = _required_message(request.get("message"))
+        if self._optimization_thread_active(session):
+            self._handle_optimization_control(session, message)
+            return {
+                "messageId": uuid.uuid4().hex,
+                "sessionId": session.session_id,
+                "turnId": uuid.uuid4().hex,
+            }
         if session.running:
             raise ValueError("An ECOS Agent turn is already running for this session.")
         if not session.language_locked:
@@ -391,6 +426,12 @@ class EcosAgentProvider:
 
     def interrupt(self, request: Mapping[str, Any] | None = None) -> None:
         session = self._session(request or {})
+        if self._optimization_thread_active(session):
+            session.optimization_stop.set()
+            if session.optimization_provider is not None:
+                session.optimization_provider.interrupt()
+            self._emit_status(session, "interrupted")
+            return
         if not session.running:
             self._emit_status(session, self._resting_status(session))
             return
@@ -399,13 +440,24 @@ class EcosAgentProvider:
         if session.active_interrupt is not None:
             session.active_interrupt()
 
-    def get_status(self, request: Mapping[str, Any] | None = None) -> dict[str, str]:
-        session_id = _optional_text((request or {}).get("sessionId"))
-        return {
+    def get_status(self, request: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        request = request or {}
+        session_id = _optional_text(request.get("sessionId"))
+        session = self.sessions.get(session_id) if session_id else None
+        result: dict[str, Any] = {
             "activeSessionId": session_id or next(iter(self.sessions), ""),
             "providerId": PROVIDER_ID,
             "state": "stopped" if self.stopped else "ready",
         }
+        if session is not None:
+            result.update(
+                {
+                    "optimizationState": session.optimization_phase,
+                    "optimizationEpisodeId": session.optimization_episode_id or "",
+                    "optimizationTurnCount": session.optimization_turn_count,
+                }
+            )
+        return result
 
     def set_mode(self, request: Mapping[str, Any]) -> dict[str, str]:
         return self.get_status(request)
@@ -426,6 +478,10 @@ class EcosAgentProvider:
         return {"sessionId": session.session_id}
 
     def stop(self, _request: Mapping[str, Any] | None = None) -> None:
+        for session in self.sessions.values():
+            session.optimization_stop.set()
+            if session.optimization_provider is not None:
+                session.optimization_provider.interrupt()
         self.stopped = True
         self._started = False
 
@@ -468,6 +524,7 @@ class EcosAgentProvider:
             "workspace_parameter_confirmation": self._confirm_workspace_parameter_update,
             "workspace_parameter_pending": self._handle_workspace_parameter_update_result,
             "confirmation": self._confirm_rerun_execution,
+            "optimization_authorization": self._confirm_optimization_start,
         }
         handler = handlers.get(session.phase)
         if handler is None:
@@ -603,7 +660,7 @@ class EcosAgentProvider:
             if choice == "3":
                 self._begin_workspace_continue(session)
                 return
-            if choice == "4":
+            if choice == "4" and session.project_root:
                 if not session.project_root:
                     self._emit(
                         session,
@@ -615,9 +672,199 @@ class EcosAgentProvider:
                     return
                 self._begin_create_workspace_in_project(session)
                 return
+            optimization_choice = "5" if session.project_root else "4"
+            if choice == optimization_choice:
+                self._begin_optimization_authorization(session)
+                return
         elif choice == "1":
             self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
             return
+
+    def _begin_optimization_authorization(self, session: _Session) -> None:
+        workspace = session.rerun_workspace_path
+        if not workspace or not Path(workspace).is_dir():
+            self._emit(session, "error", "An existing workspace is required for optimization.")
+            self._emit_phase_choice(session)
+            return
+        session.phase = "optimization_authorization"
+        session.optimization_phase = "awaiting_confirmation"
+        session.optimization_episode_id = f"episode-{uuid.uuid4().hex}"
+        self._emit(
+            session,
+            "message",
+            optimization_authorization_prompt(session.language, workspace),
+            optimization={
+                "schema_version": "ecos.optimization_authorization.v1",
+                "episode_id": session.optimization_episode_id,
+                "workspace": workspace,
+                "requires_confirmation": True,
+                "execution": "fixed candidate.rerun only",
+            },
+        )
+        self._emit_phase_choice(session)
+
+    def _confirm_optimization_start(self, session: _Session, message: str) -> None:
+        if message != "1":
+            session.phase = "operation"
+            session.optimization_phase = "idle"
+            self._emit(session, "message", cancellation_message(session.language))
+            self._emit_phase_choice(session)
+            return
+        if self.optimization_runner_factory is None:
+            session.phase = "operation"
+            session.optimization_phase = "unavailable"
+            self._emit(
+                session,
+                "error",
+                "Optimization runner is not configured with observation and ECC adapters; execution is blocked.",
+            )
+            self._emit_phase_choice(session)
+            return
+        workspace = session.rerun_workspace_path
+        if not workspace or session.optimization_episode_id is None:
+            raise ValueError("Optimization authorization is incomplete.")
+        provider: CodexAppServerProposalProvider | None = None
+        try:
+            provider = self.optimization_provider_factory(
+                cwd=Path(workspace),
+                runtime_workspace_roots=(workspace,),
+                progress_callback=lambda text: self._progress(session, text),
+            )
+            runner = self.optimization_runner_factory(
+                {
+                    "session_id": session.session_id,
+                    "episode_id": session.optimization_episode_id,
+                    "workspace": workspace,
+                },
+                provider,
+            )
+            if not isinstance(runner, OptimizationEpisodeRunner):
+                raise ValueError("Optimization runner factory returned an invalid runner.")
+        except Exception as exc:
+            if provider is not None:
+                provider.close()
+            session.optimization_phase = "unavailable"
+            self._emit(session, "error", f"Unable to start optimization: {exc}")
+            self._emit_phase_choice(session)
+            return
+        assert provider is not None
+        session.optimization_provider = provider
+        session.optimization_runner = runner
+        session.optimization_stop.clear()
+        session.optimization_pause.clear()
+        session.optimization_turn_count = 0
+        session.optimization_phase = "running"
+        session.phase = "optimization_running"
+        session.active_interrupt = provider.interrupt
+        self._emit(session, "message", optimization_started_message(session.language))
+        self._emit_status(session, "running")
+        session.optimization_thread = threading.Thread(
+            target=self._run_optimization_episode,
+            args=(session,),
+            name=f"ecos-optimization-{session.session_id}",
+            daemon=True,
+        )
+        session.optimization_thread.start()
+
+    def _run_optimization_episode(self, session: _Session) -> None:
+        runner = session.optimization_runner
+        provider = session.optimization_provider
+        if runner is None:
+            return
+        final_phase = "completed"
+        try:
+            while not session.optimization_stop.is_set():
+                while session.optimization_pause.is_set() and not session.optimization_stop.wait(0.1):
+                    pass
+                if session.optimization_stop.is_set():
+                    final_phase = "stopped"
+                    break
+                turn = runner.run_turn()
+                session.optimization_turn_count += 1
+                self._emit(
+                    session,
+                    "optimization",
+                    f"Optimization turn {session.optimization_turn_count} finished.",
+                    optimization={
+                        "schema_version": "ecos.optimization_progress.v1",
+                        "episode_id": runner.episode_id,
+                        "state": runner.state.value,
+                        "turn": session.optimization_turn_count,
+                        "planning_state": turn.planning.state.value,
+                        "execution_state": turn.execution.state.value if turn.execution else None,
+                        "incumbent_decision": (
+                            turn.incumbent_comparison.decision.value
+                            if turn.incumbent_comparison
+                            else None
+                        ),
+                        "decisive_metric": (
+                            turn.incumbent_comparison.decisive_metric.value
+                            if turn.incumbent_comparison and turn.incumbent_comparison.decisive_metric
+                            else None
+                        ),
+                    },
+                )
+                if runner.state not in {
+                    OptimizationEpisodeState.CREATED,
+                    OptimizationEpisodeState.PLANNING,
+                }:
+                    if runner.state == OptimizationEpisodeState.QUARANTINED:
+                        final_phase = "quarantined"
+                    break
+        except Exception as exc:
+            final_phase = "error"
+            self._emit(session, "error", f"Optimization episode stopped: {exc}")
+        finally:
+            if provider is not None:
+                provider.close()
+            session.active_interrupt = None
+            session.optimization_provider = None
+            session.optimization_runner = None
+            session.optimization_thread = None
+            session.optimization_phase = final_phase
+            session.phase = "operation"
+            status = {
+                "completed": "idle",
+                "stopped": "interrupted",
+                "error": "error",
+                "quarantined": "error",
+            }.get(final_phase, "idle")
+            self._emit_status(session, status)
+            self._emit_phase_choice(session)
+
+    @staticmethod
+    def _optimization_thread_active(session: _Session) -> bool:
+        return session.optimization_thread is not None and session.optimization_thread.is_alive()
+
+    def _handle_optimization_control(self, session: _Session, message: str) -> None:
+        command = message.strip().casefold()
+        if command in {"pause", "暂停"}:
+            session.optimization_pause.set()
+            session.optimization_phase = "paused"
+            self._emit_status(session, "awaiting_choice")
+            return
+        if command in {"resume", "继续"}:
+            session.optimization_pause.clear()
+            session.optimization_phase = "running"
+            self._emit_status(session, "running")
+            return
+        if command in {"stop", "停止", "cancel", "取消"}:
+            session.optimization_stop.set()
+            if session.optimization_provider is not None:
+                session.optimization_provider.interrupt()
+            session.optimization_phase = "stopping"
+            self._emit_status(session, "interrupted")
+            return
+        self._emit(
+            session,
+            "message",
+            "Optimization is running. Use pause, resume, or stop.",
+            optimization={
+                "schema_version": "ecos.optimization_status.v1",
+                "state": session.optimization_phase,
+                "turn_count": session.optimization_turn_count,
+            },
+        )
     def _resolve_operation_choice(self, session: _Session, message: str) -> str | None:
         resolve_mode = "home" if session.phase == "home_ready" else session.mode
         allowed_options = _allowed_operation_options(
@@ -2018,6 +2265,7 @@ class EcosAgentProvider:
         event_type: str,
         text: str,
         contract: dict[str, Any] | None = None,
+        optimization: dict[str, Any] | None = None,
         workspace_setup: dict[str, Any] | None = None,
         workspace_create_setup_id: str | None = None,
         workspace_rerun: dict[str, Any] | None = None,
@@ -2034,7 +2282,7 @@ class EcosAgentProvider:
             "text": text,
             "type": event_type,
         }
-        if event_type in {"message", "tool", "error", "choice"}:
+        if event_type in {"message", "tool", "error", "choice", "optimization"}:
             event["messageId"] = message_id or uuid.uuid4().hex
         if choice is not None:
             event["choice"] = choice
@@ -2042,6 +2290,8 @@ class EcosAgentProvider:
             event["delta"] = delta
         if contract is not None:
             event["contract"] = contract
+        if optimization is not None:
+            event["optimization"] = optimization
         if workspace_setup is not None:
             event["workspaceSetup"] = workspace_setup
         if workspace_create_setup_id is not None:
@@ -2216,6 +2466,8 @@ class EcosAgentProvider:
             )
         elif session.phase == "workspace_confirmation":
             choice = confirmation_choice(session.language, prompt_id, allow_free_text=True)
+        elif session.phase == "optimization_authorization":
+            choice = confirmation_choice(session.language, prompt_id, allow_free_text=False)
         elif session.phase == "workspace_signoff_confirmation":
             choice = workspace_signoff_choice(session.language, prompt_id)
         elif session.phase in {

@@ -22,6 +22,7 @@ from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     HistoryReference,
+    ObjectiveMetric,
     KnowledgeReference,
     ObservationReference,
     OptimizationDecision,
@@ -374,6 +375,9 @@ class OptimizationEpisodeController:
         self,
         receipt: CandidateExecutionReceipt,
         terminal_observation: TerminalObservation | None = None,
+        *,
+        incumbent_decision: str | None = None,
+        decisive_metric: ObjectiveMetric | None = None,
     ) -> OptimizationControlResult:
         """Record a terminal outcome produced from separately verified evidence."""
         if (
@@ -384,7 +388,13 @@ class OptimizationEpisodeController:
             or receipt.outcome is None
         ):
             raise OptimizationEpisodeControllerError("terminal receipt does not match pending execution")
-        return self._complete(receipt.outcome, receipt, terminal_observation)
+        return self._complete(
+            receipt.outcome,
+            receipt,
+            terminal_observation,
+            incumbent_decision=incumbent_decision,
+            decisive_metric=decisive_metric,
+        )
 
     @classmethod
     def recover(
@@ -610,6 +620,9 @@ class OptimizationEpisodeController:
         outcome: OptimizationOutcomeKind,
         receipt: CandidateExecutionReceipt,
         terminal_observation: TerminalObservation | None = None,
+        *,
+        incumbent_decision: str | None = None,
+        decisive_metric: ObjectiveMetric | None = None,
     ) -> OptimizationControlResult:
         if self._pending_intervention_id is None:
             raise OptimizationEpisodeControllerError("terminal receipt has no pending intervention")
@@ -626,6 +639,10 @@ class OptimizationEpisodeController:
             details["terminal_observation_sha256"] = canonical_sha256(
                 terminal_observation.model_dump(mode="json")
             )
+        if incumbent_decision is not None:
+            details["incumbent_decision"] = incumbent_decision
+        if decisive_metric is not None:
+            details["decisive_metric"] = decisive_metric.value
         self.ledger.append_terminal(
             OptimizationTerminalOutcome(
                 intervention_id=self._pending_intervention_id,
@@ -652,6 +669,8 @@ class OptimizationEpisodeController:
                     else None
                 ),
                 terminal_observation=terminal_observation,
+                incumbent_decision=incumbent_decision,
+                decisive_metric=decisive_metric,
                 outcome_details_sha256=canonical_sha256(details),
             )
         )

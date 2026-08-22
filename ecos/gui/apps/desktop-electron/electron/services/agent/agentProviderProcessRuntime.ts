@@ -391,6 +391,7 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'workspace_continue',
   'workspace_parameter_update',
   'workspace_signoff',
+  'optimization',
   'error',
 ])
 
@@ -401,6 +402,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     return null
   }
   const contract = readExecutionContract(record.contract)
+  const optimization = readOptimizationPayload(record.optimization)
   const choice = readAgentChoice(record.choice)
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
   const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
@@ -422,6 +424,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   if (type === 'workspace_continue' && !workspaceContinue) return null
   if (type === 'workspace_parameter_update' && !workspaceParameterUpdate) return null
   if (type === 'workspace_signoff' && !workspaceSignoff) return null
+  if (type === 'optimization' && !optimization) return null
   const providerId = readEventText(record.providerId)
   const sessionId = readEventText(record.sessionId)
   const text = readEventText(record.text)
@@ -431,6 +434,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(contract ? { contract } : {}),
     ...(delta ? { delta } : {}),
     ...(messageId ? { messageId } : {}),
+    ...(optimization ? { optimization } : {}),
     ...(providerId ? { providerId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(status ? { status } : {}),
@@ -442,6 +446,39 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(workspaceParameterUpdate ? { workspaceParameterUpdate } : {}),
     ...(workspaceSignoff ? { workspaceSignoff } : {}),
     type: type as DesktopAgentEventType,
+  }
+}
+
+function readOptimizationPayload(
+  value: unknown,
+): DesktopAgentEvent['optimization'] | null {
+  const record = readRecord(value)
+  if (
+    typeof record.schema_version !== 'string' ||
+    typeof record.episode_id !== 'string'
+  ) {
+    return null
+  }
+  return {
+    schema_version: record.schema_version,
+    episode_id: record.episode_id,
+    ...(typeof record.workspace === 'string' ? { workspace: record.workspace } : {}),
+    ...(typeof record.state === 'string' ? { state: record.state } : {}),
+    ...(typeof record.turn === 'number' ? { turn: record.turn } : {}),
+    ...(typeof record.turn_count === 'number' ? { turn_count: record.turn_count } : {}),
+    ...(typeof record.planning_state === 'string'
+      ? { planning_state: record.planning_state }
+      : {}),
+    ...(typeof record.execution_state === 'string'
+      ? { execution_state: record.execution_state }
+      : {}),
+    ...(typeof record.incumbent_decision === 'string' ||
+    record.incumbent_decision === null
+      ? { incumbent_decision: record.incumbent_decision as string | null }
+      : {}),
+    ...(typeof record.decisive_metric === 'string' || record.decisive_metric === null
+      ? { decisive_metric: record.decisive_metric as string | null }
+      : {}),
   }
 }
 

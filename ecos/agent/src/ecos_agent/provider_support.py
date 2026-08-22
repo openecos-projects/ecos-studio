@@ -729,6 +729,10 @@ def _keyword_operation_choice(
                     "新建工作区",
                 ),
             ),
+            (
+                "5" if "5" in allowed_ids else "4",
+                ("optimiz", "优化", "routability search", "tuning"),
+            ),
         )
     else:
         # Home: require an intentional create/run signal — not bare "project"/"workspace".

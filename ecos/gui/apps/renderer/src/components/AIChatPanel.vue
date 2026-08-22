@@ -1194,6 +1194,10 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     messageStore.upsertAgentEvent(event)
     return
   }
+  if (event.type === 'optimization') {
+    messageStore.upsertAgentEvent(event)
+    return
+  }
   if (event.type === 'message' || event.type === 'tool') {
     messageStore.upsertAgentEvent(event)
   }

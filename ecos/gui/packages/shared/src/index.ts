@@ -149,6 +149,7 @@ export type {
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentWorkspaceSetupParameters,
   DesktopAgentEventType,
+  DesktopAgentOptimizationPayload,
   DesktopAgentInterruptRequest,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,

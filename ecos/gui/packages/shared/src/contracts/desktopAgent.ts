@@ -258,6 +258,7 @@ export type DesktopAgentEventType =
   | 'workspace_continue'
   | 'workspace_parameter_update'
   | 'workspace_signoff'
+  | 'optimization'
   | 'error'
 
 export type DesktopAgentRunStatus =
@@ -281,11 +282,25 @@ export interface DesktopAgentChoice {
   variant: 'buttons' | 'list'
 }
 
+export interface DesktopAgentOptimizationPayload {
+  decisive_metric?: string | null
+  episode_id: string
+  execution_state?: string | null
+  incumbent_decision?: string | null
+  planning_state?: string | null
+  schema_version: string
+  state?: string
+  turn_count?: number
+  turn?: number
+  workspace?: string
+}
+
 export interface DesktopAgentEvent {
   choice?: DesktopAgentChoice
   contract?: DesktopAgentExecutionContract
   delta?: string
   messageId?: string
+  optimization?: DesktopAgentOptimizationPayload
   providerId?: string
   sessionId?: string
   status?: DesktopAgentRunStatus

@@ -67,6 +67,14 @@ class OptimizationEpisodeRunner:
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
 
+    @property
+    def state(self) -> OptimizationEpisodeState:
+        return self._controller.state
+
+    @property
+    def episode_id(self) -> str:
+        return self._controller.episode_id
+
     def run_turn(self) -> OptimizationEpisodeTurn:
         if self._controller.state not in {
             OptimizationEpisodeState.CREATED,
@@ -85,27 +93,34 @@ class OptimizationEpisodeRunner:
         if execution.state != OptimizationEpisodeState.EXECUTING:
             return OptimizationEpisodeTurn(observation, retrieval, planning, execution)
         if self._terminal_waiter is None or self._controller.pending_execution_id is None:
-            raise OptimizationEpisodeRunnerError("terminal waiter is required for a running candidate")
-        receipt = self._terminal_waiter(self._controller.pending_execution_id)
+            return self._indeterminate_turn(observation, retrieval, planning, execution)
+        execution_id = self._controller.pending_execution_id
+        try:
+            receipt = self._terminal_waiter(execution_id)
+        except Exception:
+            return self._indeterminate_turn(observation, retrieval, planning, execution)
         if not isinstance(receipt, CandidateExecutionReceipt):
-            raise OptimizationEpisodeRunnerError("terminal receipt is invalid")
-        if receipt.execution_id != self._controller.pending_execution_id:
-            raise OptimizationEpisodeRunnerError("terminal receipt does not match the running candidate")
+            return self._indeterminate_turn(observation, retrieval, planning, execution)
+        if receipt.execution_id != execution_id:
+            return self._indeterminate_turn(observation, retrieval, planning, execution)
         if not receipt.started or receipt.outcome is None:
-            receipt = CandidateExecutionReceipt(
-                execution_id=receipt.execution_id,
-                started=True,
-                outcome=OptimizationOutcomeKind.INDETERMINATE,
+            return self._indeterminate_turn(observation, retrieval, planning, execution)
+        try:
+            terminal_observation = (
+                self._terminal_observation_supplier(observation, receipt)
+                if self._terminal_observation_supplier is not None
+                else None
             )
-            completed = self._controller.complete_terminal(receipt)
-            return OptimizationEpisodeTurn(observation, retrieval, planning, completed)
-        terminal_observation = (
-            self._terminal_observation_supplier(observation, receipt)
-            if self._terminal_observation_supplier is not None
-            else None
+        except Exception:
+            return self._indeterminate_turn(observation, retrieval, planning, execution)
+        comparison = self._compare(terminal_observation)
+        completed = self._controller.complete_terminal(
+            receipt,
+            terminal_observation,
+            incumbent_decision=comparison.decision.value if comparison else None,
+            decisive_metric=comparison.decisive_metric if comparison else None,
         )
-        completed = self._controller.complete_terminal(receipt, terminal_observation)
-        comparison = self._compare_and_promote(terminal_observation)
+        self._promote(terminal_observation, comparison)
         return OptimizationEpisodeTurn(
             observation,
             retrieval,
@@ -119,21 +134,47 @@ class OptimizationEpisodeRunner:
         outcomes = self._controller.ledger.replay().terminal_outcomes
         return outcomes[-1].outcome if outcomes else None
 
-    def _compare_and_promote(
+    def _compare(
         self, candidate: TerminalObservation | None
     ) -> IncumbentComparison | None:
         if candidate is None or self._objective is None:
             return None
         incumbent = self._controller.incumbent
         if incumbent is None:
-            if candidate.eligible_for_incumbent:
-                self._controller.promote_incumbent(candidate)
-            return None
+            return IncumbentComparison(IncumbentDecision.INITIALIZED, None)
         comparison = compare_incumbent(
             incumbent=incumbent,
             candidate=candidate,
             objective=self._objective,
         )
-        if comparison.decision == IncumbentDecision.CANDIDATE_BETTER:
-            self._controller.promote_incumbent(candidate)
         return comparison
+
+    def _promote(
+        self,
+        candidate: TerminalObservation | None,
+        comparison: IncumbentComparison | None,
+    ) -> None:
+        if (
+            candidate is not None
+            and candidate.eligible_for_incumbent
+            and comparison is not None
+            and comparison.decision
+            in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
+        ):
+            self._controller.promote_incumbent(candidate)
+
+    def _indeterminate_turn(
+        self,
+        observation: StageObservation,
+        retrieval: OptimizationRetrievalResult,
+        planning: OptimizationControlResult,
+        execution: OptimizationControlResult,
+    ) -> OptimizationEpisodeTurn:
+        execution_id = self._controller.pending_execution_id or "unknown-execution"
+        receipt = CandidateExecutionReceipt(
+            execution_id=execution_id,
+            started=True,
+            outcome=OptimizationOutcomeKind.INDETERMINATE,
+        )
+        completed = self._controller.complete_terminal(receipt)
+        return OptimizationEpisodeTurn(observation, retrieval, planning, completed)

@@ -25,6 +25,7 @@ _PADDING_VALUES = (0, 1, 2, 3)
 
 
 class IncumbentDecision(StrEnum):
+    INITIALIZED = "initialized"
     CANDIDATE_BETTER = "candidate_better"
     INCUMBENT_RETAINED = "incumbent_retained"
     NOISE_TIE = "noise_tie"

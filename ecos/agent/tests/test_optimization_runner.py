@@ -117,6 +117,11 @@ class _MissingTerminalExecutor(_FakeExecutor):
         )
 
 
+class _RaisingTerminalExecutor(_FakeExecutor):
+    def wait_for_terminal(self, _execution_id: str) -> CandidateExecutionReceipt:
+        raise RuntimeError("terminal wait failed")
+
+
 def _evidence(execution_id: str) -> CandidateExecutionEvidence:
     return CandidateExecutionEvidence(
         candidate_root_ref=f".agent/candidates/{execution_id}",
@@ -290,6 +295,12 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         outcome.candidate_manifest_sha256 == _HASH
         for outcome in controller.ledger.replay().terminal_outcomes
     )
+    assert controller.ledger.replay().terminal_outcomes[0].incumbent_decision == (
+        IncumbentDecision.CANDIDATE_BETTER.value
+    )
+    assert controller.ledger.replay().terminal_outcomes[0].decisive_metric == (
+        ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
+    )
 
 
 def test_fake_runner_quarantines_missing_terminal_receipt(tmp_path: Path) -> None:
@@ -319,6 +330,36 @@ def test_fake_runner_quarantines_missing_terminal_receipt(tmp_path: Path) -> Non
     assert turn.execution is not None
     assert turn.execution.state == OptimizationEpisodeState.QUARANTINED
     assert turn.terminal_observation is None
+    assert controller.ledger.replay().terminal_outcomes[0].outcome == (
+        OptimizationOutcomeKind.INDETERMINATE
+    )
+
+
+def test_fake_runner_quarantines_terminal_waiter_exception(tmp_path: Path) -> None:
+    planner = _FakePlanner()
+    executor = _RaisingTerminalExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+    )
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+    )
+
+    turn = runner.run_turn()
+
+    assert turn.execution is not None
+    assert turn.execution.state == OptimizationEpisodeState.QUARANTINED
     assert controller.ledger.replay().terminal_outcomes[0].outcome == (
         OptimizationOutcomeKind.INDETERMINATE
     )

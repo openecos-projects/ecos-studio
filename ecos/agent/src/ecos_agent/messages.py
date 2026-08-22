@@ -479,6 +479,13 @@ def operation_choice(
                     "Create another workspace in this project",
                 )
             )
+        options.append(
+            _prompt(
+                language,
+                "启动受约束优化 episode",
+                "Start a bounded optimization episode",
+            )
+        )
         options_tuple = tuple(options)
     else:
         # Home sessions use home_ready_choice; keep a single create option for NL mapping.
@@ -495,6 +502,26 @@ def operation_choice(
         options_tuple,
         variant="list",
         allow_free_text=True,
+    )
+
+
+def optimization_authorization_prompt(language: str, workspace: str) -> str:
+    return _prompt(
+        language,
+        f"将对当前 workspace 启动有预算、可暂停、可回放的优化 episode：{workspace}\n"
+        "Codex 只能提出一个类型化 knob 方向；本地 controller 和固定 ECC RPC 才能执行。"
+        "请确认开始，或取消。",
+        f"Start a bounded, pausable, replayable optimization episode for this workspace: {workspace}\n"
+        "Codex may propose only one typed knob direction; the local controller and fixed ECC RPC own execution. "
+        "Confirm to start, or cancel.",
+    )
+
+
+def optimization_started_message(language: str) -> str:
+    return _prompt(
+        language,
+        "优化 episode 已确认并启动；GUI 将持续报告 proposal、candidate 终态、incumbent 和审计状态。",
+        "The optimization episode is authorized and running; the GUI will report proposals, candidate terminals, incumbent decisions, and audit state.",
     )
 
 

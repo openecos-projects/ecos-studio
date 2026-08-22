@@ -24,10 +24,12 @@ from pydantic import (
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
+    ObjectiveMetric,
     ProposalAction,
     RequestedKnobValue,
     TerminalObservation,
 )
+from ecos_agent.optimization_rules import IncumbentDecision
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -163,6 +165,8 @@ class OptimizationTerminalOutcome(_LedgerModel):
     receipt_sha256: str | None = None
     terminal_observation_sha256: str | None = None
     terminal_observation: TerminalObservation | None = None
+    incumbent_decision: IncumbentDecision | None = None
+    decisive_metric: ObjectiveMetric | None = None
     outcome_details_sha256: str
 
     @model_validator(mode="after")
@@ -171,6 +175,8 @@ class OptimizationTerminalOutcome(_LedgerModel):
             expected = canonical_sha256(self.terminal_observation.model_dump(mode="json"))
             if self.terminal_observation_sha256 != expected:
                 raise ValueError("terminal observation hash is invalid")
+        if self.incumbent_decision is None and self.decisive_metric is not None:
+            raise ValueError("decisive metric requires an incumbent decision")
         return self
 
     @field_validator("intervention_id")
