@@ -11,7 +11,11 @@ from typing import Any, Callable, Iterable, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from ecos_agent.codex_rpc import CodexProviderError, _JsonLineRpcProcessClient, _read_nested_string
+from ecos_agent.codex_rpc import (
+    CodexProviderError,
+    _JsonLineRpcProcessClient,
+    _read_nested_string,
+)
 from ecos_agent.contracts import (
     GUI_WORKSPACE_FLOW_STEPS,
     SOURCE_ROOT_IDS,
@@ -21,6 +25,8 @@ from ecos_agent.contracts import (
     StageRoutingProposal,
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
+from ecos_agent.optimization_contracts import OptimizationProposal
+from ecos_agent.optimization_controller import OptimizationPlanningContext
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal
 
 
@@ -53,10 +59,16 @@ class CodexAppServerProposalProvider:
         self.cwd = Path(cwd or Path.cwd())
         self.env = dict(env or os.environ)
         self.timeout_seconds = timeout_seconds or _timeout_from_env(self.env)
-        self.codex_bin = _resolve_codex_bin(codex_bin or self.env.get("ECOS_AGENT_CODEX_BIN"), self.env)
-        self.runtime_workspace_roots = _runtime_workspace_roots(runtime_workspace_roots or (self.cwd,))
+        self.codex_bin = _resolve_codex_bin(
+            codex_bin or self.env.get("ECOS_AGENT_CODEX_BIN"), self.env
+        )
+        self.runtime_workspace_roots = _runtime_workspace_roots(
+            runtime_workspace_roots or (self.cwd,)
+        )
         self.web_search_enabled = (
-            _web_search_from_env(self.env) if web_search_enabled is None else web_search_enabled
+            _web_search_from_env(self.env)
+            if web_search_enabled is None
+            else web_search_enabled
         )
         self.diagnostics_path = _diagnostics_path_from_env(self.env)
         self.progress_callback = progress_callback
@@ -88,9 +100,25 @@ class CodexAppServerProposalProvider:
 
         with self._state_lock:
             if self._active_turn_id is not None:
-                raise CodexProviderError("Codex turn is active", failure_class="tool_error")
+                raise CodexProviderError(
+                    "Codex turn is active", failure_class="tool_error"
+                )
             self._thread_id = None
             self._interrupted = False
+
+    def propose(self, context: OptimizationPlanningContext) -> dict[str, Any]:
+        return self._proposal(
+            _optimization_planning_payload(context),
+            (
+                "Return one JSON object matching ecos.optimization_proposal.v1. "
+                "Choose only continue, propose, stop, or escalate. A propose decision may name exactly one "
+                "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
+                "workspaces, RPC methods, or execution instructions. Reference only the supplied observation, "
+                "history, and knowledge identifiers. Local validation selects values and owns execution."
+            ),
+            _optimization_proposal_output_schema(),
+            OptimizationProposal,
+        )
 
     def propose_gui_workspace_setup(self, context: dict[str, Any]) -> dict[str, Any]:
         return self._proposal(
@@ -109,7 +137,9 @@ class CodexAppServerProposalProvider:
             GuiWorkspaceSetupProposal,
         )
 
-    def propose_gui_workspace_path_discovery(self, context: dict[str, Any]) -> dict[str, Any]:
+    def propose_gui_workspace_path_discovery(
+        self, context: dict[str, Any]
+    ) -> dict[str, Any]:
         return self._proposal(
             context,
             (
@@ -121,16 +151,24 @@ class CodexAppServerProposalProvider:
             GuiWorkspaceSetupProposal,
         )
 
-    def propose_gui_workspace_rerun_patch(self, context: dict[str, Any]) -> dict[str, Any]:
+    def propose_gui_workspace_rerun_patch(
+        self, context: dict[str, Any]
+    ) -> dict[str, Any]:
         allowed_knobs = context.get("allowed_knobs")
-        if not isinstance(allowed_knobs, list) or not all(isinstance(item, str) for item in allowed_knobs):
-            raise CodexProviderError("GUI rerun request has no allowed knobs", failure_class="missing_input")
-        boolean_knobs = context.get("boolean_knobs")
-        if (
-            not isinstance(boolean_knobs, list)
-            or not all(isinstance(item, str) and item in allowed_knobs for item in boolean_knobs)
+        if not isinstance(allowed_knobs, list) or not all(
+            isinstance(item, str) for item in allowed_knobs
         ):
-            raise CodexProviderError("GUI rerun request has invalid boolean knobs", failure_class="missing_input")
+            raise CodexProviderError(
+                "GUI rerun request has no allowed knobs", failure_class="missing_input"
+            )
+        boolean_knobs = context.get("boolean_knobs")
+        if not isinstance(boolean_knobs, list) or not all(
+            isinstance(item, str) and item in allowed_knobs for item in boolean_knobs
+        ):
+            raise CodexProviderError(
+                "GUI rerun request has invalid boolean knobs",
+                failure_class="missing_input",
+            )
         return self._proposal(
             context,
             (
@@ -148,11 +186,11 @@ class CodexAppServerProposalProvider:
     def respond_to_gui_chat(self, context: dict[str, Any]) -> dict[str, Any]:
         allowed_ids = _allowed_operation_ids(context.get("allowed_operations"))
         if allowed_ids:
-            route_instruction = (
-                "If the request clearly intends exactly one allowed operation, return that operation and null answer. "
-            )
+            route_instruction = "If the request clearly intends exactly one allowed operation, return that operation and null answer. "
         else:
-            route_instruction = "No operation is allowed in the current state; return null operation. "
+            route_instruction = (
+                "No operation is allowed in the current state; return null operation. "
+            )
         return self._proposal(
             context,
             (
@@ -173,7 +211,9 @@ class CodexAppServerProposalProvider:
         roots = _available_source_roots(context.get("available_source_roots"))
         question = context.get("natural_language_request")
         if not isinstance(question, str) or not question.strip():
-            raise CodexProviderError("source search request has no question", failure_class="missing_input")
+            raise CodexProviderError(
+                "source search request has no question", failure_class="missing_input"
+            )
         payload: dict[str, Any] = {
             "natural_language_request": question,
             "available_source_roots": roots,
@@ -199,7 +239,9 @@ class CodexAppServerProposalProvider:
             slots = _StageRoutingSlotsProposal.model_validate(
                 self._proposal(
                     {
-                        "natural_language_request": context.get("natural_language_request"),
+                        "natural_language_request": context.get(
+                            "natural_language_request"
+                        ),
                         "stage_catalog": stage_catalog,
                     },
                     (
@@ -234,7 +276,8 @@ class CodexAppServerProposalProvider:
             raise
         except ValueError as exc:
             raise CodexProviderError(
-                "Codex stage routing proposal failed schema validation", failure_class="parse_error"
+                "Codex stage routing proposal failed schema validation",
+                failure_class="parse_error",
             ) from exc
 
     def _proposal(
@@ -246,13 +289,16 @@ class CodexAppServerProposalProvider:
     ) -> dict[str, Any]:
         try:
             return model.model_validate(
-                self._request_json(system=system, user=context, output_schema=output_schema)
+                self._request_json(
+                    system=system, user=context, output_schema=output_schema
+                )
             ).model_dump(mode="json")
         except CodexProviderError:
             raise
         except Exception as exc:
             raise CodexProviderError(
-                "Codex GUI proposal failed schema validation", failure_class="parse_error"
+                "Codex GUI proposal failed schema validation",
+                failure_class="parse_error",
             ) from exc
 
     def _request_json(
@@ -262,15 +308,21 @@ class CodexAppServerProposalProvider:
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise CodexProviderError("Codex assistant content is not valid JSON", failure_class="parse_error") from exc
+            raise CodexProviderError(
+                "Codex assistant content is not valid JSON", failure_class="parse_error"
+            ) from exc
         if not isinstance(payload, dict):
-            raise CodexProviderError("Codex assistant JSON must be an object", failure_class="parse_error")
+            raise CodexProviderError(
+                "Codex assistant JSON must be an object", failure_class="parse_error"
+            )
         return payload
 
     def _run_turn(self, prompt: str, output_schema: dict[str, Any]) -> str:
         with self._state_lock:
             if self._interrupted:
-                raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
+                raise CodexProviderError(
+                    "Codex turn interrupted", failure_class="interrupted"
+                )
         # One lifecycle line only; observable Codex actions still stream via
         # activity_callback (web search, workspace reads, retries).
         self._report_progress("Thinking…")
@@ -309,7 +361,9 @@ class CodexAppServerProposalProvider:
         )
         turn_id = _read_nested_string(response, (("turn", "id"), ("turnId",), ("id",)))
         if not turn_id:
-            raise CodexProviderError("Codex turn/start response missing turn id", failure_class="tool_error")
+            raise CodexProviderError(
+                "Codex turn/start response missing turn id", failure_class="tool_error"
+            )
         with self._state_lock:
             self._active_turn_id = turn_id
         try:
@@ -318,7 +372,9 @@ class CodexAppServerProposalProvider:
             )
         except CodexProviderError as exc:
             if self._interrupted:
-                raise CodexProviderError("Codex turn interrupted", failure_class="interrupted") from exc
+                raise CodexProviderError(
+                    "Codex turn interrupted", failure_class="interrupted"
+                ) from exc
             if exc.failure_class == "timeout":
                 self.close()
             raise
@@ -326,7 +382,9 @@ class CodexAppServerProposalProvider:
             with self._state_lock:
                 self._active_turn_id = None
         if self._interrupted:
-            raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
+            raise CodexProviderError(
+                "Codex turn interrupted", failure_class="interrupted"
+            )
         return text
 
     def _ensure_client(self) -> _JsonLineRpcProcessClient:
@@ -351,8 +409,15 @@ class CodexAppServerProposalProvider:
             self._client.request(
                 "initialize",
                 {
-                    "clientInfo": {"name": "ecos-agent", "title": "ECOS Agent", "version": "0.1.0"},
-                    "capabilities": {"experimentalApi": True, "requestAttestation": False},
+                    "clientInfo": {
+                        "name": "ecos-agent",
+                        "title": "ECOS Agent",
+                        "version": "0.1.0",
+                    },
+                    "capabilities": {
+                        "experimentalApi": True,
+                        "requestAttestation": False,
+                    },
                 },
             )
         return self._client
@@ -384,9 +449,14 @@ class CodexAppServerProposalProvider:
                     "experimentalRawEvents": False,
                 },
             )
-            self._thread_id = _read_nested_string(response, (("thread", "id"), ("threadId",), ("id",)))
+            self._thread_id = _read_nested_string(
+                response, (("thread", "id"), ("threadId",), ("id",))
+            )
             if not self._thread_id:
-                raise CodexProviderError("Codex thread/start response missing thread id", failure_class="tool_error")
+                raise CodexProviderError(
+                    "Codex thread/start response missing thread id",
+                    failure_class="tool_error",
+                )
         return self._thread_id
 
     def _report_progress(self, text: str) -> None:
@@ -397,48 +467,69 @@ class CodexAppServerProposalProvider:
 def _allowed_operation_ids(value: object) -> list[str]:
     if not isinstance(value, list):
         raise CodexProviderError(
-            "GUI chat request has invalid allowed operations", failure_class="missing_input"
+            "GUI chat request has invalid allowed operations",
+            failure_class="missing_input",
         )
     allowed_ids: list[str] = []
     for item in value:
         if not isinstance(item, Mapping):
             raise CodexProviderError(
-                "GUI chat request has invalid allowed operations", failure_class="missing_input"
+                "GUI chat request has invalid allowed operations",
+                failure_class="missing_input",
             )
         operation_id = item.get("id")
         label = item.get("label")
-        if not isinstance(operation_id, str) or operation_id not in {"1", "2", "3", "4"}:
+        if not isinstance(operation_id, str) or operation_id not in {
+            "1",
+            "2",
+            "3",
+            "4",
+        }:
             raise CodexProviderError(
-                "GUI chat request has invalid operation id", failure_class="missing_input"
+                "GUI chat request has invalid operation id",
+                failure_class="missing_input",
             )
         if not isinstance(label, str) or not label.strip():
             raise CodexProviderError(
-                "GUI chat request has invalid operation label", failure_class="missing_input"
+                "GUI chat request has invalid operation label",
+                failure_class="missing_input",
             )
         allowed_ids.append(operation_id)
     if len(set(allowed_ids)) != len(allowed_ids):
         raise CodexProviderError(
-            "GUI chat request has duplicate operation ids", failure_class="missing_input"
+            "GUI chat request has duplicate operation ids",
+            failure_class="missing_input",
         )
     return allowed_ids
 
 
 def _available_source_roots(value: object) -> list[str]:
     if not isinstance(value, list) or not value:
-        raise CodexProviderError("source search request has no available roots", failure_class="missing_input")
-    roots = [item for item in value if isinstance(item, str) and item in SOURCE_ROOT_IDS]
+        raise CodexProviderError(
+            "source search request has no available roots",
+            failure_class="missing_input",
+        )
+    roots = [
+        item for item in value if isinstance(item, str) and item in SOURCE_ROOT_IDS
+    ]
     if len(roots) != len(value) or len(set(roots)) != len(roots):
-        raise CodexProviderError("source search request has invalid roots", failure_class="missing_input")
+        raise CodexProviderError(
+            "source search request has invalid roots", failure_class="missing_input"
+        )
     return roots
 
 
 def _stage_catalog(value: object) -> list[dict[str, str]]:
     if not isinstance(value, list) or not value:
-        raise CodexProviderError("stage routing request has no stage catalog", failure_class="missing_input")
+        raise CodexProviderError(
+            "stage routing request has no stage catalog", failure_class="missing_input"
+        )
     catalog: list[dict[str, str]] = []
     for item in value:
         if not isinstance(item, Mapping):
-            raise CodexProviderError("stage routing catalog is invalid", failure_class="missing_input")
+            raise CodexProviderError(
+                "stage routing catalog is invalid", failure_class="missing_input"
+            )
         stage = item.get("stage")
         summary = item.get("summary")
         chunk_sha256 = item.get("chunk_sha256")
@@ -451,10 +542,16 @@ def _stage_catalog(value: object) -> list[dict[str, str]]:
             or not isinstance(chunk_sha256, str)
             or len(chunk_sha256) != 64
         ):
-            raise CodexProviderError("stage routing catalog is invalid", failure_class="missing_input")
-        catalog.append({"stage": stage, "summary": summary, "chunk_sha256": chunk_sha256})
+            raise CodexProviderError(
+                "stage routing catalog is invalid", failure_class="missing_input"
+            )
+        catalog.append(
+            {"stage": stage, "summary": summary, "chunk_sha256": chunk_sha256}
+        )
     if len(catalog) > 32 or len({item["stage"] for item in catalog}) != len(catalog):
-        raise CodexProviderError("stage routing catalog is invalid", failure_class="missing_input")
+        raise CodexProviderError(
+            "stage routing catalog is invalid", failure_class="missing_input"
+        )
     return catalog
 
 
@@ -486,10 +583,14 @@ def _resolve_codex_bin(candidate: str | None, env: Mapping[str, str]) -> str:
             return resolved
         if path.is_file() and os.access(path, os.X_OK):
             return str(path)
-        raise CodexProviderError("Codex CLI is required but not executable", failure_class="missing_input")
+        raise CodexProviderError(
+            "Codex CLI is required but not executable", failure_class="missing_input"
+        )
     resolved = shutil.which("codex", path=env.get("PATH"))
     if not resolved:
-        raise CodexProviderError("Codex CLI is required for ECOS Agent", failure_class="missing_input")
+        raise CodexProviderError(
+            "Codex CLI is required for ECOS Agent", failure_class="missing_input"
+        )
     return resolved
 
 
@@ -497,9 +598,15 @@ def _timeout_from_env(env: Mapping[str, str]) -> int:
     try:
         timeout = int(env.get("ECOS_AGENT_CODEX_TIMEOUT_SECONDS", "150"))
     except ValueError as exc:
-        raise CodexProviderError("ECOS_AGENT_CODEX_TIMEOUT_SECONDS must be an integer", failure_class="missing_input") from exc
+        raise CodexProviderError(
+            "ECOS_AGENT_CODEX_TIMEOUT_SECONDS must be an integer",
+            failure_class="missing_input",
+        ) from exc
     if timeout <= 0:
-        raise CodexProviderError("ECOS_AGENT_CODEX_TIMEOUT_SECONDS must be positive", failure_class="missing_input")
+        raise CodexProviderError(
+            "ECOS_AGENT_CODEX_TIMEOUT_SECONDS must be positive",
+            failure_class="missing_input",
+        )
     return timeout
 
 
@@ -509,7 +616,11 @@ def _web_search_from_env(env: Mapping[str, str]) -> bool:
     Fabs run ECOS on air-gapped or egress-filtered networks, and a PDK-bound
     session should not reach the public web without someone deciding it should.
     """
-    return env.get("ECOS_AGENT_CODEX_WEB_SEARCH", "").strip().casefold() in {"1", "true", "on"}
+    return env.get("ECOS_AGENT_CODEX_WEB_SEARCH", "").strip().casefold() in {
+        "1",
+        "true",
+        "on",
+    }
 
 
 def _diagnostics_path_from_env(env: Mapping[str, str]) -> Path | None:
@@ -523,9 +634,14 @@ def _diagnostics_path_from_env(env: Mapping[str, str]) -> Path | None:
 
 
 def _runtime_workspace_roots(roots: Iterable[str | Path]) -> tuple[str, ...]:
-    normalized = tuple(dict.fromkeys(str(Path(root).expanduser().resolve()) for root in roots))
+    normalized = tuple(
+        dict.fromkeys(str(Path(root).expanduser().resolve()) for root in roots)
+    )
     if not normalized or any(not Path(root).is_dir() for root in normalized):
-        raise CodexProviderError("Codex runtime workspace roots must be existing directories", failure_class="missing_input")
+        raise CodexProviderError(
+            "Codex runtime workspace roots must be existing directories",
+            failure_class="missing_input",
+        )
     return normalized
 
 
@@ -539,18 +655,93 @@ def _build_prompt(system: str, user: dict[str, Any]) -> str:
     )
 
 
+def _optimization_planning_payload(
+    context: OptimizationPlanningContext,
+) -> dict[str, Any]:
+    if not isinstance(context, OptimizationPlanningContext):
+        raise CodexProviderError(
+            "optimization planning context is invalid", failure_class="missing_input"
+        )
+    if (
+        len(context.history) > 6
+        or len(context.knowledge_refs) > 6
+        or len(context.knowledge_chunks) > 6
+    ):
+        raise CodexProviderError(
+            "optimization planning context exceeds its bounds",
+            failure_class="missing_input",
+        )
+    return {
+        "context_ref": context.context_ref.model_dump(mode="json"),
+        "observation_ref": context.observation_ref.model_dump(mode="json"),
+        "history": [
+            {
+                "reference": item.reference.model_dump(mode="json"),
+                "outcome": item.outcome.value,
+                "action": item.action.model_dump(mode="json"),
+                "requested": item.requested.model_dump(mode="json"),
+            }
+            for item in context.history
+        ],
+        "knowledge_refs": [
+            item.model_dump(mode="json") for item in context.knowledge_refs
+        ],
+        "knowledge_chunks": list(context.knowledge_chunks),
+    }
+
+
+def _optimization_proposal_output_schema() -> dict[str, Any]:
+    schema = OptimizationProposal.model_json_schema()
+    _require_all_schema_properties(schema)
+    return schema
+
+
+def _require_all_schema_properties(value: object) -> None:
+    if isinstance(value, dict):
+        properties = value.get("properties")
+        if isinstance(properties, dict):
+            value["required"] = list(properties)
+        for nested in value.values():
+            _require_all_schema_properties(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _require_all_schema_properties(nested)
+
+
 def _gui_workspace_setup_output_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
         "required": [
-            "schema_version", "workspace_name", "description", "design_name", "top_module", "clock_name",
-            "frequency_mhz", "max_fanout", "flow_start", "flow_end", "die_area_mode", "utilitization",
-            "margin", "die_width", "die_height", "target_density", "target_overflow", "project_root",
-            "rtl_path", "filelist_path", "sdc_path", "pdk_root", "summary",
+            "schema_version",
+            "workspace_name",
+            "description",
+            "design_name",
+            "top_module",
+            "clock_name",
+            "frequency_mhz",
+            "max_fanout",
+            "flow_start",
+            "flow_end",
+            "die_area_mode",
+            "utilitization",
+            "margin",
+            "die_width",
+            "die_height",
+            "target_density",
+            "target_overflow",
+            "project_root",
+            "rtl_path",
+            "filelist_path",
+            "sdc_path",
+            "pdk_root",
+            "summary",
         ],
         "properties": {
-            "schema_version": {"type": "string", "const": "flow-agent.gui_workspace_setup_proposal.v1"},
+            "schema_version": {
+                "type": "string",
+                "const": "flow-agent.gui_workspace_setup_proposal.v1",
+            },
             "workspace_name": {"type": "null"},
             "description": {"type": "null"},
             "design_name": {"type": ["string", "null"], "maxLength": 128},
@@ -559,8 +750,14 @@ def _gui_workspace_setup_output_schema() -> dict[str, Any]:
             "frequency_mhz": {"type": ["number", "null"]},
             "max_fanout": {"type": ["number", "null"]},
             "flow_start": {"type": "null"},
-            "flow_end": {"type": ["string", "null"], "enum": [*GUI_WORKSPACE_FLOW_STEPS, None]},
-            "die_area_mode": {"type": ["string", "null"], "enum": ["utilitization_margin", "width_height", None]},
+            "flow_end": {
+                "type": ["string", "null"],
+                "enum": [*GUI_WORKSPACE_FLOW_STEPS, None],
+            },
+            "die_area_mode": {
+                "type": ["string", "null"],
+                "enum": ["utilitization_margin", "width_height", None],
+            },
             "utilitization": {"type": ["number", "null"]},
             "margin": {"type": ["number", "null"]},
             "die_width": {"type": ["number", "null"]},
@@ -577,14 +774,19 @@ def _gui_workspace_setup_output_schema() -> dict[str, Any]:
     }
 
 
-def _gui_workspace_rerun_patch_output_schema(allowed_knobs: list[str]) -> dict[str, Any]:
+def _gui_workspace_rerun_patch_output_schema(
+    allowed_knobs: list[str],
+) -> dict[str, Any]:
     value_schema = ECCParameterPatchItem.model_json_schema()["properties"]["value"]
     return {
         "type": "object",
         "additionalProperties": False,
         "required": ["schema_version", "parameter_patch", "summary"],
         "properties": {
-            "schema_version": {"type": "string", "const": "flow-agent.gui_workspace_rerun_parameter_proposal.v1"},
+            "schema_version": {
+                "type": "string",
+                "const": "flow-agent.gui_workspace_rerun_parameter_proposal.v1",
+            },
             "parameter_patch": {
                 "type": "array",
                 "maxItems": 16,
@@ -630,7 +832,10 @@ def _source_search_output_schema(roots: list[str]) -> dict[str, Any]:
         "additionalProperties": False,
         "required": ["schema_version", "queries", "rationale"],
         "properties": {
-            "schema_version": {"type": "string", "const": "flow-agent.source_search_proposal.v1"},
+            "schema_version": {
+                "type": "string",
+                "const": "flow-agent.source_search_proposal.v1",
+            },
             "queries": {
                 "type": "array",
                 "maxItems": 5,
@@ -662,7 +867,10 @@ def _stage_routing_slots_output_schema(stages: tuple[str, ...]) -> dict[str, Any
             "rationale",
         ],
         "properties": {
-            "schema_version": {"type": "string", "const": "flow-agent.stage_routing_slots.v1"},
+            "schema_version": {
+                "type": "string",
+                "const": "flow-agent.stage_routing_slots.v1",
+            },
             "primary_stage": stage_slot,
             "secondary_stage": stage_slot,
             "tertiary_stage": stage_slot,

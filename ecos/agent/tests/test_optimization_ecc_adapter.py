@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 import json
-from pathlib import Path
 import sys
 import time
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 import pytest
 
@@ -16,18 +16,20 @@ from ecos_agent.optimization_contracts import (
     OptimizationDecision,
     OptimizationProposal,
     ProposalReason,
+    RequestedKnobValue,
     StrategyDirection,
 )
-from ecos_agent.optimization_controller import CandidateExecutionRequest
+from ecos_agent.optimization_controller import (
+    CandidateExecutionReceipt,
+    CandidateExecutionRequest,
+)
 from ecos_agent.optimization_ecc_adapter import (
-    EccContentLengthRpcClient,
     EccCandidateRerunAdapter,
+    EccContentLengthRpcClient,
     OptimizationEccAdapterError,
     _step_render_ack,
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.optimization_contracts import RequestedKnobValue
-
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -46,7 +48,11 @@ class _FakeEccRpc:
         if method == "candidate.rerun":
             return self.candidate_response
         if method == "operation.cancel":
-            return {"accepted": True, "operationId": params["operationId"], "state": "running"}
+            return {
+                "accepted": True,
+                "operationId": params["operationId"],
+                "state": "running",
+            }
         raise AssertionError(f"unexpected RPC method: {method}")
 
     def wait_for_terminal(
@@ -71,7 +77,9 @@ def _proposal(knob_id: str, direction: StrategyDirection) -> OptimizationProposa
             "reason_code": ProposalReason.OBSERVATION,
             "rationale_summary": "Use one legal placement change.",
             "observation_refs": [
-                ObservationReference(observation_id="observation-1", sha256=HASH).model_dump()
+                ObservationReference(
+                    observation_id="observation-1", sha256=HASH
+                ).model_dump()
             ],
             "knowledge_refs": [
                 KnowledgeReference(
@@ -92,7 +100,9 @@ def _proposal(knob_id: str, direction: StrategyDirection) -> OptimizationProposa
     )
 
 
-def _request(knob_id: str, value: bool | int | float, direction: StrategyDirection) -> CandidateExecutionRequest:
+def _request(
+    knob_id: str, value: bool | int | float, direction: StrategyDirection
+) -> CandidateExecutionRequest:
     return CandidateExecutionRequest(
         intervention_id="intervention-1",
         episode_id="episode-1",
@@ -112,7 +122,9 @@ def _running_operation() -> dict[str, object]:
 
 def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
     rpc = _FakeEccRpc(_running_operation())
-    adapter = EccCandidateRerunAdapter(rpc, workspace_id="workspace-1", site_width_dbu=200)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
 
     receipt = adapter.start(
         _request("place.target_density", 0.65, StrategyDirection.INCREASE)
@@ -139,19 +151,27 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
 
 def test_adapter_materializes_logical_padding_sites_to_dbu() -> None:
     rpc = _FakeEccRpc(_running_operation())
-    adapter = EccCandidateRerunAdapter(rpc, workspace_id="workspace-1", site_width_dbu=200)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
 
     adapter.start(_request("place.cell_padding_x", 2, StrategyDirection.INCREASE))
 
-    assert rpc.calls[0][1]["patch"] == [{"knob_id": "place.cell_padding_x", "value": 400}]
+    assert rpc.calls[0][1]["patch"] == [
+        {"knob_id": "place.cell_padding_x", "value": 400}
+    ]
 
 
 def test_adapter_rejects_mismatched_request_or_foreign_operation() -> None:
     rpc = _FakeEccRpc({**_running_operation(), "workspaceId": "other-workspace"})
-    adapter = EccCandidateRerunAdapter(rpc, workspace_id="workspace-1", site_width_dbu=200)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
 
     with pytest.raises(OptimizationEccAdapterError, match="workspace"):
-        adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+        adapter.start(
+            _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+        )
 
     mismatch = _request("place.target_density", 0.65, StrategyDirection.INCREASE)
     mismatch = CandidateExecutionRequest(
@@ -163,13 +183,22 @@ def test_adapter_rejects_mismatched_request_or_foreign_operation() -> None:
     )
     with pytest.raises(OptimizationEccAdapterError, match="knob"):
         EccCandidateRerunAdapter(
-            _FakeEccRpc(_running_operation()), workspace_id="workspace-1", site_width_dbu=200
+            _FakeEccRpc(_running_operation()),
+            workspace_id="workspace-1",
+            site_width_dbu=200,
         ).start(mismatch)
 
     with pytest.raises(OptimizationEccAdapterError, match="request id"):
         EccCandidateRerunAdapter(
-            _FakeEccRpc(_running_operation()), workspace_id="workspace-1", site_width_dbu=200
-        ).start(replace(_request("place.target_density", 0.65, StrategyDirection.INCREASE), episode_id=".."))
+            _FakeEccRpc(_running_operation()),
+            workspace_id="workspace-1",
+            site_width_dbu=200,
+        ).start(
+            replace(
+                _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+                episode_id="..",
+            )
+        )
 
 
 def test_adapter_waits_for_terminal_cancel_receipt() -> None:
@@ -181,7 +210,9 @@ def test_adapter_waits_for_terminal_cancel_receipt() -> None:
             "state": "cancelled",
         },
     )
-    adapter = EccCandidateRerunAdapter(rpc, workspace_id="workspace-1", site_width_dbu=200)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
 
     receipt = adapter.cancel("operation-1")
 
@@ -189,9 +220,75 @@ def test_adapter_waits_for_terminal_cancel_receipt() -> None:
     assert rpc.calls == [("operation.cancel", {"operationId": "operation-1"})]
 
 
+def test_adapter_waits_for_successful_terminal_without_claiming_qor_outcome() -> None:
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    receipt = adapter.wait_for_terminal("operation-1")
+
+    assert receipt == CandidateExecutionReceipt(
+        execution_id="operation-1", started=True
+    )
+
+
+def test_adapter_rejects_foreign_terminal_operation() -> None:
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "other-workspace",
+            "state": "failed",
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    with pytest.raises(OptimizationEccAdapterError, match="workspace"):
+        adapter.wait_for_terminal("operation-1")
+
+
+@pytest.mark.parametrize(
+    ("state", "outcome"),
+    [
+        ("failed", OptimizationOutcomeKind.EXECUTION_FAILED),
+        ("cancelled", OptimizationOutcomeKind.TIMED_OUT_CANCELLED),
+    ],
+)
+def test_adapter_classifies_terminal_execution_outcomes(
+    state: str, outcome: OptimizationOutcomeKind
+) -> None:
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": state,
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    receipt = adapter.wait_for_terminal("operation-1")
+
+    assert receipt.outcome == outcome
+
+
 def test_adapter_leaves_missing_cancel_receipt_indeterminate_to_controller() -> None:
     rpc = _FakeEccRpc(_running_operation())
-    adapter = EccCandidateRerunAdapter(rpc, workspace_id="workspace-1", site_width_dbu=200)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
 
     receipt = adapter.cancel("operation-1")
 
@@ -201,9 +298,13 @@ def test_adapter_leaves_missing_cancel_receipt_indeterminate_to_controller() -> 
 
 def test_adapter_classifies_an_immediate_execution_failure() -> None:
     rpc = _FakeEccRpc({**_running_operation(), "state": "failed"})
-    adapter = EccCandidateRerunAdapter(rpc, workspace_id="workspace-1", site_width_dbu=200)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
 
-    receipt = adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+    receipt = adapter.start(
+        _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+    )
 
     assert receipt.outcome == OptimizationOutcomeKind.EXECUTION_FAILED
 
@@ -226,14 +327,17 @@ def test_step_completed_event_has_one_fixed_render_ack() -> None:
         "stepCommitId": "operation-1:step:1",
         "workspaceRevision": 1,
     }
-    assert _step_render_ack(
-        {
-            "type": "step.completed",
-            "eventId": "event-1",
-            "operationId": "operation-1",
-            "payload": {"state": "Failed"},
-        }
-    ) is None
+    assert (
+        _step_render_ack(
+            {
+                "type": "step.completed",
+                "eventId": "event-1",
+                "operationId": "operation-1",
+                "payload": {"state": "Failed"},
+            }
+        )
+        is None
+    )
 
 
 def test_stdio_client_requires_an_absolute_executable_path(tmp_path) -> None:
@@ -283,7 +387,10 @@ Path({str(acknowledgement)!r}).write_text(json.dumps(read_frame()), encoding="ut
     executable.chmod(0o755)
     client = EccContentLengthRpcClient(executable)
 
-    assert client.call("operation.status", {"operationId": "operation-1"})["state"] == "running"
+    assert (
+        client.call("operation.status", {"operationId": "operation-1"})["state"]
+        == "running"
+    )
     for _ in range(20):
         if acknowledgement.exists():
             break

@@ -13,9 +13,11 @@ from pathlib import Path
 from typing import Mapping, Protocol
 
 from ecos_agent.optimization_contracts import OptimizationKnob
-from ecos_agent.optimization_controller import CandidateExecutionReceipt, CandidateExecutionRequest
+from ecos_agent.optimization_controller import (
+    CandidateExecutionReceipt,
+    CandidateExecutionRequest,
+)
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
@@ -62,7 +64,9 @@ class EccCandidateRerunAdapter:
         self._site_width_dbu = site_width_dbu
 
     def start(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
-        if not _ID.fullmatch(request.episode_id) or not _ID.fullmatch(request.intervention_id):
+        if not _ID.fullmatch(request.episode_id) or not _ID.fullmatch(
+            request.intervention_id
+        ):
             raise OptimizationEccAdapterError("candidate request id is invalid")
         patch = self._materialize_patch(request)
         response = self._rpc.call(
@@ -110,9 +114,39 @@ class EccCandidateRerunAdapter:
             if state in {"cancelled", "failed"}
             else None
         )
-        return CandidateExecutionReceipt(execution_id=intervention_id, started=True, outcome=outcome)
+        return CandidateExecutionReceipt(
+            execution_id=intervention_id, started=True, outcome=outcome
+        )
 
-    def _materialize_patch(self, request: CandidateExecutionRequest) -> dict[str, object]:
+    def wait_for_terminal(
+        self,
+        execution_id: str,
+        *,
+        timeout_seconds: float = 60.0,
+    ) -> CandidateExecutionReceipt:
+        if not _ID.fullmatch(execution_id):
+            raise OptimizationEccAdapterError("operation id is invalid")
+        if type(timeout_seconds) not in {int, float} or timeout_seconds <= 0:
+            raise OptimizationEccAdapterError("terminal wait timeout is invalid")
+        terminal = self._rpc.wait_for_terminal(execution_id, float(timeout_seconds))
+        if terminal is None:
+            return CandidateExecutionReceipt(execution_id=execution_id, started=True)
+        terminal_id, state = self._validate_operation(terminal)
+        if terminal_id != execution_id:
+            raise OptimizationEccAdapterError("terminal operation id does not match")
+        if state not in _TERMINAL_STATES:
+            raise OptimizationEccAdapterError("terminal operation state is invalid")
+        outcome = {
+            "failed": OptimizationOutcomeKind.EXECUTION_FAILED,
+            "cancelled": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+        }.get(state)
+        return CandidateExecutionReceipt(
+            execution_id=execution_id, started=True, outcome=outcome
+        )
+
+    def _materialize_patch(
+        self, request: CandidateExecutionRequest
+    ) -> dict[str, object]:
         action = request.proposal.action
         if action is None or request.requested.knob_id != action.knob_id:
             raise OptimizationEccAdapterError("requested knob does not match proposal")
@@ -139,7 +173,11 @@ class EccCandidateRerunAdapter:
         state = response.get("state")
         if not isinstance(operation_id, str) or not _ID.fullmatch(operation_id):
             raise OptimizationEccAdapterError("operation id is invalid")
-        if not isinstance(state, str) or state not in {"queued", "running", *_TERMINAL_STATES}:
+        if not isinstance(state, str) or state not in {
+            "queued",
+            "running",
+            *_TERMINAL_STATES,
+        }:
             raise OptimizationEccAdapterError("operation state is invalid")
         if require_workspace and response.get("workspaceId") != self._workspace_id:
             raise OptimizationEccAdapterError("operation workspace does not match")
@@ -149,10 +187,15 @@ class EccCandidateRerunAdapter:
 class EccContentLengthRpcClient:
     """Launch the ECC binary with a fixed stdio command and RPC allowlist."""
 
-    def __init__(self, executable: Path, *, response_timeout_seconds: float = 10.0) -> None:
+    def __init__(
+        self, executable: Path, *, response_timeout_seconds: float = 10.0
+    ) -> None:
         if not executable.is_absolute():
             raise OptimizationEccAdapterError("ECC executable path must be absolute")
-        if type(response_timeout_seconds) not in {int, float} or response_timeout_seconds <= 0:
+        if (
+            type(response_timeout_seconds) not in {int, float}
+            or response_timeout_seconds <= 0
+        ):
             raise OptimizationEccAdapterError("RPC response timeout is invalid")
         try:
             resolved = executable.resolve(strict=True)
@@ -182,7 +225,9 @@ class EccContentLengthRpcClient:
             )
         except OSError as exc:
             raise OptimizationEccAdapterError("failed to start ECC RPC") from exc
-        threading.Thread(target=self._read_stdout, name="ecc-rpc-reader", daemon=True).start()
+        threading.Thread(
+            target=self._read_stdout, name="ecc-rpc-reader", daemon=True
+        ).start()
 
     def close(self) -> None:
         process = self._process
@@ -202,7 +247,9 @@ class EccContentLengthRpcClient:
     def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method not in _ALLOWED_METHODS - {"operation.ack_step_rendered"}:
             raise OptimizationEccAdapterError("ECC RPC method is not allowed")
-        return self._request(method, params, timeout_seconds=self._response_timeout_seconds)
+        return self._request(
+            method, params, timeout_seconds=self._response_timeout_seconds
+        )
 
     def wait_for_terminal(
         self, operation_id: str, timeout_seconds: float
@@ -218,7 +265,9 @@ class EccContentLengthRpcClient:
             if status.get("state") in _TERMINAL_STATES:
                 return status
             try:
-                event = self._events.get(timeout=min(1.0, max(0.0, deadline - time.monotonic())))
+                event = self._events.get(
+                    timeout=min(1.0, max(0.0, deadline - time.monotonic()))
+                )
             except queue.Empty:
                 continue
             terminal = _terminal_event(event, operation_id)
@@ -237,7 +286,9 @@ class EccContentLengthRpcClient:
             self._next_id += 1
             response: queue.Queue[dict[str, object]] = queue.Queue(maxsize=1)
             self._pending[request_id] = response
-            self._send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+            self._send(
+                {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+            )
         try:
             payload = response.get(timeout=timeout_seconds)
         except queue.Empty as exc:
@@ -261,10 +312,14 @@ class EccContentLengthRpcClient:
             while chunk := process.stdout.read(8192):
                 for raw in decoder.feed(chunk):
                     self._handle_message(raw)
-        except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
-            self._reader_error = OptimizationEccAdapterError("ECC RPC stream is invalid")
+        except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            self._reader_error = OptimizationEccAdapterError(
+                "ECC RPC stream is invalid"
+            )
         finally:
-            failure = self._reader_error or OptimizationEccAdapterError("ECC RPC stream closed")
+            failure = self._reader_error or OptimizationEccAdapterError(
+                "ECC RPC stream closed"
+            )
             for pending in tuple(self._pending.values()):
                 pending.put({"error": str(failure)})
 
@@ -285,21 +340,31 @@ class EccContentLengthRpcClient:
             raise ValueError("runtime event is invalid")
         ack = _step_render_ack(event)
         if ack is not None:
-            self._send({"jsonrpc": "2.0", "method": "operation.ack_step_rendered", "params": ack})
+            self._send(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "operation.ack_step_rendered",
+                    "params": ack,
+                }
+            )
         self._events.put(event)
 
     def _send(self, payload: dict[str, object]) -> None:
         process = self._process
         if process is None or process.stdin is None:
             raise OptimizationEccAdapterError("ECC RPC is not running")
-        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
         if len(body) > _MAX_PAYLOAD_BYTES:
             raise OptimizationEccAdapterError("ECC RPC payload is too large")
         try:
             process.stdin.write(b"Content-Length: %d\r\n\r\n" % len(body) + body)
             process.stdin.flush()
         except OSError as exc:
-            raise OptimizationEccAdapterError("failed to write ECC RPC request") from exc
+            raise OptimizationEccAdapterError(
+                "failed to write ECC RPC request"
+            ) from exc
 
 
 class _ContentLengthDecoder:
@@ -320,7 +385,11 @@ class _ContentLengthDecoder:
 
     @staticmethod
     def _content_length(header: bytes) -> int:
-        values = [line.split(b":", 1)[1].strip() for line in header.split(b"\r\n") if line.lower().startswith(b"content-length:")]
+        values = [
+            line.split(b":", 1)[1].strip()
+            for line in header.split(b"\r\n")
+            if line.lower().startswith(b"content-length:")
+        ]
         if len(values) != 1 or not values[0].isdigit():
             raise ValueError("Content-Length is invalid")
         length = int(values[0])
@@ -355,7 +424,9 @@ def _step_render_ack(event: Mapping[str, object]) -> dict[str, object] | None:
     }
 
 
-def _terminal_event(event: Mapping[str, object], operation_id: str) -> dict[str, object] | None:
+def _terminal_event(
+    event: Mapping[str, object], operation_id: str
+) -> dict[str, object] | None:
     if event.get("operationId") != operation_id:
         return None
     states = {
