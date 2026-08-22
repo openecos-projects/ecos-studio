@@ -419,3 +419,33 @@ def test_comparator_rejects_an_invalid_incumbent() -> None:
             candidate=_terminal("candidate", dr=0, overflow=0, wirelength=1),
             objective=_objective(),
         )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "drc_clean",
+        "lvs_clean",
+        "rcx_corner_coverage",
+        "rcx_spef_parse_health",
+        "sta_setup_closed",
+        "sta_hold_closed",
+    ],
+)
+def test_required_signoff_gate_cannot_be_not_applicable(field: str) -> None:
+    values = SignoffGates.all(GateResult.PASS).model_dump()
+    values[field] = GateResult.NOT_APPLICABLE
+
+    with pytest.raises(ValidationError, match="required signoff gates"):
+        SignoffGates.model_validate(values)
+
+
+def test_optional_mpc_signoff_gates_can_be_not_applicable() -> None:
+    gates = SignoffGates.all(GateResult.PASS).model_copy(
+        update={
+            "mpc_minimum_area": GateResult.NOT_APPLICABLE,
+            "mpc_maximum_area": GateResult.NOT_APPLICABLE,
+        }
+    )
+
+    assert gates.passed is True

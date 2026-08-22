@@ -26,7 +26,10 @@ from ecos_agent.contracts import (
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
 from ecos_agent.optimization_contracts import OptimizationProposal
-from ecos_agent.optimization_controller import OptimizationPlanningContext
+from ecos_agent.optimization_controller import (
+    OptimizationPlanningContext,
+    planning_context_payload,
+)
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal
 
 
@@ -671,40 +674,7 @@ def _optimization_planning_payload(
             "optimization planning context exceeds its bounds",
             failure_class="missing_input",
         )
-    payload = {
-        "context_ref": context.context_ref.model_dump(mode="json"),
-        "observation_ref": context.observation_ref.model_dump(mode="json"),
-        "incumbent": (
-            context.incumbent.model_dump(mode="json")
-            if context.incumbent is not None
-            else None
-        ),
-        "history": [
-            {
-                "reference": item.reference.model_dump(mode="json"),
-                "outcome": item.outcome.value,
-                "action": item.action.model_dump(mode="json"),
-                "requested": item.requested.model_dump(mode="json"),
-                "terminal_observation": (
-                    item.terminal_observation.model_dump(mode="json")
-                    if item.terminal_observation is not None
-                    else None
-                ),
-            }
-            for item in context.history
-        ],
-        "knowledge_refs": [
-            item.model_dump(mode="json") for item in context.knowledge_refs
-        ],
-        "knowledge_chunks": list(context.knowledge_chunks),
-    }
-    if context.observation is not None:
-        payload["observation"] = context.observation.model_dump(mode="json")
-    if context.budget is not None:
-        payload["budget"] = context.budget.model_dump(mode="json")
-    if context.current_values is not None:
-        payload["current_values"] = dict(sorted(context.current_values.items()))
-    return payload
+    return planning_context_payload(context)
 
 
 def _optimization_proposal_output_schema() -> dict[str, Any]:

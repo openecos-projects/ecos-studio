@@ -471,6 +471,20 @@ class SignoffGates(_ContractModel):
     mpc_minimum_area: GateResult
     mpc_maximum_area: GateResult
 
+    @model_validator(mode="after")
+    def validate_required_gate_states(self) -> "SignoffGates":
+        required = (
+            self.drc_clean,
+            self.lvs_clean,
+            self.rcx_corner_coverage,
+            self.rcx_spef_parse_health,
+            self.sta_setup_closed,
+            self.sta_hold_closed,
+        )
+        if any(value == GateResult.NOT_APPLICABLE for value in required):
+            raise ValueError("required signoff gates cannot be not_applicable")
+        return self
+
     @classmethod
     def all(cls, result: GateResult) -> "SignoffGates":
         return cls(**{name: result for name in cls.model_fields})

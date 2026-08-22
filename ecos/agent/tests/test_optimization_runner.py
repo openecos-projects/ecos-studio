@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
@@ -24,7 +26,12 @@ from ecos_agent.optimization_controller import (
     OptimizationEpisodeController,
     OptimizationPlanningContext,
 )
-from ecos_agent.optimization_ledger import OptimizationLedger, OptimizationOutcomeKind
+from ecos_agent.optimization_ledger import (
+    OptimizationLedger,
+    OptimizationOutcomeKind,
+    OptimizationPlanningAudit,
+    OptimizationPlanningAuditIntegrityError,
+)
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
     KnowledgeChannelResult,
@@ -318,6 +325,20 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert controller.ledger.replay().terminal_outcomes[0].decisive_metric == (
         ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
     )
+    planning_audit = OptimizationPlanningAudit(tmp_path / "episode").replay()
+    assert [entry.history_count for entry in planning_audit.entries] == [0, 1]
+    assert planning_audit.entries[1].history_refs[0].intervention_id == "intervention-1"
+    assert all(
+        entry.planner_payload_sha256.startswith("sha256:")
+        for entry in planning_audit.entries
+    )
+    audit_path = tmp_path / "episode" / "optimization-planning-audit.v1.jsonl"
+    audit_path.write_text(
+        audit_path.read_text(encoding="utf-8").replace('"history_count":1', '"history_count":0'),
+        encoding="utf-8",
+    )
+    with pytest.raises(OptimizationPlanningAuditIntegrityError, match="invalid hash"):
+        OptimizationPlanningAudit(tmp_path / "episode").verify()
     runner.close()
     assert (controller.ledger.root / "optimization-ledger-manifest.v1.json").is_file()
 

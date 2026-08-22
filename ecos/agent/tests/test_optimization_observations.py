@@ -65,6 +65,9 @@ def frozen_workspace(tmp_path: Path) -> Path:
                 {"name": "place", "state": "Success"},
                 {"name": "route", "state": "Success"},
                 {"name": "drc", "state": "Success"},
+                {"name": "lvs", "state": "Success"},
+                {"name": "filler", "state": "Success"},
+                {"name": "RCX", "state": "Success"},
                 {"name": "sta", "state": "Success"},
                 {"name": "Harden", "state": "Success"},
             ]
@@ -97,6 +100,7 @@ def frozen_workspace(tmp_path: Path) -> Path:
     )
     _write_json(root / "drc_ecc/checklist.json", _checklist(("quality.drc.clean", "pass")))
     _write_json(root / "lvs_ecc/checklist.json", _checklist(("quality.lvs.clean", "pass")))
+    _write_json(root / "filler_ecc/checklist.json", _checklist(("quality.filler.complete", "pass")))
     _write_json(
         root / "RCX_ecc/checklist.json",
         _checklist(
@@ -191,6 +195,24 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert observation.signoff_gates.mpc_maximum_area.value == "not_applicable"
     assert observation.harden_artifacts_complete is True
     assert observation.eligible_for_incumbent is True
+
+
+@pytest.mark.parametrize("stage", ["lvs", "filler", "RCX"])
+def test_terminal_observation_rejects_missing_or_failed_required_flow_stage(
+    frozen_workspace: Path, stage: str
+) -> None:
+    flow_path = frozen_workspace / "home/flow.json"
+    flow = json.loads(flow_path.read_text(encoding="utf-8"))
+    flow["steps"] = [item for item in flow["steps"] if item["name"] != stage]
+    _write_json(flow_path, flow)
+
+    with pytest.raises(OptimizationObservationError, match="canonical stage"):
+        build_terminal_observation(frozen_workspace)
+
+    flow["steps"].append({"name": stage, "state": "Failed"})
+    _write_json(flow_path, flow)
+    with pytest.raises(OptimizationObservationError, match="not successful"):
+        build_terminal_observation(frozen_workspace)
 
 
 def test_terminal_observation_keeps_configured_mpc_fail_closed(

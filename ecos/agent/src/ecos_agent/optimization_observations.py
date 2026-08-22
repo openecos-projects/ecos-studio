@@ -39,6 +39,15 @@ _STAGE_DIRECTORIES = {
     ECCStepName.HARDEN: "Harden_ecc",
 }
 _TERMINAL_METRICS = ROUTABILITY_OBJECTIVE_ORDER
+_TERMINAL_FLOW_STEPS = (
+    ECCStepName.ROUTING,
+    ECCStepName.DRC,
+    ECCStepName.LVS,
+    ECCStepName.FILLER,
+    ECCStepName.RCX,
+    ECCStepName.STA,
+    ECCStepName.HARDEN,
+)
 _TERMINAL_FILES = (
     "home/flow.json",
     "home/parameters.json",
@@ -91,7 +100,7 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     root = _workspace_root(workspace_root)
     files = {path: _read_json(root, path) for path in _TERMINAL_FILES}
     flow = files["home/flow.json"]
-    for stage in (ECCStepName.ROUTING, ECCStepName.DRC, ECCStepName.STA, ECCStepName.HARDEN):
+    for stage in _TERMINAL_FLOW_STEPS:
         _require_successful_stage(flow, stage)
     route_metrics = _qor_metrics(files["route_ecc/analysis/qor_metrics.json"])
     terminal_metrics = {
