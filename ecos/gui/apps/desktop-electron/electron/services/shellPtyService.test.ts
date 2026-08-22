@@ -1,6 +1,38 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { electronLogger } from './logger'
 import { ShellPtyService } from './shellPtyService'
+import { runtimeBinPathEnvVariable } from './eccRpc/runtimeEnv'
+
+const tempDirs: string[] = []
+
+function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  tempDirs.push(dir)
+  return dir
+}
+
+function makeRecordingBackend(fakePty: FakePty) {
+  return {
+    spawn: vi.fn(
+      (_file: string, _args: string[], _options: { env: NodeJS.ProcessEnv }) => fakePty,
+    ),
+  }
+}
+
+function recordedSpawnEnv(
+  ptyBackend: ReturnType<typeof makeRecordingBackend>,
+): NodeJS.ProcessEnv {
+  return ptyBackend.spawn.mock.calls[0]?.[2].env ?? {}
+}
+
+afterEach(() => {
+  while (tempDirs.length > 0) {
+    rmSync(tempDirs.pop() as string, { force: true, recursive: true })
+  }
+})
 
 interface FakePtyEventDisposable {
   dispose(): void
@@ -295,5 +327,130 @@ describe('ShellPtyService', () => {
     )
     expect(() => service.resize('missing', 100, 28)).toThrow('Unknown shell session')
     expect(() => service.kill('missing')).toThrow('Unknown shell session')
+  })
+
+  it('injects the zsh startup wrapper and terminal path when shellStartupDir is set', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = makeRecordingBackend(fakePty)
+    const startupDir = makeTempDir('ecos-shell-rc-')
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        PATH: '/runtime/bin:/usr/bin',
+        SHELL: '/bin/zsh',
+        [runtimeBinPathEnvVariable]: '/runtime/bin',
+      },
+      platform: 'linux',
+      ptyBackend,
+      shellStartupDir: startupDir,
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/zsh',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/runtime/bin:/usr/bin',
+          TERM: 'xterm-256color',
+          ZDOTDIR: join(startupDir, 'zsh'),
+          [runtimeBinPathEnvVariable]: '/runtime/bin',
+        }),
+      }),
+    )
+  })
+
+  it('injects the bash rcfile and terminal path when shellStartupDir is set', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = makeRecordingBackend(fakePty)
+    const startupDir = makeTempDir('ecos-shell-rc-')
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        PATH: '/runtime/bin:/usr/bin',
+        SHELL: '/bin/bash',
+        [runtimeBinPathEnvVariable]: '/runtime/bin',
+      },
+      platform: 'linux',
+      ptyBackend,
+      shellStartupDir: startupDir,
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      ['--rcfile', join(startupDir, 'bash', 'rc')],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/runtime/bin:/usr/bin',
+          [runtimeBinPathEnvVariable]: '/runtime/bin',
+        }),
+      }),
+    )
+    expect(recordedSpawnEnv(ptyBackend).ZDOTDIR).toBeUndefined()
+  })
+
+  it('derives the terminal path from the envProvider env, not the static env', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = makeRecordingBackend(fakePty)
+    const startupDir = makeTempDir('ecos-shell-rc-')
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        PATH: '/static/bin',
+        SHELL: '/bin/zsh',
+      },
+      envProvider: vi.fn(async () => ({
+        HOME: '/home/ecos',
+        PATH: '/dynamic/bin:/usr/bin',
+        SHELL: '/bin/zsh',
+        [runtimeBinPathEnvVariable]: '/dynamic/bin',
+      })),
+      platform: 'linux',
+      ptyBackend,
+      shellStartupDir: startupDir,
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    const spawnEnv = recordedSpawnEnv(ptyBackend)
+    expect(spawnEnv[runtimeBinPathEnvVariable]).toBe('/dynamic/bin')
+    expect(spawnEnv.PATH).toBe('/dynamic/bin:/usr/bin')
+    expect(spawnEnv.ZDOTDIR).toBe(join(startupDir, 'zsh'))
+  })
+
+  it('spawns without the wrapper and logs when startup file generation fails', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = makeRecordingBackend(fakePty)
+    const blockingFile = join(makeTempDir('ecos-shell-rc-block-'), 'file')
+    writeFileSync(blockingFile, 'not a directory')
+    const loggerDebug = vi
+      .spyOn(electronLogger, 'debug')
+      .mockImplementation(() => undefined)
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        PATH: '/runtime/bin',
+        SHELL: '/bin/zsh',
+        [runtimeBinPathEnvVariable]: '/runtime/bin',
+      },
+      platform: 'linux',
+      ptyBackend,
+      shellStartupDir: join(blockingFile, 'shell-rc'),
+    })
+
+    const session = await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(session.shell).toBe('/bin/zsh')
+    const spawnEnv = recordedSpawnEnv(ptyBackend)
+    expect(spawnEnv.ZDOTDIR).toBeUndefined()
+    expect(spawnEnv[runtimeBinPathEnvVariable]).toBe('/runtime/bin')
+    expect(spawnEnv.PATH).toBe('/runtime/bin')
+    expect(loggerDebug).toHaveBeenCalledWith(
+      '[shell] startup injection failed: %s',
+      expect.any(String),
+    )
   })
 })

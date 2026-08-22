@@ -8,6 +8,8 @@ import type {
 } from '@ecos-studio/shared'
 import { spawn as spawnPty } from 'node-pty'
 import { electronLogger } from './logger'
+import type { ShellStartupPlan } from './shellStartupInjection'
+import { ensureShellStartupFiles, planShellStartup } from './shellStartupInjection'
 
 type ShellPlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
 type RuntimeEnvProvider = () => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv
@@ -50,6 +52,7 @@ export interface ShellPtyServiceOptions {
   envProvider?: RuntimeEnvProvider
   platform?: ShellPlatform
   ptyBackend?: PtyBackend
+  shellStartupDir?: string
 }
 
 interface ShellSessionRecord {
@@ -83,6 +86,7 @@ export class ShellPtyService {
   private readonly envProvider?: RuntimeEnvProvider
   private readonly platform: ShellPlatform
   private readonly ptyBackend: PtyBackend
+  private readonly shellStartupDir?: string
   private readonly sessions = new Map<string, ShellSessionRecord>()
 
   constructor(options: ShellPtyServiceOptions = {}) {
@@ -90,6 +94,7 @@ export class ShellPtyService {
     this.envProvider = options.envProvider
     this.platform = options.platform ?? process.platform
     this.ptyBackend = options.ptyBackend ?? { spawn: spawnPty }
+    this.shellStartupDir = options.shellStartupDir
   }
 
   async createSession(
@@ -100,11 +105,13 @@ export class ShellPtyService {
     const sessionId = randomUUID()
     const shell = getDefaultShell(this.platform, env)
     const cwd = options.cwd || getDefaultCwd(env)
-    const pty = this.ptyBackend.spawn(shell, [], {
+    const startupPlan = this.resolveStartupPlan(shell, env)
+    const pty = this.ptyBackend.spawn(shell, startupPlan.args, {
       cols: normalizePositiveInteger(options.cols, 80),
       cwd,
       env: {
         ...env,
+        ...startupPlan.env,
         TERM: 'xterm-256color',
       },
       name: 'xterm-256color',
@@ -180,6 +187,28 @@ export class ShellPtyService {
         error instanceof Error ? error.message : String(error),
       )
       return this.env
+    }
+  }
+
+  private resolveStartupPlan(shell: string, env: NodeJS.ProcessEnv): ShellStartupPlan {
+    if (!this.shellStartupDir) {
+      return { args: [], env: {} }
+    }
+
+    try {
+      ensureShellStartupFiles(this.shellStartupDir)
+      return planShellStartup({
+        shell,
+        env,
+        platform: this.platform,
+        startupDir: this.shellStartupDir,
+      })
+    } catch (error) {
+      electronLogger.debug(
+        '[shell] startup injection failed: %s',
+        error instanceof Error ? error.message : String(error),
+      )
+      return { args: [], env: {} }
     }
   }
 }
