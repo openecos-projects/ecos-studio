@@ -18,6 +18,7 @@ from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+_SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 _ALLOWED_METHODS = frozenset(
     {
@@ -243,7 +244,9 @@ class EccContentLengthRpcClient:
             self._pending.pop(request_id, None)
             raise OptimizationEccAdapterError("ECC RPC response timed out") from exc
         if "error" in payload:
-            raise OptimizationEccAdapterError("ECC RPC rejected the request")
+            detail = _safe_rpc_error_detail(payload["error"])
+            suffix = f": {detail}" if detail else ""
+            raise OptimizationEccAdapterError(f"ECC RPC {method} rejected{suffix}")
         result = payload.get("result")
         if not isinstance(result, dict):
             raise OptimizationEccAdapterError("ECC RPC result is invalid")
@@ -362,3 +365,13 @@ def _terminal_event(event: Mapping[str, object], operation_id: str) -> dict[str,
     }
     state = states.get(event.get("type"))
     return None if state is None else {"operationId": operation_id, "state": state}
+
+
+def _safe_rpc_error_detail(error: object) -> str:
+    if not isinstance(error, Mapping):
+        return ""
+    data = error.get("data")
+    detail = data.get("message") if isinstance(data, Mapping) else None
+    if not isinstance(detail, str) or not _SAFE_RPC_ERROR_DETAIL.fullmatch(detail):
+        return ""
+    return detail

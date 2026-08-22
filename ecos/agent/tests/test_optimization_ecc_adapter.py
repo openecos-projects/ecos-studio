@@ -300,3 +300,38 @@ Path({str(acknowledgement)!r}).write_text(json.dumps(read_frame()), encoding="ut
             "workspaceRevision": 1,
         },
     }
+
+
+def test_stdio_client_reports_safe_ecc_rejection_details(tmp_path: Path) -> None:
+    executable = tmp_path / "fake-ecc"
+    executable.write_text(
+        f"""#!{sys.executable}
+import json
+import sys
+
+header = b''
+while not header.endswith(b'\\r\\n\\r\\n'):
+    header += sys.stdin.buffer.read(1)
+length = int(header.split(b':', 1)[1].split(b'\\r\\n', 1)[0])
+request = json.loads(sys.stdin.buffer.read(length))
+payload = json.dumps({{
+    "jsonrpc": "2.0",
+    "id": request["id"],
+    "error": {{
+        "code": -32602,
+        "message": "invalid_request",
+        "data": {{"message": "operation not found: operation-1"}},
+    }},
+}}).encode()
+sys.stdout.buffer.write(b"Content-Length: %d\\r\\n\\r\\n" % len(payload) + payload)
+sys.stdout.buffer.flush()
+""",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+
+    with pytest.raises(OptimizationEccAdapterError, match="operation not found"):
+        client.call("operation.status", {"operationId": "operation-1"})
+
+    client.close()
