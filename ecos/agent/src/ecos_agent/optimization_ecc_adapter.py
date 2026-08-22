@@ -14,6 +14,7 @@ from typing import Mapping, Protocol
 
 from ecos_agent.optimization_contracts import OptimizationKnob
 from ecos_agent.optimization_controller import (
+    CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
 )
@@ -82,17 +83,20 @@ class EccCandidateRerunAdapter:
             },
         )
         operation_id, state = self._validate_operation(response)
+        evidence = self._evidence(response)
         if state == "failed":
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,
                 outcome=OptimizationOutcomeKind.EXECUTION_FAILED,
+                evidence=evidence,
             )
         if state == "cancelled":
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,
                 outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+                evidence=evidence,
             )
         return CandidateExecutionReceipt(execution_id=operation_id, started=True)
 
@@ -141,8 +145,32 @@ class EccCandidateRerunAdapter:
             "cancelled": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
         }.get(state)
         return CandidateExecutionReceipt(
-            execution_id=execution_id, started=True, outcome=outcome
+            execution_id=execution_id,
+            started=True,
+            outcome=outcome,
+            evidence=self._evidence(terminal),
         )
+
+    @staticmethod
+    def _evidence(response: Mapping[str, object]) -> CandidateExecutionEvidence | None:
+        result = response.get("result")
+        if result is None:
+            return None
+        if not isinstance(result, Mapping):
+            raise OptimizationEccAdapterError("candidate terminal result is invalid")
+        values = {
+            "candidate_root_ref": result.get("candidateRootRef"),
+            "candidate_manifest_ref": result.get("candidateManifestRef"),
+            "candidate_manifest_sha256": result.get("candidateManifestSha256"),
+        }
+        if all(value is None for value in values.values()):
+            return None
+        if not all(isinstance(value, str) for value in values.values()):
+            raise OptimizationEccAdapterError("candidate terminal evidence is incomplete")
+        try:
+            return CandidateExecutionEvidence(**values)
+        except ValueError as exc:
+            raise OptimizationEccAdapterError("candidate terminal evidence is invalid") from exc
 
     def _materialize_patch(
         self, request: CandidateExecutionRequest

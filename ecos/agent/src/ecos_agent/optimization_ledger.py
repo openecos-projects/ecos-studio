@@ -158,6 +158,8 @@ class OptimizationTerminalOutcome(_LedgerModel):
     intervention_id: str
     outcome: OptimizationOutcomeKind
     candidate_manifest_sha256: str
+    candidate_root_ref: str | None = None
+    candidate_manifest_ref: str | None = None
     receipt_sha256: str | None = None
     terminal_observation_sha256: str | None = None
     terminal_observation: TerminalObservation | None = None
@@ -176,6 +178,13 @@ class OptimizationTerminalOutcome(_LedgerModel):
     def validate_id(cls, value: str) -> str:
         if not _ID.fullmatch(value):
             raise ValueError("ledger identifier is invalid")
+        return value
+
+    @field_validator("candidate_root_ref", "candidate_manifest_ref")
+    @classmethod
+    def validate_candidate_refs(cls, value: str | None) -> str | None:
+        if value is not None:
+            _validate_relative_path(value)
         return value
 
     @field_validator(

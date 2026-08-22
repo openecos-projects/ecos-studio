@@ -18,6 +18,7 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization_controller import (
+    CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     OptimizationAgentMode,
     OptimizationEpisodeController,
@@ -82,11 +83,13 @@ class _FakeExecutor:
                     execution_id="execution-1",
                     started=True,
                     outcome=OptimizationOutcomeKind.DEGRADED,
+                    evidence=_evidence("execution-1"),
                 ),
                 CandidateExecutionReceipt(
                     execution_id="execution-2",
                     started=True,
                     outcome=OptimizationOutcomeKind.IMPROVED,
+                    evidence=_evidence("execution-2"),
                 ),
             )
         )
@@ -112,6 +115,16 @@ class _MissingTerminalExecutor(_FakeExecutor):
         self.terminal_receipts = iter(
             (CandidateExecutionReceipt(execution_id="execution-1", started=True),)
         )
+
+
+def _evidence(execution_id: str) -> CandidateExecutionEvidence:
+    return CandidateExecutionEvidence(
+        candidate_root_ref=f".agent/candidates/{execution_id}",
+        candidate_manifest_ref=(
+            f".agent/candidates/{execution_id}/analysis/candidate_workspace.v1.json"
+        ),
+        candidate_manifest_sha256=_HASH,
+    )
 
 
 def _budget() -> BudgetSnapshot:
@@ -271,6 +284,10 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     ]
     assert all(
         outcome.terminal_observation_sha256 is not None
+        for outcome in controller.ledger.replay().terminal_outcomes
+    )
+    assert all(
+        outcome.candidate_manifest_sha256 == _HASH
         for outcome in controller.ledger.replay().terminal_outcomes
     )
 

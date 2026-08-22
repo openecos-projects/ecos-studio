@@ -44,7 +44,8 @@ from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization_rules import select_requested_value
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
-_STATE_FILE = "optimization-episode-state.v1.json"
+_SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+_STATE_FILE = "optimization-episode-state.v2.json"
 
 
 class OptimizationEpisodeControllerError(ValueError):
@@ -57,12 +58,33 @@ class OptimizationAgentMode(StrEnum):
 
 
 @dataclass(frozen=True)
+class CandidateExecutionEvidence:
+    candidate_root_ref: str
+    candidate_manifest_ref: str
+    candidate_manifest_sha256: str
+
+    def __post_init__(self) -> None:
+        for value in (self.candidate_root_ref, self.candidate_manifest_ref):
+            if (
+                not value
+                or "\\" in value
+                or value.startswith("/")
+                or "." in value.split("/")
+                or ".." in value.split("/")
+            ):
+                raise ValueError("candidate evidence reference is invalid")
+        if not _SHA256.fullmatch(self.candidate_manifest_sha256):
+            raise ValueError("candidate manifest hash is invalid")
+
+
+@dataclass(frozen=True)
 class CandidateExecutionReceipt:
     """The only execution status the M4 fake adapter may return."""
 
     execution_id: str
     started: bool
     outcome: OptimizationOutcomeKind | None = None
+    evidence: CandidateExecutionEvidence | None = None
 
     def __post_init__(self) -> None:
         if not _ID.fullmatch(self.execution_id):
@@ -71,6 +93,8 @@ class CandidateExecutionReceipt:
             raise ValueError("execution receipt started flag is invalid")
         if self.outcome is not None and not isinstance(self.outcome, OptimizationOutcomeKind):
             raise ValueError("execution receipt outcome is invalid")
+        if self.evidence is not None and not isinstance(self.evidence, CandidateExecutionEvidence):
+            raise ValueError("execution receipt evidence is invalid")
 
 
 @dataclass(frozen=True)
@@ -136,6 +160,7 @@ class _PersistedEpisodeState(BaseModel):
     budget: BudgetSnapshot
     started_at: float
     incumbent: TerminalObservation | None = None
+    parent_manifest_sha256: str | None = None
     ledger_event_count: int = Field(ge=0)
     ledger_chain_head_sha256: str | None = None
     proposal: OptimizationProposal | None = None
@@ -148,6 +173,10 @@ class _PersistedEpisodeState(BaseModel):
 
     @model_validator(mode="after")
     def validate_state_hash(self) -> "_PersistedEpisodeState":
+        if self.parent_manifest_sha256 is not None and not _SHA256.fullmatch(
+            self.parent_manifest_sha256
+        ):
+            raise ValueError("parent manifest hash is invalid")
         if self.state_sha256 != canonical_sha256(self.model_dump(mode="json", exclude={"state_sha256"})):
             raise ValueError("state hash is invalid")
         return self
@@ -168,6 +197,7 @@ class OptimizationEpisodeController:
         ledger: OptimizationLedger,
         clock: Callable[[], float],
         incumbent: TerminalObservation | None = None,
+        parent_manifest_sha256: str | None = None,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -181,6 +211,9 @@ class OptimizationEpisodeController:
         self._started_at = self._valid_clock()
         self._budget = budget
         self._incumbent = incumbent
+        if parent_manifest_sha256 is not None and not _SHA256.fullmatch(parent_manifest_sha256):
+            raise OptimizationEpisodeControllerError("parent manifest hash is invalid")
+        self._parent_manifest_sha256 = parent_manifest_sha256
         self._state = OptimizationEpisodeState.CREATED
         self._proposal: OptimizationProposal | None = None
         self._requested: RequestedKnobValue | None = None
@@ -381,6 +414,7 @@ class OptimizationEpisodeController:
         controller._started_at = snapshot.started_at
         controller._budget = snapshot.budget
         controller._incumbent = snapshot.incumbent
+        controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
         controller._state = snapshot.state
         controller._proposal = snapshot.proposal
         controller._requested = snapshot.requested
@@ -563,7 +597,9 @@ class OptimizationEpisodeController:
             execution_contract_sha256=execution_contract_sha256,
             parent_manifest_sha256=canonical_sha256(
                 {"checkpoint_id": self.checkpoint_id, "episode_id": self.episode_id}
-            ),
+            )
+            if self._parent_manifest_sha256 is None
+            else self._parent_manifest_sha256,
             environment_sha256=canonical_sha256({"mode": self.mode.value}),
             proposal_action=request.proposal.action,
             requested=request.requested,
@@ -582,6 +618,10 @@ class OptimizationEpisodeController:
             "started": receipt.started,
             "outcome": outcome.value,
         }
+        if receipt.evidence is not None:
+            details["candidate_root_ref"] = receipt.evidence.candidate_root_ref
+            details["candidate_manifest_ref"] = receipt.evidence.candidate_manifest_ref
+            details["candidate_manifest_sha256"] = receipt.evidence.candidate_manifest_sha256
         if terminal_observation is not None:
             details["terminal_observation_sha256"] = canonical_sha256(
                 terminal_observation.model_dump(mode="json")
@@ -590,7 +630,21 @@ class OptimizationEpisodeController:
             OptimizationTerminalOutcome(
                 intervention_id=self._pending_intervention_id,
                 outcome=outcome,
-                candidate_manifest_sha256=canonical_sha256(details),
+                candidate_manifest_sha256=(
+                    receipt.evidence.candidate_manifest_sha256
+                    if receipt.evidence is not None
+                    else canonical_sha256(details)
+                ),
+                candidate_root_ref=(
+                    receipt.evidence.candidate_root_ref
+                    if receipt.evidence is not None
+                    else None
+                ),
+                candidate_manifest_ref=(
+                    receipt.evidence.candidate_manifest_ref
+                    if receipt.evidence is not None
+                    else None
+                ),
                 receipt_sha256=canonical_sha256(details),
                 terminal_observation_sha256=(
                     canonical_sha256(terminal_observation.model_dump(mode="json"))
@@ -680,6 +734,7 @@ class OptimizationEpisodeController:
             "state": self._state.value,
             "budget": self._budget.model_dump(mode="json"),
             "incumbent": self._incumbent.model_dump(mode="json") if self._incumbent else None,
+            "parent_manifest_sha256": self._parent_manifest_sha256,
             "started_at": self._started_at,
             "ledger_event_count": len(replay.entries),
             "ledger_chain_head_sha256": replay.chain_head_sha256,

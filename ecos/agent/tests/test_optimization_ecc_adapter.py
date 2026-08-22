@@ -240,6 +240,54 @@ def test_adapter_waits_for_successful_terminal_without_claiming_qor_outcome() ->
     )
 
 
+def test_adapter_retains_valid_candidate_manifest_evidence() -> None:
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {
+                "candidateRootRef": ".agent/candidates/intervention-1",
+                "candidateManifestRef": (
+                    ".agent/candidates/intervention-1/analysis/candidate_workspace.v1.json"
+                ),
+                "candidateManifestSha256": HASH,
+            },
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    receipt = adapter.wait_for_terminal("operation-1")
+
+    assert receipt.evidence is not None
+    assert receipt.evidence.candidate_manifest_sha256 == HASH
+
+
+def test_adapter_rejects_absolute_candidate_evidence_reference() -> None:
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {
+                "candidateRootRef": "/tmp/candidate",
+                "candidateManifestRef": "/tmp/candidate/manifest.json",
+                "candidateManifestSha256": HASH,
+            },
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    with pytest.raises(OptimizationEccAdapterError, match="evidence"):
+        adapter.wait_for_terminal("operation-1")
+
+
 def test_adapter_rejects_foreign_terminal_operation() -> None:
     rpc = _FakeEccRpc(
         _running_operation(),
