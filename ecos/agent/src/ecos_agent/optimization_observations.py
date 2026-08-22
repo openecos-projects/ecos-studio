@@ -47,6 +47,8 @@ _TERMINAL_FILES = (
     "sta_ecc/analysis/qor_metrics.json",
     "Harden_ecc/analysis/qor_metrics.json",
     "drc_ecc/checklist.json",
+    "lvs_ecc/checklist.json",
+    "RCX_ecc/checklist.json",
     "sta_ecc/checklist.json",
     "Harden_ecc/checklist.json",
 )
@@ -97,6 +99,7 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     }
     harden_metrics = _qor_metrics(files["Harden_ecc/analysis/qor_metrics.json"])
     output_paths = _harden_output_paths(files["home/parameters.json"])
+    mpc_configured = _mpc_configured(files["home/parameters.json"])
     complete_outputs = all(_is_nonempty_file(root, path) for path in output_paths)
     missing_artifacts = harden_metrics.get("harden_artifact_missing_count")
     harden_complete = complete_outputs and missing_artifacts == 0
@@ -109,20 +112,24 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
         harden_artifacts_complete=harden_complete,
         signoff_gates=SignoffGates(
             drc_clean=_checklist_gate(files["drc_ecc/checklist.json"], "quality.drc.clean"),
-            lvs_clean=GateResult.UNAVAILABLE,
-            rcx_corner_coverage=GateResult.UNAVAILABLE,
-            rcx_spef_parse_health=GateResult.UNAVAILABLE,
+            lvs_clean=_checklist_gate(files["lvs_ecc/checklist.json"], "quality.lvs.clean"),
+            rcx_corner_coverage=_checklist_gate(
+                files["RCX_ecc/checklist.json"], "quality.rcx.corner_coverage"
+            ),
+            rcx_spef_parse_health=_checklist_gate(
+                files["RCX_ecc/checklist.json"], "quality.rcx.spef_parse_health"
+            ),
             sta_setup_closed=_checklist_gate(
                 files["sta_ecc/checklist.json"], "quality.sta.setup_closed"
             ),
             sta_hold_closed=_checklist_gate(
                 files["sta_ecc/checklist.json"], "quality.sta.hold_closed"
             ),
-            mpc_minimum_area=_checklist_gate(
-                files["Harden_ecc/checklist.json"], "quality.mpc.minimum_area"
+            mpc_minimum_area=_optional_mpc_gate(
+                files["Harden_ecc/checklist.json"], "quality.mpc.minimum_area", mpc_configured
             ),
-            mpc_maximum_area=_checklist_gate(
-                files["Harden_ecc/checklist.json"], "quality.mpc.maximum_area"
+            mpc_maximum_area=_optional_mpc_gate(
+                files["Harden_ecc/checklist.json"], "quality.mpc.maximum_area", mpc_configured
             ),
         ),
         metrics=terminal_metrics,
@@ -290,3 +297,16 @@ def _checklist_gate(payload: dict[str, Any], gate_id: str) -> GateResult:
     if state in {"fail", "blocked"}:
         return GateResult.FAIL
     return GateResult.UNAVAILABLE
+
+
+def _optional_mpc_gate(
+    payload: dict[str, Any], gate_id: str, configured: bool
+) -> GateResult:
+    if not configured:
+        return GateResult.NOT_APPLICABLE
+    return _checklist_gate(payload, gate_id)
+
+
+def _mpc_configured(parameters: dict[str, Any]) -> bool:
+    mpc = parameters.get("MPC")
+    return isinstance(mpc, dict) and isinstance(mpc.get("core_template"), dict)

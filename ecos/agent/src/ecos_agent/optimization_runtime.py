@@ -68,6 +68,7 @@ def create_optimization_runner(
     ).manifest_sha256
     ledger_root = workspace / ".agent" / "optimization" / episode_id
     rpc = EccContentLengthRpcClient(_ecc_executable())
+    ledger = _ledger(ledger_root)
     try:
         workspace_id = rpc.open_workspace(workspace)
         executor = EccCandidateRerunAdapter(
@@ -75,17 +76,28 @@ def create_optimization_runner(
             workspace_id=workspace_id,
             site_width_dbu=site_width_dbu,
         )
-        controller = OptimizationEpisodeController(
-            episode_id=episode_id,
-            checkpoint_id=checkpoint_id,
-            mode=OptimizationAgentMode.FULL_AGENT,
-            budget=budget,
-            planner=planner,
-            executor=executor,
-            ledger=_ledger(ledger_root),
-            clock=_monotonic,
-            parent_manifest_sha256=parent_manifest,
-        )
+        state_path = ledger_root / "optimization-episode-state.v2.json"
+        if state_path.is_file():
+            controller = OptimizationEpisodeController.recover(
+                planner=planner,
+                executor=executor,
+                ledger=ledger,
+                clock=_monotonic,
+            )
+        elif ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
+            raise OptimizationRuntimeError("optimization episode state is missing")
+        else:
+            controller = OptimizationEpisodeController(
+                episode_id=episode_id,
+                checkpoint_id=checkpoint_id,
+                mode=OptimizationAgentMode.FULL_AGENT,
+                budget=budget,
+                planner=planner,
+                executor=executor,
+                ledger=ledger,
+                clock=_monotonic,
+                parent_manifest_sha256=parent_manifest,
+            )
     except Exception:
         rpc.close()
         raise
@@ -104,10 +116,16 @@ def create_optimization_runner(
         return retrieval.retrieve(request)
 
     def terminal_waiter(execution_id: str):
-        return executor.wait_for_terminal(
+        remaining = controller.budget.remaining_wall_time_seconds
+        if remaining <= 0:
+            return executor.cancel(execution_id)
+        receipt = executor.wait_for_terminal(
             execution_id,
-            timeout_seconds=_terminal_timeout_seconds(),
+            timeout_seconds=min(_terminal_timeout_seconds(), remaining),
         )
+        if receipt.outcome is None:
+            return executor.cancel(execution_id)
+        return receipt
 
     def terminal_observation_supplier(_observation, receipt):
         if receipt.evidence is None:

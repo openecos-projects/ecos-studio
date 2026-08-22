@@ -379,6 +379,7 @@ class OptimizationEpisodeController:
         receipt: CandidateExecutionReceipt,
         terminal_observation: TerminalObservation | None = None,
         *,
+        outcome: OptimizationOutcomeKind | None = None,
         incumbent_decision: str | None = None,
         decisive_metric: ObjectiveMetric | None = None,
     ) -> OptimizationControlResult:
@@ -392,7 +393,7 @@ class OptimizationEpisodeController:
         ):
             raise OptimizationEpisodeControllerError("terminal receipt does not match pending execution")
         return self._complete(
-            receipt.outcome,
+            outcome or receipt.outcome,
             receipt,
             terminal_observation,
             incumbent_decision=incumbent_decision,

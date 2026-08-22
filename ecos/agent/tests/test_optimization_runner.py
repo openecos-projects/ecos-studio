@@ -122,6 +122,23 @@ class _RaisingTerminalExecutor(_FakeExecutor):
         raise RuntimeError("terminal wait failed")
 
 
+class _SuccessfulExecutor(_FakeExecutor):
+    def __init__(self) -> None:
+        self.start_receipts = iter(
+            (CandidateExecutionReceipt(execution_id="execution-1", started=True),)
+        )
+        self.terminal_receipts = iter(
+            (
+                CandidateExecutionReceipt(
+                    execution_id="execution-1",
+                    started=True,
+                    outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+                    evidence=_evidence("execution-1"),
+                ),
+            )
+        )
+
+
 def _evidence(execution_id: str) -> CandidateExecutionEvidence:
     return CandidateExecutionEvidence(
         candidate_root_ref=f".agent/candidates/{execution_id}",
@@ -303,6 +320,96 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     )
     runner.close()
     assert (controller.ledger.root / "optimization-ledger-manifest.v1.json").is_file()
+
+
+def test_successful_execution_is_classified_by_qor_comparison(tmp_path: Path) -> None:
+    planner = _FakePlanner()
+    executor = _SuccessfulExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        incumbent=_incumbent(),
+    )
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=_terminal_observation,
+        objective=freeze_routability_objective(
+            {
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (0.0, 0.0, 0.0),
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (0.0, 0.0, 0.0),
+                ObjectiveMetric.ROUTE_WIRELENGTH: (0.0, 0.0, 0.0),
+            }
+        ),
+    )
+
+    runner.run_turn()
+
+    outcome = controller.ledger.replay().terminal_outcomes[0]
+    assert outcome.outcome == OptimizationOutcomeKind.IMPROVED
+    assert outcome.incumbent_decision == IncumbentDecision.CANDIDATE_BETTER.value
+
+
+def test_ineligible_candidate_is_classified_without_an_incumbent(tmp_path: Path) -> None:
+    planner = _FakePlanner()
+    executor = _SuccessfulExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+    )
+
+    def ineligible_observation(
+        observation: StageObservation, receipt: CandidateExecutionReceipt
+    ) -> TerminalObservation:
+        terminal = _terminal_observation(observation, receipt)
+        return terminal.model_copy(
+            update={
+                "signoff_gates": terminal.signoff_gates.model_copy(
+                    update={"mpc_minimum_area": GateResult.UNAVAILABLE}
+                )
+            }
+        )
+
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=ineligible_observation,
+        objective=freeze_routability_objective(
+            {
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (0.0, 0.0, 0.0),
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (0.0, 0.0, 0.0),
+                ObjectiveMetric.ROUTE_WIRELENGTH: (0.0, 0.0, 0.0),
+            }
+        ),
+    )
+
+    turn = runner.run_turn()
+
+    assert turn.incumbent_comparison is not None
+    assert turn.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
+    assert controller.incumbent is None
+    assert controller.ledger.replay().terminal_outcomes[0].outcome == (
+        OptimizationOutcomeKind.CANDIDATE_INELIGIBLE
+    )
+    runner.close()
 
 
 def test_fake_runner_quarantines_missing_terminal_receipt(tmp_path: Path) -> None:

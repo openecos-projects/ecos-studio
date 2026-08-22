@@ -127,6 +127,7 @@ class OptimizationEpisodeRunner:
         completed = self._controller.complete_terminal(
             receipt,
             terminal_observation,
+            outcome=self._quality_outcome(receipt.outcome, comparison),
             incumbent_decision=comparison.decision.value if comparison else None,
             decisive_metric=comparison.decisive_metric if comparison else None,
         )
@@ -140,6 +141,23 @@ class OptimizationEpisodeRunner:
             comparison,
         )
 
+    @staticmethod
+    def _quality_outcome(
+        execution_outcome: OptimizationOutcomeKind,
+        comparison: IncumbentComparison | None,
+    ) -> OptimizationOutcomeKind:
+        if execution_outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED:
+            return execution_outcome
+        if comparison is None:
+            return execution_outcome
+        return {
+            IncumbentDecision.INITIALIZED: OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+            IncumbentDecision.CANDIDATE_BETTER: OptimizationOutcomeKind.IMPROVED,
+            IncumbentDecision.INCUMBENT_RETAINED: OptimizationOutcomeKind.DEGRADED,
+            IncumbentDecision.NOISE_TIE: OptimizationOutcomeKind.TRADEOFF,
+            IncumbentDecision.CANDIDATE_INELIGIBLE: OptimizationOutcomeKind.CANDIDATE_INELIGIBLE,
+        }[comparison.decision]
+
     def _previous_outcome(self) -> OptimizationOutcomeKind | None:
         outcomes = self._controller.ledger.replay().terminal_outcomes
         return outcomes[-1].outcome if outcomes else None
@@ -149,6 +167,8 @@ class OptimizationEpisodeRunner:
     ) -> IncumbentComparison | None:
         if candidate is None or self._objective is None:
             return None
+        if not candidate.eligible_for_incumbent:
+            return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
         incumbent = self._controller.incumbent
         if incumbent is None:
             return IncumbentComparison(IncumbentDecision.INITIALIZED, None)

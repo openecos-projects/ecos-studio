@@ -96,6 +96,14 @@ def frozen_workspace(tmp_path: Path) -> Path:
         _metrics(("harden_artifact_missing_count", 0)),
     )
     _write_json(root / "drc_ecc/checklist.json", _checklist(("quality.drc.clean", "pass")))
+    _write_json(root / "lvs_ecc/checklist.json", _checklist(("quality.lvs.clean", "pass")))
+    _write_json(
+        root / "RCX_ecc/checklist.json",
+        _checklist(
+            ("quality.rcx.corner_coverage", "pass"),
+            ("quality.rcx.spef_parse_health", "pass"),
+        ),
+    )
     _write_json(
         root / "sta_ecc/checklist.json",
         _checklist(
@@ -162,7 +170,7 @@ def test_stage_observation_rejects_incomplete_and_unsafe_workspace_evidence(
         build_stage_observation(frozen_workspace, "place", budget=_budget())
 
 
-def test_terminal_observation_uses_fixed_signoff_sources_and_preserves_unavailable_lvs(
+def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     frozen_workspace: Path,
 ) -> None:
     observation = build_terminal_observation(frozen_workspace)
@@ -176,8 +184,29 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_preserves_unavailab
     assert observation.signoff_gates.drc_clean.value == "pass"
     assert observation.signoff_gates.sta_setup_closed.value == "pass"
     assert observation.signoff_gates.sta_hold_closed.value == "pass"
-    assert observation.signoff_gates.lvs_clean.value == "unavailable"
+    assert observation.signoff_gates.lvs_clean.value == "pass"
+    assert observation.signoff_gates.rcx_corner_coverage.value == "pass"
+    assert observation.signoff_gates.rcx_spef_parse_health.value == "pass"
+    assert observation.signoff_gates.mpc_minimum_area.value == "not_applicable"
+    assert observation.signoff_gates.mpc_maximum_area.value == "not_applicable"
     assert observation.harden_artifacts_complete is True
+    assert observation.eligible_for_incumbent is True
+
+
+def test_terminal_observation_keeps_configured_mpc_fail_closed(
+    frozen_workspace: Path,
+) -> None:
+    parameters_path = frozen_workspace / "home/parameters.json"
+    parameters = json.loads(parameters_path.read_text(encoding="utf-8"))
+    parameters["MPC"] = {"core_template": {"minimum_area": 1, "maximum_area": 2}}
+    _write_json(parameters_path, parameters)
+    checklist_path = frozen_workspace / "Harden_ecc/checklist.json"
+    _write_json(checklist_path, _checklist(("quality.mpc.minimum_area", "pass")))
+
+    observation = build_terminal_observation(frozen_workspace)
+
+    assert observation.signoff_gates.mpc_minimum_area.value == "pass"
+    assert observation.signoff_gates.mpc_maximum_area.value == "unavailable"
     assert observation.eligible_for_incumbent is False
 
 

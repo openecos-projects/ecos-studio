@@ -82,6 +82,7 @@ class GateResult(StrEnum):
     PASS = "pass"
     FAIL = "fail"
     UNAVAILABLE = "unavailable"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class OptimizationEpisodeState(StrEnum):
@@ -405,6 +406,10 @@ class BudgetSnapshot(_ContractModel):
         return self.budget.planning_call_limit - self.consumed_planning_calls
 
     @property
+    def remaining_wall_time_seconds(self) -> float:
+        return max(0.0, self.budget.wall_time_limit_seconds - self.elapsed_wall_time_seconds)
+
+    @property
     def exhausted(self) -> bool:
         return (
             self.remaining_candidates == 0
@@ -472,7 +477,10 @@ class SignoffGates(_ContractModel):
 
     @property
     def passed(self) -> bool:
-        return all(value == GateResult.PASS for value in self.model_dump().values())
+        return all(
+            value in {GateResult.PASS, GateResult.NOT_APPLICABLE}
+            for value in self.model_dump().values()
+        )
 
 
 class TerminalObservation(_ContractModel):

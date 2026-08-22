@@ -120,6 +120,15 @@ def test_budget_rejects_a_noncanonical_wall_time_limit() -> None:
         )
 
 
+def test_budget_reports_remaining_wall_time() -> None:
+    snapshot = BudgetSnapshot(
+        budget=EpisodeBudget.from_default_reruns((10.0, 12.0, 11.0)),
+        elapsed_wall_time_seconds=20.0,
+    )
+
+    assert snapshot.remaining_wall_time_seconds == 68.0
+
+
 def test_stage_observation_is_typed_and_carries_remaining_budget() -> None:
     observation = StageObservation(
         observation_id="observation-1",
