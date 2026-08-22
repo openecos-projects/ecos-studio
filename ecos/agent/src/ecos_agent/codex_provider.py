@@ -680,6 +680,11 @@ def _optimization_planning_payload(
                 "outcome": item.outcome.value,
                 "action": item.action.model_dump(mode="json"),
                 "requested": item.requested.model_dump(mode="json"),
+                "terminal_observation": (
+                    item.terminal_observation.model_dump(mode="json")
+                    if item.terminal_observation is not None
+                    else None
+                ),
             }
             for item in context.history
         ],

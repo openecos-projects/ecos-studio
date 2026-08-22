@@ -13,11 +13,21 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Iterator, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import ProposalAction, RequestedKnobValue
-
+from ecos_agent.optimization_contracts import (
+    ProposalAction,
+    RequestedKnobValue,
+    TerminalObservation,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -150,7 +160,16 @@ class OptimizationTerminalOutcome(_LedgerModel):
     candidate_manifest_sha256: str
     receipt_sha256: str | None = None
     terminal_observation_sha256: str | None = None
+    terminal_observation: TerminalObservation | None = None
     outcome_details_sha256: str
+
+    @model_validator(mode="after")
+    def validate_terminal_observation_hash(self) -> "OptimizationTerminalOutcome":
+        if self.terminal_observation is not None:
+            expected = canonical_sha256(self.terminal_observation.model_dump(mode="json"))
+            if self.terminal_observation_sha256 != expected:
+                raise ValueError("terminal observation hash is invalid")
+        return self
 
     @field_validator("intervention_id")
     @classmethod

@@ -227,6 +227,10 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert second.retrieval.request.previous_intervention_outcome == OptimizationOutcomeKind.DEGRADED
     assert planner.contexts[0].history == ()
     assert planner.contexts[1].history[0].requested.value == 3
+    assert planner.contexts[1].history[0].terminal_observation is not None
+    assert planner.contexts[1].history[0].terminal_observation.metrics[
+        ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
+    ] == 3.0
     assert planner.contexts[0].context_ref.input_sha256 != planner.contexts[1].context_ref.input_sha256
     assert [outcome.outcome for outcome in controller.ledger.replay().terminal_outcomes] == [
         OptimizationOutcomeKind.DEGRADED,

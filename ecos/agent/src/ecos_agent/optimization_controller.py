@@ -92,6 +92,7 @@ class OptimizationHistory:
     outcome: OptimizationOutcomeKind
     action: ProposalAction
     requested: RequestedKnobValue
+    terminal_observation: TerminalObservation | None = None
 
 
 @dataclass(frozen=True)
@@ -413,6 +414,11 @@ class OptimizationEpisodeController:
                             "outcome": item.outcome.value,
                             "action": item.action.model_dump(mode="json"),
                             "requested": item.requested.model_dump(mode="json"),
+                            "terminal_observation": (
+                                item.terminal_observation.model_dump(mode="json")
+                                if item.terminal_observation is not None
+                                else None
+                            ),
                         }
                         for item in history
                     ],
@@ -488,6 +494,7 @@ class OptimizationEpisodeController:
                     outcome=outcome.outcome,
                     action=start.proposal_action,
                     requested=start.requested,
+                    terminal_observation=outcome.terminal_observation,
                 )
             )
         return tuple(history[-6:])
@@ -567,6 +574,7 @@ class OptimizationEpisodeController:
                     if terminal_observation is not None
                     else None
                 ),
+                terminal_observation=terminal_observation,
                 outcome_details_sha256=canonical_sha256(details),
             )
         )
