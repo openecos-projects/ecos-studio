@@ -36,6 +36,11 @@ from ecos_agent.optimization_retrieval import (
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
+CURRENT_VALUES = {
+    "place.target_density": 0.2,
+    "place.cell_padding_x": 2,
+    "place.routability_opt": True,
+}
 
 
 class _Clock:
@@ -195,10 +200,12 @@ def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(tmp_pat
     ecc = _FakeEcc(_terminal(OptimizationOutcomeKind.DEGRADED))
     controller = _controller(tmp_path, codex, ecc)
 
-    planned = controller.plan(_observation(), _retrieval())
+    planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert planned.state == OptimizationEpisodeState.AWAITING_EXECUTION
     assert planned.proposal is not None
+    assert planned.requested is not None
+    assert planned.requested.value == 3
     assert codex.contexts[0].knowledge_chunks == ("Audited congestion strategy.",)
     completed = controller.execute()
     assert completed.state == OptimizationEpisodeState.PLANNING
@@ -206,6 +213,24 @@ def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(tmp_pat
     assert controller.budget.consumed_candidates == 1
     assert len(ecc.start_calls) == 1
     assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
+
+
+def test_controller_persists_attempted_requested_values(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal, _proposal),
+        _FakeEcc(
+            _terminal(OptimizationOutcomeKind.DEGRADED, "execution-1"),
+            _terminal(OptimizationOutcomeKind.DEGRADED, "execution-2"),
+        ),
+    )
+
+    assert controller.plan(_observation(), _retrieval(), CURRENT_VALUES).requested.value == 3
+    controller.execute()
+    planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert planned.requested is None
+    assert planned.rejection_reason == "no_legal_candidate"
 
 
 @pytest.mark.parametrize(
@@ -238,7 +263,7 @@ def test_contract_mutations_are_rejected_before_fake_ecc_side_effects(
     ecc = _FakeEcc()
     controller = _controller(tmp_path, codex, ecc)
 
-    rejected = controller.plan(_observation(), _retrieval())
+    rejected = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert rejected.proposal is None
     assert rejected.rejection_reason is not None
@@ -262,7 +287,7 @@ def test_no_knowledge_mode_hides_chunks_and_rejects_knowledge_references(tmp_pat
         mode=OptimizationAgentMode.LLM_NO_KNOWLEDGE,
     )
 
-    rejected = controller.plan(_observation(), _retrieval())
+    rejected = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert codex.contexts[0].knowledge_chunks == ()
     assert codex.contexts[0].knowledge_refs == ()
@@ -274,7 +299,7 @@ def test_budget_exhaustion_stops_without_calling_fake_codex(tmp_path: Path) -> N
     codex = _FakeCodex(_proposal)
     controller = _controller(tmp_path, codex, _FakeEcc(), budget=_budget(candidates=6))
 
-    stopped = controller.plan(_observation(), _retrieval())
+    stopped = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert stopped.state == OptimizationEpisodeState.STOPPED
     assert codex.contexts == []
@@ -302,7 +327,7 @@ def test_non_action_decisions_never_reach_fake_ecc(
     ecc = _FakeEcc()
     controller = _controller(tmp_path, _FakeCodex(response), ecc)
 
-    result = controller.plan(_observation(), _retrieval())
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert result.state == expected_state
     assert result.proposal is not None
@@ -316,13 +341,17 @@ def test_missing_fake_ecc_receipt_is_charged_and_quarantined(tmp_path: Path) -> 
             raise RuntimeError("connection lost after request")
 
     controller = _controller(tmp_path, _FakeCodex(_proposal), _NoReceiptEcc())
-    controller.plan(_observation(), _retrieval())
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     result = controller.execute()
 
     assert result.state == OptimizationEpisodeState.QUARANTINED
     assert controller.budget.consumed_candidates == 1
     assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.INDETERMINATE
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert state["attempted_requests"] == [
+        {"knob_id": "place.cell_padding_x", "value": 3}
+    ]
 
 
 def test_not_started_retries_once_without_consuming_a_candidate(tmp_path: Path) -> None:
@@ -332,7 +361,7 @@ def test_not_started_retries_once_without_consuming_a_candidate(tmp_path: Path) 
         CandidateExecutionReceipt(execution_id="execution-2", started=False),
     )
     controller = _controller(tmp_path, codex, ecc)
-    controller.plan(_observation(), _retrieval())
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     result = controller.execute()
 
@@ -347,7 +376,7 @@ def test_timeout_cancels_once_and_quarantines_when_fake_ecc_has_no_receipt(tmp_p
     codex = _FakeCodex(_proposal)
     ecc = _FakeEcc(_started(), cancel_receipt=_started())
     controller = _controller(tmp_path, codex, ecc)
-    controller.plan(_observation(), _retrieval())
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
     controller.execute()
 
     quarantined = controller.timeout()
@@ -367,7 +396,7 @@ def test_timeout_with_terminal_cancel_receipt_preserves_negative_outcome(tmp_pat
         cancel_receipt=_terminal(OptimizationOutcomeKind.TIMED_OUT_CANCELLED),
     )
     controller = _controller(tmp_path, codex, ecc)
-    controller.plan(_observation(), _retrieval())
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
     controller.execute()
 
     result = controller.timeout()
@@ -378,11 +407,24 @@ def test_timeout_with_terminal_cancel_receipt_preserves_negative_outcome(tmp_pat
     )
 
 
+def test_terminal_outcome_can_only_complete_the_pending_execution(tmp_path: Path) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    controller.execute()
+
+    result = controller.complete_terminal(
+        _terminal(OptimizationOutcomeKind.DEGRADED, "execution-1")
+    )
+
+    assert result.state == OptimizationEpisodeState.PLANNING
+    assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
+
+
 def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_path: Path) -> None:
     codex = _FakeCodex(_proposal)
     ecc = _FakeEcc(_started())
     controller = _controller(tmp_path, codex, ecc)
-    controller.plan(_observation(), _retrieval())
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
     controller.execute()
 
     recovered = OptimizationEpisodeController.recover(

@@ -11,6 +11,7 @@ from ecos_agent.optimization_contracts import (
     MetricNoiseBand,
     ObjectiveMetric,
     OptimizationKnob,
+    ProposalAction,
     RequestedKnobValue,
     ROUTABILITY_OBJECTIVE_ORDER,
     RoutabilityObjectiveContract,
@@ -127,6 +128,35 @@ def next_coordinate_selection(
                 requested,
                 (index + 1) % len(CONTROLLED_COORDINATE_ORDER),
             )
+    return None
+
+
+def select_requested_value(
+    action: ProposalAction,
+    *,
+    current_values: Mapping[str, bool | int | float],
+    attempted: Iterable[RequestedKnobValue] = (),
+    known_aliases: Iterable[RequestedKnobValue] = (),
+) -> RequestedKnobValue | None:
+    """Select the next frozen value for one validated strategy direction."""
+    current = _current_value(action.knob_id, current_values)
+    attempted_values = tuple(attempted)
+    aliases = tuple(known_aliases)
+    if action.knob_id == OptimizationKnob.ROUTABILITY_OPT:
+        desired = action.direction == StrategyDirection.ENABLE
+        if current == desired:
+            return None
+        return _unexcluded_request(action.knob_id, desired, attempted_values, aliases)
+    direction = (
+        CoordinateDirection.INCREASE
+        if action.direction == StrategyDirection.INCREASE
+        else CoordinateDirection.DECREASE
+    )
+    coordinate_action = CoordinateAction(action.knob_id, direction)
+    for value in _directional_lattice_values(coordinate_action, current):
+        request = _unexcluded_request(action.knob_id, value, attempted_values, aliases)
+        if request is not None:
+            return request
     return None
 
 

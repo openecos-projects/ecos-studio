@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -27,6 +27,7 @@ from ecos_agent.optimization_contracts import (
     OptimizationEpisodeState,
     OptimizationProposal,
     ProposalContextRef,
+    RequestedKnobValue,
     StageObservation,
 )
 from ecos_agent.optimization_ledger import (
@@ -37,6 +38,7 @@ from ecos_agent.optimization_ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
+from ecos_agent.optimization_rules import select_requested_value
 
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -84,14 +86,17 @@ class CandidateExecutionRequest:
     """A fake execution request with no command, path, workspace, or RPC field."""
 
     intervention_id: str
+    episode_id: str
     checkpoint_id: str
     proposal: OptimizationProposal
+    requested: RequestedKnobValue
 
 
 @dataclass(frozen=True)
 class OptimizationControlResult:
     state: OptimizationEpisodeState
     proposal: OptimizationProposal | None = None
+    requested: RequestedKnobValue | None = None
     rejection_reason: str | None = None
 
 
@@ -118,6 +123,8 @@ class _PersistedEpisodeState(BaseModel):
     ledger_event_count: int = Field(ge=0)
     ledger_chain_head_sha256: str | None = None
     proposal: OptimizationProposal | None = None
+    requested: RequestedKnobValue | None = None
+    attempted_requests: tuple[RequestedKnobValue, ...] = ()
     pending_intervention_id: str | None = None
     pending_execution_id: str | None = None
     cancel_requested: bool = False
@@ -158,6 +165,8 @@ class OptimizationEpisodeController:
         self._budget = budget
         self._state = OptimizationEpisodeState.CREATED
         self._proposal: OptimizationProposal | None = None
+        self._requested: RequestedKnobValue | None = None
+        self._attempted_request_values: tuple[RequestedKnobValue, ...] = ()
         self._pending_intervention_id: str | None = None
         self._pending_execution_id: str | None = None
         self._cancel_requested = False
@@ -180,6 +189,7 @@ class OptimizationEpisodeController:
         self,
         observation: StageObservation,
         retrieval: OptimizationRetrievalResult,
+        current_values: Mapping[str, bool | int | float],
     ) -> OptimizationControlResult:
         self._refresh_budget()
         if self._state not in {OptimizationEpisodeState.CREATED, OptimizationEpisodeState.PLANNING}:
@@ -187,6 +197,7 @@ class OptimizationEpisodeController:
         if self._budget.exhausted:
             self._state = OptimizationEpisodeState.STOPPED
             self._proposal = None
+            self._requested = None
             self._persist()
             return self._result("budget_exhausted")
 
@@ -204,6 +215,7 @@ class OptimizationEpisodeController:
             return self._reject(rejection_reason)
         if proposal.decision != OptimizationDecision.PROPOSE:
             self._proposal = None
+            self._requested = None
             self._state = {
                 OptimizationDecision.CONTINUE: OptimizationEpisodeState.PLANNING,
                 OptimizationDecision.STOP: OptimizationEpisodeState.STOPPED,
@@ -211,29 +223,50 @@ class OptimizationEpisodeController:
             }[proposal.decision]
             self._persist()
             return OptimizationControlResult(self._state, proposal)
+        assert proposal.action is not None
+        requested = select_requested_value(
+            proposal.action,
+            current_values=current_values,
+            attempted=self._attempted_requests(),
+        )
+        if requested is None:
+            return self._reject("no_legal_candidate")
         self._proposal = proposal
+        self._requested = requested
         self._state = OptimizationEpisodeState.AWAITING_EXECUTION
         self._persist()
         return self._result()
 
     def execute(self) -> OptimizationControlResult:
         self._refresh_budget()
-        if self._state != OptimizationEpisodeState.AWAITING_EXECUTION or self._proposal is None:
+        if (
+            self._state != OptimizationEpisodeState.AWAITING_EXECUTION
+            or self._proposal is None
+            or self._requested is None
+        ):
             raise OptimizationEpisodeControllerError("episode has no approved proposal to execute")
         if self._budget.exhausted:
             self._state = OptimizationEpisodeState.STOPPED
             self._proposal = None
+            self._requested = None
             self._persist()
             return self._result("budget_exhausted")
 
         intervention_id = self._next_intervention_id()
-        request = CandidateExecutionRequest(intervention_id, self.checkpoint_id, self._proposal)
+        request = CandidateExecutionRequest(
+            intervention_id,
+            self.episode_id,
+            self.checkpoint_id,
+            self._proposal,
+            self._requested,
+        )
         try:
             receipt = self._start_once_with_retry(request)
         except OptimizationEpisodeControllerError:
             self._budget = self._consume(candidates=1)
             self._pending_intervention_id = intervention_id
             self._pending_execution_id = "unknown-execution"
+            self._attempted_request_values = (*self._attempted_request_values, request.requested)
             self.ledger.append_start(self._ledger_start(request))
             return self._quarantine_indeterminate()
         if receipt is None:
@@ -245,6 +278,7 @@ class OptimizationEpisodeController:
         self._budget = self._consume(candidates=1)
         self._pending_intervention_id = intervention_id
         self._pending_execution_id = receipt.execution_id
+        self._attempted_request_values = (*self._attempted_request_values, request.requested)
         self.ledger.append_start(self._ledger_start(request))
         if receipt.outcome is None:
             self._state = OptimizationEpisodeState.EXECUTING
@@ -268,6 +302,18 @@ class OptimizationEpisodeController:
         if receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED:
             return self._complete(receipt.outcome, receipt)
         return self._quarantine_indeterminate()
+
+    def complete_terminal(self, receipt: CandidateExecutionReceipt) -> OptimizationControlResult:
+        """Record a terminal outcome produced from separately verified evidence."""
+        if (
+            self._state != OptimizationEpisodeState.EXECUTING
+            or self._pending_execution_id is None
+            or receipt.execution_id != self._pending_execution_id
+            or not receipt.started
+            or receipt.outcome is None
+        ):
+            raise OptimizationEpisodeControllerError("terminal receipt does not match pending execution")
+        return self._complete(receipt.outcome, receipt)
 
     @classmethod
     def recover(
@@ -298,6 +344,8 @@ class OptimizationEpisodeController:
         controller._budget = snapshot.budget
         controller._state = snapshot.state
         controller._proposal = snapshot.proposal
+        controller._requested = snapshot.requested
+        controller._attempted_request_values = snapshot.attempted_requests
         controller._pending_intervention_id = snapshot.pending_intervention_id
         controller._pending_execution_id = snapshot.pending_execution_id
         controller._cancel_requested = snapshot.cancel_requested
@@ -398,8 +446,10 @@ class OptimizationEpisodeController:
         execution_contract_sha256 = canonical_sha256(
             {
                 "intervention_id": request.intervention_id,
+                "episode_id": request.episode_id,
                 "checkpoint_id": request.checkpoint_id,
                 "proposal_sha256": proposal_sha256,
+                "requested": request.requested.model_dump(mode="json"),
             }
         )
         return OptimizationInterventionStart(
@@ -407,7 +457,12 @@ class OptimizationEpisodeController:
             parent_checkpoint_id=self.checkpoint_id,
             candidate_checkpoint_id=f"candidate-{request.intervention_id}",
             parameter_before_sha256=canonical_sha256({"checkpoint_id": self.checkpoint_id}),
-            parameter_after_sha256=canonical_sha256({"proposal_sha256": proposal_sha256}),
+            parameter_after_sha256=canonical_sha256(
+                {
+                    "checkpoint_id": self.checkpoint_id,
+                    "requested": request.requested.model_dump(mode="json"),
+                }
+            ),
             proposal_sha256=proposal_sha256,
             execution_contract_sha256=execution_contract_sha256,
             parent_manifest_sha256=canonical_sha256(
@@ -441,6 +496,7 @@ class OptimizationEpisodeController:
         self._pending_execution_id = None
         self._cancel_requested = False
         self._proposal = None
+        self._requested = None
         self._state = (
             OptimizationEpisodeState.QUARANTINED
             if outcome == OptimizationOutcomeKind.INDETERMINATE
@@ -463,11 +519,20 @@ class OptimizationEpisodeController:
     def _reject(self, reason: str) -> OptimizationControlResult:
         self._state = OptimizationEpisodeState.PLANNING
         self._proposal = None
+        self._requested = None
         self._persist()
         return self._result(reason)
 
     def _result(self, rejection_reason: str | None = None) -> OptimizationControlResult:
-        return OptimizationControlResult(self._state, self._proposal, rejection_reason)
+        return OptimizationControlResult(
+            self._state,
+            self._proposal,
+            self._requested,
+            rejection_reason,
+        )
+
+    def _attempted_requests(self) -> tuple[RequestedKnobValue, ...]:
+        return self._attempted_request_values
 
     def _refresh_budget(self) -> None:
         elapsed = max(self._budget.elapsed_wall_time_seconds, self._valid_clock() - self._started_at)
@@ -509,6 +574,10 @@ class OptimizationEpisodeController:
             "ledger_event_count": len(replay.entries),
             "ledger_chain_head_sha256": replay.chain_head_sha256,
             "proposal": self._proposal.model_dump(mode="json") if self._proposal else None,
+            "requested": self._requested.model_dump(mode="json") if self._requested else None,
+            "attempted_requests": [
+                request.model_dump(mode="json") for request in self._attempted_request_values
+            ],
             "pending_intervention_id": self._pending_intervention_id,
             "pending_execution_id": self._pending_execution_id,
             "cancel_requested": self._cancel_requested,
