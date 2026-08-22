@@ -31,7 +31,6 @@ import {
 } from './useWorkspaceLifecycle'
 import {
   readWorkspaceFlowResourceApi,
-  readWorkspaceHomeResourceApi,
   readWorkspaceParametersResourceApi,
 } from '@/api/workspaceResources'
 import {
@@ -62,8 +61,6 @@ interface SerializedProject {
   completedSteps?: number
   currentStep?: string
   totalRuntime?: string
-  cellCount?: number
-  frequency?: number
 }
 
 const currentProject = ref<Project | null>()
@@ -1517,24 +1514,6 @@ export function useWorkspace() {
       }
     } catch {
       console.warn('Failed to read parameters.json for snapshot')
-    }
-
-    try {
-      const homeData = await readWorkspaceHomeResourceApi()
-      if (!isCurrent()) return
-      const monitor = isRecord(homeData) ? homeData.monitor : null
-      if (isRecord(monitor)) {
-        if (Array.isArray(monitor.instance) && monitor.instance.length > 0) {
-          const cellCount = asNumber(monitor.instance[monitor.instance.length - 1])
-          if (cellCount !== undefined) snapshot.cellCount = cellCount
-        }
-        if (Array.isArray(monitor.frequency) && monitor.frequency.length > 0) {
-          const lastFreq = asNumber(monitor.frequency[monitor.frequency.length - 1])
-          if (lastFreq !== undefined && lastFreq > 0) snapshot.frequency = lastFreq
-        }
-      }
-    } catch {
-      console.warn('Failed to read home.json for snapshot')
     }
 
     const currentIdx = recentProjects.value.findIndex(
