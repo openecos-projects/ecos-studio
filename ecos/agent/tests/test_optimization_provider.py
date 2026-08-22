@@ -68,6 +68,13 @@ def test_gui_optimization_authorization_holds_and_closes_codex_provider(tmp_path
     assert session.optimization_phase == "error"
     assert fake_provider.closed == 1
     assert factory_calls[0]["cwd"] == workspace
+    assert factory_calls[0]["diagnostics_path"] == (
+        workspace
+        / ".agent"
+        / "optimization"
+        / session.optimization_episode_id
+        / "codex-rpc-diagnostics.v1.jsonl"
+    )
     assert factory_calls[1]["context"]["episode_id"] == session.optimization_episode_id
     assert any(event["type"] == "optimization" for event in events) is False
     assert any(event["type"] == "error" and "test stop" in str(event["text"]) for event in events)

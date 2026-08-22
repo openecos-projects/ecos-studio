@@ -3,11 +3,14 @@ import json
 import pytest
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.optimization_contracts import PlanningProviderEvidence
 from ecos_agent.optimization_ledger import (
     OptimizationArtifactManifestError,
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationLedgerIntegrityError,
+    OptimizationPlanningProviderEvidenceAudit,
+    OptimizationPlanningProviderAuditIntegrityError,
     OptimizationLedgerRecoveryRequired,
     OptimizationLedgerStateError,
     OptimizationOutcomeKind,
@@ -225,3 +228,26 @@ def test_replay_rejects_a_valid_json_record_with_a_broken_sequence(tmp_path) -> 
 
     with pytest.raises(OptimizationLedgerIntegrityError, match="sequence"):
         ledger.verify()
+
+
+def test_planning_provider_evidence_is_hash_bound_to_a_planning_call(tmp_path) -> None:
+    audit = OptimizationPlanningProviderEvidenceAudit(tmp_path / "episode")
+    evidence = PlanningProviderEvidence(
+        provider_id="codex_app_server",
+        thread_id="thread-1",
+        turn_id="turn-1",
+        response_sha256=HASH,
+        diagnostics_sha256=HASH,
+    )
+
+    entry = audit.append(planning_entry_sha256=HASH, evidence=evidence)
+
+    replay = audit.verify()
+    assert replay.entries == (entry,)
+    assert entry.planning_entry_sha256 == HASH
+    assert entry.evidence == evidence
+
+    contents = audit.audit_path.read_text(encoding="utf-8")
+    audit.audit_path.write_text(contents.replace("turn-1", "turn-2"), encoding="utf-8")
+    with pytest.raises(OptimizationPlanningProviderAuditIntegrityError, match="invalid hash"):
+        audit.verify()

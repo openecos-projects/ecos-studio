@@ -159,6 +159,16 @@ class _JsonLineRpcProcessClient:
         text, _ = self.wait_for_turn_details(turn_id, progress_callback=progress_callback)
         return text
 
+    def record_turn_completion(
+        self, *, thread_id: str, turn_id: str, response_sha256: str
+    ) -> None:
+        self._record(
+            "turn_completed",
+            thread_id=thread_id,
+            turn_id=turn_id,
+            response_sha256=response_sha256,
+        )
+
     def wait_for_turn_details(
         self,
         turn_id: str,

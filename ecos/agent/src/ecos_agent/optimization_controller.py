@@ -28,6 +28,7 @@ from ecos_agent.optimization_contracts import (
     OptimizationDecision,
     OptimizationEpisodeState,
     OptimizationProposal,
+    PlanningProviderEvidence,
     ProposalAction,
     ProposalContextRef,
     RequestedKnobValue,
@@ -38,7 +39,10 @@ from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationPlanningAudit,
+    OptimizationPlanningAuditEntry,
     OptimizationPlanningAuditReplay,
+    OptimizationPlanningProviderEvidenceAudit,
+    OptimizationPlanningProviderEvidenceReplay,
     OptimizationLedgerReplay,
     OptimizationOutcomeKind,
     OptimizationTerminalOutcome,
@@ -48,7 +52,8 @@ from ecos_agent.optimization_rules import select_requested_value
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v2.json"
+_STATE_FILE = "optimization-episode-state.v3.json"
+_LEGACY_STATE_FILE = "optimization-episode-state.v2.json"
 
 
 class OptimizationEpisodeControllerError(ValueError):
@@ -192,7 +197,7 @@ class OptimizationExecutionAdapter(Protocol):
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "ecos.optimization_episode_state.v2"
+    schema_version: str = "ecos.optimization_episode_state.v3"
     episode_id: str
     checkpoint_id: str
     mode: OptimizationAgentMode
@@ -205,6 +210,8 @@ class _PersistedEpisodeState(BaseModel):
     ledger_chain_head_sha256: str | None = None
     planning_audit_event_count: int = Field(default=0, ge=0)
     planning_audit_chain_head_sha256: str | None = None
+    planning_provider_audit_event_count: int = Field(default=0, ge=0)
+    planning_provider_audit_chain_head_sha256: str | None = None
     proposal: OptimizationProposal | None = None
     requested: RequestedKnobValue | None = None
     attempted_requests: tuple[RequestedKnobValue, ...] = ()
@@ -250,6 +257,7 @@ class OptimizationEpisodeController:
         self.executor = executor
         self.ledger = ledger
         self._planning_audit = OptimizationPlanningAudit(ledger.root)
+        self._planning_provider_audit = OptimizationPlanningProviderEvidenceAudit(ledger.root)
         self._clock = clock
         self._started_at = self._valid_clock()
         self._budget = budget
@@ -314,7 +322,7 @@ class OptimizationEpisodeController:
         self._state = OptimizationEpisodeState.PLANNING
         self._budget = self._consume(planning_calls=1)
         context = self._planning_context(observation, retrieval, current_values)
-        self._planning_audit.append(
+        planning_entry = self._planning_audit.append(
             context_ref=context.context_ref,
             history_refs=tuple(item.reference for item in context.history),
             history_outcomes=tuple(item.outcome for item in context.history),
@@ -326,7 +334,9 @@ class OptimizationEpisodeController:
         try:
             proposal = self._parse_proposal(self.planner.propose(context))
         except (TypeError, ValidationError, ValueError):
+            self._record_planning_provider_evidence(planning_entry)
             return self._reject("proposal_schema")
+        self._record_planning_provider_evidence(planning_entry)
 
         rejection_reason = self._validate_proposal(proposal, context)
         if rejection_reason is not None:
@@ -457,6 +467,10 @@ class OptimizationEpisodeController:
         clock: Callable[[], float],
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
+        if not path.is_file() and (ledger.root / _LEGACY_STATE_FILE).is_file():
+            raise OptimizationEpisodeControllerError(
+                "pre-provider-audit episode cannot be recovered; start a new optimization episode"
+            )
         try:
             snapshot = _PersistedEpisodeState.model_validate_json(path.read_bytes())
         except (OSError, ValidationError, ValueError) as exc:
@@ -464,7 +478,14 @@ class OptimizationEpisodeController:
         replay = ledger.recover()
         planning_audit = OptimizationPlanningAudit(ledger.root)
         audit_replay = planning_audit.verify()
-        cls._verify_snapshot_trace(snapshot, replay, audit_replay)
+        planning_provider_audit = OptimizationPlanningProviderEvidenceAudit(ledger.root)
+        provider_audit_replay = planning_provider_audit.verify()
+        cls._verify_snapshot_trace(
+            snapshot,
+            replay,
+            audit_replay,
+            provider_audit_replay,
+        )
 
         controller = cls.__new__(cls)
         controller.episode_id = snapshot.episode_id
@@ -479,6 +500,7 @@ class OptimizationEpisodeController:
         controller._incumbent = snapshot.incumbent
         controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
         controller._planning_audit = planning_audit
+        controller._planning_provider_audit = planning_provider_audit
         controller._state = snapshot.state
         controller._proposal = snapshot.proposal
         controller._requested = snapshot.requested
@@ -757,6 +779,27 @@ class OptimizationEpisodeController:
     def _next_intervention_id(self) -> str:
         return f"intervention-{len(self.ledger.replay().entries) + 1}"
 
+    def _record_planning_provider_evidence(
+        self, planning_entry: OptimizationPlanningAuditEntry
+    ) -> None:
+        consume = getattr(self.planner, "consume_planning_evidence", None)
+        if consume is None:
+            return
+        if not callable(consume):
+            raise OptimizationEpisodeControllerError("planner evidence reader is invalid")
+        evidence = consume()
+        if evidence is None:
+            return
+        try:
+            parsed = PlanningProviderEvidence.model_validate(evidence)
+        except (TypeError, ValidationError, ValueError) as exc:
+            raise OptimizationEpisodeControllerError("planner evidence is invalid") from exc
+        self._planning_provider_audit.append(
+            planning_entry_sha256=planning_entry.entry_sha256,
+            evidence=parsed,
+        )
+        self._persist()
+
     def _reject(self, reason: str) -> OptimizationControlResult:
         self._state = OptimizationEpisodeState.PLANNING
         self._proposal = None
@@ -805,8 +848,9 @@ class OptimizationEpisodeController:
     def _persist(self) -> None:
         replay = self.ledger.replay()
         planning_audit = self._planning_audit.replay()
+        planning_provider_audit = self._planning_provider_audit.replay()
         value = {
-            "schema_version": "ecos.optimization_episode_state.v2",
+            "schema_version": "ecos.optimization_episode_state.v3",
             "episode_id": self.episode_id,
             "checkpoint_id": self.checkpoint_id,
             "mode": self.mode.value,
@@ -819,6 +863,8 @@ class OptimizationEpisodeController:
             "ledger_chain_head_sha256": replay.chain_head_sha256,
             "planning_audit_event_count": len(planning_audit.entries),
             "planning_audit_chain_head_sha256": planning_audit.chain_head_sha256,
+            "planning_provider_audit_event_count": len(planning_provider_audit.entries),
+            "planning_provider_audit_chain_head_sha256": planning_provider_audit.chain_head_sha256,
             "proposal": self._proposal.model_dump(mode="json") if self._proposal else None,
             "requested": self._requested.model_dump(mode="json") if self._requested else None,
             "attempted_requests": [
@@ -837,6 +883,7 @@ class OptimizationEpisodeController:
         snapshot: _PersistedEpisodeState,
         replay: OptimizationLedgerReplay,
         planning_audit: OptimizationPlanningAuditReplay,
+        planning_provider_audit: OptimizationPlanningProviderEvidenceReplay,
     ) -> None:
         if (
             snapshot.ledger_event_count != len(replay.entries)
@@ -848,6 +895,22 @@ class OptimizationEpisodeController:
             or snapshot.planning_audit_chain_head_sha256 != planning_audit.chain_head_sha256
         ):
             raise OptimizationEpisodeControllerError("episode state does not match planning audit trace")
+        if (
+            snapshot.planning_provider_audit_event_count != len(planning_provider_audit.entries)
+            or snapshot.planning_provider_audit_chain_head_sha256
+            != planning_provider_audit.chain_head_sha256
+        ):
+            raise OptimizationEpisodeControllerError(
+                "episode state does not match planning provider audit trace"
+            )
+        known_planning_entries = {entry.entry_sha256 for entry in planning_audit.entries}
+        if any(
+            entry.planning_entry_sha256 not in known_planning_entries
+            for entry in planning_provider_audit.entries
+        ):
+            raise OptimizationEpisodeControllerError(
+                "planning provider evidence does not match planning audit trace"
+            )
         if tuple(replay.pending_intervention_ids) != _pending_tuple(snapshot.pending_intervention_id):
             raise OptimizationEpisodeControllerError("episode pending execution does not match ledger trace")
 

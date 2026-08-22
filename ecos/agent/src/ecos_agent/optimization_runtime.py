@@ -76,13 +76,18 @@ def create_optimization_runner(
             workspace_id=workspace_id,
             site_width_dbu=site_width_dbu,
         )
-        state_path = ledger_root / "optimization-episode-state.v2.json"
+        state_path = ledger_root / "optimization-episode-state.v3.json"
+        legacy_state_path = ledger_root / "optimization-episode-state.v2.json"
         if state_path.is_file():
             controller = OptimizationEpisodeController.recover(
                 planner=planner,
                 executor=executor,
                 ledger=ledger,
                 clock=_monotonic,
+            )
+        elif legacy_state_path.is_file():
+            raise OptimizationRuntimeError(
+                "pre-provider-audit episode cannot be recovered; start a new optimization episode"
             )
         elif ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
             raise OptimizationRuntimeError("optimization episode state is missing")

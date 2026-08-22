@@ -154,3 +154,27 @@ def test_optimization_planner_fails_closed_on_invalid_codex_proposal(
         provider.propose(context)
 
     assert error.value.failure_class == "parse_error"
+
+
+def test_optimization_planner_exposes_one_consumable_turn_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    context = _context()
+
+    def request(**_kwargs: object) -> dict[str, object]:
+        provider._completed_turn = ("thread-1", "turn-1", HASH)
+        return _proposal(context)
+
+    monkeypatch.setattr(provider, "_request_json", request)
+
+    provider.propose(context)
+
+    evidence = provider.consume_planning_evidence()
+    assert evidence is not None
+    assert evidence.provider_id == "codex_app_server"
+    assert evidence.thread_id == "thread-1"
+    assert evidence.turn_id == "turn-1"
+    assert evidence.response_sha256 == HASH
+    assert evidence.diagnostics_sha256 is None
+    assert provider.consume_planning_evidence() is None

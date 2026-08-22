@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -26,6 +27,7 @@ from ecos_agent.contracts import (
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
 from ecos_agent.optimization_contracts import OptimizationProposal
+from ecos_agent.optimization_contracts import PlanningProviderEvidence
 from ecos_agent.optimization_controller import (
     OptimizationPlanningContext,
     planning_context_payload,
@@ -58,6 +60,7 @@ class CodexAppServerProposalProvider:
         runtime_workspace_roots: Iterable[str | Path] | None = None,
         progress_callback: Callable[[str], None] | None = None,
         web_search_enabled: bool | None = None,
+        diagnostics_path: Path | None = None,
     ) -> None:
         self.cwd = Path(cwd or Path.cwd())
         self.env = dict(env or os.environ)
@@ -73,11 +76,13 @@ class CodexAppServerProposalProvider:
             if web_search_enabled is None
             else web_search_enabled
         )
-        self.diagnostics_path = _diagnostics_path_from_env(self.env)
+        self.diagnostics_path = diagnostics_path or _diagnostics_path_from_env(self.env)
         self.progress_callback = progress_callback
         self._client: _JsonLineRpcProcessClient | None = None
         self._thread_id: str | None = None
         self._active_turn_id: str | None = None
+        self._completed_turn: tuple[str, str, str] | None = None
+        self._planning_evidence: PlanningProviderEvidence | None = None
         self._interrupted = False
         self._state_lock = threading.Lock()
 
@@ -110,18 +115,32 @@ class CodexAppServerProposalProvider:
             self._interrupted = False
 
     def propose(self, context: OptimizationPlanningContext) -> dict[str, Any]:
-        return self._proposal(
-            _optimization_planning_payload(context),
-            (
-                "Return one JSON object matching ecos.optimization_proposal.v1. "
-                "Choose only continue, propose, stop, or escalate. A propose decision may name exactly one "
-                "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
-                "workspaces, RPC methods, or execution instructions. Reference only the supplied observation, "
-                "history, and knowledge identifiers. Local validation selects values and owns execution."
-            ),
-            _optimization_proposal_output_schema(),
-            OptimizationProposal,
-        )
+        with self._state_lock:
+            self._completed_turn = None
+            self._planning_evidence = None
+        try:
+            return self._proposal(
+                _optimization_planning_payload(context),
+                (
+                    "Return one JSON object matching ecos.optimization_proposal.v1. "
+                    "Choose only continue, propose, stop, or escalate. A propose decision may name exactly one "
+                    "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
+                    "workspaces, RPC methods, or execution instructions. Reference only the supplied observation, "
+                    "history, and knowledge identifiers. Local validation selects values and owns execution."
+                ),
+                _optimization_proposal_output_schema(),
+                OptimizationProposal,
+            )
+        finally:
+            self._capture_planning_evidence()
+
+    def consume_planning_evidence(self) -> PlanningProviderEvidence | None:
+        """Return the evidence for the most recent optimization planner turn once."""
+
+        with self._state_lock:
+            evidence = self._planning_evidence
+            self._planning_evidence = None
+            return evidence
 
     def propose_gui_workspace_setup(self, context: dict[str, Any]) -> dict[str, Any]:
         return self._proposal(
@@ -388,7 +407,32 @@ class CodexAppServerProposalProvider:
             raise CodexProviderError(
                 "Codex turn interrupted", failure_class="interrupted"
             )
+        response_sha256 = _text_sha256(text)
+        client.record_turn_completion(
+            thread_id=thread_id,
+            turn_id=turn_id,
+            response_sha256=response_sha256,
+        )
+        with self._state_lock:
+            self._completed_turn = (thread_id, turn_id, response_sha256)
         return text
+
+    def _capture_planning_evidence(self) -> None:
+        with self._state_lock:
+            completed_turn = self._completed_turn
+            self._completed_turn = None
+        if completed_turn is None:
+            return
+        thread_id, turn_id, response_sha256 = completed_turn
+        diagnostics_sha256 = _diagnostics_sha256(self.diagnostics_path)
+        with self._state_lock:
+            self._planning_evidence = PlanningProviderEvidence(
+                provider_id="codex_app_server",
+                thread_id=thread_id,
+                turn_id=turn_id,
+                response_sha256=response_sha256,
+                diagnostics_sha256=diagnostics_sha256,
+            )
 
     def _ensure_client(self) -> _JsonLineRpcProcessClient:
         if self._client is None:
@@ -634,6 +678,20 @@ def _diagnostics_path_from_env(env: Mapping[str, str]) -> Path | None:
     """
     configured = env.get("ECOS_AGENT_CODEX_DIAGNOSTICS_PATH", "").strip()
     return Path(configured).expanduser() if configured else None
+
+
+def _diagnostics_sha256(path: Path | None) -> str | None:
+    if path is None or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def _text_sha256(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _runtime_workspace_roots(roots: Iterable[str | Path]) -> tuple[str, ...]:

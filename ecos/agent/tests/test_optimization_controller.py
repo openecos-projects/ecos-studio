@@ -15,6 +15,7 @@ from ecos_agent.optimization_contracts import (
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
+    PlanningProviderEvidence,
     ProposalReason,
     StageObservation,
     StrategyDirection,
@@ -25,7 +26,12 @@ from ecos_agent.optimization_controller import (
     OptimizationEpisodeController,
     OptimizationEpisodeControllerError,
 )
-from ecos_agent.optimization_ledger import OptimizationLedger, OptimizationOutcomeKind
+from ecos_agent.optimization_ledger import (
+    OptimizationLedger,
+    OptimizationOutcomeKind,
+    OptimizationPlanningAudit,
+    OptimizationPlanningProviderEvidenceAudit,
+)
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
     KnowledgeChannelResult,
@@ -64,6 +70,17 @@ class _FakeCodex:
         if callable(response):
             return response(context)
         return response
+
+
+class _AuditedFakeCodex(_FakeCodex):
+    def consume_planning_evidence(self) -> PlanningProviderEvidence | None:
+        return PlanningProviderEvidence(
+            provider_id="codex_app_server",
+            thread_id="thread-1",
+            turn_id=f"turn-{len(self.contexts)}",
+            response_sha256=HASH,
+            diagnostics_sha256=HASH,
+        )
 
 
 class _FakeEcc:
@@ -213,6 +230,30 @@ def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(tmp_pat
     assert controller.budget.consumed_candidates == 1
     assert len(ecc.start_calls) == 1
     assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
+
+
+def test_controller_binds_codex_turn_evidence_to_the_planning_audit(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _AuditedFakeCodex(_proposal),
+        _FakeEcc(_started()),
+    )
+
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    planning = OptimizationPlanningAudit(tmp_path / "episode").replay()
+    provider = OptimizationPlanningProviderEvidenceAudit(tmp_path / "episode").replay()
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert provider.entries[0].planning_entry_sha256 == planning.entries[0].entry_sha256
+    assert state["planning_provider_audit_event_count"] == 1
+    assert state["planning_provider_audit_chain_head_sha256"] == provider.chain_head_sha256
+    recovered = OptimizationEpisodeController.recover(
+        planner=_AuditedFakeCodex(_proposal),
+        executor=_FakeEcc(_started()),
+        ledger=controller.ledger,
+        clock=_Clock(),
+    )
+    assert recovered.state == OptimizationEpisodeState.AWAITING_EXECUTION
 
 
 def test_controller_persists_attempted_requested_values(tmp_path: Path) -> None:
@@ -441,6 +482,19 @@ def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_p
     state["state"] = "planning"
     state_path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(OptimizationEpisodeControllerError, match="state hash"):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(),
+            ledger=controller.ledger,
+            clock=_Clock(),
+        )
+
+
+def test_recovery_rejects_a_pre_provider_audit_episode(tmp_path: Path) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+    controller.state_path.rename(controller.state_path.with_name("optimization-episode-state.v2.json"))
+
+    with pytest.raises(OptimizationEpisodeControllerError, match="pre-provider-audit"):
         OptimizationEpisodeController.recover(
             planner=_FakeCodex(_proposal),
             executor=_FakeEcc(),

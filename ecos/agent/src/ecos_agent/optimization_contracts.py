@@ -100,6 +100,33 @@ class _ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PlanningProviderEvidence(_ContractModel):
+    """Opaque proof that a Codex planner turn produced one response."""
+
+    schema_version: Literal["ecos.optimization_planning_provider_evidence.v1"] = (
+        "ecos.optimization_planning_provider_evidence.v1"
+    )
+    provider_id: Literal["codex_app_server"]
+    thread_id: str
+    turn_id: str
+    response_sha256: str
+    diagnostics_sha256: str | None = None
+
+    @field_validator("thread_id", "turn_id")
+    @classmethod
+    def validate_turn_identifier(cls, value: str) -> str:
+        if not value or len(value) > 512:
+            raise ValueError("planning provider turn identifier is invalid")
+        return value
+
+    @field_validator("response_sha256", "diagnostics_sha256")
+    @classmethod
+    def validate_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("planning provider evidence hash is invalid")
+        return value
+
+
 class ProposalContextRef(_ContractModel):
     episode_id: str
     checkpoint_id: str

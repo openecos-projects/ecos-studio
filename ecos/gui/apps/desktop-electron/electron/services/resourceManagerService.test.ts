@@ -4166,7 +4166,7 @@ describe('ResourceManagerService', () => {
                 platforms: {
                   'all-platform': {
                     url: archiveUrl,
-                    sha256: '',
+                    sha256: createHash('sha256').update(archive).digest('hex'),
                     size: archive.byteLength,
                     strip_prefix: 'mpc-frame-80f226fdd11d7a9e651ca0b113d320606b2c549c',
                   },

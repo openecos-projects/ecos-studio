@@ -729,6 +729,13 @@ class EcosAgentProvider:
                 cwd=Path(workspace),
                 runtime_workspace_roots=(workspace,),
                 progress_callback=lambda text: self._progress(session, text),
+                diagnostics_path=(
+                    Path(workspace)
+                    / ".agent"
+                    / "optimization"
+                    / session.optimization_episode_id
+                    / "codex-rpc-diagnostics.v1.jsonl"
+                ),
             )
             runner = self.optimization_runner_factory(
                 {
