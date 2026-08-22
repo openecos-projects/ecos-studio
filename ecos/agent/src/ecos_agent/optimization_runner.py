@@ -8,6 +8,7 @@ from typing import Callable, Mapping
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     OptimizationEpisodeState,
+    RoutabilityObjectiveContract,
     StageObservation,
     TerminalObservation,
 )
@@ -18,6 +19,11 @@ from ecos_agent.optimization_controller import (
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
+from ecos_agent.optimization_rules import (
+    IncumbentComparison,
+    IncumbentDecision,
+    compare_incumbent,
+)
 
 
 class OptimizationEpisodeRunnerError(ValueError):
@@ -31,6 +37,7 @@ class OptimizationEpisodeTurn:
     planning: OptimizationControlResult
     execution: OptimizationControlResult | None
     terminal_observation: TerminalObservation | None = None
+    incumbent_comparison: IncumbentComparison | None = None
 
 
 class OptimizationEpisodeRunner:
@@ -50,6 +57,7 @@ class OptimizationEpisodeRunner:
             [StageObservation, CandidateExecutionReceipt], TerminalObservation
         ]
         | None = None,
+        objective: RoutabilityObjectiveContract | None = None,
     ) -> None:
         self._controller = controller
         self._observation_supplier = observation_supplier
@@ -57,6 +65,7 @@ class OptimizationEpisodeRunner:
         self._current_values = current_values
         self._terminal_waiter = terminal_waiter
         self._terminal_observation_supplier = terminal_observation_supplier
+        self._objective = objective
 
     def run_turn(self) -> OptimizationEpisodeTurn:
         if self._controller.state not in {
@@ -96,10 +105,35 @@ class OptimizationEpisodeRunner:
             else None
         )
         completed = self._controller.complete_terminal(receipt, terminal_observation)
+        comparison = self._compare_and_promote(terminal_observation)
         return OptimizationEpisodeTurn(
-            observation, retrieval, planning, completed, terminal_observation
+            observation,
+            retrieval,
+            planning,
+            completed,
+            terminal_observation,
+            comparison,
         )
 
     def _previous_outcome(self) -> OptimizationOutcomeKind | None:
         outcomes = self._controller.ledger.replay().terminal_outcomes
         return outcomes[-1].outcome if outcomes else None
+
+    def _compare_and_promote(
+        self, candidate: TerminalObservation | None
+    ) -> IncumbentComparison | None:
+        if candidate is None or self._objective is None:
+            return None
+        incumbent = self._controller.incumbent
+        if incumbent is None:
+            if candidate.eligible_for_incumbent:
+                self._controller.promote_incumbent(candidate)
+            return None
+        comparison = compare_incumbent(
+            incumbent=incumbent,
+            candidate=candidate,
+            objective=self._objective,
+        )
+        if comparison.decision == IncumbentDecision.CANDIDATE_BETTER:
+            self._controller.promote_incumbent(candidate)
+        return comparison

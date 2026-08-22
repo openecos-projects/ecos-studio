@@ -79,6 +79,7 @@ class OptimizationPlanningContext:
 
     context_ref: ProposalContextRef
     observation_ref: ObservationReference
+    incumbent: TerminalObservation | None
     history: tuple["OptimizationHistory", ...]
     knowledge_refs: tuple[KnowledgeReference, ...]
     knowledge_chunks: tuple[str, ...]
@@ -127,13 +128,14 @@ class OptimizationExecutionAdapter(Protocol):
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "ecos.optimization_episode_state.v1"
+    schema_version: str = "ecos.optimization_episode_state.v2"
     episode_id: str
     checkpoint_id: str
     mode: OptimizationAgentMode
     state: OptimizationEpisodeState
     budget: BudgetSnapshot
     started_at: float
+    incumbent: TerminalObservation | None = None
     ledger_event_count: int = Field(ge=0)
     ledger_chain_head_sha256: str | None = None
     proposal: OptimizationProposal | None = None
@@ -165,6 +167,7 @@ class OptimizationEpisodeController:
         executor: OptimizationExecutionAdapter,
         ledger: OptimizationLedger,
         clock: Callable[[], float],
+        incumbent: TerminalObservation | None = None,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -177,6 +180,7 @@ class OptimizationEpisodeController:
         self._clock = clock
         self._started_at = self._valid_clock()
         self._budget = budget
+        self._incumbent = incumbent
         self._state = OptimizationEpisodeState.CREATED
         self._proposal: OptimizationProposal | None = None
         self._requested: RequestedKnobValue | None = None
@@ -193,6 +197,18 @@ class OptimizationEpisodeController:
     @property
     def pending_execution_id(self) -> str | None:
         return self._pending_execution_id
+
+    @property
+    def incumbent(self) -> TerminalObservation | None:
+        return self._incumbent
+
+    def promote_incumbent(self, candidate: TerminalObservation) -> None:
+        if not candidate.eligible_for_incumbent:
+            raise OptimizationEpisodeControllerError(
+                "candidate terminal observation is not eligible"
+            )
+        self._incumbent = candidate
+        self._persist()
 
     @property
     def budget(self) -> BudgetSnapshot:
@@ -364,6 +380,7 @@ class OptimizationEpisodeController:
         controller._clock = clock
         controller._started_at = snapshot.started_at
         controller._budget = snapshot.budget
+        controller._incumbent = snapshot.incumbent
         controller._state = snapshot.state
         controller._proposal = snapshot.proposal
         controller._requested = snapshot.requested
@@ -405,6 +422,11 @@ class OptimizationEpisodeController:
             input_sha256=canonical_sha256(
                 {
                     "observation_ref": observation_ref.model_dump(mode="json"),
+                    "incumbent": (
+                        self._incumbent.model_dump(mode="json")
+                        if self._incumbent is not None
+                        else None
+                    ),
                     "retrieval": retrieval.contract,
                     "budget": self._budget.model_dump(mode="json"),
                     "ledger_head": self.ledger.replay().chain_head_sha256,
@@ -428,6 +450,7 @@ class OptimizationEpisodeController:
         return OptimizationPlanningContext(
             context_ref,
             observation_ref,
+            self._incumbent,
             history,
             knowledge_refs,
             knowledge_chunks,
@@ -650,12 +673,13 @@ class OptimizationEpisodeController:
     def _persist(self) -> None:
         replay = self.ledger.replay()
         value = {
-            "schema_version": "ecos.optimization_episode_state.v1",
+            "schema_version": "ecos.optimization_episode_state.v2",
             "episode_id": self.episode_id,
             "checkpoint_id": self.checkpoint_id,
             "mode": self.mode.value,
             "state": self._state.value,
             "budget": self._budget.model_dump(mode="json"),
+            "incumbent": self._incumbent.model_dump(mode="json") if self._incumbent else None,
             "started_at": self._started_at,
             "ledger_event_count": len(replay.entries),
             "ledger_chain_head_sha256": replay.chain_head_sha256,

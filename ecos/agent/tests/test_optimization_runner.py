@@ -30,6 +30,10 @@ from ecos_agent.optimization_retrieval import (
     OptimizationRetrievalRequest,
     OptimizationRetrievalResult,
 )
+from ecos_agent.optimization_rules import (
+    IncumbentDecision,
+    freeze_routability_objective,
+)
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 
 _HASH = "sha256:" + "a" * 64
@@ -193,6 +197,21 @@ def _terminal_observation(
     )
 
 
+def _incumbent() -> TerminalObservation:
+    return TerminalObservation(
+        observation_id="terminal-baseline",
+        evidence_manifest_sha256=_HASH,
+        evidence_valid=True,
+        harden_artifacts_complete=True,
+        signoff_gates=SignoffGates.all(GateResult.PASS),
+        metrics={
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 5.0,
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 5.0,
+            ObjectiveMetric.ROUTE_WIRELENGTH: 5.0,
+        },
+    )
+
+
 def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_path: Path) -> None:
     planner = _FakePlanner()
     executor = _FakeExecutor()
@@ -205,6 +224,7 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        incumbent=_incumbent(),
     )
     runner = OptimizationEpisodeRunner(
         controller=controller,
@@ -213,6 +233,13 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         current_values=_CURRENT_VALUES,
         terminal_waiter=executor.wait_for_terminal,
         terminal_observation_supplier=_terminal_observation,
+        objective=freeze_routability_objective(
+            {
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (0.0, 0.0, 0.0),
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (0.0, 0.0, 0.0),
+                ObjectiveMetric.ROUTE_WIRELENGTH: (0.0, 0.0, 0.0),
+            }
+        ),
     )
 
     first = runner.run_turn()
@@ -231,6 +258,12 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert planner.contexts[1].history[0].terminal_observation.metrics[
         ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
     ] == 3.0
+    assert first.incumbent_comparison is not None
+    assert first.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert second.incumbent_comparison is not None
+    assert second.incumbent_comparison.decision == IncumbentDecision.NOISE_TIE
+    assert controller.incumbent is not None
+    assert controller.incumbent.observation_id == "terminal-execution-1"
     assert planner.contexts[0].context_ref.input_sha256 != planner.contexts[1].context_ref.input_sha256
     assert [outcome.outcome for outcome in controller.ledger.replay().terminal_outcomes] == [
         OptimizationOutcomeKind.DEGRADED,

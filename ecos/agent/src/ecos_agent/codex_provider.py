@@ -674,6 +674,11 @@ def _optimization_planning_payload(
     return {
         "context_ref": context.context_ref.model_dump(mode="json"),
         "observation_ref": context.observation_ref.model_dump(mode="json"),
+        "incumbent": (
+            context.incumbent.model_dump(mode="json")
+            if context.incumbent is not None
+            else None
+        ),
         "history": [
             {
                 "reference": item.reference.model_dump(mode="json"),

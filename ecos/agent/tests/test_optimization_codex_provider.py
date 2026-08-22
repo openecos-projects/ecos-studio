@@ -63,6 +63,7 @@ def _context() -> OptimizationPlanningContext:
         observation_ref=ObservationReference(
             observation_id="observation-1", sha256=HASH
         ),
+        incumbent=None,
         history=(history,),
         knowledge_refs=(
             KnowledgeReference(entity_id="strategy-1", chunk_sha256=CHUNK_HASH),
@@ -114,6 +115,7 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
     assert set(captured["user"]) == {
         "context_ref",
         "observation_ref",
+        "incumbent",
         "history",
         "knowledge_refs",
         "knowledge_chunks",
