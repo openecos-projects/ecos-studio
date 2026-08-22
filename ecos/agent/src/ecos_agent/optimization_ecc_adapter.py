@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import queue
 import re
@@ -25,6 +26,7 @@ _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 _ALLOWED_METHODS = frozenset(
     {
+        "workspace.open",
         "candidate.rerun",
         "operation.cancel",
         "operation.status",
@@ -64,6 +66,11 @@ class EccCandidateRerunAdapter:
         self._workspace_id = workspace_id
         self._site_width_dbu = site_width_dbu
 
+    def close(self) -> None:
+        close = getattr(self._rpc, "close", None)
+        if callable(close):
+            close()
+
     def start(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
         if not _ID.fullmatch(request.episode_id) or not _ID.fullmatch(
             request.intervention_id
@@ -76,7 +83,7 @@ class EccCandidateRerunAdapter:
                 "workspaceId": self._workspace_id,
                 "targetStep": "place",
                 "endStep": "Harden",
-                "candidateId": request.intervention_id,
+                "candidateId": _candidate_id(request.episode_id, request.intervention_id),
                 "patch": [patch],
                 "executionScope": "full_flow",
                 "idempotencyKey": f"{request.episode_id}.{request.intervention_id}",
@@ -141,6 +148,7 @@ class EccCandidateRerunAdapter:
         if state not in _TERMINAL_STATES:
             raise OptimizationEccAdapterError("terminal operation state is invalid")
         outcome = {
+            "succeeded": OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
             "failed": OptimizationOutcomeKind.EXECUTION_FAILED,
             "cancelled": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
         }.get(state)
@@ -272,6 +280,22 @@ class EccContentLengthRpcClient:
                 process.wait()
         self._process = None
 
+    def open_workspace(self, directory: Path) -> str:
+        """Open the parent workspace and return the runtime session id."""
+        if not directory.is_absolute() or not directory.is_dir():
+            raise OptimizationEccAdapterError("workspace directory is unavailable")
+        result = self._request(
+            "workspace.open",
+            {"directory": str(directory.resolve())},
+            timeout_seconds=self._response_timeout_seconds,
+        )
+        workspace_id = result.get("workspaceId")
+        if not isinstance(workspace_id, str) or not _ID.fullmatch(workspace_id):
+            raise OptimizationEccAdapterError("workspace session id is invalid")
+        if result.get("directory") != str(directory.resolve()):
+            raise OptimizationEccAdapterError("workspace session directory does not match")
+        return workspace_id
+
     def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method not in _ALLOWED_METHODS - {"operation.ack_step_rendered"}:
             raise OptimizationEccAdapterError("ECC RPC method is not allowed")
@@ -285,13 +309,20 @@ class EccContentLengthRpcClient:
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             remaining = deadline - time.monotonic()
-            status = self._request(
-                "operation.status",
-                {"operationId": operation_id},
-                timeout_seconds=min(self._response_timeout_seconds, remaining),
-            )
-            if status.get("state") in _TERMINAL_STATES:
-                return status
+            try:
+                status = self._request(
+                    "operation.status",
+                    {"operationId": operation_id},
+                    timeout_seconds=min(self._response_timeout_seconds, remaining),
+                )
+            except OptimizationEccAdapterError as exc:
+                # ECC may serialize status behind a long-running candidate;
+                # runtime events remain the authoritative terminal signal.
+                if "response timed out" not in str(exc):
+                    raise
+            else:
+                if status.get("state") in _TERMINAL_STATES:
+                    return status
             try:
                 event = self._events.get(
                     timeout=min(1.0, max(0.0, deadline - time.monotonic()))
@@ -463,7 +494,17 @@ def _terminal_event(
         "operation.cancelled": "cancelled",
     }
     state = states.get(event.get("type"))
-    return None if state is None else {"operationId": operation_id, "state": state}
+    if state is None:
+        return None
+    terminal: dict[str, object] = {
+        "operationId": operation_id,
+        "workspaceId": event.get("workspaceId"),
+        "state": state,
+    }
+    payload = event.get("payload")
+    if isinstance(payload, Mapping) and isinstance(payload.get("result"), Mapping):
+        terminal["result"] = dict(payload["result"])
+    return terminal
 
 
 def _safe_rpc_error_detail(error: object) -> str:
@@ -474,3 +515,8 @@ def _safe_rpc_error_detail(error: object) -> str:
     if not isinstance(detail, str) or not _SAFE_RPC_ERROR_DETAIL.fullmatch(detail):
         return ""
     return detail
+
+
+def _candidate_id(episode_id: str, intervention_id: str) -> str:
+    digest = hashlib.sha256(episode_id.encode("utf-8")).hexdigest()[:16]
+    return f"candidate-{digest}-{intervention_id}"

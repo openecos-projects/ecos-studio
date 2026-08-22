@@ -8,13 +8,17 @@ import threading
 from typing import Any
 
 from ecos_agent.provider import EcosAgentProvider
+from ecos_agent.optimization_runtime import create_optimization_runner
 
 
 class EcosAgentProtocolServer:
     def __init__(self) -> None:
         self._threads: list[threading.Thread] = []
         self._write_lock = threading.Lock()
-        self.provider = EcosAgentProvider(emit=self._emit)
+        self.provider = EcosAgentProvider(
+            emit=self._emit,
+            optimization_runner_factory=create_optimization_runner,
+        )
 
     def serve(self) -> int:
         for raw_line in sys.stdin:

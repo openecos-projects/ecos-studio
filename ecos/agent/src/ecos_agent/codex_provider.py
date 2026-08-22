@@ -671,7 +671,7 @@ def _optimization_planning_payload(
             "optimization planning context exceeds its bounds",
             failure_class="missing_input",
         )
-    return {
+    payload = {
         "context_ref": context.context_ref.model_dump(mode="json"),
         "observation_ref": context.observation_ref.model_dump(mode="json"),
         "incumbent": (
@@ -698,6 +698,13 @@ def _optimization_planning_payload(
         ],
         "knowledge_chunks": list(context.knowledge_chunks),
     }
+    if context.observation is not None:
+        payload["observation"] = context.observation.model_dump(mode="json")
+    if context.budget is not None:
+        payload["budget"] = context.budget.model_dump(mode="json")
+    if context.current_values is not None:
+        payload["current_values"] = dict(sorted(context.current_values.items()))
+    return payload
 
 
 def _optimization_proposal_output_schema() -> dict[str, Any]:

@@ -815,6 +815,8 @@ class EcosAgentProvider:
             final_phase = "error"
             self._emit(session, "error", f"Optimization episode stopped: {exc}")
         finally:
+            if runner is not None:
+                runner.close()
             if provider is not None:
                 provider.close()
             session.active_interrupt = None

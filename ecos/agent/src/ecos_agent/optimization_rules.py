@@ -194,7 +194,12 @@ def _current_value(
         ):
             raise ValueError("current target density is invalid")
     elif knob_id == OptimizationKnob.CELL_PADDING_X:
-        if type(value) is not int or not 0 <= value <= 3:
+        if (
+            type(value) not in {int, float}
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or not 0 <= float(value) <= 3
+        ):
             raise ValueError("current cell padding site count is invalid")
     elif type(value) is not bool:
         raise ValueError("current routability optimization value is invalid")

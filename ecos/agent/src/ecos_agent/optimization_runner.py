@@ -75,6 +75,16 @@ class OptimizationEpisodeRunner:
     def episode_id(self) -> str:
         return self._controller.episode_id
 
+    def close(self) -> None:
+        ledger = getattr(self._controller, "ledger", None)
+        write_manifest = getattr(ledger, "write_manifest", None)
+        if callable(write_manifest):
+            write_manifest()
+        executor = getattr(self._controller, "executor", None)
+        close = getattr(executor, "close", None)
+        if callable(close):
+            close()
+
     def run_turn(self) -> OptimizationEpisodeTurn:
         if self._controller.state not in {
             OptimizationEpisodeState.CREATED,

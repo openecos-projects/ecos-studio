@@ -108,6 +108,9 @@ class OptimizationPlanningContext:
     history: tuple["OptimizationHistory", ...]
     knowledge_refs: tuple[KnowledgeReference, ...]
     knowledge_chunks: tuple[str, ...]
+    observation: StageObservation | None = None
+    budget: BudgetSnapshot | None = None
+    current_values: Mapping[str, bool | int | float] | None = None
 
 
 @dataclass(frozen=True)
@@ -271,7 +274,7 @@ class OptimizationEpisodeController:
 
         self._state = OptimizationEpisodeState.PLANNING
         self._budget = self._consume(planning_calls=1)
-        context = self._planning_context(observation, retrieval)
+        context = self._planning_context(observation, retrieval, current_values)
         self._persist()
         try:
             proposal = self._parse_proposal(self.planner.propose(context))
@@ -444,6 +447,7 @@ class OptimizationEpisodeController:
         self,
         observation: StageObservation,
         retrieval: OptimizationRetrievalResult,
+        current_values: Mapping[str, bool | int | float],
     ) -> OptimizationPlanningContext:
         history = self._history()
         observation_ref = ObservationReference(
@@ -473,6 +477,7 @@ class OptimizationEpisodeController:
                     ),
                     "retrieval": retrieval.contract,
                     "budget": self._budget.model_dump(mode="json"),
+                    "current_values": dict(sorted(current_values.items())),
                     "ledger_head": self.ledger.replay().chain_head_sha256,
                     "history": [
                         {
@@ -498,6 +503,9 @@ class OptimizationEpisodeController:
             history,
             knowledge_refs,
             knowledge_chunks,
+            observation,
+            self._budget,
+            dict(current_values),
         )
 
     def _parse_proposal(self, payload: object) -> OptimizationProposal:

@@ -64,6 +64,7 @@ class OptimizationOutcomeKind(StrEnum):
     DEGRADED = "degraded"
     TRADEOFF = "tradeoff"
     INFEASIBLE = "infeasible"
+    EXECUTION_SUCCEEDED = "execution_succeeded"
     EXECUTION_FAILED = "execution_failed"
     EVIDENCE_INVALID = "evidence_invalid"
     TIMED_OUT_CANCELLED = "timed_out_cancelled"

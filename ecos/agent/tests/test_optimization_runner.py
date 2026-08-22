@@ -301,6 +301,8 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert controller.ledger.replay().terminal_outcomes[0].decisive_metric == (
         ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
     )
+    runner.close()
+    assert (controller.ledger.root / "optimization-ledger-manifest.v1.json").is_file()
 
 
 def test_fake_runner_quarantines_missing_terminal_receipt(tmp_path: Path) -> None:

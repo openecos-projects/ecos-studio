@@ -140,7 +140,7 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
                 "workspaceId": "workspace-1",
                 "targetStep": "place",
                 "endStep": "Harden",
-                "candidateId": "intervention-1",
+                "candidateId": "candidate-0c4c4b249d945101-intervention-1",
                 "patch": [{"knob_id": "place.target_density", "value": 0.65}],
                 "executionScope": "full_flow",
                 "idempotencyKey": "episode-1.intervention-1",
@@ -236,7 +236,9 @@ def test_adapter_waits_for_successful_terminal_without_claiming_qor_outcome() ->
     receipt = adapter.wait_for_terminal("operation-1")
 
     assert receipt == CandidateExecutionReceipt(
-        execution_id="operation-1", started=True
+        execution_id="operation-1",
+        started=True,
+        outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
     )
 
 
@@ -248,9 +250,9 @@ def test_adapter_retains_valid_candidate_manifest_evidence() -> None:
             "workspaceId": "workspace-1",
             "state": "succeeded",
             "result": {
-                "candidateRootRef": ".agent/candidates/intervention-1",
+                "candidateRootRef": ".agent/candidates/candidate-0c4c4b249d945101-intervention-1",
                 "candidateManifestRef": (
-                    ".agent/candidates/intervention-1/analysis/candidate_workspace.v1.json"
+                    ".agent/candidates/candidate-0c4c4b249d945101-intervention-1/analysis/candidate_workspace.v1.json"
                 ),
                 "candidateManifestSha256": HASH,
             },
@@ -264,6 +266,7 @@ def test_adapter_retains_valid_candidate_manifest_evidence() -> None:
 
     assert receipt.evidence is not None
     assert receipt.evidence.candidate_manifest_sha256 == HASH
+    assert receipt.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
 
 
 def test_adapter_rejects_absolute_candidate_evidence_reference() -> None:
