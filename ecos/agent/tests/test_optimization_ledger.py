@@ -134,6 +134,24 @@ def test_intervention_start_requires_distinct_parent_and_candidate_checkpoints()
         OptimizationInterventionStart.model_validate(payload)
 
 
+def test_intervention_start_requires_a_matching_action_and_requested_value() -> None:
+    payload = _start().model_dump()
+    payload["proposal_action"] = {
+        "knob_id": "place.target_density",
+        "direction": "increase",
+        "expected_effects": [
+            {"metric_id": "route_la_total_overflow", "direction": "decrease"}
+        ],
+    }
+
+    with pytest.raises(ValueError, match="paired"):
+        OptimizationInterventionStart.model_validate(payload)
+
+    payload["requested"] = {"knob_id": "place.cell_padding_x", "value": 1}
+    with pytest.raises(ValueError, match="knob"):
+        OptimizationInterventionStart.model_validate(payload)
+
+
 def test_empty_ledger_manifest_binds_the_real_empty_ledger_file(tmp_path) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
 

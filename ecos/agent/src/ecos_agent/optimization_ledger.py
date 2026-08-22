@@ -16,6 +16,7 @@ from typing import Annotated, Iterator, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.optimization_contracts import ProposalAction, RequestedKnobValue
 
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -107,6 +108,8 @@ class OptimizationInterventionStart(_LedgerModel):
     execution_contract_sha256: str
     parent_manifest_sha256: str
     environment_sha256: str
+    proposal_action: ProposalAction | None = None
+    requested: RequestedKnobValue | None = None
 
     @field_validator("intervention_id", "parent_checkpoint_id", "candidate_checkpoint_id")
     @classmethod
@@ -132,6 +135,11 @@ class OptimizationInterventionStart(_LedgerModel):
     def validate_checkpoints(self) -> "OptimizationInterventionStart":
         if self.parent_checkpoint_id == self.candidate_checkpoint_id:
             raise ValueError("parent and candidate checkpoints must be different")
+        if (self.proposal_action is None) != (self.requested is None):
+            raise ValueError("ledger proposal action and requested value must be paired")
+        if self.proposal_action is not None and self.requested is not None:
+            if self.proposal_action.knob_id != self.requested.knob_id:
+                raise ValueError("ledger proposal action and requested knob must match")
         return self
 
 

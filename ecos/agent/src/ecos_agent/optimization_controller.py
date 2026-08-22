@@ -21,11 +21,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
+    HistoryReference,
     KnowledgeReference,
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
     OptimizationProposal,
+    ProposalAction,
     ProposalContextRef,
     RequestedKnobValue,
     StageObservation,
@@ -77,8 +79,19 @@ class OptimizationPlanningContext:
 
     context_ref: ProposalContextRef
     observation_ref: ObservationReference
+    history: tuple["OptimizationHistory", ...]
     knowledge_refs: tuple[KnowledgeReference, ...]
     knowledge_chunks: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class OptimizationHistory:
+    """A bounded, typed prior intervention exposed to the next planner turn."""
+
+    reference: HistoryReference
+    outcome: OptimizationOutcomeKind
+    action: ProposalAction
+    requested: RequestedKnobValue
 
 
 @dataclass(frozen=True)
@@ -362,6 +375,7 @@ class OptimizationEpisodeController:
         observation: StageObservation,
         retrieval: OptimizationRetrievalResult,
     ) -> OptimizationPlanningContext:
+        history = self._history()
         observation_ref = ObservationReference(
             observation_id=observation.observation_id,
             sha256=canonical_sha256(observation.model_dump(mode="json")),
@@ -385,10 +399,25 @@ class OptimizationEpisodeController:
                     "retrieval": retrieval.contract,
                     "budget": self._budget.model_dump(mode="json"),
                     "ledger_head": self.ledger.replay().chain_head_sha256,
+                    "history": [
+                        {
+                            "reference": item.reference.model_dump(mode="json"),
+                            "outcome": item.outcome.value,
+                            "action": item.action.model_dump(mode="json"),
+                            "requested": item.requested.model_dump(mode="json"),
+                        }
+                        for item in history
+                    ],
                 }
             ),
         )
-        return OptimizationPlanningContext(context_ref, observation_ref, knowledge_refs, knowledge_chunks)
+        return OptimizationPlanningContext(
+            context_ref,
+            observation_ref,
+            history,
+            knowledge_refs,
+            knowledge_chunks,
+        )
 
     def _parse_proposal(self, payload: object) -> OptimizationProposal:
         if isinstance(payload, OptimizationProposal):
@@ -404,7 +433,7 @@ class OptimizationEpisodeController:
             return "context_reference"
         if tuple(proposal.observation_refs) != (context.observation_ref,):
             return "observation_reference"
-        if not self._history_refs_are_current(proposal):
+        if not self._history_refs_are_current(proposal, context):
             return "history_reference"
         proposed_knowledge = _knowledge_keys(proposal.knowledge_refs)
         available_knowledge = _knowledge_keys(context.knowledge_refs)
@@ -419,12 +448,41 @@ class OptimizationEpisodeController:
                 return "proposal_action"
         return None
 
-    def _history_refs_are_current(self, proposal: OptimizationProposal) -> bool:
-        outcomes = {
-            (outcome.intervention_id, canonical_sha256(outcome.model_dump(mode="json")))
-            for outcome in self.ledger.replay().terminal_outcomes
+    def _history_refs_are_current(
+        self,
+        proposal: OptimizationProposal,
+        context: OptimizationPlanningContext,
+    ) -> bool:
+        available = {
+            (item.reference.intervention_id, item.reference.outcome_sha256)
+            for item in context.history
         }
-        return all((item.intervention_id, item.outcome_sha256) in outcomes for item in proposal.history_refs)
+        return all((item.intervention_id, item.outcome_sha256) in available for item in proposal.history_refs)
+
+    def _history(self) -> tuple[OptimizationHistory, ...]:
+        replay = self.ledger.replay()
+        starts = {
+            entry.payload.intervention_id: entry.payload
+            for entry in replay.entries
+            if isinstance(entry.payload, OptimizationInterventionStart)
+        }
+        history = []
+        for outcome in replay.terminal_outcomes:
+            start = starts[outcome.intervention_id]
+            if start.proposal_action is None or start.requested is None:
+                continue
+            history.append(
+                OptimizationHistory(
+                    reference=HistoryReference(
+                        intervention_id=outcome.intervention_id,
+                        outcome_sha256=canonical_sha256(outcome.model_dump(mode="json")),
+                    ),
+                    outcome=outcome.outcome,
+                    action=start.proposal_action,
+                    requested=start.requested,
+                )
+            )
+        return tuple(history[-6:])
 
     def _start_once_with_retry(
         self,
@@ -469,6 +527,8 @@ class OptimizationEpisodeController:
                 {"checkpoint_id": self.checkpoint_id, "episode_id": self.episode_id}
             ),
             environment_sha256=canonical_sha256({"mode": self.mode.value}),
+            proposal_action=request.proposal.action,
+            requested=request.requested,
         )
 
     def _complete(
