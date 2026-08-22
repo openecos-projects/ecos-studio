@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError
+from ecos_agent.codex_provider import (
+    CodexAppServerProposalProvider,
+    CodexProviderError,
+    create_required_codex_provider,
+)
 from ecos_agent.optimization_contracts import (
     ExpectedEffectDirection,
     HistoryReference,
@@ -178,3 +182,23 @@ def test_optimization_planner_exposes_one_consumable_turn_evidence(
     assert evidence.response_sha256 == HASH
     assert evidence.diagnostics_sha256 is None
     assert provider.consume_planning_evidence() is None
+
+
+def test_required_codex_provider_forwards_episode_diagnostics_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    def initialize(self: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(CodexAppServerProposalProvider, "__init__", initialize)
+    diagnostics_path = tmp_path / "codex-rpc-diagnostics.v1.jsonl"
+
+    create_required_codex_provider(
+        cwd=tmp_path,
+        runtime_workspace_roots=(tmp_path,),
+        diagnostics_path=diagnostics_path,
+    )
+
+    assert captured["diagnostics_path"] == diagnostics_path

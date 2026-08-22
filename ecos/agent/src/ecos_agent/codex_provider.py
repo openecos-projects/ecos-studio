@@ -608,12 +608,14 @@ def create_required_codex_provider(
     runtime_workspace_roots: Iterable[str | Path] | None = None,
     progress_callback: Callable[[str], None] | None = None,
     web_search_enabled: bool | None = None,
+    diagnostics_path: Path | None = None,
 ) -> CodexAppServerProposalProvider:
     return CodexAppServerProposalProvider(
         cwd=cwd,
         runtime_workspace_roots=runtime_workspace_roots,
         progress_callback=progress_callback,
         web_search_enabled=web_search_enabled,
+        diagnostics_path=diagnostics_path,
     )
 
 
