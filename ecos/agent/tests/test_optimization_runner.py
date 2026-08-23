@@ -306,6 +306,7 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert second.incumbent_comparison.decision == IncumbentDecision.NOISE_TIE
     assert controller.incumbent is not None
     assert controller.incumbent.observation_id == "terminal-execution-1"
+    assert controller.incumbent_candidate_root_ref == ".agent/candidates/execution-1"
     assert planner.contexts[0].context_ref.input_sha256 != planner.contexts[1].context_ref.input_sha256
     assert [outcome.outcome for outcome in controller.ledger.replay().terminal_outcomes] == [
         OptimizationOutcomeKind.DEGRADED,

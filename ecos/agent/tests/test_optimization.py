@@ -29,6 +29,7 @@ from ecos_agent.optimization_rules import (
     compare_incumbent,
     freeze_routability_objective,
     next_coordinate_selection,
+    legal_actions,
 )
 
 
@@ -328,6 +329,25 @@ def test_coordinate_search_rejects_missing_or_invalid_current_values() -> None:
             current_values={"place.target_density": 0.5},
             attempted=(),
         )
+
+
+def test_legal_actions_exclude_only_noop_directions() -> None:
+    actions = legal_actions(
+        current_values={
+            "place.target_density": 0.2,
+            "place.cell_padding_x": 1.5,
+            "place.routability_opt": True,
+        },
+        attempted=(),
+    )
+
+    assert [(item.knob_id.value, item.direction.value) for item in actions] == [
+        ("place.target_density", "decrease"),
+        ("place.target_density", "increase"),
+        ("place.cell_padding_x", "decrease"),
+        ("place.cell_padding_x", "increase"),
+        ("place.routability_opt", "disable"),
+    ]
 
     with pytest.raises(ValueError, match="site count"):
         next_coordinate_selection(

@@ -459,6 +459,8 @@ function readOptimizationPayload(
   ) {
     return null
   }
+  const action = readOptimizationAction(record.action)
+  const requested = readOptimizationRequested(record.requested)
   return {
     schema_version: record.schema_version,
     episode_id: record.episode_id,
@@ -479,7 +481,49 @@ function readOptimizationPayload(
     ...(typeof record.decisive_metric === 'string' || record.decisive_metric === null
       ? { decisive_metric: record.decisive_metric as string | null }
       : {}),
+    ...(typeof record.proposal_decision === 'string' || record.proposal_decision === null
+      ? { proposal_decision: record.proposal_decision as string | null }
+      : {}),
+    ...(typeof record.proposal_reason === 'string' || record.proposal_reason === null
+      ? { proposal_reason: record.proposal_reason as string | null }
+      : {}),
+    ...(typeof record.rejection_reason === 'string' || record.rejection_reason === null
+      ? { rejection_reason: record.rejection_reason as string | null }
+      : {}),
+    ...(action || record.action === null ? { action } : {}),
+    ...(requested || record.requested === null ? { requested } : {}),
+    ...(typeof record.incumbent_candidate_root_ref === 'string' ||
+    record.incumbent_candidate_root_ref === null
+      ? {
+          incumbent_candidate_root_ref: record.incumbent_candidate_root_ref as
+            | string
+            | null,
+        }
+      : {}),
   }
+}
+
+function readOptimizationAction(
+  value: unknown,
+): { direction: string; knob_id: string } | null {
+  const record = readRecord(value)
+  if (typeof record.direction !== 'string' || typeof record.knob_id !== 'string') {
+    return null
+  }
+  return { direction: record.direction, knob_id: record.knob_id }
+}
+
+function readOptimizationRequested(
+  value: unknown,
+): { knob_id: string; value: boolean | number } | null {
+  const record = readRecord(value)
+  if (
+    typeof record.knob_id !== 'string' ||
+    (typeof record.value !== 'boolean' && typeof record.value !== 'number')
+  ) {
+    return null
+  }
+  return { knob_id: record.knob_id, value: record.value }
 }
 
 function readWorkspaceSignoffContract(

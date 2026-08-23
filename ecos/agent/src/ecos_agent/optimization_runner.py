@@ -75,6 +75,10 @@ class OptimizationEpisodeRunner:
     def episode_id(self) -> str:
         return self._controller.episode_id
 
+    @property
+    def incumbent_candidate_root_ref(self) -> str | None:
+        return self._controller.incumbent_candidate_root_ref
+
     def close(self) -> None:
         ledger = getattr(self._controller, "ledger", None)
         write_manifest = getattr(ledger, "write_manifest", None)
@@ -131,7 +135,7 @@ class OptimizationEpisodeRunner:
             incumbent_decision=comparison.decision.value if comparison else None,
             decisive_metric=comparison.decisive_metric if comparison else None,
         )
-        self._promote(terminal_observation, comparison)
+        self._promote(terminal_observation, comparison, receipt)
         return OptimizationEpisodeTurn(
             observation,
             retrieval,
@@ -183,6 +187,7 @@ class OptimizationEpisodeRunner:
         self,
         candidate: TerminalObservation | None,
         comparison: IncumbentComparison | None,
+        receipt: CandidateExecutionReceipt,
     ) -> None:
         if (
             candidate is not None
@@ -191,7 +196,7 @@ class OptimizationEpisodeRunner:
             and comparison.decision
             in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
         ):
-            self._controller.promote_incumbent(candidate)
+            self._controller.promote_incumbent(candidate, receipt.evidence)
 
     def _indeterminate_turn(
         self,

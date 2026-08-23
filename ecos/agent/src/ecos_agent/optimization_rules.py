@@ -10,6 +10,7 @@ from typing import Iterable, Mapping, Sequence
 from ecos_agent.optimization_contracts import (
     MetricNoiseBand,
     ObjectiveMetric,
+    LegalAction,
     OptimizationKnob,
     ProposalAction,
     RequestedKnobValue,
@@ -64,6 +65,31 @@ CONTROLLED_COORDINATE_ORDER = (
     CoordinateAction(OptimizationKnob.CELL_PADDING_X, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.ROUTABILITY_OPT, CoordinateDirection.TOGGLE),
 )
+
+
+def legal_actions(
+    *,
+    current_values: Mapping[str, bool | int | float],
+    attempted: Iterable[RequestedKnobValue],
+    known_aliases: Iterable[RequestedKnobValue] = (),
+) -> tuple[LegalAction, ...]:
+    """Return every direction that still maps to a concrete local value."""
+    attempted_values = tuple(attempted)
+    aliases = tuple(known_aliases)
+    actions = []
+    for coordinate in CONTROLLED_COORDINATE_ORDER:
+        current = _current_value(coordinate.knob_id, current_values)
+        if _next_requested_value(coordinate, current_values, attempted_values, aliases) is None:
+            continue
+        direction = (
+            StrategyDirection.ENABLE
+            if coordinate.direction == CoordinateDirection.TOGGLE and not current
+            else StrategyDirection.DISABLE
+            if coordinate.direction == CoordinateDirection.TOGGLE
+            else StrategyDirection(coordinate.direction.value)
+        )
+        actions.append(LegalAction(knob_id=coordinate.knob_id, direction=direction))
+    return tuple(actions)
 
 
 def freeze_routability_objective(

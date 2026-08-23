@@ -9,7 +9,10 @@ import shutil
 from pathlib import Path
 from typing import Any, Mapping
 
+from pydantic import ValidationError
+
 from ecos_agent.optimization_controller import (
+    CandidateExecutionEvidence,
     OptimizationAgentMode,
     OptimizationEpisodeController,
 )
@@ -33,8 +36,10 @@ from ecos_agent.optimization_retrieval import (
 )
 from ecos_agent.optimization_rules import freeze_routability_objective
 from ecos_agent.optimization_contracts import (
+    BaselineReplayEvidence,
     BudgetSnapshot,
     EpisodeBudget,
+    ObjectiveMetric,
 )
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 
@@ -63,12 +68,6 @@ def create_optimization_runner(
     workspace = _workspace(context.get("workspace"))
     episode_id = _text(context.get("episode_id"), "episode_id")
     checkpoint_id = "place"
-    baseline_runtime = _place_to_harden_runtime_seconds(workspace)
-    budget = BudgetSnapshot(
-        budget=EpisodeBudget.from_default_reruns(
-            (baseline_runtime, baseline_runtime, baseline_runtime)
-        )
-    )
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
     current_values = _current_values(workspace, site_width_dbu)
@@ -80,6 +79,12 @@ def create_optimization_runner(
             "place_dreamplace/analysis/qor_metrics.json",
         ),
     ).manifest_sha256
+    baseline_replays = _load_baseline_replays(workspace, parent_manifest)
+    budget = BudgetSnapshot(
+        budget=EpisodeBudget.from_default_reruns(
+            tuple(replay.runtime_seconds for replay in baseline_replays.replays)
+        )
+    )
     ledger_root = workspace / ".agent" / "optimization" / episode_id
     rpc = EccContentLengthRpcClient(_ecc_executable())
     ledger = _ledger(ledger_root)
@@ -90,8 +95,11 @@ def create_optimization_runner(
             workspace_id=workspace_id,
             site_width_dbu=site_width_dbu,
         )
-        state_path = ledger_root / "optimization-episode-state.v3.json"
-        legacy_state_path = ledger_root / "optimization-episode-state.v2.json"
+        state_path = ledger_root / "optimization-episode-state.v4.json"
+        legacy_state_paths = (
+            ledger_root / "optimization-episode-state.v2.json",
+            ledger_root / "optimization-episode-state.v3.json",
+        )
         if state_path.is_file():
             controller = OptimizationEpisodeController.recover(
                 planner=planner,
@@ -99,9 +107,9 @@ def create_optimization_runner(
                 ledger=ledger,
                 clock=_monotonic,
             )
-        elif legacy_state_path.is_file():
+        elif any(path.is_file() for path in legacy_state_paths):
             raise OptimizationRuntimeError(
-                "pre-provider-audit episode cannot be recovered; start a new optimization episode"
+                "pre-policy episode cannot be recovered; start a new optimization episode"
             )
         elif ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
             raise OptimizationRuntimeError("optimization episode state is missing")
@@ -115,6 +123,7 @@ def create_optimization_runner(
                 executor=executor,
                 ledger=ledger,
                 clock=_monotonic,
+                incumbent=terminal_observation,
                 parent_manifest_sha256=parent_manifest,
             )
     except Exception:
@@ -159,9 +168,46 @@ def create_optimization_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=freeze_routability_objective(
-            {metric: (value, value, value) for metric, value in terminal_observation.metrics.items()}
+            {
+                metric: tuple(
+                    replay.terminal_observation.metrics[metric]
+                    for replay in baseline_replays.replays
+                )
+                for metric in ObjectiveMetric
+            }
         ),
     )
+
+
+def _load_baseline_replays(
+    workspace: Path, parent_manifest_sha256: str
+) -> BaselineReplayEvidence:
+    path = workspace / ".agent" / "optimization" / "baseline-replays.v1.json"
+    if not path.is_file():
+        raise OptimizationRuntimeError("baseline replay evidence is unavailable")
+    try:
+        evidence = BaselineReplayEvidence.model_validate_json(path.read_bytes())
+    except (OSError, ValidationError) as exc:
+        raise OptimizationRuntimeError("baseline replay evidence is invalid") from exc
+    if evidence.parent_manifest_sha256 != parent_manifest_sha256:
+        raise OptimizationRuntimeError("baseline replay evidence does not match the workspace")
+    try:
+        observed = tuple(
+            build_candidate_terminal_observation(
+                workspace,
+                CandidateExecutionEvidence(
+                    replay.candidate_root_ref,
+                    replay.candidate_manifest_ref,
+                    replay.candidate_manifest_sha256,
+                ),
+            )
+            for replay in evidence.replays
+        )
+    except (OSError, ValueError) as exc:
+        raise OptimizationRuntimeError("baseline replay candidate evidence is invalid") from exc
+    if observed != tuple(replay.terminal_observation for replay in evidence.replays):
+        raise OptimizationRuntimeError("baseline replay terminal evidence does not match candidates")
+    return evidence
 
 
 def _workspace(value: object) -> Path:

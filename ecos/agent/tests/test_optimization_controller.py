@@ -32,6 +32,10 @@ from ecos_agent.optimization_ledger import (
     OptimizationPlanningAudit,
     OptimizationPlanningProviderEvidenceAudit,
 )
+from ecos_agent.optimization_decision_audit import (
+    OptimizationDecisionAudit,
+    OptimizationDecisionAuditIntegrityError,
+)
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
     KnowledgeChannelResult,
@@ -350,7 +354,7 @@ def test_budget_exhaustion_stops_without_calling_fake_codex(tmp_path: Path) -> N
     ("decision", "expected_state"),
     [
         (OptimizationDecision.CONTINUE, OptimizationEpisodeState.PLANNING),
-        (OptimizationDecision.STOP, OptimizationEpisodeState.STOPPED),
+        (OptimizationDecision.STOP, OptimizationEpisodeState.PLANNING),
         (OptimizationDecision.ESCALATE, OptimizationEpisodeState.ESCALATED),
     ],
 )
@@ -373,6 +377,64 @@ def test_non_action_decisions_never_reach_fake_ecc(
     assert result.state == expected_state
     assert result.proposal is not None
     assert ecc.start_calls == []
+
+
+def test_controller_defers_early_stop_then_uses_local_fallback(tmp_path: Path) -> None:
+    def stop(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal.update(
+            decision=OptimizationDecision.STOP,
+            reason_code=ProposalReason.NO_LEGAL_CANDIDATE,
+            rationale_summary="No evidence-backed action remains.",
+        )
+        proposal.pop("action")
+        return proposal
+
+    controller = _controller(tmp_path, _FakeCodex(stop, stop), _FakeEcc(_started()))
+
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert first.state == OptimizationEpisodeState.PLANNING
+    assert first.rejection_reason == "minimum_candidates_not_met"
+    assert second.state == OptimizationEpisodeState.AWAITING_EXECUTION
+    assert second.requested is not None
+    assert second.rejection_reason == "controlled_coordinate_fallback"
+
+
+def test_stop_is_accepted_after_minimum_candidate_executions(tmp_path: Path) -> None:
+    def stop(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal.update(
+            decision=OptimizationDecision.STOP,
+            reason_code=ProposalReason.OBSERVATION,
+            rationale_summary="The bounded search is complete.",
+        )
+        proposal.pop("action")
+        return proposal
+
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(stop),
+        _FakeEcc(),
+        budget=_budget(candidates=2),
+    )
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.STOPPED
+
+
+def test_planning_decisions_are_hash_bound_and_replayable(tmp_path: Path) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    entries = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert len(entries) == 1
+    assert entries[0].proposal == result.proposal
+    assert entries[0].validation_result == "accepted"
+    assert entries[0].requested == result.requested
 
 
 def test_missing_fake_ecc_receipt_is_charged_and_quarantined(tmp_path: Path) -> None:
@@ -494,10 +556,33 @@ def test_recovery_rejects_a_pre_provider_audit_episode(tmp_path: Path) -> None:
     controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
     controller.state_path.rename(controller.state_path.with_name("optimization-episode-state.v2.json"))
 
-    with pytest.raises(OptimizationEpisodeControllerError, match="pre-provider-audit"):
+    with pytest.raises(OptimizationEpisodeControllerError, match="pre-policy"):
         OptimizationEpisodeController.recover(
             planner=_FakeCodex(_proposal),
             executor=_FakeEcc(),
             ledger=controller.ledger,
             clock=_Clock(),
         )
+
+
+def test_decision_audit_rejects_malformed_hash_and_tampered_record(tmp_path: Path) -> None:
+    audit = OptimizationDecisionAudit(tmp_path / "episode")
+    with pytest.raises(ValueError, match="hash is invalid"):
+        audit.append(
+            planning_entry_sha256="sha256:" + "z" * 64,
+            proposal=None,
+            validation_result="rejected",
+            rejection_reason="proposal_schema",
+            requested=None,
+            state=OptimizationEpisodeState.PLANNING,
+        )
+
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    path = OptimizationDecisionAudit(tmp_path / "episode").audit_path
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["rejection_reason"] = "tampered"
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    with pytest.raises(OptimizationDecisionAuditIntegrityError, match="record 1 is invalid"):
+        OptimizationDecisionAudit(tmp_path / "episode").verify()

@@ -283,11 +283,17 @@ export interface DesktopAgentChoice {
 }
 
 export interface DesktopAgentOptimizationPayload {
+  action?: { direction: string; knob_id: string } | null
   decisive_metric?: string | null
   episode_id: string
   execution_state?: string | null
+  incumbent_candidate_root_ref?: string | null
   incumbent_decision?: string | null
   planning_state?: string | null
+  proposal_decision?: string | null
+  proposal_reason?: string | null
+  rejection_reason?: string | null
+  requested?: { knob_id: string; value: boolean | number } | null
   schema_version: string
   state?: string
   turn_count?: number

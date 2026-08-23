@@ -831,6 +831,30 @@ class EcosAgentProvider:
                             if turn.incumbent_comparison and turn.incumbent_comparison.decisive_metric
                             else None
                         ),
+                        "proposal_decision": (
+                            turn.planning.proposal.decision.value
+                            if turn.planning.proposal
+                            else None
+                        ),
+                        "proposal_reason": (
+                            turn.planning.proposal.reason_code.value
+                            if turn.planning.proposal
+                            else None
+                        ),
+                        "rejection_reason": turn.planning.rejection_reason,
+                        "action": (
+                            turn.planning.proposal.action.model_dump(mode="json")
+                            if turn.planning.proposal and turn.planning.proposal.action
+                            else None
+                        ),
+                        "requested": (
+                            turn.planning.requested.model_dump(mode="json")
+                            if turn.planning.requested
+                            else None
+                        ),
+                        "incumbent_candidate_root_ref": (
+                            runner.incumbent_candidate_root_ref
+                        ),
                     },
                 )
                 if runner.state not in {

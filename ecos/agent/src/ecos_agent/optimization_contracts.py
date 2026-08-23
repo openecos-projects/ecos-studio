@@ -100,6 +100,26 @@ class _ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LegalAction(_ContractModel):
+    knob_id: OptimizationKnob
+    direction: StrategyDirection
+
+    @model_validator(mode="after")
+    def validate_direction(self) -> "LegalAction":
+        numeric = {OptimizationKnob.TARGET_DENSITY, OptimizationKnob.CELL_PADDING_X}
+        if self.knob_id in numeric and self.direction not in {
+            StrategyDirection.INCREASE,
+            StrategyDirection.DECREASE,
+        }:
+            raise ValueError("numeric legal actions require increase or decrease")
+        if self.knob_id == OptimizationKnob.ROUTABILITY_OPT and self.direction not in {
+            StrategyDirection.ENABLE,
+            StrategyDirection.DISABLE,
+        }:
+            raise ValueError("boolean legal actions require enable or disable")
+        return self
+
+
 class PlanningProviderEvidence(_ContractModel):
     """Opaque proof that a Codex planner turn produced one response."""
 
@@ -375,9 +395,11 @@ class KnobApplicationReceipt(_ContractModel):
 
 
 class EpisodeBudget(_ContractModel):
-    schema_version: Literal["ecos.optimization_budget.v1"] = "ecos.optimization_budget.v1"
+    schema_version: Literal["ecos.optimization_budget.v2"] = "ecos.optimization_budget.v2"
     candidate_execution_limit: Literal[6] = 6
     planning_call_limit: Literal[18] = 18
+    minimum_candidate_executions: Literal[2] = 2
+    max_planning_only_turns: Literal[2] = 2
     default_place_to_harden_seconds: tuple[float, float, float]
     wall_time_limit_seconds: float
 
@@ -559,6 +581,66 @@ class TerminalObservation(_ContractModel):
     @property
     def eligible_for_incumbent(self) -> bool:
         return self.evidence_valid and self.harden_artifacts_complete and self.signoff_gates.passed
+
+
+class BaselineReplay(_ContractModel):
+    replay_id: str
+    candidate_root_ref: str
+    candidate_manifest_ref: str
+    candidate_manifest_sha256: str
+    runtime_seconds: float = Field(gt=0)
+    terminal_observation: TerminalObservation
+
+    @field_validator("replay_id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _ID.fullmatch(value):
+            raise ValueError("baseline replay id is invalid")
+        return value
+
+    @field_validator("candidate_root_ref", "candidate_manifest_ref")
+    @classmethod
+    def validate_reference(cls, value: str) -> str:
+        if not value or "\\" in value or value.startswith("/") or "." in value.split("/"):
+            raise ValueError("baseline replay reference is invalid")
+        if ".." in value.split("/"):
+            raise ValueError("baseline replay reference is invalid")
+        return value
+
+    @field_validator("candidate_manifest_sha256")
+    @classmethod
+    def validate_manifest_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("baseline replay manifest hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_terminal_evidence(self) -> "BaselineReplay":
+        if not self.terminal_observation.eligible_for_incumbent:
+            raise ValueError("baseline replay terminal evidence is ineligible")
+        return self
+
+
+class BaselineReplayEvidence(_ContractModel):
+    schema_version: Literal["ecos.optimization_baseline_replays.v1"] = (
+        "ecos.optimization_baseline_replays.v1"
+    )
+    parent_manifest_sha256: str
+    replays: tuple[BaselineReplay, BaselineReplay, BaselineReplay]
+    artifact_sha256: str
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> "BaselineReplayEvidence":
+        if not _SHA256.fullmatch(self.parent_manifest_sha256):
+            raise ValueError("baseline replay parent manifest hash is invalid")
+        if len({replay.replay_id for replay in self.replays}) != 3:
+            raise ValueError("baseline replay ids must be unique")
+        if not _SHA256.fullmatch(self.artifact_sha256):
+            raise ValueError("baseline replay artifact hash is invalid")
+        expected = canonical_sha256(self.model_dump(mode="json", exclude={"artifact_sha256"}))
+        if self.artifact_sha256 != expected:
+            raise ValueError("baseline replay artifact hash does not match its content")
+        return self
 
 
 class MetricNoiseBand(_ContractModel):

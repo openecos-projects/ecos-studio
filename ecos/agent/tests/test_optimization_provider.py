@@ -32,6 +32,29 @@ class _FailingRunner(OptimizationEpisodeRunner):
         raise RuntimeError("test stop")
 
 
+class _CompletedRunner(_FailingRunner):
+    def run_turn(self):
+        self._controller.state = OptimizationEpisodeState.STOPPED
+        return SimpleNamespace(
+            planning=SimpleNamespace(
+                state=OptimizationEpisodeState.STOPPED,
+                proposal=SimpleNamespace(
+                    decision=SimpleNamespace(value="stop"),
+                    reason_code=SimpleNamespace(value="observation"),
+                    action=None,
+                ),
+                requested=None,
+                rejection_reason=None,
+            ),
+            execution=None,
+            incumbent_comparison=None,
+        )
+
+    @property
+    def incumbent_candidate_root_ref(self) -> str:
+        return ".agent/candidates/candidate-winner"
+
+
 def test_gui_optimization_authorization_holds_and_closes_codex_provider(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -96,3 +119,29 @@ def test_gui_optimization_fails_closed_without_runner_factory(tmp_path: Path) ->
     assert session.optimization_phase == "unavailable"
     assert session.phase == "operation"
     assert any(event["type"] == "error" and "not configured" in str(event["text"]) for event in events)
+
+
+def test_gui_optimization_reports_decision_and_winner_evidence(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda _context, _planner: _CompletedRunner(),
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    provider.send_message({"sessionId": session_id, "message": "4"})
+    provider.send_message({"sessionId": session_id, "message": "1"})
+    deadline = time.monotonic() + 2
+    while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    progress = next(event["optimization"] for event in events if event["type"] == "optimization")
+    assert progress["proposal_decision"] == "stop"
+    assert progress["proposal_reason"] == "observation"
+    assert progress["rejection_reason"] is None
+    assert progress["incumbent_candidate_root_ref"] == ".agent/candidates/candidate-winner"

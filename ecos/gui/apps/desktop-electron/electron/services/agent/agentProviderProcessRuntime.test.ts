@@ -210,6 +210,56 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('forwards optimization decision and incumbent evidence fields', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          optimization: {
+            action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
+            episode_id: 'episode-1',
+            incumbent_candidate_root_ref: '.agent/candidates/winner',
+            proposal_decision: 'propose',
+            proposal_reason: 'observation',
+            rejection_reason: null,
+            requested: { knob_id: 'place.cell_padding_x', value: 3 },
+            schema_version: 'ecos.optimization_progress.v1',
+          },
+          type: 'optimization',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        optimization: expect.objectContaining({
+          action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
+          incumbent_candidate_root_ref: '.agent/candidates/winner',
+          proposal_decision: 'propose',
+          proposal_reason: 'observation',
+          rejection_reason: null,
+          requested: { knob_id: 'place.cell_padding_x', value: 3 },
+        }),
+      }),
+    )
+  })
+
   it('forwards structured choice, status, and streaming fields', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

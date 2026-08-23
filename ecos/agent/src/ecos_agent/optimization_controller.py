@@ -21,9 +21,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
+    ExpectedEffect,
+    ExpectedEffectDirection,
     HistoryReference,
     ObjectiveMetric,
     KnowledgeReference,
+    LegalAction,
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
@@ -31,9 +34,15 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEvidence,
     ProposalAction,
     ProposalContextRef,
+    ProposalReason,
     RequestedKnobValue,
     StageObservation,
     TerminalObservation,
+)
+from ecos_agent.optimization_decision_audit import (
+    DecisionValidationResult,
+    OptimizationDecisionAudit,
+    OptimizationDecisionAuditReplay,
 )
 from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
@@ -48,12 +57,15 @@ from ecos_agent.optimization_ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
-from ecos_agent.optimization_rules import select_requested_value
+from ecos_agent.optimization_rules import legal_actions, select_requested_value
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v3.json"
-_LEGACY_STATE_FILE = "optimization-episode-state.v2.json"
+_STATE_FILE = "optimization-episode-state.v4.json"
+_LEGACY_STATE_FILES = (
+    "optimization-episode-state.v2.json",
+    "optimization-episode-state.v3.json",
+)
 
 
 class OptimizationEpisodeControllerError(ValueError):
@@ -118,6 +130,7 @@ class OptimizationPlanningContext:
     observation: StageObservation | None = None
     budget: BudgetSnapshot | None = None
     current_values: Mapping[str, bool | int | float] | None = None
+    legal_actions: tuple[LegalAction, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -162,6 +175,7 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         payload["budget"] = context.budget.model_dump(mode="json")
     if context.current_values is not None:
         payload["current_values"] = dict(sorted(context.current_values.items()))
+    payload["legal_actions"] = [item.model_dump(mode="json") for item in context.legal_actions]
     return payload
 
 
@@ -197,7 +211,7 @@ class OptimizationExecutionAdapter(Protocol):
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "ecos.optimization_episode_state.v3"
+    schema_version: str = "ecos.optimization_episode_state.v4"
     episode_id: str
     checkpoint_id: str
     mode: OptimizationAgentMode
@@ -212,6 +226,12 @@ class _PersistedEpisodeState(BaseModel):
     planning_audit_chain_head_sha256: str | None = None
     planning_provider_audit_event_count: int = Field(default=0, ge=0)
     planning_provider_audit_chain_head_sha256: str | None = None
+    decision_audit_event_count: int = Field(default=0, ge=0)
+    decision_audit_chain_head_sha256: str | None = None
+    planning_only_turns: int = Field(default=0, ge=0)
+    incumbent_candidate_root_ref: str | None = None
+    incumbent_candidate_manifest_ref: str | None = None
+    incumbent_candidate_manifest_sha256: str | None = None
     proposal: OptimizationProposal | None = None
     requested: RequestedKnobValue | None = None
     attempted_requests: tuple[RequestedKnobValue, ...] = ()
@@ -258,10 +278,14 @@ class OptimizationEpisodeController:
         self.ledger = ledger
         self._planning_audit = OptimizationPlanningAudit(ledger.root)
         self._planning_provider_audit = OptimizationPlanningProviderEvidenceAudit(ledger.root)
+        self._decision_audit = OptimizationDecisionAudit(ledger.root)
         self._clock = clock
         self._started_at = self._valid_clock()
         self._budget = budget
         self._incumbent = incumbent
+        self._incumbent_candidate_root_ref: str | None = None
+        self._incumbent_candidate_manifest_ref: str | None = None
+        self._incumbent_candidate_manifest_sha256: str | None = None
         if parent_manifest_sha256 is not None and not _SHA256.fullmatch(parent_manifest_sha256):
             raise OptimizationEpisodeControllerError("parent manifest hash is invalid")
         self._parent_manifest_sha256 = parent_manifest_sha256
@@ -272,6 +296,7 @@ class OptimizationEpisodeController:
         self._pending_intervention_id: str | None = None
         self._pending_execution_id: str | None = None
         self._cancel_requested = False
+        self._planning_only_turns = 0
         self._persist()
 
     @property
@@ -286,12 +311,25 @@ class OptimizationEpisodeController:
     def incumbent(self) -> TerminalObservation | None:
         return self._incumbent
 
-    def promote_incumbent(self, candidate: TerminalObservation) -> None:
+    @property
+    def incumbent_candidate_root_ref(self) -> str | None:
+        return self._incumbent_candidate_root_ref
+
+    def promote_incumbent(
+        self,
+        candidate: TerminalObservation,
+        evidence: CandidateExecutionEvidence | None = None,
+    ) -> None:
         if not candidate.eligible_for_incumbent:
             raise OptimizationEpisodeControllerError(
                 "candidate terminal observation is not eligible"
             )
         self._incumbent = candidate
+        self._incumbent_candidate_root_ref = evidence.candidate_root_ref if evidence else None
+        self._incumbent_candidate_manifest_ref = evidence.candidate_manifest_ref if evidence else None
+        self._incumbent_candidate_manifest_sha256 = (
+            evidence.candidate_manifest_sha256 if evidence else None
+        )
         self._persist()
 
     @property
@@ -335,22 +373,44 @@ class OptimizationEpisodeController:
             proposal = self._parse_proposal(self.planner.propose(context))
         except (TypeError, ValidationError, ValueError):
             self._record_planning_provider_evidence(planning_entry)
-            return self._reject("proposal_schema")
+            return self._defer_or_fallback(
+                planning_entry,
+                context,
+                proposal=None,
+                reason="proposal_schema",
+            )
         self._record_planning_provider_evidence(planning_entry)
 
         rejection_reason = self._validate_proposal(proposal, context)
         if rejection_reason is not None:
-            return self._reject(rejection_reason)
+            return self._defer_or_fallback(
+                planning_entry,
+                context,
+                proposal=proposal,
+                reason=rejection_reason,
+            )
         if proposal.decision != OptimizationDecision.PROPOSE:
-            self._proposal = None
-            self._requested = None
-            self._state = {
-                OptimizationDecision.CONTINUE: OptimizationEpisodeState.PLANNING,
-                OptimizationDecision.STOP: OptimizationEpisodeState.STOPPED,
-                OptimizationDecision.ESCALATE: OptimizationEpisodeState.ESCALATED,
-            }[proposal.decision]
-            self._persist()
-            return OptimizationControlResult(self._state, proposal)
+            if proposal.decision == OptimizationDecision.ESCALATE:
+                self._state = OptimizationEpisodeState.ESCALATED
+                return self._finish_planning(planning_entry, proposal, "accepted", None)
+            if proposal.decision == OptimizationDecision.STOP and (
+                self._budget.consumed_candidates
+                >= self._budget.budget.minimum_candidate_executions
+                or not context.legal_actions
+            ):
+                self._state = OptimizationEpisodeState.STOPPED
+                return self._finish_planning(planning_entry, proposal, "accepted", None)
+            reason = (
+                "minimum_candidates_not_met"
+                if proposal.decision == OptimizationDecision.STOP
+                else "planner_continue"
+            )
+            return self._defer_or_fallback(
+                planning_entry,
+                context,
+                proposal=proposal,
+                reason=reason,
+            )
         assert proposal.action is not None
         requested = select_requested_value(
             proposal.action,
@@ -358,12 +418,17 @@ class OptimizationEpisodeController:
             attempted=self._attempted_requests(),
         )
         if requested is None:
-            return self._reject("no_legal_candidate")
+            return self._defer_or_fallback(
+                planning_entry,
+                context,
+                proposal=proposal,
+                reason="no_legal_candidate",
+            )
         self._proposal = proposal
         self._requested = requested
+        self._planning_only_turns = 0
         self._state = OptimizationEpisodeState.AWAITING_EXECUTION
-        self._persist()
-        return self._result()
+        return self._finish_planning(planning_entry, proposal, "accepted", None)
 
     def execute(self) -> OptimizationControlResult:
         self._refresh_budget()
@@ -467,9 +532,11 @@ class OptimizationEpisodeController:
         clock: Callable[[], float],
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
-        if not path.is_file() and (ledger.root / _LEGACY_STATE_FILE).is_file():
+        if not path.is_file() and any(
+            (ledger.root / name).is_file() for name in _LEGACY_STATE_FILES
+        ):
             raise OptimizationEpisodeControllerError(
-                "pre-provider-audit episode cannot be recovered; start a new optimization episode"
+                "pre-policy episode cannot be recovered; start a new optimization episode"
             )
         try:
             snapshot = _PersistedEpisodeState.model_validate_json(path.read_bytes())
@@ -480,11 +547,14 @@ class OptimizationEpisodeController:
         audit_replay = planning_audit.verify()
         planning_provider_audit = OptimizationPlanningProviderEvidenceAudit(ledger.root)
         provider_audit_replay = planning_provider_audit.verify()
+        decision_audit = OptimizationDecisionAudit(ledger.root)
+        decision_audit_replay = decision_audit.verify()
         cls._verify_snapshot_trace(
             snapshot,
             replay,
             audit_replay,
             provider_audit_replay,
+            decision_audit_replay,
         )
 
         controller = cls.__new__(cls)
@@ -501,6 +571,7 @@ class OptimizationEpisodeController:
         controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
         controller._planning_audit = planning_audit
         controller._planning_provider_audit = planning_provider_audit
+        controller._decision_audit = decision_audit
         controller._state = snapshot.state
         controller._proposal = snapshot.proposal
         controller._requested = snapshot.requested
@@ -508,6 +579,12 @@ class OptimizationEpisodeController:
         controller._pending_intervention_id = snapshot.pending_intervention_id
         controller._pending_execution_id = snapshot.pending_execution_id
         controller._cancel_requested = snapshot.cancel_requested
+        controller._planning_only_turns = snapshot.planning_only_turns
+        controller._incumbent_candidate_root_ref = snapshot.incumbent_candidate_root_ref
+        controller._incumbent_candidate_manifest_ref = snapshot.incumbent_candidate_manifest_ref
+        controller._incumbent_candidate_manifest_sha256 = (
+            snapshot.incumbent_candidate_manifest_sha256
+        )
 
         if replay.pending_intervention_ids:
             controller._budget = controller._consume(candidates=0, minimum_candidates=len(replay.pending_intervention_ids))
@@ -523,6 +600,10 @@ class OptimizationEpisodeController:
         current_values: Mapping[str, bool | int | float],
     ) -> OptimizationPlanningContext:
         history = self._history()
+        available_actions = legal_actions(
+            current_values=current_values,
+            attempted=self._attempted_requests(),
+        )
         observation_ref = ObservationReference(
             observation_id=observation.observation_id,
             sha256=canonical_sha256(observation.model_dump(mode="json")),
@@ -551,6 +632,9 @@ class OptimizationEpisodeController:
                     "retrieval": retrieval.contract,
                     "budget": self._budget.model_dump(mode="json"),
                     "current_values": dict(sorted(current_values.items())),
+                    "legal_actions": [
+                        item.model_dump(mode="json") for item in available_actions
+                    ],
                     "ledger_head": self.ledger.replay().chain_head_sha256,
                     "history": [
                         {
@@ -579,6 +663,7 @@ class OptimizationEpisodeController:
             observation,
             self._budget,
             dict(current_values),
+            available_actions,
         )
 
     def _parse_proposal(self, payload: object) -> OptimizationProposal:
@@ -800,12 +885,106 @@ class OptimizationEpisodeController:
         )
         self._persist()
 
-    def _reject(self, reason: str) -> OptimizationControlResult:
-        self._state = OptimizationEpisodeState.PLANNING
+    def _defer_or_fallback(
+        self,
+        planning_entry: OptimizationPlanningAuditEntry,
+        context: OptimizationPlanningContext,
+        *,
+        proposal: OptimizationProposal | None,
+        reason: str,
+    ) -> OptimizationControlResult:
+        self._planning_only_turns += 1
         self._proposal = None
         self._requested = None
+        if not context.legal_actions:
+            self._state = OptimizationEpisodeState.STOPPED
+            return self._finish_planning(
+                planning_entry, proposal, "rejected", "no_legal_candidate"
+            )
+        if self._planning_only_turns < self._budget.budget.max_planning_only_turns:
+            self._state = OptimizationEpisodeState.PLANNING
+            return self._finish_planning(planning_entry, proposal, "rejected", reason)
+
+        action = context.legal_actions[0]
+        fallback = self._fallback_proposal(context, action)
+        assert fallback.action is not None
+        requested = select_requested_value(
+            fallback.action,
+            current_values=context.current_values or {},
+            attempted=self._attempted_requests(),
+        )
+        if requested is None:
+            raise OptimizationEpisodeControllerError("local fallback has no legal value")
+        self._proposal = fallback
+        self._requested = requested
+        self._planning_only_turns = 0
+        self._state = OptimizationEpisodeState.AWAITING_EXECUTION
+        return self._finish_planning(
+            planning_entry,
+            fallback,
+            "fallback",
+            "controlled_coordinate_fallback",
+        )
+
+    @staticmethod
+    def _fallback_proposal(
+        context: OptimizationPlanningContext,
+        action: LegalAction,
+    ) -> OptimizationProposal:
+        return OptimizationProposal(
+            context_ref=context.context_ref,
+            decision=OptimizationDecision.PROPOSE,
+            reason_code=ProposalReason.INSUFFICIENT_EVIDENCE,
+            rationale_summary="Local controlled-coordinate fallback after bounded planning-only turns.",
+            observation_refs=(context.observation_ref,),
+            history_refs=tuple(item.reference for item in context.history),
+            knowledge_refs=(),
+            action=ProposalAction(
+                knob_id=action.knob_id,
+                direction=action.direction,
+                expected_effects=(
+                    ExpectedEffect(
+                        metric_id=ObjectiveMetric.ROUTE_WIRELENGTH,
+                        direction=ExpectedEffectDirection.UNKNOWN,
+                    ),
+                ),
+            ),
+        )
+
+    def _finish_planning(
+        self,
+        planning_entry: OptimizationPlanningAuditEntry,
+        proposal: OptimizationProposal | None,
+        validation_result: DecisionValidationResult,
+        rejection_reason: str | None,
+    ) -> OptimizationControlResult:
+        self._decision_audit.append(
+            planning_entry_sha256=planning_entry.entry_sha256,
+            proposal=proposal,
+            validation_result=validation_result,
+            rejection_reason=rejection_reason,
+            requested=self._requested,
+            state=self._state,
+        )
         self._persist()
-        return self._result(reason)
+        return OptimizationControlResult(
+            self._state,
+            (
+                self._proposal
+                if self._proposal is not None
+                else proposal
+                if validation_result == "accepted"
+                or rejection_reason
+                in {
+                    "minimum_candidates_not_met",
+                    "planner_continue",
+                    "no_legal_candidate",
+                }
+                else None
+            ),
+            self._requested,
+            rejection_reason,
+        )
 
     def _result(self, rejection_reason: str | None = None) -> OptimizationControlResult:
         return OptimizationControlResult(
@@ -849,8 +1028,9 @@ class OptimizationEpisodeController:
         replay = self.ledger.replay()
         planning_audit = self._planning_audit.replay()
         planning_provider_audit = self._planning_provider_audit.replay()
+        decision_audit = self._decision_audit.replay()
         value = {
-            "schema_version": "ecos.optimization_episode_state.v3",
+            "schema_version": "ecos.optimization_episode_state.v4",
             "episode_id": self.episode_id,
             "checkpoint_id": self.checkpoint_id,
             "mode": self.mode.value,
@@ -865,6 +1045,12 @@ class OptimizationEpisodeController:
             "planning_audit_chain_head_sha256": planning_audit.chain_head_sha256,
             "planning_provider_audit_event_count": len(planning_provider_audit.entries),
             "planning_provider_audit_chain_head_sha256": planning_provider_audit.chain_head_sha256,
+            "decision_audit_event_count": len(decision_audit.entries),
+            "decision_audit_chain_head_sha256": decision_audit.chain_head_sha256,
+            "planning_only_turns": self._planning_only_turns,
+            "incumbent_candidate_root_ref": self._incumbent_candidate_root_ref,
+            "incumbent_candidate_manifest_ref": self._incumbent_candidate_manifest_ref,
+            "incumbent_candidate_manifest_sha256": self._incumbent_candidate_manifest_sha256,
             "proposal": self._proposal.model_dump(mode="json") if self._proposal else None,
             "requested": self._requested.model_dump(mode="json") if self._requested else None,
             "attempted_requests": [
@@ -884,6 +1070,7 @@ class OptimizationEpisodeController:
         replay: OptimizationLedgerReplay,
         planning_audit: OptimizationPlanningAuditReplay,
         planning_provider_audit: OptimizationPlanningProviderEvidenceReplay,
+        decision_audit: OptimizationDecisionAuditReplay,
     ) -> None:
         if (
             snapshot.ledger_event_count != len(replay.entries)
@@ -903,6 +1090,13 @@ class OptimizationEpisodeController:
             raise OptimizationEpisodeControllerError(
                 "episode state does not match planning provider audit trace"
             )
+        if (
+            snapshot.decision_audit_event_count != len(decision_audit.entries)
+            or snapshot.decision_audit_chain_head_sha256 != decision_audit.chain_head_sha256
+        ):
+            raise OptimizationEpisodeControllerError(
+                "episode state does not match decision audit trace"
+            )
         known_planning_entries = {entry.entry_sha256 for entry in planning_audit.entries}
         if any(
             entry.planning_entry_sha256 not in known_planning_entries
@@ -910,6 +1104,13 @@ class OptimizationEpisodeController:
         ):
             raise OptimizationEpisodeControllerError(
                 "planning provider evidence does not match planning audit trace"
+            )
+        if any(
+            entry.planning_entry_sha256 not in known_planning_entries
+            for entry in decision_audit.entries
+        ):
+            raise OptimizationEpisodeControllerError(
+                "planning decisions do not match planning audit trace"
             )
         if tuple(replay.pending_intervention_ids) != _pending_tuple(snapshot.pending_intervention_id):
             raise OptimizationEpisodeControllerError("episode pending execution does not match ledger trace")
