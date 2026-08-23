@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import math
 import os
 import queue
 import re
@@ -77,16 +78,54 @@ class EccCandidateRerunAdapter:
         ):
             raise OptimizationEccAdapterError("candidate request id is invalid")
         patch = self._materialize_patch(request)
+        return self._start_rerun(
+            candidate_id=_candidate_id(request.episode_id, request.intervention_id),
+            idempotency_key=f"{request.episode_id}.{request.intervention_id}",
+            patch=patch,
+        )
+
+    def start_baseline(
+        self, episode_id: str, replay_number: int, target_density: float
+    ) -> CandidateExecutionReceipt:
+        if not _ID.fullmatch(episode_id):
+            raise OptimizationEccAdapterError("baseline episode id is invalid")
+        if type(replay_number) is not int or replay_number not in {1, 2, 3}:
+            raise OptimizationEccAdapterError("baseline replay number is invalid")
+        if (
+            type(target_density) not in {int, float}
+            or isinstance(target_density, bool)
+            or not math.isfinite(target_density)
+            or not 0 < target_density <= 1
+        ):
+            raise OptimizationEccAdapterError("baseline target density is invalid")
+        replay_id = f"baseline-{replay_number}"
+        # ECC requires one patch; replaying the frozen parent value is configuration-neutral.
+        return self._start_rerun(
+            candidate_id=_candidate_id(episode_id, replay_id),
+            idempotency_key=f"{episode_id}.{replay_id}",
+            patch={
+                "knob_id": OptimizationKnob.TARGET_DENSITY.value,
+                "value": float(target_density),
+            },
+        )
+
+    def _start_rerun(
+        self,
+        *,
+        candidate_id: str,
+        idempotency_key: str,
+        patch: dict[str, object],
+    ) -> CandidateExecutionReceipt:
         response = self._rpc.call(
             "candidate.rerun",
             {
                 "workspaceId": self._workspace_id,
                 "targetStep": "place",
                 "endStep": "Harden",
-                "candidateId": _candidate_id(request.episode_id, request.intervention_id),
+                "candidateId": candidate_id,
                 "patch": [patch],
                 "executionScope": "full_flow",
-                "idempotencyKey": f"{request.episode_id}.{request.intervention_id}",
+                "idempotencyKey": idempotency_key,
             },
         )
         operation_id, state = self._validate_operation(response)

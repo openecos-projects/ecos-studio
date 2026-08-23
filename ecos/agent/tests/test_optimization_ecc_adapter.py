@@ -149,6 +149,31 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
     ]
 
 
+def test_adapter_starts_default_baseline_with_frozen_current_density() -> None:
+    rpc = _FakeEccRpc(_running_operation())
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    receipt = adapter.start_baseline("episode-1", 1, 0.55)
+
+    assert receipt.execution_id == "operation-1"
+    assert rpc.calls == [
+        (
+            "candidate.rerun",
+            {
+                "workspaceId": "workspace-1",
+                "targetStep": "place",
+                "endStep": "Harden",
+                "candidateId": "candidate-0c4c4b249d945101-baseline-1",
+                "patch": [{"knob_id": "place.target_density", "value": 0.55}],
+                "executionScope": "full_flow",
+                "idempotencyKey": "episode-1.baseline-1",
+            },
+        )
+    ]
+
+
 def test_adapter_materializes_logical_padding_sites_to_dbu() -> None:
     rpc = _FakeEccRpc(_running_operation())
     adapter = EccCandidateRerunAdapter(

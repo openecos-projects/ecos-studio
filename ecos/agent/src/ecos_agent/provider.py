@@ -865,6 +865,8 @@ class EcosAgentProvider:
         workspace = session.rerun_workspace_path
         if not workspace or session.optimization_episode_id is None:
             raise ValueError("Optimization authorization is incomplete.")
+        session.optimization_phase = "preparing_baseline"
+        session.phase = "optimization_preparing"
         provider: CodexAppServerProposalProvider | None = None
         try:
             provider = self.optimization_provider_factory(
@@ -885,6 +887,8 @@ class EcosAgentProvider:
                     "episode_id": session.optimization_episode_id,
                     "workspace": workspace,
                     "objective": session.optimization_objective,
+                    "progress_callback": lambda text: self._progress(session, text),
+                    "cancel_requested": lambda: session.interrupt_requested,
                 },
                 provider,
             )
@@ -894,6 +898,7 @@ class EcosAgentProvider:
             if provider is not None:
                 provider.close()
             session.optimization_phase = "unavailable"
+            session.phase = "operation" if session.mode == "workspace" else "home_ready"
             self._emit(session, "error", f"Unable to start optimization: {exc}")
             self._emit_phase_choice(session)
             return

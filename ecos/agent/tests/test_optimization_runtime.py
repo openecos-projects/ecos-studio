@@ -6,16 +6,22 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization_controller import (
+    CandidateExecutionEvidence,
+    CandidateExecutionReceipt,
+)
 from ecos_agent.optimization_contracts import (
     ObjectiveMetric,
     OptimizationObjectiveProposal,
     TerminalObservation,
 )
+from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_runtime import (
     OptimizationRuntimeError,
     _load_baseline_replays,
     _optimization_objective,
     _place_to_harden_runtime_seconds,
+    _prepare_baseline_replays,
 )
 from ecos_agent.optimization_rules import freeze_optimization_objective
 
@@ -195,3 +201,187 @@ def test_load_baseline_replays_does_not_reuse_legacy_v1_evidence(tmp_path: Path)
 
     with pytest.raises(OptimizationRuntimeError, match="baseline replay evidence is unavailable"):
         _load_baseline_replays(tmp_path, parent_manifest)
+
+
+class _BaselineExecutor:
+    def __init__(self, *, fail_at: int | None = None) -> None:
+        self.calls: list[tuple[str, int, float]] = []
+        self.fail_at = fail_at
+
+    def start_baseline(
+        self, episode_id: str, replay_number: int, target_density: float
+    ) -> CandidateExecutionReceipt:
+        self.calls.append((episode_id, replay_number, target_density))
+        outcome = (
+            OptimizationOutcomeKind.EXECUTION_FAILED
+            if replay_number == self.fail_at
+            else OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+        )
+        return CandidateExecutionReceipt(
+            execution_id=f"operation-{replay_number}",
+            started=True,
+            outcome=outcome,
+            evidence=CandidateExecutionEvidence(
+                candidate_root_ref=f".agent/candidates/baseline-{replay_number}",
+                candidate_manifest_ref=(
+                    f".agent/candidates/baseline-{replay_number}/analysis/"
+                    "candidate_workspace.v1.json"
+                ),
+                candidate_manifest_sha256="sha256:" + str(replay_number) * 64,
+            ),
+        )
+
+
+class _PendingBaselineExecutor(_BaselineExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancelled: list[str] = []
+
+    def start_baseline(
+        self, episode_id: str, replay_number: int, target_density: float
+    ) -> CandidateExecutionReceipt:
+        self.calls.append((episode_id, replay_number, target_density))
+        return CandidateExecutionReceipt(
+            execution_id=f"operation-{replay_number}", started=True
+        )
+
+    def cancel(self, execution_id: str) -> CandidateExecutionReceipt:
+        self.cancelled.append(execution_id)
+        return CandidateExecutionReceipt(
+            execution_id=execution_id,
+            started=True,
+            outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+        )
+
+
+def _mock_successful_baseline_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    parent_manifest: str,
+    *,
+    observed_parent_manifest: str | None = None,
+) -> None:
+    template = _write_baseline_replays(tmp_path, parent_manifest)
+    observations = [
+        TerminalObservation.model_validate(item["terminal_observation"])
+        for item in json.loads(template.read_text(encoding="utf-8"))["replays"]
+    ]
+    template.unlink()
+    monkeypatch.setattr(
+        "ecos_agent.optimization_runtime.build_candidate_terminal_observation",
+        lambda _workspace, evidence: observations[
+            int(evidence.candidate_root_ref.rsplit("-", 1)[1]) - 1
+        ],
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization_runtime._place_to_harden_runtime_seconds",
+        lambda candidate: 10.0 + int(candidate.name.rsplit("-", 1)[1]),
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization_runtime._parent_manifest_sha256",
+        lambda _workspace: observed_parent_manifest or parent_manifest,
+    )
+
+
+def test_prepare_baseline_replays_executes_three_default_full_flows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    parent_manifest = "sha256:" + "a" * 64
+    _mock_successful_baseline_artifacts(monkeypatch, tmp_path, parent_manifest)
+    executor = _BaselineExecutor()
+    progress: list[str] = []
+
+    evidence = _prepare_baseline_replays(
+        tmp_path,
+        parent_manifest,
+        "episode-new",
+        executor,
+        0.55,
+        progress.append,
+        lambda: False,
+    )
+
+    assert executor.calls == [
+        ("episode-new", 1, 0.55),
+        ("episode-new", 2, 0.55),
+        ("episode-new", 3, 0.55),
+    ]
+    assert [replay.runtime_seconds for replay in evidence.replays] == [11, 12, 13]
+    assert progress == [
+        "Preparing baseline replay 1/3.",
+        "Baseline replay 1/3 completed.",
+        "Preparing baseline replay 2/3.",
+        "Baseline replay 2/3 completed.",
+        "Preparing baseline replay 3/3.",
+        "Baseline replay 3/3 completed.",
+    ]
+    assert (tmp_path / ".agent/optimization/baseline-replays.v2.json").is_file()
+    assert not list(
+        (tmp_path / ".agent/optimization").glob(".baseline-replays.v2.json.*.tmp")
+    )
+
+
+def test_prepare_baseline_replays_rejects_parent_manifest_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    parent_manifest = "sha256:" + "a" * 64
+    _mock_successful_baseline_artifacts(
+        monkeypatch,
+        tmp_path,
+        parent_manifest,
+        observed_parent_manifest="sha256:" + "b" * 64,
+    )
+
+    with pytest.raises(OptimizationRuntimeError, match="workspace changed"):
+        _prepare_baseline_replays(
+            tmp_path,
+            parent_manifest,
+            "episode-new",
+            _BaselineExecutor(),
+            0.55,
+            lambda _text: None,
+            lambda: False,
+        )
+
+    assert not (tmp_path / ".agent/optimization/baseline-replays.v2.json").exists()
+
+
+def test_prepare_baseline_replays_does_not_publish_partial_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        "ecos_agent.optimization_runtime.build_candidate_terminal_observation",
+        lambda *_args: pytest.fail("failed replay must not be observed"),
+    )
+
+    with pytest.raises(OptimizationRuntimeError, match="baseline replay 1 failed"):
+        _prepare_baseline_replays(
+            tmp_path,
+            "sha256:" + "a" * 64,
+            "episode-new",
+            _BaselineExecutor(fail_at=1),
+            0.55,
+            lambda _text: None,
+            lambda: False,
+        )
+
+    assert not (tmp_path / ".agent/optimization/baseline-replays.v2.json").exists()
+
+
+def test_prepare_baseline_replays_cancels_an_interrupted_operation(tmp_path: Path) -> None:
+    executor = _PendingBaselineExecutor()
+    cancellation_checks = iter((False, True))
+
+    with pytest.raises(OptimizationRuntimeError, match="interrupted"):
+        _prepare_baseline_replays(
+            tmp_path,
+            "sha256:" + "a" * 64,
+            "episode-new",
+            executor,
+            0.55,
+            lambda _text: None,
+            lambda: next(cancellation_checks),
+        )
+
+    assert executor.cancelled == ["operation-1"]
+    assert not (tmp_path / ".agent/optimization/baseline-replays.v2.json").exists()
