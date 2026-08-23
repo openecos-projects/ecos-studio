@@ -26,11 +26,11 @@ from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     HistoryReference,
-    ObjectiveMetric,
     PlanningProviderEvidence,
     ProposalContextRef,
     ProposalAction,
     RequestedKnobValue,
+    SelectionMetric,
     TerminalObservation,
 )
 from ecos_agent.optimization_rules import IncumbentDecision
@@ -180,7 +180,7 @@ class OptimizationTerminalOutcome(_LedgerModel):
     terminal_observation_sha256: str | None = None
     terminal_observation: TerminalObservation | None = None
     incumbent_decision: IncumbentDecision | None = None
-    decisive_metric: ObjectiveMetric | None = None
+    decisive_metric: SelectionMetric | None = None
     outcome_details_sha256: str
 
     @model_validator(mode="after")

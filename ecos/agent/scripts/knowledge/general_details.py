@@ -1,4 +1,4 @@
-"""Congestion-metric general knowledge: step-scoped, not a flow stage."""
+"""Step-scoped general knowledge; not a flow stage."""
 
 from __future__ import annotations
 
@@ -116,6 +116,45 @@ GENERAL_REGRESSION_CASES = (
     },
 )
 
+WIRELENGTH_REGRESSION_CASES = (
+    {
+        "id": "wirelength-proxy-route-validation",
+        "question": "Placement HPWL improved, but routed wirelength has not been validated through route. What should happen next?",
+        "entity_id": "strategy.wirelength.validate_route_after_proxy_gain.v1",
+        "required_text": "validate_routed_wirelength_after_proxy_gain",
+    },
+    {
+        "id": "wirelength-hpwl-flute-disagreement",
+        "question": "Placement HPWL cannot distinguish candidate topology, or HPWL and FLUTE rank candidates differently. Which place-stage proxy should be checked?",
+        "entity_id": "strategy.wirelength.use_flute_when_hpwl_is_ambiguous.v1",
+        "required_text": "use_flute_as_secondary_wirelength_proxy",
+    },
+    {
+        "id": "wirelength-clean-congestion-reduce-spreading",
+        "question": "Congestion and DRC are clean, timing is within tolerance, but routed wirelength is high while routability relief remains active.",
+        "entity_id": "strategy.wirelength.reduce_excessive_place_spreading.v1",
+        "required_text": "reduce_excessive_place_spreading",
+    },
+    {
+        "id": "wirelength-timing-veto",
+        "question": "Wirelength improves but WNS and TNS materially worsen beyond replay noise. Should the placement candidate be accepted?",
+        "entity_id": "strategy.wirelength.reject_guardrail_regression.v1",
+        "required_text": "reject_wirelength_guardrail_regression",
+    },
+    {
+        "id": "wirelength-macro-hpwl-veto",
+        "question": "MacroHPWL improves but congestion, routed wirelength, WNS, and TNS degrade.",
+        "entity_id": "strategy.wirelength.reject_macro_hpwl_only_gain.v1",
+        "required_text": "reject_macro_hpwl_only_gain",
+    },
+    {
+        "id": "wirelength-downstream-rebound-veto",
+        "question": "Global routing improves but legalization or detailed route reverses the wirelength gain.",
+        "entity_id": "strategy.wirelength.reject_post_legalization_rebound.v1",
+        "required_text": "reject_post_legalization_rebound",
+    },
+)
+
 
 def build_general_bundle(output: Path) -> None:
     entries, documents = _strategy_entries()
@@ -146,6 +185,10 @@ def build_general_bundle(output: Path) -> None:
             _json({**case, "question": f"Explain {case['entity_id']}"}) + "\n"
             for case in GENERAL_REGRESSION_CASES
         ),
+        encoding="utf-8",
+    )
+    regression.joinpath("wirelength_questions.jsonl").write_text(
+        "".join(_json(case) + "\n" for case in WIRELENGTH_REGRESSION_CASES),
         encoding="utf-8",
     )
     files = {

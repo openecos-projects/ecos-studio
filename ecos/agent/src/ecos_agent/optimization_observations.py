@@ -12,6 +12,7 @@ from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_contracts import (
     ROUTABILITY_OBJECTIVE_ORDER,
+    TIMING_GUARDRAIL_ORDER,
     BudgetSnapshot,
     GateResult,
     SignoffGates,
@@ -106,6 +107,11 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     terminal_metrics = {
         metric: _required_metric(route_metrics, metric.value) for metric in _TERMINAL_METRICS
     }
+    sta_metrics = _qor_metrics(files["sta_ecc/analysis/qor_metrics.json"])
+    timing_guardrail = {
+        metric: _required_timing_metric(sta_metrics, metric.value)
+        for metric in TIMING_GUARDRAIL_ORDER
+    }
     harden_metrics = _qor_metrics(files["Harden_ecc/analysis/qor_metrics.json"])
     output_paths = _harden_output_paths(files["home/parameters.json"])
     mpc_configured = _mpc_configured(files["home/parameters.json"])
@@ -142,6 +148,7 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
             ),
         ),
         metrics=terminal_metrics,
+        timing_guardrail=timing_guardrail,
     )
 
 
@@ -284,6 +291,15 @@ def _required_metric(metrics: dict[str, float], metric_id: str) -> float:
     if value < 0:
         raise OptimizationObservationError("terminal QoR objective metric is invalid")
     return value
+
+
+def _required_timing_metric(metrics: dict[str, float], metric_id: str) -> float:
+    try:
+        return metrics[metric_id]
+    except KeyError as exc:
+        raise OptimizationObservationError(
+            "terminal timing guardrail metric is unavailable"
+        ) from exc
 
 
 def _harden_output_paths(parameters: dict[str, Any]) -> tuple[str, str, str]:

@@ -23,6 +23,7 @@ from ecos_agent.optimization_contracts import (
     StageObservation,
     StrategyDirection,
     TerminalObservation,
+    TimingMetric,
 )
 from ecos_agent.optimization_rules import (
     IncumbentDecision,
@@ -50,6 +51,7 @@ def _terminal(
     signoff: GateResult = GateResult.PASS,
     evidence_valid: bool = True,
     harden_artifacts_complete: bool = True,
+    timing: dict[TimingMetric, float] | None = None,
 ) -> TerminalObservation:
     return TerminalObservation(
         observation_id=observation_id,
@@ -62,6 +64,13 @@ def _terminal(
             ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: overflow,
             ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
         },
+        timing_guardrail=timing
+        or {
+            TimingMetric.STA_SETUP_WNS: 1.0,
+            TimingMetric.STA_SETUP_TNS: 0.0,
+            TimingMetric.STA_HOLD_WNS: 0.5,
+            TimingMetric.STA_HOLD_TNS: 0.0,
+        },
     )
 
 
@@ -71,7 +80,13 @@ def _objective() -> RoutabilityObjectiveContract:
             ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (8, 9, 10),
             ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (15, 15, 15),
             ObjectiveMetric.ROUTE_WIRELENGTH: (100.0, 102.0, 101.0),
-        }
+        },
+        default_timing_replays={
+            TimingMetric.STA_SETUP_WNS: (0.8, 1.0, 0.9),
+            TimingMetric.STA_SETUP_TNS: (-0.1, 0.0, -0.05),
+            TimingMetric.STA_HOLD_WNS: (0.4, 0.5, 0.45),
+            TimingMetric.STA_HOLD_TNS: (0.0, 0.0, 0.0),
+        },
     )
 
 
@@ -366,6 +381,9 @@ def test_noise_bands_are_derived_from_all_three_default_replays() -> None:
     assert objective.noise_band(ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT) == 2
     assert objective.noise_band(ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW) == 0
     assert objective.noise_band(ObjectiveMetric.ROUTE_WIRELENGTH) == 2
+    assert objective.timing_guardrail.noise_band(TimingMetric.STA_SETUP_WNS) == pytest.approx(
+        0.2
+    )
 
     with pytest.raises(ValueError, match="three"):
         freeze_routability_objective(
@@ -373,8 +391,55 @@ def test_noise_bands_are_derived_from_all_three_default_replays() -> None:
                 ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (8, 9),
                 ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (15, 15, 15),
                 ObjectiveMetric.ROUTE_WIRELENGTH: (100.0, 102.0, 101.0),
-            }
+            },
+            default_timing_replays={
+                metric: (0.0, 0.0, 0.0) for metric in TimingMetric
+            },
         )
+
+
+def test_comparator_rejects_timing_regression_beyond_replay_noise() -> None:
+    comparison = compare_incumbent(
+        incumbent=_terminal("incumbent", dr=0, overflow=0, wirelength=100),
+        candidate=_terminal(
+            "candidate",
+            dr=0,
+            overflow=0,
+            wirelength=90,
+            timing={
+                TimingMetric.STA_SETUP_WNS: 0.7,
+                TimingMetric.STA_SETUP_TNS: 0.0,
+                TimingMetric.STA_HOLD_WNS: 0.5,
+                TimingMetric.STA_HOLD_TNS: 0.0,
+            },
+        ),
+        objective=_objective(),
+    )
+
+    assert comparison.decision == IncumbentDecision.INCUMBENT_RETAINED
+    assert comparison.decisive_metric == TimingMetric.STA_SETUP_WNS
+
+
+def test_comparator_keeps_route_order_inside_timing_replay_noise() -> None:
+    comparison = compare_incumbent(
+        incumbent=_terminal("incumbent", dr=0, overflow=0, wirelength=100),
+        candidate=_terminal(
+            "candidate",
+            dr=0,
+            overflow=0,
+            wirelength=90,
+            timing={
+                TimingMetric.STA_SETUP_WNS: 0.85,
+                TimingMetric.STA_SETUP_TNS: 0.0,
+                TimingMetric.STA_HOLD_WNS: 0.5,
+                TimingMetric.STA_HOLD_TNS: 0.0,
+            },
+        ),
+        objective=_objective(),
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == ObjectiveMetric.ROUTE_WIRELENGTH
 
 
 def test_comparator_prioritizes_detail_route_violations() -> None:

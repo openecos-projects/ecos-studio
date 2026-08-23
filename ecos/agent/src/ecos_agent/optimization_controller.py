@@ -36,6 +36,7 @@ from ecos_agent.optimization_contracts import (
     ProposalContextRef,
     ProposalReason,
     RequestedKnobValue,
+    SelectionMetric,
     StageObservation,
     TerminalObservation,
 )
@@ -503,7 +504,7 @@ class OptimizationEpisodeController:
         *,
         outcome: OptimizationOutcomeKind | None = None,
         incumbent_decision: str | None = None,
-        decisive_metric: ObjectiveMetric | None = None,
+        decisive_metric: SelectionMetric | None = None,
     ) -> OptimizationControlResult:
         """Record a terminal outcome produced from separately verified evidence."""
         if (
@@ -788,7 +789,7 @@ class OptimizationEpisodeController:
         terminal_observation: TerminalObservation | None = None,
         *,
         incumbent_decision: str | None = None,
-        decisive_metric: ObjectiveMetric | None = None,
+        decisive_metric: SelectionMetric | None = None,
     ) -> OptimizationControlResult:
         if self._pending_intervention_id is None:
             raise OptimizationEpisodeControllerError("terminal receipt has no pending intervention")

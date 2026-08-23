@@ -15,9 +15,14 @@ from ecos_agent.optimization_contracts import (
     ProposalAction,
     RequestedKnobValue,
     ROUTABILITY_OBJECTIVE_ORDER,
+    TIMING_GUARDRAIL_ORDER,
     RoutabilityObjectiveContract,
+    SelectionMetric,
     StrategyDirection,
     TerminalObservation,
+    TimingGuardrailContract,
+    TimingMetric,
+    TimingNoiseBand,
 )
 
 
@@ -42,7 +47,7 @@ class CoordinateDirection(StrEnum):
 @dataclass(frozen=True)
 class IncumbentComparison:
     decision: IncumbentDecision
-    decisive_metric: ObjectiveMetric | None
+    decisive_metric: SelectionMetric | None
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,8 @@ def legal_actions(
 
 def freeze_routability_objective(
     default_replays: Mapping[ObjectiveMetric, Sequence[float]],
+    *,
+    default_timing_replays: Mapping[TimingMetric, Sequence[float]],
 ) -> RoutabilityObjectiveContract:
     bands = []
     for metric_id in ROUTABILITY_OBJECTIVE_ORDER:
@@ -109,7 +116,24 @@ def freeze_routability_objective(
         )
     if set(default_replays) != set(ROUTABILITY_OBJECTIVE_ORDER):
         raise ValueError("default replays must contain only frozen objective metrics")
-    return RoutabilityObjectiveContract(noise_bands=tuple(bands))
+    timing_bands = []
+    for metric_id in TIMING_GUARDRAIL_ORDER:
+        values = tuple(default_timing_replays.get(metric_id, ()))
+        if len(values) != 3:
+            raise ValueError("each timing metric requires exactly three default replays")
+        timing_bands.append(
+            TimingNoiseBand(
+                metric_id=metric_id,
+                default_replay_values=values,
+                tolerance=max(values) - min(values),
+            )
+        )
+    if set(default_timing_replays) != set(TIMING_GUARDRAIL_ORDER):
+        raise ValueError("default timing replays must contain only frozen timing metrics")
+    return RoutabilityObjectiveContract(
+        noise_bands=tuple(bands),
+        timing_guardrail=TimingGuardrailContract(noise_bands=tuple(timing_bands)),
+    )
 
 
 def compare_incumbent(
@@ -122,6 +146,10 @@ def compare_incumbent(
         raise ValueError("incumbent terminal observation is not eligible")
     if not candidate.eligible_for_incumbent:
         return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
+    for metric_id in TIMING_GUARDRAIL_ORDER:
+        degradation = incumbent.timing_guardrail[metric_id] - candidate.timing_guardrail[metric_id]
+        if degradation > objective.timing_guardrail.noise_band(metric_id):
+            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     for metric_id in ROUTABILITY_OBJECTIVE_ORDER:
         delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
         tolerance = objective.noise_band(metric_id)

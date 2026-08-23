@@ -12,6 +12,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     OptimizationKnob,
+    TimingMetric,
 )
 from ecos_agent.optimization_controller import CandidateExecutionEvidence
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
@@ -92,7 +93,14 @@ def frozen_workspace(tmp_path: Path) -> Path:
     _write_json(root / "drc_ecc/analysis/qor_metrics.json", _metrics(("drc_count", 0)))
     _write_json(
         root / "sta_ecc/analysis/qor_metrics.json",
-        _metrics(("sta_setup_violation_count", 0), ("sta_hold_violation_count", 0)),
+        _metrics(
+            ("sta_setup_violation_count", 0),
+            ("sta_hold_violation_count", 0),
+            ("sta_setup_wns", 0.2),
+            ("sta_setup_tns", 0.0),
+            ("sta_hold_wns", 0.1),
+            ("sta_hold_tns", 0.0),
+        ),
     )
     _write_json(
         root / "Harden_ecc/analysis/qor_metrics.json",
@@ -185,6 +193,12 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
         "route_la_total_overflow": 1.0,
         "route_wirelength": 5243.741,
     }
+    assert observation.timing_guardrail == {
+        TimingMetric.STA_SETUP_WNS: 0.2,
+        TimingMetric.STA_SETUP_TNS: 0.0,
+        TimingMetric.STA_HOLD_WNS: 0.1,
+        TimingMetric.STA_HOLD_TNS: 0.0,
+    }
     assert observation.signoff_gates.drc_clean.value == "pass"
     assert observation.signoff_gates.sta_setup_closed.value == "pass"
     assert observation.signoff_gates.sta_hold_closed.value == "pass"
@@ -195,6 +209,46 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert observation.signoff_gates.mpc_maximum_area.value == "not_applicable"
     assert observation.harden_artifacts_complete is True
     assert observation.eligible_for_incumbent is True
+
+
+@pytest.mark.parametrize("metric_id", [metric.value for metric in TimingMetric])
+def test_terminal_observation_requires_each_timing_guardrail_metric(
+    frozen_workspace: Path, metric_id: str
+) -> None:
+    path = frozen_workspace / "sta_ecc/analysis/qor_metrics.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["metrics"] = [item for item in payload["metrics"] if item["id"] != metric_id]
+    _write_json(path, payload)
+
+    with pytest.raises(OptimizationObservationError, match="timing guardrail metric"):
+        build_terminal_observation(frozen_workspace)
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_terminal_observation_rejects_non_finite_timing_guardrail_metric(
+    frozen_workspace: Path, invalid_value: float
+) -> None:
+    path = frozen_workspace / "sta_ecc/analysis/qor_metrics.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    next(item for item in payload["metrics"] if item["id"] == "sta_setup_wns")[
+        "value"
+    ] = invalid_value
+    _write_json(path, payload)
+
+    with pytest.raises(OptimizationObservationError, match="QoR metric is invalid"):
+        build_terminal_observation(frozen_workspace)
+
+
+def test_terminal_observation_rejects_duplicate_timing_guardrail_metric(
+    frozen_workspace: Path,
+) -> None:
+    path = frozen_workspace / "sta_ecc/analysis/qor_metrics.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["metrics"].append({"id": "sta_setup_wns", "value": 0.2})
+    _write_json(path, payload)
+
+    with pytest.raises(OptimizationObservationError, match="QoR metric is invalid"):
+        build_terminal_observation(frozen_workspace)
 
 
 @pytest.mark.parametrize("stage", ["lvs", "filler", "RCX"])
@@ -379,4 +433,7 @@ def test_default_optimization_retrieval_keeps_tool_and_general_knowledge_separat
     assert len(tool.knowledge_refs) <= 3
     assert len(general.knowledge_refs) <= 3
     assert all(not ref.entity_id.startswith("strategy.") for ref in tool.knowledge_refs)
-    assert all(ref.entity_id.startswith("strategy.congestion.") for ref in general.knowledge_refs)
+    assert all(
+        ref.entity_id.startswith(("strategy.congestion.", "strategy.wirelength."))
+        for ref in general.knowledge_refs
+    )

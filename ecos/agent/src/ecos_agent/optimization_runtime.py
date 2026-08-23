@@ -40,6 +40,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ObjectiveMetric,
+    TimingMetric,
 )
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 
@@ -174,7 +175,14 @@ def create_optimization_runner(
                     for replay in baseline_replays.replays
                 )
                 for metric in ObjectiveMetric
-            }
+            },
+            default_timing_replays={
+                metric: tuple(
+                    replay.terminal_observation.timing_guardrail[metric]
+                    for replay in baseline_replays.replays
+                )
+                for metric in TimingMetric
+            },
         ),
     )
 
@@ -182,7 +190,7 @@ def create_optimization_runner(
 def _load_baseline_replays(
     workspace: Path, parent_manifest_sha256: str
 ) -> BaselineReplayEvidence:
-    path = workspace / ".agent" / "optimization" / "baseline-replays.v1.json"
+    path = workspace / ".agent" / "optimization" / "baseline-replays.v2.json"
     if not path.is_file():
         raise OptimizationRuntimeError("baseline replay evidence is unavailable")
     try:

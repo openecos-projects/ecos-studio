@@ -41,11 +41,21 @@ class ObjectiveMetric(StrEnum):
     ROUTE_WIRELENGTH = "route_wirelength"
 
 
+class TimingMetric(StrEnum):
+    STA_SETUP_WNS = "sta_setup_wns"
+    STA_SETUP_TNS = "sta_setup_tns"
+    STA_HOLD_WNS = "sta_hold_wns"
+    STA_HOLD_TNS = "sta_hold_tns"
+
+
 ROUTABILITY_OBJECTIVE_ORDER = (
     ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
     ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
     ObjectiveMetric.ROUTE_WIRELENGTH,
 )
+
+TIMING_GUARDRAIL_ORDER = tuple(TimingMetric)
+SelectionMetric = ObjectiveMetric | TimingMetric
 
 
 class OptimizationDecision(StrEnum):
@@ -547,13 +557,14 @@ class SignoffGates(_ContractModel):
 
 
 class TerminalObservation(_ContractModel):
-    schema_version: Literal["ecos.terminal_observation.v1"] = "ecos.terminal_observation.v1"
+    schema_version: Literal["ecos.terminal_observation.v2"] = "ecos.terminal_observation.v2"
     observation_id: str
     evidence_manifest_sha256: str
     evidence_valid: bool
     harden_artifacts_complete: bool
     signoff_gates: SignoffGates
     metrics: dict[ObjectiveMetric, float]
+    timing_guardrail: dict[TimingMetric, float]
 
     @field_validator("observation_id")
     @classmethod
@@ -576,6 +587,17 @@ class TerminalObservation(_ContractModel):
             raise ValueError("terminal metrics must contain the frozen objective metrics")
         if any(not math.isfinite(number) or number < 0 for number in value.values()):
             raise ValueError("terminal metrics must be finite and non-negative")
+        return value
+
+    @field_validator("timing_guardrail")
+    @classmethod
+    def validate_timing_guardrail(
+        cls, value: dict[TimingMetric, float]
+    ) -> dict[TimingMetric, float]:
+        if set(value) != set(TIMING_GUARDRAIL_ORDER):
+            raise ValueError("terminal timing guardrail must contain the frozen timing metrics")
+        if any(not math.isfinite(number) for number in value.values()):
+            raise ValueError("terminal timing guardrail metrics must be finite")
         return value
 
     @property
@@ -622,8 +644,8 @@ class BaselineReplay(_ContractModel):
 
 
 class BaselineReplayEvidence(_ContractModel):
-    schema_version: Literal["ecos.optimization_baseline_replays.v1"] = (
-        "ecos.optimization_baseline_replays.v1"
+    schema_version: Literal["ecos.optimization_baseline_replays.v2"] = (
+        "ecos.optimization_baseline_replays.v2"
     )
     parent_manifest_sha256: str
     replays: tuple[BaselineReplay, BaselineReplay, BaselineReplay]
@@ -664,8 +686,9 @@ class MetricNoiseBand(_ContractModel):
 
 
 class RoutabilityObjectiveContract(_ContractModel):
-    schema_version: Literal["ecos.routability_objective.v1"] = "ecos.routability_objective.v1"
+    schema_version: Literal["ecos.routability_objective.v2"] = "ecos.routability_objective.v2"
     noise_bands: tuple[MetricNoiseBand, ...]
+    timing_guardrail: "TimingGuardrailContract"
 
     @field_validator("noise_bands")
     @classmethod
@@ -682,6 +705,43 @@ class RoutabilityObjectiveContract(_ContractModel):
     @property
     def contract_sha256(self) -> str:
         return canonical_sha256(self.model_dump(mode="json"))
+
+
+class TimingNoiseBand(_ContractModel):
+    metric_id: TimingMetric
+    default_replay_values: tuple[float, float, float]
+    tolerance: float
+
+    @field_validator("default_replay_values")
+    @classmethod
+    def validate_values(cls, value: tuple[float, float, float]) -> tuple[float, float, float]:
+        if any(not math.isfinite(item) for item in value):
+            raise ValueError("timing noise replay values must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def validate_tolerance(self) -> "TimingNoiseBand":
+        expected = max(self.default_replay_values) - min(self.default_replay_values)
+        if not math.isclose(self.tolerance, expected, rel_tol=0, abs_tol=1e-12):
+            raise ValueError("timing noise tolerance must equal the three-replay range")
+        return self
+
+
+class TimingGuardrailContract(_ContractModel):
+    schema_version: Literal["ecos.timing_guardrail.v1"] = "ecos.timing_guardrail.v1"
+    noise_bands: tuple[TimingNoiseBand, ...]
+
+    @field_validator("noise_bands")
+    @classmethod
+    def validate_noise_bands(
+        cls, value: tuple[TimingNoiseBand, ...]
+    ) -> tuple[TimingNoiseBand, ...]:
+        if tuple(item.metric_id for item in value) != TIMING_GUARDRAIL_ORDER:
+            raise ValueError("timing noise bands must use the frozen timing order")
+        return value
+
+    def noise_band(self, metric_id: TimingMetric) -> float:
+        return next(item.tolerance for item in self.noise_bands if item.metric_id == metric_id)
 
 
 def _is_density_lattice_value(value: float) -> bool:

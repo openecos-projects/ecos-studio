@@ -18,6 +18,7 @@ from ecos_agent.optimization_contracts import (
     StageObservation,
     StrategyDirection,
     TerminalObservation,
+    TimingMetric,
 )
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
@@ -51,6 +52,18 @@ _CURRENT_VALUES = {
     "place.cell_padding_x": 2,
     "place.routability_opt": True,
 }
+_TIMING_GUARDRAIL = {metric: 0.0 for metric in TimingMetric}
+
+
+def _objective():
+    return freeze_routability_objective(
+        {
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (0.0, 0.0, 0.0),
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (0.0, 0.0, 0.0),
+            ObjectiveMetric.ROUTE_WIRELENGTH: (0.0, 0.0, 0.0),
+        },
+        default_timing_replays={metric: (0.0, 0.0, 0.0) for metric in TimingMetric},
+    )
 
 
 class _Clock:
@@ -236,6 +249,7 @@ def _terminal_observation(
             ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 3.0,
             ObjectiveMetric.ROUTE_WIRELENGTH: 4.0,
         },
+        timing_guardrail=_TIMING_GUARDRAIL,
     )
 
 
@@ -251,6 +265,7 @@ def _incumbent() -> TerminalObservation:
             ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 5.0,
             ObjectiveMetric.ROUTE_WIRELENGTH: 5.0,
         },
+        timing_guardrail=_TIMING_GUARDRAIL,
     )
 
 
@@ -275,13 +290,7 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         current_values=_CURRENT_VALUES,
         terminal_waiter=executor.wait_for_terminal,
         terminal_observation_supplier=_terminal_observation,
-        objective=freeze_routability_objective(
-            {
-                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (0.0, 0.0, 0.0),
-                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (0.0, 0.0, 0.0),
-                ObjectiveMetric.ROUTE_WIRELENGTH: (0.0, 0.0, 0.0),
-            }
-        ),
+        objective=_objective(),
     )
 
     first = runner.run_turn()
@@ -365,13 +374,7 @@ def test_successful_execution_is_classified_by_qor_comparison(tmp_path: Path) ->
         current_values=_CURRENT_VALUES,
         terminal_waiter=executor.wait_for_terminal,
         terminal_observation_supplier=_terminal_observation,
-        objective=freeze_routability_objective(
-            {
-                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (0.0, 0.0, 0.0),
-                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (0.0, 0.0, 0.0),
-                ObjectiveMetric.ROUTE_WIRELENGTH: (0.0, 0.0, 0.0),
-            }
-        ),
+        objective=_objective(),
     )
 
     runner.run_turn()
@@ -379,6 +382,44 @@ def test_successful_execution_is_classified_by_qor_comparison(tmp_path: Path) ->
     outcome = controller.ledger.replay().terminal_outcomes[0]
     assert outcome.outcome == OptimizationOutcomeKind.IMPROVED
     assert outcome.incumbent_decision == IncumbentDecision.CANDIDATE_BETTER.value
+
+
+def test_timing_regression_is_audited_as_degraded(tmp_path: Path) -> None:
+    planner = _FakePlanner()
+    executor = _SuccessfulExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        incumbent=_incumbent(),
+    )
+
+    def timing_regressed_observation(observation, receipt):
+        terminal = _terminal_observation(observation, receipt)
+        timing = dict(terminal.timing_guardrail)
+        timing[TimingMetric.STA_SETUP_WNS] = -0.1
+        return terminal.model_copy(update={"timing_guardrail": timing})
+
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=timing_regressed_observation,
+        objective=_objective(),
+    )
+
+    runner.run_turn()
+
+    outcome = controller.ledger.replay().terminal_outcomes[0]
+    assert outcome.outcome == OptimizationOutcomeKind.DEGRADED
+    assert outcome.decisive_metric == TimingMetric.STA_SETUP_WNS
 
 
 def test_ineligible_candidate_is_classified_without_an_incumbent(tmp_path: Path) -> None:
@@ -414,13 +455,7 @@ def test_ineligible_candidate_is_classified_without_an_incumbent(tmp_path: Path)
         current_values=_CURRENT_VALUES,
         terminal_waiter=executor.wait_for_terminal,
         terminal_observation_supplier=ineligible_observation,
-        objective=freeze_routability_objective(
-            {
-                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (0.0, 0.0, 0.0),
-                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (0.0, 0.0, 0.0),
-                ObjectiveMetric.ROUTE_WIRELENGTH: (0.0, 0.0, 0.0),
-            }
-        ),
+        objective=_objective(),
     )
 
     turn = runner.run_turn()

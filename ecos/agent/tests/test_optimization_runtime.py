@@ -61,7 +61,7 @@ def test_place_to_harden_runtime_fails_closed_on_incomplete_stage(tmp_path: Path
 
 
 def _write_baseline_replays(tmp_path: Path, parent_manifest_sha256: str) -> Path:
-    destination = tmp_path / ".agent" / "optimization" / "baseline-replays.v1.json"
+    destination = tmp_path / ".agent" / "optimization" / "baseline-replays.v2.json"
     destination.parent.mkdir(parents=True)
     metrics = {
         "route_dr_total_violation_count": 3.0,
@@ -69,7 +69,7 @@ def _write_baseline_replays(tmp_path: Path, parent_manifest_sha256: str) -> Path
         "route_wirelength": 100.0,
     }
     payload = {
-        "schema_version": "ecos.optimization_baseline_replays.v1",
+        "schema_version": "ecos.optimization_baseline_replays.v2",
         "parent_manifest_sha256": parent_manifest_sha256,
         "replays": [
             {
@@ -81,7 +81,7 @@ def _write_baseline_replays(tmp_path: Path, parent_manifest_sha256: str) -> Path
                 "candidate_manifest_sha256": "sha256:" + str(index) * 64,
                 "runtime_seconds": float(10 + index),
                 "terminal_observation": {
-                    "schema_version": "ecos.terminal_observation.v1",
+                    "schema_version": "ecos.terminal_observation.v2",
                     "observation_id": f"baseline-{index}",
                     "evidence_manifest_sha256": "sha256:" + str(index) * 64,
                     "evidence_valid": True,
@@ -97,6 +97,12 @@ def _write_baseline_replays(tmp_path: Path, parent_manifest_sha256: str) -> Path
                         "mpc_maximum_area": "not_applicable",
                     },
                     "metrics": metrics,
+                    "timing_guardrail": {
+                        "sta_setup_wns": index / 10,
+                        "sta_setup_tns": 0.0,
+                        "sta_hold_wns": index / 20,
+                        "sta_hold_tns": 0.0,
+                    },
                 },
             }
             for index in range(1, 4)
@@ -113,7 +119,7 @@ def test_load_baseline_replays_requires_three_hash_bound_terminal_runs(
     parent_manifest = "sha256:" + "a" * 64
     _write_baseline_replays(tmp_path, parent_manifest)
     payload = json.loads(
-        (tmp_path / ".agent/optimization/baseline-replays.v1.json").read_text(
+        (tmp_path / ".agent/optimization/baseline-replays.v2.json").read_text(
             encoding="utf-8"
         )
     )
@@ -134,6 +140,10 @@ def test_load_baseline_replays_requires_three_hash_bound_terminal_runs(
         for replay in evidence.replays
     ]
     assert wirelengths == [100, 100, 100]
+    assert [
+        replay.terminal_observation.timing_guardrail["sta_setup_wns"]
+        for replay in evidence.replays
+    ] == pytest.approx([0.1, 0.2, 0.3])
 
 
 def test_load_baseline_replays_fails_closed_when_missing_or_tampered(tmp_path: Path) -> None:
@@ -147,4 +157,13 @@ def test_load_baseline_replays_fails_closed_when_missing_or_tampered(tmp_path: P
     artifact.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(OptimizationRuntimeError, match="baseline replay evidence is invalid"):
+        _load_baseline_replays(tmp_path, parent_manifest)
+
+
+def test_load_baseline_replays_does_not_reuse_legacy_v1_evidence(tmp_path: Path) -> None:
+    parent_manifest = "sha256:" + "a" * 64
+    artifact = _write_baseline_replays(tmp_path, parent_manifest)
+    artifact.rename(artifact.with_name("baseline-replays.v1.json"))
+
+    with pytest.raises(OptimizationRuntimeError, match="baseline replay evidence is unavailable"):
         _load_baseline_replays(tmp_path, parent_manifest)
