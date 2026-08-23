@@ -113,7 +113,7 @@ class _FakeEcc:
 
 def _budget(*, candidates: int = 0, planning: int = 0) -> BudgetSnapshot:
     return BudgetSnapshot(
-        budget=EpisodeBudget.from_default_reruns((10.0, 11.0, 12.0)),
+        budget=EpisodeBudget.from_reference_rerun(11.0),
         consumed_candidates=candidates,
         consumed_planning_calls=planning,
     )
@@ -612,9 +612,10 @@ def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_p
         )
 
 
-def test_recovery_rejects_a_pre_provider_audit_episode(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", ("v2", "v5"))
+def test_recovery_rejects_a_pre_policy_episode(tmp_path: Path, version: str) -> None:
     controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
-    controller.state_path.rename(controller.state_path.with_name("optimization-episode-state.v2.json"))
+    controller.state_path.rename(controller.state_path.with_name(f"optimization-episode-state.{version}.json"))
 
     with pytest.raises(OptimizationEpisodeControllerError, match="pre-policy"):
         OptimizationEpisodeController.recover(

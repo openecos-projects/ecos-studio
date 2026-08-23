@@ -31,7 +31,7 @@ from ecos_agent.optimization_retrieval import (
 
 def _budget() -> BudgetSnapshot:
     return BudgetSnapshot(
-        budget=EpisodeBudget.from_default_reruns((10.0, 11.0, 12.0)),
+        budget=EpisodeBudget.from_reference_rerun(11.0),
         consumed_candidates=1,
         consumed_planning_calls=2,
     )

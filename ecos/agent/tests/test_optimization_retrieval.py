@@ -41,7 +41,7 @@ def _observation() -> StageObservation:
         stage="place",
         evidence_manifest_sha256=HASH,
         metrics={"place_lutrudy_utilization_max": 0.88},
-        budget=BudgetSnapshot(budget=EpisodeBudget.from_default_reruns((10.0, 11.0, 12.0))),
+        budget=BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(11.0)),
     )
 
 

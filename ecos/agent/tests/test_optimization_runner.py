@@ -56,14 +56,7 @@ _TIMING_GUARDRAIL = {metric: 0.0 for metric in TimingMetric}
 
 
 def _objective():
-    return freeze_routability_objective(
-        {
-            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (0.0, 0.0, 0.0),
-            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (0.0, 0.0, 0.0),
-            ObjectiveMetric.ROUTE_WIRELENGTH: (0.0, 0.0, 0.0),
-        },
-        default_timing_replays={metric: (0.0, 0.0, 0.0) for metric in TimingMetric},
-    )
+    return freeze_routability_objective(_incumbent())
 
 
 class _Clock:
@@ -170,7 +163,7 @@ def _evidence(execution_id: str) -> CandidateExecutionEvidence:
 
 
 def _budget() -> BudgetSnapshot:
-    return BudgetSnapshot(budget=EpisodeBudget.from_default_reruns((10.0, 11.0, 12.0)))
+    return BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(11.0))
 
 
 def _proposal(

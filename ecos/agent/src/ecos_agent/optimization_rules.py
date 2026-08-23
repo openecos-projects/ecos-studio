@@ -5,11 +5,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
-    MetricNoiseBand,
+    MetricReference,
     ObjectiveMetric,
     LegalAction,
     OptimizationKnob,
@@ -26,7 +26,7 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingGuardrailContract,
     TimingMetric,
-    TimingNoiseBand,
+    TimingReference,
 )
 
 
@@ -122,41 +122,24 @@ def freeze_optimization_objective(
 
 
 def freeze_routability_objective(
-    default_replays: Mapping[ObjectiveMetric, Sequence[float]],
-    *,
-    default_timing_replays: Mapping[TimingMetric, Sequence[float]],
+    baseline: TerminalObservation,
 ) -> RoutabilityObjectiveContract:
-    bands = []
-    for metric_id in ROUTABILITY_OBJECTIVE_ORDER:
-        values = tuple(default_replays.get(metric_id, ()))
-        if len(values) != 3:
-            raise ValueError("each objective metric requires exactly three default replays")
-        bands.append(
-            MetricNoiseBand(
-                metric_id=metric_id,
-                default_replay_values=values,
-                tolerance=max(values) - min(values),
-            )
-        )
-    if set(default_replays) != set(ROUTABILITY_OBJECTIVE_ORDER):
-        raise ValueError("default replays must contain only frozen objective metrics")
-    timing_bands = []
-    for metric_id in TIMING_GUARDRAIL_ORDER:
-        values = tuple(default_timing_replays.get(metric_id, ()))
-        if len(values) != 3:
-            raise ValueError("each timing metric requires exactly three default replays")
-        timing_bands.append(
-            TimingNoiseBand(
-                metric_id=metric_id,
-                default_replay_values=values,
-                tolerance=max(values) - min(values),
-            )
-        )
-    if set(default_timing_replays) != set(TIMING_GUARDRAIL_ORDER):
-        raise ValueError("default timing replays must contain only frozen timing metrics")
+    if not baseline.eligible_for_incumbent:
+        raise ValueError("baseline terminal observation is not eligible")
     return RoutabilityObjectiveContract(
-        noise_bands=tuple(bands),
-        timing_guardrail=TimingGuardrailContract(noise_bands=tuple(timing_bands)),
+        references=tuple(
+            MetricReference(metric_id=metric_id, reference_value=baseline.metrics[metric_id])
+            for metric_id in ROUTABILITY_OBJECTIVE_ORDER
+        ),
+        timing_guardrail=TimingGuardrailContract(
+            references=tuple(
+                TimingReference(
+                    metric_id=metric_id,
+                    reference_value=baseline.timing_guardrail[metric_id],
+                )
+                for metric_id in TIMING_GUARDRAIL_ORDER
+            )
+        ),
     )
 
 
@@ -173,27 +156,25 @@ def compare_incumbent(
         return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
     for metric_id in TIMING_GUARDRAIL_ORDER:
         degradation = incumbent.timing_guardrail[metric_id] - candidate.timing_guardrail[metric_id]
-        if degradation > objective.timing_guardrail.noise_band(metric_id):
+        if degradation > 0:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     if semantic_objective is not None:
         for metric_id in semantic_objective.preserve_metrics:
             delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
-            if -delta > objective.noise_band(metric_id):
+            if delta < 0:
                 return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
         metric_id = semantic_objective.primary_metric
         delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
-        tolerance = objective.noise_band(metric_id)
-        if delta > tolerance:
+        if delta > 0:
             return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
-        if -delta > tolerance:
+        if delta < 0:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
         return IncumbentComparison(IncumbentDecision.NOISE_TIE, None)
     for metric_id in ROUTABILITY_OBJECTIVE_ORDER:
         delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
-        tolerance = objective.noise_band(metric_id)
-        if delta > tolerance:
+        if delta > 0:
             return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
-        if -delta > tolerance:
+        if delta < 0:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     return IncumbentComparison(IncumbentDecision.NOISE_TIE, None)
 

@@ -84,31 +84,6 @@ class EccCandidateRerunAdapter:
             patch=patch,
         )
 
-    def start_baseline(
-        self, episode_id: str, replay_number: int, target_density: float
-    ) -> CandidateExecutionReceipt:
-        if not _ID.fullmatch(episode_id):
-            raise OptimizationEccAdapterError("baseline episode id is invalid")
-        if type(replay_number) is not int or replay_number not in {1, 2, 3}:
-            raise OptimizationEccAdapterError("baseline replay number is invalid")
-        if (
-            type(target_density) not in {int, float}
-            or isinstance(target_density, bool)
-            or not math.isfinite(target_density)
-            or not 0 < target_density <= 1
-        ):
-            raise OptimizationEccAdapterError("baseline target density is invalid")
-        replay_id = f"baseline-{replay_number}"
-        # ECC requires one patch; replaying the frozen parent value is configuration-neutral.
-        return self._start_rerun(
-            candidate_id=_candidate_id(episode_id, replay_id),
-            idempotency_key=f"{episode_id}.{replay_id}",
-            patch={
-                "knob_id": OptimizationKnob.TARGET_DENSITY.value,
-                "value": float(target_density),
-            },
-        )
-
     def _start_rerun(
         self,
         *,

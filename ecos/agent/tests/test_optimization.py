@@ -42,7 +42,7 @@ CHUNK_HASH = "b" * 64
 
 
 def _budget() -> EpisodeBudget:
-    return EpisodeBudget.from_default_reruns((10.0, 12.0, 11.0))
+    return EpisodeBudget.from_reference_rerun(11.0)
 
 
 def _terminal(
@@ -79,17 +79,18 @@ def _terminal(
 
 def _objective() -> RoutabilityObjectiveContract:
     return freeze_routability_objective(
-        {
-            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (8, 9, 10),
-            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (15, 15, 15),
-            ObjectiveMetric.ROUTE_WIRELENGTH: (100.0, 102.0, 101.0),
-        },
-        default_timing_replays={
-            TimingMetric.STA_SETUP_WNS: (0.8, 1.0, 0.9),
-            TimingMetric.STA_SETUP_TNS: (-0.1, 0.0, -0.05),
-            TimingMetric.STA_HOLD_WNS: (0.4, 0.5, 0.45),
-            TimingMetric.STA_HOLD_TNS: (0.0, 0.0, 0.0),
-        },
+        _terminal(
+            "baseline",
+            dr=9,
+            overflow=15,
+            wirelength=101.0,
+            timing={
+                TimingMetric.STA_SETUP_WNS: 0.9,
+                TimingMetric.STA_SETUP_TNS: -0.05,
+                TimingMetric.STA_HOLD_WNS: 0.45,
+                TimingMetric.STA_HOLD_TNS: 0.0,
+            },
+        )
     )
 
 
@@ -121,12 +122,12 @@ def _proposal(**overrides: object) -> dict[str, object]:
     return payload
 
 
-def test_budget_is_frozen_from_three_default_reruns() -> None:
+def test_budget_is_frozen_from_one_reference_rerun() -> None:
     budget = _budget()
 
     assert budget.candidate_execution_limit == 6
     assert budget.planning_call_limit == 18
-    assert budget.default_place_to_harden_seconds == (10.0, 12.0, 11.0)
+    assert budget.reference_place_to_harden_seconds == 11.0
     assert budget.wall_time_limit_seconds == 88.0
     assert BudgetSnapshot(budget=budget, consumed_candidates=6, consumed_planning_calls=18).exhausted
 
@@ -134,14 +135,14 @@ def test_budget_is_frozen_from_three_default_reruns() -> None:
 def test_budget_rejects_a_noncanonical_wall_time_limit() -> None:
     with pytest.raises(ValidationError, match="8 times"):
         EpisodeBudget(
-            default_place_to_harden_seconds=(10.0, 12.0, 11.0),
+            reference_place_to_harden_seconds=11.0,
             wall_time_limit_seconds=80.0,
         )
 
 
 def test_budget_reports_remaining_wall_time() -> None:
     snapshot = BudgetSnapshot(
-        budget=EpisodeBudget.from_default_reruns((10.0, 12.0, 11.0)),
+        budget=EpisodeBudget.from_reference_rerun(11.0),
         elapsed_wall_time_seconds=20.0,
     )
 
@@ -411,30 +412,29 @@ def test_legal_actions_exclude_only_noop_directions() -> None:
         )
 
 
-def test_noise_bands_are_derived_from_all_three_default_replays() -> None:
+def test_objective_is_frozen_from_one_parent_terminal_observation() -> None:
     objective = _objective()
 
-    assert objective.noise_band(ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT) == 2
-    assert objective.noise_band(ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW) == 0
-    assert objective.noise_band(ObjectiveMetric.ROUTE_WIRELENGTH) == 2
-    assert objective.timing_guardrail.noise_band(TimingMetric.STA_SETUP_WNS) == pytest.approx(
-        0.2
+    assert objective.reference_value(ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT) == 9
+    assert objective.reference_value(ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW) == 15
+    assert objective.reference_value(ObjectiveMetric.ROUTE_WIRELENGTH) == 101
+    assert objective.timing_guardrail.reference_value(TimingMetric.STA_SETUP_WNS) == pytest.approx(
+        0.9
     )
 
-    with pytest.raises(ValueError, match="three"):
+    with pytest.raises(ValueError, match="eligible"):
         freeze_routability_objective(
-            {
-                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: (8, 9),
-                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: (15, 15, 15),
-                ObjectiveMetric.ROUTE_WIRELENGTH: (100.0, 102.0, 101.0),
-            },
-            default_timing_replays={
-                metric: (0.0, 0.0, 0.0) for metric in TimingMetric
-            },
+            _terminal(
+                "ineligible-baseline",
+                dr=0,
+                overflow=0,
+                wirelength=0,
+                signoff=GateResult.FAIL,
+            )
         )
 
 
-def test_comparator_rejects_timing_regression_beyond_replay_noise() -> None:
+def test_comparator_rejects_any_timing_regression() -> None:
     comparison = compare_incumbent(
         incumbent=_terminal("incumbent", dr=0, overflow=0, wirelength=100),
         candidate=_terminal(
@@ -487,7 +487,7 @@ def test_semantic_objective_preserves_guardrails_before_primary_metric() -> None
     assert comparison.decisive_metric == ObjectiveMetric.ROUTE_WIRELENGTH
 
 
-def test_comparator_keeps_route_order_inside_timing_replay_noise() -> None:
+def test_comparator_accepts_unchanged_timing_before_route_improvement() -> None:
     comparison = compare_incumbent(
         incumbent=_terminal("incumbent", dr=0, overflow=0, wirelength=100),
         candidate=_terminal(
@@ -496,7 +496,7 @@ def test_comparator_keeps_route_order_inside_timing_replay_noise() -> None:
             overflow=0,
             wirelength=90,
             timing={
-                TimingMetric.STA_SETUP_WNS: 0.85,
+                TimingMetric.STA_SETUP_WNS: 1.0,
                 TimingMetric.STA_SETUP_TNS: 0.0,
                 TimingMetric.STA_HOLD_WNS: 0.5,
                 TimingMetric.STA_HOLD_TNS: 0.0,
@@ -531,7 +531,7 @@ def test_comparator_does_not_trade_detail_route_violations_for_overflow() -> Non
     assert comparison.decisive_metric == ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
 
 
-def test_comparator_uses_next_metric_only_inside_noise_band() -> None:
+def test_comparator_uses_first_improved_metric() -> None:
     comparison = compare_incumbent(
         incumbent=_terminal("incumbent", dr=10, overflow=9, wirelength=105),
         candidate=_terminal("candidate", dr=8, overflow=7, wirelength=100),
@@ -539,13 +539,13 @@ def test_comparator_uses_next_metric_only_inside_noise_band() -> None:
     )
 
     assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
-    assert comparison.decisive_metric == ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
+    assert comparison.decisive_metric == ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
 
 
-def test_comparator_keeps_incumbent_on_noise_tie() -> None:
+def test_comparator_keeps_incumbent_on_exact_tie() -> None:
     comparison = compare_incumbent(
         incumbent=_terminal("incumbent", dr=10, overflow=10, wirelength=100),
-        candidate=_terminal("candidate", dr=9, overflow=10, wirelength=101),
+        candidate=_terminal("candidate", dr=10, overflow=10, wirelength=100),
         objective=_objective(),
     )
 

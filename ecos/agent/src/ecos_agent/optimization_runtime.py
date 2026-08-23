@@ -7,19 +7,16 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 from pydantic import ValidationError
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
-    BaselineReplay,
-    BaselineReplayEvidence,
     BudgetSnapshot,
     EpisodeBudget,
-    ObjectiveMetric,
     OptimizationObjectiveContract,
-    TimingMetric,
+    TerminalObservation,
 )
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
@@ -34,7 +31,6 @@ from ecos_agent.optimization_ecc_adapter import (
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
-    _write_json_atomic,
     build_optimization_artifact_manifest,
 )
 from ecos_agent.optimization_observations import (
@@ -78,13 +74,13 @@ def create_optimization_runner(
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
     current_values = _current_values(workspace, site_width_dbu)
-    parent_manifest = _parent_manifest_sha256(workspace)
-    progress_callback = context.get("progress_callback")
-    cancel_requested = context.get("cancel_requested")
-    if progress_callback is not None and not callable(progress_callback):
-        raise OptimizationRuntimeError("optimization progress callback is invalid")
-    if cancel_requested is not None and not callable(cancel_requested):
-        raise OptimizationRuntimeError("optimization cancellation callback is invalid")
+    parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
+    routability_objective = freeze_routability_objective(terminal_observation)
+    budget = BudgetSnapshot(
+        budget=EpisodeBudget.from_reference_rerun(
+            _place_to_harden_runtime_seconds(workspace)
+        )
+    )
     ledger_root = workspace / ".agent" / "optimization" / episode_id
     rpc = EccContentLengthRpcClient(_ecc_executable())
     ledger = _ledger(ledger_root)
@@ -95,29 +91,12 @@ def create_optimization_runner(
             workspace_id=workspace_id,
             site_width_dbu=site_width_dbu,
         )
-        baseline_path = workspace / ".agent" / "optimization" / "baseline-replays.v2.json"
-        if baseline_path.is_file():
-            baseline_replays = _load_baseline_replays(workspace, parent_manifest)
-        else:
-            baseline_replays = _prepare_baseline_replays(
-                workspace,
-                parent_manifest,
-                episode_id,
-                executor,
-                float(current_values["place.target_density"]),
-                progress_callback or (lambda _text: None),
-                cancel_requested or (lambda: False),
-            )
-        budget = BudgetSnapshot(
-            budget=EpisodeBudget.from_default_reruns(
-                tuple(replay.runtime_seconds for replay in baseline_replays.replays)
-            )
-        )
-        state_path = ledger_root / "optimization-episode-state.v5.json"
+        state_path = ledger_root / "optimization-episode-state.v6.json"
         legacy_state_paths = (
             ledger_root / "optimization-episode-state.v2.json",
             ledger_root / "optimization-episode-state.v3.json",
             ledger_root / "optimization-episode-state.v4.json",
+            ledger_root / "optimization-episode-state.v5.json",
         )
         if state_path.is_file():
             controller = OptimizationEpisodeController.recover(
@@ -129,6 +108,10 @@ def create_optimization_runner(
             if controller.objective != objective:
                 raise OptimizationRuntimeError(
                     "optimization objective does not match the recovered episode"
+                )
+            if controller.parent_manifest_sha256 != parent_manifest:
+                raise OptimizationRuntimeError(
+                    "optimization workspace does not match the recovered episode"
                 )
         elif any(path.is_file() for path in legacy_state_paths):
             raise OptimizationRuntimeError(
@@ -193,22 +176,7 @@ def create_optimization_runner(
         current_values=current_values,
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
-        objective=freeze_routability_objective(
-            {
-                metric: tuple(
-                    replay.terminal_observation.metrics[metric]
-                    for replay in baseline_replays.replays
-                )
-                for metric in ObjectiveMetric
-            },
-            default_timing_replays={
-                metric: tuple(
-                    replay.terminal_observation.timing_guardrail[metric]
-                    for replay in baseline_replays.replays
-                )
-                for metric in TimingMetric
-            },
-        ),
+        objective=routability_objective,
     )
 
 
@@ -221,144 +189,21 @@ def _optimization_objective(value: object) -> OptimizationObjectiveContract:
         raise OptimizationRuntimeError("optimization objective is invalid") from exc
 
 
-def _parent_manifest_sha256(workspace: Path) -> str:
-    return build_optimization_artifact_manifest(
+def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> str:
+    checkpoint_manifest = build_optimization_artifact_manifest(
         workspace,
         (
             "home/flow.json",
             "home/parameters.json",
             "place_dreamplace/analysis/qor_metrics.json",
         ),
-    ).manifest_sha256
-
-
-def _prepare_baseline_replays(
-    workspace: Path,
-    parent_manifest_sha256: str,
-    episode_id: str,
-    executor: EccCandidateRerunAdapter,
-    target_density: float,
-    progress_callback: Callable[[str], None],
-    cancel_requested: Callable[[], bool],
-) -> BaselineReplayEvidence:
-    replays: list[BaselineReplay] = []
-    for replay_number in range(1, 4):
-        if cancel_requested():
-            raise OptimizationRuntimeError("baseline replay preparation was interrupted")
-        progress_callback(f"Preparing baseline replay {replay_number}/3.")
-        replays.append(
-            _execute_baseline_replay(
-                workspace,
-                episode_id,
-                replay_number,
-                executor,
-                target_density,
-                cancel_requested,
-            )
-        )
-        progress_callback(f"Baseline replay {replay_number}/3 completed.")
-    if _parent_manifest_sha256(workspace) != parent_manifest_sha256:
-        raise OptimizationRuntimeError("workspace changed during baseline replay preparation")
-    payload = {
-        "schema_version": "ecos.optimization_baseline_replays.v2",
-        "parent_manifest_sha256": parent_manifest_sha256,
-        "replays": [replay.model_dump(mode="json") for replay in replays],
-    }
-    payload["artifact_sha256"] = canonical_sha256(payload)
-    try:
-        evidence = BaselineReplayEvidence.model_validate(payload)
-    except ValidationError as exc:
-        raise OptimizationRuntimeError("baseline replay evidence is invalid") from exc
-    _write_json_atomic(
-        workspace / ".agent" / "optimization" / "baseline-replays.v2.json",
-        evidence.model_dump(mode="json"),
     )
-    return _load_baseline_replays(workspace, parent_manifest_sha256)
-
-
-def _execute_baseline_replay(
-    workspace: Path,
-    episode_id: str,
-    replay_number: int,
-    executor: EccCandidateRerunAdapter,
-    target_density: float,
-    cancel_requested: Callable[[], bool],
-) -> BaselineReplay:
-    receipt = executor.start_baseline(episode_id, replay_number, target_density)
-    receipt = _wait_for_baseline_terminal(executor, receipt, cancel_requested)
-    if receipt.outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED or receipt.evidence is None:
-        raise OptimizationRuntimeError(f"baseline replay {replay_number} failed")
-    try:
-        observation = build_candidate_terminal_observation(workspace, receipt.evidence)
-        return BaselineReplay(
-            replay_id=f"baseline-{replay_number}",
-            candidate_root_ref=receipt.evidence.candidate_root_ref,
-            candidate_manifest_ref=receipt.evidence.candidate_manifest_ref,
-            candidate_manifest_sha256=receipt.evidence.candidate_manifest_sha256,
-            runtime_seconds=_place_to_harden_runtime_seconds(
-                workspace / receipt.evidence.candidate_root_ref
-            ),
-            terminal_observation=observation,
-        )
-    except (OSError, ValueError) as exc:
-        raise OptimizationRuntimeError(
-            f"baseline replay {replay_number} evidence is invalid"
-        ) from exc
-
-
-def _wait_for_baseline_terminal(
-    executor: EccCandidateRerunAdapter,
-    receipt: CandidateExecutionReceipt,
-    cancel_requested: Callable[[], bool],
-) -> CandidateExecutionReceipt:
-    if not receipt.started:
-        raise OptimizationRuntimeError("baseline replay did not start")
-    if receipt.outcome is not None:
-        return receipt
-    deadline = _monotonic() + _terminal_timeout_seconds()
-    while (remaining := deadline - _monotonic()) > 0:
-        if cancel_requested():
-            executor.cancel(receipt.execution_id)
-            raise OptimizationRuntimeError("baseline replay preparation was interrupted")
-        terminal = executor.wait_for_terminal(
-            receipt.execution_id,
-            timeout_seconds=min(5.0, remaining),
-        )
-        if terminal.outcome is not None:
-            return terminal
-    executor.cancel(receipt.execution_id)
-    raise OptimizationRuntimeError("baseline replay timed out")
-
-
-def _load_baseline_replays(
-    workspace: Path, parent_manifest_sha256: str
-) -> BaselineReplayEvidence:
-    path = workspace / ".agent" / "optimization" / "baseline-replays.v2.json"
-    if not path.is_file():
-        raise OptimizationRuntimeError("baseline replay evidence is unavailable")
-    try:
-        evidence = BaselineReplayEvidence.model_validate_json(path.read_bytes())
-    except (OSError, ValidationError) as exc:
-        raise OptimizationRuntimeError("baseline replay evidence is invalid") from exc
-    if evidence.parent_manifest_sha256 != parent_manifest_sha256:
-        raise OptimizationRuntimeError("baseline replay evidence does not match the workspace")
-    try:
-        observed = tuple(
-            build_candidate_terminal_observation(
-                workspace,
-                CandidateExecutionEvidence(
-                    replay.candidate_root_ref,
-                    replay.candidate_manifest_ref,
-                    replay.candidate_manifest_sha256,
-                ),
-            )
-            for replay in evidence.replays
-        )
-    except (OSError, ValueError) as exc:
-        raise OptimizationRuntimeError("baseline replay candidate evidence is invalid") from exc
-    if observed != tuple(replay.terminal_observation for replay in evidence.replays):
-        raise OptimizationRuntimeError("baseline replay terminal evidence does not match candidates")
-    return evidence
+    return canonical_sha256(
+        {
+            "checkpoint_manifest_sha256": checkpoint_manifest.manifest_sha256,
+            "terminal_manifest_sha256": terminal.evidence_manifest_sha256,
+        }
+    )
 
 
 def _workspace(value: object) -> Path:

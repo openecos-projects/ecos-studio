@@ -80,8 +80,6 @@ def test_gui_optimization_authorization_holds_and_closes_codex_provider(
 
     def runner_factory(context: dict[str, object], planner: object) -> _FailingRunner:
         factory_calls.append({"context": context, "planner": planner})
-        context["progress_callback"]("Preparing baseline replay 1/3.")
-        assert context["cancel_requested"]() is False
         return _FailingRunner()
 
     provider = EcosAgentProvider(
@@ -117,10 +115,6 @@ def test_gui_optimization_authorization_holds_and_closes_codex_provider(
     assert factory_calls[2]["context"]["episode_id"] == session.optimization_episode_id
     assert factory_calls[2]["context"]["objective"]["primary_metric"] == "route_wirelength"
     assert any(event["type"] == "optimization" for event in events) is False
-    assert any(
-        event["type"] == "tool" and "baseline replay 1/3" in str(event["text"])
-        for event in events
-    )
     assert any(event["type"] == "error" and "test stop" in str(event["text"]) for event in events)
 
 
@@ -146,14 +140,14 @@ def test_gui_optimization_fails_closed_without_runner_factory(tmp_path: Path) ->
     assert any(event["type"] == "error" and "not configured" in str(event["text"]) for event in events)
 
 
-def test_gui_baseline_preparation_failure_returns_to_operation(tmp_path: Path) -> None:
+def test_gui_runner_start_failure_returns_to_operation(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     events: list[dict[str, object]] = []
     fake_provider = _FakeCodexProvider()
 
     def fail(_context: dict[str, object], _planner: object) -> _CompletedRunner:
-        raise RuntimeError("baseline replay 2 failed")
+        raise RuntimeError("runner startup failed")
 
     provider = EcosAgentProvider(
         emit=events.append,
@@ -173,7 +167,7 @@ def test_gui_baseline_preparation_failure_returns_to_operation(tmp_path: Path) -
     assert session.optimization_phase == "unavailable"
     assert fake_provider.closed == 2
     assert any(
-        event["type"] == "error" and "baseline replay 2 failed" in str(event["text"])
+        event["type"] == "error" and "runner startup failed" in str(event["text"])
         for event in events
     )
 

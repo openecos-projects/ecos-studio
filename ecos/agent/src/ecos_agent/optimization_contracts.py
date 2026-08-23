@@ -491,34 +491,38 @@ class KnobApplicationReceipt(_ContractModel):
 
 
 class EpisodeBudget(_ContractModel):
-    schema_version: Literal["ecos.optimization_budget.v2"] = "ecos.optimization_budget.v2"
+    schema_version: Literal["ecos.optimization_budget.v3"] = "ecos.optimization_budget.v3"
     candidate_execution_limit: Literal[6] = 6
     planning_call_limit: Literal[18] = 18
     minimum_candidate_executions: Literal[2] = 2
     max_planning_only_turns: Literal[2] = 2
-    default_place_to_harden_seconds: tuple[float, float, float]
+    reference_place_to_harden_seconds: float
     wall_time_limit_seconds: float
 
-    @field_validator("default_place_to_harden_seconds")
+    @field_validator("reference_place_to_harden_seconds")
     @classmethod
-    def validate_default_times(
-        cls, value: tuple[float, float, float]
-    ) -> tuple[float, float, float]:
-        if any(not math.isfinite(item) or item <= 0 for item in value):
-            raise ValueError("default rerun times must be finite and positive")
+    def validate_reference_time(cls, value: float) -> float:
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("reference rerun time must be finite and positive")
         return value
 
     @model_validator(mode="after")
     def validate_wall_time_limit(self) -> "EpisodeBudget":
-        median = sorted(self.default_place_to_harden_seconds)[1]
-        if not math.isclose(self.wall_time_limit_seconds, 8 * median, rel_tol=0, abs_tol=1e-9):
-            raise ValueError("wall time limit must equal 8 times the default rerun median")
+        if not math.isclose(
+            self.wall_time_limit_seconds,
+            8 * self.reference_place_to_harden_seconds,
+            rel_tol=0,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("wall time limit must equal 8 times the reference rerun")
         return self
 
     @classmethod
-    def from_default_reruns(cls, durations: tuple[float, float, float]) -> "EpisodeBudget":
-        median = sorted(durations)[1]
-        return cls(default_place_to_harden_seconds=durations, wall_time_limit_seconds=8 * median)
+    def from_reference_rerun(cls, duration: float) -> "EpisodeBudget":
+        return cls(
+            reference_place_to_harden_seconds=duration,
+            wall_time_limit_seconds=8 * duration,
+        )
 
 
 class BudgetSnapshot(_ContractModel):
@@ -691,143 +695,65 @@ class TerminalObservation(_ContractModel):
         return self.evidence_valid and self.harden_artifacts_complete and self.signoff_gates.passed
 
 
-class BaselineReplay(_ContractModel):
-    replay_id: str
-    candidate_root_ref: str
-    candidate_manifest_ref: str
-    candidate_manifest_sha256: str
-    runtime_seconds: float = Field(gt=0)
-    terminal_observation: TerminalObservation
-
-    @field_validator("replay_id")
-    @classmethod
-    def validate_id(cls, value: str) -> str:
-        if not _ID.fullmatch(value):
-            raise ValueError("baseline replay id is invalid")
-        return value
-
-    @field_validator("candidate_root_ref", "candidate_manifest_ref")
-    @classmethod
-    def validate_reference(cls, value: str) -> str:
-        if not value or "\\" in value or value.startswith("/") or "." in value.split("/"):
-            raise ValueError("baseline replay reference is invalid")
-        if ".." in value.split("/"):
-            raise ValueError("baseline replay reference is invalid")
-        return value
-
-    @field_validator("candidate_manifest_sha256")
-    @classmethod
-    def validate_manifest_hash(cls, value: str) -> str:
-        if not _SHA256.fullmatch(value):
-            raise ValueError("baseline replay manifest hash is invalid")
-        return value
-
-    @model_validator(mode="after")
-    def validate_terminal_evidence(self) -> "BaselineReplay":
-        if not self.terminal_observation.eligible_for_incumbent:
-            raise ValueError("baseline replay terminal evidence is ineligible")
-        return self
-
-
-class BaselineReplayEvidence(_ContractModel):
-    schema_version: Literal["ecos.optimization_baseline_replays.v2"] = (
-        "ecos.optimization_baseline_replays.v2"
-    )
-    parent_manifest_sha256: str
-    replays: tuple[BaselineReplay, BaselineReplay, BaselineReplay]
-    artifact_sha256: str
-
-    @model_validator(mode="after")
-    def validate_evidence(self) -> "BaselineReplayEvidence":
-        if not _SHA256.fullmatch(self.parent_manifest_sha256):
-            raise ValueError("baseline replay parent manifest hash is invalid")
-        if len({replay.replay_id for replay in self.replays}) != 3:
-            raise ValueError("baseline replay ids must be unique")
-        if not _SHA256.fullmatch(self.artifact_sha256):
-            raise ValueError("baseline replay artifact hash is invalid")
-        expected = canonical_sha256(self.model_dump(mode="json", exclude={"artifact_sha256"}))
-        if self.artifact_sha256 != expected:
-            raise ValueError("baseline replay artifact hash does not match its content")
-        return self
-
-
-class MetricNoiseBand(_ContractModel):
+class MetricReference(_ContractModel):
     metric_id: ObjectiveMetric
-    default_replay_values: tuple[float, float, float]
-    tolerance: float
+    reference_value: float
 
-    @field_validator("default_replay_values")
+    @field_validator("reference_value")
     @classmethod
-    def validate_values(cls, value: tuple[float, float, float]) -> tuple[float, float, float]:
-        if any(not math.isfinite(item) or item < 0 for item in value):
-            raise ValueError("noise replay values must be finite and non-negative")
+    def validate_value(cls, value: float) -> float:
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("reference value must be finite and non-negative")
         return value
-
-    @model_validator(mode="after")
-    def validate_tolerance(self) -> "MetricNoiseBand":
-        expected = max(self.default_replay_values) - min(self.default_replay_values)
-        if not math.isclose(self.tolerance, expected, rel_tol=0, abs_tol=1e-12):
-            raise ValueError("noise tolerance must equal the three-replay range")
-        return self
-
 
 class RoutabilityObjectiveContract(_ContractModel):
-    schema_version: Literal["ecos.routability_objective.v2"] = "ecos.routability_objective.v2"
-    noise_bands: tuple[MetricNoiseBand, ...]
+    schema_version: Literal["ecos.routability_objective.v3"] = "ecos.routability_objective.v3"
+    references: tuple[MetricReference, ...]
     timing_guardrail: "TimingGuardrailContract"
 
-    @field_validator("noise_bands")
+    @field_validator("references")
     @classmethod
-    def validate_noise_bands(
-        cls, value: tuple[MetricNoiseBand, ...]
-    ) -> tuple[MetricNoiseBand, ...]:
+    def validate_references(
+        cls, value: tuple[MetricReference, ...]
+    ) -> tuple[MetricReference, ...]:
         if tuple(item.metric_id for item in value) != ROUTABILITY_OBJECTIVE_ORDER:
-            raise ValueError("noise bands must use the frozen objective order")
+            raise ValueError("references must use the frozen objective order")
         return value
 
-    def noise_band(self, metric_id: ObjectiveMetric) -> float:
-        return next(item.tolerance for item in self.noise_bands if item.metric_id == metric_id)
+    def reference_value(self, metric_id: ObjectiveMetric) -> float:
+        return next(item.reference_value for item in self.references if item.metric_id == metric_id)
 
     @property
     def contract_sha256(self) -> str:
         return canonical_sha256(self.model_dump(mode="json"))
 
 
-class TimingNoiseBand(_ContractModel):
+class TimingReference(_ContractModel):
     metric_id: TimingMetric
-    default_replay_values: tuple[float, float, float]
-    tolerance: float
+    reference_value: float
 
-    @field_validator("default_replay_values")
+    @field_validator("reference_value")
     @classmethod
-    def validate_values(cls, value: tuple[float, float, float]) -> tuple[float, float, float]:
-        if any(not math.isfinite(item) for item in value):
-            raise ValueError("timing noise replay values must be finite")
+    def validate_value(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("timing reference value must be finite")
         return value
-
-    @model_validator(mode="after")
-    def validate_tolerance(self) -> "TimingNoiseBand":
-        expected = max(self.default_replay_values) - min(self.default_replay_values)
-        if not math.isclose(self.tolerance, expected, rel_tol=0, abs_tol=1e-12):
-            raise ValueError("timing noise tolerance must equal the three-replay range")
-        return self
-
 
 class TimingGuardrailContract(_ContractModel):
-    schema_version: Literal["ecos.timing_guardrail.v1"] = "ecos.timing_guardrail.v1"
-    noise_bands: tuple[TimingNoiseBand, ...]
+    schema_version: Literal["ecos.timing_guardrail.v2"] = "ecos.timing_guardrail.v2"
+    references: tuple[TimingReference, ...]
 
-    @field_validator("noise_bands")
+    @field_validator("references")
     @classmethod
-    def validate_noise_bands(
-        cls, value: tuple[TimingNoiseBand, ...]
-    ) -> tuple[TimingNoiseBand, ...]:
+    def validate_references(
+        cls, value: tuple[TimingReference, ...]
+    ) -> tuple[TimingReference, ...]:
         if tuple(item.metric_id for item in value) != TIMING_GUARDRAIL_ORDER:
-            raise ValueError("timing noise bands must use the frozen timing order")
+            raise ValueError("timing references must use the frozen timing order")
         return value
 
-    def noise_band(self, metric_id: TimingMetric) -> float:
-        return next(item.tolerance for item in self.noise_bands if item.metric_id == metric_id)
+    def reference_value(self, metric_id: TimingMetric) -> float:
+        return next(item.reference_value for item in self.references if item.metric_id == metric_id)
 
 
 def _is_density_lattice_value(value: float) -> bool:

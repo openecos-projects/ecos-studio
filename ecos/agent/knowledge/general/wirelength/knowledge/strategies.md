@@ -7,7 +7,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** Placement HPWL or FLUTE wirelength improves beyond local replay noise, but the candidate has not yet been validated through route.
+**Condition:** Placement HPWL or FLUTE wirelength improves, but the candidate has not yet been validated through route.
 
 **Diagnosis:** placement proxy terminal gap.
 
@@ -17,7 +17,7 @@
 
 **Effects:** route_wirelength unchanged.
 
-**Anti-conditions:** route_execution_not_authorized, baseline_noise_band_unavailable.
+**Anti-conditions:** route_execution_not_authorized, parent_terminal_reference_unavailable.
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -88,17 +88,17 @@
 
 **Applies to steps:** place.
 
-**Condition:** A place-stage parameter candidate improves HPWL, FLUTE, or routed wirelength but materially worsens congestion, DRC, or timing against the replayed baseline.
+**Condition:** A place-stage parameter candidate improves HPWL, FLUTE, or routed wirelength but worsens congestion, DRC, or timing against the parent terminal reference.
 
 **Diagnosis:** wirelength gain violates non regression constraint.
 
-**Required evidence:** baseline_replay_noise_bands, route_wirelength, route_dr_total_violation_count, route_la_total_overflow, drc_count, sta_setup_wns, sta_setup_tns, sta_hold_wns, sta_hold_tns.
+**Required evidence:** parent_terminal_reference, route_wirelength, route_dr_total_violation_count, route_la_total_overflow, drc_count, sta_setup_wns, sta_setup_tns, sta_hold_wns, sta_hold_tns.
 
 **Action intent:** reject wirelength guardrail regression (`reject_wirelength_guardrail_regression`).
 
 **Effects:** congestion unchanged; timing unchanged.
 
-**Anti-conditions:** regression_within_replay_noise, baseline_guardrail_evidence_unavailable.
+**Anti-conditions:** parent_terminal_reference_unavailable.
 
 **ECOS analog:** No authorized knob. Do not invent one.
 
@@ -125,7 +125,7 @@
 
 **Effects:** route_wirelength unchanged.
 
-**Anti-conditions:** rebound_within_replay_noise, downstream_evidence_unavailable.
+**Anti-conditions:** parent_terminal_reference_unavailable, downstream_evidence_unavailable.
 
 **ECOS analog:** No authorized knob. Do not invent one.
 

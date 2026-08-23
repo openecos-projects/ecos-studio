@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable, Mapping, Protocol
+from typing import Callable, Literal, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -63,11 +63,12 @@ from ecos_agent.optimization_rules import legal_actions, select_requested_value
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v5.json"
+_STATE_FILE = "optimization-episode-state.v6.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
     "optimization-episode-state.v4.json",
+    "optimization-episode-state.v5.json",
 )
 
 
@@ -218,7 +219,9 @@ class OptimizationExecutionAdapter(Protocol):
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "ecos.optimization_episode_state.v5"
+    schema_version: Literal["ecos.optimization_episode_state.v6"] = (
+        "ecos.optimization_episode_state.v6"
+    )
     episode_id: str
     checkpoint_id: str
     mode: OptimizationAgentMode
@@ -350,6 +353,10 @@ class OptimizationEpisodeController:
     def budget(self) -> BudgetSnapshot:
         self._refresh_budget()
         return self._budget
+
+    @property
+    def parent_manifest_sha256(self) -> str | None:
+        return self._parent_manifest_sha256
 
     @property
     def state_path(self) -> Path:
@@ -1060,7 +1067,7 @@ class OptimizationEpisodeController:
         planning_provider_audit = self._planning_provider_audit.replay()
         decision_audit = self._decision_audit.replay()
         value = {
-            "schema_version": "ecos.optimization_episode_state.v5",
+            "schema_version": "ecos.optimization_episode_state.v6",
             "episode_id": self.episode_id,
             "checkpoint_id": self.checkpoint_id,
             "mode": self.mode.value,
