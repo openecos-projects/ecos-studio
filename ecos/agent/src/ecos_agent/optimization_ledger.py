@@ -134,6 +134,9 @@ class OptimizationInterventionStart(_LedgerModel):
     execution_contract_sha256: str
     parent_manifest_sha256: str
     environment_sha256: str
+    objective_contract_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     proposal_action: ProposalAction | None = None
     requested: RequestedKnobValue | None = None
 
@@ -151,10 +154,12 @@ class OptimizationInterventionStart(_LedgerModel):
         "execution_contract_sha256",
         "parent_manifest_sha256",
         "environment_sha256",
+        "objective_contract_sha256",
     )
     @classmethod
-    def validate_hash(cls, value: str) -> str:
-        _validate_sha256(value)
+    def validate_hash(cls, value: str | None) -> str | None:
+        if value is not None:
+            _validate_sha256(value)
         return value
 
     @model_validator(mode="after")

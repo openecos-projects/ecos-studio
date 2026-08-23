@@ -15,6 +15,8 @@ from ecos_agent.optimization_contracts import (
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
+    OptimizationObjectiveContract,
+    OptimizationObjectiveProposal,
     PlanningProviderEvidence,
     ProposalReason,
     StageObservation,
@@ -42,6 +44,7 @@ from ecos_agent.optimization_retrieval import (
     OptimizationRetrievalRequest,
     OptimizationRetrievalResult,
 )
+from ecos_agent.optimization_rules import freeze_optimization_objective
 
 
 HASH = "sha256:" + "a" * 64
@@ -113,6 +116,20 @@ def _budget(*, candidates: int = 0, planning: int = 0) -> BudgetSnapshot:
         budget=EpisodeBudget.from_default_reruns((10.0, 11.0, 12.0)),
         consumed_candidates=candidates,
         consumed_planning_calls=planning,
+    )
+
+
+def _objective() -> OptimizationObjectiveContract:
+    return freeze_optimization_objective(
+        "Minimize route wirelength while preserving DRC and congestion.",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+            ),
+            rationale_summary="Wirelength is primary; routing quality remains constrained.",
+        ),
     )
 
 
@@ -192,6 +209,7 @@ def _controller(
     mode: OptimizationAgentMode = OptimizationAgentMode.FULL_AGENT,
     budget: BudgetSnapshot | None = None,
     clock: _Clock | None = None,
+    objective: OptimizationObjectiveContract | None = None,
 ) -> OptimizationEpisodeController:
     return OptimizationEpisodeController(
         episode_id="episode-1",
@@ -202,6 +220,7 @@ def _controller(
         executor=ecc,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=clock or _Clock(),
+        objective=objective,
     )
 
 
@@ -435,6 +454,47 @@ def test_planning_decisions_are_hash_bound_and_replayable(tmp_path: Path) -> Non
     assert entries[0].proposal == result.proposal
     assert entries[0].validation_result == "accepted"
     assert entries[0].requested == result.requested
+
+
+def test_objective_is_bound_to_planning_state_decision_and_execution(tmp_path: Path) -> None:
+    objective = _objective()
+    codex = _FakeCodex(_proposal)
+    controller = _controller(
+        tmp_path,
+        codex,
+        _FakeEcc(_started()),
+        objective=objective,
+    )
+
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    controller.execute()
+
+    assert codex.contexts[0].objective == objective
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert state["objective"] == objective.model_dump(mode="json")
+    start = controller.ledger.replay().entries[0].payload
+    assert start.objective_contract_sha256 == objective.contract_sha256
+    decision = OptimizationDecisionAudit(tmp_path / "episode").replay().entries[0]
+    assert decision.objective_contract_sha256 == objective.contract_sha256
+
+
+def test_recovery_preserves_the_frozen_objective(tmp_path: Path) -> None:
+    objective = _objective()
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(_started()),
+        objective=objective,
+    )
+
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal),
+        executor=_FakeEcc(),
+        ledger=controller.ledger,
+        clock=_Clock(),
+    )
+
+    assert recovered.objective == objective
 
 
 def test_missing_fake_ecc_receipt_is_charged_and_quarantined(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ from typing import Callable, Mapping
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     OptimizationEpisodeState,
+    OptimizationObjectiveContract,
     RoutabilityObjectiveContract,
     StageObservation,
     TerminalObservation,
@@ -74,6 +75,10 @@ class OptimizationEpisodeRunner:
     @property
     def episode_id(self) -> str:
         return self._controller.episode_id
+
+    @property
+    def objective(self) -> OptimizationObjectiveContract | None:
+        return self._controller.objective
 
     @property
     def incumbent_candidate_root_ref(self) -> str | None:
@@ -180,6 +185,7 @@ class OptimizationEpisodeRunner:
             incumbent=incumbent,
             candidate=candidate,
             objective=self._objective,
+            semantic_objective=self._controller.objective,
         )
         return comparison
 

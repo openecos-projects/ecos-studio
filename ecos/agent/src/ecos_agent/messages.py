@@ -81,6 +81,42 @@ def optimization_workspace_prompt(language: str) -> str:
     )
 
 
+def optimization_objective_prompt(language: str) -> str:
+    return _prompt(
+        language,
+        "请用自然语言描述优化目标，例如：降低布线线长，同时保持 DRC 和时序不退化。",
+        "Describe the optimization goal in natural language, for example: reduce routed wirelength while preserving DRC and timing.",
+    )
+
+
+def optimization_objective_summary_message(
+    language: str,
+    *,
+    primary_metric: str,
+    preserve_metrics: tuple[str, ...],
+    signoff_gates: tuple[str, ...],
+    rationale_summary: str,
+    objective_sha256: str,
+) -> str:
+    preserve = ", ".join(preserve_metrics) if preserve_metrics else "(none)"
+    gates = ", ".join(signoff_gates) if signoff_gates else "(fixed by ECOS)"
+    return _prompt(
+        language,
+        "已将目标规范化并冻结：\n"
+        f"- 目标理解：{rationale_summary}\n"
+        f"- 主指标：{primary_metric}\n"
+        f"- 保持指标：{preserve}\n"
+        f"- 固定 signoff gates：{gates}\n"
+        f"- objective_sha：{objective_sha256}",
+        "Normalized and frozen objective:\n"
+        f"- Interpretation: {rationale_summary}\n"
+        f"- Primary metric: {primary_metric}\n"
+        f"- Preserve metrics: {preserve}\n"
+        f"- Fixed signoff gates: {gates}\n"
+        f"- objective_sha: {objective_sha256}",
+    )
+
+
 def unmatched_operation_prompt(language: str) -> str:
     return _prompt(
         language,

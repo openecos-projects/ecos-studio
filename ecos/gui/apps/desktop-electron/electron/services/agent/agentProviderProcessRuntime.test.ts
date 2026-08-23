@@ -234,6 +234,8 @@ describe('AgentProviderProcessRuntime', () => {
             action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
             episode_id: 'episode-1',
             incumbent_candidate_root_ref: '.agent/candidates/winner',
+            objective_sha256: `sha256:${'a'.repeat(64)}`,
+            primary_metric: 'route_wirelength',
             proposal_decision: 'propose',
             proposal_reason: 'observation',
             rejection_reason: null,
@@ -251,6 +253,8 @@ describe('AgentProviderProcessRuntime', () => {
         optimization: expect.objectContaining({
           action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
           incumbent_candidate_root_ref: '.agent/candidates/winner',
+          objective_sha256: `sha256:${'a'.repeat(64)}`,
+          primary_metric: 'route_wirelength',
           proposal_decision: 'propose',
           proposal_reason: 'observation',
           rejection_reason: null,

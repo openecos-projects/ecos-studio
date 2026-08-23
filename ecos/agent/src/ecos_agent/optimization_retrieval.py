@@ -18,6 +18,7 @@ from ecos_agent.knowledge_retriever import (
 )
 from ecos_agent.optimization_contracts import (
     KnowledgeReference,
+    ObjectiveMetric,
     OptimizationKnob,
     StageObservation,
 )
@@ -57,6 +58,8 @@ class OptimizationRetrievalRequest(BaseModel):
     observation_status: Literal["success"] = "success"
     previous_intervention_outcome: OptimizationOutcomeKind | None = None
     allowed_knobs: tuple[OptimizationKnob, ...] = tuple(OptimizationKnob)
+    primary_metric: ObjectiveMetric | None = None
+    preserve_metrics: tuple[ObjectiveMetric, ...] = Field(default=(), max_length=2)
 
     @field_validator("task_id")
     @classmethod
@@ -78,6 +81,10 @@ class OptimizationRetrievalRequest(BaseModel):
     def validate_knobs(self) -> "OptimizationRetrievalRequest":
         if self.allowed_knobs != tuple(OptimizationKnob):
             raise ValueError("retrieval allowed knobs are not frozen")
+        if self.primary_metric is not None and self.primary_metric in self.preserve_metrics:
+            raise ValueError("retrieval primary metric cannot also be preserved")
+        if len(set(self.preserve_metrics)) != len(self.preserve_metrics):
+            raise ValueError("retrieval preserve metrics must be unique")
         return self
 
     @property
@@ -177,12 +184,16 @@ def build_optimization_retrieval_request(
     task_id: str,
     observation: StageObservation,
     previous_intervention_outcome: OptimizationOutcomeKind | None,
+    primary_metric: ObjectiveMetric | None = None,
+    preserve_metrics: tuple[ObjectiveMetric, ...] = (),
 ) -> OptimizationRetrievalRequest:
     return OptimizationRetrievalRequest(
         task_id=task_id,
         current_stage=observation.stage,
         observed_metric_ids=tuple(sorted(observation.metrics)),
         previous_intervention_outcome=previous_intervention_outcome,
+        primary_metric=primary_metric,
+        preserve_metrics=preserve_metrics,
     )
 
 
@@ -203,12 +214,18 @@ def _enabled_channels(channels: Iterable[KnowledgeChannel]) -> frozenset[Knowled
 def _fixed_query(request: OptimizationRetrievalRequest, channel: KnowledgeChannel) -> str:
     outcome = request.previous_intervention_outcome or "none"
     metrics = " ".join(request.observed_metric_ids)
+    objective = (
+        f"primary metric {request.primary_metric.value} "
+        f"preserve metrics {' '.join(metric.value for metric in request.preserve_metrics) or 'none'}"
+        if request.primary_metric is not None
+        else "primary metric default preserve metrics none"
+    )
     knobs = "target density cell padding routability optimization"
     prefix = "DreamPlace placement" if channel == KnowledgeChannel.TOOL else "congestion strategy"
     return (
         f"{prefix} current stage {request.current_stage.value} action stage {request.action_stage} "
         f"observation {request.observation_status} metrics {metrics} previous outcome {outcome} "
-        f"legal knobs {knobs}"
+        f"{objective} legal knobs {knobs}"
     )
 
 

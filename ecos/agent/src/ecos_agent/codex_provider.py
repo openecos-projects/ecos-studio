@@ -26,8 +26,11 @@ from ecos_agent.contracts import (
     StageRoutingProposal,
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
-from ecos_agent.optimization_contracts import OptimizationProposal
-from ecos_agent.optimization_contracts import PlanningProviderEvidence
+from ecos_agent.optimization_contracts import (
+    OptimizationObjectiveProposal,
+    OptimizationProposal,
+    PlanningProviderEvidence,
+)
 from ecos_agent.optimization_controller import (
     OptimizationPlanningContext,
     planning_context_payload,
@@ -289,6 +292,28 @@ class CodexAppServerProposalProvider:
             )
         finally:
             self._capture_planning_evidence()
+
+    def propose_optimization_objective(self, natural_language_goal: str) -> dict[str, Any]:
+        goal = natural_language_goal.strip()
+        if not goal:
+            raise CodexProviderError(
+                "optimization objective request is empty", failure_class="missing_input"
+            )
+        return self._proposal(
+            {
+                "schema_version": "ecos.optimization_objective_request.v1",
+                "natural_language_goal": goal,
+            },
+            (
+                "Return one JSON object matching ecos.optimization_objective_proposal.v1. "
+                "Interpret only the user's optimization goal. Output only the whitelisted "
+                "primary_metric, preserve_metrics, and rationale fields defined by the schema. "
+                "Do not return parameter values, paths, commands, tools, workspaces, RPC methods, "
+                "or execution instructions. Local ECOS validation freezes the objective and owns execution."
+            ),
+            _optimization_objective_output_schema(),
+            OptimizationObjectiveProposal,
+        )
 
     def consume_planning_evidence(self) -> PlanningProviderEvidence | None:
         """Return the evidence for the most recent optimization planner turn once."""
@@ -908,6 +933,12 @@ def _optimization_planning_payload(
 
 def _optimization_proposal_output_schema() -> dict[str, Any]:
     schema = OptimizationProposal.model_json_schema()
+    _require_all_schema_properties(schema)
+    return schema
+
+
+def _optimization_objective_output_schema() -> dict[str, Any]:
+    schema = OptimizationObjectiveProposal.model_json_schema()
     _require_all_schema_properties(schema)
     return schema
 

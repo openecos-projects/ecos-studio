@@ -6,12 +6,18 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import TerminalObservation
+from ecos_agent.optimization_contracts import (
+    ObjectiveMetric,
+    OptimizationObjectiveProposal,
+    TerminalObservation,
+)
 from ecos_agent.optimization_runtime import (
     OptimizationRuntimeError,
     _load_baseline_replays,
+    _optimization_objective,
     _place_to_harden_runtime_seconds,
 )
+from ecos_agent.optimization_rules import freeze_optimization_objective
 
 
 _STAGES = (
@@ -58,6 +64,28 @@ def test_place_to_harden_runtime_fails_closed_on_incomplete_stage(tmp_path: Path
 
     with pytest.raises(OptimizationRuntimeError, match="flow completion evidence"):
         _place_to_harden_runtime_seconds(tmp_path)
+
+
+def test_runtime_requires_a_hash_bound_optimization_objective() -> None:
+    objective = freeze_optimization_objective(
+        "Minimize wirelength without routing regressions.",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+            ),
+            rationale_summary="Keep routing constraints while reducing wirelength.",
+        ),
+    )
+
+    assert _optimization_objective(objective.model_dump(mode="json")) == objective
+    with pytest.raises(OptimizationRuntimeError, match="optimization objective is missing"):
+        _optimization_objective(None)
+    tampered = objective.model_dump(mode="json")
+    tampered["primary_metric"] = ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
+    with pytest.raises(OptimizationRuntimeError, match="optimization objective is invalid"):
+        _optimization_objective(tampered)
 
 
 def _write_baseline_replays(tmp_path: Path, parent_manifest_sha256: str) -> Path:

@@ -40,6 +40,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ObjectiveMetric,
+    OptimizationObjectiveContract,
     TimingMetric,
 )
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
@@ -68,6 +69,7 @@ def create_optimization_runner(
 ) -> OptimizationEpisodeRunner:
     workspace = _workspace(context.get("workspace"))
     episode_id = _text(context.get("episode_id"), "episode_id")
+    objective = _optimization_objective(context.get("objective"))
     checkpoint_id = "place"
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
@@ -96,10 +98,11 @@ def create_optimization_runner(
             workspace_id=workspace_id,
             site_width_dbu=site_width_dbu,
         )
-        state_path = ledger_root / "optimization-episode-state.v4.json"
+        state_path = ledger_root / "optimization-episode-state.v5.json"
         legacy_state_paths = (
             ledger_root / "optimization-episode-state.v2.json",
             ledger_root / "optimization-episode-state.v3.json",
+            ledger_root / "optimization-episode-state.v4.json",
         )
         if state_path.is_file():
             controller = OptimizationEpisodeController.recover(
@@ -108,6 +111,10 @@ def create_optimization_runner(
                 ledger=ledger,
                 clock=_monotonic,
             )
+            if controller.objective != objective:
+                raise OptimizationRuntimeError(
+                    "optimization objective does not match the recovered episode"
+                )
         elif any(path.is_file() for path in legacy_state_paths):
             raise OptimizationRuntimeError(
                 "pre-policy episode cannot be recovered; start a new optimization episode"
@@ -126,6 +133,7 @@ def create_optimization_runner(
                 clock=_monotonic,
                 incumbent=terminal_observation,
                 parent_manifest_sha256=parent_manifest,
+                objective=objective,
             )
     except Exception:
         rpc.close()
@@ -141,6 +149,8 @@ def create_optimization_runner(
             task_id=episode_id,
             observation=observation,
             previous_intervention_outcome=previous,
+            primary_metric=objective.primary_metric,
+            preserve_metrics=objective.preserve_metrics,
         )
         return retrieval.retrieve(request)
 
@@ -185,6 +195,15 @@ def create_optimization_runner(
             },
         ),
     )
+
+
+def _optimization_objective(value: object) -> OptimizationObjectiveContract:
+    if value is None:
+        raise OptimizationRuntimeError("optimization objective is missing")
+    try:
+        return OptimizationObjectiveContract.model_validate(value)
+    except (TypeError, ValidationError, ValueError) as exc:
+        raise OptimizationRuntimeError("optimization objective is invalid") from exc
 
 
 def _load_baseline_replays(

@@ -54,6 +54,15 @@ ROUTABILITY_OBJECTIVE_ORDER = (
     ObjectiveMetric.ROUTE_WIRELENGTH,
 )
 
+REQUIRED_SIGNOFF_GATES = (
+    "drc_clean",
+    "lvs_clean",
+    "rcx_corner_coverage",
+    "rcx_spef_parse_health",
+    "sta_setup_closed",
+    "sta_hold_closed",
+)
+
 TIMING_GUARDRAIL_ORDER = tuple(TimingMetric)
 SelectionMetric = ObjectiveMetric | TimingMetric
 
@@ -108,6 +117,83 @@ class OptimizationEpisodeState(StrEnum):
 
 class _ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class OptimizationObjectiveProposal(_ContractModel):
+    schema_version: Literal["ecos.optimization_objective_proposal.v1"] = (
+        "ecos.optimization_objective_proposal.v1"
+    )
+    primary_metric: ObjectiveMetric
+    preserve_metrics: tuple[ObjectiveMetric, ...] = Field(default=(), max_length=2)
+    rationale_summary: str
+
+    @field_validator("preserve_metrics")
+    @classmethod
+    def validate_preserve_metrics(
+        cls, value: tuple[ObjectiveMetric, ...]
+    ) -> tuple[ObjectiveMetric, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("preserve metrics must be unique")
+        return value
+
+    @field_validator("rationale_summary")
+    @classmethod
+    def validate_rationale(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 512:
+            raise ValueError("objective rationale is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_metric_roles(self) -> "OptimizationObjectiveProposal":
+        if self.primary_metric in self.preserve_metrics:
+            raise ValueError("primary metric cannot also be preserved")
+        return self
+
+
+class OptimizationObjectiveContract(_ContractModel):
+    schema_version: Literal["ecos.optimization_objective.v1"] = (
+        "ecos.optimization_objective.v1"
+    )
+    source_goal_sha256: str
+    primary_metric: ObjectiveMetric
+    preserve_metrics: tuple[ObjectiveMetric, ...] = Field(default=(), max_length=2)
+    required_signoff_gates: tuple[str, ...]
+    rationale_summary: str
+    contract_sha256: str
+
+    @field_validator("source_goal_sha256", "contract_sha256")
+    @classmethod
+    def validate_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("objective contract hash is invalid")
+        return value
+
+    @field_validator("required_signoff_gates")
+    @classmethod
+    def validate_required_gates(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if value != REQUIRED_SIGNOFF_GATES:
+            raise ValueError("objective contract must preserve required signoff gates")
+        return value
+
+    @field_validator("rationale_summary")
+    @classmethod
+    def validate_rationale(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 512:
+            raise ValueError("objective rationale is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> "OptimizationObjectiveContract":
+        if self.primary_metric in self.preserve_metrics:
+            raise ValueError("primary metric cannot also be preserved")
+        if len(set(self.preserve_metrics)) != len(self.preserve_metrics):
+            raise ValueError("preserve metrics must be unique")
+        expected = canonical_sha256(self.model_dump(mode="json", exclude={"contract_sha256"}))
+        if self.contract_sha256 != expected:
+            raise ValueError("objective contract hash does not match its content")
+        return self
 
 
 class LegalAction(_ContractModel):

@@ -30,6 +30,7 @@ from ecos_agent.optimization_contracts import (
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
+    OptimizationObjectiveContract,
     OptimizationProposal,
     PlanningProviderEvidence,
     ProposalAction,
@@ -62,10 +63,11 @@ from ecos_agent.optimization_rules import legal_actions, select_requested_value
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v4.json"
+_STATE_FILE = "optimization-episode-state.v5.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
+    "optimization-episode-state.v4.json",
 )
 
 
@@ -132,6 +134,7 @@ class OptimizationPlanningContext:
     budget: BudgetSnapshot | None = None
     current_values: Mapping[str, bool | int | float] | None = None
     legal_actions: tuple[LegalAction, ...] = ()
+    objective: OptimizationObjectiveContract | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,9 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         ],
         "knowledge_refs": [item.model_dump(mode="json") for item in context.knowledge_refs],
         "knowledge_chunks": list(context.knowledge_chunks),
+        "objective": (
+            context.objective.model_dump(mode="json") if context.objective is not None else None
+        ),
     }
     if context.observation is not None:
         payload["observation"] = context.observation.model_dump(mode="json")
@@ -212,7 +218,7 @@ class OptimizationExecutionAdapter(Protocol):
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "ecos.optimization_episode_state.v4"
+    schema_version: str = "ecos.optimization_episode_state.v5"
     episode_id: str
     checkpoint_id: str
     mode: OptimizationAgentMode
@@ -220,6 +226,7 @@ class _PersistedEpisodeState(BaseModel):
     budget: BudgetSnapshot
     started_at: float
     incumbent: TerminalObservation | None = None
+    objective: OptimizationObjectiveContract | None = None
     parent_manifest_sha256: str | None = None
     ledger_event_count: int = Field(ge=0)
     ledger_chain_head_sha256: str | None = None
@@ -268,6 +275,7 @@ class OptimizationEpisodeController:
         clock: Callable[[], float],
         incumbent: TerminalObservation | None = None,
         parent_manifest_sha256: str | None = None,
+        objective: OptimizationObjectiveContract | None = None,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -284,6 +292,7 @@ class OptimizationEpisodeController:
         self._started_at = self._valid_clock()
         self._budget = budget
         self._incumbent = incumbent
+        self._objective = objective
         self._incumbent_candidate_root_ref: str | None = None
         self._incumbent_candidate_manifest_ref: str | None = None
         self._incumbent_candidate_manifest_sha256: str | None = None
@@ -311,6 +320,10 @@ class OptimizationEpisodeController:
     @property
     def incumbent(self) -> TerminalObservation | None:
         return self._incumbent
+
+    @property
+    def objective(self) -> OptimizationObjectiveContract | None:
+        return self._objective
 
     @property
     def incumbent_candidate_root_ref(self) -> str | None:
@@ -569,6 +582,7 @@ class OptimizationEpisodeController:
         controller._started_at = snapshot.started_at
         controller._budget = snapshot.budget
         controller._incumbent = snapshot.incumbent
+        controller._objective = snapshot.objective
         controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
         controller._planning_audit = planning_audit
         controller._planning_provider_audit = planning_provider_audit
@@ -631,6 +645,11 @@ class OptimizationEpisodeController:
                         else None
                     ),
                     "retrieval": retrieval.contract,
+                    "objective": (
+                        self._objective.model_dump(mode="json")
+                        if self._objective is not None
+                        else None
+                    ),
                     "budget": self._budget.model_dump(mode="json"),
                     "current_values": dict(sorted(current_values.items())),
                     "legal_actions": [
@@ -665,6 +684,7 @@ class OptimizationEpisodeController:
             self._budget,
             dict(current_values),
             available_actions,
+            self._objective,
         )
 
     def _parse_proposal(self, payload: object) -> OptimizationProposal:
@@ -756,6 +776,9 @@ class OptimizationEpisodeController:
                 "episode_id": request.episode_id,
                 "checkpoint_id": request.checkpoint_id,
                 "proposal_sha256": proposal_sha256,
+                "objective_contract_sha256": (
+                    self._objective.contract_sha256 if self._objective is not None else None
+                ),
                 "requested": request.requested.model_dump(mode="json"),
             }
         )
@@ -778,6 +801,9 @@ class OptimizationEpisodeController:
             if self._parent_manifest_sha256 is None
             else self._parent_manifest_sha256,
             environment_sha256=canonical_sha256({"mode": self.mode.value}),
+            objective_contract_sha256=(
+                self._objective.contract_sha256 if self._objective is not None else None
+            ),
             proposal_action=request.proposal.action,
             requested=request.requested,
         )
@@ -966,6 +992,9 @@ class OptimizationEpisodeController:
             rejection_reason=rejection_reason,
             requested=self._requested,
             state=self._state,
+            objective_contract_sha256=(
+                self._objective.contract_sha256 if self._objective is not None else None
+            ),
         )
         self._persist()
         return OptimizationControlResult(
@@ -1031,13 +1060,14 @@ class OptimizationEpisodeController:
         planning_provider_audit = self._planning_provider_audit.replay()
         decision_audit = self._decision_audit.replay()
         value = {
-            "schema_version": "ecos.optimization_episode_state.v4",
+            "schema_version": "ecos.optimization_episode_state.v5",
             "episode_id": self.episode_id,
             "checkpoint_id": self.checkpoint_id,
             "mode": self.mode.value,
             "state": self._state.value,
             "budget": self._budget.model_dump(mode="json"),
             "incumbent": self._incumbent.model_dump(mode="json") if self._incumbent else None,
+            "objective": self._objective.model_dump(mode="json") if self._objective else None,
             "parent_manifest_sha256": self._parent_manifest_sha256,
             "started_at": self._started_at,
             "ledger_event_count": len(replay.entries),
@@ -1112,6 +1142,24 @@ class OptimizationEpisodeController:
         ):
             raise OptimizationEpisodeControllerError(
                 "planning decisions do not match planning audit trace"
+            )
+        objective_sha256 = (
+            snapshot.objective.contract_sha256 if snapshot.objective is not None else None
+        )
+        if any(
+            entry.payload.objective_contract_sha256 != objective_sha256
+            for entry in replay.entries
+            if isinstance(entry.payload, OptimizationInterventionStart)
+        ):
+            raise OptimizationEpisodeControllerError(
+                "outcome ledger does not match the frozen objective"
+            )
+        if any(
+            entry.objective_contract_sha256 != objective_sha256
+            for entry in decision_audit.entries
+        ):
+            raise OptimizationEpisodeControllerError(
+                "decision audit does not match the frozen objective"
             )
         if tuple(replay.pending_intervention_ids) != _pending_tuple(snapshot.pending_intervention_id):
             raise OptimizationEpisodeControllerError("episode pending execution does not match ledger trace")

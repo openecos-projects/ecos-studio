@@ -37,6 +37,9 @@ class OptimizationDecisionAuditEntry(BaseModel):
     sequence: int = Field(ge=1)
     previous_entry_sha256: str | None = None
     planning_entry_sha256: str
+    objective_contract_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     proposal: OptimizationProposal | None = None
     validation_result: DecisionValidationResult
     rejection_reason: str | None = None
@@ -44,7 +47,12 @@ class OptimizationDecisionAuditEntry(BaseModel):
     state: OptimizationEpisodeState
     entry_sha256: str
 
-    @field_validator("previous_entry_sha256", "planning_entry_sha256", "entry_sha256")
+    @field_validator(
+        "previous_entry_sha256",
+        "planning_entry_sha256",
+        "objective_contract_sha256",
+        "entry_sha256",
+    )
     @classmethod
     def validate_hash(cls, value: str | None) -> str | None:
         if value is not None and not _SHA256.fullmatch(value):
@@ -95,6 +103,7 @@ class OptimizationDecisionAudit:
         rejection_reason: str | None,
         requested: RequestedKnobValue | None,
         state: OptimizationEpisodeState,
+        objective_contract_sha256: str | None = None,
     ) -> OptimizationDecisionAuditEntry:
         with self._exclusive_lock():
             replay = self._verify_locked()
@@ -107,6 +116,8 @@ class OptimizationDecisionAudit:
                 "requested": requested.model_dump(mode="json") if requested else None,
                 "state": state.value,
             }
+            if objective_contract_sha256 is not None:
+                payload["objective_contract_sha256"] = objective_contract_sha256
             hash_payload = {
                 "schema_version": "ecos.optimization_decision_audit.v1",
                 "sequence": sequence,

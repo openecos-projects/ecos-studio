@@ -55,6 +55,8 @@ from ecos_agent.messages import (
     operation_choice,
     operation_prompt,
     optimization_authorization_prompt,
+    optimization_objective_prompt,
+    optimization_objective_summary_message,
     optimization_started_message,
     optimization_workspace_prompt,
     optional_file_choice,
@@ -152,7 +154,11 @@ from ecos_agent.provider_support import (
     _workspace_inputs_payload,
     _workspace_rerun_execution_contract,
 )
-from ecos_agent.optimization_contracts import OptimizationEpisodeState
+from ecos_agent.optimization_contracts import (
+    OptimizationEpisodeState,
+    OptimizationObjectiveProposal,
+)
+from ecos_agent.optimization_rules import freeze_optimization_objective
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 
 
@@ -210,6 +216,35 @@ def _is_greeting(message: str) -> bool:
 def _proposal_sha256(proposal: StageRoutingProposal) -> str:
     payload = json.dumps(proposal.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _freeze_optimization_objective(proposal: object, source_goal: str) -> dict[str, Any]:
+    contract = freeze_optimization_objective(
+        source_goal,
+        OptimizationObjectiveProposal.model_validate(proposal),
+    )
+    return contract.model_dump(mode="json")
+
+
+def _objective_sha256(contract: Mapping[str, Any]) -> str:
+    contract_sha256 = contract.get("contract_sha256")
+    if isinstance(contract_sha256, str) and contract_sha256.startswith("sha256:"):
+        return contract_sha256
+    raise ValueError("optimization objective contract hash is invalid")
+
+
+def _objective_primary_metric(contract: Mapping[str, Any]) -> str | None:
+    value = contract.get("primary_metric")
+    return value if isinstance(value, str) else None
+
+
+def _objective_string_tuple(contract: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = contract.get(key)
+    if isinstance(value, list):
+        return tuple(item for item in value if isinstance(item, str))
+    if isinstance(value, tuple):
+        return tuple(item for item in value if isinstance(item, str))
+    return ()
 
 
 def _known_projects(value: object) -> list[tuple[str, str]]:
@@ -303,6 +338,9 @@ class _Session:
     optimization_stop: threading.Event = field(default_factory=threading.Event)
     optimization_pause: threading.Event = field(default_factory=threading.Event)
     optimization_turn_count: int = 0
+    optimization_objective: dict[str, Any] | None = None
+    optimization_objective_sha256: str | None = None
+    optimization_primary_metric: str | None = None
     codex_provider: CodexAppServerProposalProvider | None = None
 
 
@@ -543,6 +581,7 @@ class EcosAgentProvider:
             "workspace_parameter_pending": self._handle_workspace_parameter_update_result,
             "confirmation": self._confirm_rerun_execution,
             "optimization_workspace": self._select_optimization_workspace,
+            "optimization_objective": self._select_optimization_objective,
             "optimization_authorization": self._confirm_optimization_start,
         }
         handler = handlers.get(session.phase)
@@ -552,7 +591,7 @@ class EcosAgentProvider:
         if session.phase in {"home_ready", "operation"}:
             self._handle_idle_input(session, message)
             return
-        if _is_conversational_input(message):
+        if session.phase != "optimization_objective" and _is_conversational_input(message):
             self._answer_non_state_input(session, message, allow_operations=False)
             return
         handler(session, message)
@@ -697,11 +736,24 @@ class EcosAgentProvider:
                 return
             optimization_choice = "5" if session.project_root else "4"
             if choice == optimization_choice:
-                self._begin_optimization_authorization(session)
+                self._begin_optimization_objective(session)
                 return
         elif choice == "1":
             self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
             return
+
+    def _begin_optimization_objective(self, session: _Session) -> None:
+        workspace = session.rerun_workspace_path
+        if not workspace or not Path(workspace).is_dir():
+            self._emit(session, "error", "An existing workspace is required for optimization.")
+            self._emit_phase_choice(session)
+            return
+        session.phase = "optimization_objective"
+        session.optimization_phase = "awaiting_objective"
+        session.optimization_objective = None
+        session.optimization_objective_sha256 = None
+        session.optimization_primary_metric = None
+        self._emit(session, "message", optimization_objective_prompt(session.language))
 
     def _begin_optimization_authorization(self, session: _Session) -> None:
         workspace = session.rerun_workspace_path
@@ -740,6 +792,57 @@ class EcosAgentProvider:
             self._emit(session, "message", optimization_workspace_prompt(session.language))
             return
         session.rerun_workspace_path = workspace
+        self._begin_optimization_objective(session)
+
+    def _select_optimization_objective(self, session: _Session, message: str) -> None:
+        goal = message.strip()
+        if not goal:
+            self._emit(session, "message", optimization_objective_prompt(session.language))
+            return
+        workspace = session.rerun_workspace_path
+        if not workspace:
+            raise ValueError("Optimization objective requires a workspace.")
+        provider: CodexAppServerProposalProvider | None = None
+        try:
+            provider = self.optimization_provider_factory(
+                cwd=Path(workspace),
+                runtime_workspace_roots=(workspace,),
+                progress_callback=lambda text: self._progress(session, text),
+                diagnostics_path=(
+                    Path(workspace)
+                    / ".agent"
+                    / "optimization"
+                    / "objective-codex-rpc-diagnostics.v1.jsonl"
+                ),
+            )
+            session.active_interrupt = provider.interrupt
+            proposal = provider.propose_optimization_objective(goal)
+            contract = _freeze_optimization_objective(proposal, goal)
+        except Exception as exc:
+            session.phase = "operation" if session.mode == "workspace" else "home_ready"
+            session.optimization_phase = "unavailable"
+            self._emit(session, "error", f"Unable to parse optimization objective: {exc}")
+            self._emit_phase_choice(session)
+            return
+        finally:
+            session.active_interrupt = None
+            if provider is not None:
+                provider.close()
+        session.optimization_objective = contract
+        session.optimization_objective_sha256 = _objective_sha256(contract)
+        session.optimization_primary_metric = _objective_primary_metric(contract)
+        self._emit(
+            session,
+            "message",
+            optimization_objective_summary_message(
+                session.language,
+                primary_metric=session.optimization_primary_metric or "(unknown)",
+                preserve_metrics=_objective_string_tuple(contract, "preserve_metrics"),
+                signoff_gates=_objective_string_tuple(contract, "required_signoff_gates"),
+                rationale_summary=str(contract["rationale_summary"]),
+                objective_sha256=session.optimization_objective_sha256,
+            ),
+        )
         self._begin_optimization_authorization(session)
 
     def _confirm_optimization_start(self, session: _Session, message: str) -> None:
@@ -781,6 +884,7 @@ class EcosAgentProvider:
                     "session_id": session.session_id,
                     "episode_id": session.optimization_episode_id,
                     "workspace": workspace,
+                    "objective": session.optimization_objective,
                 },
                 provider,
             )
@@ -830,10 +934,15 @@ class EcosAgentProvider:
                 self._emit(
                     session,
                     "optimization",
-                    f"Optimization turn {session.optimization_turn_count} finished.",
+                    (
+                        f"Optimization turn {session.optimization_turn_count} finished for "
+                        f"primary objective {session.optimization_primary_metric}."
+                    ),
                     optimization={
                         "schema_version": "ecos.optimization_progress.v1",
                         "episode_id": runner.episode_id,
+                        "objective_sha256": session.optimization_objective_sha256,
+                        "primary_metric": session.optimization_primary_metric,
                         "state": runner.state.value,
                         "turn": session.optimization_turn_count,
                         "planning_state": turn.planning.state.value,

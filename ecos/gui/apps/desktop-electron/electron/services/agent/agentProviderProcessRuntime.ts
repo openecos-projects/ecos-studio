@@ -466,6 +466,12 @@ function readOptimizationPayload(
     episode_id: record.episode_id,
     ...(typeof record.workspace === 'string' ? { workspace: record.workspace } : {}),
     ...(typeof record.state === 'string' ? { state: record.state } : {}),
+    ...(typeof record.objective_sha256 === 'string'
+      ? { objective_sha256: record.objective_sha256 }
+      : {}),
+    ...(typeof record.primary_metric === 'string'
+      ? { primary_metric: record.primary_metric }
+      : {}),
     ...(typeof record.turn === 'number' ? { turn: record.turn } : {}),
     ...(typeof record.turn_count === 'number' ? { turn_count: record.turn_count } : {}),
     ...(typeof record.planning_state === 'string'

@@ -7,12 +7,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable, Mapping, Sequence
 
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     MetricNoiseBand,
     ObjectiveMetric,
     LegalAction,
     OptimizationKnob,
+    OptimizationObjectiveContract,
+    OptimizationObjectiveProposal,
     ProposalAction,
+    REQUIRED_SIGNOFF_GATES,
     RequestedKnobValue,
     ROUTABILITY_OBJECTIVE_ORDER,
     TIMING_GUARDRAIL_ORDER,
@@ -97,6 +101,26 @@ def legal_actions(
     return tuple(actions)
 
 
+def freeze_optimization_objective(
+    goal_text: str,
+    proposal: OptimizationObjectiveProposal,
+) -> OptimizationObjectiveContract:
+    if not isinstance(goal_text, str) or not goal_text.strip():
+        raise ValueError("optimization goal text is invalid")
+    payload = {
+        "schema_version": "ecos.optimization_objective.v1",
+        "source_goal_sha256": canonical_sha256(goal_text.strip()),
+        "primary_metric": proposal.primary_metric.value,
+        "preserve_metrics": [metric.value for metric in proposal.preserve_metrics],
+        "required_signoff_gates": list(REQUIRED_SIGNOFF_GATES),
+        "rationale_summary": proposal.rationale_summary,
+    }
+    return OptimizationObjectiveContract(
+        **payload,
+        contract_sha256=canonical_sha256(payload),
+    )
+
+
 def freeze_routability_objective(
     default_replays: Mapping[ObjectiveMetric, Sequence[float]],
     *,
@@ -141,6 +165,7 @@ def compare_incumbent(
     incumbent: TerminalObservation,
     candidate: TerminalObservation,
     objective: RoutabilityObjectiveContract,
+    semantic_objective: OptimizationObjectiveContract | None = None,
 ) -> IncumbentComparison:
     if not incumbent.eligible_for_incumbent:
         raise ValueError("incumbent terminal observation is not eligible")
@@ -150,6 +175,19 @@ def compare_incumbent(
         degradation = incumbent.timing_guardrail[metric_id] - candidate.timing_guardrail[metric_id]
         if degradation > objective.timing_guardrail.noise_band(metric_id):
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+    if semantic_objective is not None:
+        for metric_id in semantic_objective.preserve_metrics:
+            delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
+            if -delta > objective.noise_band(metric_id):
+                return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+        metric_id = semantic_objective.primary_metric
+        delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
+        tolerance = objective.noise_band(metric_id)
+        if delta > tolerance:
+            return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
+        if -delta > tolerance:
+            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+        return IncumbentComparison(IncumbentDecision.NOISE_TIE, None)
     for metric_id in ROUTABILITY_OBJECTIVE_ORDER:
         delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
         tolerance = objective.noise_band(metric_id)

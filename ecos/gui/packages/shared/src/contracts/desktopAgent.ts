@@ -289,7 +289,9 @@ export interface DesktopAgentOptimizationPayload {
   execution_state?: string | null
   incumbent_candidate_root_ref?: string | null
   incumbent_decision?: string | null
+  objective_sha256?: string
   planning_state?: string | null
+  primary_metric?: string
   proposal_decision?: string | null
   proposal_reason?: string | null
   rejection_reason?: string | null

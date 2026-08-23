@@ -652,7 +652,8 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
     workspace.mkdir()
     _send(provider, session_id, str(workspace))
     assert provider.sessions[session_id].rerun_workspace_path == str(workspace)
-    assert provider.sessions[session_id].phase == "optimization_authorization"
+    assert provider.sessions[session_id].phase == "optimization_objective"
+    assert "Describe the optimization goal" in str(_last_event(events, "message")["text"])
 
 
 @pytest.mark.parametrize(

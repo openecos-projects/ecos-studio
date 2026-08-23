@@ -10,6 +10,8 @@ from ecos_agent.optimization_contracts import (
     KnobApplicationReceipt,
     KnowledgeReference,
     ObjectiveMetric,
+    OptimizationObjectiveContract,
+    OptimizationObjectiveProposal,
     ObservationReference,
     OptimizationDecision,
     OptimizationProposal,
@@ -28,6 +30,7 @@ from ecos_agent.optimization_contracts import (
 from ecos_agent.optimization_rules import (
     IncumbentDecision,
     compare_incumbent,
+    freeze_optimization_objective,
     freeze_routability_objective,
     next_coordinate_selection,
     legal_actions,
@@ -198,6 +201,39 @@ def test_proposal_binds_context_and_stable_knowledge_refs() -> None:
     with pytest.raises(ValidationError, match="hash"):
         OptimizationProposal.model_validate(
             _proposal(context_ref={"episode_id": "episode-1", "checkpoint_id": "checkpoint-1", "input_sha256": "old"})
+        )
+
+
+def test_natural_language_objective_is_frozen_with_required_signoff_gates() -> None:
+    proposal = OptimizationObjectiveProposal(
+        primary_metric=ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+        preserve_metrics=(ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,),
+        rationale_summary="Reduce global routing overflow without increasing DRC pressure.",
+    )
+
+    contract = freeze_optimization_objective("optimize congestion", proposal)
+
+    assert contract.source_goal_sha256.startswith("sha256:")
+    assert contract.primary_metric == ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
+    assert contract.preserve_metrics == (ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,)
+    assert contract.required_signoff_gates == (
+        "drc_clean",
+        "lvs_clean",
+        "rcx_corner_coverage",
+        "rcx_spef_parse_health",
+        "sta_setup_closed",
+        "sta_hold_closed",
+    )
+    assert contract.contract_sha256.startswith("sha256:")
+    assert OptimizationObjectiveContract.model_validate(contract.model_dump()) == contract
+
+
+def test_natural_language_objective_rejects_primary_preserve_overlap() -> None:
+    with pytest.raises(ValidationError, match="primary metric"):
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(ObjectiveMetric.ROUTE_WIRELENGTH,),
+            rationale_summary="Invalid overlap.",
         )
 
 
@@ -418,6 +454,37 @@ def test_comparator_rejects_timing_regression_beyond_replay_noise() -> None:
 
     assert comparison.decision == IncumbentDecision.INCUMBENT_RETAINED
     assert comparison.decisive_metric == TimingMetric.STA_SETUP_WNS
+
+
+def test_semantic_objective_preserves_guardrails_before_primary_metric() -> None:
+    semantic = freeze_optimization_objective(
+        "reduce wirelength while preserving detail route violations",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,),
+            rationale_summary="Prefer wirelength only if DRC does not regress.",
+        ),
+    )
+
+    comparison = compare_incumbent(
+        incumbent=_terminal("incumbent", dr=1, overflow=10, wirelength=100),
+        candidate=_terminal("candidate", dr=4, overflow=10, wirelength=80),
+        objective=_objective(),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.INCUMBENT_RETAINED
+    assert comparison.decisive_metric == ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
+
+    comparison = compare_incumbent(
+        incumbent=_terminal("incumbent", dr=1, overflow=10, wirelength=100),
+        candidate=_terminal("candidate", dr=1, overflow=10, wirelength=80),
+        objective=_objective(),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == ObjectiveMetric.ROUTE_WIRELENGTH
 
 
 def test_comparator_keeps_route_order_inside_timing_replay_noise() -> None:

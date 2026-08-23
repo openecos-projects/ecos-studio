@@ -124,6 +124,7 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
         "knowledge_refs",
         "knowledge_chunks",
         "legal_actions",
+        "objective",
     }
     assert "workspace" not in captured["user"]
     assert "specific parameter values" in captured["system"]
@@ -203,3 +204,46 @@ def test_required_codex_provider_forwards_episode_diagnostics_path(
     )
 
     assert captured["diagnostics_path"] == diagnostics_path
+
+
+def test_optimization_objective_parser_sends_only_bounded_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    captured: dict[str, object] = {}
+
+    def request(
+        system: str, user: dict[str, object], output_schema: dict[str, object]
+    ) -> dict[str, object]:
+        captured.update(system=system, user=user, output_schema=output_schema)
+        return {
+            "schema_version": "ecos.optimization_objective_proposal.v1",
+            "primary_metric": "route_wirelength",
+            "preserve_metrics": ["route_dr_total_violation_count"],
+            "rationale_summary": "Reduce routing wirelength while preserving signoff cleanliness.",
+        }
+
+    monkeypatch.setattr(provider, "_request_json", request)
+
+    proposal = provider.propose_optimization_objective("reduce routed wirelength")
+
+    assert proposal["primary_metric"] == "route_wirelength"
+    assert captured["user"] == {
+        "schema_version": "ecos.optimization_objective_request.v1",
+        "natural_language_goal": "reduce routed wirelength",
+    }
+    assert "primary_metric" in captured["system"]
+    assert "commands" in captured["system"]
+    assert captured["output_schema"]["required"] == [
+        "schema_version",
+        "primary_metric",
+        "preserve_metrics",
+        "rationale_summary",
+    ]
+
+
+def test_optimization_objective_parser_rejects_empty_goal(tmp_path: Path) -> None:
+    provider = _provider(tmp_path)
+
+    with pytest.raises(CodexProviderError, match="empty"):
+        provider.propose_optimization_objective("  ")
