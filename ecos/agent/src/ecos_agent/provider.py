@@ -52,6 +52,7 @@ from ecos_agent.messages import (
     operation_prompt,
     optimization_authorization_prompt,
     optimization_started_message,
+    optimization_workspace_prompt,
     optional_file_choice,
     optional_file_prompt,
     pdk_prompt,
@@ -524,6 +525,7 @@ class EcosAgentProvider:
             "workspace_parameter_confirmation": self._confirm_workspace_parameter_update,
             "workspace_parameter_pending": self._handle_workspace_parameter_update_result,
             "confirmation": self._confirm_rerun_execution,
+            "optimization_workspace": self._select_optimization_workspace,
             "optimization_authorization": self._confirm_optimization_start,
         }
         handler = handlers.get(session.phase)
@@ -646,6 +648,10 @@ class EcosAgentProvider:
         if choice == "1":
             self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
             return
+        if choice == "2":
+            session.phase = "optimization_workspace"
+            self._emit(session, "message", optimization_workspace_prompt(session.language))
+            return
 
     def _select_operation(self, session: _Session, message: str, choice: str) -> None:
         if session.mode == "workspace":
@@ -703,15 +709,31 @@ class EcosAgentProvider:
         )
         self._emit_phase_choice(session)
 
+    def _select_optimization_workspace(self, session: _Session, message: str) -> None:
+        try:
+            workspace = normalize_path(
+                message, label="Optimization workspace", require_directory=True
+            )
+        except ValueError as exc:
+            self._emit(
+                session,
+                "message",
+                invalid_value(session.language, "Optimization workspace", str(exc)),
+            )
+            self._emit(session, "message", optimization_workspace_prompt(session.language))
+            return
+        session.rerun_workspace_path = workspace
+        self._begin_optimization_authorization(session)
+
     def _confirm_optimization_start(self, session: _Session, message: str) -> None:
         if message != "1":
-            session.phase = "operation"
+            session.phase = "operation" if session.mode == "workspace" else "home_ready"
             session.optimization_phase = "idle"
             self._emit(session, "message", cancellation_message(session.language))
             self._emit_phase_choice(session)
             return
         if self.optimization_runner_factory is None:
-            session.phase = "operation"
+            session.phase = "operation" if session.mode == "workspace" else "home_ready"
             session.optimization_phase = "unavailable"
             self._emit(
                 session,
@@ -831,7 +853,7 @@ class EcosAgentProvider:
             session.optimization_runner = None
             session.optimization_thread = None
             session.optimization_phase = final_phase
-            session.phase = "operation"
+            session.phase = "operation" if session.mode == "workspace" else "home_ready"
             status = {
                 "completed": "idle",
                 "stopped": "interrupted",

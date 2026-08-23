@@ -599,6 +599,10 @@ const emptyStateSuggestions = computed(() => {
         label: 'Start creating a Workspace and run a full RTL-to-GDS flow',
         value: '1',
       },
+      {
+        label: 'Start a bounded optimization episode',
+        value: '2',
+      },
     ]
   }
   const suggestions = [

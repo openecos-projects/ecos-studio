@@ -23,6 +23,7 @@ from ecos_agent.messages import (
     design_name_prompt,
     flow_end_prompt,
     home_ready_prompt,
+    home_ready_choice,
     number_prompt,
     operation_choice,
     operation_prompt,
@@ -735,7 +736,7 @@ def _keyword_operation_choice(
             ),
         )
     else:
-        # Home: require an intentional create/run signal — not bare "project"/"workspace".
+        # Home: require an intentional setup or optimization signal.
         candidates = (
             (
                 "1",
@@ -752,6 +753,10 @@ def _keyword_operation_choice(
                     "完整流程",
                     "创建并运行",
                 ),
+            ),
+            (
+                "2",
+                ("optimiz", "优化", "routability search", "tuning"),
             ),
         )
     matches = [
@@ -842,11 +847,15 @@ def _extract_create_bootstrap(message: str) -> CreateBootstrap:
 def _allowed_operation_options(
     language: str, *, mode: str, allow_create_workspace_in_project: bool
 ) -> list[dict[str, str]]:
-    choice = operation_choice(
-        language,
-        "operation-preview",
-        mode=mode,
-        allow_create_workspace_in_project=allow_create_workspace_in_project,
+    choice = (
+        home_ready_choice(language, "operation-preview")
+        if mode == "home"
+        else operation_choice(
+            language,
+            "operation-preview",
+            mode=mode,
+            allow_create_workspace_in_project=allow_create_workspace_in_project,
+        )
     )
     return [
         {"id": str(option["value"]), "label": str(option["label"])}

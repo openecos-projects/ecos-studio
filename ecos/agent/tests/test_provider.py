@@ -440,7 +440,7 @@ def test_rerun_skips_empty_parameter_table_for_fixfanout(tmp_path: Path) -> None
     )
 
 
-def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
+def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path: Path) -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(
         emit=events.append,
@@ -453,17 +453,22 @@ def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
     assert choice["title"] == "Get started"
     assert choice["variant"] == "buttons"
     assert choice["allowFreeText"] is True
-    assert [option["value"] for option in choice["options"]] == ["1"]
+    assert [option["value"] for option in choice["options"]] == ["1", "2"]
     assert "Start creating a Workspace" in choice["options"][0]["label"]
+    assert "bounded optimization episode" in choice["options"][1]["label"]
     welcome = next(event["text"] for event in events if event["type"] == "message")
-    assert "Start below" in str(welcome)
+    assert "manual flow setup or bounded optimization" in str(welcome)
     assert "Choose an operation below" not in str(welcome)
 
-    choice_count = len([event for event in events if event["type"] == "choice"])
     _send(provider, session_id, "2")
-    assert provider.sessions[session_id].phase == "home_ready"
-    assert _last_event(events, "message")["text"] == "Please describe your ECOS question."
-    assert len([event for event in events if event["type"] == "choice"]) == choice_count
+    assert provider.sessions[session_id].phase == "optimization_workspace"
+    assert "baseline workspace completed through Harden" in str(_last_event(events, "message")["text"])
+
+    workspace = tmp_path / "baseline-workspace"
+    workspace.mkdir()
+    _send(provider, session_id, str(workspace))
+    assert provider.sessions[session_id].rerun_workspace_path == str(workspace)
+    assert provider.sessions[session_id].phase == "optimization_authorization"
 
 
 @pytest.mark.parametrize(
@@ -1514,7 +1519,7 @@ def test_operation_and_cancellation_choices_preserve_the_controlled_paths() -> N
     assert home_ready["title"] == "Get started"
     assert home_ready["variant"] == "buttons"
     assert home_ready["allowFreeText"] is True
-    assert [option["value"] for option in home_ready["options"]] == ["1"]
+    assert [option["value"] for option in home_ready["options"]] == ["1", "2"]
 
     session.phase = "workspace_confirmation"
     session.workspace_setup_id = "setup-1"

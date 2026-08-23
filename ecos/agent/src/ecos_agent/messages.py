@@ -55,8 +55,9 @@ def welcome_message(
         "ECOS Agent is a state-controlled, PPA-oriented design-flow agent. "
         "From the home screen it selects or creates a Project "
         "(directory with project.json), then creates a Workspace under that Project "
-        "and runs a full ECC physical-design flow.\n\n"
-        "Start below, or describe what you want to set up."
+        "and runs a full ECC physical-design flow. It can also start a bounded optimization episode "
+        "from an existing baseline workspace completed through Harden.\n\n"
+        "Choose manual flow setup or bounded optimization below."
     )
 
 
@@ -67,8 +68,16 @@ def operation_prompt(language: str) -> str:
 def home_ready_prompt(language: str) -> str:
     return _prompt(
         language,
-        "点击下方开始创建 Workspace，或直接说明意图（例如使用已有 Project、设计名、Workspace 名称）。",
-        "Start creating a Workspace below, or describe your intent (for example an existing Project, design name, or Workspace name).",
+        "选择手工创建 Workspace，或为自动优化提供一个已完成的 baseline workspace。",
+        "Choose manual Workspace setup, or provide a completed baseline workspace for bounded optimization.",
+    )
+
+
+def optimization_workspace_prompt(language: str) -> str:
+    return _prompt(
+        language,
+        "请输入已完成至 Harden 的 baseline workspace 绝对路径。优化将在隔离候选 workspace 中执行。",
+        "Enter the absolute path of a baseline workspace completed through Harden. Optimization runs in isolated candidate workspaces.",
     )
 
 
@@ -453,6 +462,14 @@ def home_ready_choice(language: str, prompt_id: str) -> dict[str, Any]:
                     "Start creating a Workspace and run a full RTL-to-GDS flow",
                 ),
                 "1",
+            ),
+            (
+                _prompt(
+                    language,
+                    "启动受约束优化 episode",
+                    "Start a bounded optimization episode",
+                ),
+                "2",
             ),
         ),
     )

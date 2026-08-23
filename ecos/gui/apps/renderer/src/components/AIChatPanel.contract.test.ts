@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import source from './AIChatPanel.vue?raw'
 
 describe('AIChatPanel flow contracts', () => {
+  it('separates manual workspace setup from bounded optimization on the home screen', () => {
+    expect(source).toContain("label: 'Start creating a Workspace and run a full RTL-to-GDS flow'")
+    expect(source).toContain("label: 'Start a bounded optimization episode'")
+    expect(source).toContain("value: '2'")
+  })
+
   it('routes structured choices through their prompt id and compatible option value', () => {
     expect(source).toContain("event.type === 'choice'")
     expect(source).toContain(
