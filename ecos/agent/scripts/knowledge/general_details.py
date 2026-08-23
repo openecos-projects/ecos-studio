@@ -9,9 +9,20 @@ from .steps import STAGES, _add, _json, _sha256, _source_inventory
 
 GENERAL_DIR = Path(__file__).resolve().parent / "general"
 GENERAL_SOURCE_PATHS = {
-    "general.statements": "ecos/agent/scripts/knowledge/general/statements.jsonl",
-    "general.bindings": "ecos/agent/scripts/knowledge/general/bindings.jsonl",
+    "congestion": {
+        "general.statements": "ecos/agent/scripts/knowledge/general/statements.jsonl",
+        "general.bindings": "ecos/agent/scripts/knowledge/general/bindings.jsonl",
+    },
+    "wirelength": {
+        "general.wirelength.statements": (
+            "ecos/agent/scripts/knowledge/general/wirelength/statements.jsonl"
+        ),
+        "general.wirelength.bindings": (
+            "ecos/agent/scripts/knowledge/general/wirelength/bindings.jsonl"
+        ),
+    },
 }
+GENERAL_KNOWLEDGE_METRICS = tuple(GENERAL_SOURCE_PATHS)
 _ALLOWED_STAGES = {stage.slug for stage in STAGES}
 _DIRECTION = {
     "increase": "increase",
@@ -21,10 +32,11 @@ _DIRECTION = {
 }
 
 
-def _load_jsonl(name: str) -> list[dict[str, object]]:
+def _load_jsonl(metric: str, name: str) -> list[dict[str, object]]:
+    directory = GENERAL_DIR if metric == "congestion" else GENERAL_DIR / metric
     return [
         json.loads(line)
-        for line in (GENERAL_DIR / name).read_text(encoding="utf-8").splitlines()
+        for line in (directory / name).read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
 
@@ -40,11 +52,14 @@ def _analog(binding: dict[str, object] | None) -> str:
     return f"{'; '.join(parts)} ({binding.get('analog_quality', 'coarse')} analog)"
 
 
-def _strategy_entries() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
-    bindings = {str(item["action_intent"]): item for item in _load_jsonl("bindings.jsonl")}
+def _strategy_entries(metric: str) -> tuple[list[dict[str, object]], dict[str, list[str]]]:
+    bindings = {
+        str(item["action_intent"]): item for item in _load_jsonl(metric, "bindings.jsonl")
+    }
+    source_ids = tuple(GENERAL_SOURCE_PATHS[metric])
     entries: list[dict[str, object]] = []
     documents: dict[str, list[str]] = {}
-    for statement in _load_jsonl("statements.jsonl"):
+    for statement in _load_jsonl(metric, "statements.jsonl"):
         intent = str(statement["action_intent"])
         diagnosis = statement["diagnosis"]
         if not isinstance(diagnosis, dict):
@@ -52,7 +67,9 @@ def _strategy_entries() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
         stages = tuple(statement.get("scope", {}).get("stages", ()))
         if not stages or any(stage not in _ALLOWED_STAGES for stage in stages):
             raise ValueError(f"invalid stages: {statement['id']}")
-        metric = str(statement["id"]).split(".")[1]
+        statement_metric = str(statement["id"]).split(".")[1]
+        if statement_metric != metric:
+            raise ValueError(f"invalid metric: {statement['id']}")
         effects = "; ".join(
             f"{item['metric']} {item['direction']}"
             for item in statement["effects"]
@@ -60,8 +77,8 @@ def _strategy_entries() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
         )
         body = "\n\n".join(
             [
-                f"**Topic:** {metric} strategy.",
-                f"**Metric:** {metric}.",
+                f"**Topic:** {statement_metric} strategy.",
+                f"**Metric:** {statement_metric}.",
                 f"**Applies to steps:** {', '.join(stages)}.",
                 f"**Condition:** {statement['condition']}",
                 f"**Diagnosis:** {str(diagnosis['cause']).replace('_', ' ')}.",
@@ -81,14 +98,14 @@ def _strategy_entries() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
             aliases=(),
             document="strategies.md",
             body=body,
-            evidence=("general.statements", "general.bindings"),
+            evidence=source_ids,
             stages=stages,
         )
-        entries[-1]["metric"] = metric
+        entries[-1]["metric"] = statement_metric
     return entries, documents
 
 
-GENERAL_REGRESSION_CASES = (
+CONGESTION_REGRESSION_CASES = (
     {
         "id": "strategy-local-move",
         "entity_id": "strategy.congestion.local_move_cells.v1",
@@ -155,40 +172,48 @@ WIRELENGTH_REGRESSION_CASES = (
     },
 )
 
+REGRESSION_CASES = {
+    "congestion": CONGESTION_REGRESSION_CASES,
+    "wirelength": WIRELENGTH_REGRESSION_CASES,
+}
 
-def build_general_bundle(output: Path) -> None:
-    entries, documents = _strategy_entries()
+
+def build_general_bundle(output: Path, metric: str) -> None:
+    if metric not in GENERAL_KNOWLEDGE_METRICS:
+        raise ValueError(f"unsupported general knowledge metric: {metric}")
+    entries, documents = _strategy_entries(metric)
     knowledge = output / "knowledge"
     knowledge.mkdir(parents=True, exist_ok=True)
     for name, chunks in documents.items():
         (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
-    metrics = list(dict.fromkeys(str(entry.get("metric", "")) for entry in entries))
     catalog = {
         "schema_version": "ecos-general-catalog.v1",
         "domain": "ecos_general_knowledge",
         "publication": {
             "status": "source-audited",
             "scope": "step-scoped general strategies; not a flow stage",
-            "metrics": metrics,
+            "metrics": [metric],
         },
         "entities": entries,
     }
     (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
     (output / "sources.json").write_text(
-        _json(_source_inventory(GENERAL_SOURCE_PATHS, "ecos-general-sources.v1")) + "\n",
+        _json(_source_inventory(GENERAL_SOURCE_PATHS[metric], "ecos-general-sources.v1"))
+        + "\n",
         encoding="utf-8",
     )
     regression = output / "regression"
     regression.mkdir(exist_ok=True)
-    regression.joinpath("congestion_questions.jsonl").write_text(
+    regression.joinpath(f"{metric}_questions.jsonl").write_text(
         "".join(
-            _json({**case, "question": f"Explain {case['entity_id']}"}) + "\n"
-            for case in GENERAL_REGRESSION_CASES
+            _json(
+                case
+                if "question" in case
+                else {**case, "question": f"Explain {case['entity_id']}"}
+            )
+            + "\n"
+            for case in REGRESSION_CASES[metric]
         ),
-        encoding="utf-8",
-    )
-    regression.joinpath("wirelength_questions.jsonl").write_text(
-        "".join(_json(case) + "\n" for case in WIRELENGTH_REGRESSION_CASES),
         encoding="utf-8",
     )
     files = {

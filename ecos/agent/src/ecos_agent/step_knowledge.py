@@ -55,16 +55,23 @@ class StepKnowledge(KnowledgeBundle):
 GENERAL_KNOWLEDGE_SPEC = KnowledgeBundleSpec(
     "general", "ecos-general-manifest.v1", "ecos-general-catalog.v1"
 )
+GENERAL_KNOWLEDGE_METRICS = ("congestion", "wirelength")
 
 
 def load_default_step_knowledge() -> tuple[StepKnowledge, ...]:
     return tuple(StepKnowledge.from_default(spec) for spec in STEP_KNOWLEDGE_SPECS)
 
 
-def load_default_general_knowledge() -> KnowledgeBundle:
+def load_default_general_knowledge(metric: str = "congestion") -> KnowledgeBundle:
     bundled_root = getattr(sys, "_MEIPASS", None)
     root = Path(bundled_root) / "knowledge" if bundled_root else _default_knowledge_root()
-    return KnowledgeBundle._from_directory(general_bundle_path(root), GENERAL_KNOWLEDGE_SPEC)
+    return KnowledgeBundle._from_directory(
+        general_bundle_path(root, metric), GENERAL_KNOWLEDGE_SPEC
+    )
+
+
+def load_default_general_knowledge_bundles() -> tuple[KnowledgeBundle, ...]:
+    return tuple(load_default_general_knowledge(metric) for metric in GENERAL_KNOWLEDGE_METRICS)
 
 
 def tool_bundle_path(root: Path, slug: str) -> Path:
@@ -72,6 +79,8 @@ def tool_bundle_path(root: Path, slug: str) -> Path:
 
 
 def general_bundle_path(root: Path, metric: str = "congestion") -> Path:
+    if metric not in GENERAL_KNOWLEDGE_METRICS:
+        raise StepKnowledgeError(f"unsupported general knowledge metric: {metric}")
     return root / "general" / metric
 
 
@@ -84,12 +93,14 @@ def _default_knowledge_root() -> Path:
 
 __all__ = [
     "GENERAL_KNOWLEDGE_SPEC",
+    "GENERAL_KNOWLEDGE_METRICS",
     "STEP_KNOWLEDGE_SPECS",
     "StepKnowledge",
     "StepKnowledgeError",
     "StepKnowledgeSpec",
     "general_bundle_path",
     "load_default_general_knowledge",
+    "load_default_general_knowledge_bundles",
     "load_default_step_knowledge",
     "tool_bundle_path",
 ]

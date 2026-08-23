@@ -58,7 +58,10 @@ def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path:
     assert sorted(path.name for path in (output / "tool").iterdir()) == sorted(
         spec.slug for spec in STEP_KNOWLEDGE_SPECS
     )
-    assert sorted(path.name for path in (output / "general").iterdir()) == ["congestion"]
+    assert sorted(path.name for path in (output / "general").iterdir()) == [
+        "congestion",
+        "wirelength",
+    ]
     assert (output / "retrieval-config.v1.json").is_file()
     place_catalog = json.loads((output / "tool" / "place" / "catalog.json").read_text(encoding="utf-8"))
     assert place_catalog["schema_version"] == "ecos-place-catalog.v3"

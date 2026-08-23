@@ -4,26 +4,31 @@ from pathlib import Path
 from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever
 from ecos_agent.provider import EcosAgentProvider
 from ecos_agent.step_knowledge import (
+    GENERAL_KNOWLEDGE_METRICS,
     GENERAL_KNOWLEDGE_SPEC,
     STEP_KNOWLEDGE_SPECS,
     load_default_general_knowledge,
+    load_default_general_knowledge_bundles,
     load_default_step_knowledge,
 )
 
 
 AGENT_ROOT = Path(__file__).parents[1]
-GENERAL_ROOT = AGENT_ROOT / "knowledge" / "general" / "congestion"
+CONGESTION_ROOT = AGENT_ROOT / "knowledge" / "general" / "congestion"
+WIRELENGTH_ROOT = AGENT_ROOT / "knowledge" / "general" / "wirelength"
 PLACE_ROOT = AGENT_ROOT / "knowledge" / "tool" / "place"
 GENERAL_SOURCE_ROOT = AGENT_ROOT / "scripts" / "knowledge" / "general"
+WIRELENGTH_SOURCE_ROOT = GENERAL_SOURCE_ROOT / "wirelength"
 
 
-def _load_general():
-    return load_default_general_knowledge()
+def _load_general(metric: str = "congestion"):
+    return load_default_general_knowledge(metric)
 
 
 def test_general_is_not_a_flow_stage() -> None:
     assert "general" not in {spec.slug for spec in STEP_KNOWLEDGE_SPECS}
     assert len(STEP_KNOWLEDGE_SPECS) == 12
+    assert GENERAL_KNOWLEDGE_METRICS == ("congestion", "wirelength")
     assert GENERAL_KNOWLEDGE_SPEC.slug == "general"
     assert GENERAL_KNOWLEDGE_SPEC.catalog_schema == "ecos-general-catalog.v1"
 
@@ -41,24 +46,31 @@ def test_place_bundle_stays_tool_specific() -> None:
     assert not (PLACE_ROOT / "knowledge" / "strategies.md").exists()
 
 
-def test_general_bundle_publishes_congestion_and_wirelength_strategy_cards() -> None:
-    knowledge = _load_general()
-    catalog = json.loads((GENERAL_ROOT / "catalog.json").read_text(encoding="utf-8"))
-    strategies = (GENERAL_ROOT / "knowledge" / "strategies.md").read_text(encoding="utf-8")
+def test_general_bundles_keep_congestion_and_wirelength_separate() -> None:
+    congestion = _load_general("congestion")
+    wirelength = _load_general("wirelength")
+    congestion_catalog = json.loads(
+        (CONGESTION_ROOT / "catalog.json").read_text(encoding="utf-8")
+    )
+    wirelength_catalog = json.loads(
+        (WIRELENGTH_ROOT / "catalog.json").read_text(encoding="utf-8")
+    )
+    congestion_strategies = (CONGESTION_ROOT / "knowledge" / "strategies.md").read_text(
+        encoding="utf-8"
+    )
 
-    assert catalog["schema_version"] == "ecos-general-catalog.v1"
-    assert catalog["publication"]["metrics"] == ["congestion", "wirelength"]
-    assert {entity["kind"] for entity in catalog["entities"]} == {"strategy"}
-    assert len(knowledge.entities) == 24
-    assert "strategy.congestion.local_move_cells.v1" in knowledge.entity_ids
-    assert "strategy.congestion.macro_or_narrow_channel.v1" in knowledge.entity_ids
-    entity = next(item for item in knowledge.entities if item.entity_id.endswith("macro_or_narrow_channel.v1"))
+    assert congestion_catalog["publication"]["metrics"] == ["congestion"]
+    assert wirelength_catalog["publication"]["metrics"] == ["wirelength"]
+    assert len(congestion.entities) == 18
+    assert len(wirelength.entities) == 6
+    assert all(entity_id.startswith("strategy.congestion.") for entity_id in congestion.entity_ids)
+    assert all(entity_id.startswith("strategy.wirelength.") for entity_id in wirelength.entity_ids)
+    assert not (CONGESTION_ROOT / "regression" / "wirelength_questions.jsonl").exists()
+    assert not (WIRELENGTH_ROOT / "regression" / "congestion_questions.jsonl").exists()
+    entity = next(item for item in congestion.entities if item.entity_id.endswith("macro_or_narrow_channel.v1"))
     assert entity.stages == ("place", "floorplan")
-    assert "No authorized knob" in strategies
-    assert "place.routability_opt" in strategies
-    assert "spread_local_movable_cells" in strategies
-    assert "strategy.wirelength.validate_route_after_proxy_gain.v1" in knowledge.entity_ids
-    assert "strategy.wirelength.reduce_excessive_place_spreading.v1" in knowledge.entity_ids
+    assert "No authorized knob" in congestion_strategies
+    assert "spread_local_movable_cells" in congestion_strategies
 
 
 def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:
@@ -66,7 +78,7 @@ def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:
         item["action_intent"]: item
         for item in (
             json.loads(line)
-            for line in (GENERAL_SOURCE_ROOT / "bindings.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (WIRELENGTH_SOURCE_ROOT / "bindings.jsonl").read_text(encoding="utf-8").splitlines()
             if line.strip()
         )
     }
@@ -113,7 +125,7 @@ def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:
 
 
 def test_retriever_attaches_general_cards_to_steps_not_a_new_stage() -> None:
-    bundles = (*load_default_step_knowledge(), _load_general())
+    bundles = (*load_default_step_knowledge(), *load_default_general_knowledge_bundles())
     retriever = GlobalKnowledgeRetriever(bundles)
 
     assert "general" not in retriever.stage_ids
@@ -127,7 +139,7 @@ def test_congestion_questions_retrieve_step_scoped_strategy_cards() -> None:
     retriever = GlobalKnowledgeRetriever((*load_default_step_knowledge(), _load_general()))
     regression = [
         json.loads(line)
-        for line in (GENERAL_ROOT / "regression" / "congestion_questions.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (CONGESTION_ROOT / "regression" / "congestion_questions.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     for case in regression:
@@ -163,10 +175,12 @@ def test_congestion_questions_retrieve_step_scoped_strategy_cards() -> None:
 
 
 def test_wirelength_questions_retrieve_step_scoped_strategy_cards() -> None:
-    retriever = GlobalKnowledgeRetriever((*load_default_step_knowledge(), _load_general()))
+    retriever = GlobalKnowledgeRetriever(
+        (*load_default_step_knowledge(), _load_general("wirelength"))
+    )
     regression = [
         json.loads(line)
-        for line in (GENERAL_ROOT / "regression" / "wirelength_questions.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (WIRELENGTH_ROOT / "regression" / "wirelength_questions.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
 
@@ -190,8 +204,8 @@ def test_default_provider_loads_general_without_adding_a_stage() -> None:
     provider = EcosAgentProvider(emit=lambda _event: None)
     assert "general" not in provider.knowledge_retriever.stage_ids
     assert set(provider.knowledge_retriever.stage_ids) == {spec.slug for spec in STEP_KNOWLEDGE_SPECS}
-    assert "strategy.congestion.local_move_cells.v1" in {
-        entity.entity_id
-        for bundle in (*provider.knowledge, load_default_general_knowledge())
-        for entity in bundle.entities
-    }
+    answer = provider.knowledge_retriever.reply_for_stages(
+        "HPWL and FLUTE rank placement candidates differently", ("place",)
+    )
+    assert answer is not None
+    assert "strategy.wirelength.use_flute_when_hpwl_is_ambiguous.v1" in answer.entity_ids

@@ -22,7 +22,10 @@ from ecos_agent.optimization_contracts import (
     StageObservation,
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.step_knowledge import load_default_general_knowledge, load_default_step_knowledge
+from ecos_agent.step_knowledge import (
+    load_default_general_knowledge_bundles,
+    load_default_step_knowledge,
+)
 
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -139,7 +142,7 @@ class OptimizationKnowledgeRetriever:
             config = _frozen_top_k_config()
             tool_retriever = GlobalKnowledgeRetriever(load_default_step_knowledge(), config=config)
             general_retriever = GlobalKnowledgeRetriever(
-                (load_default_general_knowledge(),), config=config
+                load_default_general_knowledge_bundles(), config=config
             )
         self._tool_retriever = tool_retriever
         self._general_retriever = general_retriever
