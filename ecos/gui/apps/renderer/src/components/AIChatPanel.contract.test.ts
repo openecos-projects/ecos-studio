@@ -2,8 +2,17 @@ import { describe, expect, it } from 'vitest'
 import source from './AIChatPanel.vue?raw'
 
 describe('AIChatPanel flow contracts', () => {
+  it('keeps slash commands in the same Agent Chat provider session', () => {
+    expect(source).not.toContain('codexCliTerminal')
+    expect(source).not.toContain('sendCodexCliInput')
+    expect(source).not.toContain('toggleCodexCliMode')
+    expect(source).toContain('await sendAgentMessage(message)')
+  })
+
   it('separates manual workspace setup from bounded optimization on the home screen', () => {
-    expect(source).toContain("label: 'Start creating a Workspace and run a full RTL-to-GDS flow'")
+    expect(source).toContain(
+      "label: 'Start creating a Workspace and run a full RTL-to-GDS flow'",
+    )
     expect(source).toContain("label: 'Start a bounded optimization episode'")
     expect(source).toContain("value: '2'")
   })

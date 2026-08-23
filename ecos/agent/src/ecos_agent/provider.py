@@ -167,6 +167,7 @@ _OptimizationProviderFactory = Callable[..., CodexAppServerProposalProvider]
 _OptimizationRunnerFactory = Callable[
     [Mapping[str, Any], CodexAppServerProposalProvider], OptimizationEpisodeRunner
 ]
+_DEFAULT_CHAT_RESPONSE_PARSER = _propose_gui_chat_response
 _CHAT_GREETING_PREFIXES = ("hello", "hi", "hey", "你好", "您好", "嗨")
 _GREETING_PATTERN = re.compile(
     r"^(?:hello|hi|hey|你好|您好|嗨)[\s!,.?，。！？]*$", re.IGNORECASE
@@ -302,6 +303,7 @@ class _Session:
     optimization_stop: threading.Event = field(default_factory=threading.Event)
     optimization_pause: threading.Event = field(default_factory=threading.Event)
     optimization_turn_count: int = 0
+    codex_provider: CodexAppServerProposalProvider | None = None
 
 
 class EcosAgentProvider:
@@ -426,6 +428,8 @@ class EcosAgentProvider:
             raise
         finally:
             session.active_interrupt = None
+            if session.codex_provider is not None:
+                session.codex_provider.clear_interrupted()
             session.active_tool_message_id = None
             session.active_turn_id = None
             session.running = False
@@ -491,10 +495,15 @@ class EcosAgentProvider:
             session.optimization_stop.set()
             if session.optimization_provider is not None:
                 session.optimization_provider.interrupt()
+            if session.codex_provider is not None:
+                session.codex_provider.close()
         self.stopped = True
         self._started = False
 
     def _handle_input(self, session: _Session, message: str) -> None:
+        if re.match(r"^/[A-Za-z][A-Za-z0-9_-]*(?:\s|$)", message):
+            self._handle_slash_command(session, message)
+            return
         handlers = {
             "home_ready": self._select_home_ready,
             "operation": self._select_operation,
@@ -1047,7 +1056,17 @@ class EcosAgentProvider:
         if source_result is not None:
             context["retrieved_code"] = source_result.contract()
         try:
-            response = GuiChatResponseProposal.model_validate(self.chat_response_parser(context))
+            if self.chat_response_parser is _DEFAULT_CHAT_RESPONSE_PARSER:
+                provider = self._chat_provider(session)
+                self._register_interrupt(session, provider.interrupt)
+                request_context = {
+                    key: value for key, value in context.items() if not key.startswith("_")
+                }
+                response_payload = provider.respond_to_gui_chat(request_context)
+                self._register_interrupt(session, None)
+            else:
+                response_payload = self.chat_response_parser(context)
+            response = GuiChatResponseProposal.model_validate(response_payload)
             self._check_interrupted(session)
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
@@ -1056,6 +1075,187 @@ class EcosAgentProvider:
                 self._emit(session, "error", f"Unable to answer the request: {exc}")
             return None
         return response
+
+    def _chat_provider(self, session: _Session) -> CodexAppServerProposalProvider:
+        if session.codex_provider is None:
+            cwd_value = session.rerun_workspace_path or session.project_root
+            cwd = Path(cwd_value).expanduser().resolve() if cwd_value else Path.cwd()
+            if not cwd.is_dir():
+                cwd = Path.cwd()
+            session.codex_provider = create_required_codex_provider(
+                cwd=cwd,
+                runtime_workspace_roots=(cwd,),
+                progress_callback=lambda text: self._progress(session, text),
+                ephemeral=False,
+            )
+        return session.codex_provider
+
+    def _handle_slash_command(self, session: _Session, message: str) -> None:
+        command, _, argument = message.partition(" ")
+        handlers: dict[str, Callable[[_Session, str], None]] = {
+            "/compact": self._slash_compact,
+            "/fork": self._slash_fork,
+            "/goal": self._slash_goal,
+            "/help": self._slash_help,
+            "/model": self._slash_model,
+            "/new": self._slash_new,
+            "/permissions": self._slash_permissions,
+            "/rename": self._slash_rename,
+            "/resume": self._slash_resume,
+            "/review": self._slash_review,
+            "/status": self._slash_status,
+        }
+        handler = handlers.get(command.casefold())
+        if handler is None:
+            detail = (
+                "Shell execution is not exposed in Agent Chat."
+                if command.casefold() in {"/command", "/exec", "/shell", "/terminal"}
+                else "Type /help for supported commands."
+            )
+            self._emit(session, "error", f"Unsupported slash command: {command}. {detail}")
+            return
+        try:
+            handler(session, argument.strip())
+        except (CodexProviderError, ValueError) as exc:
+            self._emit(session, "error", str(exc))
+
+    def _slash_help(self, session: _Session, _argument: str) -> None:
+        self._emit(
+            session,
+            "message",
+            "Supported: /model, /goal, /compact, /review, /new, /resume, "
+            "/fork, /rename, /status, /permissions. Terminal-only commands "
+            "such as /theme and /keymap do not apply to Agent Chat.",
+        )
+
+    def _slash_model(self, session: _Session, argument: str) -> None:
+        provider = self._chat_provider(session)
+        if argument:
+            model = provider.select_model(argument)
+            name = model.get("displayName") or model.get("model")
+            self._emit(session, "message", f"Model set to {name}.")
+            return
+        models = provider.list_models()
+        options = [
+            {
+                "id": str(index),
+                "label": str(item.get("displayName") or item.get("model") or item.get("id")),
+                "value": f"/model {item.get('model') or item.get('id')}",
+            }
+            for index, item in enumerate(models, start=1)
+        ]
+        self._emit_command_choice(session, "Select a Codex model", options)
+
+    def _slash_goal(self, session: _Session, argument: str) -> None:
+        provider = self._chat_provider(session)
+        if not argument:
+            goal = provider.get_goal()
+            self._emit(session, "message", self._goal_text(goal))
+            return
+        action, _, value = argument.partition(" ")
+        if action == "clear":
+            provider.clear_goal()
+            self._emit(session, "message", "Goal cleared.")
+        elif action in {"pause", "resume"}:
+            goal = provider.set_goal(status="paused" if action == "pause" else "active")
+            self._emit(session, "message", self._goal_text(goal))
+        elif action == "edit":
+            if not value.strip():
+                raise ValueError("Usage: /goal edit <objective>")
+            goal = provider.set_goal(objective=value.strip())
+            self._emit(session, "message", self._goal_text(goal))
+        else:
+            goal = provider.set_goal(objective=argument)
+            self._emit(session, "message", self._goal_text(goal))
+
+    @staticmethod
+    def _goal_text(goal: Mapping[str, Any] | None) -> str:
+        if goal is None:
+            return "No active goal."
+        return f"Goal ({goal.get('status', 'active')}): {goal.get('objective', '')}"
+
+    def _slash_compact(self, session: _Session, argument: str) -> None:
+        if argument:
+            raise ValueError("Usage: /compact")
+        self._chat_provider(session).compact()
+        self._emit(session, "message", "Compaction started for this Chat thread.")
+
+    def _slash_review(self, session: _Session, argument: str) -> None:
+        if argument:
+            raise ValueError("Usage: /review")
+        review = self._chat_provider(session).review_uncommitted_changes()
+        self._emit(session, "message", review or "Review completed with no findings.")
+
+    def _slash_new(self, session: _Session, argument: str) -> None:
+        thread_id = self._chat_provider(session).start_new_thread(argument or None)
+        self._emit(session, "message", f"Started a new Codex thread: {thread_id}")
+
+    def _slash_fork(self, session: _Session, argument: str) -> None:
+        if argument:
+            raise ValueError("Usage: /fork")
+        thread_id = self._chat_provider(session).fork_thread()
+        self._emit(session, "message", f"Forked into Codex thread: {thread_id}")
+
+    def _slash_rename(self, session: _Session, argument: str) -> None:
+        if not argument:
+            raise ValueError("Usage: /rename <name>")
+        self._chat_provider(session).rename_thread(argument)
+        self._emit(session, "message", f"Chat renamed to {argument}.")
+
+    def _slash_resume(self, session: _Session, argument: str) -> None:
+        provider = self._chat_provider(session)
+        if argument:
+            thread_id = provider.resume_thread(argument)
+            self._emit(session, "message", f"Resumed Codex thread: {thread_id}")
+            return
+        options = [
+            {
+                "id": str(index),
+                "label": str(item.get("name") or item.get("preview") or item.get("id")),
+                "value": f"/resume {item.get('id')}",
+            }
+            for index, item in enumerate(provider.list_threads(), start=1)
+            if item.get("id")
+        ]
+        self._emit_command_choice(session, "Resume a Codex thread", options)
+
+    def _slash_status(self, session: _Session, argument: str) -> None:
+        if argument:
+            raise ValueError("Usage: /status")
+        provider = self._chat_provider(session)
+        thread_id = provider.thread_id or "not started"
+        model = provider.model or "default"
+        self._emit(
+            session,
+            "message",
+            f"Thread: {thread_id}\nModel: {model}\nPermissions: read-only, approvals disabled",
+        )
+
+    def _slash_permissions(self, session: _Session, _argument: str) -> None:
+        self._emit(
+            session,
+            "message",
+            "ECOS Agent Chat is fixed to read-only Codex access. Execution remains behind "
+            "typed ECOS contracts, local validation, and explicit GUI confirmation.",
+        )
+
+    def _emit_command_choice(
+        self, session: _Session, title: str, options: list[dict[str, str]]
+    ) -> None:
+        if not options:
+            raise ValueError(f"{title}: no options are available")
+        self._emit(
+            session,
+            "choice",
+            title,
+            choice={
+                "promptId": uuid.uuid4().hex,
+                "title": title,
+                "options": options,
+                "allowFreeText": True,
+                "variant": "list",
+            },
+        )
 
     def _begin_home_workspace_create(self, session: _Session, message: str) -> None:
         self._reset_workspace_setup(session)

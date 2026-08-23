@@ -181,6 +181,190 @@ def test_new_ephemeral_thread_discards_prior_case_context(tmp_path: Path) -> Non
         provider.new_ephemeral_thread()
 
 
+def test_codex_chat_controls_use_allowlisted_thread_rpc(tmp_path: Path) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.requests: list[tuple[str, dict[str, object]]] = []
+
+        def request(self, method: str, params: dict[str, object]) -> dict[str, object]:
+            self.requests.append((method, params))
+            if method == "model/list":
+                return {"data": [{"id": "gpt-test", "model": "gpt-test"}]}
+            if method == "thread/goal/set":
+                return {
+                    "goal": {
+                        "objective": params.get("objective", "Ship it"),
+                        "status": params.get("status", "active"),
+                    }
+                }
+            if method == "thread/goal/get":
+                return {"goal": {"objective": "Ship it", "status": "active"}}
+            return {}
+
+        def interrupt_turn(self, thread_id: str, turn_id: str) -> None:
+            self.requests.append(
+                ("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})
+            )
+
+    client = FakeClient()
+    provider._client = client
+    provider._thread_id = "thread-1"
+
+    provider.select_model("gpt-test")
+    provider.set_goal(objective="Ship it")
+    assert provider.get_goal() == {"objective": "Ship it", "status": "active"}
+    provider.compact()
+    provider.rename_thread("ECOS task")
+    provider._active_turn_id = "turn-1"
+    provider.interrupt()
+    provider.clear_interrupted()
+
+    assert [method for method, _params in client.requests] == [
+        "model/list",
+        "thread/goal/set",
+        "thread/goal/get",
+        "thread/compact/start",
+        "thread/name/set",
+        "turn/interrupt",
+    ]
+    assert all(
+        params.get("threadId") == "thread-1"
+        for method, params in client.requests
+        if method != "model/list"
+    )
+    assert provider.thread_id == "thread-1"
+    assert provider._interrupted is False
+
+
+def test_session_chat_and_slash_commands_share_one_codex_provider(
+    tmp_path: Path, monkeypatch
+) -> None:
+    events: list[dict[str, object]] = []
+
+    class FakeCodexProvider:
+        thread_id = "thread-1"
+        model = None
+
+        def __init__(self) -> None:
+            self.calls: list[object] = []
+
+        def respond_to_gui_chat(self, context: dict[str, object]) -> dict[str, object]:
+            self.calls.append(("chat", context["natural_language_request"]))
+            return _chat_response(answer="Persistent answer.")
+
+        def list_models(self) -> list[dict[str, object]]:
+            self.calls.append("models")
+            return [
+                {
+                    "id": "gpt-test",
+                    "model": "gpt-test",
+                    "displayName": "GPT Test",
+                    "description": "Test model",
+                    "defaultReasoningEffort": "medium",
+                }
+            ]
+
+        def select_model(self, model: str) -> dict[str, object]:
+            self.calls.append(("model", model))
+            self.model = model
+            return {"model": model, "displayName": "GPT Test"}
+
+        def set_goal(
+            self, *, objective: str | None = None, status: str | None = None
+        ) -> dict[str, object]:
+            self.calls.append(("set_goal", objective, status))
+            return {"objective": objective or "Ship it", "status": status or "active"}
+
+        def get_goal(self) -> dict[str, object]:
+            self.calls.append("get_goal")
+            return {"objective": "Ship it", "status": "active"}
+
+        def compact(self) -> None:
+            self.calls.append("compact")
+
+        def review_uncommitted_changes(self) -> str:
+            self.calls.append("review")
+            return "Review finding."
+
+        def interrupt(self) -> None:
+            pass
+
+        def clear_interrupted(self) -> None:
+            pass
+
+        def close(self) -> None:
+            self.calls.append("close")
+
+    fake = FakeCodexProvider()
+    monkeypatch.setattr(
+        "ecos_agent.provider.create_required_codex_provider", lambda **_kwargs: fake
+    )
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home", "directory": str(tmp_path)})[
+        "sessionId"
+    ]
+
+    provider.send_message({"sessionId": session_id, "message": "hello"})
+    provider.send_message({"sessionId": session_id, "message": "/model"})
+    choice = _last_event(events, "choice")["choice"]
+    assert choice["options"][0]["value"] == "/model gpt-test"
+    provider.send_message({"sessionId": session_id, "message": "/model gpt-test"})
+    assert _last_event(events, "message")["text"] == "Model set to GPT Test."
+    provider.send_message({"sessionId": session_id, "message": "/goal Ship it"})
+    provider.send_message({"sessionId": session_id, "message": "/goal"})
+    provider.send_message({"sessionId": session_id, "message": "/compact"})
+    provider.send_message({"sessionId": session_id, "message": "/review"})
+
+    assert fake.calls == [
+        ("chat", "hello"),
+        "models",
+        ("model", "gpt-test"),
+        ("set_goal", "Ship it", None),
+        "get_goal",
+        "compact",
+        "review",
+    ]
+    assert provider.sessions[session_id].codex_provider is fake
+    assert _last_event(events, "message")["text"] == "Review finding."
+
+
+def test_slash_commands_fail_closed_without_shell_fallback(tmp_path: Path, monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+
+    class FakeCodexProvider:
+        thread_id = "thread-1"
+        model = None
+
+        def interrupt(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "ecos_agent.provider.create_required_codex_provider",
+        lambda **_kwargs: FakeCodexProvider(),
+    )
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home", "directory": str(tmp_path)})[
+        "sessionId"
+    ]
+
+    provider.send_message({"sessionId": session_id, "message": "/shell rm -rf /"})
+    provider.send_message({"sessionId": session_id, "message": "/unknown"})
+
+    errors = [event["text"] for event in events if event["type"] == "error"]
+    assert errors == [
+        "Unsupported slash command: /shell. Shell execution is not exposed in Agent Chat.",
+        "Unsupported slash command: /unknown. Type /help for supported commands.",
+    ]
+
+
 def test_timeout_closes_the_app_server_before_the_next_proposal(tmp_path: Path) -> None:
     codex = tmp_path / "codex"
     codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")

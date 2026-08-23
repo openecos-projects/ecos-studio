@@ -103,14 +103,10 @@ class _JsonLineRpcProcessClient:
                 process.wait(timeout=2)
         self._process = None
 
-    def interrupt_turn(self, turn_id: str) -> None:
-        self._notifications.put(
-            {
-                "method": "error",
-                "params": {"error": {"code": "interrupted"}, "turnId": turn_id},
-            }
+    def interrupt_turn(self, thread_id: str, turn_id: str) -> None:
+        self.request(
+            "turn/interrupt", {"threadId": thread_id, "turnId": turn_id}
         )
-        self.close()
 
     def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         process = self._process
