@@ -43,6 +43,20 @@ class OptimizationRuntimeError(ValueError):
     """The workspace cannot be assembled into a trusted production episode."""
 
 
+_PLACE_TO_HARDEN_STAGES = (
+    "place",
+    "CTS",
+    "legalization",
+    "route",
+    "drc",
+    "lvs",
+    "filler",
+    "RCX",
+    "sta",
+    "Harden",
+)
+
+
 def create_optimization_runner(
     context: Mapping[str, Any], planner: object
 ) -> OptimizationEpisodeRunner:
@@ -166,34 +180,35 @@ def _text(value: object, label: str) -> str:
 
 
 def _place_to_harden_runtime_seconds(workspace: Path) -> float:
-    stages = (
-        "place_dreamplace",
-        "CTS_ecc",
-        "legalization_dreamplace",
-        "route_ecc",
-        "drc_ecc",
-        "lvs_ecc",
-        "filler_ecc",
-        "RCX_ecc",
-        "sta_ecc",
-        "Harden_ecc",
-    )
+    try:
+        payload = json.loads((workspace / "home" / "flow.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OptimizationRuntimeError("place-to-Harden flow evidence is unavailable") from exc
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        raise OptimizationRuntimeError("place-to-Harden flow completion evidence is invalid")
     total = 0.0
-    for stage in stages:
-        path = workspace / stage / "analysis" / "qor_metrics.json"
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise OptimizationRuntimeError("place-to-Harden QoR evidence is unavailable") from exc
-        for item in payload.get("metrics", ()):
-            if isinstance(item, dict) and item.get("id") == "runtime_seconds":
-                value = item.get("value")
-                if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
-                    total += float(value)
-                    break
-        else:
-            raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
+    for stage in _PLACE_TO_HARDEN_STAGES:
+        total += _successful_flow_stage_runtime_seconds(steps, stage)
+    if total <= 0:
+        raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
     return total
+
+
+def _successful_flow_stage_runtime_seconds(steps: list[object], stage: str) -> float:
+    matches = [item for item in steps if isinstance(item, dict) and item.get("name") == stage]
+    if len(matches) != 1 or matches[0].get("state") != "Success":
+        raise OptimizationRuntimeError("place-to-Harden flow completion evidence is invalid")
+    runtime = matches[0].get("runtime")
+    if not isinstance(runtime, str):
+        raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
+    match = re.fullmatch(r"(\d+):(\d+):(\d+)", runtime.strip())
+    if match is None:
+        raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
+    hours, minutes, seconds = (int(part) for part in match.groups())
+    if minutes >= 60 or seconds >= 60:
+        raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
+    return float(hours * 3600 + minutes * 60 + seconds)
 
 
 def _current_values(workspace: Path, site_width_dbu: int) -> dict[str, bool | int | float]:

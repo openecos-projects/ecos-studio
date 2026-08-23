@@ -12,31 +12,46 @@ from ecos_agent.optimization_runtime import (
 
 
 _STAGES = (
-    "place_dreamplace",
-    "CTS_ecc",
-    "legalization_dreamplace",
-    "route_ecc",
-    "drc_ecc",
-    "lvs_ecc",
-    "filler_ecc",
-    "RCX_ecc",
-    "sta_ecc",
-    "Harden_ecc",
+    "place",
+    "CTS",
+    "legalization",
+    "route",
+    "drc",
+    "lvs",
+    "filler",
+    "RCX",
+    "sta",
+    "Harden",
 )
 
 
-def test_place_to_harden_runtime_uses_all_terminal_stages(tmp_path: Path) -> None:
-    for index, stage in enumerate(_STAGES, start=1):
-        path = tmp_path / stage / "analysis"
-        path.mkdir(parents=True)
-        (path / "qor_metrics.json").write_text(
-            json.dumps({"metrics": [{"id": "runtime_seconds", "value": index}]}),
-            encoding="utf-8",
-        )
+def _write_flow(tmp_path: Path, *, states: dict[str, str] | None = None) -> None:
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "flow.json").write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {
+                        "name": stage,
+                        "state": (states or {}).get(stage, "Success"),
+                        "runtime": f"0:0:{index}",
+                    }
+                    for index, stage in enumerate(_STAGES)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    assert _place_to_harden_runtime_seconds(tmp_path) == sum(range(1, 11))
+
+def test_place_to_harden_runtime_uses_successful_flow_records(tmp_path: Path) -> None:
+    _write_flow(tmp_path)
+
+    assert _place_to_harden_runtime_seconds(tmp_path) == sum(range(10))
 
 
-def test_place_to_harden_runtime_fails_closed_on_missing_stage(tmp_path: Path) -> None:
-    with pytest.raises(OptimizationRuntimeError, match="QoR evidence"):
+def test_place_to_harden_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -> None:
+    _write_flow(tmp_path, states={"place": "Ongoing"})
+
+    with pytest.raises(OptimizationRuntimeError, match="flow completion evidence"):
         _place_to_harden_runtime_seconds(tmp_path)
