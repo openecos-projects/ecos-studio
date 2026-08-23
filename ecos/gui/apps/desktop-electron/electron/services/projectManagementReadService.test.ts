@@ -105,6 +105,14 @@ describe('ProjectManagementReadService', () => {
     ).resolves.toContain('"root_path":"/old/location/gcd"')
   })
 
+  it('returns null for a historical project root that no longer exists', async () => {
+    const missingRoot = join(tmpdir(), `ecos-missing-project-${crypto.randomUUID()}`)
+
+    await expect(
+      new ProjectManagementReadService().readManifest(missingRoot),
+    ).resolves.toBeNull()
+  })
+
   it('rejects undeclared workspaces and files outside the summary allowlist', async () => {
     const { projectRoot } = await createProject()
     const undeclaredWorkspace = join(projectRoot, 'ws_0002')

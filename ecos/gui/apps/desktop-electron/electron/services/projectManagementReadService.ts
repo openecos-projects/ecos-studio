@@ -82,7 +82,13 @@ async function mapWithConcurrency<T, R>(
 
 export class ProjectManagementReadService {
   async readManifest(projectRoot: string): Promise<string | null> {
-    const root = await canonicalizeExistingDirectory(projectRoot)
+    let root: string
+    try {
+      root = await canonicalizeExistingDirectory(projectRoot)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return null
+      throw error
+    }
     return await readOptionalBoundedTextFile(
       join(root, 'project.json'),
       PROJECT_MANIFEST_MAX_BYTES,
