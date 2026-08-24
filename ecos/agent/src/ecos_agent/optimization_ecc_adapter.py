@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import queue
 import re
@@ -89,6 +88,7 @@ class EccCandidateRerunAdapter:
             idempotency_key=f"{request.episode_id}.{request.intervention_id}",
             patch=patch,
             requested=request.requested,
+            parent_candidate_root_ref=request.parent_candidate_root_ref,
         )
 
     def _start_rerun(
@@ -98,19 +98,20 @@ class EccCandidateRerunAdapter:
         idempotency_key: str,
         patch: dict[str, object],
         requested: RequestedKnobValue,
+        parent_candidate_root_ref: str | None,
     ) -> CandidateExecutionReceipt:
-        response = self._rpc.call(
-            "candidate.rerun",
-            {
-                "workspaceId": self._workspace_id,
-                "targetStep": "place",
-                "endStep": "Harden",
-                "candidateId": candidate_id,
-                "patch": [patch],
-                "executionScope": "full_flow",
-                "idempotencyKey": idempotency_key,
-            },
-        )
+        params = {
+            "workspaceId": self._workspace_id,
+            "targetStep": "place",
+            "endStep": "Harden",
+            "candidateId": candidate_id,
+            "patch": [patch],
+            "executionScope": "full_flow",
+            "idempotencyKey": idempotency_key,
+        }
+        if parent_candidate_root_ref is not None:
+            params["parentCandidateRootRef"] = parent_candidate_root_ref
+        response = self._rpc.call("candidate.rerun", params)
         operation_id, state = self._validate_operation(response)
         evidence = self._evidence(response)
         application_receipt = self._application_receipt(response, requested, state)

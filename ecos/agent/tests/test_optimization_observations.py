@@ -330,6 +330,34 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
     assert observation.observation_id == "terminal-Harden"
     assert observation.metrics["route_la_total_overflow"] == 1.0
 
+    candidate_flow = candidate_root / "home/flow.json"
+    candidate_flow.write_text(candidate_flow.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    candidate_2_root = frozen_workspace / ".agent/candidates/candidate-2"
+    shutil.copytree(candidate_root, candidate_2_root)
+    manifest_2_ref = ".agent/candidates/candidate-2/analysis/candidate_workspace.v1.json"
+    manifest_2_path = frozen_workspace / manifest_2_ref
+    _write_json(
+        manifest_2_path,
+        {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": "candidate-2",
+            "candidate_root_ref": ".agent/candidates/candidate-2",
+            "parent_candidate_root_ref": ".agent/candidates/candidate-1",
+            "parent_flow_sha256": file_sha256(candidate_flow),
+            "candidate_flow_sha256": file_sha256(candidate_2_root / "home/flow.json"),
+        },
+    )
+    evidence_2 = CandidateExecutionEvidence(
+        candidate_root_ref=".agent/candidates/candidate-2",
+        candidate_manifest_ref=manifest_2_ref,
+        candidate_manifest_sha256=file_sha256(manifest_2_path),
+    )
+
+    assert build_candidate_terminal_observation(frozen_workspace, evidence_2).observation_id == (
+        "terminal-Harden"
+    )
+
 
 class _RecordingRetriever:
     def __init__(self, prefix: str) -> None:

@@ -20,7 +20,6 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization_controller import (
-    CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     OptimizationAgentMode,
     OptimizationEpisodeController,
@@ -79,7 +78,6 @@ def create_optimization_runner(
     checkpoint_id = "place"
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
-    current_values = _current_values(workspace, site_width_dbu)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
     design_id = _design_id(workspace)
     routability_objective = freeze_routability_objective(terminal_observation)
@@ -160,6 +158,10 @@ def create_optimization_runner(
 
     retrieval = OptimizationKnowledgeRetriever()
     stop_event = threading.Event()
+    current_values = _current_values(
+        _incumbent_workspace(workspace, controller.incumbent_candidate_root_ref),
+        site_width_dbu,
+    )
 
     def observation_supplier(current_budget: BudgetSnapshot):
         return build_stage_observation(workspace, checkpoint_id, budget=current_budget)
@@ -259,6 +261,27 @@ def _workspace(value: object) -> Path:
     if not path.is_absolute() or path.is_symlink() or not path.is_dir():
         raise OptimizationRuntimeError("optimization workspace is unavailable")
     return path.resolve()
+
+
+def _incumbent_workspace(workspace: Path, candidate_root_ref: str | None) -> Path:
+    if candidate_root_ref is None:
+        return workspace
+    parts = Path(candidate_root_ref).parts
+    if len(parts) != 3 or parts[:2] != (".agent", "candidates") or not parts[2]:
+        raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    candidate = workspace
+    for part in parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(workspace)
+    except (OSError, ValueError) as exc:
+        raise OptimizationRuntimeError("incumbent candidate workspace is invalid") from exc
+    if not resolved.is_dir():
+        raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    return resolved
 
 
 def _text(value: object, label: str) -> str:

@@ -86,6 +86,7 @@ class _FakePlanner:
 
 class _FakeExecutor:
     def __init__(self) -> None:
+        self.requests: list[object] = []
         self.start_receipts = iter(
             (
                 CandidateExecutionReceipt(execution_id="execution-1", started=True),
@@ -110,6 +111,7 @@ class _FakeExecutor:
         )
 
     def start(self, request: object) -> CandidateExecutionReceipt:
+        self.requests.append(request)
         return next(self.start_receipts)
 
     def wait_for_terminal(self, execution_id: str) -> CandidateExecutionReceipt:
@@ -139,6 +141,7 @@ class _RaisingTerminalExecutor(_FakeExecutor):
 
 class _SuccessfulExecutor(_FakeExecutor):
     def __init__(self) -> None:
+        self.requests: list[object] = []
         self.start_receipts = iter(
             (CandidateExecutionReceipt(execution_id="execution-1", started=True),)
         )
@@ -300,6 +303,10 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert second.retrieval.request.previous_intervention_outcome == OptimizationOutcomeKind.DEGRADED
     assert planner.contexts[0].history == ()
     assert planner.contexts[1].history[0].requested.value == 3
+    assert planner.contexts[1].current_values is not None
+    assert planner.contexts[1].current_values["place.cell_padding_x"] == 3
+    assert executor.requests[0].parent_candidate_root_ref is None
+    assert executor.requests[1].parent_candidate_root_ref == ".agent/candidates/execution-1"
     assert planner.contexts[1].history[0].terminal_observation is not None
     assert planner.contexts[1].history[0].terminal_observation.metrics[
         ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW

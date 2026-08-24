@@ -18,6 +18,7 @@ from ecos_agent.optimization_contracts import (
 from ecos_agent.optimization_runtime import (
     OptimizationRuntimeError,
     _design_id,
+    _incumbent_workspace,
     _wait_for_terminal_receipt,
     _optimization_objective,
     _parent_manifest_sha256,
@@ -115,6 +116,17 @@ def test_design_id_comes_from_workspace_parameters_and_fails_closed(tmp_path: Pa
     parameters.write_text(json.dumps({"Design": "../other"}), encoding="utf-8")
     with pytest.raises(OptimizationRuntimeError, match="identifier is invalid"):
         _design_id(tmp_path)
+
+
+def test_incumbent_workspace_resolves_only_registered_candidate_roots(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    candidate = workspace / ".agent" / "candidates" / "candidate-1"
+    candidate.mkdir(parents=True)
+
+    assert _incumbent_workspace(workspace, None) == workspace
+    assert _incumbent_workspace(workspace, ".agent/candidates/candidate-1") == candidate
+    with pytest.raises(OptimizationRuntimeError, match="incumbent candidate workspace"):
+        _incumbent_workspace(workspace, "../outside")
 
 
 def test_parent_manifest_binds_terminal_evidence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

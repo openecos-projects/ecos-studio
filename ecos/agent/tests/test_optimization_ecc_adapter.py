@@ -164,6 +164,22 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
     ]
 
 
+def test_adapter_reruns_from_the_incumbent_candidate_workspace() -> None:
+    rpc = _FakeEccRpc(_running_operation())
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    adapter.start(
+        replace(
+            _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+            parent_candidate_root_ref=".agent/candidates/candidate-1",
+        )
+    )
+
+    assert rpc.calls[0][1]["parentCandidateRootRef"] == ".agent/candidates/candidate-1"
+
+
 def test_adapter_materializes_logical_padding_sites_to_dbu() -> None:
     rpc = _FakeEccRpc(_running_operation())
     adapter = EccCandidateRerunAdapter(

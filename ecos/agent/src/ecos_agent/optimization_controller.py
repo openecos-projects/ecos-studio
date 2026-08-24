@@ -200,13 +200,14 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
 
 @dataclass(frozen=True)
 class CandidateExecutionRequest:
-    """A fake execution request with no command, path, workspace, or RPC field."""
+    """A typed execution request with no command or unrestricted path field."""
 
     intervention_id: str
     episode_id: str
     checkpoint_id: str
     proposal: OptimizationProposal
     requested: RequestedKnobValue
+    parent_candidate_root_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -515,6 +516,7 @@ class OptimizationEpisodeController:
             self.checkpoint_id,
             self._proposal,
             self._requested,
+            self._incumbent_candidate_root_ref,
         )
         try:
             receipt = self._start_once_with_retry(request)
@@ -886,6 +888,7 @@ class OptimizationEpisodeController:
                     self._objective.contract_sha256 if self._objective is not None else None
                 ),
                 "requested": request.requested.model_dump(mode="json"),
+                "parent_candidate_root_ref": request.parent_candidate_root_ref,
             }
         )
         return OptimizationInterventionStart(

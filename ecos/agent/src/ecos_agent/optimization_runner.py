@@ -10,6 +10,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     OptimizationEpisodeState,
     OptimizationObjectiveContract,
+    RequestedKnobValue,
     RoutabilityObjectiveContract,
     StageObservation,
     TerminalObservation,
@@ -65,7 +66,7 @@ class OptimizationEpisodeRunner:
         self._controller = controller
         self._observation_supplier = observation_supplier
         self._retrieval_supplier = retrieval_supplier
-        self._current_values = current_values
+        self._current_values = dict(current_values)
         self._terminal_waiter = terminal_waiter
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
@@ -149,7 +150,7 @@ class OptimizationEpisodeRunner:
             incumbent_decision=comparison.decision.value if comparison else None,
             decisive_metric=comparison.decisive_metric if comparison else None,
         )
-        self._promote(terminal_observation, comparison, receipt)
+        self._promote(terminal_observation, comparison, receipt, planning.requested)
         return OptimizationEpisodeTurn(
             observation,
             retrieval,
@@ -203,6 +204,7 @@ class OptimizationEpisodeRunner:
         candidate: TerminalObservation | None,
         comparison: IncumbentComparison | None,
         receipt: CandidateExecutionReceipt,
+        requested: RequestedKnobValue | None,
     ) -> None:
         if (
             candidate is not None
@@ -212,6 +214,8 @@ class OptimizationEpisodeRunner:
             in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
         ):
             self._controller.promote_incumbent(candidate, receipt.evidence)
+            if requested is not None:
+                self._current_values[requested.knob_id.value] = requested.value
 
     def _indeterminate_turn(
         self,
