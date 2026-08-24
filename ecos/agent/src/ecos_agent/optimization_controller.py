@@ -38,6 +38,7 @@ from ecos_agent.optimization_contracts import (
     ProposalContextRef,
     ProposalReason,
     RequestedKnobValue,
+    KnobApplicationReceipt,
     SelectionMetric,
     StageObservation,
     TerminalObservation,
@@ -110,6 +111,7 @@ class CandidateExecutionReceipt:
     started: bool
     outcome: OptimizationOutcomeKind | None = None
     evidence: CandidateExecutionEvidence | None = None
+    application_receipt: KnobApplicationReceipt | None = None
 
     def __post_init__(self) -> None:
         if not _ID.fullmatch(self.execution_id):
@@ -120,6 +122,10 @@ class CandidateExecutionReceipt:
             raise ValueError("execution receipt outcome is invalid")
         if self.evidence is not None and not isinstance(self.evidence, CandidateExecutionEvidence):
             raise ValueError("execution receipt evidence is invalid")
+        if self.application_receipt is not None and not isinstance(
+            self.application_receipt, KnobApplicationReceipt
+        ):
+            raise ValueError("execution application receipt is invalid")
 
 
 @dataclass(frozen=True)
@@ -840,6 +846,13 @@ class OptimizationEpisodeController:
     ) -> OptimizationControlResult:
         if self._pending_intervention_id is None:
             raise OptimizationEpisodeControllerError("terminal receipt has no pending intervention")
+        if receipt.application_receipt is not None and (
+            self._requested is None
+            or receipt.application_receipt.requested != self._requested
+        ):
+            raise OptimizationEpisodeControllerError(
+                "terminal application receipt does not match requested value"
+            )
         details = {
             "execution_id": receipt.execution_id,
             "started": receipt.started,
@@ -849,6 +862,10 @@ class OptimizationEpisodeController:
             details["candidate_root_ref"] = receipt.evidence.candidate_root_ref
             details["candidate_manifest_ref"] = receipt.evidence.candidate_manifest_ref
             details["candidate_manifest_sha256"] = receipt.evidence.candidate_manifest_sha256
+        if receipt.application_receipt is not None:
+            details["knob_application_receipt"] = receipt.application_receipt.model_dump(
+                mode="json"
+            )
         if terminal_observation is not None:
             details["terminal_observation_sha256"] = canonical_sha256(
                 terminal_observation.model_dump(mode="json")
@@ -883,6 +900,7 @@ class OptimizationEpisodeController:
                     else None
                 ),
                 terminal_observation=terminal_observation,
+                application_receipt=receipt.application_receipt,
                 incumbent_decision=incumbent_decision,
                 decisive_metric=decisive_metric,
                 outcome_details_sha256=canonical_sha256(details),

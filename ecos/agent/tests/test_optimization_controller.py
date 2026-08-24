@@ -9,6 +9,7 @@ import pytest
 from ecos_agent.codex_rpc import CodexProviderError
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
+    AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
@@ -22,6 +23,9 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
     ProposalReason,
+    KnobApplicationReceipt,
+    RequestedKnobValue,
+    RuntimeAdjustment,
     StageObservation,
     StrategyDirection,
 )
@@ -250,6 +254,26 @@ def _terminal(
     execution_id: str = "execution-1",
 ) -> CandidateExecutionReceipt:
     return CandidateExecutionReceipt(execution_id=execution_id, started=True, outcome=outcome)
+
+
+def _application_receipt() -> KnobApplicationReceipt:
+    return KnobApplicationReceipt(
+        receipt_id="receipt-1",
+        requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=3),
+        written=AppliedKnobValue(knob_id="place.cell_padding_x", value=600),
+        effective_initial=AppliedKnobValue(knob_id="place.cell_padding_x", value=600),
+        runtime_adjustments=(
+            RuntimeAdjustment(
+                effective_value=AppliedKnobValue(
+                    knob_id="place.cell_padding_x", value=400
+                ),
+                reason="capacity_cap",
+                evidence_sha256=HASH,
+            ),
+        ),
+        effective_final=AppliedKnobValue(knob_id="place.cell_padding_x", value=400),
+        evidence_sha256=HASH,
+    )
 
 
 def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(tmp_path: Path) -> None:
@@ -624,6 +648,25 @@ def test_terminal_outcome_can_only_complete_the_pending_execution(tmp_path: Path
 
     assert result.state == OptimizationEpisodeState.PLANNING
     assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
+
+
+def test_controller_persists_effective_value_receipt_in_terminal_ledger(tmp_path: Path) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    controller.execute()
+
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.DEGRADED,
+            application_receipt=_application_receipt(),
+        )
+    )
+
+    outcome = controller.ledger.replay().terminal_outcomes[0]
+    assert outcome.application_receipt is not None
+    assert outcome.application_receipt.effective_final.value == 400
 
 
 def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_path: Path) -> None:

@@ -3,7 +3,18 @@ import json
 import pytest
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import PlanningProviderEnvelope, PlanningProviderEvidence
+from ecos_agent.optimization_contracts import (
+    AppliedKnobValue,
+    ExpectedEffect,
+    ExpectedEffectDirection,
+    KnobApplicationReceipt,
+    ObjectiveMetric,
+    PlanningProviderEnvelope,
+    PlanningProviderEvidence,
+    ProposalAction,
+    RequestedKnobValue,
+    StrategyDirection,
+)
 from ecos_agent.optimization_ledger import (
     OptimizationArtifactManifestError,
     OptimizationInterventionStart,
@@ -53,6 +64,17 @@ def _terminal(
     )
 
 
+def _application_receipt() -> KnobApplicationReceipt:
+    return KnobApplicationReceipt(
+        receipt_id="receipt-1",
+        requested=RequestedKnobValue(knob_id="place.target_density", value=0.65),
+        written=AppliedKnobValue(knob_id="place.target_density", value=0.65),
+        effective_initial=AppliedKnobValue(knob_id="place.target_density", value=0.65),
+        effective_final=AppliedKnobValue(knob_id="place.target_density", value=0.65),
+        evidence_sha256=HASH,
+    )
+
+
 def test_ledger_retains_a_degraded_outcome_and_replays_it_deterministically(tmp_path) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
 
@@ -70,6 +92,34 @@ def test_ledger_retains_a_degraded_outcome_and_replays_it_deterministically(tmp_
     manifest = ledger.write_manifest()
     assert manifest.ledger_sha256 == file_sha256(ledger.ledger_path)
     assert manifest.chain_head_sha256 == first_replay.chain_head_sha256
+
+
+def test_ledger_replays_an_effective_value_receipt(tmp_path) -> None:
+    ledger = OptimizationLedger(tmp_path / "episode")
+    ledger.append_start(
+        _start().model_copy(
+            update={
+                "proposal_action": ProposalAction(
+                    knob_id="place.target_density",
+                    direction=StrategyDirection.INCREASE,
+                    expected_effects=(
+                        ExpectedEffect(
+                            metric_id=ObjectiveMetric.ROUTE_WIRELENGTH,
+                            direction=ExpectedEffectDirection.DECREASE,
+                        ),
+                    ),
+                ),
+                "requested": RequestedKnobValue(
+                    knob_id="place.target_density", value=0.65
+                ),
+            }
+        )
+    )
+    terminal = _terminal()
+    terminal = terminal.model_copy(update={"application_receipt": _application_receipt()})
+    ledger.append_terminal(terminal)
+
+    assert ledger.replay().terminal_outcomes[0].application_receipt == _application_receipt()
 
 
 def test_ledger_rejects_tampering_and_never_appends_to_an_invalid_chain(tmp_path) -> None:

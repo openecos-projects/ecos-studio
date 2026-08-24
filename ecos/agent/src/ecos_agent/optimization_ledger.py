@@ -30,6 +30,7 @@ from ecos_agent.optimization_contracts import (
     ProposalContextRef,
     ProposalAction,
     RequestedKnobValue,
+    KnobApplicationReceipt,
     SelectionMetric,
     TerminalObservation,
 )
@@ -184,6 +185,7 @@ class OptimizationTerminalOutcome(_LedgerModel):
     receipt_sha256: str | None = None
     terminal_observation_sha256: str | None = None
     terminal_observation: TerminalObservation | None = None
+    application_receipt: KnobApplicationReceipt | None = None
     incumbent_decision: IncumbentDecision | None = None
     decisive_metric: SelectionMetric | None = None
     outcome_details_sha256: str
@@ -757,6 +759,14 @@ def _replay_entries(entries: tuple[OptimizationLedgerEntry, ...]) -> Optimizatio
         else:
             if payload.intervention_id not in starts or payload.intervention_id in terminal_by_id:
                 raise OptimizationLedgerIntegrityError("terminal outcome does not match one pending intervention")
+            start = starts[payload.intervention_id]
+            if payload.application_receipt is not None and (
+                start.requested is None
+                or payload.application_receipt.requested != start.requested
+            ):
+                raise OptimizationLedgerIntegrityError(
+                    "terminal application receipt does not match intervention request"
+                )
             terminal_by_id[payload.intervention_id] = payload
             outcomes.append(payload)
         previous_hash = entry.entry_sha256
