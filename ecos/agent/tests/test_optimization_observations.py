@@ -86,6 +86,7 @@ def frozen_workspace(tmp_path: Path) -> Path:
         root / "route_ecc/analysis/qor_metrics.json",
         _metrics(
             ("route_dr_total_violation_count", 0),
+            ("route_dr_total_wirelength", 9999),
             ("route_la_total_overflow", 1),
             ("route_wirelength", 5243.741),
         ),
