@@ -33,4 +33,18 @@ describe('frontend workspace creation lifecycle', () => {
     expect(wizardSource).toContain('initialConfig?: Partial<WorkspaceConfig>')
     expect(wizardSource).toContain('createFrontendWorkspaceConfig(props.initialConfig)')
   })
+
+  it('locks managed project identity and routes with the created workspace id', () => {
+    expect(viewSource).toContain(':managed-workspace="managedWorkspaceCreation"')
+    expect(viewSource).toContain('Boolean(queryString(route.query.projectRoot))')
+    expect(viewSource).toContain('Boolean(queryString(route.query.workspacePath))')
+    expect(viewSource).toContain('workspaceId: basenamePath(workspacePath)')
+    expect(viewSource).not.toContain(
+      'queryString(route.query.workspaceId) || basenamePath(workspacePath)',
+    )
+
+    expect(wizardSource).toContain(':readonly="managedWorkspace"')
+    expect(wizardSource).toContain(':disabled="managedWorkspace"')
+    expect(wizardSource).toContain('if (props.managedWorkspace) return')
+  })
 })

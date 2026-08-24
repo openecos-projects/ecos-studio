@@ -450,6 +450,46 @@ describe('project management V3 model', () => {
     expect(createSelectionState(model).selectedStep).toBe('sim')
   })
 
+  it('keeps frontend descendants adjacent to their parent workspace', () => {
+    const firstRoot = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/cpu',
+        name: 'cpu',
+        designName: 'cpu',
+        projectType: 'frontend',
+        now: '2026-08-20T00:00:00.000Z',
+      }),
+      {
+        projectRoot: '/projects/cpu',
+        workspacePath: '/projects/cpu/ws_0001',
+        now: '2026-08-20T00:00:00.000Z',
+      },
+    )
+    const secondRoot = registerWorkspaceInManifest(firstRoot, {
+      projectRoot: '/projects/cpu',
+      workspacePath: '/projects/cpu/ws_0002',
+      now: '2026-08-20T00:01:00.000Z',
+    })
+    const manifest = registerWorkspaceInManifest(secondRoot, {
+      projectRoot: '/projects/cpu',
+      workspacePath: '/projects/cpu/ws_0003',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'review',
+      now: '2026-08-20T00:02:00.000Z',
+    })
+
+    const model = buildProjectManagementProject(
+      { ...project, projectType: 'frontend' },
+      manifest,
+    )
+
+    expect(model.workspaces.map((workspace) => [workspace.id, workspace.depth])).toEqual([
+      ['ws_0001', 0],
+      ['ws_0003', 1],
+      ['ws_0002', 0],
+    ])
+  })
+
   it('derives dashboard keys and step-specific Step Analysis metrics from schema v3 ids', () => {
     const manifest = manifestWithWorkspace()
     const model = buildProjectManagementProject(

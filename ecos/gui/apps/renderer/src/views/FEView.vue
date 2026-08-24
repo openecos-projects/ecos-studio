@@ -188,6 +188,7 @@
       v-if="showWizard"
       :creating="wizardCreating"
       :initial-config="initialWizardConfig"
+      :managed-workspace="managedWorkspaceCreation"
       @close="closeWizard"
       @create="handleWizardCreate"
     />
@@ -218,6 +219,12 @@ const showWizard = ref(false)
 const wizardCreating = ref(false)
 const showAllProjects = ref(false)
 const initialWizardConfig = ref<Partial<WorkspaceConfig> | undefined>(undefined)
+const managedWorkspaceCreation = computed(
+  () =>
+    Boolean(initialWizardConfig.value) &&
+    Boolean(queryString(route.query.projectRoot)) &&
+    Boolean(queryString(route.query.workspacePath)),
+)
 
 const frontendProjects = computed(() => {
   return recentProjects.value.filter((project) => project.designTool === 'frontend')
@@ -314,7 +321,7 @@ function workspaceRouteQuery(workspacePath: string) {
   return {
     projectRoot,
     projectName: queryString(route.query.projectName),
-    workspaceId: queryString(route.query.workspaceId) || basenamePath(workspacePath),
+    workspaceId: basenamePath(workspacePath),
   }
 }
 

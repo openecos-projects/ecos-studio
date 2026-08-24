@@ -47,6 +47,8 @@ export function buildFrontendProjectManagementProject(
       workspaceName: workspace.name,
       workspacePath: workspace.workspacePath,
       status: workspace.status,
+      startStage: workspace.startStep as ProjectManifestFrontendFlowStep,
+      endStage: workspace.endStep as ProjectManifestFrontendFlowStep,
       steps: workspace.steps.map((step) => ({
         stage: step.step as ProjectManifestFrontendFlowStep,
         status: step.status,
@@ -233,23 +235,43 @@ function sortWorkspacesByLineage(
   workspaces: ProjectManifestWorkspace[],
 ): Array<{ workspace: ProjectManifestWorkspace; depth: number }> {
   const byId = new Map(workspaces.map((workspace) => [workspace.workspace_id, workspace]))
-  const depthFor = (
-    workspace: ProjectManifestWorkspace,
-    visited = new Set<string>(),
-  ): number => {
+  const childrenBySource = new Map<string, ProjectManifestWorkspace[]>()
+  const roots: ProjectManifestWorkspace[] = []
+
+  for (const workspace of workspaces) {
     const sourceId =
       workspace.branch_from?.source_workspace_id ?? workspace.source_workspace_id
-    if (!sourceId || visited.has(sourceId)) return 0
-    const source = byId.get(sourceId)
-    if (!source) return 0
-    visited.add(sourceId)
-    return depthFor(source, visited) + 1
+    if (sourceId && byId.has(sourceId)) {
+      const children = childrenBySource.get(sourceId) ?? []
+      children.push(workspace)
+      childrenBySource.set(sourceId, children)
+    } else {
+      roots.push(workspace)
+    }
   }
-  return [...workspaces]
-    .sort(
-      (left, right) =>
-        new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
-        left.workspace_id.localeCompare(right.workspace_id),
-    )
-    .map((workspace) => ({ workspace, depth: depthFor(workspace) }))
+
+  const sortByCreatedAt = (
+    left: ProjectManifestWorkspace,
+    right: ProjectManifestWorkspace,
+  ) =>
+    new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
+    left.workspace_id.localeCompare(right.workspace_id)
+
+  roots.sort(sortByCreatedAt)
+  for (const children of childrenBySource.values()) children.sort(sortByCreatedAt)
+
+  const visited = new Set<string>()
+  const sorted: Array<{ workspace: ProjectManifestWorkspace; depth: number }> = []
+  const visit = (workspace: ProjectManifestWorkspace, depth: number) => {
+    if (visited.has(workspace.workspace_id)) return
+    visited.add(workspace.workspace_id)
+    sorted.push({ workspace, depth })
+    for (const child of childrenBySource.get(workspace.workspace_id) ?? []) {
+      visit(child, depth + 1)
+    }
+  }
+
+  for (const root of roots) visit(root, 0)
+  for (const workspace of [...workspaces].sort(sortByCreatedAt)) visit(workspace, 0)
+  return sorted
 }

@@ -116,4 +116,99 @@ describe('buildFrontendProjectAnalysis', () => {
       'Simulation',
     ])
   })
+
+  it('uses the emitted Prepare contract schema and excludes non-CPU review issues', () => {
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_0001',
+        workspaceName: 'cpu',
+        workspacePath: '/projects/cpu/ws_0001',
+        status: 'success',
+        steps: [
+          { stage: 'prepare', status: 'success' },
+          { stage: 'review', status: 'success' },
+        ],
+        detailTexts: {
+          prepare: JSON.stringify({
+            summary: {
+              contracts: [
+                { label: 'CPU Filelist', status: 'OK', detail: '8 RTL files' },
+                {
+                  label: 'Test Suite',
+                  status: 'Warning',
+                  detail: 'Default smoke suite',
+                },
+                { label: 'SoC Harness', status: 'Missing', detail: 'No harness found' },
+              ],
+            },
+          }),
+          review: JSON.stringify({
+            review: {
+              issues: [
+                {
+                  title: 'CPU reset risk',
+                  detail: 'Inspect the reset path.',
+                  severity: 'warning',
+                  ownership: 'cpu',
+                },
+                {
+                  title: 'Yosys frontend limitation',
+                  detail: 'The tool could not parse this construct.',
+                  severity: 'warning',
+                  ownership: 'tool',
+                },
+              ],
+            },
+          }),
+        },
+      },
+    ])
+
+    expect(analysis.findings).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        title: 'Test Suite needs attention',
+        detail: 'Default smoke suite',
+      }),
+      expect.objectContaining({
+        severity: 'error',
+        title: 'SoC Harness contract failed',
+        detail: 'No harness found',
+      }),
+      expect.objectContaining({ title: 'CPU reset risk' }),
+    ])
+  })
+
+  it('counts only configured and reused stages in partial flow progress', () => {
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_0002',
+        workspaceName: 'cpu branch',
+        workspacePath: '/projects/cpu/ws_0002',
+        status: 'success',
+        startStage: 'review',
+        endStage: 'lint',
+        steps: [
+          { stage: 'prepare', status: 'reused' },
+          { stage: 'review', status: 'success' },
+          { stage: 'elab', status: 'success' },
+          { stage: 'lint', status: 'success' },
+          { stage: 'sim', status: 'skipped' },
+        ],
+      },
+    ])
+
+    expect(analysis).toMatchObject({
+      completeWorkspaceCount: 1,
+      completedSteps: 4,
+      totalSteps: 4,
+      progressPercent: 100,
+    })
+    expect(analysis.workspaces[0]?.steps.map((step) => step.stage)).toEqual([
+      'prepare',
+      'review',
+      'elab',
+      'lint',
+    ])
+  })
 })

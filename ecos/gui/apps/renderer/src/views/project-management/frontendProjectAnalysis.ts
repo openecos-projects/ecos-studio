@@ -82,6 +82,8 @@ export interface FrontendWorkspaceAnalysisSource {
   workspaceName: string
   workspacePath: string
   status: string
+  startStage?: FrontendAnalysisStage
+  endStage?: FrontendAnalysisStage
   steps: ReadonlyArray<{
     stage: FrontendAnalysisStage
     status: FrontendAnalysisStepStatus
@@ -98,6 +100,8 @@ const FRONTEND_STAGE_LABELS: Record<FrontendAnalysisStage, string> = {
 }
 
 const COMPLETED_STATUSES = new Set<FrontendAnalysisStepStatus>(['success', 'reused'])
+const PREPARE_CONTRACT_SUCCESS_STATUSES = new Set(['ok', 'pass', 'success'])
+const PREPARE_CONTRACT_WARNING_STATUSES = new Set(['warning', 'stub', 'disabled'])
 
 export function buildFrontendProjectAnalysis(
   sources: readonly FrontendWorkspaceAnalysisSource[],
@@ -135,14 +139,18 @@ export function buildFrontendProjectAnalysis(
 function buildFrontendWorkspaceAnalysis(
   source: FrontendWorkspaceAnalysisSource,
 ): FrontendWorkspaceAnalysis {
-  const steps = source.steps.map(({ stage, status }) =>
-    buildFrontendStepAnalysis(
-      source.workspaceId,
-      stage,
-      status,
-      source.detailTexts?.[stage] ?? null,
-    ),
-  )
+  const steps = source.steps
+    .filter(({ stage, status }) =>
+      isConfiguredAnalysisStage(stage, status, source.startStage, source.endStage),
+    )
+    .map(({ stage, status }) =>
+      buildFrontendStepAnalysis(
+        source.workspaceId,
+        stage,
+        status,
+        source.detailTexts?.[stage] ?? null,
+      ),
+    )
   const completedSteps = steps.filter((step) =>
     COMPLETED_STATUSES.has(step.status),
   ).length
@@ -329,12 +337,19 @@ function stageFindings(
   if (stage === 'prepare') {
     return arrayAt(detail, ['summary', 'contracts']).flatMap((contract, index) => {
       const item = recordValue(contract)
-      if (!item || stringValue(item.status).toLowerCase() === 'pass') return []
+      if (!item) return []
+      const status = stringValue(item.status).toLowerCase()
+      if (PREPARE_CONTRACT_SUCCESS_STATUSES.has(status)) return []
+      const label = stringValue(item.label) || stringValue(item.id) || 'Input'
+      const isWarning = PREPARE_CONTRACT_WARNING_STATUSES.has(status)
       return [
         finding(workspaceId, stage, index, {
-          severity: 'error',
-          title: `${stringValue(item.id) || 'Input'} contract failed`,
-          detail: stringValue(item.reason) || 'The prepared input contract did not pass.',
+          severity: isWarning ? 'warning' : 'error',
+          title: `${label} ${isWarning ? 'needs attention' : 'contract failed'}`,
+          detail:
+            stringValue(item.detail) ||
+            stringValue(item.reason) ||
+            'The prepared input contract did not pass.',
         }),
       ]
     })
@@ -343,6 +358,8 @@ function stageFindings(
     return arrayAt(detail, ['review', 'issues']).flatMap((issue, index) => {
       const item = recordValue(issue)
       if (!item || item.waived === true) return []
+      const ownership = stringValue(item.ownership).toLowerCase()
+      if (ownership && ownership !== 'cpu') return []
       return [
         finding(workspaceId, stage, index, {
           severity: severityValue(item.severity),
@@ -399,6 +416,19 @@ function stageFindings(
   })
 }
 
+function isConfiguredAnalysisStage(
+  stage: FrontendAnalysisStage,
+  status: FrontendAnalysisStepStatus,
+  startStage?: FrontendAnalysisStage,
+  endStage?: FrontendAnalysisStage,
+): boolean {
+  if (!startStage || !endStage || status === 'reused') return true
+  const stageIndex = FRONTEND_STAGE_ORDER.indexOf(stage)
+  const startIndex = FRONTEND_STAGE_ORDER.indexOf(startStage)
+  const endIndex = FRONTEND_STAGE_ORDER.indexOf(endStage)
+  return stageIndex >= startIndex && stageIndex <= endIndex
+}
+
 function finding(
   workspaceId: string,
   stage: FrontendAnalysisStage,
@@ -431,6 +461,14 @@ function metric(
 }
 
 type JsonRecord = Record<string, unknown>
+
+const FRONTEND_STAGE_ORDER = [
+  'prepare',
+  'review',
+  'elab',
+  'lint',
+  'sim',
+] as const satisfies readonly FrontendAnalysisStage[]
 
 function parseRecord(text: string | null | undefined): JsonRecord | null {
   if (!text) return null

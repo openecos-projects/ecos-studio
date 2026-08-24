@@ -122,11 +122,13 @@
                       v-model="config.parameters.design"
                       type="text"
                       placeholder="e.g. ysyx_00000000_soc"
+                      :readonly="managedWorkspace"
                       :class="[
                         'w-full rounded-xl border bg-(--bg-secondary)/40 px-4 py-3.5 text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80 focus:outline-none',
                         designNameError
                           ? 'border-red-500 focus:border-red-500'
                           : 'border-(--border-color) focus:border-(--accent-color)',
+                        managedWorkspace ? 'cursor-default opacity-75' : '',
                       ]"
                     />
                     <p
@@ -177,16 +179,20 @@
                           readonly
                           placeholder="Choose a folder..."
                           :class="[
-                            'w-full cursor-pointer truncate rounded-xl border bg-(--bg-secondary)/40 py-3.5 pr-4 pl-10 text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80',
+                            'w-full truncate rounded-xl border bg-(--bg-secondary)/40 py-3.5 pr-4 pl-10 text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80',
                             directoryError
                               ? 'border-red-500 focus:border-red-500'
                               : 'border-(--border-color) focus:border-(--accent-color)',
+                            managedWorkspace
+                              ? 'cursor-default opacity-75'
+                              : 'cursor-pointer',
                           ]"
                           @click="selectLocation"
                         />
                       </div>
                       <button
-                        class="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-(--border-color) bg-(--bg-primary)/50 px-6 py-3.5 font-medium text-(--text-primary) shadow-sm transition-colors hover:border-(--text-secondary) hover:bg-(--bg-secondary)"
+                        class="flex shrink-0 items-center gap-2 rounded-xl border border-(--border-color) bg-(--bg-primary)/50 px-6 py-3.5 font-medium text-(--text-primary) shadow-sm transition-colors enabled:cursor-pointer enabled:hover:border-(--text-secondary) enabled:hover:bg-(--bg-secondary) disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="managedWorkspace"
                         @click="selectLocation"
                       >
                         Browse
@@ -886,10 +892,12 @@ interface Emits {
 interface Props {
   creating?: boolean
   initialConfig?: Partial<WorkspaceConfig>
+  managedWorkspace?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   creating: false,
+  managedWorkspace: false,
 })
 const emit = defineEmits<Emits>()
 
@@ -1469,6 +1477,7 @@ function compatibilityFor(
 }
 
 const selectLocation = async () => {
+  if (props.managedWorkspace) return
   const desktopApi = await waitForDesktopApi()
   const result = await desktopApi.dialog.pickDirectory({
     title: 'Select Project Save Location',
