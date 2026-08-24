@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Callable, Mapping
 
@@ -59,6 +60,7 @@ class OptimizationEpisodeRunner:
         ]
         | None = None,
         objective: RoutabilityObjectiveContract | None = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         self._controller = controller
         self._observation_supplier = observation_supplier
@@ -67,6 +69,7 @@ class OptimizationEpisodeRunner:
         self._terminal_waiter = terminal_waiter
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
+        self._stop_event = stop_event or threading.Event()
 
     @property
     def state(self) -> OptimizationEpisodeState:
@@ -94,6 +97,9 @@ class OptimizationEpisodeRunner:
         if callable(close):
             close()
 
+    def request_stop(self) -> None:
+        self._stop_event.set()
+
     def run_turn(self) -> OptimizationEpisodeTurn:
         if self._controller.state not in {
             OptimizationEpisodeState.CREATED,
@@ -108,6 +114,9 @@ class OptimizationEpisodeRunner:
         planning = self._controller.plan(observation, retrieval, self._current_values)
         if planning.state != OptimizationEpisodeState.AWAITING_EXECUTION:
             return OptimizationEpisodeTurn(observation, retrieval, planning, None)
+        if self._stop_event.is_set():
+            stopped = self._controller.stop_before_execution()
+            return OptimizationEpisodeTurn(observation, retrieval, planning, stopped)
         execution = self._controller.execute()
         if execution.state != OptimizationEpisodeState.EXECUTING:
             return OptimizationEpisodeTurn(observation, retrieval, planning, execution)

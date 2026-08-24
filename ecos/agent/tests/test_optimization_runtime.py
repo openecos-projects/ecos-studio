@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,11 +17,14 @@ from ecos_agent.optimization_contracts import (
 )
 from ecos_agent.optimization_runtime import (
     OptimizationRuntimeError,
+    _wait_for_terminal_receipt,
     _optimization_objective,
     _parent_manifest_sha256,
     _place_to_harden_runtime_seconds,
     create_optimization_runner,
 )
+from ecos_agent.optimization_controller import CandidateExecutionReceipt
+from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_rules import freeze_optimization_objective
 
 
@@ -126,6 +130,66 @@ def test_runtime_requires_a_hash_bound_optimization_objective() -> None:
     objective["primary_metric"] = ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
     with pytest.raises(OptimizationRuntimeError, match="optimization objective is invalid"):
         _optimization_objective(objective)
+
+
+def test_terminal_waiter_propagates_stop_to_cancel_and_returns_terminal_receipt() -> None:
+    events: list[str] = []
+    stop = threading.Event()
+    stop.set()
+
+    class Executor:
+        def wait_for_terminal(self, *_args: object, **_kwargs: object):
+            events.append("wait")
+            return CandidateExecutionReceipt(execution_id="operation-1", started=True)
+
+        def cancel(self, execution_id: str):
+            events.extend(("operation.cancel", "terminal.receipt"))
+            return CandidateExecutionReceipt(
+                execution_id=execution_id,
+                started=True,
+                outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+            )
+
+    receipt = _wait_for_terminal_receipt(
+        Executor(),
+        "operation-1",
+        timeout_seconds=5.0,
+        stop_event=stop,
+    )
+
+    assert events == ["operation.cancel", "terminal.receipt"]
+    assert receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED
+
+
+def test_terminal_waiter_cancels_when_timeout_expires_between_clock_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    clock = iter((0.0, 0.05, 0.2))
+    monkeypatch.setattr("ecos_agent.optimization_runtime._monotonic", lambda: next(clock))
+
+    class Executor:
+        def wait_for_terminal(self, *_args: object, **_kwargs: object):
+            calls.append("wait")
+            raise AssertionError("expired timeout must not reach ECC wait")
+
+        def cancel(self, execution_id: str):
+            calls.append("cancel")
+            return CandidateExecutionReceipt(
+                execution_id=execution_id,
+                started=True,
+                outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+            )
+
+    receipt = _wait_for_terminal_receipt(
+        Executor(),
+        "operation-1",
+        timeout_seconds=0.1,
+        stop_event=threading.Event(),
+    )
+
+    assert calls == ["cancel"]
+    assert receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED
 
 
 class _FakeRpc:

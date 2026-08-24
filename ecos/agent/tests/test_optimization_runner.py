@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -344,6 +346,50 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         OptimizationPlanningAudit(tmp_path / "episode").verify()
     runner.close()
     assert (controller.ledger.root / "optimization-ledger-manifest.v1.json").is_file()
+
+
+def test_runner_persists_stopped_when_stop_arrives_before_ecc_start(tmp_path: Path) -> None:
+    stop_event = threading.Event()
+
+    class StopAfterProposalPlanner(_FakePlanner):
+        def propose(self, context: OptimizationPlanningContext) -> object:
+            proposal = super().propose(context)
+            stop_event.set()
+            return proposal
+
+    class NoStartExecutor(_FakeExecutor):
+        def start(self, _request: object) -> CandidateExecutionReceipt:
+            raise AssertionError("stop before execution must not start ECC")
+
+    executor = NoStartExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-stop-before-start",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=StopAfterProposalPlanner(),
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        incumbent=_incumbent(),
+    )
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        stop_event=stop_event,
+    )
+
+    turn = runner.run_turn()
+
+    assert turn.execution is not None
+    assert turn.execution.state == OptimizationEpisodeState.STOPPED
+    assert controller.state == OptimizationEpisodeState.STOPPED
+    assert controller.ledger.replay().entries == ()
+    persisted = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert persisted["state"] == "stopped"
 
 
 def test_successful_execution_is_classified_by_qor_comparison(tmp_path: Path) -> None:

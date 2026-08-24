@@ -26,9 +26,11 @@ from ecos_agent.contracts import (
     StageRoutingProposal,
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     OptimizationObjectiveProposal,
     OptimizationProposal,
+    PlanningProviderEnvelope,
     PlanningProviderEvidence,
 )
 from ecos_agent.optimization_controller import (
@@ -89,6 +91,7 @@ class CodexAppServerProposalProvider:
         self._active_turn_id: str | None = None
         self._completed_turn: tuple[str, str, str] | None = None
         self._planning_evidence: PlanningProviderEvidence | None = None
+        self._planning_envelope: PlanningProviderEnvelope | None = None
         self._interrupted = False
         self._state_lock = threading.Lock()
 
@@ -274,20 +277,35 @@ class CodexAppServerProposalProvider:
         return client.request(method, {"threadId": self._ensure_thread(client), **params})
 
     def propose(self, context: OptimizationPlanningContext) -> dict[str, Any]:
+        payload = _optimization_planning_payload(context)
+        system = (
+            "Return one JSON object matching ecos.optimization_proposal.v1. "
+            "Choose only continue, propose, stop, or escalate. A propose decision may name exactly one "
+            "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
+            "workspaces, RPC methods, or execution instructions. Reference only the supplied observation, "
+            "history, and knowledge identifiers. Local validation selects values and owns execution."
+        )
+        output_schema = _optimization_proposal_output_schema()
+        envelope_payload = {
+            "schema_version": "ecos.optimization_planning_provider_envelope.v1",
+            "provider_id": "codex_app_server",
+            "requested_model": self._model,
+            "prompt": _build_prompt(system, payload),
+            "output_schema": output_schema,
+            "planner_payload_sha256": canonical_sha256(payload),
+        }
         with self._state_lock:
             self._completed_turn = None
             self._planning_evidence = None
+            self._planning_envelope = PlanningProviderEnvelope(
+                **envelope_payload,
+                envelope_sha256=canonical_sha256(envelope_payload),
+            )
         try:
             return self._proposal(
-                _optimization_planning_payload(context),
-                (
-                    "Return one JSON object matching ecos.optimization_proposal.v1. "
-                    "Choose only continue, propose, stop, or escalate. A propose decision may name exactly one "
-                    "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
-                    "workspaces, RPC methods, or execution instructions. Reference only the supplied observation, "
-                    "history, and knowledge identifiers. Local validation selects values and owns execution."
-                ),
-                _optimization_proposal_output_schema(),
+                payload,
+                system,
+                output_schema,
                 OptimizationProposal,
             )
         finally:
@@ -610,8 +628,14 @@ class CodexAppServerProposalProvider:
         with self._state_lock:
             completed_turn = self._completed_turn
             self._completed_turn = None
+            envelope = self._planning_envelope
+            self._planning_envelope = None
         if completed_turn is None:
             return
+        if envelope is None:
+            raise CodexProviderError(
+                "Codex planning envelope is missing", failure_class="tool_error"
+            )
         thread_id, turn_id, response_sha256 = completed_turn
         diagnostics_sha256 = _diagnostics_sha256(self.diagnostics_path)
         with self._state_lock:
@@ -621,6 +645,7 @@ class CodexAppServerProposalProvider:
                 turn_id=turn_id,
                 response_sha256=response_sha256,
                 diagnostics_sha256=diagnostics_sha256,
+                envelope=envelope,
             )
 
     def _ensure_client(self) -> _JsonLineRpcProcessClient:

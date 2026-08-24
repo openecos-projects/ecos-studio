@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -138,6 +139,7 @@ def create_optimization_runner(
         raise
 
     retrieval = OptimizationKnowledgeRetriever()
+    stop_event = threading.Event()
 
     def observation_supplier(current_budget: BudgetSnapshot):
         return build_stage_observation(workspace, checkpoint_id, budget=current_budget)
@@ -154,15 +156,12 @@ def create_optimization_runner(
 
     def terminal_waiter(execution_id: str):
         remaining = controller.budget.remaining_wall_time_seconds
-        if remaining <= 0:
-            return executor.cancel(execution_id)
-        receipt = executor.wait_for_terminal(
+        return _wait_for_terminal_receipt(
+            executor,
             execution_id,
             timeout_seconds=min(_terminal_timeout_seconds(), remaining),
+            stop_event=stop_event,
         )
-        if receipt.outcome is None:
-            return executor.cancel(execution_id)
-        return receipt
 
     def terminal_observation_supplier(_observation, receipt):
         if receipt.evidence is None:
@@ -177,7 +176,34 @@ def create_optimization_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
+        stop_event=stop_event,
     )
+
+
+def _wait_for_terminal_receipt(
+    executor: EccCandidateRerunAdapter,
+    execution_id: str,
+    *,
+    timeout_seconds: float,
+    stop_event: threading.Event,
+) -> CandidateExecutionReceipt:
+    deadline = _monotonic() + max(0.0, timeout_seconds)
+    while not stop_event.is_set() and _monotonic() < deadline:
+        remaining = deadline - _monotonic()
+        if remaining <= 0:
+            break
+        try:
+            receipt = executor.wait_for_terminal(
+                execution_id, timeout_seconds=min(1.0, remaining)
+            )
+        except Exception:
+            if stop_event.is_set():
+                return executor.cancel(execution_id)
+            raise
+        if receipt.outcome is not None:
+            return receipt
+        stop_event.wait(min(0.05, max(0.0, deadline - _monotonic())))
+    return executor.cancel(execution_id)
 
 
 def _optimization_objective(value: object) -> OptimizationObjectiveContract:

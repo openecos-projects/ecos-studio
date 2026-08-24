@@ -6,6 +6,7 @@ from typing import Callable
 
 import pytest
 
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
@@ -17,6 +18,7 @@ from ecos_agent.optimization_contracts import (
     OptimizationEpisodeState,
     OptimizationObjectiveContract,
     OptimizationObjectiveProposal,
+    PlanningProviderEnvelope,
     PlanningProviderEvidence,
     ProposalReason,
     StageObservation,
@@ -27,6 +29,7 @@ from ecos_agent.optimization_controller import (
     OptimizationAgentMode,
     OptimizationEpisodeController,
     OptimizationEpisodeControllerError,
+    planning_context_payload,
 )
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
@@ -81,12 +84,25 @@ class _FakeCodex:
 
 class _AuditedFakeCodex(_FakeCodex):
     def consume_planning_evidence(self) -> PlanningProviderEvidence | None:
+        payload = {
+            "schema_version": "ecos.optimization_planning_provider_envelope.v1",
+            "provider_id": "codex_app_server",
+            "requested_model": "test-model",
+            "prompt": "bounded test prompt",
+            "output_schema": {"type": "object"},
+            "planner_payload_sha256": canonical_sha256(
+                planning_context_payload(self.contexts[-1])
+            ),
+        }
         return PlanningProviderEvidence(
             provider_id="codex_app_server",
             thread_id="thread-1",
             turn_id=f"turn-{len(self.contexts)}",
             response_sha256=HASH,
             diagnostics_sha256=HASH,
+            envelope=PlanningProviderEnvelope(
+                **payload, envelope_sha256=canonical_sha256(payload)
+            ),
         )
 
 

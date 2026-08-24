@@ -517,6 +517,17 @@ class OptimizationEpisodeController:
             return self._complete(receipt.outcome, receipt)
         return self._quarantine_indeterminate()
 
+    def stop_before_execution(self) -> OptimizationControlResult:
+        if self._state != OptimizationEpisodeState.AWAITING_EXECUTION:
+            raise OptimizationEpisodeControllerError(
+                "episode has no unstarted execution to stop"
+            )
+        self._proposal = None
+        self._requested = None
+        self._state = OptimizationEpisodeState.STOPPED
+        self._persist()
+        return self._result("stop_requested_before_execution")
+
     def complete_terminal(
         self,
         receipt: CandidateExecutionReceipt,
@@ -913,6 +924,10 @@ class OptimizationEpisodeController:
             parsed = PlanningProviderEvidence.model_validate(evidence)
         except (TypeError, ValidationError, ValueError) as exc:
             raise OptimizationEpisodeControllerError("planner evidence is invalid") from exc
+        if parsed.envelope.planner_payload_sha256 != planning_entry.planner_payload_sha256:
+            raise OptimizationEpisodeControllerError(
+                "planner evidence does not match the planning payload"
+            )
         self._planning_provider_audit.append(
             planning_entry_sha256=planning_entry.entry_sha256,
             evidence=parsed,

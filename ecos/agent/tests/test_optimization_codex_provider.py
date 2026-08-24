@@ -7,8 +7,10 @@ import pytest
 from ecos_agent.codex_provider import (
     CodexAppServerProposalProvider,
     CodexProviderError,
+    _build_prompt,
     create_required_codex_provider,
 )
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     ExpectedEffectDirection,
     HistoryReference,
@@ -167,8 +169,10 @@ def test_optimization_planner_exposes_one_consumable_turn_evidence(
 ) -> None:
     provider = _provider(tmp_path)
     context = _context()
+    captured: dict[str, object] = {}
 
-    def request(**_kwargs: object) -> dict[str, object]:
+    def request(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
         provider._completed_turn = ("thread-1", "turn-1", HASH)
         return _proposal(context)
 
@@ -183,6 +187,15 @@ def test_optimization_planner_exposes_one_consumable_turn_evidence(
     assert evidence.turn_id == "turn-1"
     assert evidence.response_sha256 == HASH
     assert evidence.diagnostics_sha256 is None
+    assert evidence.envelope.requested_model is None
+    assert evidence.envelope.prompt == _build_prompt(
+        captured["system"], captured["user"]
+    )
+    assert evidence.envelope.output_schema == captured["output_schema"]
+    assert evidence.envelope.planner_payload_sha256 == canonical_sha256(captured["user"])
+    assert evidence.envelope.envelope_sha256 == canonical_sha256(
+        evidence.envelope.model_dump(mode="json", exclude={"envelope_sha256"})
+    )
     assert provider.consume_planning_evidence() is None
 
 

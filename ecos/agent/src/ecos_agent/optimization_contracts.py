@@ -216,17 +216,62 @@ class LegalAction(_ContractModel):
         return self
 
 
-class PlanningProviderEvidence(_ContractModel):
-    """Opaque proof that a Codex planner turn produced one response."""
+class PlanningProviderEnvelope(_ContractModel):
+    """Exact model-visible request, excluding hidden reasoning and response text."""
 
-    schema_version: Literal["ecos.optimization_planning_provider_evidence.v1"] = (
-        "ecos.optimization_planning_provider_evidence.v1"
+    schema_version: Literal["ecos.optimization_planning_provider_envelope.v1"] = (
+        "ecos.optimization_planning_provider_envelope.v1"
+    )
+    provider_id: Literal["codex_app_server"]
+    requested_model: str | None = None
+    prompt: str
+    output_schema: dict[str, object]
+    planner_payload_sha256: str
+    envelope_sha256: str
+
+    @field_validator("requested_model")
+    @classmethod
+    def validate_model(cls, value: str | None) -> str | None:
+        if value is not None and (not value or len(value) > 512):
+            raise ValueError("planning provider model is invalid")
+        return value
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        if not value or len(value.encode("utf-8")) > 1024 * 1024:
+            raise ValueError("planning provider prompt is invalid")
+        return value
+
+    @field_validator("planner_payload_sha256", "envelope_sha256")
+    @classmethod
+    def validate_envelope_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("planning provider envelope hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> "PlanningProviderEnvelope":
+        expected = canonical_sha256(
+            self.model_dump(mode="json", exclude={"envelope_sha256"})
+        )
+        if self.envelope_sha256 != expected:
+            raise ValueError("planning provider envelope hash does not match")
+        return self
+
+
+class PlanningProviderEvidence(_ContractModel):
+    """Hash-bound proof that one exact planner request produced a response."""
+
+    schema_version: Literal["ecos.optimization_planning_provider_evidence.v2"] = (
+        "ecos.optimization_planning_provider_evidence.v2"
     )
     provider_id: Literal["codex_app_server"]
     thread_id: str
     turn_id: str
     response_sha256: str
     diagnostics_sha256: str | None = None
+    envelope: PlanningProviderEnvelope
 
     @field_validator("thread_id", "turn_id")
     @classmethod
