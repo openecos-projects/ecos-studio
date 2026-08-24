@@ -125,7 +125,9 @@ def _proposal(**overrides: object) -> dict[str, object]:
 def test_budget_is_frozen_from_one_reference_rerun() -> None:
     budget = _budget()
 
+    assert budget.schema_version == "ecos.optimization_budget.v4"
     assert budget.candidate_execution_limit == 6
+    assert budget.minimum_candidate_executions == budget.candidate_execution_limit
     assert budget.planning_call_limit == 18
     assert budget.reference_place_to_harden_seconds == 11.0
     assert budget.wall_time_limit_seconds == 88.0

@@ -552,10 +552,10 @@ class KnobApplicationReceipt(_ContractModel):
 
 
 class EpisodeBudget(_ContractModel):
-    schema_version: Literal["ecos.optimization_budget.v3"] = "ecos.optimization_budget.v3"
+    schema_version: Literal["ecos.optimization_budget.v4"] = "ecos.optimization_budget.v4"
     candidate_execution_limit: Literal[6] = 6
     planning_call_limit: Literal[18] = 18
-    minimum_candidate_executions: Literal[2] = 2
+    minimum_candidate_executions: Literal[6] = 6
     max_planning_only_turns: Literal[2] = 2
     reference_place_to_harden_seconds: float
     wall_time_limit_seconds: float

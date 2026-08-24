@@ -558,7 +558,7 @@ def test_controller_uses_local_fallback_after_codex_parse_error(tmp_path: Path) 
     assert second.rejection_reason == "controlled_coordinate_fallback"
 
 
-def test_stop_is_accepted_after_minimum_candidate_executions(tmp_path: Path) -> None:
+def test_stop_is_deferred_until_fixed_candidate_budget_is_exhausted(tmp_path: Path) -> None:
     def stop(context: object) -> dict[str, object]:
         proposal = _proposal(context)
         proposal.update(
@@ -578,7 +578,8 @@ def test_stop_is_accepted_after_minimum_candidate_executions(tmp_path: Path) -> 
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
-    assert result.state == OptimizationEpisodeState.STOPPED
+    assert result.state == OptimizationEpisodeState.PLANNING
+    assert result.rejection_reason == "minimum_candidates_not_met"
 
 
 def test_planning_decisions_are_hash_bound_and_replayable(tmp_path: Path) -> None:
