@@ -1984,7 +1984,7 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     _send(provider, session_id, "1")
     assert provider.sessions[session_id].phase == "workspace_project_root"
     known = _last_event(events, "interaction")["interaction"]
-    assert known["fields"][0]["defaultValue"] == str(project_root)
+    assert known["options"][0]["label"] == f"projects — {project_root}"
 
     _send(provider, session_id, str(project_root))
     assert provider.sessions[session_id].phase == "workspace_name"
@@ -2011,6 +2011,67 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     _send(provider, session_id, "4")
     assert provider.sessions[session_id].phase == "workspace_rtl"
     assert provider.sessions[session_id].workspace_setup.flow_end == "place"
+
+
+def test_existing_project_branch_keeps_all_known_projects_selectable(tmp_path: Path) -> None:
+    projects = []
+    for name in ("alpha", "beta"):
+        project = tmp_path / name
+        project.mkdir()
+        (project / "project.json").write_text("{}", encoding="utf-8")
+        projects.append({"name": name, "path": str(project)})
+
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"mode": "home", "knownProjects": projects}
+    )["sessionId"]
+
+    _send(provider, session_id, "1")
+    _send(provider, session_id, "1")
+
+    interaction = _last_event(events, "interaction")["interaction"]
+    assert interaction["kind"] == "choice"
+    assert [option["label"] for option in interaction["options"]] == [
+        f"alpha — {projects[0]['path']}",
+        f"beta — {projects[1]['path']}",
+    ]
+
+
+def test_invalid_form_answer_keeps_the_same_request_available(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "project.json").write_text("{}", encoding="utf-8")
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"mode": "home", "knownProjects": [{"name": "project", "path": str(project)}]}
+    )["sessionId"]
+
+    _send(provider, session_id, "1")
+    _send(provider, session_id, "1")
+    _send(provider, session_id, str(project))
+    session = provider.sessions[session_id]
+    session.phase = "workspace_rtl"
+    session.path_recommendations["rtl"] = str(tmp_path / "missing.v")
+    provider._emit_phase_choice(session)
+    request = session.pending_interaction["request"]
+    assert request["kind"] == "form"
+
+    with pytest.raises(ValueError, match="Form field 'value' is invalid"):
+        provider.answer_interaction(
+            {
+                "sessionId": session_id,
+                "requestId": request["requestId"],
+                "kind": "form",
+                "values": {"value": str(tmp_path / "missing")},
+            }
+        )
+
+    pending = provider.sessions[session_id].pending_interaction
+    assert pending is not None
+    assert pending["request"]["requestId"] == request["requestId"]
+    assert request["requestId"] not in provider.sessions[session_id].interaction_history
 
 
 def test_design_name_uses_local_file_candidates_without_codex(tmp_path: Path, monkeypatch) -> None:

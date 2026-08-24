@@ -454,7 +454,8 @@ const contractPanelBind = computed(() => ({
   workspaceSignoffAnchorTurnId: activeUi.value.workspaceSignoffAnchorTurnId,
   workspaceSignoffExecutionState: workspaceSignoffExecutionState.value,
   workspaceSignoffOutputPath: workspaceSignoffOutputPath.value,
-  workspaceSignoffTitle: 'Signoff package export',
+  workspaceSignoffTitle:
+    activeUi.value.lastContractSurface === 'signoff' ? 'Signoff package export' : '',
   workspaceSetupAnsweredOptionId: workspaceSetupAnsweredOptionId.value,
   workspaceSetupAnchorTurnId: activeUi.value.workspaceSetupAnchorTurnId,
   workspaceSetupContract: workspaceSetupContract.value,

@@ -56,6 +56,7 @@
           :type="field.kind === 'number' ? 'number' : 'text'"
           :min="field.kind === 'number' ? field.min : undefined"
           :max="field.kind === 'number' ? field.max : undefined"
+          :step="field.kind === 'number' ? 'any' : undefined"
           :required="field.required"
         />
       </label>

@@ -360,6 +360,73 @@ describe('AgentProviderProcessRuntime', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
+  it('preserves select defaults and required state in interaction forms', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    const child = harness.children[0]
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          interaction: {
+            interaction: {
+              fields: [
+                {
+                  defaultValue: 'project-b',
+                  id: 'project',
+                  kind: 'select',
+                  label: 'Project',
+                  options: [
+                    { id: 'project-a', label: 'Project A' },
+                    { id: 'project-b', label: 'Project B' },
+                  ],
+                  required: true,
+                },
+              ],
+              kind: 'form',
+            },
+            kind: 'form',
+            purpose: 'execution',
+            requestId: 'form-1',
+            schema_version: 'flow-agent.interaction_request.v1',
+            status: 'pending',
+            title: 'Choose a project',
+          },
+          type: 'interaction',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: expect.objectContaining({
+          interaction: expect.objectContaining({
+            fields: [
+              expect.objectContaining({
+                defaultValue: 'project-b',
+                required: true,
+              }),
+            ],
+          }),
+        }),
+      }),
+    )
+  })
+
   it('forwards execution contracts with every resolved parameter field', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

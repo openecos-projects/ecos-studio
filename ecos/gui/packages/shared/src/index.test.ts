@@ -70,6 +70,7 @@ describe('shared public contracts', () => {
       purpose: 'execution',
       kind: 'choice',
       title: 'Choose an operation',
+      status: 'pending',
       interaction: {
         kind: 'choice',
         options: [{ id: 'option-1', label: 'Run flow' }],

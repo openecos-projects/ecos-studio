@@ -709,7 +709,11 @@ function readInteractionField(value: unknown): DesktopAgentInteractionField | nu
       id,
       kind: fieldKind,
       label,
+      ...(typeof field.defaultValue === 'string'
+        ? { defaultValue: field.defaultValue }
+        : {}),
       options: options as { id: string; label: string }[],
+      ...(typeof field.required === 'boolean' ? { required: field.required } : {}),
     }
   }
   const common = {

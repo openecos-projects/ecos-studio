@@ -164,6 +164,13 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("canExportSignoffPackage(flow) ? 'Harden'")
   })
 
+  it('does not bind the signoff panel before a signoff event', () => {
+    expect(source).not.toContain("workspaceSignoffTitle: 'Signoff package export'")
+    expect(source).toContain(
+      "activeUi.value.lastContractSurface === 'signoff' ? 'Signoff package export' : ''",
+    )
+  })
+
   it('applies parameter updates from the contract instead of a local knob table', () => {
     // A second mapping here silently dropped every knob it did not know about.
     expect(source).not.toContain('applyParameterPatchToParametersJson')

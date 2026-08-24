@@ -344,6 +344,7 @@ class _Session:
     optimization_primary_metric: str | None = None
     codex_provider: CodexAppServerProposalProvider | None = None
     pending_interaction: dict[str, Any] | None = None
+    interaction_retry: dict[str, Any] | None = None
     interaction_history: dict[str, str] = field(default_factory=dict)
 
 
@@ -542,6 +543,16 @@ class EcosAgentProvider:
                     raise ValueError(f"Form field '{field['id']}' has an invalid option.")
                 if field["kind"] in {"text", "path"} and value is not None and not isinstance(value, str):
                     raise ValueError(f"Form field '{field['id']}' must be text.")
+                if session.phase == "workspace_rtl" and field["kind"] == "path":
+                    try:
+                        normalize_path(
+                            value,
+                            label="RTL path",
+                            suffixes=(".v", ".sv"),
+                            require_file=True,
+                        )
+                    except ValueError as exc:
+                        raise ValueError(f"Form field '{field['id']}' is invalid: {exc}") from exc
             if len(values) != 1:
                 raise ValueError("This execution phase accepts one form field at a time.")
             message = str(next(iter(values.values()), "") or "")
@@ -554,11 +565,7 @@ class EcosAgentProvider:
                 raise ValueError("Interaction option is not available.")
 
         session.pending_interaction = None
-        session.interaction_history[pending["request"]["requestId"]] = (
-            "cancelled"
-            if pending["request"]["kind"] == "confirm" and str(message) == "2"
-            else "answered"
-        )
+        session.interaction_retry = pending
         continuation = pending.get("continuation")
         if pending["request"]["purpose"] == "clarification":
             if not isinstance(continuation, str) or not continuation:
@@ -571,16 +578,31 @@ class EcosAgentProvider:
             )
         else:
             handler = None
+        def run_answer() -> None:
+            try:
+                self._run_turn(session, str(message), handler)
+            except Exception:
+                if session.interaction_retry is pending:
+                    session.pending_interaction = pending
+                    session.interaction_retry = None
+                raise
+            if session.pending_interaction is pending:
+                session.interaction_retry = None
+                return
+            if session.interaction_retry is pending:
+                session.interaction_history[pending["request"]["requestId"]] = (
+                    "cancelled"
+                    if pending["request"]["kind"] == "confirm" and str(message) == "2"
+                    else "answered"
+                )
+                session.interaction_retry = None
+
         if defer:
             session.running = True
-            thread = threading.Thread(
-                target=self._run_turn,
-                args=(session, str(message), handler),
-                daemon=True,
-            )
+            thread = threading.Thread(target=run_answer, daemon=True)
             thread.start()
         else:
-            self._run_turn(session, str(message), handler)
+            run_answer()
         return {
             "accepted": True,
             "requestId": pending["request"]["requestId"],
@@ -2656,7 +2678,7 @@ class EcosAgentProvider:
                 invalid_value(session.language, label, "Unable to interpret a valid in-range value"),
             )
             self._emit(session, "message", number_prompt(session.language, label, current, lower, upper))
-            self._emit_phase_choice(session)
+            self._emit_retry_or_phase_choice(session)
             return None
 
     def _repeat_setup_default(self, session: _Session, label: str, error: str) -> None:
@@ -2667,12 +2689,22 @@ class EcosAgentProvider:
             "Clock Signal Name": session.workspace_setup.clock_name,
         }
         self._emit(session, "message", default_value_prompt(session.language, label, values[label]))
-        self._emit_phase_choice(session)
+        self._emit_retry_or_phase_choice(session)
 
     def _repeat_invalid(self, session: _Session, label: str, error: str, prompt) -> None:
         self._emit(session, "message", invalid_value(session.language, label, error))
         self._emit(session, "message", prompt(session.language))
-        self._emit_phase_choice(session)
+        self._emit_retry_or_phase_choice(session)
+
+    def _emit_retry_or_phase_choice(self, session: _Session) -> None:
+        pending = session.interaction_retry
+        if pending is None:
+            self._emit_phase_choice(session)
+            return
+        session.pending_interaction = pending
+        session.interaction_retry = None
+        request = pending["request"]
+        self._emit(session, "interaction", request["title"], interaction=request)
 
     def _apply_detected_defaults(self, session: _Session) -> None:
         defaults = infer_design_defaults(
@@ -3003,7 +3035,11 @@ class EcosAgentProvider:
                 "kind": "confirm",
             }
             kind = "confirm"
-        elif choice.get("allowFreeText") and session.phase not in {"home_ready", "operation"}:
+        elif choice.get("allowFreeText") and session.phase not in {
+            "home_ready",
+            "operation",
+            "workspace_project_root",
+        }:
             field_kind = "number" if session.phase in {
                 "workspace_frequency",
                 "workspace_max_fanout",
