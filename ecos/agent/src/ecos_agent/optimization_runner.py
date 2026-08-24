@@ -60,6 +60,7 @@ class OptimizationEpisodeRunner:
         ]
         | None = None,
         objective: RoutabilityObjectiveContract | None = None,
+        memory_writer: Callable[[], None] | None = None,
         stop_event: threading.Event | None = None,
     ) -> None:
         self._controller = controller
@@ -69,6 +70,7 @@ class OptimizationEpisodeRunner:
         self._terminal_waiter = terminal_waiter
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
+        self._memory_writer = memory_writer
         self._stop_event = stop_event or threading.Event()
 
     @property
@@ -119,6 +121,7 @@ class OptimizationEpisodeRunner:
             return OptimizationEpisodeTurn(observation, retrieval, planning, stopped)
         execution = self._controller.execute()
         if execution.state != OptimizationEpisodeState.EXECUTING:
+            self._write_memory()
             return OptimizationEpisodeTurn(observation, retrieval, planning, execution)
         if self._terminal_waiter is None or self._controller.pending_execution_id is None:
             return self._indeterminate_turn(observation, retrieval, planning, execution)
@@ -150,6 +153,7 @@ class OptimizationEpisodeRunner:
             decisive_metric=comparison.decisive_metric if comparison else None,
         )
         self._promote(terminal_observation, comparison, receipt)
+        self._write_memory()
         return OptimizationEpisodeTurn(
             observation,
             retrieval,
@@ -227,4 +231,9 @@ class OptimizationEpisodeRunner:
             outcome=OptimizationOutcomeKind.INDETERMINATE,
         )
         completed = self._controller.complete_terminal(receipt)
+        self._write_memory()
         return OptimizationEpisodeTurn(observation, retrieval, planning, completed)
+
+    def _write_memory(self) -> None:
+        if self._controller.ledger.replay().terminal_outcomes and self._memory_writer:
+            self._memory_writer()

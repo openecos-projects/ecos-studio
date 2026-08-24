@@ -34,6 +34,7 @@ from ecos_agent.optimization_ledger import (
     OptimizationOutcomeKind,
     build_optimization_artifact_manifest,
 )
+from ecos_agent.optimization_memory import derive_episode_task_memory
 from ecos_agent.optimization_observations import (
     build_candidate_terminal_observation,
     build_stage_observation,
@@ -168,6 +169,14 @@ def create_optimization_runner(
             raise OptimizationRuntimeError("ECC terminal receipt has no candidate evidence")
         return build_candidate_terminal_observation(workspace, receipt.evidence)
 
+    def memory_writer() -> None:
+        derive_episode_task_memory(
+            ledger_root,
+            workspace_id=canonical_sha256({"workspace": str(workspace)}),
+            design_id=_design_id(context, workspace),
+            design_fingerprint_sha256=parent_manifest,
+        )
+
     return OptimizationEpisodeRunner(
         controller=controller,
         observation_supplier=observation_supplier,
@@ -176,6 +185,7 @@ def create_optimization_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
+        memory_writer=memory_writer,
         stop_event=stop_event,
     )
 
@@ -245,6 +255,14 @@ def _text(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise OptimizationRuntimeError(f"optimization {label} is missing")
     return value.strip()
+
+
+def _design_id(context: Mapping[str, Any], workspace: Path) -> str:
+    value = context.get("design_id")
+    text = workspace.name if value is None else _text(value, "design_id")
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", text):
+        return text
+    return canonical_sha256({"design": text})
 
 
 def _place_to_harden_runtime_seconds(workspace: Path) -> float:
