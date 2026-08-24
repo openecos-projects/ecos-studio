@@ -340,6 +340,13 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('pdkValidationMessage')
   })
 
+  it('deduplicates PDK cards and only lists missing files for invalid PDKs', () => {
+    expect(source).toContain('const seenPaths = new Set<string>()')
+    expect(source).toContain('normalizePath(pdk.path)')
+    expect(source).toContain('normalizePath(scanned.canonicalPath)')
+    expect(source).toContain('!pdk.valid && pdkMissingFiles(pdk).length > 0')
+  })
+
   it('rechecks project-pinned PDKs from their source path', () => {
     expect(source).toContain("if (pdk.source === 'project')")
     expect(source).toContain('scanPdkDirectory(pdk.path)')

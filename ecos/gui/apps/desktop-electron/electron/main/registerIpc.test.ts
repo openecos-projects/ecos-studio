@@ -875,6 +875,61 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.rpcPing).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects invalid backend PDKs before runtime workspace creation', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const error = new Error('PDK validation failed for ics55')
+    services.resourceManagerService.validatePdkRootForWorkspace.mockRejectedValue(error)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
+        designTool: 'backend',
+        payload: {
+          directory: '/tmp/workspace',
+          pdk: 'ics55',
+          pdkRoot: '/tmp/pdk',
+        },
+      }),
+    ).resolves.toEqual({
+      error: { message: error.message, name: 'Error' },
+      ok: false,
+    })
+    expect(
+      services.resourceManagerService.validatePdkRootForWorkspace,
+    ).toHaveBeenCalledWith('/tmp/pdk')
+    expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('records a validated backend PDK after runtime workspace creation', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const payload = {
+      directory: '/tmp/workspace',
+      pdk: 'ics55',
+      pdkRoot: '/tmp/pdk',
+    }
+    const result = { directory: '/tmp/workspace', workspaceHandle: 'workspace-handle' }
+    services.resourceManagerService.validatePdkRootForWorkspace.mockResolvedValue(
+      undefined,
+    )
+    services.eccRuntimeService.createWorkspace.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
+        designTool: 'backend',
+        payload,
+      }),
+    ).resolves.toEqual(result)
+    expect(
+      services.resourceManagerService.validatePdkRootForWorkspace,
+    ).toHaveBeenCalledWith('/tmp/pdk')
+    expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith(payload)
+    expect(services.resourceManagerService.recordPdkReference).toHaveBeenCalledWith(
+      '/tmp/workspace',
+      '/tmp/pdk',
+    )
+  })
+
   it('waits for a runtime operation through the main-process tracker', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }

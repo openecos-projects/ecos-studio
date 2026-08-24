@@ -1728,12 +1728,27 @@ export function registerIpc(
   handle(desktopApiIpcChannels.designRuntimeWorkspaceCreate, async (event, request) => {
     const runtimeRequest = request as DesignRuntimeWorkspaceCreateRequest
     const designTool = requireDesignTool(runtimeRequest.designTool)
+    const backendRequest =
+      designTool === 'backend'
+        ? (runtimeRequest.payload as unknown as EccWorkspaceCreateRequest)
+        : null
+    if (backendRequest) {
+      await services.resourceManagerService.validatePdkRootForWorkspace(
+        backendRequest.pdkRoot ?? '',
+      )
+    }
     const result =
       designTool === 'frontend'
         ? await services.frontendRpcRuntimeService.createWorkspace(runtimeRequest.payload)
         : await services.eccRuntimeService.createWorkspace(
             runtimeRequest.payload as unknown as EccWorkspaceCreateRequest,
           )
+    if (backendRequest) {
+      await services.resourceManagerService.recordPdkReference(
+        backendRequest.directory,
+        backendRequest.pdkRoot ?? '',
+      )
+    }
     const workspaceHandle = workspaceHandleFromResult(result)
     if (workspaceHandle) {
       trackWorkspaceHandle(

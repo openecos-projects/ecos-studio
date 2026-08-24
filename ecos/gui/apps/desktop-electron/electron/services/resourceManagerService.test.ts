@@ -5696,6 +5696,178 @@ describe('ResourceManagerService', () => {
     })
   })
 
+  it('deduplicates PDK records by real path without rescanning on listing', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const pdkRoot = join(root, 'local', 'ics55')
+    const pdkLink = join(root, 'local', 'ics55-link')
+    await mkdir(join(pdkRoot, 'IP'), { recursive: true })
+    await mkdir(join(pdkRoot, 'prtech'), { recursive: true })
+    await symlink(pdkRoot, pdkLink)
+    await mkdir(dirs.resourcesDir, { recursive: true })
+
+    const entry = {
+      type: 'pdk',
+      id: 'ics55',
+      name: 'ics55',
+      pdk_id: 'ics55',
+      version: '',
+      sha256: '',
+      source: 'local',
+      source_url: '',
+      canonical_path: pdkLink,
+      path: pdkLink,
+      detected_files: [],
+      detected_file_groups: { directories: [], files: [] },
+      imported_at: '2026-08-21T00:00:00.000Z',
+      active: true,
+      managed: false,
+      health: 'ok',
+    }
+    await writeFile(
+      join(dirs.resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 3,
+        resources_dir: dirs.resourcesDir,
+        tools_dir: dirs.toolsDir,
+        pdks_dir: dirs.pdksDir,
+        installed: {
+          'pdk:ics55': entry,
+          'pdk:ics55:local:duplicate': {
+            ...entry,
+            canonical_path: pdkLink,
+            path: pdkLink,
+            active: false,
+            managed: true,
+          },
+        },
+        pdk_references: [
+          {
+            project_path: '/tmp/project',
+            pdk_root: pdkRoot,
+            resource_id: 'pdk:ics55',
+          },
+        ],
+      }),
+      'utf8',
+    )
+
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ schema_version: 2, tools: [], pdks: [] })),
+      ),
+    })
+
+    const result = await service.listResources()
+    const pdks = result.resources.filter((resource) => resource.type === 'pdk')
+
+    expect(pdks).toHaveLength(1)
+    expect(pdks[0]).toMatchObject({
+      id: 'pdk:ics55:local:duplicate',
+      path: pdkRoot,
+      status: 'installed',
+    })
+    const manifest = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ) as {
+      installed: Record<string, { type?: string; canonical_path?: string; path?: string }>
+      pdk_references: Array<{ resource_id: string }>
+    }
+    expect(Object.keys(manifest.installed)).toEqual(['pdk:ics55:local:duplicate'])
+    expect(manifest.installed['pdk:ics55:local:duplicate']).toMatchObject({
+      canonical_path: pdkRoot,
+      path: pdkRoot,
+    })
+    expect(manifest.pdk_references[0]?.resource_id).toBe('pdk:ics55:local:duplicate')
+  })
+
+  it('serializes listing normalization with concurrent PDK imports', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const existingRoot = join(root, 'local', 'existing')
+    const existingLink = join(root, 'local', 'existing-link')
+    const importedRoot = join(root, 'local', 'imported')
+    await mkdir(join(existingRoot, 'IP'), { recursive: true })
+    await mkdir(join(existingRoot, 'prtech'), { recursive: true })
+    await symlink(existingRoot, existingLink)
+    await mkdir(join(importedRoot, 'IP'), { recursive: true })
+    await mkdir(join(importedRoot, 'prtech'), { recursive: true })
+    await mkdir(dirs.resourcesDir, { recursive: true })
+
+    await writeFile(
+      join(dirs.resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 3,
+        resources_dir: dirs.resourcesDir,
+        tools_dir: dirs.toolsDir,
+        pdks_dir: dirs.pdksDir,
+        mpcs_dir: join(root, 'data', 'mpcs'),
+        installed: {
+          'pdk:ics55:local:existing': {
+            type: 'pdk',
+            id: 'ics55',
+            name: 'ics55',
+            pdk_id: 'ics55',
+            version: '',
+            sha256: '',
+            source: 'local',
+            source_url: '',
+            canonical_path: existingLink,
+            path: existingLink,
+            detected_files: [],
+            detected_file_groups: { directories: [], files: [] },
+            imported_at: '2026-08-21T00:00:00.000Z',
+            active: true,
+            managed: false,
+            health: 'ok',
+          },
+        },
+        pdk_references: [],
+      }),
+      'utf8',
+    )
+
+    const firstWriteStarted = deferred<void>()
+    const releaseFirstWrite = deferred<void>()
+    let writeCount = 0
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ schema_version: 2, tools: [], pdks: [] })),
+      ),
+      manifestWriter: async (path, content) => {
+        writeCount += 1
+        if (writeCount === 1) {
+          firstWriteStarted.resolve()
+          await releaseFirstWrite.promise
+        }
+        await writeFile(path, content, 'utf8')
+      },
+    })
+
+    const listing = service.listResources()
+    await firstWriteStarted.promise
+    const importing = service.importPdkPath(importedRoot)
+    const importCompletedWhileListingWasBlocked = await Promise.race([
+      importing.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 25)),
+    ])
+
+    expect(importCompletedWhileListingWasBlocked).toBe(false)
+    releaseFirstWrite.resolve()
+    await Promise.all([listing, importing])
+
+    const manifest = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, { path?: string }> }
+    expect(Object.values(manifest.installed).map((entry) => entry.path)).toEqual(
+      expect.arrayContaining([existingRoot, importedRoot]),
+    )
+  })
+
   it('migrates a legacy managed PDK parent path to its installed version directory', async () => {
     const root = await createTempDir('ecos-resources-')
     const dirs = testResourceDirs(root)

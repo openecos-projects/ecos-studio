@@ -397,7 +397,7 @@ export class ResourceManagerService {
 
   async listResources(): Promise<ResourceList> {
     const state = await this.fetchRegistry()
-    const manifest = await this.readManifest()
+    const manifest = await this.readManifestForListing()
     const updateChecks = await this.readUpdateCheckCache()
     const installedTools = getInstalledTools(manifest)
     const installedPdks = getInstalledPdks(manifest)
@@ -2236,10 +2236,13 @@ export class ResourceManagerService {
         this.pdksDir,
         this.mpcsDir,
       )
+      let changed = false
       if (manifest.schema_version < 3) {
         await this.migratePdkManifest(manifest)
-        await this.writeManifestFile(manifest)
+        changed = true
       }
+      if (await deduplicatePdkEntries(manifest)) changed = true
+      if (changed) await this.writeManifestFile(manifest)
       return manifest
     } catch (error) {
       if (isFileNotFoundError(error)) return this.emptyManifest()
@@ -2248,6 +2251,14 @@ export class ResourceManagerService {
         { cause: error },
       )
     }
+  }
+
+  private async readManifestForListing(): Promise<ResourceManifest> {
+    let manifest!: ResourceManifest
+    await this.withManifestLock(async () => {
+      manifest = await this.readManifest()
+    })
+    return manifest
   }
 
   private async readRuntimeManifest(): Promise<ResourceManifest> {
@@ -2259,10 +2270,13 @@ export class ResourceManagerService {
         this.pdksDir,
         this.mpcsDir,
       )
+      let changed = false
       if (manifest.schema_version < 3) {
         await this.migratePdkManifest(manifest)
-        await this.writeManifest(manifest)
+        changed = true
       }
+      if (await deduplicatePdkEntries(manifest)) changed = true
+      if (changed) await this.writeManifest(manifest)
       return manifest
     } catch (error) {
       if (!isFileNotFoundError(error)) {
@@ -3498,6 +3512,64 @@ function getInstalledPdks(
   return entries
 }
 
+async function deduplicatePdkEntries(manifest: ResourceManifest): Promise<boolean> {
+  let changed = false
+  const groups = new Map<
+    string,
+    Array<{ resourceId: string; entry: PdkInventoryEntry }>
+  >()
+  for (const [resourceId, entry] of Object.entries(manifest.installed)) {
+    if (!isPdkEntry(entry)) continue
+    const path = entry.canonical_path || entry.path
+    if (!path) continue
+    const canonicalPath = await realpath(resolve(path)).catch(() => null)
+    const key = canonicalPath ?? resolve(path)
+    if (
+      canonicalPath &&
+      (entry.canonical_path !== canonicalPath || entry.path !== canonicalPath)
+    ) {
+      entry.canonical_path = canonicalPath
+      entry.path = canonicalPath
+      changed = true
+    }
+    const group = groups.get(key) ?? []
+    group.push({ resourceId, entry })
+    groups.set(key, group)
+  }
+
+  const replacements = new Map<string, string>()
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    const winner = group.reduce((best, candidate) =>
+      pdkEntryScore(candidate) > pdkEntryScore(best) ? candidate : best,
+    )
+    for (const candidate of group) {
+      if (candidate.resourceId === winner.resourceId) continue
+      delete manifest.installed[candidate.resourceId]
+      replacements.set(candidate.resourceId, winner.resourceId)
+    }
+  }
+
+  if (replacements.size === 0) return changed
+  manifest.pdk_references = manifest.pdk_references.map((reference) => ({
+    ...reference,
+    resource_id: replacements.get(reference.resource_id) ?? reference.resource_id,
+  }))
+  return true
+}
+
+function pdkEntryScore(candidate: {
+  resourceId: string
+  entry: PdkInventoryEntry
+}): number {
+  return (
+    (isPdkRegistryId(candidate.resourceId) ? 0 : 4) +
+    (candidate.entry.health === 'ok' ? 2 : 0) +
+    (candidate.entry.active ? 1 : 0) +
+    (candidate.entry.managed ? 1 : 0)
+  )
+}
+
 function getInstalledMpcs(manifest: ResourceManifest): Record<string, MpcInventoryEntry> {
   const entries: Record<string, MpcInventoryEntry> = {}
   for (const [resourceId, entry] of Object.entries(manifest.installed)) {
@@ -4108,11 +4180,25 @@ function isKnownPdk(pdkId: string): boolean {
 
 async function validatePdkEntry(entry: PdkInventoryEntry): Promise<string> {
   try {
-    const pathStats = await stat(entry.canonical_path)
-    if (!pathStats.isDirectory()) return 'invalid'
-    const scanned = await scanPdkDirectory(entry.canonical_path)
+    const root = entry.canonical_path || entry.path
+    const pathStats = await stat(root)
+    if (!pathStats.isDirectory()) {
+      entry.detected_files = []
+      entry.detected_file_groups = { directories: [], files: [] }
+      return 'invalid'
+    }
+    const scanned = await scanPdkDirectory(root)
+    entry.canonical_path = scanned.canonicalPath
+    entry.path = scanned.canonicalPath
+    entry.detected_files = [
+      ...scanned.detectedFiles.directories,
+      ...scanned.detectedFiles.files,
+    ]
+    entry.detected_file_groups = scanned.detectedFiles
     return await validateScannedPdk({ ...scanned, pdkId: entry.pdk_id })
   } catch {
+    entry.detected_files = []
+    entry.detected_file_groups = { directories: [], files: [] }
     return 'missing'
   }
 }

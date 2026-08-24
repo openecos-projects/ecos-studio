@@ -884,7 +884,7 @@
                           {{ pdkValidationMessage(pdk) }}
                         </span>
                         <ul
-                          v-if="pdkMissingFiles(pdk).length > 0"
+                          v-if="!pdk.valid && pdkMissingFiles(pdk).length > 0"
                           class="mt-1 list-disc pl-5 text-[11px] leading-5 text-red-500"
                         >
                           <li
@@ -2225,10 +2225,18 @@ const activePdkStep = computed(() =>
   pdkWizardSteps.find((item) => item.key === activePdkWizardStep.value),
 )
 const projectPinnedPdk = ref<import('../types').ImportedPdk | null>(null)
-const pdkOptions = computed(() => [
-  ...importedPdks.value,
-  ...(projectPinnedPdk.value ? [projectPinnedPdk.value] : []),
-])
+const pdkOptions = computed(() => {
+  const seenPaths = new Set<string>()
+  return [
+    ...importedPdks.value,
+    ...(projectPinnedPdk.value ? [projectPinnedPdk.value] : []),
+  ].filter((pdk) => {
+    const path = normalizePath(pdk.path)
+    if (!path || seenPaths.has(path)) return false
+    seenPaths.add(path)
+    return true
+  })
+})
 const selectedPdk = computed(() =>
   pdkOptions.value.find((pdk) => pdk.id === selectedPdkId.value),
 )
@@ -2812,8 +2820,9 @@ async function ensurePdksLoaded() {
   hasLoadedPdks.value = true
   await loadPdks(true)
   if (config.value.pdk || config.value.pdk_root) {
+    const configuredPdkRoot = normalizePath(config.value.pdk_root)
     const matchedPdk = config.value.pdk_root
-      ? importedPdks.value.find((pdk) => pdk.path === config.value.pdk_root)
+      ? importedPdks.value.find((pdk) => normalizePath(pdk.path) === configuredPdkRoot)
       : importedPdks.value.find(
           (pdk) => pdk.id === selectedPdkId.value || pdk.pdkId === config.value.pdk,
         )
@@ -2825,6 +2834,13 @@ async function ensurePdksLoaded() {
       const scanned = await getDesktopApi().workspace.scanPdkDirectory(
         config.value.pdk_root,
       )
+      const canonicalPdk = importedPdks.value.find(
+        (pdk) => normalizePath(pdk.path) === normalizePath(scanned.canonicalPath),
+      )
+      if (canonicalPdk) {
+        selectPdk(canonicalPdk)
+        return
+      }
       const valid = hasValidKnownPdkLayout(scanned.pdkId, scanned.detectedFiles)
       projectPinnedPdk.value = {
         id: `project-pinned:${scanned.canonicalPath}`,
