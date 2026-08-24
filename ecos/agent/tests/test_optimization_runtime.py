@@ -17,6 +17,7 @@ from ecos_agent.optimization_contracts import (
 )
 from ecos_agent.optimization_runtime import (
     OptimizationRuntimeError,
+    _design_id,
     _wait_for_terminal_receipt,
     _optimization_objective,
     _parent_manifest_sha256,
@@ -103,6 +104,17 @@ def test_place_to_harden_runtime_fails_closed_on_incomplete_stage(tmp_path: Path
 
     with pytest.raises(OptimizationRuntimeError, match="flow completion evidence"):
         _place_to_harden_runtime_seconds(tmp_path)
+
+
+def test_design_id_comes_from_workspace_parameters_and_fails_closed(tmp_path: Path) -> None:
+    (tmp_path / "home").mkdir()
+    parameters = tmp_path / "home" / "parameters.json"
+    parameters.write_text(json.dumps({"Design": "aes_core"}), encoding="utf-8")
+    assert _design_id(tmp_path) == "aes_core"
+
+    parameters.write_text(json.dumps({"Design": "../other"}), encoding="utf-8")
+    with pytest.raises(OptimizationRuntimeError, match="identifier is invalid"):
+        _design_id(tmp_path)
 
 
 def test_parent_manifest_binds_terminal_evidence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -210,6 +222,10 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    (workspace / "home").mkdir()
+    (workspace / "home" / "parameters.json").write_text(
+        json.dumps({"Design": "design-a"}), encoding="utf-8"
+    )
     rpc = _FakeRpc(Path("ecc"))
     monkeypatch.setattr(
         "ecos_agent.optimization_runtime.EccContentLengthRpcClient", lambda _path: rpc
@@ -244,5 +260,11 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
 
     assert rpc.calls == [workspace]
     assert not (workspace / ".agent/optimization/baseline-replays.v2.json").exists()
+    episode_root = workspace / ".agent" / "optimization" / "episode-new"
+    assert (episode_root / "optimization-task-memory-scope.v1.json").is_file()
+    state = json.loads(
+        (episode_root / "optimization-episode-state.v6.json").read_text(encoding="utf-8")
+    )
+    assert state["task_memory_scope_sha256"].startswith("sha256:")
     runner.close()
     assert rpc.closed is True

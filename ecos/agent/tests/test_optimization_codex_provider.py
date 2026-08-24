@@ -141,6 +141,7 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
         "observation_refs",
         "history_refs",
         "knowledge_refs",
+        "task_memory_refs",
         "action",
     ]
     assert schema["$defs"]["OptimizationKnob"]["enum"] == [

@@ -34,7 +34,10 @@ from ecos_agent.optimization_ledger import (
     OptimizationOutcomeKind,
     build_optimization_artifact_manifest,
 )
-from ecos_agent.optimization_memory import derive_episode_task_memory
+from ecos_agent.optimization_memory import (
+    OptimizationTaskMemoryStore,
+    build_task_memory_scope,
+)
 from ecos_agent.optimization_observations import (
     build_candidate_terminal_observation,
     build_stage_observation,
@@ -64,6 +67,7 @@ _PLACE_TO_HARDEN_STAGES = (
     "sta",
     "Harden",
 )
+_DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 
 
 def create_optimization_runner(
@@ -77,6 +81,7 @@ def create_optimization_runner(
     site_width_dbu = _site_width_dbu(workspace)
     current_values = _current_values(workspace, site_width_dbu)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
+    design_id = _design_id(workspace)
     routability_objective = freeze_routability_objective(terminal_observation)
     budget = BudgetSnapshot(
         budget=EpisodeBudget.from_reference_rerun(
@@ -84,6 +89,14 @@ def create_optimization_runner(
         )
     )
     ledger_root = workspace / ".agent" / "optimization" / episode_id
+    memory_scope = build_task_memory_scope(
+        workspace_manifest_sha256=parent_manifest,
+        design_id=design_id,
+        checkpoint_id=checkpoint_id,
+        episode_id=episode_id,
+        objective_contract_sha256=objective.contract_sha256,
+    )
+    memory_store = OptimizationTaskMemoryStore(ledger_root.parent, memory_scope)
     rpc = EccContentLengthRpcClient(_ecc_executable())
     ledger = _ledger(ledger_root)
     try:
@@ -101,11 +114,14 @@ def create_optimization_runner(
             ledger_root / "optimization-episode-state.v5.json",
         )
         if state_path.is_file():
+            memory_store.verify_episode_scope(ledger_root)
             controller = OptimizationEpisodeController.recover(
                 planner=planner,
                 executor=executor,
                 ledger=ledger,
                 clock=_monotonic,
+                task_memory_scope_sha256=memory_scope.scope_sha256,
+                task_memory_supplier=memory_store.snapshot,
             )
             if controller.objective != objective:
                 raise OptimizationRuntimeError(
@@ -122,6 +138,7 @@ def create_optimization_runner(
         elif ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
             raise OptimizationRuntimeError("optimization episode state is missing")
         else:
+            memory_store.ensure_episode_scope(ledger_root)
             controller = OptimizationEpisodeController(
                 episode_id=episode_id,
                 checkpoint_id=checkpoint_id,
@@ -134,6 +151,8 @@ def create_optimization_runner(
                 incumbent=terminal_observation,
                 parent_manifest_sha256=parent_manifest,
                 objective=objective,
+                task_memory_scope_sha256=memory_scope.scope_sha256,
+                task_memory_supplier=memory_store.snapshot,
             )
     except Exception:
         rpc.close()
@@ -169,14 +188,6 @@ def create_optimization_runner(
             raise OptimizationRuntimeError("ECC terminal receipt has no candidate evidence")
         return build_candidate_terminal_observation(workspace, receipt.evidence)
 
-    def memory_writer() -> None:
-        derive_episode_task_memory(
-            ledger_root,
-            workspace_id=canonical_sha256({"workspace": str(workspace)}),
-            design_id=_design_id(context, workspace),
-            design_fingerprint_sha256=parent_manifest,
-        )
-
     return OptimizationEpisodeRunner(
         controller=controller,
         observation_supplier=observation_supplier,
@@ -185,7 +196,6 @@ def create_optimization_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
-        memory_writer=memory_writer,
         stop_event=stop_event,
     )
 
@@ -257,12 +267,17 @@ def _text(value: object, label: str) -> str:
     return value.strip()
 
 
-def _design_id(context: Mapping[str, Any], workspace: Path) -> str:
-    value = context.get("design_id")
-    text = workspace.name if value is None else _text(value, "design_id")
-    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", text):
-        return text
-    return canonical_sha256({"design": text})
+def _design_id(workspace: Path) -> str:
+    try:
+        payload = json.loads(
+            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OptimizationRuntimeError("workspace design identifier is unavailable") from exc
+    value = payload.get("Design")
+    if not isinstance(value, str) or not _DESIGN_ID.fullmatch(value):
+        raise OptimizationRuntimeError("workspace design identifier is invalid")
+    return value
 
 
 def _place_to_harden_runtime_seconds(workspace: Path) -> float:

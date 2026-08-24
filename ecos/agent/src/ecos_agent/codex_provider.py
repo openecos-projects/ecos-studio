@@ -284,7 +284,8 @@ class CodexAppServerProposalProvider:
             "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
             "workspaces, RPC methods, or execution instructions. observation_refs must contain exactly the "
             "supplied observation_ref, not the incumbent observation. Reference only supplied history and "
-            "knowledge identifiers. Local validation selects values and owns execution."
+            "knowledge identifiers and task-memory summary hashes. Task memory is evidence only; "
+            "local validation selects values and owns execution."
         )
         output_schema = _optimization_proposal_output_schema()
         envelope_payload = {
@@ -949,6 +950,7 @@ def _optimization_planning_payload(
         len(context.history) > 6
         or len(context.knowledge_refs) > 6
         or len(context.knowledge_chunks) > 6
+        or (context.task_memory is not None and len(context.task_memory.summaries) > 6)
     ):
         raise CodexProviderError(
             "optimization planning context exceeds its bounds",

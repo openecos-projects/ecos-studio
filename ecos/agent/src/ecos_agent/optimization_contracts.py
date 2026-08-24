@@ -365,6 +365,17 @@ class KnowledgeReference(_ContractModel):
         return value
 
 
+class OptimizationTaskMemoryReference(_ContractModel):
+    summary_sha256: str
+
+    @field_validator("summary_sha256")
+    @classmethod
+    def validate_summary_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("task memory summary hash is invalid")
+        return value
+
+
 class ExpectedEffect(_ContractModel):
     metric_id: ObjectiveMetric
     direction: ExpectedEffectDirection
@@ -406,6 +417,9 @@ class OptimizationProposal(_ContractModel):
     observation_refs: tuple[ObservationReference, ...] = Field(min_length=1, max_length=13)
     history_refs: tuple[HistoryReference, ...] = Field(default=(), max_length=6)
     knowledge_refs: tuple[KnowledgeReference, ...] = Field(default=(), max_length=6)
+    task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = Field(
+        default=(), max_length=6, exclude_if=lambda value: not value
+    )
     action: ProposalAction | None = None
 
     @field_validator("rationale_summary")
@@ -416,7 +430,9 @@ class OptimizationProposal(_ContractModel):
             raise ValueError("proposal rationale is invalid")
         return value
 
-    @field_validator("observation_refs", "history_refs", "knowledge_refs")
+    @field_validator(
+        "observation_refs", "history_refs", "knowledge_refs", "task_memory_refs"
+    )
     @classmethod
     def validate_unique_references(cls, value: tuple[object, ...]) -> tuple[object, ...]:
         identifiers = [next(iter(item.model_dump().values())) for item in value]

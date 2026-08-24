@@ -12,6 +12,7 @@ from ecos_agent.optimization_contracts import (
     OptimizationDecision,
     OptimizationEpisodeState,
     OptimizationProposal,
+    OptimizationTaskMemoryReference,
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
     ProposalAction,
@@ -37,9 +38,10 @@ from ecos_agent.optimization_replication import (
 
 
 HASH = "sha256:" + "a" * 64
+MEMORY_HASH = "sha256:" + "b" * 64
 
 
-def _episode(root):
+def _episode(root, *, with_task_memory: bool = False):
     context_ref = ProposalContextRef(
         episode_id="episode-1", checkpoint_id="checkpoint-parent", input_sha256=HASH
     )
@@ -49,6 +51,11 @@ def _episode(root):
         reason_code=ProposalReason.OBSERVATION,
         rationale_summary="Try one bounded congestion intervention.",
         observation_refs=(ObservationReference(observation_id="observation-1", sha256=HASH),),
+        task_memory_refs=(
+            (OptimizationTaskMemoryReference(summary_sha256=MEMORY_HASH),)
+            if with_task_memory
+            else ()
+        ),
         action=ProposalAction(
             knob_id="place.target_density",
             direction=StrategyDirection.DECREASE,
@@ -90,6 +97,12 @@ def _episode(root):
         budget_snapshot=BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(1.0)),
         incumbent=None,
         planner_payload_sha256=HASH,
+        task_memory_snapshot_sha256=MEMORY_HASH if with_task_memory else None,
+        task_memory_refs=(
+            (OptimizationTaskMemoryReference(summary_sha256=MEMORY_HASH),)
+            if with_task_memory
+            else ()
+        ),
     )
     prompt = "Owner alice inspects /home/alice/private/design on build01.ucas.ac.cn."
     envelope_payload = {
@@ -175,6 +188,22 @@ def test_verifier_requires_manifest_to_bind_the_replay_projection(tmp_path) -> N
 
     with pytest.raises(OptimizationReplicationError, match="replay projection"):
         verify_replication_package(package_root)
+
+
+def test_replication_projection_preserves_task_memory_evidence_refs(tmp_path) -> None:
+    episode_root = tmp_path / "episode"
+    package_root = tmp_path / "public"
+    _episode(episode_root, with_task_memory=True)
+
+    export_replication_package(episode_root, package_root)
+
+    projection = json.loads(
+        (package_root / "optimization-replay.v1.json").read_text(encoding="utf-8")
+    )
+    planning = projection["planning"][0]
+    assert planning["task_memory_snapshot_sha256"] == MEMORY_HASH
+    assert planning["task_memory_refs"] == [{"summary_sha256": MEMORY_HASH}]
+    assert "chat" not in json.dumps(planning)
 
 
 def test_verifier_rejects_execution_without_an_accepted_proposal(tmp_path) -> None:

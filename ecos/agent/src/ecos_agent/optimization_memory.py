@@ -1,21 +1,28 @@
-"""Evidence-bound, episode-local task memory derived from optimization traces."""
+"""Replayable, evidence-bound task memory for optimization episodes."""
 
 from __future__ import annotations
 
+import fcntl
 import json
+import math
 import os
 import re
-import tempfile
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Iterator, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
+    KnobScalar,
+    ObjectiveMetric,
+    OptimizationKnob,
+    OptimizationTaskMemoryReference,
     ProposalAction,
     RequestedKnobValue,
-    SelectionMetric,
+    StrategyDirection,
     TerminalObservation,
 )
 from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
@@ -23,285 +30,601 @@ from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationOutcomeKind,
+    OptimizationTerminalOutcome,
+    _canonical_json,
+    _fsync_directory,
+    _validate_relative_path,
+    _write_json_atomic,
 )
 
-_MEMORY_FILE = "optimization-task-memory.v1.json"
-_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
+_STORE_FILE = "task-memory.v1.jsonl"
+_SCOPE_FILE = "optimization-task-memory-scope.v1.json"
+_STATE_FILE = "optimization-episode-state.v6.json"
+_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+_MAX_RECORDS = 6
 
 
 class OptimizationTaskMemoryError(ValueError):
-    """Task memory cannot be trusted for replay or retrieval."""
+    """Task memory cannot be safely created or queried."""
 
 
-class OptimizationTaskMemoryScope(BaseModel):
+class OptimizationTaskMemoryIntegrityError(OptimizationTaskMemoryError):
+    """Persisted task memory or source evidence failed verification."""
+
+
+class _MemoryModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    workspace_id: str
+
+class OptimizationTaskMemoryScope(_MemoryModel):
+    schema_version: Literal["ecos.optimization_task_memory_scope.v1"] = (
+        "ecos.optimization_task_memory_scope.v1"
+    )
+    workspace_manifest_sha256: str
     design_id: str
-    design_fingerprint_sha256: str
+    checkpoint_id: str
     episode_id: str
-    objective_contract_sha256: str | None = None
-
-    @field_validator("workspace_id", "design_id", "episode_id")
-    @classmethod
-    def validate_id(cls, value: str) -> str:
-        if not _ID.fullmatch(value):
-            raise ValueError("memory scope id is invalid")
-        return value
-
-    @field_validator("design_fingerprint_sha256", "objective_contract_sha256")
-    @classmethod
-    def validate_hash(cls, value: str | None) -> str | None:
-        if value is not None and not _SHA256.fullmatch(value):
-            raise ValueError("memory scope hash is invalid")
-        return value
-
-
-class OptimizationTaskMemoryEvidence(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    ledger_event_count: int = Field(ge=0)
-    ledger_chain_head_sha256: str | None = None
-    start_entry_sha256: str
-    terminal_entry_sha256: str
-    terminal_outcome_sha256: str
-    planning_entry_sha256: str | None = None
-    decision_entry_sha256: str | None = None
-    candidate_manifest_sha256: str
-    candidate_root_ref: str | None = None
-    candidate_manifest_ref: str | None = None
-    receipt_sha256: str | None = None
+    objective_contract_sha256: str
+    scope_sha256: str
 
     @field_validator(
-        "ledger_chain_head_sha256",
-        "start_entry_sha256",
-        "terminal_entry_sha256",
-        "terminal_outcome_sha256",
-        "planning_entry_sha256",
-        "decision_entry_sha256",
-        "candidate_manifest_sha256",
-        "receipt_sha256",
+        "workspace_manifest_sha256", "objective_contract_sha256", "scope_sha256"
     )
-    @classmethod
-    def validate_hash(cls, value: str | None) -> str | None:
-        if value is not None and not _SHA256.fullmatch(value):
-            raise ValueError("memory evidence hash is invalid")
-        return value
-
-
-class OptimizationTaskMemoryEntry(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    intervention_id: str
-    stage: str
-    action: ProposalAction
-    requested: RequestedKnobValue | None = None
-    outcome: OptimizationOutcomeKind
-    incumbent_decision: str | None = None
-    decisive_metric: SelectionMetric | None = None
-    terminal_observation: TerminalObservation | None = None
-    summary: str
-    evidence: OptimizationTaskMemoryEvidence
-
-    @field_validator("intervention_id", "stage")
-    @classmethod
-    def validate_id(cls, value: str) -> str:
-        if not _ID.fullmatch(value):
-            raise ValueError("memory entry id is invalid")
-        return value
-
-
-class OptimizationTaskMemory(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    schema_version: Literal["ecos.optimization_task_memory.v1"] = (
-        "ecos.optimization_task_memory.v1"
-    )
-    scope: OptimizationTaskMemoryScope
-    entries: tuple[OptimizationTaskMemoryEntry, ...] = ()
-    memory_sha256: str
-
-    @field_validator("memory_sha256")
     @classmethod
     def validate_hash(cls, value: str) -> str:
         if not _SHA256.fullmatch(value):
-            raise ValueError("memory hash is invalid")
+            raise ValueError("task memory scope hash is invalid")
+        return value
+
+    @field_validator("design_id", "checkpoint_id", "episode_id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _ID.fullmatch(value):
+            raise ValueError("task memory scope identifier is invalid")
         return value
 
     @model_validator(mode="after")
-    def validate_memory_hash(self) -> "OptimizationTaskMemory":
-        expected = canonical_sha256(
-            self.model_dump(mode="json", exclude={"memory_sha256"})
-        )
-        if self.memory_sha256 != expected:
-            raise ValueError("memory hash is invalid")
+    def validate_scope_hash(self) -> "OptimizationTaskMemoryScope":
+        expected = canonical_sha256(self.model_dump(mode="json", exclude={"scope_sha256"}))
+        if self.scope_sha256 != expected:
+            raise ValueError("task memory scope hash is invalid")
         return self
 
 
-def derive_episode_task_memory(
-    episode_root: Path,
+class OptimizationTaskMemoryEvidence(_MemoryModel):
+    source_episode_id: str
+    intervention_id: str
+    planning_entry_sha256: str
+    decision_entry_sha256: str
+    ledger_start_entry_sha256: str
+    ledger_terminal_entry_sha256: str
+    outcome_sha256: str
+    candidate_manifest_sha256: str
+    candidate_root_ref: str
+    candidate_manifest_ref: str
+    receipt_sha256: str
+    terminal_observation_sha256: str
+
+    @field_validator("source_episode_id", "intervention_id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _ID.fullmatch(value):
+            raise ValueError("task memory evidence identifier is invalid")
+        return value
+
+    @field_validator(
+        "planning_entry_sha256",
+        "decision_entry_sha256",
+        "ledger_start_entry_sha256",
+        "ledger_terminal_entry_sha256",
+        "outcome_sha256",
+        "candidate_manifest_sha256",
+        "receipt_sha256",
+        "terminal_observation_sha256",
+    )
+    @classmethod
+    def validate_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("task memory evidence hash is invalid")
+        return value
+
+    @field_validator("candidate_root_ref", "candidate_manifest_ref")
+    @classmethod
+    def validate_candidate_ref(cls, value: str) -> str:
+        _validate_relative_path(value)
+        return value
+
+
+class OptimizationTaskMemoryEntry(_MemoryModel):
+    schema_version: Literal["ecos.optimization_task_memory_entry.v1"] = (
+        "ecos.optimization_task_memory_entry.v1"
+    )
+    sequence: StrictInt = Field(ge=1)
+    previous_entry_sha256: str | None = None
+    scope: OptimizationTaskMemoryScope
+    action: ProposalAction
+    requested: RequestedKnobValue
+    outcome: OptimizationOutcomeKind
+    terminal_observation: TerminalObservation
+    evidence: OptimizationTaskMemoryEvidence
+    entry_sha256: str
+
+    @field_validator("previous_entry_sha256", "entry_sha256")
+    @classmethod
+    def validate_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("task memory entry hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_entry(self) -> "OptimizationTaskMemoryEntry":
+        if self.action.knob_id != self.requested.knob_id:
+            raise ValueError("task memory action and requested knob do not match")
+        if self.evidence.source_episode_id != self.scope.episode_id:
+            raise ValueError("task memory evidence does not match its scope")
+        expected = _entry_sha256(
+            self.sequence,
+            self.previous_entry_sha256,
+            self.model_dump(
+                mode="json",
+                exclude={"sequence", "previous_entry_sha256", "entry_sha256"},
+            ),
+        )
+        if self.entry_sha256 != expected:
+            raise ValueError("task memory entry hash is invalid")
+        return self
+
+
+class OptimizationTaskMemoryOutcomeCount(_MemoryModel):
+    outcome: OptimizationOutcomeKind
+    count: StrictInt = Field(ge=1, le=_MAX_RECORDS)
+
+
+class OptimizationTaskMemoryMetricRange(_MemoryModel):
+    metric_id: ObjectiveMetric
+    minimum: float
+    maximum: float
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "OptimizationTaskMemoryMetricRange":
+        if not math.isfinite(self.minimum) or not math.isfinite(self.maximum):
+            raise ValueError("task memory metric range is invalid")
+        if self.minimum > self.maximum:
+            raise ValueError("task memory metric range is reversed")
+        return self
+
+
+class OptimizationTaskMemorySummary(_MemoryModel):
+    reference: OptimizationTaskMemoryReference
+    knob_id: OptimizationKnob
+    direction: StrategyDirection
+    requested_values: tuple[KnobScalar, ...] = Field(max_length=_MAX_RECORDS)
+    outcome_counts: tuple[OptimizationTaskMemoryOutcomeCount, ...]
+    metric_ranges: tuple[OptimizationTaskMemoryMetricRange, ...]
+    evidence_refs: tuple[OptimizationTaskMemoryEvidence, ...] = Field(
+        min_length=1, max_length=_MAX_RECORDS
+    )
+
+    @model_validator(mode="after")
+    def validate_summary_hash(self) -> "OptimizationTaskMemorySummary":
+        expected = canonical_sha256(
+            self.model_dump(mode="json", exclude={"reference"})
+        )
+        if self.reference.summary_sha256 != expected:
+            raise ValueError("task memory summary hash is invalid")
+        return self
+
+
+class OptimizationTaskMemorySnapshot(_MemoryModel):
+    schema_version: Literal["ecos.optimization_task_memory_snapshot.v1"] = (
+        "ecos.optimization_task_memory_snapshot.v1"
+    )
+    scope: OptimizationTaskMemoryScope
+    source_event_count: StrictInt = Field(ge=0)
+    source_evidence_sha256: str | None = None
+    summaries: tuple[OptimizationTaskMemorySummary, ...] = Field(max_length=_MAX_RECORDS)
+    snapshot_sha256: str
+
+    @field_validator("source_evidence_sha256", "snapshot_sha256")
+    @classmethod
+    def validate_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("task memory snapshot hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_snapshot_hash(self) -> "OptimizationTaskMemorySnapshot":
+        expected = canonical_sha256(
+            self.model_dump(mode="json", exclude={"snapshot_sha256"})
+        )
+        if self.snapshot_sha256 != expected:
+            raise ValueError("task memory snapshot hash is invalid")
+        return self
+
+
+@dataclass(frozen=True)
+class OptimizationTaskMemoryReplay:
+    entries: tuple[OptimizationTaskMemoryEntry, ...]
+    chain_head_sha256: str | None
+
+
+@dataclass(frozen=True)
+class _Candidate:
+    scope: OptimizationTaskMemoryScope
+    action: ProposalAction
+    requested: RequestedKnobValue
+    outcome: OptimizationOutcomeKind
+    terminal_observation: TerminalObservation
+    evidence: OptimizationTaskMemoryEvidence
+
+
+def build_task_memory_scope(
     *,
-    workspace_id: str,
+    workspace_manifest_sha256: str,
     design_id: str,
-    design_fingerprint_sha256: str,
-) -> OptimizationTaskMemory:
-    root = episode_root.resolve()
-    ledger_replay = OptimizationLedger(root).verify()
-    decisions = OptimizationDecisionAudit(root).verify()
+    checkpoint_id: str,
+    episode_id: str,
+    objective_contract_sha256: str,
+) -> OptimizationTaskMemoryScope:
+    value = {
+        "schema_version": "ecos.optimization_task_memory_scope.v1",
+        "workspace_manifest_sha256": workspace_manifest_sha256,
+        "design_id": design_id,
+        "checkpoint_id": checkpoint_id,
+        "episode_id": episode_id,
+        "objective_contract_sha256": objective_contract_sha256,
+    }
+    return OptimizationTaskMemoryScope(**value, scope_sha256=canonical_sha256(value))
+
+
+class OptimizationTaskMemoryStore:
+    """Append terminal evidence and derive a bounded cross-episode snapshot."""
+
+    def __init__(self, root: Path, scope: OptimizationTaskMemoryScope) -> None:
+        self.root = root.resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.scope = scope
+        self.store_path = self.root / _STORE_FILE
+        self._lock_path = self.root / ".task-memory.lock"
+
+    def ensure_episode_scope(
+        self, episode_root: Path, scope: OptimizationTaskMemoryScope | None = None
+    ) -> None:
+        expected = scope or self.scope
+        path = episode_root.resolve() / _SCOPE_FILE
+        if path.is_file():
+            if _load_scope(path) != expected:
+                raise OptimizationTaskMemoryIntegrityError(
+                    "task memory scope conflicts with the episode"
+                )
+            return
+        _write_json_atomic(path, expected.model_dump(mode="json"))
+
+    def verify_episode_scope(self, episode_root: Path) -> None:
+        if _load_scope(episode_root.resolve() / _SCOPE_FILE) != self.scope:
+            raise OptimizationTaskMemoryIntegrityError(
+                "task memory scope does not match the recovered episode"
+            )
+
+    def replay(self) -> OptimizationTaskMemoryReplay:
+        with self._exclusive_lock():
+            return self._verify_locked()
+
+    def synchronize(self) -> OptimizationTaskMemoryReplay:
+        with self._exclusive_lock():
+            replay = self._verify_locked()
+            known = {_evidence_key(entry.evidence) for entry in replay.entries}
+            candidates = []
+            for episode_root in sorted(path for path in self.root.iterdir() if path.is_dir()):
+                if (episode_root / _SCOPE_FILE).is_file():
+                    candidates.extend(_derive_candidates(episode_root))
+            derived = {_evidence_key(candidate.evidence) for candidate in candidates}
+            if not known.issubset(derived):
+                raise OptimizationTaskMemoryIntegrityError(
+                    "task memory source evidence is unavailable"
+                )
+            candidates.sort(
+                key=lambda item: (
+                    item.scope.episode_id,
+                    item.evidence.ledger_terminal_entry_sha256,
+                )
+            )
+            entries = list(replay.entries)
+            previous = replay.chain_head_sha256
+            for candidate in candidates:
+                if _evidence_key(candidate.evidence) in known:
+                    continue
+                entry = _build_entry(len(entries) + 1, previous, candidate)
+                with self.store_path.open("ab") as stream:
+                    stream.write(_canonical_json(entry.model_dump(mode="json")) + b"\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                entries.append(entry)
+                previous = entry.entry_sha256
+                known.add(_evidence_key(candidate.evidence))
+            if entries != list(replay.entries):
+                _fsync_directory(self.root)
+            return OptimizationTaskMemoryReplay(tuple(entries), previous)
+
+    def snapshot(self) -> OptimizationTaskMemorySnapshot:
+        replay = self.synchronize()
+        matching = [
+            entry
+            for entry in replay.entries
+            if _same_task(entry.scope, self.scope)
+            and entry.scope.episode_id != self.scope.episode_id
+        ]
+        selected = matching[-_MAX_RECORDS:]
+        summaries = _summaries(tuple(selected))
+        value = {
+            "schema_version": "ecos.optimization_task_memory_snapshot.v1",
+            "scope": self.scope.model_dump(mode="json"),
+            "source_event_count": len(matching),
+            "source_evidence_sha256": (
+                canonical_sha256(
+                    [entry.evidence.model_dump(mode="json") for entry in matching]
+                )
+                if matching
+                else None
+            ),
+            "summaries": [item.model_dump(mode="json") for item in summaries],
+        }
+        return OptimizationTaskMemorySnapshot(
+            **value, snapshot_sha256=canonical_sha256(value)
+        )
+
+    def _verify_locked(self) -> OptimizationTaskMemoryReplay:
+        if not self.store_path.exists():
+            return OptimizationTaskMemoryReplay((), None)
+        payload = self.store_path.read_bytes()
+        if payload and not payload.endswith(b"\n"):
+            raise OptimizationTaskMemoryIntegrityError(
+                "task memory store has a torn final record"
+            )
+        entries = []
+        previous = None
+        for line_number, raw_line in enumerate(payload.splitlines(), start=1):
+            try:
+                entry = OptimizationTaskMemoryEntry.model_validate_json(raw_line)
+            except ValueError as exc:
+                raise OptimizationTaskMemoryIntegrityError(
+                    f"task memory record {line_number} has an invalid hash or schema"
+                ) from exc
+            if entry.sequence != line_number or entry.previous_entry_sha256 != previous:
+                raise OptimizationTaskMemoryIntegrityError(
+                    "task memory hash chain is broken"
+                )
+            entries.append(entry)
+            previous = entry.entry_sha256
+        return OptimizationTaskMemoryReplay(tuple(entries), previous)
+
+    @contextmanager
+    def _exclusive_lock(self) -> Iterator[None]:
+        with self._lock_path.open("a+b") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _derive_candidates(episode_root: Path) -> tuple[_Candidate, ...]:
+    scope = _load_scope(episode_root / _SCOPE_FILE)
+    state = _verified_state(episode_root / _STATE_FILE)
+    ledger = OptimizationLedger(episode_root).verify()
+    decisions = OptimizationDecisionAudit(episode_root).verify()
+    _verify_source_trace(scope, state, ledger, decisions)
     accepted = {
         canonical_sha256(entry.proposal.model_dump(mode="json")): entry
         for entry in decisions.entries
-        if entry.validation_result in {"accepted", "fallback"} and entry.proposal is not None
+        if entry.validation_result in {"accepted", "fallback"}
+        and entry.proposal is not None
     }
     starts = {
         entry.payload.intervention_id: (entry, entry.payload)
-        for entry in ledger_replay.entries
+        for entry in ledger.entries
         if isinstance(entry.payload, OptimizationInterventionStart)
     }
-    objective_hashes = {
-        payload.objective_contract_sha256
-        for _, payload in starts.values()
-        if payload.objective_contract_sha256 is not None
-    }
-    scope = OptimizationTaskMemoryScope(
-        workspace_id=workspace_id,
-        design_id=design_id,
-        design_fingerprint_sha256=design_fingerprint_sha256,
-        episode_id=_episode_id(decisions),
-        objective_contract_sha256=_single_objective_hash(objective_hashes),
-    )
-    entries = []
-    for terminal_entry in ledger_replay.entries:
-        outcome = getattr(terminal_entry.payload, "outcome", None)
-        if outcome is None:
+    result = []
+    for terminal_entry in ledger.entries:
+        terminal = terminal_entry.payload
+        if not isinstance(terminal, OptimizationTerminalOutcome):
             continue
-        start_entry, start = starts[terminal_entry.payload.intervention_id]
+        start_entry, start = starts[terminal.intervention_id]
+        if not _eligible(start, terminal):
+            continue
         decision = accepted.get(start.proposal_sha256)
-        if decision is None or start.proposal_action is None:
-            continue
-        entries.append(
-            OptimizationTaskMemoryEntry(
-                intervention_id=start.intervention_id,
-                stage=start.parent_checkpoint_id,
+        if decision is None:
+            raise OptimizationTaskMemoryIntegrityError(
+                "terminal memory evidence has no accepted decision"
+            )
+        assert start.proposal_action is not None and start.requested is not None
+        assert terminal.terminal_observation is not None
+        assert terminal.terminal_observation_sha256 is not None
+        assert terminal.candidate_root_ref is not None
+        assert terminal.candidate_manifest_ref is not None
+        assert terminal.receipt_sha256 is not None
+        result.append(
+            _Candidate(
+                scope=scope,
                 action=start.proposal_action,
                 requested=start.requested,
-                outcome=terminal_entry.payload.outcome,
-                incumbent_decision=(
-                    terminal_entry.payload.incumbent_decision.value
-                    if terminal_entry.payload.incumbent_decision is not None
-                    else None
-                ),
-                decisive_metric=terminal_entry.payload.decisive_metric,
-                terminal_observation=terminal_entry.payload.terminal_observation,
-                summary=_summary(start.proposal_action, terminal_entry.payload.outcome),
+                outcome=terminal.outcome,
+                terminal_observation=terminal.terminal_observation,
                 evidence=OptimizationTaskMemoryEvidence(
-                    ledger_event_count=terminal_entry.sequence,
-                    ledger_chain_head_sha256=terminal_entry.entry_sha256,
-                    start_entry_sha256=start_entry.entry_sha256,
-                    terminal_entry_sha256=terminal_entry.entry_sha256,
-                    terminal_outcome_sha256=canonical_sha256(
-                        terminal_entry.payload.model_dump(mode="json")
-                    ),
+                    source_episode_id=scope.episode_id,
+                    intervention_id=start.intervention_id,
                     planning_entry_sha256=decision.planning_entry_sha256,
                     decision_entry_sha256=decision.entry_sha256,
-                    candidate_manifest_sha256=terminal_entry.payload.candidate_manifest_sha256,
-                    candidate_root_ref=terminal_entry.payload.candidate_root_ref,
-                    candidate_manifest_ref=terminal_entry.payload.candidate_manifest_ref,
-                    receipt_sha256=terminal_entry.payload.receipt_sha256,
+                    ledger_start_entry_sha256=start_entry.entry_sha256,
+                    ledger_terminal_entry_sha256=terminal_entry.entry_sha256,
+                    outcome_sha256=canonical_sha256(terminal.model_dump(mode="json")),
+                    candidate_manifest_sha256=terminal.candidate_manifest_sha256,
+                    candidate_root_ref=terminal.candidate_root_ref,
+                    candidate_manifest_ref=terminal.candidate_manifest_ref,
+                    receipt_sha256=terminal.receipt_sha256,
+                    terminal_observation_sha256=terminal.terminal_observation_sha256,
                 ),
             )
         )
-    memory = _build_memory(scope, tuple(entries))
-    _reject_conflict(root, memory)
-    _write_json_atomic(root / _MEMORY_FILE, memory.model_dump(mode="json"))
-    return memory
+    return tuple(result)
 
 
-def load_episode_task_memory(
-    episode_root: Path,
-    *,
-    workspace_id: str | None = None,
-    design_id: str | None = None,
-    design_fingerprint_sha256: str | None = None,
-    episode_id: str | None = None,
-) -> OptimizationTaskMemory:
+def _verified_state(path: Path) -> dict[str, object]:
     try:
-        memory = OptimizationTaskMemory.model_validate_json(
-            (episode_root / _MEMORY_FILE).read_bytes()
+        state = json.loads(path.read_text(encoding="utf-8"))
+        recorded = state.pop("state_sha256")
+    except (OSError, json.JSONDecodeError, KeyError, AttributeError) as exc:
+        raise OptimizationTaskMemoryIntegrityError(
+            "task memory source state is unavailable"
+        ) from exc
+    if recorded != canonical_sha256(state):
+        raise OptimizationTaskMemoryIntegrityError("task memory source state hash is invalid")
+    state["state_sha256"] = recorded
+    return state
+
+
+def _verify_source_trace(scope, state, ledger, decisions) -> None:
+    objective = state.get("objective")
+    if (
+        state.get("schema_version") != "ecos.optimization_episode_state.v6"
+        or state.get("episode_id") != scope.episode_id
+        or state.get("checkpoint_id") != scope.checkpoint_id
+        or state.get("parent_manifest_sha256") != scope.workspace_manifest_sha256
+        or state.get("task_memory_scope_sha256") != scope.scope_sha256
+        or not isinstance(objective, dict)
+        or objective.get("contract_sha256") != scope.objective_contract_sha256
+        or state.get("ledger_event_count") != len(ledger.entries)
+        or state.get("ledger_chain_head_sha256") != ledger.chain_head_sha256
+        or state.get("decision_audit_event_count") != len(decisions.entries)
+        or state.get("decision_audit_chain_head_sha256") != decisions.chain_head_sha256
+    ):
+        raise OptimizationTaskMemoryIntegrityError(
+            "task memory source scope does not match its evidence trace"
         )
-    except (OSError, ValueError) as exc:
-        raise OptimizationTaskMemoryError("task memory hash is invalid") from exc
-    expected = {
-        "workspace_id": workspace_id,
-        "design_id": design_id,
-        "design_fingerprint_sha256": design_fingerprint_sha256,
-        "episode_id": episode_id,
-    }
-    for key, value in expected.items():
-        if value is not None and getattr(memory.scope, key) != value:
-            raise OptimizationTaskMemoryError("task memory scope does not match")
-    return memory
+    for entry in ledger.entries:
+        if isinstance(entry.payload, OptimizationInterventionStart) and (
+            entry.payload.parent_checkpoint_id != scope.checkpoint_id
+            or entry.payload.parent_manifest_sha256 != scope.workspace_manifest_sha256
+            or entry.payload.objective_contract_sha256 != scope.objective_contract_sha256
+        ):
+            raise OptimizationTaskMemoryIntegrityError(
+                "task memory intervention does not match its scope"
+            )
 
 
-def optimization_task_memory_path(episode_root: Path) -> Path:
-    return episode_root / _MEMORY_FILE
-
-
-def _build_memory(
-    scope: OptimizationTaskMemoryScope,
-    entries: tuple[OptimizationTaskMemoryEntry, ...],
-) -> OptimizationTaskMemory:
-    value = {
-        "schema_version": "ecos.optimization_task_memory.v1",
-        "scope": scope.model_dump(mode="json"),
-        "entries": [entry.model_dump(mode="json") for entry in entries],
-    }
-    return OptimizationTaskMemory(**value, memory_sha256=canonical_sha256(value))
-
-
-def _episode_id(decisions) -> str:
-    for entry in decisions.entries:
-        if entry.proposal is not None:
-            return entry.proposal.context_ref.episode_id
-    raise OptimizationTaskMemoryError("task memory has no planning evidence")
-
-
-def _single_objective_hash(values: set[str]) -> str | None:
-    if len(values) > 1:
-        raise OptimizationTaskMemoryError("task memory objective scope is ambiguous")
-    return next(iter(values), None)
-
-
-def _summary(action: ProposalAction, outcome: OptimizationOutcomeKind) -> str:
-    return f"{action.knob_id} {action.direction.value} -> {outcome.value}"
-
-
-def _reject_conflict(root: Path, memory: OptimizationTaskMemory) -> None:
-    path = root / _MEMORY_FILE
-    if not path.exists():
-        return
-    existing = load_episode_task_memory(root)
-    if existing.scope != memory.scope:
-        raise OptimizationTaskMemoryError("task memory scope conflicts with episode")
-    if existing.entries != memory.entries[: len(existing.entries)]:
-        raise OptimizationTaskMemoryError("task memory conflicts with evidence")
-
-
-def _write_json_atomic(destination: Path, value: object) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=destination.parent,
-        prefix=f".{destination.name}.",
-        suffix=".tmp",
+def _eligible(start, terminal) -> bool:
+    return all(
+        value is not None
+        for value in (
+            start.proposal_action,
+            start.requested,
+            terminal.candidate_root_ref,
+            terminal.candidate_manifest_ref,
+            terminal.receipt_sha256,
+            terminal.terminal_observation,
+            terminal.terminal_observation_sha256,
+        )
     )
+
+
+def _build_entry(sequence: int, previous: str | None, candidate: _Candidate):
+    payload = {
+        "schema_version": "ecos.optimization_task_memory_entry.v1",
+        "scope": candidate.scope.model_dump(mode="json"),
+        "action": candidate.action.model_dump(mode="json"),
+        "requested": candidate.requested.model_dump(mode="json"),
+        "outcome": candidate.outcome.value,
+        "terminal_observation": candidate.terminal_observation.model_dump(mode="json"),
+        "evidence": candidate.evidence.model_dump(mode="json"),
+    }
+    return OptimizationTaskMemoryEntry(
+        sequence=sequence,
+        previous_entry_sha256=previous,
+        **payload,
+        entry_sha256=_entry_sha256(sequence, previous, payload),
+    )
+
+
+def _entry_sha256(sequence: int, previous: str | None, payload: object) -> str:
+    return canonical_sha256(
+        {
+            "schema_version": "ecos.optimization_task_memory_entry.v1",
+            "sequence": sequence,
+            "previous_entry_sha256": previous,
+            "payload": payload,
+        }
+    )
+
+
+def _summaries(
+    entries: tuple[OptimizationTaskMemoryEntry, ...]
+) -> tuple[OptimizationTaskMemorySummary, ...]:
+    groups: dict[tuple[str, str], list[OptimizationTaskMemoryEntry]] = {}
+    for entry in entries:
+        groups.setdefault((entry.action.knob_id.value, entry.action.direction.value), []).append(
+            entry
+        )
+    result = []
+    for key in sorted(groups):
+        group = groups[key]
+        counts = tuple(
+            OptimizationTaskMemoryOutcomeCount(outcome=outcome, count=count)
+            for outcome, count in sorted(
+                (
+                    (outcome, sum(entry.outcome == outcome for entry in group))
+                    for outcome in {entry.outcome for entry in group}
+                ),
+                key=lambda item: item[0].value,
+            )
+        )
+        ranges = []
+        for metric in ObjectiveMetric:
+            values = [entry.terminal_observation.metrics[metric] for entry in group]
+            ranges.append(
+                OptimizationTaskMemoryMetricRange(
+                    metric_id=metric, minimum=min(values), maximum=max(values)
+                )
+            )
+        payload = {
+            "knob_id": group[0].action.knob_id.value,
+            "direction": group[0].action.direction.value,
+            "requested_values": [entry.requested.value for entry in group],
+            "outcome_counts": [item.model_dump(mode="json") for item in counts],
+            "metric_ranges": [item.model_dump(mode="json") for item in ranges],
+            "evidence_refs": [entry.evidence.model_dump(mode="json") for entry in group],
+        }
+        result.append(
+            OptimizationTaskMemorySummary(
+                reference=OptimizationTaskMemoryReference(
+                    summary_sha256=canonical_sha256(payload)
+                ),
+                **payload,
+            )
+        )
+    return tuple(result)
+
+
+def _same_task(left: OptimizationTaskMemoryScope, right: OptimizationTaskMemoryScope) -> bool:
+    return (
+        left.workspace_manifest_sha256 == right.workspace_manifest_sha256
+        and left.design_id == right.design_id
+        and left.checkpoint_id == right.checkpoint_id
+        and left.objective_contract_sha256 == right.objective_contract_sha256
+    )
+
+
+def _evidence_key(evidence: OptimizationTaskMemoryEvidence) -> tuple[str, str, str]:
+    return (
+        evidence.source_episode_id,
+        evidence.intervention_id,
+        evidence.outcome_sha256,
+    )
+
+
+def _load_scope(path: Path) -> OptimizationTaskMemoryScope:
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, sort_keys=True, separators=(",", ":"), allow_nan=False)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_name, destination)
-    except BaseException:
-        Path(temporary_name).unlink(missing_ok=True)
-        raise
+        return OptimizationTaskMemoryScope.model_validate_json(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise OptimizationTaskMemoryIntegrityError("task memory scope hash is invalid") from exc

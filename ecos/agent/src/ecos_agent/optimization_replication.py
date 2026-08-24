@@ -10,12 +10,13 @@ import socket
 from pathlib import Path
 from typing import Literal, Sequence
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     OptimizationEpisodeState,
     OptimizationProposal,
+    OptimizationTaskMemoryReference,
     ProposalContextRef,
 )
 from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
@@ -91,6 +92,12 @@ class PublicPlanningRecord(_ReplicationModel):
     planning_entry_sha256: str
     context_ref: ProposalContextRef
     planner_payload_sha256: str
+    task_memory_snapshot_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = Field(
+        default=(), max_length=6, exclude_if=lambda value: not value
+    )
     response_sha256: str
     envelope: PublicPlanningEnvelope
     proposal: OptimizationProposal | None
@@ -102,6 +109,7 @@ class PublicPlanningRecord(_ReplicationModel):
     @field_validator(
         "planning_entry_sha256",
         "planner_payload_sha256",
+        "task_memory_snapshot_sha256",
         "response_sha256",
         "source_proposal_sha256",
     )
@@ -117,6 +125,8 @@ class PublicPlanningRecord(_ReplicationModel):
             raise ValueError("planning envelope does not match its planning payload")
         if (self.proposal is None) != (self.source_proposal_sha256 is None):
             raise ValueError("planning proposal hash is incomplete")
+        if self.task_memory_refs and self.task_memory_snapshot_sha256 is None:
+            raise ValueError("planning task memory references require a snapshot")
         return self
 
 
@@ -318,6 +328,8 @@ def _public_planning(planning, provider, decision) -> PublicPlanningRecord:
         planning_entry_sha256=planning.entry_sha256,
         context_ref=planning.context_ref,
         planner_payload_sha256=planning.planner_payload_sha256,
+        task_memory_snapshot_sha256=planning.task_memory_snapshot_sha256,
+        task_memory_refs=planning.task_memory_refs,
         response_sha256=provider.evidence.response_sha256,
         envelope=public_envelope,
         proposal=(

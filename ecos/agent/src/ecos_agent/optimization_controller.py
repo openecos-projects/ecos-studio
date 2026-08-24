@@ -62,6 +62,7 @@ from ecos_agent.optimization_ledger import (
 )
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization_rules import legal_actions, select_requested_value
+from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -143,6 +144,7 @@ class OptimizationPlanningContext:
     current_values: Mapping[str, bool | int | float] | None = None
     legal_actions: tuple[LegalAction, ...] = ()
     objective: OptimizationObjectiveContract | None = None
+    task_memory: OptimizationTaskMemorySnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +193,8 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
     if context.current_values is not None:
         payload["current_values"] = dict(sorted(context.current_values.items()))
     payload["legal_actions"] = [item.model_dump(mode="json") for item in context.legal_actions]
+    if context.task_memory is not None:
+        payload["task_memory"] = context.task_memory.model_dump(mode="json")
     return payload
 
 
@@ -256,6 +260,9 @@ class _PersistedEpisodeState(BaseModel):
     pending_intervention_id: str | None = None
     pending_execution_id: str | None = None
     cancel_requested: bool = False
+    task_memory_scope_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     state_sha256: str
 
     @model_validator(mode="after")
@@ -264,6 +271,10 @@ class _PersistedEpisodeState(BaseModel):
             self.parent_manifest_sha256
         ):
             raise ValueError("parent manifest hash is invalid")
+        if self.task_memory_scope_sha256 is not None and not _SHA256.fullmatch(
+            self.task_memory_scope_sha256
+        ):
+            raise ValueError("task memory scope hash is invalid")
         if self.state_sha256 != canonical_sha256(self.model_dump(mode="json", exclude={"state_sha256"})):
             raise ValueError("state hash is invalid")
         return self
@@ -286,6 +297,8 @@ class OptimizationEpisodeController:
         incumbent: TerminalObservation | None = None,
         parent_manifest_sha256: str | None = None,
         objective: OptimizationObjectiveContract | None = None,
+        task_memory_scope_sha256: str | None = None,
+        task_memory_supplier: Callable[[], OptimizationTaskMemorySnapshot] | None = None,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -309,6 +322,12 @@ class OptimizationEpisodeController:
         if parent_manifest_sha256 is not None and not _SHA256.fullmatch(parent_manifest_sha256):
             raise OptimizationEpisodeControllerError("parent manifest hash is invalid")
         self._parent_manifest_sha256 = parent_manifest_sha256
+        if task_memory_scope_sha256 is not None and not _SHA256.fullmatch(
+            task_memory_scope_sha256
+        ):
+            raise OptimizationEpisodeControllerError("task memory scope hash is invalid")
+        self._task_memory_scope_sha256 = task_memory_scope_sha256
+        self._task_memory_supplier = task_memory_supplier
         self._state = OptimizationEpisodeState.CREATED
         self._proposal: OptimizationProposal | None = None
         self._requested: RequestedKnobValue | None = None
@@ -366,6 +385,10 @@ class OptimizationEpisodeController:
         return self._parent_manifest_sha256
 
     @property
+    def task_memory_scope_sha256(self) -> str | None:
+        return self._task_memory_scope_sha256
+
+    @property
     def state_path(self) -> Path:
         return self.ledger.root / _STATE_FILE
 
@@ -395,6 +418,16 @@ class OptimizationEpisodeController:
             budget_snapshot=self._budget,
             incumbent=self._incumbent,
             planner_payload_sha256=canonical_sha256(planning_context_payload(context)),
+            task_memory_snapshot_sha256=(
+                context.task_memory.snapshot_sha256
+                if context.task_memory is not None
+                else None
+            ),
+            task_memory_refs=(
+                tuple(item.reference for item in context.task_memory.summaries)
+                if context.task_memory is not None
+                else ()
+            ),
         )
         self._persist()
         try:
@@ -571,6 +604,8 @@ class OptimizationEpisodeController:
         executor: OptimizationExecutionAdapter,
         ledger: OptimizationLedger,
         clock: Callable[[], float],
+        task_memory_scope_sha256: str | None = None,
+        task_memory_supplier: Callable[[], OptimizationTaskMemorySnapshot] | None = None,
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
         if not path.is_file() and any(
@@ -597,6 +632,10 @@ class OptimizationEpisodeController:
             provider_audit_replay,
             decision_audit_replay,
         )
+        if snapshot.task_memory_scope_sha256 != task_memory_scope_sha256:
+            raise OptimizationEpisodeControllerError(
+                "task memory scope does not match the recovered episode"
+            )
 
         controller = cls.__new__(cls)
         controller.episode_id = snapshot.episode_id
@@ -611,6 +650,8 @@ class OptimizationEpisodeController:
         controller._incumbent = snapshot.incumbent
         controller._objective = snapshot.objective
         controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
+        controller._task_memory_scope_sha256 = snapshot.task_memory_scope_sha256
+        controller._task_memory_supplier = task_memory_supplier
         controller._planning_audit = planning_audit
         controller._planning_provider_audit = planning_provider_audit
         controller._decision_audit = decision_audit
@@ -642,6 +683,25 @@ class OptimizationEpisodeController:
         current_values: Mapping[str, bool | int | float],
     ) -> OptimizationPlanningContext:
         history = self._history()
+        task_memory = (
+            self._task_memory_supplier()
+            if self._task_memory_supplier is not None
+            else None
+        )
+        if task_memory is not None and (
+            not isinstance(task_memory, OptimizationTaskMemorySnapshot)
+            or task_memory.scope.scope_sha256 != self._task_memory_scope_sha256
+            or task_memory.scope.episode_id != self.episode_id
+            or task_memory.scope.checkpoint_id != self.checkpoint_id
+            or (
+                self._objective is not None
+                and task_memory.scope.objective_contract_sha256
+                != self._objective.contract_sha256
+            )
+        ):
+            raise OptimizationEpisodeControllerError(
+                "task memory snapshot does not match the episode"
+            )
         available_actions = legal_actions(
             current_values=current_values,
             attempted=self._attempted_requests(),
@@ -697,6 +757,11 @@ class OptimizationEpisodeController:
                         }
                         for item in history
                     ],
+                    "task_memory": (
+                        task_memory.model_dump(mode="json")
+                        if task_memory is not None
+                        else None
+                    ),
                 }
             ),
         )
@@ -712,6 +777,7 @@ class OptimizationEpisodeController:
             dict(current_values),
             available_actions,
             self._objective,
+            task_memory,
         )
 
     def _parse_proposal(self, payload: object) -> OptimizationProposal:
@@ -736,6 +802,19 @@ class OptimizationEpisodeController:
             return "no_knowledge_reference"
         if not proposed_knowledge.issubset(available_knowledge):
             return "knowledge_reference"
+        proposed_memory = {
+            item.summary_sha256 for item in proposal.task_memory_refs
+        }
+        available_memory = (
+            {
+                item.reference.summary_sha256
+                for item in context.task_memory.summaries
+            }
+            if context.task_memory is not None
+            else set()
+        )
+        if not proposed_memory.issubset(available_memory):
+            return "task_memory_reference"
         if proposal.decision == OptimizationDecision.PROPOSE:
             if self.mode == OptimizationAgentMode.FULL_AGENT and not proposed_knowledge:
                 return "knowledge_reference"
@@ -1134,6 +1213,8 @@ class OptimizationEpisodeController:
             "pending_execution_id": self._pending_execution_id,
             "cancel_requested": self._cancel_requested,
         }
+        if self._task_memory_scope_sha256 is not None:
+            value["task_memory_scope_sha256"] = self._task_memory_scope_sha256
         value["state_sha256"] = canonical_sha256(value)
         _PersistedEpisodeState.model_validate(value)
         _write_json_atomic(self.state_path, value)
