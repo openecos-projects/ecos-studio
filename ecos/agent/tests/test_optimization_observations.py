@@ -212,6 +212,20 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert observation.eligible_for_incumbent is True
 
 
+def test_terminal_observation_maps_blocked_ecc_checklist_to_failed_gate(
+    frozen_workspace: Path,
+) -> None:
+    path = frozen_workspace / "lvs_ecc/checklist.json"
+    payload = _checklist(("quality.lvs.clean", "failed"))
+    payload["status"] = "blocked"
+    _write_json(path, payload)
+
+    observation = build_terminal_observation(frozen_workspace)
+
+    assert observation.signoff_gates.lvs_clean.value == "fail"
+    assert observation.eligible_for_incumbent is False
+
+
 @pytest.mark.parametrize("metric_id", [metric.value for metric in TimingMetric])
 def test_terminal_observation_requires_each_timing_guardrail_metric(
     frozen_workspace: Path, metric_id: str

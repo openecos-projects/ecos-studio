@@ -322,7 +322,9 @@ def _harden_output_paths(parameters: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def _checklist_gate(payload: dict[str, Any], gate_id: str) -> GateResult:
-    if payload.get("status") != "ready" or not isinstance(payload.get("checklist"), list):
+    if payload.get("status") not in {"ready", "blocked"} or not isinstance(
+        payload.get("checklist"), list
+    ):
         raise OptimizationObservationError("workspace signoff checklist is invalid")
     matches = [item for item in payload["checklist"] if isinstance(item, dict) and item.get("id") == gate_id]
     if len(matches) != 1:
@@ -330,7 +332,7 @@ def _checklist_gate(payload: dict[str, Any], gate_id: str) -> GateResult:
     state = matches[0].get("state")
     if state == "pass":
         return GateResult.PASS
-    if state in {"fail", "blocked"}:
+    if state in {"fail", "failed", "blocked"}:
         return GateResult.FAIL
     return GateResult.UNAVAILABLE
 

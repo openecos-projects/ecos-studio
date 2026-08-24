@@ -1,0 +1,95 @@
+{
+  "schema_version": "ecos.optimization_gate0_config.v1",
+  "pdk_root": "../../../../pdk/icsprout55-pdk",
+  "default_replays": 3,
+  "terminal_timeout_seconds": 900,
+  "baseline": {
+    "frequency_mhz": 50,
+    "max_fanout": 32,
+    "utilitization": 0.4,
+    "target_density": 0.2,
+    "target_overflow": 0.1,
+    "cell_padding_sites": 2,
+    "routability_opt": true
+  },
+  "probes": [
+    {
+      "probe_id": "density-decrease",
+      "knob_id": "place.target_density",
+      "delta": -0.05
+    },
+    {
+      "probe_id": "density-increase",
+      "knob_id": "place.target_density",
+      "delta": 0.05
+    },
+    {
+      "probe_id": "padding-decrease",
+      "knob_id": "place.cell_padding_x",
+      "delta": -1
+    },
+    {
+      "probe_id": "padding-increase",
+      "knob_id": "place.cell_padding_x",
+      "delta": 1
+    },
+    {
+      "probe_id": "routability-toggle",
+      "knob_id": "place.routability_opt",
+      "delta": null
+    }
+  ],
+  "designs": [
+    {
+      "design_id": "gcd",
+      "top_module": "gcd",
+      "clock_name": "clk",
+      "rtl": {
+        "path": "designs/gcd/rtl/gcd.v",
+        "sha256": "sha256:b4bd14574f723adb907d70efac29b19cf78c4df58b734bfede3286c4d0800c0e"
+      },
+      "filelist": {
+        "path": "designs/gcd/filelist.f",
+        "sha256": "sha256:55b8e7e0821080f90bc534416f324133f7203459d02ad00e4cf7168d1e112fa5"
+      },
+      "sdc": {
+        "path": "designs/gcd/gcd.sdc",
+        "sha256": "sha256:762eb16c28aa1b7d438ec4c8078126c32008a995a63dc92c9009de54a9efdb6a"
+      }
+    },
+    {
+      "design_id": "cia",
+      "top_module": "cia",
+      "clock_name": "E_CLK",
+      "rtl": {
+        "path": "designs/cia/rtl/cia.v",
+        "sha256": "sha256:1816497f85e54953c0b39b851d122459aaeaa891976722f70e465f33868f096e"
+      },
+      "filelist": {
+        "path": "designs/cia/filelist.f",
+        "sha256": "sha256:f54264d93a3af06d59024a507df9802d96888ca1f73523d58fb72cc26122909b"
+      },
+      "sdc": {
+        "path": "designs/cia/cia.sdc",
+        "sha256": "sha256:42f042db0af7f76c44a980c79c7a2e86795cc19a823b76c26381c3b7b0d2fae8"
+      }
+    },
+    {
+      "design_id": "i2c",
+      "top_module": "i2c",
+      "clock_name": "wb_clk_i",
+      "rtl": {
+        "path": "designs/i2c/rtl/i2c.v",
+        "sha256": "sha256:5a4e34b1fa2de6c638990eac0a583f6c0222a1d50a6d8362dfb97001cd7fbd3f"
+      },
+      "filelist": {
+        "path": "designs/i2c/filelist.f",
+        "sha256": "sha256:3dd570ff5b76a16b5fecbaa94171a54fe9e7d94638d2ddb9b2c4aad23498a357"
+      },
+      "sdc": {
+        "path": "designs/i2c/i2c.sdc",
+        "sha256": "sha256:3f6516f07af03407fd0db3ccc93680b86b80fd8cff3e306df6c2020613742d1a"
+      }
+    }
+  ]
+}
