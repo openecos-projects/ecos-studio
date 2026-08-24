@@ -297,7 +297,7 @@ def test_knob_receipt_rejects_a_mismatched_runtime_knob() -> None:
         )
 
 
-def test_coordinate_search_selects_nearest_untried_density_value() -> None:
+def test_coordinate_search_bisects_the_largest_unexplored_density_interval() -> None:
     selection = next_coordinate_selection(
         current_values={
             "place.target_density": 0.47,
@@ -308,11 +308,11 @@ def test_coordinate_search_selects_nearest_untried_density_value() -> None:
     )
 
     assert selection is not None
-    assert selection.requested == RequestedKnobValue(knob_id="place.target_density", value=0.45)
+    assert selection.requested == RequestedKnobValue(knob_id="place.target_density", value=0.3)
     assert selection.next_action_index == 1
 
 
-def test_coordinate_search_skips_attempted_and_known_aliases_without_reordering() -> None:
+def test_coordinate_search_uses_attempted_and_alias_values_to_refine_the_interval() -> None:
     selection = next_coordinate_selection(
         current_values={
             "place.target_density": 0.5,
@@ -324,7 +324,7 @@ def test_coordinate_search_skips_attempted_and_known_aliases_without_reordering(
     )
 
     assert selection is not None
-    assert selection.requested == RequestedKnobValue(knob_id="place.target_density", value=0.35)
+    assert selection.requested == RequestedKnobValue(knob_id="place.target_density", value=0.25)
     assert selection.next_action_index == 1
 
 
