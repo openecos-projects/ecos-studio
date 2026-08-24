@@ -58,23 +58,6 @@
       }
     },
     {
-      "design_id": "cia",
-      "top_module": "cia",
-      "clock_name": "E_CLK",
-      "rtl": {
-        "path": "designs/cia/rtl/cia.v",
-        "sha256": "sha256:1816497f85e54953c0b39b851d122459aaeaa891976722f70e465f33868f096e"
-      },
-      "filelist": {
-        "path": "designs/cia/filelist.f",
-        "sha256": "sha256:f54264d93a3af06d59024a507df9802d96888ca1f73523d58fb72cc26122909b"
-      },
-      "sdc": {
-        "path": "designs/cia/cia.sdc",
-        "sha256": "sha256:42f042db0af7f76c44a980c79c7a2e86795cc19a823b76c26381c3b7b0d2fae8"
-      }
-    },
-    {
       "design_id": "i2c",
       "top_module": "i2c",
       "clock_name": "wb_clk_i",

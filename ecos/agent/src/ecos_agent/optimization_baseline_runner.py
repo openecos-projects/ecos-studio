@@ -1,0 +1,586 @@
+"""Run the frozen non-LLM baseline pilot on canonical gcd/i2c workspaces."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Mapping, Sequence
+
+from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.optimization_baselines import (
+    ONLINE_BASELINE_METHODS,
+    BaselineMethod,
+    BaselineSelection,
+    rule_guided_policy_manifest,
+    select_baseline_candidate,
+)
+from ecos_agent.optimization_contracts import (
+    ObjectiveMetric,
+    OptimizationKnob,
+    RequestedKnobValue,
+    StrategyDirection,
+    TerminalObservation,
+    TimingMetric,
+)
+from ecos_agent.optimization_ecc_adapter import EccContentLengthRpcClient
+from ecos_agent.optimization_gate0 import (
+    Gate0Config,
+    Gate0Design,
+    PilotCandidateExecutionError,
+    compare_observations,
+    load_gate0_config,
+    noise_profile,
+    readiness_report,
+    run_pilot_candidate,
+)
+from ecos_agent.optimization_ledger import OptimizationOutcomeKind
+from ecos_agent.optimization_observations import build_terminal_observation
+
+_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+_PILOT_DESIGNS = frozenset({"gcd", "i2c"})
+_CANDIDATE_LIMIT = 6
+_DEFAULT_SEED = 20260824
+
+
+class BaselineRunnerError(RuntimeError):
+    """The baseline pilot cannot produce complete comparable evidence."""
+
+
+@dataclass(frozen=True)
+class BaselineCandidateExecution:
+    observation: TerminalObservation
+    candidate_root_ref: str
+
+
+@dataclass(frozen=True)
+class BaselineCandidateFailure:
+    execution_id: str
+    outcome: OptimizationOutcomeKind | None
+
+
+CandidateExecutor = Callable[
+    [int, BaselineSelection, str | None, TerminalObservation],
+    BaselineCandidateExecution | BaselineCandidateFailure,
+]
+
+
+def evaluate_online_method(
+    method: BaselineMethod,
+    *,
+    design_id: str,
+    baseline: TerminalObservation,
+    current_values: Mapping[str, bool | int | float],
+    epsilon: Mapping[str, float],
+    random_seed: int,
+    execute: CandidateExecutor,
+) -> dict[str, object]:
+    """Evaluate six side-effect-accounted actions with incumbent-only promotion."""
+    method = BaselineMethod(method)
+    if method not in ONLINE_BASELINE_METHODS:
+        raise BaselineRunnerError("baseline method is not online")
+    values = dict(current_values)
+    attempted: list[RequestedKnobValue] = []
+    rows: list[dict[str, object]] = []
+    incumbent = baseline
+    parent_candidate_root_ref = None
+    coordinate_index = 0
+    first_improvement = None
+    success = False
+    failures = 0
+    started = time.monotonic()
+    for turn_index in range(_CANDIDATE_LIMIT):
+        selection = select_baseline_candidate(
+            method,
+            design_id=design_id,
+            turn_index=turn_index,
+            coordinate_index=coordinate_index,
+            random_seed=random_seed,
+            current_values=values,
+            attempted=attempted,
+            incumbent=incumbent,
+        )
+        if selection is None:
+            raise BaselineRunnerError("baseline exhausted legal candidates before six attempts")
+        coordinate_index = selection.next_coordinate_index
+        attempted.append(selection.requested)
+        row = _selection_row(turn_index + 1, selection, parent_candidate_root_ref)
+        execution = execute(turn_index + 1, selection, parent_candidate_root_ref, incumbent)
+        if isinstance(execution, BaselineCandidateFailure):
+            failures += 1
+            row.update(
+                comparison=(
+                    execution.outcome.value
+                    if execution.outcome is not None
+                    else OptimizationOutcomeKind.INDETERMINATE.value
+                ),
+                execution_id=execution.execution_id,
+            )
+        else:
+            comparison = compare_observations(
+                _terminal_metrics(incumbent), execution.observation, epsilon
+            )
+            row["comparison"] = comparison
+            row["candidate_root_ref"] = execution.candidate_root_ref
+            if comparison == "better":
+                success = True
+                first_improvement = first_improvement or turn_index + 1
+                incumbent = execution.observation
+                parent_candidate_root_ref = execution.candidate_root_ref
+                values[selection.requested.knob_id.value] = selection.requested.value
+        row["success_by_candidate"] = success
+        rows.append(row)
+    return {
+        "schema_version": "ecos.optimization_baseline_method.v1",
+        "method": method.value,
+        "design_id": design_id,
+        "candidate_count": len(rows),
+        "failed_candidate_count": failures,
+        "first_improvement_candidate_index": first_improvement,
+        "lex_success_at_6": success,
+        "success_at_k": {
+            str(row["candidate_index"]): row["success_by_candidate"] for row in rows
+        },
+        "planning_call_count": 0,
+        "wall_time_seconds": time.monotonic() - started,
+        "random_seed": random_seed if method == BaselineMethod.RANDOM_ACTION else None,
+        "candidates": rows,
+        "best_terminal_observation": incumbent.model_dump(mode="json"),
+    }
+
+
+def run_baseline_pilot(
+    config_path: Path,
+    results_root: Path,
+    *,
+    run_id: str,
+    workspaces: Mapping[str, Path],
+    random_seed: int = _DEFAULT_SEED,
+) -> dict[str, object]:
+    if not _ID.fullmatch(run_id):
+        raise BaselineRunnerError("baseline run id is invalid")
+    config_path = Path(config_path).resolve()
+    config = load_gate0_config(config_path)
+    _validate_scope(config, workspaces, random_seed)
+    readiness = readiness_report(config_path)
+    designs = {item.design_id: item for item in config.designs}
+    workspace_bindings = {
+        design_id: _workspace_binding(
+            config, designs[design_id], Path(workspace), readiness
+        )
+        for design_id, workspace in sorted(workspaces.items())
+    }
+    run_root = Path(results_root).resolve() / run_id
+    if run_root.exists():
+        raise BaselineRunnerError("baseline run directory already exists")
+    run_root.mkdir(parents=True)
+    _write_json(run_root / "run-manifest.v1.json", {
+        "schema_version": "ecos.optimization_baseline_run.v1",
+        "run_id": run_id,
+        "config_sha256": readiness["config_sha256"],
+        "designs": sorted(workspaces),
+        "methods": [BaselineMethod.DEFAULT, *ONLINE_BASELINE_METHODS],
+        "candidate_execution_limit": _CANDIDATE_LIMIT,
+        "random_seed": random_seed,
+        "workspaces": {key: str(Path(value).resolve()) for key, value in sorted(workspaces.items())},
+        "workspace_bindings": workspace_bindings,
+        "policies": {
+            BaselineMethod.RULE_GUIDED_DIRECTION.value: rule_guided_policy_manifest(),
+        },
+        "readiness": readiness,
+    })
+    summaries = {}
+    try:
+        for design_id in sorted(workspaces):
+            summaries[design_id] = _run_design(
+                config,
+                design_id,
+                Path(workspaces[design_id]),
+                run_root / design_id,
+                readiness,
+                run_id,
+                random_seed,
+            )
+    except KeyboardInterrupt:
+        _write_json(run_root / "interrupted.v1.json", {
+            "schema_version": "ecos.optimization_baseline_interruption.v1",
+            "message": "baseline pilot interrupted before completion",
+        })
+        raise
+    except Exception as exc:
+        _write_json(run_root / "failure.v1.json", {
+            "error_type": type(exc).__name__,
+            "message": "baseline pilot execution failed",
+        })
+        raise
+    summary = {
+        "schema_version": "ecos.optimization_baseline_summary.v1",
+        "run_id": run_id,
+        "designs": summaries,
+    }
+    _write_json(run_root / "baseline-summary.v1.json", summary)
+    return summary
+
+
+def _run_design(
+    config: Gate0Config,
+    design_id: str,
+    workspace: Path,
+    output: Path,
+    readiness: Mapping[str, object],
+    run_id: str,
+    random_seed: int,
+) -> dict[str, object]:
+    workspace = _canonical_workspace(workspace)
+    output.mkdir()
+    baseline = build_terminal_observation(workspace)
+    if not baseline.eligible_for_incumbent:
+        raise BaselineRunnerError("baseline workspace is not terminal eligible")
+    client = EccContentLengthRpcClient(
+        Path(readiness["ecc"]["executable"]), response_timeout_seconds=30  # type: ignore[index]
+    )
+    try:
+        workspace_id = client.open_workspace(workspace)
+        defaults = _default_replays(
+            client, workspace_id, workspace, output, config, readiness, run_id, design_id, baseline
+        )
+        profile = noise_profile(defaults)
+        methods = {
+            BaselineMethod.DEFAULT.value: _default_summary(design_id, baseline, profile)
+        }
+        for method in ONLINE_BASELINE_METHODS:
+            methods[method.value] = _run_online_method(
+                method,
+                client,
+                workspace_id,
+                workspace,
+                output / method.value,
+                config,
+                readiness,
+                run_id,
+                design_id,
+                baseline,
+                profile["epsilon"],
+                random_seed,
+            )
+    finally:
+        client.close()
+    summary = {"design_id": design_id, "noise_profile": profile, "methods": methods}
+    _write_json(output / "design-summary.v1.json", summary)
+    return summary
+
+
+def _default_replays(
+    client: EccContentLengthRpcClient,
+    workspace_id: str,
+    workspace: Path,
+    output: Path,
+    config: Gate0Config,
+    readiness: Mapping[str, object],
+    run_id: str,
+    design_id: str,
+    baseline: TerminalObservation,
+) -> tuple[TerminalObservation, ...]:
+    results = []
+    (output / "calibration").mkdir()
+    for index in range(1, config.default_replays + 1):
+        result = run_pilot_candidate(
+            client,
+            workspace_id,
+            workspace,
+            int(readiness["pdk"]["site_width_dbu"]),  # type: ignore[index]
+            baseline,
+            RequestedKnobValue(
+                knob_id=OptimizationKnob.TARGET_DENSITY,
+                value=config.baseline.target_density,
+            ),
+            StrategyDirection.INCREASE,
+            f"calibration-{index}",
+            output / "calibration" / f"default-replay-{index}",
+            readiness["config_sha256"],
+            float(config.terminal_timeout_seconds),
+            episode_id=_episode_id(run_id, design_id, "calibration"),
+            rationale_summary="Execute one frozen default replay for baseline noise calibration.",
+        )
+        results.append(result.observation)
+    return tuple(results)
+
+
+def _run_online_method(
+    method: BaselineMethod,
+    client: EccContentLengthRpcClient,
+    workspace_id: str,
+    workspace: Path,
+    output: Path,
+    config: Gate0Config,
+    readiness: Mapping[str, object],
+    run_id: str,
+    design_id: str,
+    baseline: TerminalObservation,
+    epsilon: Mapping[str, float],
+    random_seed: int,
+) -> dict[str, object]:
+    output.mkdir()
+
+    def execute(
+        index: int,
+        selection: BaselineSelection,
+        parent_candidate_root_ref: str | None,
+        incumbent: TerminalObservation,
+    ) -> BaselineCandidateExecution | BaselineCandidateFailure:
+        candidate_output = output / f"candidate-{index}"
+        _write_json(output / f"decision-{index}.v1.json", _selection_row(
+            index, selection, parent_candidate_root_ref
+        ))
+        try:
+            result = run_pilot_candidate(
+                client,
+                workspace_id,
+                workspace,
+                int(readiness["pdk"]["site_width_dbu"]),  # type: ignore[index]
+                incumbent,
+                selection.requested,
+                selection.action.direction,
+                f"{method.value}-{index}",
+                candidate_output,
+                readiness["config_sha256"],
+                float(config.terminal_timeout_seconds),
+                episode_id=_episode_id(run_id, design_id, method.value),
+                parent_candidate_root_ref=parent_candidate_root_ref,
+                rationale_summary=f"Execute frozen {method.value} baseline action {index}.",
+                knowledge_refs=(selection.knowledge_ref,) if selection.knowledge_ref else (),
+            )
+        except PilotCandidateExecutionError as exc:
+            receipt = exc.receipt
+            _write_json(candidate_output / "failure.v1.json", {
+                "consumed_candidate": True,
+                "execution_id": receipt.execution_id,
+                "outcome": receipt.outcome.value if receipt.outcome is not None else None,
+            })
+            return BaselineCandidateFailure(receipt.execution_id, receipt.outcome)
+        except Exception as exc:
+            _write_json(candidate_output / "failure.v1.json", {
+                "consumed_candidate": False,
+                "error_type": type(exc).__name__,
+                "message": "candidate failed before a chargeable execution receipt",
+            })
+            raise
+        evidence = result.receipt.evidence
+        if evidence is None:
+            raise BaselineRunnerError("successful candidate evidence is missing")
+        return BaselineCandidateExecution(
+            result.observation, evidence.candidate_root_ref
+        )
+
+    summary = evaluate_online_method(
+        method,
+        design_id=design_id,
+        baseline=baseline,
+        current_values=_baseline_values(config),
+        epsilon=epsilon,
+        random_seed=random_seed,
+        execute=execute,
+    )
+    _write_json(output / "method-summary.v1.json", summary)
+    return summary
+
+
+def _default_summary(
+    design_id: str,
+    baseline: TerminalObservation,
+    profile: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "schema_version": "ecos.optimization_baseline_method.v1",
+        "method": BaselineMethod.DEFAULT.value,
+        "design_id": design_id,
+        "candidate_count": 0,
+        "planning_call_count": 0,
+        "wall_time_seconds": 0.0,
+        "noise_profile": profile,
+        "terminal_observation": baseline.model_dump(mode="json"),
+    }
+
+
+def _selection_row(
+    index: int, selection: BaselineSelection, parent_candidate_root_ref: str | None
+) -> dict[str, object]:
+    return {
+        "candidate_index": index,
+        "action": selection.action.model_dump(mode="json"),
+        "requested": selection.requested.model_dump(mode="json"),
+        "knowledge_ref": (
+            selection.knowledge_ref.model_dump(mode="json")
+            if selection.knowledge_ref is not None
+            else None
+        ),
+        "parent_candidate_root_ref": parent_candidate_root_ref,
+    }
+
+
+def _terminal_metrics(observation: TerminalObservation) -> dict[str, float]:
+    return {
+        **{metric.value: float(observation.metrics[metric]) for metric in ObjectiveMetric},
+        **{metric.value: float(observation.timing_guardrail[metric]) for metric in TimingMetric},
+    }
+
+
+def _baseline_values(config: Gate0Config) -> dict[str, bool | int | float]:
+    return {
+        OptimizationKnob.TARGET_DENSITY.value: config.baseline.target_density,
+        OptimizationKnob.CELL_PADDING_X.value: config.baseline.cell_padding_sites,
+        OptimizationKnob.ROUTABILITY_OPT.value: config.baseline.routability_opt,
+    }
+
+
+def _validate_scope(
+    config: Gate0Config, workspaces: Mapping[str, Path], random_seed: int
+) -> None:
+    if {item.design_id for item in config.designs} != _PILOT_DESIGNS:
+        raise BaselineRunnerError("baseline pilot config must contain only gcd and i2c")
+    if set(workspaces) != _PILOT_DESIGNS:
+        raise BaselineRunnerError("baseline pilot requires gcd and i2c workspaces")
+    if type(random_seed) is not int:
+        raise BaselineRunnerError("baseline random seed is invalid")
+
+
+def _canonical_workspace(path: Path) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute() or candidate.is_symlink() or not candidate.is_dir():
+        raise BaselineRunnerError("canonical workspace is unavailable")
+    return candidate.resolve()
+
+
+def _workspace_binding(
+    config: Gate0Config,
+    design: Gate0Design,
+    path: Path,
+    readiness: Mapping[str, object],
+) -> dict[str, object]:
+    workspace = _canonical_workspace(path)
+    snapshots = {
+        "rtl": _workspace_file(workspace, Path("origin/rtl") / Path(design.rtl.path).name),
+        "filelist": _workspace_file(workspace, Path("origin/filelist.f")),
+        "sdc": _workspace_file(workspace, Path("origin") / Path(design.sdc.path).name),
+    }
+    expected_hashes = {
+        key: getattr(design, key).sha256 for key in ("rtl", "filelist", "sdc")
+    }
+    for key, snapshot in snapshots.items():
+        if file_sha256(snapshot) != expected_hashes[key]:
+            raise BaselineRunnerError(f"{design.design_id} workspace {key} snapshot does not match")
+    parameters_path = _workspace_file(workspace, Path("home/parameters.json"))
+    flow_path = _workspace_file(workspace, Path("home/flow.json"))
+    try:
+        parameters = json.loads(parameters_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BaselineRunnerError("workspace parameters are invalid") from exc
+    baseline = config.baseline
+    site_width = int(readiness["pdk"]["site_width_dbu"])  # type: ignore[index]
+    expected_parameters = {
+        "Design": design.design_id,
+        "Top module": design.top_module,
+        "Clock": design.clock_name,
+        "Frequency max [MHz]": baseline.frequency_mhz,
+        "Max fanout": baseline.max_fanout,
+        "Target density": baseline.target_density,
+        "Target overflow": baseline.target_overflow,
+        "Cell padding x": baseline.cell_padding_sites * site_width,
+        "Routability opt flag": int(baseline.routability_opt),
+    }
+    if not isinstance(parameters, dict) or any(
+        parameters.get(key) != value for key, value in expected_parameters.items()
+    ):
+        raise BaselineRunnerError(f"{design.design_id} workspace parameters do not match")
+    core = parameters.get("Core")
+    if not isinstance(core, dict) or core.get("Utilitization") != baseline.utilitization:
+        raise BaselineRunnerError(f"{design.design_id} workspace utilization does not match")
+    if parameters.get("PDK Root") != readiness["pdk"]["root"]:  # type: ignore[index]
+        raise BaselineRunnerError(f"{design.design_id} workspace PDK does not match")
+    observation = build_terminal_observation(workspace)
+    if not observation.eligible_for_incumbent:
+        raise BaselineRunnerError(f"{design.design_id} workspace is not terminal eligible")
+    return {
+        "design_id": design.design_id,
+        "workspace": str(workspace),
+        "input_sha256": expected_hashes,
+        "parameters_sha256": file_sha256(parameters_path),
+        "flow_sha256": file_sha256(flow_path),
+        "terminal_evidence_manifest_sha256": observation.evidence_manifest_sha256,
+    }
+
+
+def _workspace_file(workspace: Path, relative_path: Path) -> Path:
+    candidate = workspace / relative_path
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(workspace)
+    except (OSError, ValueError) as exc:
+        raise BaselineRunnerError("workspace evidence is unavailable or unsafe") from exc
+    if candidate.is_symlink() or not resolved.is_file():
+        raise BaselineRunnerError("workspace evidence is unavailable or unsafe")
+    return resolved
+
+
+def _episode_id(run_id: str, design_id: str, method: str) -> str:
+    suffix = canonical_sha256(run_id)[7:15]
+    return f"baseline-{design_id}-{method}-{suffix}"
+
+
+def _write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _workspace_argument(value: str) -> tuple[str, Path]:
+    design_id, separator, raw_path = value.partition("=")
+    if not separator or design_id not in _PILOT_DESIGNS or not raw_path:
+        raise argparse.ArgumentTypeError("workspace must be gcd=/absolute/path or i2c=/absolute/path")
+    return design_id, Path(raw_path)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    agent_root = Path(__file__).resolve().parents[2]
+    parser = argparse.ArgumentParser(description="Run gcd/i2c non-LLM optimization baselines")
+    parser.add_argument("--config", type=Path, default=agent_root / "experiments/pilot/pilot.v1.json")
+    parser.add_argument("--results-root", type=Path, default=agent_root / "experiments/pilot/results")
+    parser.add_argument("--run-id", default=time.strftime("baseline-%Y%m%dT%H%M%S", time.gmtime()))
+    parser.add_argument("--random-seed", type=int, default=_DEFAULT_SEED)
+    parser.add_argument("--workspace", action="append", type=_workspace_argument, required=True)
+    args = parser.parse_args(argv)
+    workspaces = dict(args.workspace)
+    if len(workspaces) != len(args.workspace):
+        parser.error("workspace design ids must be unique")
+    try:
+        summary = run_baseline_pilot(
+            args.config,
+            args.results_root,
+            run_id=args.run_id,
+            workspaces=workspaces,
+            random_seed=args.random_seed,
+        )
+    except KeyboardInterrupt:
+        print("Baseline pilot interrupted before completion.", file=sys.stderr)
+        return 130
+    except (BaselineRunnerError, OSError, ValueError) as exc:
+        print(f"Baseline pilot failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps({
+        design_id: {
+            method: result.get("lex_success_at_6")
+            for method, result in design["methods"].items()
+            if method != BaselineMethod.DEFAULT.value
+        }
+        for design_id, design in summary["designs"].items()
+    }, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

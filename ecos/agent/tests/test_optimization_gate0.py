@@ -5,12 +5,14 @@ from pathlib import Path
 
 import pytest
 
+import ecos_agent.optimization_gate0 as gate0
 from ecos_agent.optimization_contracts import (
     GateResult,
     ObjectiveMetric,
     OptimizationKnob,
     RequestedKnobValue,
     SignoffGates,
+    StrategyDirection,
     TerminalObservation,
     TimingMetric,
 )
@@ -20,6 +22,7 @@ from ecos_agent.optimization_controller import (
 )
 from ecos_agent.optimization_gate0 import (
     Gate0Error,
+    PilotCandidateExecutionError,
     build_materialization_application_receipt,
     compare_observations,
     load_gate0_config,
@@ -27,6 +30,7 @@ from ecos_agent.optimization_gate0 import (
     qualify_design,
     qualify_pool,
     require_terminal_receipt,
+    run_pilot_candidate,
 )
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
@@ -206,6 +210,54 @@ def test_candidate_receipt_fails_closed_without_bound_terminal_evidence() -> Non
 
     with pytest.raises(Gate0Error, match="application receipt"):
         require_terminal_receipt(receipt)
+
+
+def test_failed_candidate_records_parent_and_chargeable_receipt(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class FailedAdapter:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self, _request):
+            return CandidateExecutionReceipt(
+                execution_id="execution-1",
+                started=True,
+                outcome=OptimizationOutcomeKind.EXECUTION_FAILED,
+            )
+
+    monkeypatch.setattr(gate0, "EccCandidateRerunAdapter", FailedAdapter)
+    output = tmp_path / "candidate"
+    parent_ref = ".agent/candidates/incumbent-1"
+
+    with pytest.raises(PilotCandidateExecutionError):
+        run_pilot_candidate(
+            object(),
+            "workspace-1",
+            tmp_path,
+            200,
+            _terminal(10, 5, 100),
+            RequestedKnobValue(knob_id="place.target_density", value=0.15),
+            StrategyDirection.DECREASE,
+            "candidate-1",
+            output,
+            HASH,
+            60,
+            parent_candidate_root_ref=parent_ref,
+        )
+
+    request = json.loads(
+        (output / "candidate-request.v1.json").read_text(encoding="utf-8")
+    )
+    receipt = json.loads(
+        (output / "execution-receipt.v1.json").read_text(encoding="utf-8")
+    )
+    assert request["parent_candidate_root_ref"] == parent_ref
+    assert receipt == {
+        "execution_id": "execution-1",
+        "outcome": "execution_failed",
+        "started": True,
+    }
 
 
 def test_materialization_receipt_binds_requested_and_written_value(tmp_path: Path) -> None:

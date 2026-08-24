@@ -10,7 +10,7 @@ import statistics
 import subprocess
 import sys
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Mapping, Sequence
 
@@ -25,6 +25,7 @@ from ecos_agent.optimization_contracts import (
     EpisodeBudget,
     ExpectedEffectDirection,
     KnobApplicationReceipt,
+    KnowledgeReference,
     ObjectiveMetric,
     ObservationReference,
     OptimizationDecision,
@@ -70,6 +71,20 @@ _EXPECTED_PROBES = {
 
 class Gate0Error(RuntimeError):
     """The pilot cannot produce trustworthy Gate 0 evidence."""
+
+
+class PilotCandidateExecutionError(Gate0Error):
+    """A candidate consumed execution budget but did not complete successfully."""
+
+    def __init__(self, receipt: CandidateExecutionReceipt) -> None:
+        super().__init__("candidate execution did not succeed")
+        self.receipt = receipt
+
+
+@dataclass(frozen=True)
+class PilotCandidateRun:
+    observation: TerminalObservation
+    receipt: CandidateExecutionReceipt
 
 
 class _Model(BaseModel):
@@ -389,24 +404,24 @@ def _run_design(
             raise Gate0Error("canonical baseline record is invalid")
         site_width = int(readiness["pdk"]["site_width_dbu"])  # type: ignore[index]
         defaults = [
-            _run_candidate(
+            run_pilot_candidate(
                 client, workspace_id, workspace, site_width, observation,
                 RequestedKnobValue(knob_id=OptimizationKnob.TARGET_DENSITY, value=config.baseline.target_density),
                 StrategyDirection.INCREASE, f"default-replay-{index}",
                 output / f"default-replay-{index}", readiness["config_sha256"],
                 float(config.terminal_timeout_seconds),
-            )
+            ).observation
             for index in range(1, config.default_replays + 1)
         ]
         values = _baseline_values(config.baseline)
         probes = {
-            probe.probe_id: _run_candidate(
+            probe.probe_id: run_pilot_candidate(
                 client, workspace_id, workspace, site_width, observation,
                 _probe_request(probe, values),
                 _probe_direction(probe, values[probe.knob_id.value]), probe.probe_id,
                 output / probe.probe_id,
                 readiness["config_sha256"], float(config.terminal_timeout_seconds),
-            )
+            ).observation
             for probe in config.probes
         }
     finally:
@@ -499,7 +514,7 @@ class _RecordingRpc:
         return self.terminal_record
 
 
-def _run_candidate(
+def run_pilot_candidate(
     client: EccContentLengthRpcClient,
     workspace_id: str,
     workspace: Path,
@@ -511,13 +526,29 @@ def _run_candidate(
     output: Path,
     config_sha256: object,
     timeout_seconds: float,
-) -> TerminalObservation:
+    *,
+    episode_id: str = "gate0-pilot",
+    parent_candidate_root_ref: str | None = None,
+    rationale_summary: str = "Execute one frozen Gate 0 local-sensitivity probe.",
+    knowledge_refs: Sequence[KnowledgeReference] = (),
+) -> PilotCandidateRun:
     output.mkdir()
-    request = _candidate_execution_request(candidate_id, requested, direction, baseline, str(config_sha256))
+    request = _candidate_execution_request(
+        candidate_id,
+        requested,
+        direction,
+        baseline,
+        str(config_sha256),
+        episode_id=episode_id,
+        parent_candidate_root_ref=parent_candidate_root_ref,
+        rationale_summary=rationale_summary,
+        knowledge_refs=knowledge_refs,
+    )
     _write_json(output / "candidate-request.v1.json", {
         "intervention_id": request.intervention_id,
         "episode_id": request.episode_id,
         "checkpoint_id": request.checkpoint_id,
+        "parent_candidate_root_ref": request.parent_candidate_root_ref,
         "proposal": request.proposal.model_dump(mode="json"),
         "requested": request.requested.model_dump(mode="json"),
     })
@@ -551,11 +582,19 @@ def _run_candidate(
             output / "application-receipt.v1.json",
             receipt.application_receipt.model_dump(mode="json"),
         )
+    _write_json(output / "execution-receipt.v1.json", {
+        "execution_id": receipt.execution_id,
+        "started": receipt.started,
+        "outcome": receipt.outcome.value if receipt.outcome is not None else None,
+    })
+    if receipt.started and receipt.outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED:
+        _write_json(output / "runtime.v1.json", {"elapsed_seconds": time.monotonic() - started})
+        raise PilotCandidateExecutionError(receipt)
     evidence = require_terminal_receipt(receipt)
     observation = build_candidate_terminal_observation(workspace, evidence)
     _write_json(output / "terminal-observation.v1.json", observation.model_dump(mode="json"))
     _write_json(output / "runtime.v1.json", {"elapsed_seconds": time.monotonic() - started})
-    return observation
+    return PilotCandidateRun(observation, receipt)
 
 
 def _candidate_execution_request(
@@ -564,15 +603,21 @@ def _candidate_execution_request(
     direction: StrategyDirection,
     baseline: TerminalObservation,
     config_sha256: str,
+    *,
+    episode_id: str,
+    parent_candidate_root_ref: str | None,
+    rationale_summary: str,
+    knowledge_refs: Sequence[KnowledgeReference],
 ) -> CandidateExecutionRequest:
     proposal = OptimizationProposal.model_validate({
-        "context_ref": {"episode_id": "gate0-pilot", "checkpoint_id": "canonical", "input_sha256": config_sha256},
+        "context_ref": {"episode_id": episode_id, "checkpoint_id": "canonical", "input_sha256": config_sha256},
         "decision": OptimizationDecision.PROPOSE,
         "reason_code": ProposalReason.OBSERVATION,
-        "rationale_summary": "Execute one frozen Gate 0 local-sensitivity probe.",
+        "rationale_summary": rationale_summary,
         "observation_refs": [ObservationReference(
             observation_id=baseline.observation_id, sha256=baseline.evidence_manifest_sha256
         ).model_dump()],
+        "knowledge_refs": [item.model_dump(mode="json") for item in knowledge_refs],
         "action": {
             "knob_id": requested.knob_id,
             "direction": direction,
@@ -584,10 +629,11 @@ def _candidate_execution_request(
     })
     return CandidateExecutionRequest(
         intervention_id=candidate_id,
-        episode_id="gate0-pilot",
+        episode_id=episode_id,
         checkpoint_id="canonical",
         proposal=proposal,
         requested=requested,
+        parent_candidate_root_ref=parent_candidate_root_ref,
     )
 
 
