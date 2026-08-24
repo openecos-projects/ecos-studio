@@ -1,6 +1,7 @@
-import shutil
+import hashlib
 import json
 import re
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -78,6 +79,30 @@ def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path:
 def test_committed_stage_bundles_pass_generator_check() -> None:
     subprocess.run(
         ["uv", "run", "python", "scripts/build_knowledge.py", "--check"],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_generator_check_ignores_repository_revisions(tmp_path: Path) -> None:
+    output = tmp_path / "knowledge"
+    shutil.copytree(KNOWLEDGE_ROOT, output)
+    sources_path = output / "tool" / "place" / "sources.json"
+    manifest_path = sources_path.with_name("manifest.json")
+    sources = json.loads(sources_path.read_text(encoding="utf-8"))
+    sources["repositories"] = dict.fromkeys(sources["repositories"], "0" * 40)
+    data = (json.dumps(sources, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+    sources_path.write_bytes(data)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][sources_path.name] = hashlib.sha256(data).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--check", "--output", str(output)],
         cwd=AGENT_ROOT,
         check=True,
         capture_output=True,
