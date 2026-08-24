@@ -6,6 +6,7 @@ from typing import Callable
 
 import pytest
 
+from ecos_agent.codex_rpc import CodexProviderError
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
@@ -434,6 +435,32 @@ def test_controller_defers_early_stop_then_uses_local_fallback(tmp_path: Path) -
     assert first.rejection_reason == "minimum_candidates_not_met"
     assert second.state == OptimizationEpisodeState.AWAITING_EXECUTION
     assert second.requested is not None
+    assert second.rejection_reason == "controlled_coordinate_fallback"
+
+
+def test_controller_uses_local_fallback_after_codex_parse_error(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _AuditedFakeCodex(
+            lambda context: _proposal(
+                context,
+                observation_refs=[
+                    context.observation_ref.model_dump(),
+                    ObservationReference(
+                        observation_id="terminal-Harden", sha256=HASH
+                    ).model_dump(),
+                ],
+            ),
+            CodexProviderError("schema validation", failure_class="parse_error"),
+        ),
+        _FakeEcc(_started()),
+    )
+
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert first.rejection_reason == "observation_reference"
+    assert second.state == OptimizationEpisodeState.AWAITING_EXECUTION
     assert second.rejection_reason == "controlled_coordinate_fallback"
 
 

@@ -282,8 +282,9 @@ class CodexAppServerProposalProvider:
             "Return one JSON object matching ecos.optimization_proposal.v1. "
             "Choose only continue, propose, stop, or escalate. A propose decision may name exactly one "
             "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
-            "workspaces, RPC methods, or execution instructions. Reference only the supplied observation, "
-            "history, and knowledge identifiers. Local validation selects values and owns execution."
+            "workspaces, RPC methods, or execution instructions. observation_refs must contain exactly the "
+            "supplied observation_ref, not the incumbent observation. Reference only supplied history and "
+            "knowledge identifiers. Local validation selects values and owns execution."
         )
         output_schema = _optimization_proposal_output_schema()
         envelope_payload = {

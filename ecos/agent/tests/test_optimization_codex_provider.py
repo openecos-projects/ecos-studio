@@ -130,6 +130,7 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
     }
     assert "workspace" not in captured["user"]
     assert "specific parameter values" in captured["system"]
+    assert "exactly the supplied observation_ref" in captured["system"]
     schema = captured["output_schema"]
     assert schema["required"] == [
         "schema_version",

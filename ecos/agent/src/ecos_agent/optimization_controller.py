@@ -18,6 +18,7 @@ from typing import Callable, Literal, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from ecos_agent.codex_rpc import CodexProviderError
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
@@ -392,7 +393,9 @@ class OptimizationEpisodeController:
         self._persist()
         try:
             proposal = self._parse_proposal(self.planner.propose(context))
-        except (TypeError, ValidationError, ValueError):
+        except (CodexProviderError, TypeError, ValidationError, ValueError) as exc:
+            if isinstance(exc, CodexProviderError) and exc.failure_class != "parse_error":
+                raise
             self._record_planning_provider_evidence(planning_entry)
             return self._defer_or_fallback(
                 planning_entry,
