@@ -11,9 +11,6 @@ DRY_RUN=false
 REQUIRED_ENTRIES=(
   "resources/binaries/chip-viewer-native"
   "resources/binaries/ecc"
-  "resources/binaries/plocate"
-  "resources/binaries/updatedb"
-  "resources/binaries/hdl-index-libs"
   "resources/binaries/_internal/ecc_tools_bin"
   "resources/binaries/_internal/ecc_tools_bin/lib"
   "resources/binaries/_internal/ecc_tools_bin/ecc_py.cpython-311-x86_64-linux-gnu.so"
@@ -31,7 +28,7 @@ Usage: chip-viewer-appimage-smoke.sh [options]
 
 Inspect the ECOS Studio AppImage and fail if required chip viewer runtime
 payload files are missing.
-Required payload includes chip-viewer-native, ecc, plocate, updatedb,
+Required payload includes chip-viewer-native, ecc,
 and the packaged ecc_tools_bin runtime libraries.
 
 Options:

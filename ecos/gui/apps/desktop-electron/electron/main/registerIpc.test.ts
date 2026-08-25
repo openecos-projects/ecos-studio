@@ -3,7 +3,6 @@ import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
   desktopMenuEventIds,
-  type DesktopHdlDesignCandidate,
   type EccRuntimeEvent,
 } from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -228,11 +227,6 @@ function registerHandlers(
       isOpen: vi.fn(),
       open: vi.fn(),
     },
-    hdlDesignIndexService: {
-      getStatus: vi.fn(() => ({ rootCount: 1, state: 'ready' as const })),
-      query: vi.fn(async () => [] as DesktopHdlDesignCandidate[]),
-      updateRoots: vi.fn(),
-    },
   }
 
   registerIpc(
@@ -301,59 +295,6 @@ describe('registerIpc', () => {
 
     expect(Array.from(handlers.keys()).sort()).toEqual(
       Object.values(desktopApiIpcChannels).sort(),
-    )
-  })
-
-  it('bounds HDL design index queries and registers known Project roots', async () => {
-    const { handlers, services } = registerHandlers()
-    services.projectManagementReadService.readManifest.mockImplementation(
-      async (path: string) =>
-        path === '/projects/demo'
-          ? JSON.stringify({
-              design_name: 'demo',
-              root_path: path,
-              schema_version: 1,
-              workspaces: [],
-            })
-          : null,
-    )
-    services.hdlDesignIndexService.query.mockResolvedValueOnce([
-      {
-        confidence: 0.8,
-        designName: 'gcd',
-        id: 'gcd',
-        reasons: ['matched'],
-        rtlPath: '/projects/demo/gcd.v',
-      },
-    ])
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.hdlDesignIndexQuery)?.(
-        { sender: {} },
-        { designName: ' gcd ', limit: 99 },
-      ),
-    ).resolves.toEqual([expect.objectContaining({ id: 'gcd' })])
-    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
-      { sender: { id: 1 } },
-      {
-        mode: 'home',
-        projectRoot: '/projects/demo',
-        providerId: 'ecos_agent',
-        sessionId: 'home-session',
-        knownProjects: [
-          { name: 'demo', path: '/projects/demo' },
-          { name: 'unsafe', path: '/' },
-        ],
-      },
-    )
-
-    expect(services.hdlDesignIndexService.query).toHaveBeenCalledWith({
-      designName: 'gcd',
-      limit: 3,
-    })
-    expect(services.hdlDesignIndexService.updateRoots).toHaveBeenCalledWith(
-      ['/projects/demo'],
-      '/projects/demo',
     )
   })
 
@@ -852,38 +793,6 @@ describe('registerIpc', () => {
       kind: 'form',
       requestId: 'request-3',
       undo: true,
-    })
-    await expect(
-      handlers.get(desktopApiIpcChannels.agentAnswerInteraction)?.(event, {
-        ...session,
-        designBundle: { rtlPath: '/chips/gcd/gcd.v' },
-        kind: 'form',
-        requestId: 'request-invalid',
-        text: '/chips/other.v',
-      }),
-    ).resolves.toMatchObject({
-      error: { message: 'Invalid design bundle interaction answer.' },
-      ok: false,
-    })
-    await handlers.get(desktopApiIpcChannels.agentAnswerInteraction)?.(event, {
-      ...session,
-      designBundle: {
-        filelistPath: '/chips/gcd/gcd.f',
-        rtlPath: '/chips/gcd/gcd.v',
-        sdcPath: '/chips/gcd/gcd.sdc',
-      },
-      kind: 'form',
-      requestId: 'request-4',
-    })
-    expect(agentRuntimeService?.answerInteraction).toHaveBeenLastCalledWith({
-      ...session,
-      designBundle: {
-        filelistPath: '/chips/gcd/gcd.f',
-        rtlPath: '/chips/gcd/gcd.v',
-        sdcPath: '/chips/gcd/gcd.sdc',
-      },
-      kind: 'form',
-      requestId: 'request-4',
     })
     expect(agentRuntimeService?.interrupt).toHaveBeenCalledWith(session)
   })

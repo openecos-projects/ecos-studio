@@ -47,7 +47,7 @@ install-apt-deps:
 	    libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev \
 	    flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison \
 	    libhwloc-dev libcurl4-openssl-dev libtbb-dev \
-	    patchelf jq wget plocate
+	    patchelf jq wget
 
 install-tools:
 	@echo "==> Installing Node.js (LTS)..."

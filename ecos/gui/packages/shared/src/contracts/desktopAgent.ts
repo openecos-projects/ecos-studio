@@ -168,19 +168,6 @@ export type DesktopAgentInteractionAnswerRequest = DesktopAgentProviderRequest &
       }
     | {
         kind: 'form'
-        designBundle: {
-          filelistPath?: string
-          rtlPath: string
-          sdcPath?: string
-        }
-        undo?: never
-        optionId?: never
-        text?: never
-        values?: never
-      }
-    | {
-        kind: 'form'
-        designBundle?: never
         undo?: never
         optionId?: never
         text?: never

@@ -576,24 +576,7 @@ class EcosAgentProvider:
         if request.get("undo") is True:
             return self._undo_interaction(session, pending)
 
-        design_bundle = request.get("designBundle")
-        bundle_handler: Callable[[_Session, str], None] | None = None
-        if design_bundle is not None:
-            if (
-                pending["request"]["kind"] != "form"
-                or session.phase != "workspace_rtl"
-                or not isinstance(design_bundle, Mapping)
-            ):
-                raise ValueError("A design bundle is not valid for this interaction.")
-            rtl_path = design_bundle.get("rtlPath")
-            if not isinstance(rtl_path, str) or not rtl_path.strip():
-                raise ValueError("A design bundle requires an RTL path.")
-            message = rtl_path.strip()
-            bundle = dict(design_bundle)
-            bundle_handler = lambda current, _answer: self._select_design_bundle(
-                current, bundle
-            )
-        elif pending["request"]["kind"] == "form":
+        if pending["request"]["kind"] == "form":
             values = request.get("values")
             if not isinstance(values, dict):
                 raise ValueError("Form interaction values must be an object.")
@@ -660,8 +643,7 @@ class EcosAgentProvider:
                 )
             )
         else:
-            handler = bundle_handler
-
+            handler = None
         def run_answer() -> None:
             try:
                 self._run_turn(session, str(message), handler)
@@ -2260,23 +2242,6 @@ class EcosAgentProvider:
         )
         self._emit_phase_choice(session)
 
-    def _select_design_bundle(
-        self, session: _Session, bundle: Mapping[str, Any]
-    ) -> None:
-        filelist = bundle.get("filelistPath")
-        sdc = bundle.get("sdcPath")
-        if filelist is not None and not isinstance(filelist, str):
-            raise ValueError("Design bundle filelistPath must be text.")
-        if sdc is not None and not isinstance(sdc, str):
-            raise ValueError("Design bundle sdcPath must be text.")
-        session.workspace_inputs.filelist_path = optional_path(
-            filelist or "", label="Filelist path", suffixes=(".f",)
-        )
-        session.workspace_inputs.sdc_path = optional_path(
-            sdc or "", label="SDC path", suffixes=(".sdc",)
-        )
-        self._select_rtl(session, str(bundle["rtlPath"]))
-
     def _select_filelist(self, session: _Session, message: str) -> None:
         try:
             session.workspace_inputs.filelist_path = optional_path(
@@ -3092,12 +3057,13 @@ class EcosAgentProvider:
             )
         elif session.phase == "workspace_rtl":
             recommendation = _recommended_path(session, "rtl")
-            choice = recommended_path_choice(
-                session.language,
-                prompt_id,
-                recommendation,
-                field="RTL",
-            )
+            if recommendation:
+                choice = recommended_path_choice(
+                    session.language,
+                    prompt_id,
+                    recommendation,
+                    field="RTL",
+                )
         elif session.phase == "workspace_filelist":
             choice = optional_file_choice(
                 session.language,

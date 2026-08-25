@@ -69,6 +69,12 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('<details')
     expect(source).toContain('class="interaction-dock__summary"')
     expect(source).toContain('syncInteractionExpanded')
+    expect(source).not.toContain(
+      'if (requestId !== previousRequestId) interactionExpanded.value = false',
+    )
+    expect(source).toContain(
+      'if (sessionId !== previousSessionId) interactionExpanded.value = false',
+    )
     expect(source).toContain('<AgentInteractionCard')
     expect(source).toContain('@undo="undoLastInteraction"')
     expect(source).toContain('aria-label="Undo last selection"')

@@ -25,7 +25,6 @@ import type {
   DesktopAgentEvent,
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
-  DesktopHdlDesignIndexStatus,
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
 
@@ -77,15 +76,6 @@ function subscribeToDesktopEvent(
 }
 
 const desktopApi: DesktopApi = {
-  designIndex: {
-    getStatus: () => invokeDesktop(desktopApiIpcChannels.hdlDesignIndexGetStatus),
-    query: (request) => invokeDesktop(desktopApiIpcChannels.hdlDesignIndexQuery, request),
-    onStatus: (listener) =>
-      subscribeToDesktopEvent(
-        desktopApiEventChannels.hdlDesignIndexStatus,
-        (_event, payload: unknown) => listener(payload as DesktopHdlDesignIndexStatus),
-      ),
-  },
   app: {
     getVersions: () => invokeDesktop(desktopApiIpcChannels.appGetVersions),
   },

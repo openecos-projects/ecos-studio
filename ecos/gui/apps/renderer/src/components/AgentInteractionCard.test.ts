@@ -110,48 +110,4 @@ describe('AgentInteractionCard', () => {
     await wrapper.get('form').trigger('submit')
     expect(wrapper.emitted('answer')).toEqual([[{ values: { density: 0.35 } }]])
   })
-
-  it('preselects the highest ranked indexed design and submits its paths', async () => {
-    const wrapper = mount(AgentInteractionCard, {
-      props: {
-        designCandidates: [
-          {
-            confidence: 0.8,
-            designName: 'gcd',
-            id: 'gcd-design',
-            reasons: ['Matching SDC found nearby'],
-            rtlPath: '/chips/gcd/gcd.v',
-            sdcPath: '/chips/gcd/gcd.sdc',
-            topModule: 'gcd',
-          },
-        ],
-        designIndexStatus: { rootCount: 1, state: 'ready' },
-        interaction: {
-          interaction: {
-            fields: [{ id: 'value', kind: 'path', label: 'RTL path', required: true }],
-            kind: 'form',
-          },
-          kind: 'form',
-          purpose: 'execution',
-          requestId: 'rtl-form',
-          schema_version: 'flow-agent.interaction_request.v1',
-          status: 'pending',
-          title: 'RTL path',
-        },
-      },
-    })
-
-    expect(wrapper.get('input[type="radio"]').element).toMatchObject({ checked: true })
-    await wrapper.get('button[aria-label="Use selected design"]').trigger('click')
-    expect(wrapper.emitted('answer')).toEqual([
-      [
-        {
-          designBundle: {
-            rtlPath: '/chips/gcd/gcd.v',
-            sdcPath: '/chips/gcd/gcd.sdc',
-          },
-        },
-      ],
-    ])
-  })
 })

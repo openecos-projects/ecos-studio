@@ -1,7 +1,5 @@
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
-import { desktopApiEventChannels } from '@ecos-studio/shared'
 import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
@@ -41,7 +39,6 @@ import { ProjectManagementReadService } from '../services/projectManagementReadS
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
-import { HdlDesignIndexService } from '../services/hdlDesignIndexService'
 import {
   registerSurferProtocolSchemes,
   SurferProtocolService,
@@ -68,7 +65,6 @@ let services: {
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
-  hdlDesignIndexService?: HdlDesignIndexService
   projectManagementReadService: ProjectManagementReadService
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
@@ -256,34 +252,10 @@ function getDesktopServices() {
     arch: process.arch,
     settingsStore,
   })
-  const hdlDesignIndexService =
-    process.platform === 'linux'
-      ? new HdlDesignIndexService({
-          binaryPaths: {
-            plocate: app.isPackaged
-              ? join(process.resourcesPath, 'binaries', 'plocate')
-              : 'plocate',
-            updatedb: app.isPackaged
-              ? join(process.resourcesPath, 'binaries', 'updatedb')
-              : 'updatedb',
-          },
-          homePath: homedir(),
-          indexDirectory: join(app.getPath('userData'), 'hdl-index'),
-        })
-      : undefined
-  hdlDesignIndexService?.onStatus((status) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) {
-        window.webContents.send(desktopApiEventChannels.hdlDesignIndexStatus, status)
-      }
-    }
-  })
-  hdlDesignIndexService?.start()
 
   services = {
     appInfoService,
     frontendRpcRuntimeService,
-    hdlDesignIndexService,
     chipViewerService,
     codexDependencyService,
     eccRuntimeService,
@@ -336,7 +308,6 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       },
       eccRuntimeService: desktopServices.eccRuntimeService,
       frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
-      hdlDesignIndexService: desktopServices.hdlDesignIndexService,
       projectManagementReadService: desktopServices.projectManagementReadService,
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
@@ -429,5 +400,4 @@ if (gotSingleInstanceLock) {
       app.quit()
     }
   })
-  app.on('before-quit', () => services?.hdlDesignIndexService?.dispose())
 }

@@ -85,27 +85,6 @@ build_agent_provider() {
     packaging/run_ecos_agent.py
 }
 
-stage_hdl_index_tools() {
-  local binary_dir="$REPO_ROOT/ecos/gui/apps/desktop-electron/resources/binaries"
-  local library_dir="$binary_dir/hdl-index-libs"
-  local plocate_bin
-  local updatedb_bin
-  plocate_bin="$(command -v plocate)"
-  updatedb_bin="$(command -v updatedb)"
-  install -m 0755 "$plocate_bin" "$binary_dir/plocate"
-  install -m 0755 "$updatedb_bin" "$binary_dir/updatedb"
-  mkdir -p "$library_dir"
-  for target in "$binary_dir/plocate" "$binary_dir/updatedb"; do
-    while read -r dependency; do
-      case "$(basename "$dependency")" in
-        ld-linux*|libc.so.*|libdl.so.*|libm.so.*|libpthread.so.*|librt.so.*) continue ;;
-      esac
-      cp -L "$dependency" "$library_dir/"
-    done < <(ldd "$target" | awk '/=> \// { print $3 }')
-    patchelf --set-rpath '$ORIGIN/hdl-index-libs' "$target"
-  done
-}
-
 validate_packaged_binaries() {
   local binary_dir="$REPO_ROOT/ecos/gui/apps/desktop-electron/resources/binaries"
   local agent_dir="$REPO_ROOT/ecos/gui/apps/desktop-electron/resources/agent"
@@ -114,8 +93,6 @@ validate_packaged_binaries() {
   local required_files=(
     "$binary_dir/ecc"
     "$binary_dir/chip-viewer-native"
-    "$binary_dir/plocate"
-    "$binary_dir/updatedb"
   )
 
   for required_file in "${required_files[@]}"; do
@@ -154,7 +131,6 @@ rm -rf ecos/gui/apps/desktop-electron/resources
 mkdir -p ecos/gui/apps/desktop-electron/resources/{agent,binaries}
 cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
-stage_hdl_index_tools
 cp ecos/agent/dist/ecos-agent ecos/gui/apps/desktop-electron/resources/agent
 cp ecos/agent/agent-provider.packaged.json ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json
 validate_packaged_binaries

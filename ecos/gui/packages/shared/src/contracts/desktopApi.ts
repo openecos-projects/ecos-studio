@@ -55,11 +55,6 @@ import type {
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
 } from './desktopCodex.ts'
-import type {
-  DesktopHdlDesignCandidate,
-  DesktopHdlDesignIndexQuery,
-  DesktopHdlDesignIndexStatus,
-} from './desktopDesignIndex.ts'
 
 export type DesktopSettingsValue =
   | string
@@ -211,13 +206,6 @@ export type WorkspaceOpenOrFocusResult =
     }
 
 export interface DesktopApi {
-  designIndex?: {
-    getStatus(): Promise<DesktopHdlDesignIndexStatus>
-    query(request?: DesktopHdlDesignIndexQuery): Promise<DesktopHdlDesignCandidate[]>
-    onStatus(
-      listener: (status: DesktopHdlDesignIndexStatus) => void,
-    ): DesktopEventUnsubscribe
-  }
   app: {
     getVersions(): Promise<VersionInfo>
   }

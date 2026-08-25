@@ -549,7 +549,7 @@ def test_interaction_undo_restores_the_previous_choice_in_the_same_session() -> 
     assert session.pending_interaction["request"].get("canUndo") is not True
 
 
-def test_interaction_undo_restores_a_choice_from_the_rtl_form(tmp_path: Path) -> None:
+def test_interaction_undo_restores_a_choice_before_a_free_text_step(tmp_path: Path) -> None:
     quick_run_project = tmp_path / "quick_run"
     quick_run_project.mkdir()
     provider = EcosAgentProvider(emit=lambda _event: None)
@@ -575,15 +575,13 @@ def test_interaction_undo_restores_a_choice_from_the_rtl_form(tmp_path: Path) ->
 
     assert answer["canUndo"] is True
     assert session.phase == "workspace_rtl"
-    current = session.pending_interaction["request"]
-    assert current["kind"] == "form"
-    assert current["canUndo"] is True
+    assert session.pending_interaction is None
 
     result = provider.answer_interaction(
         {
             "sessionId": session_id,
-            "requestId": current["requestId"],
-            "kind": current["kind"],
+            "requestId": original["requestId"],
+            "kind": original["kind"],
             "undo": True,
         }
     )
@@ -969,42 +967,6 @@ def test_home_quick_setup_only_asks_for_rtl_steps_and_contract_review(
         "target_density": 0.2,
         "target_overflow": 0.1,
     }
-
-
-def test_home_quick_setup_accepts_a_validated_indexed_design_bundle(
-    tmp_path: Path,
-) -> None:
-    quick_project = tmp_path / "run_1234"
-    quick_project.mkdir()
-    rtl, filelist, sdc, _pdk = _write_workspace_inputs(tmp_path)
-    provider = EcosAgentProvider(emit=lambda _event: None)
-    session_id = provider.start_session(
-        {"mode": "home", "quickRunProjectRoot": str(quick_project)}
-    )["sessionId"]
-
-    _send(provider, session_id, "3")
-    session = provider.sessions[session_id]
-    request = session.pending_interaction["request"]
-    provider.answer_interaction(
-        {
-            "sessionId": session_id,
-            "requestId": request["requestId"],
-            "kind": "form",
-            "designBundle": {
-                "rtlPath": str(rtl),
-                "filelistPath": str(filelist),
-                "sdcPath": str(sdc),
-            },
-        }
-    )
-
-    assert session.phase == "workspace_flow_end"
-    assert session.workspace_inputs.rtl_path == str(rtl)
-    assert session.workspace_inputs.filelist_path == str(filelist)
-    assert session.workspace_inputs.sdc_path == str(sdc)
-    assert session.workspace_setup.design_name == "gcd"
-    assert session.workspace_setup.top_module == "gcd"
-    assert session.workspace_setup.clock_name == "clk"
 
 
 @pytest.mark.parametrize(

@@ -739,7 +739,7 @@ def mpc_choice(language: str, prompt_id: str) -> dict[str, Any]:
 def recommended_path_choice(
     language: str,
     prompt_id: str,
-    recommendation: str = "",
+    recommendation: str,
     *,
     field: str = "PDK",
 ) -> dict[str, Any]:
@@ -750,9 +750,10 @@ def recommended_path_choice(
         variant="buttons",
         allow_free_text=True,
         labeled_values=(
-            ((_prompt(language, "使用推荐路径", "Use recommended path"), recommendation),)
-            if recommendation
-            else ()
+            (
+                _prompt(language, "使用推荐路径", "Use recommended path"),
+                recommendation,
+            ),
         ),
     )
 
