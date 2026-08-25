@@ -173,7 +173,7 @@ jobs:
             libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev
             flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison
             libhwloc-dev libcurl4-openssl-dev libtbb-dev
-            patchelf jq wget
+            patchelf jq wget plocate
 
       - name: Setup Node.js
         uses: ./.github/actions/setup-node-pnpm

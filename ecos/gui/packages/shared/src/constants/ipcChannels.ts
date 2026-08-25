@@ -132,6 +132,8 @@ export const desktopApiIpcChannels = {
   agentCodexLogin: 'agent:codex-login',
   agentCodexRecheck: 'agent:codex-recheck',
   agentCodexSetBinPath: 'agent:codex-set-bin-path',
+  hdlDesignIndexGetStatus: 'hdl-design-index:get-status',
+  hdlDesignIndexQuery: 'hdl-design-index:query',
   shellCreateSession: 'shell:create-session',
   shellWrite: 'shell:write',
   shellResize: 'shell:resize',
@@ -140,6 +142,7 @@ export const desktopApiIpcChannels = {
 } as const
 
 export const desktopApiEventChannels = {
+  hdlDesignIndexStatus: 'hdl-design-index:status',
   menuAction: 'menu:action',
   windowCloseRequested: 'window:close-requested',
   windowResized: 'window:resized',

@@ -9,4 +9,20 @@ describe('electron-builder config', () => {
     expect(config).toMatch(/target:\n\s+- AppImage/)
     expect(config).toMatch(/\n\s+- deb\b/)
   })
+
+  it('stages the private HDL index tools in release resources', () => {
+    const buildScript = readFileSync(
+      resolve(process.cwd(), '../../../../.github/scripts/build-binaries.sh'),
+      'utf8',
+    )
+    const smokeScript = readFileSync(
+      resolve(process.cwd(), '../../../scripts/chip-viewer-appimage-smoke.sh'),
+      'utf8',
+    )
+
+    expect(buildScript).toContain('command -v plocate')
+    expect(buildScript).toContain('command -v updatedb')
+    expect(smokeScript).toContain('resources/binaries/plocate')
+    expect(smokeScript).toContain('resources/binaries/updatedb')
+  })
 })

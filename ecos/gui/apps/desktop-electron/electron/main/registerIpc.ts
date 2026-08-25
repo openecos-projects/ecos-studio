@@ -8,10 +8,11 @@ import {
 } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
+  parseProjectManifest,
   type DesktopProjectFileChangedEvent,
   type DesktopProjectLogTailEvent,
   type DesktopProjectDirectoryEntry,
@@ -63,6 +64,8 @@ import {
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
   type DesktopCodexInstallProgressEvent,
+  type DesktopHdlDesignCandidate,
+  type DesktopHdlDesignIndexStatus,
   type ResourceImportPdkRequest,
   type ResourceImportLocalRequest,
   type ResourceInstallRequest,
@@ -140,6 +143,14 @@ export interface DesktopBridgeServices {
   }
   appInfoService: {
     getVersions(): Promise<VersionInfo>
+  }
+  hdlDesignIndexService?: {
+    getStatus(): DesktopHdlDesignIndexStatus
+    query(request: {
+      designName?: string
+      limit: number
+    }): Promise<DesktopHdlDesignCandidate[]>
+    updateRoots(paths: string[], activeRoot?: string): void
   }
   createWindow?(options?: { initialRoute?: string }): Promise<void>
   settingsStore: {
@@ -2092,8 +2103,57 @@ export function registerIpc(
     return status
   })
 
+  handle(desktopApiIpcChannels.hdlDesignIndexGetStatus, () => {
+    return (
+      services.hdlDesignIndexService?.getStatus() ?? {
+        message: 'HDL file indexing is unavailable.',
+        rootCount: 0,
+        state: 'disabled',
+      }
+    )
+  })
+
+  handle(desktopApiIpcChannels.hdlDesignIndexQuery, async (_event, request) => {
+    if (!services.hdlDesignIndexService) return []
+    const record = isRecord(request) ? request : {}
+    const designName =
+      typeof record.designName === 'string' &&
+      /^[A-Za-z0-9_$.-]+$/.test(record.designName.trim())
+        ? record.designName.trim().slice(0, 128)
+        : undefined
+    return await services.hdlDesignIndexService.query({
+      ...(designName ? { designName } : {}),
+      limit: 3,
+    })
+  })
+
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
     const agentRequest = readAgentStartSessionRequest(request)
+    if (services.hdlDesignIndexService && services.projectManagementReadService) {
+      const candidateRoots = new Set([
+        ...(agentRequest.projectRoot ? [agentRequest.projectRoot] : []),
+        ...(agentRequest.knownProjects?.map((project) => project.path) ?? []),
+      ])
+      const indexRoots: string[] = []
+      for (const root of candidateRoots) {
+        try {
+          const content = await services.projectManagementReadService.readManifest(root)
+          if (
+            !content ||
+            resolve(parseProjectManifest(content).root_path) !== resolve(root)
+          ) {
+            continue
+          }
+          indexRoots.push(resolve(root))
+        } catch {
+          // Ignore stale or renderer-supplied paths that are not valid Projects.
+        }
+      }
+      const activeRoot = agentRequest.projectRoot
+        ? indexRoots.find((root) => root === resolve(agentRequest.projectRoot!))
+        : undefined
+      services.hdlDesignIndexService.updateRoots(indexRoots, activeRoot)
+    }
     if (agentRequest.mode === 'home' && services.agentQuickRunRoot) {
       // ponytail: home sessions reserve an empty root; clean stale roots if churn matters.
       agentRequest.quickRunProjectRoot = join(
@@ -2312,7 +2372,8 @@ function readAgentInteractionAnswerRequest(
     if (
       record.optionId !== undefined ||
       record.text !== undefined ||
-      record.values !== undefined
+      record.values !== undefined ||
+      record.designBundle !== undefined
     ) {
       throw new Error('Undo interaction cannot include an answer.')
     }
@@ -2325,6 +2386,46 @@ function readAgentInteractionAnswerRequest(
     }
   }
   if (kind === 'form') {
+    if (record.designBundle !== undefined) {
+      if (
+        !isRecord(record.designBundle) ||
+        record.values !== undefined ||
+        record.optionId !== undefined ||
+        record.text !== undefined
+      ) {
+        throw new Error('Invalid design bundle interaction answer.')
+      }
+      const bundle = record.designBundle
+      const keys = Object.keys(bundle)
+      if (
+        keys.some((key) => !['filelistPath', 'rtlPath', 'sdcPath'].includes(key)) ||
+        typeof bundle.rtlPath !== 'string' ||
+        !bundle.rtlPath.trim() ||
+        bundle.rtlPath.length > 4096 ||
+        (bundle.filelistPath !== undefined &&
+          (typeof bundle.filelistPath !== 'string' ||
+            bundle.filelistPath.length > 4096)) ||
+        (bundle.sdcPath !== undefined &&
+          (typeof bundle.sdcPath !== 'string' || bundle.sdcPath.length > 4096))
+      ) {
+        throw new Error('Invalid design bundle interaction answer.')
+      }
+      return {
+        designBundle: {
+          ...(typeof bundle.filelistPath === 'string' && bundle.filelistPath
+            ? { filelistPath: bundle.filelistPath }
+            : {}),
+          rtlPath: bundle.rtlPath.trim(),
+          ...(typeof bundle.sdcPath === 'string' && bundle.sdcPath
+            ? { sdcPath: bundle.sdcPath }
+            : {}),
+        },
+        kind,
+        providerId: readAgentProviderId(record),
+        requestId: requestId.trim(),
+        sessionId: readAgentSessionId(record.sessionId),
+      }
+    }
     if (!isRecord(record.values))
       throw new Error('Form interaction values must be an object.')
     const entries = Object.entries(record.values)

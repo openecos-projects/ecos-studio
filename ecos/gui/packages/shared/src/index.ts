@@ -184,6 +184,11 @@ export type {
   DesktopAgentStatusState,
 } from './contracts/desktopAgent.ts'
 export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
+export type {
+  DesktopHdlDesignCandidate,
+  DesktopHdlDesignIndexQuery,
+  DesktopHdlDesignIndexStatus,
+} from './contracts/desktopDesignIndex.ts'
 export {
   appMenuActionIds,
   desktopMenuEventIds,

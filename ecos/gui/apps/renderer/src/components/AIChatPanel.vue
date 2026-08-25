@@ -130,6 +130,8 @@
         </summary>
         <div class="interaction-dock__content">
           <AgentInteractionCard
+            :design-candidates="hdlDesignCandidates"
+            :design-index-status="hdlDesignIndexStatus"
             :interaction="pendingInteraction"
             :disabled="isRunning"
             @undo="undoLastInteraction"
@@ -235,6 +237,8 @@ import type {
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
+  DesktopHdlDesignCandidate,
+  DesktopHdlDesignIndexStatus,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentInteractionCard from './AgentInteractionCard.vue'
@@ -531,14 +535,58 @@ const isRunning = computed(
 )
 const pendingInteraction = computed(() => interactionPresentation.value.interaction)
 const undoInteraction = computed(() => activeUi.value.undoInteraction)
+const hdlDesignCandidates = ref<DesktopHdlDesignCandidate[]>([])
+const hdlDesignIndexStatus = ref<DesktopHdlDesignIndexStatus>({
+  rootCount: 0,
+  state: 'idle',
+})
 const interactionExpanded = ref(false)
 
 watch(
   () => pendingInteraction.value?.requestId,
   (requestId, previousRequestId) => {
-    if (requestId !== previousRequestId) interactionExpanded.value = false
+    if (requestId !== previousRequestId) {
+      interactionExpanded.value = false
+      hdlDesignCandidates.value = []
+      void refreshHdlDesignCandidates()
+    }
   },
 )
+
+function isRtlInteraction(
+  interaction: DesktopAgentInteractionRequest | null | undefined,
+): boolean {
+  return Boolean(
+    interaction?.kind === 'form' &&
+    interaction.interaction.kind === 'form' &&
+    interaction.interaction.fields.length === 1 &&
+    interaction.interaction.fields[0]?.kind === 'path' &&
+    interaction.interaction.fields[0]?.label === 'RTL path',
+  )
+}
+
+async function refreshHdlDesignCandidates(): Promise<void> {
+  if (!isRtlInteraction(pendingInteraction.value)) return
+  const designIndex = getOptionalDesktopApi()?.designIndex
+  if (!designIndex) {
+    hdlDesignIndexStatus.value = {
+      message: 'HDL file indexing is unavailable.',
+      rootCount: 0,
+      state: 'disabled',
+    }
+    return
+  }
+  try {
+    hdlDesignIndexStatus.value = await designIndex.getStatus()
+    hdlDesignCandidates.value = await designIndex.query({ limit: 3 })
+  } catch (error) {
+    hdlDesignIndexStatus.value = {
+      message: agentErrorMessage(error),
+      rootCount: 0,
+      state: 'error',
+    }
+  }
+}
 
 function syncInteractionExpanded(event: Event): void {
   interactionExpanded.value = (event.currentTarget as HTMLDetailsElement).open
@@ -624,9 +672,19 @@ const emptyStateSuggestions = computed(() => {
   return suggestions
 })
 let unsubscribeAgentEvents: (() => void) | undefined
+let unsubscribeHdlDesignIndex: (() => void) | undefined
 let postCreateFlowRunning = false
 
 onMounted(() => {
+  const designIndex = getOptionalDesktopApi()?.designIndex
+  if (designIndex) {
+    unsubscribeHdlDesignIndex = designIndex.onStatus((status) => {
+      hdlDesignIndexStatus.value = status
+      if (status.state === 'ready' && isRtlInteraction(pendingInteraction.value)) {
+        void refreshHdlDesignCandidates()
+      }
+    })
+  }
   void connectAgent().then(() => {
     void maybeRunPostCreateFlow()
     void flushPendingGuiActionForActiveTab()
@@ -636,6 +694,8 @@ onMounted(() => {
 onUnmounted(() => {
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = undefined
+  unsubscribeHdlDesignIndex?.()
+  unsubscribeHdlDesignIndex = undefined
   unsubscribeCodexProgress?.()
   unsubscribeCodexProgress = null
   agentFlowProgress.stop()
@@ -1404,6 +1464,9 @@ async function handleInteraction(
   answer:
     | { optionId: string }
     | { text: string }
+    | {
+        designBundle: { filelistPath?: string; rtlPath: string; sdcPath?: string }
+      }
     | { values: Record<string, string | number | null> },
 ): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
@@ -1422,7 +1485,9 @@ async function handleInteraction(
       kind === 'form'
         ? {
             kind,
-            values: 'values' in answer ? answer.values : {},
+            ...('designBundle' in answer
+              ? { designBundle: answer.designBundle }
+              : { values: 'values' in answer ? answer.values : {} }),
             providerId: AGENT_PROVIDER_ID,
             requestId,
             sessionId,

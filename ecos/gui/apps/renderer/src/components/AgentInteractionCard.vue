@@ -8,6 +8,46 @@
     <p v-if="interaction.description" class="interaction-card__description">
       {{ interaction.description }}
     </p>
+    <div v-if="isRtlForm && designCandidates.length" class="interaction-card__designs">
+      <label
+        v-for="candidate in designCandidates"
+        :key="candidate.id"
+        class="interaction-card__design"
+        :class="{
+          'interaction-card__design--selected': candidate.id === selectedDesignId,
+        }"
+      >
+        <input
+          v-model="selectedDesignId"
+          type="radio"
+          name="indexed-design"
+          :value="candidate.id"
+          :disabled="disabled"
+        />
+        <span class="interaction-card__design-copy">
+          <strong>{{ candidate.designName }}</strong>
+          <span>{{ candidate.rtlPath }}</span>
+          <span v-if="candidate.sdcPath">SDC: {{ candidate.sdcPath }}</span>
+          <span v-if="candidate.topModule">Top: {{ candidate.topModule }}</span>
+        </span>
+      </label>
+      <button
+        type="button"
+        class="interaction-card__option interaction-card__use-design"
+        aria-label="Use selected design"
+        :disabled="disabled || !selectedDesign"
+        @click="submitDesign"
+      >
+        Use selected design
+      </button>
+    </div>
+    <p
+      v-else-if="isRtlForm && designIndexStatus?.state === 'building'"
+      class="interaction-card__index-status"
+      role="status"
+    >
+      Searching local HDL files…
+    </p>
     <div v-if="choiceInteraction" class="interaction-card__options">
       <button
         v-for="(option, index) in choiceInteraction.options"
@@ -117,17 +157,29 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
-import type { DesktopAgentInteractionRequest } from '@ecos-studio/shared'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import type {
+  DesktopAgentInteractionRequest,
+  DesktopHdlDesignCandidate,
+  DesktopHdlDesignIndexStatus,
+} from '@ecos-studio/shared'
 
 type InteractionAnswer =
   | { optionId: string }
   | { text: string }
+  | {
+      designBundle: { filelistPath?: string; rtlPath: string; sdcPath?: string }
+    }
   | { values: Record<string, string | number | null> }
 
 const props = withDefaults(
-  defineProps<{ disabled?: boolean; interaction: DesktopAgentInteractionRequest }>(),
-  { disabled: false },
+  defineProps<{
+    designCandidates?: DesktopHdlDesignCandidate[]
+    designIndexStatus?: DesktopHdlDesignIndexStatus
+    disabled?: boolean
+    interaction: DesktopAgentInteractionRequest
+  }>(),
+  { designCandidates: () => [], disabled: false },
 )
 const emit = defineEmits<{
   answer: [answer: InteractionAnswer]
@@ -142,6 +194,24 @@ const confirmInteraction = computed(() =>
 )
 const formInteraction = computed(() =>
   props.interaction.interaction.kind === 'form' ? props.interaction.interaction : null,
+)
+const isRtlForm = computed(
+  () =>
+    formInteraction.value?.fields.length === 1 &&
+    formInteraction.value.fields[0]?.kind === 'path' &&
+    formInteraction.value.fields[0]?.label === 'RTL path',
+)
+const selectedDesignId = ref(props.designCandidates[0]?.id ?? '')
+const selectedDesign = computed(() =>
+  props.designCandidates.find((candidate) => candidate.id === selectedDesignId.value),
+)
+watch(
+  () => props.designCandidates,
+  (candidates) => {
+    if (!candidates.some((candidate) => candidate.id === selectedDesignId.value)) {
+      selectedDesignId.value = candidates[0]?.id ?? ''
+    }
+  },
 )
 const customAnswerIndex = computed(
   () => (choiceInteraction.value?.options.length ?? 0) + 1,
@@ -160,6 +230,18 @@ const values = reactive<Record<string, string | number | null>>(
 
 function submitForm(): void {
   emit('answer', { values: { ...values } })
+}
+
+function submitDesign(): void {
+  const candidate = selectedDesign.value
+  if (!candidate) return
+  emit('answer', {
+    designBundle: {
+      ...(candidate.filelistPath ? { filelistPath: candidate.filelistPath } : {}),
+      rtlPath: candidate.rtlPath,
+      ...(candidate.sdcPath ? { sdcPath: candidate.sdcPath } : {}),
+    },
+  })
 }
 
 function startOtherAnswer(): void {
@@ -198,6 +280,50 @@ function submitText(): void {
   font-size: 0.8125rem;
   line-height: 1.55;
   letter-spacing: 0;
+}
+.interaction-card__designs {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.interaction-card__design {
+  display: flex;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  background: var(--bg-primary);
+  cursor: pointer;
+}
+.interaction-card__design--selected {
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 5%, var(--bg-primary));
+}
+.interaction-card__design input {
+  margin-top: 0.125rem;
+  accent-color: var(--accent-color);
+}
+.interaction-card__design-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  word-break: break-all;
+}
+.interaction-card__design-copy strong {
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  word-break: normal;
+}
+.interaction-card__use-design {
+  justify-content: center;
+}
+.interaction-card__index-status {
+  margin: 0.75rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
 }
 .interaction-card__options,
 .interaction-card__form {

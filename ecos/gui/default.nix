@@ -8,6 +8,7 @@
   nodejs,
   pnpmConfigHook,
   pnpm,
+  plocate,
   python3,
   yosysWithSlang,
 }:
@@ -82,6 +83,7 @@ stdenv.mkDerivation (finalAttrs: {
       --prefix PATH : ${
         lib.makeBinPath [
           chipcompiler-cli
+          plocate
           yosysWithSlang
         ]
       }
