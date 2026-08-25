@@ -111,7 +111,7 @@ def test_gui_optimization_authorization_holds_and_closes_codex_provider(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    _send(provider, session_id, "4")
+    _send(provider, session_id, "3")
     assert provider.sessions[session_id].phase == "optimization_objective"
     _send(provider, session_id, "reduce wirelength")
     assert provider.sessions[session_id].phase == "optimization_authorization"
@@ -150,7 +150,7 @@ def test_gui_optimization_fails_closed_without_runner_factory(tmp_path: Path) ->
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    _send(provider, session_id, "4")
+    _send(provider, session_id, "3")
     _send(provider, session_id, "reduce wirelength")
     _send(provider, session_id, "1")
 
@@ -178,7 +178,7 @@ def test_gui_runner_start_failure_returns_to_operation(tmp_path: Path) -> None:
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    _send(provider, session_id, "4")
+    _send(provider, session_id, "3")
     _send(provider, session_id, "reduce wirelength")
     _send(provider, session_id, "1")
 
@@ -205,7 +205,7 @@ def test_gui_optimization_reports_decision_and_winner_evidence(tmp_path: Path) -
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    _send(provider, session_id, "4")
+    _send(provider, session_id, "3")
     _send(provider, session_id, "reduce wirelength")
     _send(provider, session_id, "1")
     deadline = time.monotonic() + 2
@@ -258,7 +258,7 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
         "sessionId"
     ]
 
-    _send(provider, session_id, "4")
+    _send(provider, session_id, "3")
     assert provider.sessions[session_id].phase == "optimization_objective"
 
     _send(
@@ -308,7 +308,7 @@ def test_gui_optimization_objective_parse_failure_returns_to_operation(tmp_path:
         "sessionId"
     ]
 
-    _send(provider, session_id, "4")
+    _send(provider, session_id, "3")
     _send(provider, session_id, "optimize something")
 
     assert provider.sessions[session_id].phase == "operation"

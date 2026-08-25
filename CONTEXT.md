@@ -24,7 +24,9 @@ _Avoid_: model-rendered component, free-form action
 
 **Interaction answer**:
 A user response associated with one pending interaction request. The backend
-validates and consumes it against that request before changing agent state.
+validates and consumes it against that request before changing agent state. A
+choice or confirmation may be answered by selecting an option or by submitting
+typed text through the same answer channel; forms remain field-validated.
 _Avoid_: raw choice value, unscoped user message
 
 **Pending interaction**:
@@ -73,7 +75,8 @@ _Avoid_: choice message, raw agent input
 
 **Interaction option**:
 A backend-defined selectable value identified by an option ID. The GUI submits
-the ID; the backend resolves the associated value from the pending request.
+the ID for card selections; typed answers are sent as text and interpreted by
+the backend state machine.
 _Avoid_: client-provided value, display label as identity
 
 **Interaction acknowledgement**:

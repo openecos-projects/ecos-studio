@@ -483,10 +483,112 @@ def test_operation_choice_uses_interaction_request_and_dedicated_answer() -> Non
 
     assert result == {
         "accepted": True,
+        "canUndo": True,
         "requestId": request["requestId"],
         "sessionId": session_id,
     }
     assert provider.sessions[session_id].phase == "workspace_project_mode"
+    project_request = provider.sessions[session_id].pending_interaction["request"]
+    assert project_request["description"] == (
+        "Choose whether to use an existing Project or create a new Project."
+    )
+    assert not any(
+        event["type"] == "message"
+        and event.get("text") == project_request["description"]
+        for event in events
+    )
+
+
+def test_interaction_choice_accepts_a_typed_answer() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    request = provider.sessions[session_id].pending_interaction["request"]
+
+    provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": request["requestId"],
+            "kind": "choice",
+            "text": "1",
+        }
+    )
+
+    assert provider.sessions[session_id].phase == "workspace_project_mode"
+    assert provider.sessions[session_id].pending_interaction is not None
+
+
+def test_interaction_undo_restores_the_previous_choice_in_the_same_session() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    original = session.pending_interaction["request"]
+
+    _send(provider, session_id, "1")
+    current = session.pending_interaction["request"]
+    assert session.phase == "workspace_project_mode"
+
+    result = provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": current["requestId"],
+            "kind": current["kind"],
+            "undo": True,
+        }
+    )
+
+    assert result == {
+        "accepted": True,
+        "requestId": current["requestId"],
+        "sessionId": session_id,
+        "undoneRequestId": original["requestId"],
+    }
+    assert session.phase == "home_ready"
+    assert session.pending_interaction["request"]["requestId"] == original["requestId"]
+    assert session.pending_interaction["request"].get("canUndo") is not True
+
+
+def test_interaction_undo_restores_a_choice_before_a_free_text_step(tmp_path: Path) -> None:
+    quick_run_project = tmp_path / "quick_run"
+    quick_run_project.mkdir()
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session(
+        {"mode": "home", "quickRunProjectRoot": str(quick_run_project)}
+    )["sessionId"]
+    session = provider.sessions[session_id]
+    original = session.pending_interaction["request"]
+    quick_run = next(
+        option
+        for option in original["interaction"]["options"]
+        if option["label"] == "Run a flow from RTL (quick setup)"
+    )
+
+    answer = provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": original["requestId"],
+            "kind": original["kind"],
+            "optionId": quick_run["id"],
+        }
+    )
+
+    assert answer["canUndo"] is True
+    assert session.phase == "workspace_rtl"
+    assert session.pending_interaction is None
+
+    result = provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": original["requestId"],
+            "kind": original["kind"],
+            "undo": True,
+        }
+    )
+
+    assert result["undoneRequestId"] == original["requestId"]
+    assert session.phase == "home_ready"
+    assert session.pending_interaction["request"]["requestId"] == original["requestId"]
 
 
 def test_interaction_answers_are_one_time_and_resume_reuses_the_pending_request() -> None:
@@ -723,7 +825,7 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    _send(provider, session_id, "2")
+    _send(provider, session_id, "1")
 
     assert provider.sessions[session_id].phase == "rerun_source_run"
     assert provider.sessions[session_id].design_id == "gcd"
@@ -765,7 +867,7 @@ def test_rerun_skips_empty_parameter_table_for_fixfanout(tmp_path: Path) -> None
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    for message in ("2", "1", "1"):
+    for message in ("1", "1", "1"):
         _send(provider, session_id, message)
 
     session = provider.sessions[session_id]
@@ -798,8 +900,9 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
     assert choice["options"][0]["id"]
     assert "Start creating a Workspace" in choice["options"][0]["label"]
     assert "bounded optimization episode" in choice["options"][1]["label"]
+    assert "Run a flow from RTL" in choice["options"][2]["label"]
     welcome = next(event["text"] for event in events if event["type"] == "message")
-    assert "manual flow setup or bounded optimization" in str(welcome)
+    assert "quick RTL setup, manual flow setup, or bounded optimization" in str(welcome)
     assert "Choose an operation below" not in str(welcome)
 
     _send(provider, session_id, "2")
@@ -812,6 +915,58 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
     assert provider.sessions[session_id].rerun_workspace_path == str(workspace)
     assert provider.sessions[session_id].phase == "optimization_objective"
     assert "Describe the optimization goal" in str(_last_event(events, "message")["text"])
+
+
+def test_home_quick_setup_only_asks_for_rtl_steps_and_contract_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quick_project = tmp_path / "run_1234"
+    quick_project.mkdir()
+    rtl, _filelist, _sdc, pdk = _write_workspace_inputs(tmp_path)
+    monkeypatch.setenv("ICS55_PDK_ROOT", str(pdk))
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session(
+        {"mode": "home", "quickRunProjectRoot": str(quick_project)}
+    )["sessionId"]
+
+    _send(provider, session_id, "3")
+    session = provider.sessions[session_id]
+    assert session.phase == "workspace_rtl"
+    assert session.workspace_setup.workspace_name == "ws_0001"
+    assert session.workspace_setup.design_name is None
+
+    _send(provider, session_id, str(rtl))
+    assert session.phase == "workspace_flow_end"
+    assert session.workspace_setup.design_name == "gcd"
+    assert session.workspace_setup.top_module == "gcd"
+
+    _send(provider, session_id, "0")
+    assert session.phase == "workspace_confirmation"
+    contract = _last_event(events, "workspace_setup")["workspaceSetup"]
+    assert contract["directory"] == str(quick_project / "ws_0001")
+    assert contract["project_context"]["project_root"] == str(quick_project)
+    assert contract["flow_config"]["end_step"] == "Harden"
+    assert contract["mpc_enabled"] is True
+    assert contract["parameters"]["design"] == "gcd"
+    assert {
+        key: contract["parameters"][key]
+        for key in (
+            "frequency_max",
+            "max_fanout",
+            "utilitization",
+            "margin",
+            "target_density",
+            "target_overflow",
+        )
+    } == {
+        "frequency_max": 50,
+        "max_fanout": 32,
+        "utilitization": 0.3,
+        "margin": 2,
+        "target_density": 0.2,
+        "target_overflow": 0.1,
+    }
 
 
 @pytest.mark.parametrize(
@@ -1208,7 +1363,7 @@ def test_workspace_mode_rerun_uses_bound_directory_without_design_prompt(
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    _send(provider, session_id, "2")
+    _send(provider, session_id, "1")
     _send(provider, session_id, "1")
 
     assert provider.sessions[session_id].phase == "rerun_stage"
@@ -1255,7 +1410,7 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
     for message in (
-        "2",
+        "1",
         "1",
         "1",
         "set place.routability_opt to 0,set target_overflow to 0.1",
@@ -1393,28 +1548,21 @@ def test_workspace_contract_validation_failure_reemits_top_choice(tmp_path: Path
     assert _last_event(events, "status")["status"] == "awaiting_interaction"
 
 
-def test_workspace_parameter_request_uses_describe_change_prompt(tmp_path: Path) -> None:
+def test_workspace_operation_choice_omits_parameter_update(tmp_path: Path) -> None:
     workspace = tmp_path / "gcd"
     workspace.mkdir()
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
-    session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
-    )["sessionId"]
+    provider.start_session({"directory": str(workspace), "mode": "workspace"})
 
-    _send(provider, session_id, "1")
-
-    assert provider.sessions[session_id].phase == "workspace_parameter_request"
-    assert any(
-        event["type"] == "message"
-        and "Describe the parameter change to save in the current workspace" in str(event["text"])
-        for event in events
-    )
-    assert not any(
-        event["type"] == "message"
-        and "no tunable rerun parameters" in str(event["text"]).lower()
-        for event in events
-    )
+    assert [
+        option["label"]
+        for option in _last_event(events, "interaction")["interaction"]["options"]
+    ] == [
+        "Rerun a specified stage",
+        "Continue unfinished flow",
+        "Start a bounded optimization episode",
+    ]
 
 
 def test_workspace_continue_uses_compact_confirm_without_command_table(
@@ -1428,7 +1576,7 @@ def test_workspace_continue_uses_compact_confirm_without_command_table(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    _send(provider, session_id, "3")
+    _send(provider, session_id, "2")
 
     assert provider.sessions[session_id].phase == "workspace_continue_confirmation"
     contract = _last_event(events, "contract")
@@ -1587,7 +1735,7 @@ def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    _send(provider, session_id, "1")
+    provider._begin_workspace_parameter_update(provider.sessions[session_id])
     _send(provider, session_id, "lower target density")
 
     assert provider.sessions[session_id].phase == "workspace_parameter_confirmation"
@@ -1618,7 +1766,7 @@ def test_workspace_parameter_update_rejects_empty_patch(tmp_path: Path) -> None:
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    _send(provider, session_id, "1")
+    provider._begin_workspace_parameter_update(provider.sessions[session_id])
     _send(provider, session_id, "lower target density")
 
     assert provider.sessions[session_id].phase == "workspace_parameter_request"
@@ -1683,7 +1831,7 @@ def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    for message in ("2", "1", "1", "reduce density"):
+    for message in ("1", "1", "1", "reduce density"):
         _send(provider, session_id, message)
 
     assert provider.sessions[session_id].phase == "rerun_parameter"
@@ -1711,9 +1859,11 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path
     session.path_recommendations["pdk"] = str(pdk)
     assert session.phase == "workspace_filelist"
     filelist_choice = _last_event(events, "interaction")["interaction"]
-    assert filelist_choice["kind"] == "form"
-    assert filelist_choice["fields"][0]["kind"] == "path"
-    assert filelist_choice["fields"][0]["defaultValue"] == display_path(str(filelist))
+    assert filelist_choice["kind"] == "choice"
+    assert [option["label"] for option in filelist_choice["options"]] == [
+        "Use recommended path",
+        "Skip",
+    ]
     assert _last_event(events, "status")["status"] == "awaiting_interaction"
 
     _send(provider, session_id, EMPTY_CHOICE_VALUE)
@@ -1721,7 +1871,11 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path
     assert session.phase == "workspace_sdc"
     assert session.workspace_inputs.filelist_path == ""
     sdc_choice = _last_event(events, "interaction")["interaction"]
-    assert sdc_choice["fields"][0]["defaultValue"] == display_path(str(sdc))
+    assert sdc_choice["kind"] == "choice"
+    assert [option["label"] for option in sdc_choice["options"]] == [
+        "Use recommended path",
+        "Skip",
+    ]
 
     _send(provider, session_id, str(sdc))
     assert session.phase == "workspace_pdk"
@@ -1735,6 +1889,11 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path
         "Use a SoC-MPC template",
         "Do not use a SoC-MPC template",
     ]
+    assert provider.sessions[session_id].pending_interaction["request"]["description"] == (
+        "A SoC-MPC template provides top-level die/core geometry, I/O pins, and core "
+        "constraints so the flow can use the selected chip template; without it, the "
+        "flow continues as a standard RTL-to-GDS run."
+    )
     _send(provider, session_id, "2")
     assert session.phase == "workspace_top"
     top_choice = _last_event(events, "interaction")["interaction"]
@@ -1850,7 +2009,7 @@ def test_operation_and_cancellation_choices_preserve_the_controlled_paths() -> N
     home_ready = _last_event(events, "interaction")["interaction"]
     assert home_ready["title"] == "Get started"
     assert home_ready["kind"] == "choice"
-    assert len(home_ready["options"]) == 2
+    assert len(home_ready["options"]) == 3
 
     session.phase = "workspace_confirmation"
     session.workspace_setup_id = "setup-1"
@@ -1943,7 +2102,7 @@ def test_start_session_binds_project_root_and_welcome_shows_both_contexts(
     assert f"Workspace: {workspace}" in str(welcome)
     operation = _last_event(events, "interaction")["interaction"]
     assert operation["kind"] == "choice"
-    assert len(operation["options"]) == 5
+    assert len(operation["options"]) == 4
 
 
 def test_standalone_workspace_hides_create_sibling_option(tmp_path: Path) -> None:
@@ -1954,7 +2113,7 @@ def test_standalone_workspace_hides_create_sibling_option(tmp_path: Path) -> Non
     provider.start_session({"directory": str(workspace), "mode": "workspace"})
     operation = _last_event(events, "interaction")["interaction"]
     assert operation["kind"] == "choice"
-    assert len(operation["options"]) == 4
+    assert len(operation["options"]) == 3
 
 
 def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
@@ -1990,12 +2149,22 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     assert provider.sessions[session_id].phase == "workspace_name"
     _send(provider, session_id, "ws_0003")
     assert provider.sessions[session_id].phase == "workspace_design"
+    design_prompt = str(_last_event(events, "message")["text"])
+    assert "Use the suggestion below" not in design_prompt
+    design_choice = _last_event(events, "interaction")["interaction"]
+    assert design_choice["kind"] == "form"
+    assert "defaultValue" not in design_choice["fields"][0]
     _send(provider, session_id, "gcd")
     assert provider.sessions[session_id].phase == "workspace_flow_end"
     assert provider.sessions[session_id].workspace_setup.workspace_name == "ws_0003"
     assert provider.sessions[session_id].workspace_setup.design_name == "gcd"
     flow_end_choice = _last_event(events, "interaction")["interaction"]
     assert flow_end_choice["title"] == "Choose the end step"
+    assert _last_event(events, "message")["text"] == (
+        "The flow always starts at Synthesis and stops after the selected stage. "
+        "For example, choosing place runs Synthesis through place only; "
+        "Run all steps continues through Harden."
+    )
     assert flow_end_choice["variant"] == "list"
     assert flow_end_choice["options"][0] == {
         "id": flow_end_choice["options"][0]["id"],
@@ -2214,7 +2383,7 @@ def test_workspace_name_default_choice_accepts_auto_suggestion(tmp_path: Path) -
     assert session.phase == "workspace_design"
 
 
-def test_workspace_mode_option_four_prefills_project_root(tmp_path: Path) -> None:
+def test_workspace_mode_option_three_prefills_project_root(tmp_path: Path) -> None:
     project = tmp_path / "gcd"
     workspace = project / "ws_0001"
     workspace.mkdir(parents=True)
@@ -2229,7 +2398,7 @@ def test_workspace_mode_option_four_prefills_project_root(tmp_path: Path) -> Non
         }
     )["sessionId"]
 
-    _send(provider, session_id, "4")
+    _send(provider, session_id, "3")
     session = provider.sessions[session_id]
     assert session.phase == "workspace_name"
     assert session.workspace_inputs.project_root == str(project)
@@ -2513,7 +2682,7 @@ def test_operation_codex_fallback_maps_nl_to_rerun(tmp_path: Path) -> None:
         operation_contexts.append(context)
         return {
             "schema_version": "flow-agent.gui_chat_response.v1",
-            "operation": "2",
+            "operation": "1",
             "answer": None,
         }
 
@@ -2539,7 +2708,6 @@ def test_operation_codex_fallback_maps_nl_to_rerun(tmp_path: Path) -> None:
         "2",
         "3",
         "4",
-        "5",
     ]
 
 
@@ -2610,7 +2778,7 @@ def test_bare_operation_number_skips_codex(tmp_path: Path) -> None:
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    _send(provider, session_id, "3")
+    _send(provider, session_id, "2")
 
     assert operation_contexts == []
     assert provider.sessions[session_id].phase == "workspace_continue_confirmation"

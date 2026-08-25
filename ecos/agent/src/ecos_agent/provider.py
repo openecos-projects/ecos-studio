@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import os
 import re
 import threading
 import uuid
@@ -64,7 +66,6 @@ from ecos_agent.messages import (
     optional_file_prompt,
     pdk_prompt,
     project_mode_choice,
-    project_mode_prompt,
     project_root_prompt,
     recommended_path_choice,
     unmatched_operation_prompt,
@@ -297,6 +298,41 @@ _NUMERIC_FIELDS = {
     "Placement Target Overflow": "target_overflow",
 }
 
+_INTERACTION_UNDO_FIELDS = (
+    "phase",
+    "language",
+    "language_locked",
+    "project_root",
+    "quick_setup",
+    "creating_project",
+    "design_id",
+    "inherited_design_name",
+    "rerun_stage",
+    "rerun_resolver",
+    "rerun_workspace_path",
+    "rerun_discovery",
+    "rerun_parameter_patch",
+    "workspace_rerun_contract",
+    "workspace_setup",
+    "workspace_inputs",
+    "path_recommendations",
+    "workspace_setup_id",
+    "mpc_selection",
+    "workspace_contract",
+    "workspace_continue_id",
+    "workspace_parameter_update",
+    "workspace_signoff_id",
+    "workspace_signoff_workspace",
+    "optimization_phase",
+    "optimization_episode_id",
+    "optimization_turn_count",
+    "optimization_objective",
+    "optimization_objective_sha256",
+    "optimization_primary_metric",
+    "pending_interaction",
+    "interaction_history",
+)
+
 
 @dataclass
 class _Session:
@@ -307,6 +343,8 @@ class _Session:
     language_locked: bool = False
     project_root: str | None = None
     known_projects: list[tuple[str, str]] = field(default_factory=list)
+    quick_run_project_root: str | None = None
+    quick_setup: bool = False
     creating_project: bool = False
     design_id: str | None = None
     inherited_design_name: str | None = None
@@ -346,6 +384,7 @@ class _Session:
     pending_interaction: dict[str, Any] | None = None
     interaction_retry: dict[str, Any] | None = None
     interaction_history: dict[str, str] = field(default_factory=dict)
+    interaction_undo: dict[str, Any] | None = None
 
 
 class EcosAgentProvider:
@@ -414,6 +453,7 @@ class EcosAgentProvider:
         if mode in {"home", "workspace"}:
             session.mode = mode
         session.known_projects = _known_projects(request.get("knownProjects"))
+        session.quick_run_project_root = _optional_text(request.get("quickRunProjectRoot"))
         if directory:
             session.inherited_design_name = _design_id_for_workspace(directory)
         # Directory alone is only a rerun default; GUI must pass mode explicitly.
@@ -441,6 +481,7 @@ class EcosAgentProvider:
         if session.pending_interaction is not None:
             raise ValueError("An interaction answer is required for this session.")
         message = _required_message(request.get("message"))
+        session.interaction_undo = None
         if self._optimization_thread_active(session):
             self._handle_optimization_control(session, message)
             return {
@@ -498,6 +539,19 @@ class EcosAgentProvider:
         session = self._session(request)
         pending = session.pending_interaction
         if pending is None:
+            if request.get("undo") is True:
+                state = session.interaction_undo
+                restored = state.get("pending_interaction") if state is not None else None
+                restored_request = restored.get("request") if isinstance(restored, dict) else None
+                if (
+                    not isinstance(restored_request, dict)
+                    or request.get("requestId") != restored_request.get("requestId")
+                    or request.get("kind") != restored_request.get("kind")
+                ):
+                    raise ValueError("No interaction selection is available to undo.")
+                if session.running:
+                    raise ValueError("An ECOS Agent turn is already running for this session.")
+                return self._undo_interaction(session, None)
             request_id = _optional_text(request.get("requestId"))
             if request_id and session.interaction_history.get(request_id) == "superseded":
                 raise ValueError("Interaction request was superseded.")
@@ -519,6 +573,8 @@ class EcosAgentProvider:
             raise ValueError("Interaction kind does not match the pending request.")
         if session.running:
             raise ValueError("An ECOS Agent turn is already running for this session.")
+        if request.get("undo") is True:
+            return self._undo_interaction(session, pending)
 
         if pending["request"]["kind"] == "form":
             values = request.get("values")
@@ -558,12 +614,22 @@ class EcosAgentProvider:
             message = str(next(iter(values.values()), "") or "")
         else:
             option_id = request.get("optionId")
-            if not isinstance(option_id, str):
-                raise ValueError("Interaction option is not available.")
-            message = pending["values"].get(option_id)
-            if message is None:
-                raise ValueError("Interaction option is not available.")
+            typed_text = request.get("text")
+            if option_id is not None and typed_text is not None:
+                raise ValueError("Interaction answer must use an option or text, not both.")
+            if option_id is not None:
+                if not isinstance(option_id, str):
+                    raise ValueError("Interaction option is not available.")
+                message = pending["values"].get(option_id)
+                if message is None:
+                    raise ValueError("Interaction option is not available.")
+            elif isinstance(typed_text, str) and typed_text.strip():
+                message = typed_text.strip()
+            else:
+                raise ValueError("Interaction option or text answer is required.")
 
+        undo_state = self._capture_interaction_state(session)
+        session.interaction_undo = undo_state
         session.pending_interaction = None
         session.interaction_retry = pending
         continuation = pending.get("continuation")
@@ -583,8 +649,9 @@ class EcosAgentProvider:
                 self._run_turn(session, str(message), handler)
             except Exception:
                 if session.interaction_retry is pending:
-                    session.pending_interaction = pending
+                    self._restore_interaction_state(session, undo_state)
                     session.interaction_retry = None
+                    session.interaction_undo = None
                 raise
             if session.pending_interaction is pending:
                 session.interaction_retry = None
@@ -603,10 +670,58 @@ class EcosAgentProvider:
             thread.start()
         else:
             run_answer()
-        return {
+        result = {
             "accepted": True,
             "requestId": pending["request"]["requestId"],
             "sessionId": session.session_id,
+        }
+        if session.interaction_undo is not None:
+            result["canUndo"] = True
+        return result
+
+    @staticmethod
+    def _capture_interaction_state(session: _Session) -> dict[str, Any]:
+        return {
+            name: copy.deepcopy(getattr(session, name))
+            for name in _INTERACTION_UNDO_FIELDS
+        }
+
+    @staticmethod
+    def _restore_interaction_state(session: _Session, state: Mapping[str, Any]) -> None:
+        for name in _INTERACTION_UNDO_FIELDS:
+            setattr(session, name, copy.deepcopy(state[name]))
+
+    def _undo_interaction(
+        self, session: _Session, current: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        state = session.interaction_undo
+        if state is None or (
+            current is not None and current["request"].get("canUndo") is not True
+        ):
+            raise ValueError("No interaction selection is available to undo.")
+        restored_before_undo = state.get("pending_interaction")
+        if not isinstance(restored_before_undo, dict):
+            raise ValueError("The previous interaction is unavailable.")
+        current_request_id = (
+            current["request"]["requestId"]
+            if current is not None
+            else restored_before_undo["request"]["requestId"]
+        )
+        self._restore_interaction_state(session, state)
+        session.interaction_undo = None
+        restored = session.pending_interaction
+        if restored is None:
+            raise ValueError("The previous interaction is unavailable.")
+        restored["request"].pop("canUndo", None)
+        if current is not None:
+            session.interaction_history[current_request_id] = "superseded"
+        request = restored["request"]
+        self._emit(session, "interaction", request["title"], interaction=request)
+        return {
+            "accepted": True,
+            "requestId": current_request_id,
+            "sessionId": session.session_id,
+            "undoneRequestId": request["requestId"],
         }
 
     def interrupt(self, request: Mapping[str, Any] | None = None) -> None:
@@ -845,33 +960,26 @@ class EcosAgentProvider:
             session.phase = "optimization_workspace"
             self._emit(session, "message", optimization_workspace_prompt(session.language))
             return
+        if choice == "3":
+            self._begin_quick_workspace_create(session)
+            return
 
     def _select_operation(self, session: _Session, message: str, choice: str) -> None:
         if session.mode == "workspace":
-            if choice == "1":
+            if choice == "parameter":
                 self._begin_workspace_parameter_update(session)
-                if message.strip() != "1":
-                    self._select_workspace_parameter_request(session, message)
+                self._select_workspace_parameter_request(session, message)
                 return
-            if choice == "2":
+            if choice == "1":
                 self._begin_workspace_scoped_rerun(session)
                 return
-            if choice == "3":
+            if choice == "2":
                 self._begin_workspace_continue(session)
                 return
-            if choice == "4" and session.project_root:
-                if not session.project_root:
-                    self._emit(
-                        session,
-                        "message",
-                        "This workspace is not under a Project (no project.json parent). "
-                        "Associate or create a Project before creating another workspace.",
-                    )
-                    self._emit_phase_choice(session)
-                    return
+            if choice == "3" and session.project_root:
                 self._begin_create_workspace_in_project(session)
                 return
-            optimization_choice = "5" if session.project_root else "4"
+            optimization_choice = "4" if session.project_root else "3"
             if choice == optimization_choice:
                 self._begin_optimization_objective(session)
                 return
@@ -1564,6 +1672,28 @@ class EcosAgentProvider:
             flow_end_explicit=flow_end_explicit,
         )
 
+    def _begin_quick_workspace_create(self, session: _Session) -> None:
+        self._reset_workspace_setup(session)
+        root = session.quick_run_project_root
+        if not root or not Path(root).is_dir():
+            self._emit(session, "error", "Quick setup storage is unavailable.")
+            self._emit_phase_choice(session)
+            return
+        session.quick_setup = True
+        session.creating_project = True
+        session.workspace_inputs.project_root = root
+        session.workspace_inputs.project_name = derive_project_name(root)
+        self._update_workspace_setup(
+            session,
+            workspace_name=recommended_workspace_name(root),
+        )
+        pdk_root = _optional_text(os.environ.get("ICS55_PDK_ROOT"))
+        if pdk_root and Path(pdk_root).is_dir():
+            session.path_recommendations = {"pdk": pdk_root}
+        session.phase = "workspace_rtl"
+        self._emit(session, "message", rtl_prompt(session.language))
+        self._emit_phase_choice(session)
+
     def _enter_create_flow_phase(
         self,
         session: _Session,
@@ -1581,7 +1711,6 @@ class EcosAgentProvider:
                 )
             else:
                 session.phase = "workspace_project_mode"
-                self._emit(session, "message", project_mode_prompt(session.language))
             self._emit_phase_choice(session)
             return
         if not session.workspace_setup.workspace_name:
@@ -1596,13 +1725,10 @@ class EcosAgentProvider:
             return
         if not session.workspace_setup.design_name:
             session.phase = "workspace_design"
-            recommendation = (
-                session.inherited_design_name or session.workspace_inputs.project_name or ""
-            )
             self._emit(
                 session,
                 "message",
-                design_name_prompt(session.language, recommendation),
+                design_name_prompt(session.language),
             )
             self._emit_phase_choice(session)
             return
@@ -1667,7 +1793,6 @@ class EcosAgentProvider:
             self._emit_phase_choice(session)
             return
         self._emit(session, "message", unmatched_operation_prompt(session.language))
-        self._emit(session, "message", project_mode_prompt(session.language))
         self._emit_phase_choice(session)
 
     def _begin_workspace_scoped_rerun(self, session: _Session) -> None:
@@ -2052,14 +2177,11 @@ class EcosAgentProvider:
                 session, mode_explicit=True, flow_end_explicit=flow_end_explicit
             )
             return
-        design_recommendation = (
-            session.inherited_design_name or session.workspace_inputs.project_name or ""
-        )
         session.phase = "workspace_design"
         self._emit(
             session,
             "message",
-            design_name_prompt(session.language, design_recommendation),
+            design_name_prompt(session.language),
         )
         self._emit_phase_choice(session)
 
@@ -2074,6 +2196,17 @@ class EcosAgentProvider:
             self._emit_phase_choice(session)
             return
         self._update_workspace_setup(session, flow_start="Synthesis", flow_end=end_step)
+        if session.quick_setup and session.workspace_inputs.rtl_path:
+            pdk_root = _recommended_path(session, "pdk")
+            if pdk_root:
+                session.workspace_inputs.pdk_root = pdk_root
+                session.mpc_selection = True
+                self._show_workspace_contract(session)
+                return
+            session.phase = "workspace_pdk"
+            self._emit(session, "message", pdk_prompt(session.language, ""))
+            self._emit_phase_choice(session)
+            return
         session.phase = "workspace_rtl"
         self._emit(session, "message", rtl_prompt(session.language, _recommended_path(session, "rtl")))
         self._emit_phase_choice(session)
@@ -2092,6 +2225,15 @@ class EcosAgentProvider:
             )
             return
         self._apply_detected_defaults(session)
+        if session.quick_setup:
+            self._update_workspace_setup(
+                session,
+                design_name=session.workspace_setup.top_module,
+            )
+            session.phase = "workspace_flow_end"
+            self._emit(session, "message", flow_end_prompt(session.language))
+            self._emit_phase_choice(session)
+            return
         session.phase = "workspace_filelist"
         self._emit(
             session,
@@ -2160,6 +2302,10 @@ class EcosAgentProvider:
                 lambda language: pdk_prompt(language, _recommended_path(session, "pdk")),
             )
             return
+        if session.quick_setup:
+            session.mpc_selection = True
+            self._show_workspace_contract(session)
+            return
         session.phase = "workspace_mpc"
         self._emit(
             session,
@@ -2191,8 +2337,7 @@ class EcosAgentProvider:
         self._emit_phase_choice(session)
 
     def _select_design_name(self, session: _Session, message: str) -> None:
-        recommendation = session.inherited_design_name or session.workspace_inputs.project_name or ""
-        answer = resolve_emptyable_answer(message) or recommendation
+        answer = resolve_emptyable_answer(message)
         try:
             design = normalize_identifier(answer, label="Design Name")
         except ValueError as exc:
@@ -2200,7 +2345,7 @@ class EcosAgentProvider:
                 session,
                 "Design Name",
                 str(exc),
-                lambda language: design_name_prompt(language, recommendation),
+                lambda language: design_name_prompt(language),
             )
             return
         self._update_workspace_setup(session, design_name=design)
@@ -2773,6 +2918,7 @@ class EcosAgentProvider:
         session.workspace_setup = GuiWorkspaceSetupProposal.model_validate(payload)
 
     def _reset_workspace_setup(self, session: _Session) -> None:
+        session.quick_setup = False
         session.workspace_setup = recommended_workspace_setup()
         session.workspace_inputs = WorkspaceInputs()
         session.path_recommendations = {}
@@ -2882,17 +3028,12 @@ class EcosAgentProvider:
                 "Workspace Name",
                 recommendation,
             )
-        elif session.phase == "workspace_design" and (
-            session.inherited_design_name or session.workspace_inputs.project_name
-        ):
-            recommendation = (
-                session.inherited_design_name or session.workspace_inputs.project_name or ""
-            )
+        elif session.phase == "workspace_design":
             choice = default_value_choice(
                 session.language,
                 prompt_id,
                 "Design Name",
-                recommendation,
+                "",
             )
         elif session.phase == "rerun_source_run" and session.rerun_workspace_path:
             choice = source_run_choice(
@@ -3039,6 +3180,8 @@ class EcosAgentProvider:
             "home_ready",
             "operation",
             "workspace_project_root",
+            "workspace_filelist",
+            "workspace_sdc",
         }:
             field_kind = "number" if session.phase in {
                 "workspace_frequency",
@@ -3097,6 +3240,10 @@ class EcosAgentProvider:
             "status": "pending",
             "title": choice["title"],
         }
+        if session.interaction_undo is not None:
+            request["canUndo"] = True
+        if choice.get("description"):
+            request["description"] = choice["description"]
         return request, values
 
     def _emit_clarification(
@@ -3212,11 +3359,7 @@ class EcosAgentProvider:
         if session.phase == "workspace_name":
             return "awaiting_interaction" if session.workspace_inputs.project_root else "idle"
         if session.phase == "workspace_design":
-            return (
-                "awaiting_interaction"
-                if session.inherited_design_name or session.workspace_inputs.project_name
-                else "idle"
-            )
+            return "awaiting_interaction"
         if session.phase == "rerun_workspace":
             return "awaiting_interaction" if session.rerun_workspace_path else "idle"
         return (
@@ -3270,6 +3413,7 @@ class EcosAgentProvider:
         session.known_projects = known_projects
         session.inherited_design_name = inherited_design_name
         session.creating_project = False
+        session.quick_setup = False
         session.design_id = None
         session.rerun_stage = None
         session.rerun_resolver = None
@@ -3286,6 +3430,7 @@ class EcosAgentProvider:
         session.workspace_parameter_update = None
         session.workspace_signoff_id = None
         session.workspace_signoff_workspace = None
+        session.interaction_undo = None
 
 
 def main() -> int:
