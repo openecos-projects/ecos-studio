@@ -410,7 +410,7 @@ export class ResourceManagerService {
 
   async listResources(): Promise<ResourceList> {
     const state = await this.fetchRegistry()
-    await this.pdkInventoryService.initialize()
+    const pdkInstallations = await this.pdkInventoryService.listInstallations()
     const manifest = await this.readManifestForListing()
     const updateChecks = await this.readUpdateCheckCache()
     const installedTools = getInstalledTools(manifest)
@@ -428,11 +428,14 @@ export class ResourceManagerService {
           manifest,
           updateChecks,
           toolHealth,
+          pdkInstallations,
         ),
       )
     }
     for (const pdk of registry?.pdks ?? []) {
-      resources.push(this.registryPdkToResource(pdk, registry, manifest, toolHealth))
+      resources.push(
+        this.registryPdkToResource(pdk, registry, manifest, toolHealth, pdkInstallations),
+      )
     }
     for (const mpc of state.registry?.mpcs ?? []) {
       const local = installedMpcs[mpc.id]
@@ -712,6 +715,7 @@ export class ResourceManagerService {
       const state = await this.fetchRegistry()
       const manifest = await this.readManifest()
       const toolHealth = await checkInstalledToolHealth(getInstalledTools(manifest))
+      const pdkInstallations = await this.pdkInventoryService.listInstallations()
       const dependencies = this.registryRequiresForResource(
         state.registry,
         resourceId,
@@ -723,6 +727,7 @@ export class ResourceManagerService {
           manifest,
           dependencyId,
           toolHealth,
+          pdkInstallations,
         )
       })
 
@@ -741,19 +746,22 @@ export class ResourceManagerService {
         const latestToolHealth = await checkInstalledToolHealth(
           getInstalledTools(latestManifest),
         )
+        const latestPdkInstallations = await this.pdkInventoryService.listInstallations()
         if (
           resourceMatchesRegistryLock(
             state.registry,
             latestManifest,
             dependencyId,
             latestToolHealth,
+            latestPdkInstallations,
           )
         ) {
           continue
         }
         const hasInstalledDependency = dependencyId.startsWith('pdk:')
-          ? getInstalledPdks(latestManifest).some(
-              ({ entry }) => entry.pdk_id === pdkIdFromResourceId(dependencyId),
+          ? latestPdkInstallations.some(
+              (installation) =>
+                installation.familyId === pdkIdFromResourceId(dependencyId),
             )
           : Boolean(latestManifest.installed[dependencyId])
         const dependencyAction: ResourceAction = hasInstalledDependency
@@ -2202,6 +2210,7 @@ export class ResourceManagerService {
     manifest: ResourceManifest,
     updateChecks: ResourceUpdateCheckCache | null,
     toolHealth: ToolHealthByResourceId,
+    pdkInstallations: readonly PdkInstallationSnapshot[],
   ): ResourceInfo {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
@@ -2219,6 +2228,7 @@ export class ResourceManagerService {
       registry,
       manifest,
       toolHealth,
+      pdkInstallations,
     )
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
@@ -2396,6 +2406,7 @@ export class ResourceManagerService {
     registry: ResourceRegistry | null,
     manifest: ResourceManifest,
     toolHealth: ToolHealthByResourceId = {},
+    pdkInstallations: readonly PdkInstallationSnapshot[] = [],
   ): ResourceInfo {
     const latest = pdk.versions[0]
     const { platform, asset } = latest
@@ -2409,6 +2420,7 @@ export class ResourceManagerService {
       registry,
       manifest,
       toolHealth,
+      pdkInstallations,
     )
     return {
       id: resourceId,
@@ -2856,11 +2868,20 @@ function dependencyStateFor(
   registry: ResourceRegistry | null,
   manifest: ResourceManifest,
   toolHealth: ToolHealthByResourceId = {},
+  pdkInstallations: readonly PdkInstallationSnapshot[] = [],
 ): { installed: string[]; missing: string[] } {
   const installed: string[] = []
   const missing: string[] = []
   for (const dependencyId of dependencies) {
-    if (resourceMatchesRegistryLock(registry, manifest, dependencyId, toolHealth))
+    if (
+      resourceMatchesRegistryLock(
+        registry,
+        manifest,
+        dependencyId,
+        toolHealth,
+        pdkInstallations,
+      )
+    )
       installed.push(dependencyId)
     else missing.push(dependencyId)
   }
@@ -2872,21 +2893,18 @@ function resourceMatchesRegistryLock(
   manifest: ResourceManifest,
   resourceId: string,
   toolHealth: ToolHealthByResourceId = {},
+  pdkInstallations: readonly PdkInstallationSnapshot[] = [],
 ): boolean {
   if (!registry) return false
   const lock = registryLockForResource(registry, resourceId)
   if (!lock || !lock.sha256) return false
   if (resourceId.startsWith('pdk:')) {
     const pdkId = pdkIdFromResourceId(resourceId)
-    return Object.values(manifest.installed).some(
-      (entry) =>
-        isPdkEntry(entry) &&
-        entry.pdk_id === pdkId &&
-        entry.active &&
-        entry.health !== 'missing' &&
-        entry.health !== 'invalid' &&
-        entry.version === lock.version &&
-        entry.sha256.toLowerCase() === lock.sha256.toLowerCase(),
+    return pdkInstallations.some(
+      (installation) =>
+        installation.familyId === pdkId &&
+        installation.version === lock.version &&
+        installation.readiness === 'ready',
     )
   }
   if (!isInstalledResource(manifest, resourceId, toolHealth)) return false
@@ -3344,16 +3362,6 @@ function getInstalledTools(
   const entries: Record<string, ToolInventoryEntry> = {}
   for (const [resourceId, entry] of Object.entries(manifest.installed)) {
     if (isToolEntry(entry)) entries[resourceId.replace(/^tool:/, '')] = entry
-  }
-  return entries
-}
-
-function getInstalledPdks(
-  manifest: ResourceManifest,
-): Array<{ resourceId: string; entry: PdkInventoryEntry }> {
-  const entries: Array<{ resourceId: string; entry: PdkInventoryEntry }> = []
-  for (const [resourceId, entry] of Object.entries(manifest.installed)) {
-    if (isPdkEntry(entry)) entries.push({ resourceId, entry })
   }
   return entries
 }

@@ -20,6 +20,7 @@ export interface PdkInventoryFile {
   schemaVersion: 1
   installations: PdkInstallationRecord[]
   bindings: PdkBinding[]
+  autoBindingBlocks: Array<Pick<PdkBinding, 'projectId' | 'projectRoot'>>
 }
 
 interface PdkInventoryMigrationOptions {
@@ -37,6 +38,7 @@ export async function migrateLegacyPdkInventory(
     schemaVersion: 1,
     installations: [],
     bindings: [],
+    autoBindingBlocks: [],
   }
   const jsonWriter = options.jsonWriter ?? writeJsonAtomic
   let legacyText: string

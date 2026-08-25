@@ -948,6 +948,32 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
+  it('rejects backend workspace creation without a PDK Requirement', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
+        designTool: 'backend',
+        payload: {
+          directory: '/tmp/workspace',
+          pdk: 'vendor-pdk',
+          pdkRoot: '/tmp/vendor-pdk',
+        },
+      }),
+    ).resolves.toEqual({
+      error: {
+        message: 'PDK Requirement is required for backend workspace creation',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(
+      services.resourceManagerService.validatePdkRootForWorkspace,
+    ).not.toHaveBeenCalled()
+    expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
+  })
+
   it('uses the persisted Project Requirement for workspace creation', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }

@@ -2940,6 +2940,91 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it('satisfies registry dependencies from a Ready managed PDK Installation', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const registryPath = join(root, 'registry.json')
+    const pdkRoot = join(dirs.pdksDir, 'ics55', '1.10.100')
+    const stdCell = join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7C_V1p10C100')
+    const markers = [
+      join(pdkRoot, 'prtech', 'techLEF', 'N551P6M_ecos.lef'),
+      join(stdCell, 'ics55_LLSC_H7CR', 'lef', 'ics55_LLSC_H7CR_ecos.lef'),
+      join(stdCell, 'ics55_LLSC_H7CL', 'lef', 'ics55_LLSC_H7CL_ecos.lef'),
+      join(
+        stdCell,
+        'ics55_LLSC_H7CR',
+        'liberty',
+        'ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+      ),
+      join(
+        stdCell,
+        'ics55_LLSC_H7CL',
+        'liberty',
+        'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+      ),
+    ]
+    for (const marker of markers) {
+      await mkdir(join(marker, '..'), { recursive: true })
+      await writeFile(marker, '')
+    }
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [
+          {
+            name: 'yosys',
+            display_name: 'Yosys',
+            description: '',
+            category: 'synthesis',
+            homepage: '',
+            versions: [
+              {
+                version: '1',
+                platforms: {
+                  'all-platform': { url: 'file:///yosys.tar', sha256: 'tool-sha' },
+                },
+                requires: ['pdk:ics55'],
+              },
+            ],
+          },
+        ],
+        pdks: [
+          {
+            id: 'ics55',
+            versions: [
+              {
+                version: '1.10.100',
+                platforms: {
+                  'all-platform': { url: 'file:///ics55.tar', sha256: 'pdk-sha' },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    const service = new ResourceManagerService({
+      ...dirs,
+      registryUrl: `file://${registryPath}`,
+    })
+    await service.getPdkInventoryService().registerManagedInstallation({
+      id: 'pdk:ics55:managed:1.10.100',
+      displayName: 'ICS55',
+      familyId: 'ics55',
+      root: pdkRoot,
+      version: '1.10.100',
+    })
+
+    const yosys = (await service.listResources()).resources.find(
+      (resource) => resource.id === 'tool:yosys',
+    )
+    expect(yosys).toMatchObject({
+      installed_requires: ['pdk:ics55'],
+      missing_requires: [],
+    })
+  })
+
   it('updates healthy managed dependencies whose registry lock has changed', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)

@@ -132,12 +132,6 @@ export class PdkInventoryService {
     })
   }
 
-  async initialize(): Promise<void> {
-    await this.withLock(async () => {
-      await this.readInventory()
-    })
-  }
-
   async resolveBinding(request: PdkResolveBindingRequest): Promise<PdkBinding | null> {
     return await this.withLock(async () => {
       const projectRoot = normalizedProjectRoot(request.projectRoot)
@@ -148,6 +142,13 @@ export class PdkInventoryService {
           binding.projectId === projectId && binding.projectRoot === projectRoot,
       )
       if (existing) return existing
+      if (
+        inventory.autoBindingBlocks.some(
+          (blocked) =>
+            blocked.projectId === projectId && blocked.projectRoot === projectRoot,
+        )
+      )
+        return null
 
       const matching: PdkInstallationRecord[] = []
       for (const installation of inventory.installations) {
@@ -197,6 +198,10 @@ export class PdkInventoryService {
         (candidate) =>
           candidate.projectId !== projectId || candidate.projectRoot !== projectRoot,
       )
+      inventory.autoBindingBlocks = inventory.autoBindingBlocks.filter(
+        (blocked) =>
+          blocked.projectId !== projectId || blocked.projectRoot !== projectRoot,
+      )
       inventory.bindings.push(binding)
       await this.writeInventory(inventory)
       return binding
@@ -241,16 +246,25 @@ export class PdkInventoryService {
 
   async locateInstallation(request: PdkLocateRequest): Promise<PdkInstallationSnapshot> {
     return await this.withLock(async () => {
-      const root = await canonicalDirectory(request.root)
       const inventory = await this.readInventory()
       const installation = inventory.installations.find(
         (candidate) => candidate.id === request.installationId,
       )
       if (!installation) throw new Error('PDK Installation was not found')
+      if ((await this.snapshot(installation)).readiness !== 'missing') {
+        throw new Error('Only a Missing PDK Installation can be located')
+      }
+      const root = await canonicalDirectory(request.root)
       const existing = inventory.installations.find(
         (candidate) => candidate.id !== installation.id && candidate.root === root,
       )
       if (existing) {
+        if (
+          existing.familyId !== installation.familyId ||
+          existing.version !== installation.version
+        ) {
+          throw new Error('Located PDK Installation does not match Family and version')
+        }
         inventory.bindings = inventory.bindings.map((binding) =>
           binding.installationId === installation.id
             ? { ...binding, installationId: existing.id }
@@ -282,6 +296,12 @@ export class PdkInventoryService {
       )
       inventory.bindings = inventory.bindings.filter(
         (binding) => binding.installationId !== installation.id,
+      )
+      inventory.autoBindingBlocks.push(
+        ...removedBindings.map(({ projectId, projectRoot }) => ({
+          projectId,
+          projectRoot,
+        })),
       )
       inventory.installations = inventory.installations.filter(
         (candidate) => candidate.id !== installation.id,
@@ -376,7 +396,8 @@ export class PdkInventoryService {
       if (
         value.schemaVersion !== 1 ||
         !Array.isArray(value.installations) ||
-        !Array.isArray(value.bindings)
+        !Array.isArray(value.bindings) ||
+        (value.autoBindingBlocks !== undefined && !Array.isArray(value.autoBindingBlocks))
       ) {
         throw new Error('Invalid PDK Inventory')
       }
@@ -384,7 +405,10 @@ export class PdkInventoryService {
         await resumeLegacyPdkMigration(this.options)
         this.legacyCleanupComplete = true
       }
-      return value as PdkInventoryFile
+      return {
+        ...value,
+        autoBindingBlocks: value.autoBindingBlocks ?? [],
+      } as PdkInventoryFile
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         const inventory = await migrateLegacyPdkInventory(this.options)

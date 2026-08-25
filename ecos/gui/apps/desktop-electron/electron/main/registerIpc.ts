@@ -478,10 +478,7 @@ async function prepareEccWorkspaceCreateRequest(
   request: EccWorkspaceCreateRequest,
 ): Promise<EccWorkspaceCreateRequest> {
   if (!request.pdkRequirement) {
-    await services.resourceManagerService.validatePdkRootForWorkspace(
-      request.pdkRoot ?? '',
-    )
-    return request
+    throw new Error('PDK Requirement is required for backend workspace creation')
   }
 
   const projectRoot = request.projectRoot ?? ''

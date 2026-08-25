@@ -309,9 +309,12 @@ describe('PdkInventoryService', () => {
     const root = await createTempDir()
     const oldRoot = join(root, 'old-pdk')
     const newRoot = join(root, 'new-pdk')
+    const incompatibleRoot = join(root, 'incompatible-pdk')
     const projectRoot = join(root, 'project')
     await mkdir(oldRoot, { recursive: true })
     await mkdir(projectRoot, { recursive: true })
+    await mkdir(newRoot)
+    await mkdir(incompatibleRoot)
     const service = new PdkInventoryService({
       inventoryPath: join(root, 'state', 'pdk-inventory.json'),
       managedRoot: join(root, 'managed-pdks'),
@@ -330,8 +333,21 @@ describe('PdkInventoryService', () => {
         version: null,
       },
     })
+    await service.importInstallation({
+      displayName: 'Other PDK',
+      familyId: 'other-pdk',
+      root: incompatibleRoot,
+    })
+    await expect(
+      service.locateInstallation({ installationId: installation.id, root: newRoot }),
+    ).rejects.toThrow('Only a Missing')
     await rm(oldRoot, { recursive: true })
-    await mkdir(newRoot)
+    await expect(
+      service.locateInstallation({
+        installationId: installation.id,
+        root: incompatibleRoot,
+      }),
+    ).rejects.toThrow('does not match Family and version')
 
     await expect(
       service.locateInstallation({ installationId: installation.id, root: newRoot }),
@@ -357,8 +373,10 @@ describe('PdkInventoryService', () => {
     const root = await createTempDir()
     const pdkRoot = join(root, 'vendor-pdk')
     const projectRoot = join(root, 'project')
+    const replacementRoot = join(root, 'vendor-pdk-replacement')
     await mkdir(pdkRoot, { recursive: true })
     await mkdir(projectRoot, { recursive: true })
+    await mkdir(replacementRoot, { recursive: true })
     const service = new PdkInventoryService({
       inventoryPath: join(root, 'state', 'pdk-inventory.json'),
       managedRoot: join(root, 'managed-pdks'),
@@ -377,12 +395,19 @@ describe('PdkInventoryService', () => {
         version: null,
       },
     })
+    const replacement = await service.importInstallation({
+      displayName: 'Replacement Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: replacementRoot,
+    })
 
     await expect(service.removeInstallation(installation.id)).resolves.toEqual({
       unboundProjectIds: ['proj_demo'],
     })
     await expect(stat(pdkRoot)).resolves.toMatchObject({})
-    await expect(service.listInstallations()).resolves.toEqual([])
+    await expect(service.listInstallations()).resolves.toEqual([
+      expect.objectContaining({ id: replacement.id }),
+    ])
     await expect(
       service.resolveBinding({
         projectId: 'proj_demo',
@@ -394,6 +419,41 @@ describe('PdkInventoryService', () => {
         },
       }),
     ).resolves.toBeNull()
+    await expect(
+      new PdkInventoryService({
+        inventoryPath: join(root, 'state', 'pdk-inventory.json'),
+        managedRoot: join(root, 'managed-pdks'),
+      }).resolveBinding({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          manualConfig: null,
+          version: null,
+        },
+      }),
+    ).resolves.toBeNull()
+    await service.bindInstallation({
+      installationId: replacement.id,
+      projectId: 'proj_demo',
+      projectRoot,
+      requirement: {
+        familyId: 'vendor-pdk',
+        manualConfig: null,
+        version: null,
+      },
+    })
+    await expect(
+      service.resolveBinding({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          manualConfig: null,
+          version: null,
+        },
+      }),
+    ).resolves.toMatchObject({ installationId: replacement.id })
   })
 
   it('migrates and deduplicates legacy PDK records once', async () => {
@@ -561,6 +621,7 @@ describe('PdkInventoryService', () => {
       projectRoot: join(root, 'moving-project'),
       requirement: { familyId: 'moving-pdk', version: null, manualConfig: null },
     })
+    await rm(movingRoot, { recursive: true })
 
     await Promise.all([
       service.listInstallations(),
