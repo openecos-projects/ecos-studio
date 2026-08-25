@@ -226,6 +226,15 @@ describe('ProjectsView project management surface', () => {
     expect(projectStyles).toContain('grid-template-columns: 24px minmax(0, 1fr) auto;')
   })
 
+  it('keeps selected and unselected project rows on the same horizontal baseline', () => {
+    const selectedTreeStart = projectStyles.indexOf('.project-workspace-tree.selected {')
+    const selectedTreeEnd = projectStyles.indexOf('}', selectedTreeStart)
+    const selectedTreeStyles = projectStyles.slice(selectedTreeStart, selectedTreeEnd)
+
+    expect(selectedTreeStyles).toContain('padding: 8px 0 12px;')
+    expect(selectedTreeStyles).not.toContain('padding: 8px 8px 12px;')
+  })
+
   it('binds workspace selection and actions to the owning expanded project', () => {
     expect(source).toContain(':data-project-id="project.model.id"')
     expect(source).toContain('selectWorkspace(project.model.id, workspace.id)')
