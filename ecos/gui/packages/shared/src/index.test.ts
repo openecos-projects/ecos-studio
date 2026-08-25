@@ -4,6 +4,7 @@ import type {
   DesktopAgentInteractionRequest,
   DesktopAgentEvent,
   DesktopAgentInterruptRequest,
+  DesktopAgentInteractionAnswerRequest,
   DesktopAgentKnownProject,
   DesktopAgentStartSessionRequest,
   DesktopSaveFileDialogOptions,
@@ -80,5 +81,14 @@ describe('shared public contracts', () => {
 
     expect(request.interaction.options[0]?.id).toBe('option-1')
     expect('value' in request.interaction.options[0]!).toBe(false)
+
+    const typedAnswer = {
+      kind: 'choice',
+      providerId: 'ecos_agent',
+      requestId: 'request-1',
+      sessionId: 'session-1',
+      text: 'Start creating a workspace',
+    } satisfies DesktopAgentInteractionAnswerRequest
+    expect(typedAnswer.text).toBe('Start creating a workspace')
   })
 })

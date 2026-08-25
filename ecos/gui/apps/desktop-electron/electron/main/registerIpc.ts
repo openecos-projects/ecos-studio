@@ -8,7 +8,7 @@ import {
 } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -120,6 +120,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface DesktopBridgeServices {
+  agentQuickRunRoot?: string
   agentRuntimeService?: AgentProviderRuntime & {
     syncEnvironmentOverrides?(
       overrides: Record<string, string | undefined>,
@@ -2093,6 +2094,14 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
     const agentRequest = readAgentStartSessionRequest(request)
+    if (agentRequest.mode === 'home' && services.agentQuickRunRoot) {
+      // ponytail: home sessions reserve an empty root; clean stale roots if churn matters.
+      agentRequest.quickRunProjectRoot = join(
+        services.agentQuickRunRoot,
+        `run_${randomUUID().replaceAll('-', '')}`,
+      )
+      await mkdir(agentRequest.quickRunProjectRoot, { recursive: true })
+    }
     const window = BrowserWindow.fromWebContents(event.sender)
     const windowDirectory = window
       ? workspaceWindowRegistry.getPathForWindow(window)
@@ -2299,6 +2308,22 @@ function readAgentInteractionAnswerRequest(
   ) {
     throw new Error('Invalid agent interaction answer request.')
   }
+  if (record.undo === true) {
+    if (
+      record.optionId !== undefined ||
+      record.text !== undefined ||
+      record.values !== undefined
+    ) {
+      throw new Error('Undo interaction cannot include an answer.')
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      undo: true,
+    }
+  }
   if (kind === 'form') {
     if (!isRecord(record.values))
       throw new Error('Form interaction values must be an object.')
@@ -2322,6 +2347,23 @@ function readAgentInteractionAnswerRequest(
       requestId: requestId.trim(),
       sessionId: readAgentSessionId(record.sessionId),
       values: record.values as Record<string, string | number | null>,
+    }
+  }
+  if (record.text !== undefined) {
+    if (
+      typeof record.text !== 'string' ||
+      !record.text.trim() ||
+      record.text.length > 4096 ||
+      record.optionId !== undefined
+    ) {
+      throw new Error('Invalid typed interaction answer.')
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      text: record.text.trim(),
     }
   }
   if (typeof record.optionId !== 'string' || !record.optionId.trim()) {

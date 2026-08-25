@@ -17,6 +17,7 @@ const stripToolMarkdown = (text: string): string => text.replace(/\*/g, '')
 
 export const useMessageStore = defineStore('messages', () => {
   const messagesBySessionId = ref<Record<string, Message[]>>({})
+  const interactionUndoLengths = new Map<string, Map<string, number>>()
   const activeSessionId = ref<string | null>(null)
 
   const messages = computed(() => {
@@ -226,10 +227,15 @@ export const useMessageStore = defineStore('messages', () => {
   }
 
   const answerInteraction = (requestId: string): boolean => {
-    const message = tryActiveMessages()?.find(
+    const bucket = tryActiveMessages()
+    const message = bucket?.find(
       (candidate) => candidate.interaction?.requestId === requestId,
     )
     if (!message?.interaction || message.interaction.status !== 'pending') return false
+    const sessionId = activeSessionId.value
+    if (sessionId && bucket) {
+      interactionUndoLengths.set(sessionId, new Map([[requestId, bucket.length]]))
+    }
     message.interactionAnswered = true
     message.interaction = { ...message.interaction, status: 'answered' }
     return true
@@ -243,6 +249,31 @@ export const useMessageStore = defineStore('messages', () => {
       message.interaction = { ...message.interaction, status: 'pending' }
       message.interactionAnswered = false
     }
+  }
+
+  const rewindToInteraction = (requestId: string, sessionId?: string): boolean => {
+    const resolvedId = sessionId ?? activeSessionId.value
+    if (!resolvedId) return false
+    const bucket = messagesBySessionId.value[resolvedId]
+    const index = bucket?.findIndex(
+      (message) => message.interaction?.requestId === requestId,
+    )
+    if (!bucket || index === undefined || index < 0) return false
+    const restored = bucket[index]
+    if (!restored?.interaction) return false
+    restored.interaction = {
+      ...restored.interaction,
+      canUndo: false,
+      status: 'pending',
+    }
+    restored.interactionAnswered = false
+    const undoLength = interactionUndoLengths.get(resolvedId)?.get(requestId)
+    interactionUndoLengths.get(resolvedId)?.delete(requestId)
+    messagesBySessionId.value = {
+      ...messagesBySessionId.value,
+      [resolvedId]: bucket.slice(0, Math.max(index + 1, undoLength ?? 0)),
+    }
+    return true
   }
 
   const upsertAgentEvent = (event: DesktopAgentEvent): string => {
@@ -356,6 +387,7 @@ export const useMessageStore = defineStore('messages', () => {
    */
   const clearMessages = () => {
     messagesBySessionId.value = {}
+    interactionUndoLengths.clear()
   }
 
   const clearSessionMessages = (sessionId: string): void => {
@@ -363,6 +395,7 @@ export const useMessageStore = defineStore('messages', () => {
     const next = { ...messagesBySessionId.value }
     delete next[sessionId]
     messagesBySessionId.value = next
+    interactionUndoLengths.delete(sessionId)
   }
 
   const hasSessionGuiArtifacts = (sessionId = activeSessionId.value): boolean => {
@@ -448,6 +481,7 @@ export const useMessageStore = defineStore('messages', () => {
     addInteraction,
     answerInteraction,
     restoreInteraction,
+    rewindToInteraction,
     upsertAgentEvent,
     finishStreamingMessages,
     appendToolProgress,

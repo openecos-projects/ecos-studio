@@ -285,13 +285,18 @@ async function ensureDesktopBridgeReady(): Promise<void> {
   }
 
   if (!ipcRegistered) {
-    const agentRuntimeService = await createAgentRuntimeFromEnvironment(
+    const agentEnv = await desktopServices.resourceManagerService.createRuntimeEnv(
       process.env,
+      { platform: process.platform },
+    )
+    const agentRuntimeService = await createAgentRuntimeFromEnvironment(
+      agentEnv,
       app.isPackaged
         ? join(process.resourcesPath, 'agent')
         : resolve(app.getAppPath(), '..', '..', '..', 'agent'),
     )
     registerIpc(undefined, {
+      agentQuickRunRoot: join(app.getPath('userData'), 'quick-runs'),
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
       codexDependencyService: desktopServices.codexDependencyService,

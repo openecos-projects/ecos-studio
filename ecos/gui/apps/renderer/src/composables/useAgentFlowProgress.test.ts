@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { nextTick, ref } from 'vue'
 import type { RuntimeEventResponse } from '@/api/runtimeEvents'
+import { buildAgentToolSteps } from '@/components/agentToolSteps'
 import { useAgentFlowProgress } from './useAgentFlowProgress'
 
 function runtimeEvent(
@@ -59,6 +60,30 @@ describe('useAgentFlowProgress', () => {
 
     expect(messages).toEqual(['Running place.', 'Completed place.'])
     expect(changes).toEqual([1])
+  })
+
+  it('renders already completed steps skipped by ECC as successful progress', async () => {
+    const messages: string[] = []
+    const events = ref<RuntimeEventResponse[]>([])
+    const progress = useAgentFlowProgress(
+      (message) => messages.push(message),
+      undefined,
+      events,
+    )
+
+    progress.start('/runs/gcd')
+    events.value.push(
+      runtimeEvent('step.completed', {
+        eventId: 'event-1',
+        state: 'Skipped',
+        step: 'Synthesis',
+      }),
+    )
+    await nextTick()
+
+    expect(buildAgentToolSteps(messages.join('\n'))).toMatchObject([
+      { status: 'done', summary: 'Synthesis' },
+    ])
   })
 
   it('ignores duplicate and unrelated workspace protocol events', async () => {

@@ -150,6 +150,18 @@ export async function registerProjectManagedWorkspace(
       queryString(input.routeQuery?.projectName) ||
       basenamePath(registeredProjectRoot) ||
       'project'
+    if (input.config?.project_context?.mode === 'create') {
+      const manifest = await readOptionalProjectTextFile('project.json', {
+        projectPath: registeredProjectRoot,
+      })
+      if (!manifest) {
+        await mutateProjectManifest(registeredProjectRoot, {
+          type: 'create',
+          name: projectName,
+          designName: optionalString(input.config.parameters?.design) || projectName,
+        })
+      }
+    }
     await mutateProjectManifest(registeredProjectRoot, {
       type: 'register-workspace',
       input: {

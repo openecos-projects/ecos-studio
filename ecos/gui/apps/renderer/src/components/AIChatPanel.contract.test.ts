@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import source from './AIChatPanel.vue?raw'
+import messageItemSource from './MessageItem.vue?raw'
 
 describe('AIChatPanel flow contracts', () => {
   it('routes structured interactions through request id and dedicated answers', () => {
@@ -9,33 +10,41 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('agent.answerInteraction(request)')
   })
 
-  it('renders Cursor-style centered turns with sticky user cards', () => {
+  it('renders centered turns with visually distinct user messages', () => {
     expect(source).toContain('groupMessagesIntoTurns')
     expect(source).toContain('conversationTurns')
     expect(source).toContain('chat-turn__user')
     expect(source).toContain('position: sticky')
-    expect(source).toContain('v-for="msg in turn.responses"')
+    expect(source).toContain('v-for="msg in visibleResponses(turn.responses)"')
+    expect(source).toContain('pendingInteractionPresentation(messages.value)')
     expect(source).toContain('turnIndex === conversationTurns.length - 1')
     expect(source).toContain('.chat-turn__body')
     expect(source).toContain('background: transparent')
-    expect(source).toContain('margin-inline: auto')
     expect(source).toContain('text-align: left')
     expect(source).toContain('.chat-turn__user {\n  position: sticky')
     expect(source).toContain('display: block')
     expect(source).not.toContain('border-left: 2px solid')
     expect(source).not.toContain('var(--bg-sidebar) 82%')
+    expect(source).toContain('var(--accent-color) 12%')
+    expect(source).not.toContain('chat-turn__user-label')
+    expect(source).not.toContain('chat-turn__agent-label')
+  })
+
+  it('lets messages follow the panel width while keeping Agent text unframed', () => {
+    expect(source).not.toContain('max-width: 44rem')
+    expect(messageItemSource).not.toContain('max-width: 70ch')
+    expect(messageItemSource).not.toContain(
+      'message-bubble--assistant rounded-lg border border-(--border-color) bg-(--bg-secondary)',
+    )
   })
 
   it('keeps confirmed run plans above progress and awaiting plans after Q&A', () => {
     expect(source).toContain('AgentSessionContractPanels')
     expect(source).toContain('mode="committed"')
     expect(source).toContain('mode="awaiting"')
-    expect(source.indexOf('mode="committed"')).toBeLessThan(
-      source.indexOf('v-for="msg in turn.responses"'),
-    )
-    expect(source.indexOf('v-for="msg in turn.responses"')).toBeLessThan(
-      source.indexOf('mode="awaiting"'),
-    )
+    const responseList = 'v-for="msg in visibleResponses'
+    expect(source.indexOf('mode="committed"')).toBeLessThan(source.indexOf(responseList))
+    expect(source.indexOf(responseList)).toBeLessThan(source.indexOf('mode="awaiting"'))
     expect(source).toContain('markContractInteractionAnswered(sessionId, requestId)')
   })
 
@@ -53,9 +62,24 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('scrollToBottomIfNeeded(force, false)')
   })
 
-  it('blocks the composer while an interaction is pending and retains stop controls', () => {
+  it('docks interactions above the global composer and retains run controls', () => {
     expect(source).toContain('const pendingInteraction = computed(')
-    expect(source).toContain('Boolean(pendingInteraction.value)')
+    expect(source).toContain('v-if="pendingInteraction"')
+    expect(source).toContain('class="interaction-dock custom-scrollbar"')
+    expect(source).toContain('<details')
+    expect(source).toContain('class="interaction-dock__summary"')
+    expect(source).toContain('syncInteractionExpanded')
+    expect(source).toContain('<AgentInteractionCard')
+    expect(source).toContain('@undo="undoLastInteraction"')
+    expect(source).toContain('aria-label="Undo last selection"')
+    expect(source).toContain('undo: true')
+    expect(source).toContain('messageStore.rewindToInteraction(')
+    expect(source).toContain('<div class="composer-footer">')
+    expect(source).not.toContain('@other="focusComposer"')
+    expect(source).not.toContain('composerInputRef.value?.focus()')
+    expect(source).toContain("if ('text' in answer) messageStore.addMessage(answer.text)")
+    expect(source).toContain('handleInteractionText')
+    expect(source).toContain('text: message')
     expect(source).toContain('if (isRunning.value) {')
     expect(source).toContain('queuedMessage.value = message')
     expect(source).toContain('watch(isRunning')
@@ -74,13 +98,23 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('run-status-dot')
     expect(source).toContain('@click="cancelQueuedMessage"')
     expect(source).toContain("return 'Add a follow-up…'")
-    expect(source).toContain("return 'Complete the request above'")
+    expect(source).toContain("return 'Reply to the request above'")
     expect(source).toContain("return 'Ask anything…'")
     expect(source).toContain("return 'Connecting…'")
     expect(source).toContain("return 'Unavailable'")
     expect(source).not.toContain('Connecting to ECOS Agent')
     expect(source).not.toContain('ECOS Agent unavailable')
     expect(source).not.toContain('Message ECOS Agent')
+  })
+
+  it('overlays interactions without hiding the scrollable conversation tail', () => {
+    expect(source).toContain('ref="interactionDockRef"')
+    expect(source).toContain("'--interaction-overlay-height'")
+    expect(source).toContain('interactionDockObserver = new ResizeObserver')
+    expect(source).toContain('padding-bottom: var(--interaction-overlay-height, 0px)')
+    expect(source).toContain('position: absolute')
+    expect(source).toContain('bottom: 100%')
+    expect(source).not.toContain('flex: 0 1 auto')
   })
 
   it('does not submit while an IME composition is active', () => {
@@ -142,6 +176,20 @@ describe('AIChatPanel flow contracts', () => {
     )
     expect(source).toMatch(
       /const flowResult = await runAllFlow\(\{ rerun: false \}\)[\s\S]*await reportWorkspaceCreationResult\([\s\S]*handoff\.setupId,[\s\S]*'succeeded',[\s\S]*handoff\.ownerSessionId/,
+    )
+  })
+
+  it('clears the create trigger before reporting a post-create flow failure', () => {
+    const start = source.indexOf('async function maybeRunPostCreateFlow')
+    const end = source.indexOf('function handleAgentEvent', start)
+    const postCreateFlow = source.slice(start, end)
+    const failure = postCreateFlow.slice(postCreateFlow.indexOf('} catch (error)'))
+
+    expect(failure.indexOf('ownerUi.workspaceCreateSetupId = undefined')).toBeGreaterThan(
+      -1,
+    )
+    expect(failure.indexOf('ownerUi.workspaceCreateSetupId = undefined')).toBeLessThan(
+      failure.indexOf("'failed'"),
     )
   })
 
@@ -277,6 +325,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('projectRoot')
     expect(source).toContain('route.query.projectRoot')
     expect(source).toContain('Create another workspace in this project')
+    expect(source).not.toContain("label: 'Update workspace parameters'")
     expect(source).toContain('AgentChatTabStrip')
     expect(source).toContain('createChatTab')
     expect(source).toContain('directory: tab.workspacePath')

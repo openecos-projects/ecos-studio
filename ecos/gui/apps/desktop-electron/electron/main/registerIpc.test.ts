@@ -89,9 +89,11 @@ type RegisteredHandler = (event: { sender: unknown }, ...args: unknown[]) => unk
 
 function registerHandlers(
   agentRuntimeService?: DesktopBridgeServices['agentRuntimeService'],
+  agentQuickRunRoot?: string,
 ) {
   const handlers = new Map<string, RegisteredHandler>()
   const services = {
+    agentQuickRunRoot,
     agentRuntimeService,
     settingsStore: {
       delete: vi.fn(),
@@ -756,7 +758,69 @@ describe('registerIpc', () => {
       optionId: 'option-1',
       requestId: 'request-1',
     })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentAnswerInteraction)?.(event, {
+        ...session,
+        kind: 'choice',
+        requestId: 'request-2',
+        text: 'Start creating a workspace',
+      }),
+    ).resolves.toEqual({
+      accepted: true,
+      requestId: 'request-2',
+      sessionId: session.sessionId,
+    })
+    expect(agentRuntimeService?.answerInteraction).toHaveBeenLastCalledWith({
+      ...session,
+      kind: 'choice',
+      requestId: 'request-2',
+      text: 'Start creating a workspace',
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentAnswerInteraction)?.(event, {
+        ...session,
+        kind: 'form',
+        requestId: 'request-3',
+        undo: true,
+      }),
+    ).resolves.toEqual({
+      accepted: true,
+      requestId: 'request-3',
+      sessionId: session.sessionId,
+    })
+    expect(agentRuntimeService?.answerInteraction).toHaveBeenLastCalledWith({
+      ...session,
+      kind: 'form',
+      requestId: 'request-3',
+      undo: true,
+    })
     expect(agentRuntimeService?.interrupt).toHaveBeenCalledWith(session)
+  })
+
+  it('owns the quick-run project path in the main process', async () => {
+    const agentRuntimeService = {
+      onEvent: vi.fn(() => () => undefined),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers } = registerHandlers(agentRuntimeService, '/managed/quick-runs')
+    const event = {
+      sender: { id: 101, isDestroyed: vi.fn(() => false), once: vi.fn() },
+    }
+
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(event, {
+      mode: 'home',
+      providerId: 'ecos_agent',
+      quickRunProjectRoot: '/renderer/cannot/choose/this',
+      sessionId: 'home-session',
+    })
+
+    const request = vi.mocked(agentRuntimeService!.startSession).mock.calls[0]?.[0]
+    expect(request?.quickRunProjectRoot).toMatch(
+      /^\/managed\/quick-runs\/run_[a-f0-9]{32}$/,
+    )
+    expect(mkdirMock).toHaveBeenCalledWith(request?.quickRunProjectRoot, {
+      recursive: true,
+    })
   })
 
   it('returns version information from the app info service', async () => {

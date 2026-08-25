@@ -72,7 +72,11 @@ export function useAgentFlowProgress(
         case 'step.completed': {
           if (!step) break
           const state = stringValue(data.state)?.toLowerCase()
-          report(state === 'success' ? `Completed ${step}.` : `Failed ${step}.`)
+          report(
+            state === 'success' || state === 'skipped'
+              ? `Completed ${step}.`
+              : `Failed ${step}.`,
+          )
           onFlowChanged()
           break
         }

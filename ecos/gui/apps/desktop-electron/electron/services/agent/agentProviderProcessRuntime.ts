@@ -593,6 +593,7 @@ function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | 
   const status = record.status
   const interaction = readRecord(record.interaction)
   const description = readEventText(record.description)
+  const canUndo = record.canUndo === true
   if (
     record.schema_version !== 'flow-agent.interaction_request.v1' ||
     !requestId ||
@@ -634,6 +635,7 @@ function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | 
       requestId,
       schema_version: 'flow-agent.interaction_request.v1',
       status,
+      ...(canUndo ? { canUndo } : {}),
       ...(description ? { description } : {}),
       title,
     }
@@ -650,6 +652,8 @@ function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | 
       requestId,
       schema_version: 'flow-agent.interaction_request.v1',
       status,
+      ...(canUndo ? { canUndo } : {}),
+      ...(description ? { description } : {}),
       title,
     }
   }
@@ -672,6 +676,8 @@ function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | 
     requestId,
     schema_version: 'flow-agent.interaction_request.v1',
     status,
+    ...(canUndo ? { canUndo } : {}),
+    ...(description ? { description } : {}),
     title,
   }
 }

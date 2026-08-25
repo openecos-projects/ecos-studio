@@ -29,6 +29,7 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
   knownProjects?: DesktopAgentKnownProject[]
   mode?: DesktopAgentSessionMode
   projectRoot?: string
+  quickRunProjectRoot?: string
   sessionId?: string
   workspaceId?: string
 }
@@ -129,6 +130,7 @@ export type DesktopAgentInteractionPayload =
   | DesktopAgentFormInteraction
 
 export interface DesktopAgentInteractionRequest {
+  canUndo?: boolean
   description?: string
   interaction: DesktopAgentInteractionPayload
   kind: DesktopAgentInteractionKind
@@ -144,18 +146,41 @@ export type DesktopAgentInteractionAnswerRequest = DesktopAgentProviderRequest &
   requestId: string
   sessionId: string
 } & (
-    | { kind: 'choice' | 'confirm'; optionId: string; values?: never }
+    | {
+        undo: true
+        optionId?: never
+        text?: never
+        values?: never
+      }
+    | {
+        kind: 'choice' | 'confirm'
+        undo?: never
+        optionId: string
+        text?: never
+        values?: never
+      }
+    | {
+        kind: 'choice' | 'confirm'
+        undo?: never
+        optionId?: never
+        text: string
+        values?: never
+      }
     | {
         kind: 'form'
+        undo?: never
         optionId?: never
+        text?: never
         values: Record<string, string | number | null>
       }
   )
 
 export interface DesktopAgentInteractionAnswerResponse {
   accepted: true
+  canUndo?: boolean
   requestId: string
   sessionId: string
+  undoneRequestId?: string
 }
 
 export interface DesktopAgentStatus {

@@ -161,6 +161,39 @@ describe('messageStore', () => {
     })
   })
 
+  it('rewinds messages to the restored interaction after undo', () => {
+    const store = useMessageStore()
+    const interaction = {
+      interaction: {
+        kind: 'choice' as const,
+        options: [{ id: 'option-1', label: 'Run' }],
+        variant: 'list' as const,
+      },
+      kind: 'choice' as const,
+      purpose: 'execution' as const,
+      requestId: 'request-1',
+      schema_version: 'flow-agent.interaction_request.v1' as const,
+      status: 'pending' as const,
+      title: 'Choose',
+    }
+    store.addInteraction(interaction, 'interaction-1')
+    store.addAssistantMessage('Welcome shown before the selection.', 'done')
+    store.answerInteraction('request-1')
+    store.addAssistantMessage('Prompt created by the wrong selection.', 'done')
+    store.addInteraction(
+      { ...interaction, canUndo: true, requestId: 'request-2' },
+      'interaction-2',
+    )
+
+    expect(store.rewindToInteraction('request-1')).toBe(true)
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages[0]).toMatchObject({
+      interaction: { canUndo: false, requestId: 'request-1', status: 'pending' },
+      interactionAnswered: false,
+    })
+    expect(store.messages[1]?.content).toBe('Welcome shown before the selection.')
+  })
+
   it('merges tool deltas with the same provider message id', () => {
     const store = useMessageStore()
 

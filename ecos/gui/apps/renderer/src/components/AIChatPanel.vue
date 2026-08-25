@@ -75,12 +75,10 @@
               @create-workspace="createWorkspaceFromAgent"
             />
             <MessageItem
-              v-for="msg in turn.responses"
+              v-for="msg in visibleResponses(turn.responses)"
               :key="msg.id"
               :message="msg"
-              :interaction-disabled="isRunning"
               @img-load="onImageLoad"
-              @interaction="handleInteraction"
               class="message-item w-full max-w-full min-w-0"
             />
             <div
@@ -109,6 +107,58 @@
     </div>
 
     <div class="composer-footer">
+      <details
+        v-if="pendingInteraction"
+        ref="interactionDockRef"
+        class="interaction-dock custom-scrollbar"
+        :open="interactionExpanded"
+        @toggle="syncInteractionExpanded"
+      >
+        <summary class="interaction-dock__summary">
+          <i
+            class="ri-question-line interaction-dock__summary-icon"
+            aria-hidden="true"
+          ></i>
+          <span class="interaction-dock__summary-copy">
+            <strong>{{ pendingInteraction.title }}</strong>
+            <span>Waiting for your input</span>
+          </span>
+          <i
+            class="ri-arrow-down-s-line interaction-dock__summary-chevron"
+            aria-hidden="true"
+          ></i>
+        </summary>
+        <div class="interaction-dock__content">
+          <AgentInteractionCard
+            :interaction="pendingInteraction"
+            :disabled="isRunning"
+            @undo="undoLastInteraction"
+            @answer="
+              handleInteraction(
+                pendingInteraction.requestId,
+                pendingInteraction.kind,
+                $event,
+              )
+            "
+          />
+        </div>
+      </details>
+      <div
+        v-else-if="undoInteraction"
+        ref="interactionDockRef"
+        class="interaction-dock custom-scrollbar"
+      >
+        <button
+          type="button"
+          class="interaction-undo"
+          aria-label="Undo last selection"
+          :disabled="isRunning"
+          @click="undoLastInteraction"
+        >
+          <i class="ri-arrow-go-back-line" aria-hidden="true"></i>
+          <span>Undo selection</span>
+        </button>
+      </div>
       <p class="composer-sr-status" role="status" aria-live="polite">
         {{ statusLabel }}
       </p>
@@ -180,12 +230,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import type {
   DesktopAgentEvent,
+  DesktopAgentInteractionRequest,
   DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import AgentInteractionCard from './AgentInteractionCard.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
 import AgentSessionContractPanels from './AgentSessionContractPanels.vue'
@@ -199,7 +251,8 @@ import {
   type PendingGuiAction,
 } from './agentSessionUi'
 import { displayAgentContractTitle } from './agentContractDisplay'
-import { groupMessagesIntoTurns } from './chatTurns'
+import { groupMessagesIntoTurns, pendingInteractionPresentation } from './chatTurns'
+import type { Message } from '../types'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
@@ -239,6 +292,9 @@ const codexSetupBusy = ref(false)
 let unsubscribeCodexProgress: (() => void) | null = null
 const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(agentShell)
 const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
+const interactionPresentation = computed(() =>
+  pendingInteractionPresentation(messages.value),
+)
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 const router = useRouter()
 const route = useRoute()
@@ -269,6 +325,7 @@ const agentFlowProgress = useAgentFlowProgress(
 )
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
+const interactionDockRef = ref<HTMLElement | null>(null)
 const agentSessionId = computed({
   get: () => sharedSessionId.value,
   set: (value: string | null) => agentShell.setSessionId(value),
@@ -472,17 +529,41 @@ const isRunning = computed(
     isWorkspaceSignoffPending.value ||
     agentRunStatus.value === 'running',
 )
-const pendingInteraction = computed(
-  () =>
-    [...messages.value]
-      .reverse()
-      .find((message) => message.interaction?.status === 'pending')?.interaction,
+const pendingInteraction = computed(() => interactionPresentation.value.interaction)
+const undoInteraction = computed(() => activeUi.value.undoInteraction)
+const interactionExpanded = ref(false)
+
+watch(
+  () => pendingInteraction.value?.requestId,
+  (requestId, previousRequestId) => {
+    if (requestId !== previousRequestId) interactionExpanded.value = false
+  },
 )
+
+function syncInteractionExpanded(event: Event): void {
+  interactionExpanded.value = (event.currentTarget as HTMLDetailsElement).open
+  void nextTick(bindInteractionDockObserver)
+}
+
+function visibleResponses(responses: Message[]): Message[] {
+  const companionId = interactionPresentation.value.companionMessageId
+  return responses.filter(
+    (message) => message.type !== 'interaction' && message.id !== companionId,
+  )
+}
+const pendingInteractionAcceptsText = computed(() => {
+  const interaction = pendingInteraction.value
+  if (!interaction) return false
+  if (interaction.kind !== 'form') return true
+  if (interaction.interaction.kind !== 'form') return false
+  const field = interaction.interaction.fields[0]
+  return interaction.interaction.fields.length === 1 && field?.kind !== 'select'
+})
 const composerLocked = computed(
   () =>
     isInterruptPending.value ||
     !agentSessionId.value ||
-    Boolean(pendingInteraction.value),
+    (Boolean(pendingInteraction.value) && !pendingInteractionAcceptsText.value),
 )
 const canSubmit = computed(
   () =>
@@ -494,7 +575,7 @@ const canSubmit = computed(
 const composerPlaceholder = computed(() => {
   if (isAgentConnecting.value) return 'Connecting…'
   if (!agentSessionId.value) return 'Unavailable'
-  if (pendingInteraction.value) return 'Complete the request above'
+  if (pendingInteraction.value) return 'Reply to the request above'
   if (isRunning.value) return 'Add a follow-up…'
   return 'Ask anything…'
 })
@@ -530,15 +611,14 @@ const emptyStateSuggestions = computed(() => {
     ]
   }
   const suggestions = [
-    { label: 'Update workspace parameters', value: '1' },
-    { label: 'Rerun a completed stage', value: '2' },
-    { label: 'Continue unfinished flow', value: '3' },
+    { label: 'Rerun a completed stage', value: '1' },
+    { label: 'Continue unfinished flow', value: '2' },
   ]
   const projectRoot = activeTab.value?.projectRoot || queryString(route.query.projectRoot)
   if (projectRoot) {
     suggestions.push({
       label: 'Create another workspace in this project',
-      value: '4',
+      value: '3',
     })
   }
   return suggestions
@@ -561,6 +641,8 @@ onUnmounted(() => {
   agentFlowProgress.stop()
   scrollContentObserver?.disconnect()
   scrollContentObserver = undefined
+  interactionDockObserver?.disconnect()
+  interactionDockObserver = undefined
 })
 
 watch(
@@ -644,6 +726,39 @@ async function closeChatTab(id: string): Promise<void> {
   if (nextId) {
     const next = agentShell.tabs.find((tab) => tab.id === nextId)
     if (next && !next.started) await startProviderSession(nextId)
+  }
+}
+
+async function undoLastInteraction(): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const sessionId = agentSessionId.value
+  const interaction = pendingInteraction.value ?? undoInteraction.value
+  if (
+    !agent ||
+    !sessionId ||
+    !interaction ||
+    (pendingInteraction.value && !pendingInteraction.value.canUndo) ||
+    isAgentRequestPending.value
+  )
+    return
+  isAgentRequestPending.value = true
+  try {
+    const result = await agent.answerInteraction({
+      kind: interaction.kind,
+      providerId: AGENT_PROVIDER_ID,
+      requestId: interaction.requestId,
+      sessionId,
+      undo: true,
+    })
+    if (result.undoneRequestId) {
+      messageStore.rewindToInteraction(result.undoneRequestId, sessionId)
+      activeUi.value.undoInteraction = undefined
+    }
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+  } finally {
+    isAgentRequestPending.value = false
+    messageStore.finishStreamingMessages(sessionId)
   }
 }
 
@@ -900,6 +1015,7 @@ async function maybeRunPostCreateFlow(): Promise<void> {
       }
       await waitForRuntimeOperation(flowResult.operationId)
       const flow = await readWorkspaceFlowResourceApi()
+      ownerUi.workspaceCreateSetupId = undefined
       await reportWorkspaceCreationResult(
         handoff.setupId,
         'succeeded',
@@ -914,6 +1030,7 @@ async function maybeRunPostCreateFlow(): Promise<void> {
     }
   } catch (error) {
     const reason = agentErrorMessage(error)
+    ownerUi.workspaceCreateSetupId = undefined
     try {
       await reportWorkspaceCreationResult(
         handoff.setupId,
@@ -1116,6 +1233,26 @@ const NEAR_BOTTOM_THRESHOLD = 80
 /** Whether the viewport was pinned to the latest output before content grew. */
 const stickToBottom = ref(true)
 let scrollContentObserver: ResizeObserver | undefined
+let interactionDockObserver: ResizeObserver | undefined
+
+function bindInteractionDockObserver(): void {
+  interactionDockObserver?.disconnect()
+  const scroll = scrollContainerRef.value
+  const dock = interactionDockRef.value
+  const update = () => {
+    scroll?.style.setProperty(
+      '--interaction-overlay-height',
+      dock ? `${Math.ceil(dock.getBoundingClientRect().height + 8)}px` : '0px',
+    )
+    if (stickToBottom.value) scrollToBottom(false)
+  }
+  update()
+  if (!dock || typeof ResizeObserver === 'undefined') return
+  interactionDockObserver = new ResizeObserver(update)
+  interactionDockObserver.observe(dock)
+}
+
+watch(interactionDockRef, () => nextTick(bindInteractionDockObserver), { flush: 'post' })
 
 /**
  * 判断当前滚动位置是否接近底部
@@ -1220,6 +1357,13 @@ watch(
 const handleSubmit = async (): Promise<void> => {
   if (!canSubmit.value) return
   const message = inputValue.value.trim()
+  if (pendingInteraction.value) {
+    const interaction = pendingInteraction.value
+    inputValue.value = ''
+    resetInputHistory()
+    await handleInteractionText(interaction, message)
+    return
+  }
   if (isRunning.value) {
     if (message) queuedMessage.value = message
     inputValue.value = ''
@@ -1236,6 +1380,7 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   if (!agent || !sessionId || isAgentRequestPending.value) return
 
   if (addToHistory && message) messageStore.addMessage(message)
+  activeUi.value.undoInteraction = undefined
   inputValue.value = ''
   resetInputHistory()
   isAgentRequestPending.value = true
@@ -1256,7 +1401,10 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
 async function handleInteraction(
   requestId: string,
   kind: 'choice' | 'confirm' | 'form',
-  answer: { optionId: string } | { values: Record<string, string | number | null> },
+  answer:
+    | { optionId: string }
+    | { text: string }
+    | { values: Record<string, string | number | null> },
 ): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   const agent = desktopApi?.agent
@@ -1267,6 +1415,7 @@ async function handleInteraction(
     (message) => message.interaction?.requestId === requestId,
   )?.interaction
   if (!interaction || !messageStore.answerInteraction(requestId)) return
+  if ('text' in answer) messageStore.addMessage(answer.text)
   isAgentRequestPending.value = true
   try {
     const request =
@@ -1280,12 +1429,15 @@ async function handleInteraction(
           }
         : {
             kind,
-            optionId: 'optionId' in answer ? answer.optionId : '',
+            ...('text' in answer
+              ? { text: answer.text }
+              : { optionId: 'optionId' in answer ? answer.optionId : '' }),
             providerId: AGENT_PROVIDER_ID,
             requestId,
             sessionId,
           }
-    await agent.answerInteraction(request)
+    const result = await agent.answerInteraction(request)
+    activeUi.value.undoInteraction = result.canUndo ? { kind, requestId } : undefined
     markContractInteractionAnswered(sessionId, requestId)
   } catch (error) {
     messageStore.restoreInteraction(requestId)
@@ -1294,6 +1446,22 @@ async function handleInteraction(
     isAgentRequestPending.value = false
     messageStore.finishStreamingMessages()
   }
+}
+
+async function handleInteractionText(
+  interaction: DesktopAgentInteractionRequest,
+  message: string,
+): Promise<void> {
+  if (!message || !pendingInteractionAcceptsText.value) return
+  if (interaction.kind === 'form' && interaction.interaction.kind === 'form') {
+    const field = interaction.interaction.fields[0]
+    if (!field || interaction.interaction.fields.length !== 1) return
+    await handleInteraction(interaction.requestId, interaction.kind, {
+      values: { [field.id]: message },
+    })
+    return
+  }
+  await handleInteraction(interaction.requestId, interaction.kind, { text: message })
 }
 
 function markContractInteractionAnswered(sessionId: string, requestId: string): void {
@@ -2044,12 +2212,9 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 /* 消息容器约束 - 防止内容撑开父容器；勿设 overflow:hidden / contain，否则 sticky 用户节点失效 */
-/* Cursor light: centered conversation column; user is not a right-side bubble */
 .messages-container {
   box-sizing: border-box;
   width: 100%;
-  max-width: 44rem;
-  margin-inline: auto;
   padding-inline: 0.875rem;
 }
 
@@ -2061,23 +2226,23 @@ const handleKeyDown = (e: KeyboardEvent) => {
   position: sticky;
   top: 0;
   z-index: 5;
-  display: block;
+  display: flex;
+  justify-content: flex-end;
   margin: 0;
   padding: 0.625rem 0 0.375rem;
   background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
   backdrop-filter: blur(8px);
 }
 
-/* Cursor light: white card, centered in the column, text left-aligned */
 .chat-turn__user-inner {
   position: relative;
-  width: 100%;
+  width: min(82%, 52rem);
   min-width: 0;
-  padding: 0.75rem 0.875rem;
-  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
-  border-radius: 0.75rem;
-  background: var(--bg-primary);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  padding: 0.625rem 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
+  border-radius: 0.75rem 0.75rem 0.25rem 0.75rem;
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent-color) 8%, transparent);
 }
 
 .chat-turn__user-text {
@@ -2090,20 +2255,26 @@ const handleKeyDown = (e: KeyboardEvent) => {
   word-break: break-word;
 }
 
-/* Cursor light: agent reply is plain text in the centered column — no gray card */
+/* Keep each Agent response visually distinct from the surrounding transcript. */
 .chat-turn__body {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 0.5rem;
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  margin: 0.125rem 0 0.875rem;
-  padding: 0.25rem 0.125rem 0.5rem;
+  margin: 0.25rem 0 1rem;
+  padding: 0.375rem 0.125rem 0.625rem;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--text-primary);
+}
+
+@media (max-width: 640px) {
+  .chat-turn__user-inner {
+    width: 92%;
+  }
 }
 
 .agent-pending {
@@ -2196,12 +2367,15 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 .agent-chat {
+  position: relative;
   min-height: 0;
   background: var(--bg-primary);
 }
 
 .agent-chat__scroll {
   flex: 1 1 auto;
+  padding-bottom: var(--interaction-overlay-height, 0px);
+  scroll-padding-bottom: var(--interaction-overlay-height, 0px);
 }
 
 .composer-footer {
@@ -2211,6 +2385,129 @@ const handleKeyDown = (e: KeyboardEvent) => {
   padding: 0.75rem 0.875rem 0.875rem;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
   background: color-mix(in srgb, var(--bg-primary) 94%, var(--bg-secondary));
+}
+
+.interaction-dock {
+  position: absolute;
+  right: 0.875rem;
+  bottom: 100%;
+  left: 0.875rem;
+  z-index: 8;
+  max-height: min(60vh, 36rem);
+  overflow-y: auto;
+  margin-bottom: 0.5rem;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--bg-secondary) 52%, var(--bg-primary));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.interaction-dock__summary {
+  display: flex;
+  min-height: 3rem;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.interaction-dock__summary::-webkit-details-marker {
+  display: none;
+}
+
+.interaction-dock__summary:hover {
+  background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+}
+
+.interaction-dock__summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 50%, transparent);
+  outline-offset: -2px;
+}
+
+.interaction-dock__summary-icon {
+  color: var(--accent-color);
+  font-size: 1rem;
+}
+
+.interaction-dock__summary-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.125rem;
+}
+
+.interaction-dock__summary-copy strong,
+.interaction-dock__summary-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.interaction-dock__summary-copy strong {
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.interaction-dock__summary-copy span {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+}
+
+.interaction-dock__summary-chevron {
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  transition: transform 160ms ease-out;
+}
+
+.interaction-dock[open] .interaction-dock__summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+}
+
+.interaction-dock[open] .interaction-dock__summary-chevron {
+  transform: rotate(180deg);
+}
+
+.interaction-dock__content {
+  padding: 0.875rem;
+}
+
+.interaction-undo {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.interaction-dock > .interaction-undo {
+  margin: 0.25rem;
+}
+
+.interaction-undo:hover:not(:disabled),
+.interaction-undo:focus-visible {
+  border-color: color-mix(in srgb, var(--border-color) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 80%, var(--bg-secondary));
+  color: var(--text-primary);
+}
+
+.interaction-undo:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.interaction-undo:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .composer-sr-status {

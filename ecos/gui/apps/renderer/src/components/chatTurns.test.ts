@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../types'
-import { groupMessagesIntoTurns } from './chatTurns'
+import { groupMessagesIntoTurns, pendingInteractionPresentation } from './chatTurns'
 
 function msg(partial: Pick<Message, 'id' | 'role'> & Partial<Message>): Message {
   return {
@@ -38,5 +38,67 @@ describe('groupMessagesIntoTurns', () => {
     expect(turns[0]?.user).toBeUndefined()
     expect(turns[0]?.responses.map((m) => m.id)).toEqual(['a0'])
     expect(turns[1]?.user?.id).toBe('u1')
+  })
+
+  it('moves the prompt immediately before a pending interaction into its card', () => {
+    const presentation = pendingInteractionPresentation([
+      msg({ id: 'welcome', role: 'assistant', content: 'Welcome' }),
+      msg({
+        id: 'rtl-prompt',
+        role: 'assistant',
+        content: 'What is the RTL file path? Enter a local .v / .sv file path.',
+      }),
+      msg({
+        id: 'rtl-interaction',
+        role: 'assistant',
+        type: 'interaction',
+        interaction: {
+          interaction: {
+            fields: [{ id: 'value', kind: 'path', label: 'RTL Source Path' }],
+            kind: 'form',
+          },
+          kind: 'form',
+          purpose: 'execution',
+          requestId: 'rtl-request',
+          schema_version: 'flow-agent.interaction_request.v1',
+          status: 'pending',
+          title: 'RTL Source Path',
+        },
+      }),
+    ])
+
+    expect(presentation.companionMessageId).toBe('rtl-prompt')
+    expect(presentation.interaction?.description).toBe(
+      'What is the RTL file path? Enter a local .v / .sv file path.',
+    )
+  })
+
+  it('keeps an explicit interaction description instead of consuming transcript text', () => {
+    const presentation = pendingInteractionPresentation([
+      msg({ id: 'answer', role: 'assistant', content: 'A model answer.' }),
+      msg({
+        id: 'choice',
+        role: 'assistant',
+        type: 'interaction',
+        interaction: {
+          description: 'Choose one.',
+          interaction: {
+            kind: 'choice',
+            options: [{ id: 'one', label: 'One' }],
+            variant: 'list',
+          },
+          kind: 'choice',
+          purpose: 'execution',
+          requestId: 'choice-request',
+          schema_version: 'flow-agent.interaction_request.v1',
+          status: 'pending',
+          title: 'Choose',
+        },
+      }),
+    ])
+
+    expect(presentation).toEqual({
+      interaction: expect.objectContaining({ description: 'Choose one.' }),
+    })
   })
 })

@@ -1,5 +1,9 @@
 import { reactive } from 'vue'
-import type { DesktopAgentEvent, DesktopAgentRunStatus } from '@ecos-studio/shared'
+import type {
+  DesktopAgentEvent,
+  DesktopAgentInteractionRequest,
+  DesktopAgentRunStatus,
+} from '@ecos-studio/shared'
 
 export type AgentContractSurface =
   | 'setup'
@@ -41,6 +45,7 @@ export interface AgentSessionUiState {
   isWorkspaceContinuePending: boolean
   isWorkspaceParameterPending: boolean
   isWorkspaceSignoffPending: boolean
+  undoInteraction?: Pick<DesktopAgentInteractionRequest, 'kind' | 'requestId'>
   workspaceSetupContract?: DesktopAgentEvent['workspaceSetup']
   workspaceSetupMessage: string
   workspaceSetupAnsweredOptionId: string

@@ -1,22 +1,7 @@
 <template>
   <div class="flex w-full min-w-0 justify-start">
-    <template v-if="message.type === 'interaction'">
-      <AgentInteractionCard
-        v-if="message.interaction && !message.interactionAnswered"
-        :interaction="message.interaction"
-        :disabled="interactionDisabled"
-        @answer="
-          emit(
-            'interaction',
-            message.interaction.requestId,
-            message.interaction.kind,
-            $event,
-          )
-        "
-      />
-    </template>
     <AgentToolCard
-      v-else-if="message.type === 'tool'"
+      v-if="message.type === 'tool'"
       :content="message.content"
       :status="message.status"
     />
@@ -306,7 +291,7 @@
         'message-bubble group relative w-full max-w-full min-w-0 text-sm',
         message.role === 'user'
           ? 'rounded-lg border border-(--border-color) bg-(--bg-secondary) text-(--text-primary)'
-          : 'message-bubble--assistant text-(--text-primary)',
+          : 'message-bubble--assistant',
       ]"
     >
       <!-- 图片消息 -->
@@ -341,11 +326,7 @@
       </div>
 
       <!-- 文本消息 -->
-      <div
-        v-else
-        class="selectable"
-        :class="message.role === 'user' ? 'px-3 py-2' : 'py-1'"
-      >
+      <div v-else class="selectable px-3 py-2">
         <!-- 加载状态 -->
         <div
           v-if="message.status === 'loading' && !message.content"
@@ -445,31 +426,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
-import AgentInteractionCard from './AgentInteractionCard.vue'
 import type { Message } from '../types'
 import AgentToolCard from './AgentToolCard.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 
-const props = withDefaults(
-  defineProps<{
-    interactionDisabled?: boolean
-    message: Message
-  }>(),
-  {
-    interactionDisabled: false,
-  },
-)
+const props = defineProps<{ message: Message }>()
 
 const emit = defineEmits<{
   (e: 'img-load'): void
-  (
-    e: 'interaction',
-    requestId: string,
-    kind: 'choice' | 'confirm' | 'form',
-    answer: { optionId: string } | { values: Record<string, string | number | null> },
-  ): void
 }>()
 
 const md = new MarkdownIt({
@@ -716,20 +682,31 @@ function csvRows(content: string): string[][] {
 </script>
 
 <style scoped>
+.message-bubble--assistant {
+  max-width: min(94%, 68rem);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
 .message-bubble--assistant .markdown-body {
   color: var(--text-primary);
-  font-size: 0.8125rem;
-  line-height: 1.55;
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.65;
+  letter-spacing: 0;
 }
 
 .markdown-body {
-  line-height: 1.55;
+  line-height: 1.6;
+  letter-spacing: 0;
   word-break: break-word;
   color: var(--text-primary);
 }
 
 .markdown-body :deep(p) {
-  margin-bottom: 0.5rem;
+  margin: 0 0 0.625rem;
 }
 
 .markdown-body :deep(p:last-child) {
@@ -740,15 +717,17 @@ function csvRows(content: string): string[][] {
   background-color: color-mix(in srgb, var(--border-color) 58%, transparent);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
-  font-family: monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.9em;
 }
 
 .markdown-body :deep(pre) {
   background-color: var(--bg-secondary);
-  padding: 1rem;
-  border-radius: 8px;
+  padding: 0.875rem;
+  border-radius: 6px;
   overflow-x: auto;
-  margin: 0.5rem 0;
+  margin: 0.75rem 0;
   border: 1px solid var(--border-color);
 }
 
@@ -761,13 +740,13 @@ function csvRows(content: string): string[][] {
 .markdown-body :deep(ul) {
   list-style-type: disc;
   padding-left: 1.5rem;
-  margin-bottom: 0.5rem;
+  margin: 0.25rem 0 0.625rem;
 }
 
 .markdown-body :deep(ol) {
   list-style-type: decimal;
   padding-left: 1.5rem;
-  margin-bottom: 0.5rem;
+  margin: 0.25rem 0 0.625rem;
 }
 
 .markdown-body :deep(li) {
