@@ -1,4 +1,4 @@
-export type DesignReportFormat = 'latex' | 'markdown' | 'csv' | 'text'
+export type DesignReportFormat = 'latex' | 'markdown' | 'csv' | 'text' | 'typst'
 
 export interface DesignReportWarning {
   code: string
@@ -180,5 +180,6 @@ export interface DesignReportExportOptions {
   latexStandalone?: boolean
   latexUseBooktabs?: boolean
   latexUseSiunitx?: boolean
+  typstStandalone?: boolean
   title?: string
 }

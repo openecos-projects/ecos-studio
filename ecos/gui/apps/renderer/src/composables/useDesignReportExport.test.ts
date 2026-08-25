@@ -179,6 +179,9 @@ describe('useDesignReportExport', () => {
     composable.selectedFormat.value = 'markdown'
     expect(composable.generatedContent.value).toContain('# Design Summary Report: gcd')
 
+    composable.selectedFormat.value = 'typst'
+    expect(composable.generatedContent.value).toContain('#figure(')
+
     composable.selectedFormat.value = 'csv'
     expect(composable.generatedContent.value).toContain('Category,Metric,Value')
 
@@ -230,11 +233,8 @@ describe('useDesignReportExport', () => {
     expect(mockSaveFile).toHaveBeenCalledWith(
       expect.objectContaining({
         title: expect.stringContaining('TEX'),
+        content: composable.generatedContent.value,
       }),
-    )
-    expect(mockWriteProjectTextFile).toHaveBeenCalledWith(
-      '/projects/gcd/exports/gcd_summary.tex',
-      composable.generatedContent.value,
     )
     expect(showToast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -244,7 +244,7 @@ describe('useDesignReportExport', () => {
     )
   })
 
-  it('exports all 4 formats (.tex, .md, .csv, .txt) on exportAllFormats', async () => {
+  it('exports all 5 formats (.tex, .md, .typ, .csv, .txt) on exportAllFormats', async () => {
     currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
     const composable = useDesignReportExport({
       currentProject,
@@ -258,7 +258,7 @@ describe('useDesignReportExport', () => {
 
     const result = await composable.exportAllFormats()
     expect(result).toBe(true)
-    expect(mockWriteProjectTextFile).toHaveBeenCalledTimes(4)
+    expect(mockWriteProjectTextFile).toHaveBeenCalledTimes(5)
     expect(showToast).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'success',

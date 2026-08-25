@@ -84,6 +84,7 @@ export interface DesktopSaveFileDialogOptions {
   defaultPath?: string
   filters?: DesktopFileDialogFilter[]
   ensureDirectory?: boolean
+  content?: string
 }
 
 export interface DesktopRtlSourceDialogOptions {

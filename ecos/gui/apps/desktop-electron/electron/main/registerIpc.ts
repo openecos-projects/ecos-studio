@@ -7,7 +7,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import {
   desktopApiEventChannels,
@@ -534,14 +534,20 @@ async function saveFile(
   event: IpcMainInvokeEvent,
   options?: DesktopSaveFileDialogOptions,
 ): Promise<string | null> {
-  const { ensureDirectory, ...dialogOptions } = options ?? {}
+  const { ensureDirectory, content, ...dialogOptions } = options ?? {}
   if (ensureDirectory && dialogOptions.defaultPath) {
     await mkdir(dirname(dialogOptions.defaultPath), { recursive: true })
   }
 
   const result = await dialog.showSaveDialog(getEventWindow(event), dialogOptions)
+  if (result.canceled || !result.filePath) return null
 
-  return result.canceled ? null : (result.filePath ?? null)
+  if (typeof content === 'string') {
+    await mkdir(dirname(result.filePath), { recursive: true })
+    await writeFile(result.filePath, content, 'utf8')
+  }
+
+  return result.filePath
 }
 
 async function classifyLocalPaths(paths: string[]): Promise<PickedRtlSources> {

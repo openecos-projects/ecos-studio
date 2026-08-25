@@ -46,15 +46,16 @@ export function formatLatexReport(
     lines.push('\\usepackage{amsmath}')
     lines.push('\\usepackage{amssymb}')
     lines.push('\\usepackage{booktabs}')
-    lines.push('\\usepackage{geometry}')
-    lines.push('\\geometry{margin=1in}')
-    lines.push('')
-    lines.push(`\\title{\\textbf{${escapeLatex(title)}}}`)
-    lines.push('\\author{ECOS Studio Automated Signoff Report}')
-    lines.push('\\date{\\today}')
+    lines.push('\\usepackage[top=1.5cm,bottom=1.5cm,left=1.8cm,right=1.8cm]{geometry}')
+    lines.push('\\renewcommand{\\arraystretch}{0.98}')
+    lines.push('\\setlength{\\tabcolsep}{6pt}')
     lines.push('')
     lines.push('\\begin{document}')
-    lines.push('\\maketitle')
+    lines.push('\\begin{center}')
+    lines.push(`  {\\Large\\textbf{${escapeLatex(title)}}}\\\\[0.25em]`)
+    lines.push('  {\\footnotesize\\today}')
+    lines.push('\\end{center}')
+    lines.push('\\vspace{-0.5em}')
     lines.push('')
   }
 
@@ -68,7 +69,7 @@ export function formatLatexReport(
   lines.push(
     '% ==============================================================================',
   )
-  lines.push('\\begin{table}[htbp]')
+  lines.push('\\begin{table}[!htbp]')
   lines.push('\\centering')
   lines.push(
     `\\caption{Design Implementation and Signoff Summary: ${escapeLatex(data.design.designName)}}`,

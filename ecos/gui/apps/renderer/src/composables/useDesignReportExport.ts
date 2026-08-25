@@ -49,22 +49,14 @@ function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function projectPathForWorkspace(workspacePath: string): string {
-  const normalized = workspacePath.replace(/[\\/]+$/g, '')
-  const separatorIndex = Math.max(
-    normalized.lastIndexOf('/'),
-    normalized.lastIndexOf('\\'),
-  )
-  if (separatorIndex <= 0) return normalized
-  return normalized.slice(0, separatorIndex)
-}
-
 function formatFileExtension(format: DesignReportFormat): string {
   switch (format) {
     case 'latex':
       return 'tex'
     case 'markdown':
       return 'md'
+    case 'typst':
+      return 'typ'
     case 'csv':
       return 'csv'
     case 'text':
@@ -138,6 +130,7 @@ export function useDesignReportExport({
     latexStandalone: false,
     latexUseBooktabs: true,
     latexUseSiunitx: true,
+    typstStandalone: true,
   })
 
   let unmounted = false
@@ -688,16 +681,14 @@ export function useDesignReportExport({
     const design = reportData.value?.design.designName || 'design'
     const ext = formatFileExtension(selectedFormat.value)
     const defaultFilename = `${design}_design_summary.${ext}`
-    const defaultPath = joinLocalPath(
-      projectPathForWorkspace(currentProject.value.path),
-      defaultFilename,
-    )
+    const defaultPath = joinLocalPath(currentProject.value.path, defaultFilename)
 
     try {
       const api = getDesktopApi()
       const destination = await api.dialog.saveFile({
         title: `Save ${selectedFormat.value.toUpperCase()} Design Summary`,
         defaultPath,
+        content: text,
         filters: [
           {
             name: `${selectedFormat.value.toUpperCase()} Files`,
@@ -709,7 +700,6 @@ export function useDesignReportExport({
 
       if (!destination) return false
 
-      await writeProjectTextFile(destination, text)
       showToast({
         severity: 'success',
         summary: 'Report Saved',
@@ -730,16 +720,16 @@ export function useDesignReportExport({
   async function exportAllFormats(): Promise<boolean> {
     if (!reportData.value || !currentProject.value?.path) return false
 
-    const formats: DesignReportFormat[] = ['latex', 'markdown', 'csv', 'text']
+    const formats: DesignReportFormat[] = ['latex', 'markdown', 'typst', 'csv', 'text']
     const design = reportData.value.design.designName || 'design'
-    const parentDir = projectPathForWorkspace(currentProject.value.path)
+    const targetDir = currentProject.value.path
 
     try {
       await Promise.all(
         formats.map(async (fmt) => {
           const ext = formatFileExtension(fmt)
           const content = generateDesignReport(reportData.value!, fmt, exportOptions)
-          const targetPath = joinLocalPath(parentDir, `${design}_design_summary.${ext}`)
+          const targetPath = joinLocalPath(targetDir, `${design}_design_summary.${ext}`)
           await writeProjectTextFile(targetPath, content)
         }),
       )
@@ -747,7 +737,7 @@ export function useDesignReportExport({
       showToast({
         severity: 'success',
         summary: 'All Formats Exported',
-        detail: `Successfully generated .tex, .md, .csv, and .txt files in ${parentDir}`,
+        detail: `Successfully generated .tex, .md, .typ, .csv, and .txt files in ${targetDir}`,
         life: 5000,
       })
       return true

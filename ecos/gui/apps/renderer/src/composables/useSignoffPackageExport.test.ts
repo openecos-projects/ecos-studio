@@ -552,7 +552,27 @@ describe('useSignoffPackageExport export action', () => {
       outputPath: '/tmp/rocket package.tar.gz',
       workspaceHandle: 'workspace-handle-1',
     })
-    expect(api.writeProjectTextFile).toHaveBeenCalledTimes(4)
+    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
+      '/workspaces/active path/rocket_core_design_summary.tex',
+      expect.stringContaining('\\begin{table}'),
+    )
+    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
+      '/workspaces/active path/rocket_core_design_summary.md',
+      expect.stringContaining('# Design Summary Report: rocket_core'),
+    )
+    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
+      '/workspaces/active path/rocket_core_design_summary.typ',
+      expect.stringContaining('#figure('),
+    )
+    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
+      '/workspaces/active path/rocket_core_design_summary.csv',
+      expect.stringContaining('Category,Metric,Value'),
+    )
+    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
+      '/workspaces/active path/rocket_core_design_summary.txt',
+      expect.stringContaining('ECOS STUDIO — DESIGN SUMMARY'),
+    )
+    expect(api.writeProjectTextFile).toHaveBeenCalledTimes(5)
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'success',

@@ -358,12 +358,6 @@ export function useSignoffPackageExport({
         return
       }
 
-      const result = await api.ecc.workspace.exportSignoff({
-        outputPath,
-        workspaceHandle: workspace.workspaceHandle,
-      })
-      if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
-
       try {
         const flow = await api.workspaceResources.readFlow().catch(() => null)
         const home = await api.workspaceResources.readHome().catch(() => null)
@@ -385,14 +379,20 @@ export function useSignoffPackageExport({
             : undefined,
         })
 
-        const reportFormats: DesignReportFormat[] = ['latex', 'markdown', 'csv', 'text']
+        const reportFormats: DesignReportFormat[] = [
+          'latex',
+          'markdown',
+          'typst',
+          'csv',
+          'text',
+        ]
         const formatExtMap: Record<DesignReportFormat, string> = {
           latex: 'tex',
           markdown: 'md',
+          typst: 'typ',
           csv: 'csv',
           text: 'txt',
         }
-        const exportDir = projectPathForWorkspace(outputPath)
         await Promise.all(
           reportFormats.map(async (fmt) => {
             const ext = formatExtMap[fmt]
@@ -401,9 +401,10 @@ export function useSignoffPackageExport({
               includeStageBreakdown: true,
               includeVerificationBreakdown: true,
               latexStandalone: true,
+              typstStandalone: true,
             })
             const summaryPath = joinLocalPath(
-              exportDir,
+              workspace.workspacePath,
               `${design}_design_summary.${ext}`,
             )
             await api.workspace
@@ -419,6 +420,12 @@ export function useSignoffPackageExport({
           repErr,
         )
       }
+
+      const result = await api.ecc.workspace.exportSignoff({
+        outputPath,
+        workspaceHandle: workspace.workspaceHandle,
+      })
+      if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
 
       showToast({
         severity: 'success',

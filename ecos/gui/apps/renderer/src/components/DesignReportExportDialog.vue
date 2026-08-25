@@ -25,7 +25,6 @@
           >
             <i :class="fmt.icon" aria-hidden="true" />
             <span class="tab-label">{{ fmt.label }}</span>
-            <span class="tab-badge">{{ fmt.ext }}</span>
           </button>
         </div>
 
@@ -95,6 +94,17 @@
           />
           <span>Standalone Document (IEEEtran)</span>
         </label>
+
+        <label v-if="selectedFormat === 'typst'" class="option-checkbox">
+          <input
+            type="checkbox"
+            :checked="options.typstStandalone"
+            @change="
+              updateOption('typstStandalone', ($event.target as HTMLInputElement).checked)
+            "
+          />
+          <span>Standalone Document</span>
+        </label>
       </div>
 
       <!-- Main Preview Area -->
@@ -156,7 +166,7 @@
             @click="emit('saveAll')"
           >
             <i class="ri-folder-zip-line" aria-hidden="true" />
-            Export All Formats (4 Files)
+            Export All Formats (5 Files)
           </button>
           <button
             type="button"
@@ -208,10 +218,11 @@ const formats: Array<{
   ext: string
   icon: string
 }> = [
-  { id: 'latex', label: 'LaTeX Paper', ext: '.tex', icon: 'ri-brackets-line' },
-  { id: 'markdown', label: 'Markdown Docs', ext: '.md', icon: 'ri-markdown-line' },
-  { id: 'csv', label: 'CSV Table', ext: '.csv', icon: 'ri-table-line' },
-  { id: 'text', label: 'Plain Text Log', ext: '.txt', icon: 'ri-file-text-line' },
+  { id: 'latex', label: 'LaTeX', ext: '.tex', icon: 'ri-brackets-line' },
+  { id: 'markdown', label: 'Markdown', ext: '.md', icon: 'ri-markdown-line' },
+  { id: 'typst', label: 'Typst', ext: '.typ', icon: 'ri-article-line' },
+  { id: 'csv', label: 'CSV', ext: '.csv', icon: 'ri-table-line' },
+  { id: 'text', label: 'Text', ext: '.txt', icon: 'ri-file-text-line' },
 ]
 
 const lineCount = computed(() => {
@@ -226,13 +237,15 @@ const charCount = computed(() => {
 function formatLabel(format: DesignReportFormat): string {
   switch (format) {
     case 'latex':
-      return 'LaTeX (booktabs / siunitx)'
+      return 'LaTeX'
     case 'markdown':
-      return 'GitHub Flavored Markdown'
+      return 'Markdown'
+    case 'typst':
+      return 'Typst'
     case 'csv':
-      return 'RFC 4180 CSV Data'
+      return 'CSV'
     case 'text':
-      return 'ASCII Table Log'
+      return 'Plain Text'
   }
 }
 
@@ -242,6 +255,8 @@ function formatExt(format: DesignReportFormat): string {
       return 'tex'
     case 'markdown':
       return 'md'
+    case 'typst':
+      return 'typ'
     case 'csv':
       return 'csv'
     case 'text':

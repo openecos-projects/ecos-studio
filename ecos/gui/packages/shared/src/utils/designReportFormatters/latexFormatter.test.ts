@@ -58,7 +58,7 @@ describe('latexFormatter', () => {
 
   it('generates a clean single LaTeX table with booktabs, rich clock metrics, and escaped strings', () => {
     const tex = formatLatexReport(sampleData, { latexStandalone: false })
-    expect(tex).toContain('\\begin{table}[htbp]')
+    expect(tex).toContain('\\begin{table}[!htbp]')
     expect(tex).toContain('\\toprule')
     expect(tex).toContain('\\midrule')
     expect(tex).toContain('\\bottomrule')

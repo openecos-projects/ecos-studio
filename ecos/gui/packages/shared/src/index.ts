@@ -290,5 +290,6 @@ export {
   formatLatexReport,
   formatMarkdownReport,
   formatTextReport,
+  formatTypstReport,
   generateDesignReport,
 } from './utils/designReportFormatters/index.ts'
