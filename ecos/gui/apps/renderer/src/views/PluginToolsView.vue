@@ -694,7 +694,7 @@ async function handleRowInstall(row: ResourceRow): Promise<void> {
 }
 
 async function handleRowCancel(row: ResourceRow): Promise<void> {
-  await pluginStore.cancelResource(row.id)
+  await pluginStore.cancelResource(row.resource.id)
 }
 
 async function handleLocalImport(row: ResourceRow): Promise<void> {
@@ -743,13 +743,13 @@ async function handleRowRemove(row: ResourceRow): Promise<void> {
 
   if (action === 'remove_reference') {
     if (row.type === 'pdk') {
-      await pluginStore.removePdkReference(row.id)
+      await pluginStore.removePdkReference(row.resource.id)
       return
     }
-    await pluginStore.uninstallResource(row.id)
+    await pluginStore.uninstallResource(row.resource.id)
     return
   }
-  await pluginStore.uninstallResource(row.id)
+  await pluginStore.uninstallResource(row.resource.id)
 }
 
 async function downloadSelected(): Promise<void> {

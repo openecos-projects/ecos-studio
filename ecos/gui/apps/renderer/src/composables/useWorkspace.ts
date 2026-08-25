@@ -1243,6 +1243,7 @@ export function useWorkspace() {
           pdk: pdkName,
           pdk_root: resolvedPdkRoot,
           pdk_installation_id: creationConfig?.pdk_installation_id,
+          pdk_requirement: creationConfig?.pdk_requirement,
           parameters: backendParameters,
           origin_def: creationConfig?.origin_def,
           origin_verilog: creationConfig?.origin_verilog,

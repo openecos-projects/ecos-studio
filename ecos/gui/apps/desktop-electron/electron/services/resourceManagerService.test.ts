@@ -1043,7 +1043,7 @@ describe('ResourceManagerService', () => {
     )
   })
 
-  it('lists registry resources and imported PDKs from the desktop manifest', async () => {
+  it('keeps imported PDKs out of the generic Resource listing', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
     const pdkPath = join(root, 'pdks', 'ics55')
@@ -1104,7 +1104,7 @@ describe('ResourceManagerService', () => {
       toolsDir: join(root, 'data', 'tools'),
       pdksDir: join(root, 'data', 'pdks'),
     })
-    await service.importPdkPath(pdkPath)
+    const imported = await service.importPdkPath(pdkPath)
 
     const result = await service.listResources()
 
@@ -1119,14 +1119,6 @@ describe('ResourceManagerService', () => {
           actions: ['install'],
         }),
         expect.objectContaining({
-          id: expect.stringMatching(/^pdk:ics55:local:/),
-          type: 'pdk',
-          status: 'invalid',
-          active: false,
-          path: pdkPath,
-          actions: ['validate', 'remove_reference'],
-        }),
-        expect.objectContaining({
           id: 'pdk:ics55',
           type: 'pdk',
           status: 'available',
@@ -1134,6 +1126,14 @@ describe('ResourceManagerService', () => {
         }),
       ]),
     )
+    expect(result.resources).not.toContainEqual(
+      expect.objectContaining({ id: imported.id, path: pdkPath }),
+    )
+    await expect(service.getResource(imported.id)).resolves.toMatchObject({
+      id: imported.id,
+      path: pdkPath,
+      status: 'invalid',
+    })
   })
 
   it('recursively detects PDK LEF and Liberty files with relative directory paths', async () => {
@@ -5736,8 +5736,8 @@ describe('ResourceManagerService', () => {
       (resource) => resource.type === 'pdk' && resource.path !== null,
     )
 
-    expect(pdks).toHaveLength(1)
-    expect(pdks[0]).toMatchObject({
+    expect(pdks).toHaveLength(0)
+    await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       id: 'pdk:ics55',
       path: pdkRoot,
       status: 'invalid',
@@ -5921,8 +5921,6 @@ describe('ResourceManagerService', () => {
       },
     })
     const service = new ResourceManagerService(dirs)
-    await service.recordPdkReference(projectRoot, pdkRoot)
-
     await expect(
       service.uninstallResource('pdk:ics55:managed:1.10.100'),
     ).resolves.toMatchObject({ status: 'uninstalled' })

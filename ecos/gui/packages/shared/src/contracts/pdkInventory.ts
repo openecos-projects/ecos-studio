@@ -13,6 +13,7 @@ export interface PdkInstallationRecord {
 export interface PdkInstallationSnapshot extends PdkInstallationRecord {
   readiness: PdkReadiness
   reason: string | null
+  supportsEccDefaults: boolean
 }
 
 export interface ManualPdkConfiguration {
@@ -60,5 +61,5 @@ export interface PdkResolveBindingRequest extends PdkProjectRequest {
 }
 
 export interface PdkWorkspaceValidationRequest extends PdkProjectRequest {
-  manualConfig?: ManualPdkConfiguration | null
+  requirement: PdkRequirement
 }

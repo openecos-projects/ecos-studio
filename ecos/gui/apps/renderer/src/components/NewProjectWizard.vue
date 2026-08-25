@@ -817,7 +817,7 @@
                         :class="
                           selectedPdkId === pdk.id
                             ? 'border-(--accent-color) bg-(--accent-color)/10'
-                            : pdk.valid
+                            : isPdkEligible(pdk)
                               ? 'cursor-pointer border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
                               : 'cursor-not-allowed border-red-300/60 bg-red-500/5'
                         "
@@ -825,6 +825,7 @@
                         <button
                           type="button"
                           class="block w-full text-left"
+                          :disabled="!isPdkEligible(pdk)"
                           :aria-pressed="selectedPdkId === pdk.id"
                           @click="selectPdk(pdk)"
                         >
@@ -850,14 +851,14 @@
                                 >{{ pdk.version }}</span
                               >
                               <span
-                                v-if="!pdk.valid"
+                                v-if="!isPdkEligible(pdk)"
                                 class="mt-1 ml-1 inline-block rounded-md bg-red-500/10 px-2 py-0.5 text-xs font-semibold text-red-500"
                               >
-                                {{ pdk.status === 'missing' ? 'Missing' : 'Invalid' }}
+                                {{ pdk.readiness === 'missing' ? 'Missing' : 'Invalid' }}
                               </span>
                             </span>
                             <i
-                              v-if="selectedPdkId === pdk.id && pdk.valid"
+                              v-if="selectedPdkId === pdk.id && isPdkEligible(pdk)"
                               class="ri-checkbox-circle-fill text-xl text-green-500"
                             ></i>
                             <i
@@ -879,20 +880,7 @@
                           <i class="ri-error-warning-line mr-1" aria-hidden="true"></i>
                           {{ pdkValidationMessage(pdk) }}
                         </span>
-                        <ul
-                          v-if="!pdk.valid && pdkMissingFiles(pdk).length > 0"
-                          class="mt-1 list-disc pl-5 text-[11px] leading-5 text-red-500"
-                        >
-                          <li
-                            v-for="file in pdkMissingFiles(pdk)"
-                            :key="file"
-                            class="break-all"
-                          >
-                            {{ file }}
-                          </li>
-                        </ul>
                         <button
-                          v-if="pdk.status !== 'installing'"
                           type="button"
                           class="mt-2 inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-(--accent-color) hover:underline disabled:cursor-wait disabled:opacity-60"
                           :disabled="validatingPdkId === pdk.id"
@@ -911,7 +899,7 @@
                           }}
                         </button>
                         <button
-                          v-if="pdk.status === 'missing'"
+                          v-if="pdk.readiness === 'missing'"
                           type="button"
                           class="mt-2 ml-4 inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-(--accent-color) hover:underline"
                           @click.stop="handleLocatePdk(pdk.id)"
@@ -1565,6 +1553,7 @@ import {
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
 import {
   isHdlFilePath,
+  projectIdFromName,
   type DesktopFileDialogOptions,
   type PdkDetectedFiles,
   type PickedRtlSources,
@@ -1613,6 +1602,7 @@ interface ProjectContext {
   project_name: string
   project_root: string
   project_json_path: string
+  project_id?: string
 }
 
 interface DesignInputType {
@@ -1864,6 +1854,7 @@ function createInitialConfig(
     pdk_root: initialConfig?.pdk_root ?? source_config?.pdk_root ?? '',
     pdk_installation_id:
       initialConfig?.pdk_installation_id ?? source_config?.pdk_installation_id ?? '',
+    pdk_requirement: initialConfig?.pdk_requirement ?? source_config?.pdk_requirement,
     parameters: {
       design: '',
       description: '',
@@ -1932,6 +1923,7 @@ function createInitialProjectContext(
     project_name: projectRoot ? getFileName(projectRoot) : '',
     project_root: projectRoot,
     project_json_path: projectRoot ? joinPath(projectRoot, 'project.json') : '',
+    project_id: initialConfig?.project_context?.project_id,
   }
 }
 
@@ -2099,14 +2091,6 @@ const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
 const HAS_SPACE_RE = /\s/
 const DIRECTORY_UPLOAD_FAILURE_MESSAGE =
   'Folders cannot be uploaded from Select RTL files. Use Select design folder to scan a folder.'
-const ICS55_REQUIRED_PDK_FILES = [
-  'prtech/techLEF/N551P6M_ecos.lef',
-  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
-  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef',
-  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
-  'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
-]
-
 const projectNameError = computed(() =>
   validateName(projectContext.value.project_name, 'Project name'),
 )
@@ -2152,7 +2136,7 @@ const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
 const startsFromFloorplan = computed(() => flowStartStep.value === 'Floorplan')
 const hasSelectedPdkConfig = computed(
   () =>
-    selectedPdk.value?.valid === true &&
+    isPdkEligible(selectedPdk.value) &&
     config.value.pdk.trim() !== '' &&
     config.value.pdk_root.trim() !== '',
 )
@@ -2232,19 +2216,16 @@ const selectedPdk = computed(() =>
   pdkOptions.value.find((pdk) => pdk.id === selectedPdkId.value),
 )
 const defaultConfigAvailable = computed(
-  () => selectedPdk.value?.valid === true && selectedPdk.value.knownLayout === true,
+  () => selectedPdk.value?.readiness === 'ready' && selectedPdk.value.supportsEccDefaults,
 )
 const defaultConfigUnavailableReason = computed(() => {
   if (!selectedPdk.value) return 'Select a PDK first.'
-  if (selectedPdk.value.status === 'missing') return 'The PDK path is unavailable.'
-  if (selectedPdk.value.status === 'invalid') {
-    const missing = pdkMissingFiles(selectedPdk.value)
-    return missing.length > 0
-      ? `PDK validation failed. Missing ${missing.length} required resource file${missing.length === 1 ? '' : 's'}.`
-      : 'PDK validation failed. Check the PDK resource files.'
+  if (selectedPdk.value.readiness === 'missing') return 'The PDK path is unavailable.'
+  if (selectedPdk.value.readiness === 'invalid') {
+    return selectedPdk.value.description || 'PDK validation failed.'
   }
-  if (!selectedPdk.value.valid) return 'This PDK is not validated.'
-  if (!selectedPdk.value.knownLayout)
+  if (!isPdkEligible(selectedPdk.value)) return 'This PDK is not validated.'
+  if (!selectedPdk.value.supportsEccDefaults)
     return 'ECC defaults are only available for a known PDK layout.'
   return ''
 })
@@ -2272,7 +2253,7 @@ const detectedPdkFiles = computed<Record<PdkResourceKey, string[]>>(() => {
 })
 const pdkRequirementItems = computed(() => [
   { label: 'PDK selected', ready: Boolean(selectedPdk.value) },
-  { label: 'PDK validated', ready: selectedPdk.value?.valid === true },
+  { label: 'PDK eligible', ready: isPdkEligible(selectedPdk.value) },
   {
     label:
       pdkConfigMode.value === 'default'
@@ -2322,7 +2303,9 @@ const canProceed = computed(() => {
 const stepFiveBlockedReason = computed(() => {
   if (currentStep.value !== 5 || canProceed.value) return ''
   if (!selectedPdk.value) return 'Select a valid PDK first.'
-  if (!selectedPdk.value.valid) return pdkValidationMessage(selectedPdk.value)
+  if (!isPdkEligible(selectedPdk.value)) {
+    return pdkValidationMessage(selectedPdk.value)
+  }
   if (pdkConfigMode.value === 'manual') {
     const missing = pdkWizardSteps
       .filter((step) => pdkSelections.value[step.key].length === 0)
@@ -2498,6 +2481,7 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
 }
 
 function applyProjectManifestDefaults(manifest: ProjectManifest) {
+  projectContext.value.project_id = manifest.project_id
   projectDesignName.value = manifest.design_name
   config.value.parameters.design = manifest.design_name
   designNameTouched.value = true
@@ -2514,6 +2498,9 @@ function applyProjectManifestDefaults(manifest: ProjectManifest) {
   }
   if (baseDesign.pdk_root && !hasInitialConfigValue('pdk_root')) {
     config.value.pdk_root = baseDesign.pdk_root
+  }
+  if (baseDesign.pdk_requirement && !hasInitialConfigValue('pdk_requirement')) {
+    config.value.pdk_requirement = baseDesign.pdk_requirement
   }
 
   applyProjectDesignFileDefaults(baseDesignRecord, parameters)
@@ -2588,6 +2575,16 @@ function applyProjectDesignFileDefaults(
 }
 
 function applyProjectPdkResourceDefaults(baseDesign: Record<string, unknown>) {
+  const manualConfig = config.value.pdk_requirement?.manualConfig
+  if (manualConfig && !hasInitialConfigValue('pdk_config')) {
+    pdkConfigMode.value = 'manual'
+    pdkSelections.value = {
+      tech_lef: [manualConfig.techLef],
+      cell_lef: [...manualConfig.cellLefs],
+      liberty: [...manualConfig.liberty],
+    }
+    return
+  }
   const projectPdkConfig = baseDesign.pdk_config
   if (!isRecord(projectPdkConfig) || hasInitialConfigValue('pdk_config')) return
 
@@ -2749,6 +2746,7 @@ function setProjectMode(mode: ProjectMode) {
     projectMpc.value = null
     projectManifestError.value = ''
     isLoadingProjectManifest.value = false
+    delete projectContext.value.project_id
     projectContext.value.project_root = joinPath(
       projectParentPath.value,
       projectContext.value.project_name,
@@ -2810,6 +2808,25 @@ async function ensurePdksLoaded() {
   if (hasLoadedPdks.value) return
   hasLoadedPdks.value = true
   await loadPdks(true)
+  const requirement = config.value.pdk_requirement
+  if (requirement) {
+    const projectRoot = projectContext.value.project_root || config.value.directory
+    const projectId =
+      projectContext.value.project_id ||
+      projectIdFromName(
+        projectContext.value.project_name || getFileName(projectRoot) || 'project',
+      )
+    const binding = await getDesktopApi().pdkInventory.resolveBinding({
+      projectId,
+      projectRoot,
+      requirement,
+    })
+    const bound = importedPdks.value.find((pdk) => pdk.id === binding?.installationId)
+    if (bound) {
+      selectPdk(bound)
+      return
+    }
+  }
   const selected = importedPdks.value.find(
     (pdk) => pdk.id === config.value.pdk_installation_id,
   )
@@ -2838,12 +2855,6 @@ async function ensurePdksLoaded() {
         return
       }
     } catch {}
-  }
-  const matching = importedPdks.value.filter(
-    (pdk) => pdk.pdkId === config.value.pdk && pdk.valid,
-  )
-  if (matching.length === 1) {
-    selectPdk(matching[0])
   }
 }
 
@@ -3128,23 +3139,16 @@ function designFilesReady() {
 }
 
 function pdkValidationMessage(pdk: import('../types').ImportedPdk): string {
-  if (pdk.status === 'missing') return 'PDK path is unavailable.'
-  if (pdk.status === 'invalid') {
-    const missing = pdkMissingFiles(pdk)
-    return missing.length > 0
-      ? `Invalid PDK: ${missing.length} required resource file${missing.length === 1 ? '' : 's'} missing.`
-      : 'Invalid PDK: required resource files are missing.'
+  if (pdk.readiness === 'missing') return pdk.description || 'PDK path is unavailable.'
+  if (pdk.readiness === 'invalid') {
+    return pdk.description || 'Invalid PDK: required resource files are missing.'
   }
-  if (!pdk.valid) return 'PDK has not passed validation.'
-  if (!pdk.knownLayout) return 'Custom layout: ECC Default Config is unavailable.'
+  if (pdk.readiness === 'unverified') return 'Manual PDK configuration is required.'
   return ''
 }
 
-function pdkMissingFiles(pdk: import('../types').ImportedPdk): string[] {
-  if (pdk.pdkId !== 'ics55') return []
-  return ICS55_REQUIRED_PDK_FILES.filter(
-    (file) => !pdk.detectedFiles?.files.includes(file),
-  )
+function isPdkEligible(pdk?: import('../types').ImportedPdk): boolean {
+  return pdk?.readiness === 'ready' || pdk?.readiness === 'unverified'
 }
 
 function selectPdk(pdk: import('../types').ImportedPdk) {
@@ -3158,7 +3162,9 @@ function selectPdk(pdk: import('../types').ImportedPdk) {
     manualConfig: null,
   }
   manualPdkDetectedFiles.value = pdk.detectedFiles ?? null
-  if (!pdk.valid || !pdk.knownLayout) pdkConfigMode.value = 'manual'
+  if (pdk.readiness !== 'ready' || !pdk.supportsEccDefaults) {
+    pdkConfigMode.value = 'manual'
+  }
   syncWorkspaceConfig()
 }
 

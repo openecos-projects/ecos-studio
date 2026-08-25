@@ -408,13 +408,11 @@ export class ResourceManagerService {
 
   async listResources(): Promise<ResourceList> {
     const state = await this.fetchRegistry()
-    const pdkInstallations = await this.pdkInventoryService.listInstallations()
+    await this.pdkInventoryService.listInstallations()
     const manifest = await this.readManifestForListing()
     const updateChecks = await this.readUpdateCheckCache()
     const installedTools = getInstalledTools(manifest)
-    const installedPdks = getInstalledPdks(manifest)
     const toolHealth = await checkInstalledToolHealth(installedTools)
-    const installedPdkIds = new Set(installedPdks.map(({ resourceId }) => resourceId))
     const installedMpcs = getInstalledMpcs(manifest)
     const resources: ResourceInfo[] = []
     const registry = state.registry
@@ -432,16 +430,7 @@ export class ResourceManagerService {
       )
     }
     for (const pdk of registry?.pdks ?? []) {
-      if (
-        !pdkInstallations.some(
-          (installation) =>
-            installation.familyId === pdk.id &&
-            installation.ownership === 'managed' &&
-            installation.readiness === 'ready',
-        )
-      ) {
-        resources.push(this.registryPdkToResource(pdk, registry, manifest, toolHealth))
-      }
+      resources.push(this.registryPdkToResource(pdk, registry, manifest, toolHealth))
     }
     for (const mpc of state.registry?.mpcs ?? []) {
       const local = installedMpcs[mpc.id]
@@ -453,23 +442,6 @@ export class ResourceManagerService {
           this.installedToolToResource(name, entry, toolHealth[`tool:${name}`]),
         )
       }
-    }
-    for (const { resourceId, entry } of installedPdks) {
-      resources.push(
-        this.pdkEntryToResource(
-          resourceId,
-          entry,
-          this.findRegistryPdk(state.registry, entry.pdk_id),
-          installedPdkIds,
-          registry,
-          manifest,
-          updateChecks,
-          toolHealth,
-        ),
-      )
-    }
-    for (const installation of pdkInstallations) {
-      resources.push(pdkSnapshotToResource(installation))
     }
     for (const [id, entry] of Object.entries(installedMpcs)) {
       resources.push(
@@ -484,14 +456,17 @@ export class ResourceManagerService {
   }
 
   async getResource(resourceId: string): Promise<ResourceInfo> {
-    const resources = (await this.listResources()).resources
-    if (isPdkRegistryId(resourceId)) {
-      const pdkId = resourceNameFromId(resourceId, 'pdk')
-      const installed = resources.find(
-        (item) => item.type === 'pdk' && item.name === pdkId && item.path !== null,
-      )
-      if (installed) return installed
+    if (resourceId.startsWith('pdk:')) {
+      const installations = await this.pdkInventoryService.listInstallations()
+      const pdkId = pdkIdFromResourceId(resourceId)
+      const installation =
+        installations.find((candidate) => candidate.id === resourceId) ??
+        (isPdkRegistryId(resourceId)
+          ? installations.find((candidate) => candidate.familyId === pdkId)
+          : undefined)
+      if (installation) return pdkSnapshotToResource(installation)
     }
+    const resources = (await this.listResources()).resources
     const resource = resources.find((item) => item.id === resourceId)
     if (!resource) {
       throw new Error(`Resource '${resourceId}' not found`)
@@ -906,11 +881,6 @@ export class ResourceManagerService {
       status: removedReference ? 'removed' : 'uninstalled',
       resource_id: resourceId,
     }
-  }
-
-  async recordPdkReference(projectPath: string, pdkRoot: string): Promise<void> {
-    void projectPath
-    void pdkRoot
   }
 
   async validatePdkRootForWorkspace(pdkRoot: string): Promise<void> {

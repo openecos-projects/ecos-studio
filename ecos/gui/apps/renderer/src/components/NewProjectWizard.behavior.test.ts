@@ -12,6 +12,7 @@ const wizardMocks = vi.hoisted(() => ({
   showToast: vi.fn(),
   loadProjectHistory: vi.fn(async () => []),
   readProjectManagementManifest: vi.fn(async () => null),
+  resolveBinding: vi.fn(),
   scanPdkDirectory: vi.fn(),
 }))
 
@@ -25,6 +26,7 @@ vi.mock('../composables/useWorkspace', () => ({
 
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
+    pdkInventory: { resolveBinding: wizardMocks.resolveBinding },
     workspace: { scanPdkDirectory: wizardMocks.scanPdkDirectory },
   }),
 }))
@@ -51,13 +53,12 @@ describe('NewProjectWizard behavior', () => {
         detectedFiles: { directories: [], files: [] },
         source: 'local',
         version: '',
-        active: true,
-        status: 'installed',
-        valid: true,
-        knownLayout: true,
+        readiness: 'ready',
+        supportsEccDefaults: true,
       },
     ]
     wizardMocks.loadPdks.mockClear()
+    wizardMocks.resolveBinding.mockReset()
     wizardMocks.scanPdkDirectory.mockReset()
     wizardMocks.scanPdkDirectory.mockResolvedValue({
       canonicalPath: '/real/pdk',
@@ -87,6 +88,8 @@ describe('NewProjectWizard behavior', () => {
       },
     })
 
+    await flushPromises()
+
     for (let step = 1; step < 5; step += 1) {
       const continueButton = wrapper
         .findAll('button')
@@ -100,6 +103,88 @@ describe('NewProjectWizard behavior', () => {
     expect(wizardMocks.scanPdkDirectory).toHaveBeenCalledWith('/link/pdk')
     expect(wrapper.find('button[aria-pressed="true"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('Project Pinned')
+    wrapper.unmount()
+  })
+
+  it('restores the backend Binding when multiple Installations match', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:vendor:local:first',
+        name: 'Vendor PDK First',
+        path: '/pdks/vendor-first',
+        description: '',
+        techNode: '',
+        pdkId: 'vendor-pdk',
+        importedAt: '',
+        source: 'imported',
+        version: '',
+        readiness: 'unverified',
+        supportsEccDefaults: false,
+      },
+      {
+        id: 'pdk:vendor:local:second',
+        name: 'Vendor PDK Second',
+        path: '/pdks/vendor-second',
+        description: '',
+        techNode: '',
+        pdkId: 'vendor-pdk',
+        importedAt: '',
+        source: 'imported',
+        version: '',
+        readiness: 'unverified',
+        supportsEccDefaults: false,
+      },
+    ]
+    wizardMocks.resolveBinding.mockResolvedValue({
+      installationId: 'pdk:vendor:local:second',
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+    })
+
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/demo/ws_0001',
+          pdk: 'vendor-pdk',
+          pdk_root: '',
+          pdk_requirement: {
+            familyId: 'vendor-pdk',
+            version: null,
+            manualConfig: null,
+          },
+          project_context: {
+            mode: 'select',
+            project_id: 'proj_demo',
+            project_name: 'demo',
+            project_root: '/projects/demo',
+            project_json_path: '/projects/demo/project.json',
+          },
+          rtl_list: ['/projects/demo/top.v'],
+        },
+      },
+      global: {
+        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+      },
+    })
+
+    await flushPromises()
+
+    const wizard = wrapper.vm as unknown as {
+      ensurePdksLoaded(): Promise<void>
+      selectedPdkId: string
+    }
+    await wizard.ensurePdksLoaded()
+
+    expect(wizardMocks.resolveBinding).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      requirement: {
+        familyId: 'vendor-pdk',
+        version: null,
+        manualConfig: null,
+      },
+    })
+    expect(wizard.selectedPdkId).toBe('pdk:vendor:local:second')
     wrapper.unmount()
   })
 })

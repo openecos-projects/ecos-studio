@@ -245,6 +245,7 @@ export {
   deleteWorkspaceFromManifest,
   ensureProjectQorBaseline,
   parseProjectManifest,
+  projectIdFromName,
   projectManifestFlowSteps,
   recordReplacementBackupInManifest,
   registerWorkspaceInManifest,

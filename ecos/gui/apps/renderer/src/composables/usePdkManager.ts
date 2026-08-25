@@ -8,8 +8,6 @@ const importedPdks = ref<ImportedPdk[]>([])
 const isLoaded = ref(false)
 
 function installationToPdk(installation: PdkInstallationSnapshot): ImportedPdk {
-  const valid =
-    installation.readiness === 'ready' || installation.readiness === 'unverified'
   return {
     id: installation.id,
     name: installation.displayName,
@@ -20,10 +18,8 @@ function installationToPdk(installation: PdkInstallationSnapshot): ImportedPdk {
     importedAt: '',
     source: installation.ownership,
     version: installation.version ?? '',
-    active: false,
-    status: installation.readiness,
-    valid,
-    knownLayout: installation.familyId === 'ics55' && installation.readiness === 'ready',
+    readiness: installation.readiness,
+    supportsEccDefaults: installation.supportsEccDefaults,
   }
 }
 

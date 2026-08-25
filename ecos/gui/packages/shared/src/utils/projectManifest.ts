@@ -236,7 +236,7 @@ export function createProjectManifestDraft(
   if (!designName) throw new Error('Project manifest design_name is required.')
   return {
     schema_version: 1,
-    project_id: `proj_${slugify(name)}`,
+    project_id: projectIdFromName(name),
     name,
     design_name: designName,
     description: '',
@@ -263,6 +263,10 @@ export function createProjectManifestDraft(
     best_workspace: null,
     qor_baseline: null,
   }
+}
+
+export function projectIdFromName(name: string): string {
+  return `proj_${slugify(name)}`
 }
 
 export function serializeProjectManifest(manifest: ProjectManifest): string {

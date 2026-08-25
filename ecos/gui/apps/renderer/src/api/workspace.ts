@@ -1,7 +1,7 @@
 import { toDesktopBridgeData } from './desktopPayload'
 import { CMDEnum, ResponseEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
-import type { DesignTool } from '@ecos-studio/shared'
+import { projectIdFromName, type DesignTool } from '@ecos-studio/shared'
 
 // Types for API requests and responses
 export interface ProjectInfo {
@@ -98,6 +98,7 @@ export function createWorkspaceApi(options: {
   rtl_list?: string[]
   pdk_root?: string
   pdk_installation_id?: string
+  pdk_requirement?: import('@ecos-studio/shared').PdkRequirement
   filelist?: string
   design_input_mode?: string
   sdc?: string
@@ -210,6 +211,7 @@ export function createWorkspaceApi(options: {
     rtl_list: options.rtl_list || [],
     pdk_root: options.pdk_root || '',
     pdk_installation_id: options.pdk_installation_id || '',
+    pdk_requirement: options.pdk_requirement,
     filelist: options.filelist || '',
     design_input_mode: options.design_input_mode || '',
     sdc: options.sdc || '',
@@ -233,6 +235,9 @@ export function createWorkspaceApi(options: {
         pdkJson: data.pdk_json ?? null,
         pdkRoot: String(data.pdk_root ?? ''),
         pdkInstallationId: String(data.pdk_installation_id ?? ''),
+        pdkRequirement: data.pdk_requirement as
+          | import('@ecos-studio/shared').PdkRequirement
+          | undefined,
         projectId: projectIdFromContext(
           data.project_context as Record<string, unknown>,
           String(data.directory ?? ''),
@@ -241,10 +246,6 @@ export function createWorkspaceApi(options: {
           data.project_context as Record<string, unknown>,
           String(data.directory ?? ''),
         ),
-        manualPdkConfig:
-          data.pdk_config_mode === 'manual'
-            ? manualConfiguration(data.pdk_config as Record<string, unknown>)
-            : null,
         rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
         sdc: String(data.sdc ?? ''),
       },
@@ -276,19 +277,5 @@ function projectIdFromContext(
   const name = String(
     context.project_name || workspaceDirectory.split(/[/\\]/).pop() || 'project',
   )
-  return `proj_${name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')}`
-}
-
-function manualConfiguration(config: Record<string, unknown>) {
-  const techLef = Array.isArray(config.tech_lef) ? config.tech_lef : []
-  const cellLefs = Array.isArray(config.cell_lef) ? config.cell_lef : []
-  const liberty = Array.isArray(config.liberty) ? config.liberty : []
-  return {
-    techLef: String(techLef[0] ?? ''),
-    cellLefs: cellLefs.map(String),
-    liberty: liberty.map(String),
-  }
+  return projectIdFromName(name)
 }

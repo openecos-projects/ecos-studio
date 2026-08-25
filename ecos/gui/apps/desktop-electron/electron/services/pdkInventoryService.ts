@@ -15,6 +15,7 @@ import type {
 } from '@ecos-studio/shared'
 import {
   migrateLegacyPdkInventory,
+  resumeLegacyPdkMigration,
   writeJsonAtomic,
   type PdkInventoryFile,
 } from './pdkInventoryMigration'
@@ -23,6 +24,7 @@ export interface PdkInventoryServiceOptions {
   inventoryPath?: string
   legacyManifestPath?: string
   managedRoot?: string
+  jsonWriter?: typeof writeJsonAtomic
 }
 
 export interface ManagedPdkInstallationRequest extends PdkImportRequest {
@@ -40,6 +42,7 @@ const ICS55_MARKERS = [
 
 export class PdkInventoryService {
   private operation: Promise<void> = Promise.resolve()
+  private legacyCleanupComplete = false
   private readonly options: Required<PdkInventoryServiceOptions>
 
   constructor(options: PdkInventoryServiceOptions = {}) {
@@ -53,6 +56,7 @@ export class PdkInventoryService {
       legacyManifestPath:
         options.legacyManifestPath ?? join(dirname(inventoryPath), 'manifest.json'),
       managedRoot: options.managedRoot ?? join(dataRoot, 'ecos-studio', 'pdks'),
+      jsonWriter: options.jsonWriter ?? writeJsonAtomic,
     }
   }
 
@@ -210,15 +214,25 @@ export class PdkInventoryService {
         (candidate) => candidate.id === binding.installationId,
       )
       if (!installation) throw new Error('Bound PDK Installation was not found')
+      if (
+        installation.familyId !== request.requirement.familyId ||
+        (request.requirement.version &&
+          installation.version !== request.requirement.version)
+      ) {
+        throw new Error('Bound PDK Installation does not satisfy the Project Requirement')
+      }
       const snapshot = await this.snapshot(installation)
       if (snapshot.readiness === 'missing' || snapshot.readiness === 'invalid') {
         throw new Error(snapshot.reason ?? 'Bound PDK Installation is not usable')
       }
-      if (snapshot.readiness === 'unverified' && !request.manualConfig) {
+      if (snapshot.readiness === 'unverified' && !request.requirement.manualConfig) {
         throw new Error('Manual PDK Configuration is required')
       }
-      if (request.manualConfig) {
-        await assertManualConfiguration(installation.root, request.manualConfig)
+      if (request.requirement.manualConfig) {
+        await assertManualConfiguration(
+          installation.root,
+          request.requirement.manualConfig,
+        )
       }
       return snapshot
     })
@@ -313,10 +327,16 @@ export class PdkInventoryService {
           ...installation,
           readiness: 'missing',
           reason: 'PDK root is unavailable',
+          supportsEccDefaults: installation.familyId === 'ics55',
         }
       }
       if (installation.familyId !== 'ics55') {
-        return { ...installation, readiness: 'unverified', reason: null }
+        return {
+          ...installation,
+          readiness: 'unverified',
+          reason: null,
+          supportsEccDefaults: false,
+        }
       }
       const markers = await Promise.all(
         ICS55_MARKERS.map((marker) =>
@@ -328,11 +348,22 @@ export class PdkInventoryService {
           ...installation,
           readiness: 'invalid',
           reason: 'Required ICS55 PDK files are missing',
+          supportsEccDefaults: true,
         }
       }
-      return { ...installation, readiness: 'ready', reason: null }
+      return {
+        ...installation,
+        readiness: 'ready',
+        reason: null,
+        supportsEccDefaults: true,
+      }
     } catch {
-      return { ...installation, readiness: 'missing', reason: 'PDK root is unavailable' }
+      return {
+        ...installation,
+        readiness: 'missing',
+        reason: 'PDK root is unavailable',
+        supportsEccDefaults: installation.familyId === 'ics55',
+      }
     }
   }
 
@@ -348,17 +379,23 @@ export class PdkInventoryService {
       ) {
         throw new Error('Invalid PDK Inventory')
       }
+      if (!this.legacyCleanupComplete) {
+        await resumeLegacyPdkMigration(this.options)
+        this.legacyCleanupComplete = true
+      }
       return value as PdkInventoryFile
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return await migrateLegacyPdkInventory(this.options)
+        const inventory = await migrateLegacyPdkInventory(this.options)
+        this.legacyCleanupComplete = true
+        return inventory
       }
       throw error
     }
   }
 
   private async writeInventory(inventory: PdkInventoryFile): Promise<void> {
-    await writeJsonAtomic(this.options.inventoryPath, inventory)
+    await this.options.jsonWriter(this.options.inventoryPath, inventory)
   }
 
   private async withLock<T>(operation: () => Promise<T>): Promise<T> {

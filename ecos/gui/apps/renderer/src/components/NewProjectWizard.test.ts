@@ -59,6 +59,7 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('readProjectManifestForProject')
     expect(source).toContain('applyProjectManifestDefaults')
     expect(source).toContain('manifest.base_design')
+    expect(source).toContain('projectContext.value.project_id = manifest.project_id')
     expect(source).toContain('config.value.pdk = baseDesign.pdk')
     expect(source).toContain('config.value.pdk_root = baseDesign.pdk_root')
     expectSourceCall('setStringParameterDefault', "'top_module'")
@@ -340,16 +341,17 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('pdkValidationMessage')
   })
 
-  it('uses Inventory PDK cards and only lists missing files for invalid PDKs', () => {
+  it('uses Inventory Readiness directly for PDK cards', () => {
     expect(source).toContain('const pdkOptions = computed(() => importedPdks.value)')
     expect(source).toContain('normalizePath(scanned.canonicalPath)')
-    expect(source).toContain('!pdk.valid && pdkMissingFiles(pdk).length > 0')
+    expect(source).toContain("pdk.readiness === 'missing'")
+    expect(source).not.toContain('pdkMissingFiles')
   })
 
   it('restores Project PDK selection from Inventory and supports Locate', () => {
     expect(source).toContain('pdk.id === config.value.pdk_installation_id')
-    expect(source).toContain('pdk.pdkId === config.value.pdk && pdk.valid')
-    expect(source).toContain('if (matching.length === 1)')
+    expect(source).toContain('pdkInventory.resolveBinding')
+    expect(source).toContain('pdk.id === binding?.installationId')
     expect(source).toContain('handleLocatePdk(pdk.id)')
   })
 

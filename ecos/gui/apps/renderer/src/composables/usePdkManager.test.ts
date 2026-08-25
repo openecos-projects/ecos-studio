@@ -55,6 +55,7 @@ const pdkInstallation: PdkInstallationSnapshot = {
   ownership: 'imported',
   readiness: 'ready',
   reason: null,
+  supportsEccDefaults: true,
 }
 const listPdkInstallations = vi.fn(async () => [pdkInstallation])
 const importPdkInstallation = vi.fn(async () => pdkInstallation)
@@ -390,7 +391,7 @@ describe('usePdkManager', () => {
       expect.objectContaining({
         id: 'pdk-installation:ics55',
         source: 'imported',
-        valid: true,
+        readiness: 'ready',
       }),
     ])
     expect(listPdkInstallations).toHaveBeenCalled()
@@ -410,8 +411,8 @@ describe('usePdkManager', () => {
         id: 'pdk-installation:ics55',
         path: '/tmp/pdk',
         pdkId: 'ics55',
-        status: 'ready',
-        valid: true,
+        readiness: 'ready',
+        supportsEccDefaults: true,
       }),
     ])
   })
@@ -426,6 +427,8 @@ describe('usePdkManager', () => {
         techNode: '55nm',
         pdkId: 'ics55',
         importedAt: '2026-05-14T00:00:00Z',
+        readiness: 'ready',
+        supportsEccDefaults: true,
         detectedFiles: {
           directories: ['IP', 'prtech'],
           files: [],
@@ -471,6 +474,8 @@ describe('usePdkManager', () => {
         techNode: '55nm',
         pdkId: 'ics55',
         importedAt: '2026-05-14T00:00:00Z',
+        readiness: 'ready',
+        supportsEccDefaults: true,
       },
     ]
 

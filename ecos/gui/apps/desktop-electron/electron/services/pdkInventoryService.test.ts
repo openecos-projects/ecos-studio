@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PdkInventoryService } from './pdkInventoryService'
+import { writeJsonAtomic } from './pdkInventoryMigration'
 
 const tempDirectories: string[] = []
 
@@ -112,7 +113,9 @@ describe('PdkInventoryService', () => {
     await mkdir(projectRoot, { recursive: true })
     await writeFile(join(pdkRoot, 'tech.lef'), 'VERSION 5.8 ;\n')
     await writeFile(join(pdkRoot, 'cells.lef'), 'VERSION 5.8 ;\n')
+    await writeFile(join(pdkRoot, 'typ.lib'), 'library(test) {}\n')
     await writeFile(join(root, 'outside.lib'), 'library(test) {}\n')
+    await symlink(join(root, 'outside.lib'), join(pdkRoot, 'escaped.lib'))
     const service = new PdkInventoryService({
       inventoryPath: join(root, 'state', 'pdk-inventory.json'),
       managedRoot: join(root, 'managed-pdks'),
@@ -136,13 +139,139 @@ describe('PdkInventoryService', () => {
       service.validateWorkspace({
         projectId: 'proj_demo',
         projectRoot,
-        manualConfig: {
-          techLef: 'tech.lef',
-          cellLefs: ['cells.lef'],
-          liberty: ['../outside.lib'],
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          manualConfig: {
+            techLef: 'tech.lef',
+            cellLefs: ['cells.lef'],
+            liberty: ['../outside.lib'],
+          },
         },
       }),
     ).rejects.toThrow('outside the PDK root')
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          manualConfig: {
+            techLef: 'tech.lef',
+            cellLefs: ['cells.lef'],
+            liberty: ['typ.lib'],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ readiness: 'unverified' })
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          manualConfig: {
+            techLef: 'tech.lef',
+            cellLefs: ['.'],
+            liberty: ['typ.lib'],
+          },
+        },
+      }),
+    ).rejects.toThrow('is not a file')
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          manualConfig: {
+            techLef: 'tech.lef',
+            cellLefs: ['cells.lef'],
+            liberty: ['missing.lib'],
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          manualConfig: {
+            techLef: 'tech.lef',
+            cellLefs: ['cells.lef'],
+            liberty: ['escaped.lib'],
+          },
+        },
+      }),
+    ).rejects.toThrow('outside the PDK root')
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          manualConfig: { techLef: 'tech.lef', cellLefs: [], liberty: [] },
+        },
+      }),
+    ).rejects.toThrow('incomplete')
+  })
+
+  it('preserves an existing Missing Binding and leaves multiple matches Unbound', async () => {
+    const root = await createTempDir()
+    const firstRoot = join(root, 'vendor-first')
+    const secondRoot = join(root, 'vendor-second')
+    const thirdRoot = join(root, 'vendor-third')
+    await Promise.all(
+      [firstRoot, secondRoot, thirdRoot].map((path) => mkdir(path, { recursive: true })),
+    )
+    const service = new PdkInventoryService({
+      inventoryPath: join(root, 'state', 'pdk-inventory.json'),
+      managedRoot: join(root, 'managed-pdks'),
+    })
+    const first = await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: firstRoot,
+    })
+    await service.resolveBinding({
+      projectId: 'proj_existing',
+      projectRoot: join(root, 'existing-project'),
+      requirement: { familyId: 'vendor-pdk', version: null, manualConfig: null },
+    })
+    await rm(firstRoot, { recursive: true })
+    await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: secondRoot,
+    })
+
+    await expect(
+      service.resolveBinding({
+        projectId: 'proj_existing',
+        projectRoot: join(root, 'existing-project'),
+        requirement: { familyId: 'vendor-pdk', version: null, manualConfig: null },
+      }),
+    ).resolves.toMatchObject({ installationId: first.id })
+
+    await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: thirdRoot,
+    })
+    await expect(
+      service.resolveBinding({
+        projectId: 'proj_multiple',
+        projectRoot: join(root, 'multiple-project'),
+        requirement: { familyId: 'vendor-pdk', version: null, manualConfig: null },
+      }),
+    ).resolves.toBeNull()
   })
 
   it('locates a Missing Installation without changing its identity or Binding', async () => {
@@ -309,6 +438,128 @@ describe('PdkInventoryService', () => {
     }
     expect(Object.keys(legacy.installed)).toEqual(['tool:yosys'])
     expect(legacy.pdk_references).toEqual([])
+  })
+
+  it('resumes legacy cleanup after Inventory was written', async () => {
+    const root = await createTempDir()
+    const pdkRoot = join(root, 'vendor-pdk')
+    const inventoryPath = join(root, 'state', 'pdk-inventory.json')
+    const legacyManifestPath = join(root, 'state', 'manifest.json')
+    await mkdir(pdkRoot, { recursive: true })
+    await mkdir(join(root, 'state'), { recursive: true })
+    await writeFile(
+      legacyManifestPath,
+      JSON.stringify({
+        schema_version: 3,
+        installed: {
+          'pdk:vendor-pdk:local:first': {
+            type: 'pdk',
+            pdk_id: 'vendor-pdk',
+            canonical_path: pdkRoot,
+            managed: false,
+          },
+        },
+        pdk_references: [],
+      }),
+    )
+    let writes = 0
+    const interrupted = new PdkInventoryService({
+      inventoryPath,
+      legacyManifestPath,
+      managedRoot: join(root, 'managed-pdks'),
+      jsonWriter: async (path, value) => {
+        writes += 1
+        if (writes === 2) throw new Error('interrupted legacy cleanup')
+        await writeJsonAtomic(path, value)
+      },
+    })
+
+    await expect(interrupted.listInstallations()).rejects.toThrow(
+      'interrupted legacy cleanup',
+    )
+    await expect(readFile(inventoryPath, 'utf8')).resolves.toContain(
+      'pdk:vendor-pdk:local:first',
+    )
+    await expect(readFile(legacyManifestPath, 'utf8')).resolves.toContain(
+      'pdk:vendor-pdk:local:first',
+    )
+
+    const resumed = new PdkInventoryService({
+      inventoryPath,
+      legacyManifestPath,
+      managedRoot: join(root, 'managed-pdks'),
+    })
+    await expect(resumed.listInstallations()).resolves.toHaveLength(1)
+    await expect(readFile(legacyManifestPath, 'utf8')).resolves.not.toContain(
+      'pdk:vendor-pdk:local:first',
+    )
+  })
+
+  it('serializes listing with import, Locate, removal, and Binding updates', async () => {
+    const root = await createTempDir()
+    const movingRoot = join(root, 'moving-old')
+    const movedRoot = join(root, 'moving-new')
+    const removableRoot = join(root, 'removable')
+    const addedRoot = join(root, 'added')
+    await Promise.all(
+      [movingRoot, movedRoot, removableRoot, addedRoot].map((path) =>
+        mkdir(path, { recursive: true }),
+      ),
+    )
+    const service = new PdkInventoryService({
+      inventoryPath: join(root, 'state', 'pdk-inventory.json'),
+      managedRoot: join(root, 'managed-pdks'),
+    })
+    const moving = await service.importInstallation({
+      displayName: 'Moving PDK',
+      familyId: 'moving-pdk',
+      root: movingRoot,
+    })
+    const removable = await service.importInstallation({
+      displayName: 'Removable PDK',
+      familyId: 'removable-pdk',
+      root: removableRoot,
+    })
+    await service.resolveBinding({
+      projectId: 'proj_moving',
+      projectRoot: join(root, 'moving-project'),
+      requirement: { familyId: 'moving-pdk', version: null, manualConfig: null },
+    })
+
+    await Promise.all([
+      service.listInstallations(),
+      service.importInstallation({
+        displayName: 'Added PDK',
+        familyId: 'added-pdk',
+        root: addedRoot,
+      }),
+      service.locateInstallation({ installationId: moving.id, root: movedRoot }),
+      service.removeInstallation(removable.id),
+      service.resolveBinding({
+        projectId: 'proj_added',
+        projectRoot: join(root, 'added-project'),
+        requirement: { familyId: 'added-pdk', version: null, manualConfig: null },
+      }),
+    ])
+
+    await expect(service.listInstallations()).resolves.toEqual([
+      expect.objectContaining({ id: moving.id, root: movedRoot }),
+      expect.objectContaining({ familyId: 'added-pdk', root: addedRoot }),
+    ])
+    const inventory = JSON.parse(
+      await readFile(join(root, 'state', 'pdk-inventory.json'), 'utf8'),
+    ) as {
+      bindings: Array<{ installationId: string; projectId: string }>
+    }
+    expect(inventory.bindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          installationId: moving.id,
+          projectId: 'proj_moving',
+        }),
+        expect.objectContaining({ projectId: 'proj_added' }),
+      ]),
+    )
   })
 
   it('uninstalls Managed content only from the managed root', async () => {

@@ -50,15 +50,23 @@ export const usePluginStore = defineStore('plugin', () => {
   }
 
   function _resourceName(resourceId: string): string {
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     if (resource) {
       return resource.name
     }
     return resourceId.replace(/^(tool|pdk):/, '')
   }
 
+  function _resourceById(resourceId: string): ResourceItem | undefined {
+    return (
+      resources.value.find(
+        (item) => item.id === resourceId && item.type === 'pdk' && item.path !== null,
+      ) ?? resources.value.find((item) => item.id === resourceId)
+    )
+  }
+
   function _toolNameForResourceId(resourceId: string): string | null {
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     if (resource?.type === 'tool') {
       return resource.name
     }
@@ -138,7 +146,7 @@ export const usePluginStore = defineStore('plugin', () => {
   }
 
   function _setResourceStatus(resourceId: string, status: ResourceItem['status']): void {
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     if (!resource) {
       return
     }
@@ -153,7 +161,7 @@ export const usePluginStore = defineStore('plugin', () => {
     resourceErrors.value[resourceId] = message
     _syncLegacyToolError(resourceId, message)
 
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     if (!resource) {
       return
     }
@@ -176,14 +184,9 @@ export const usePluginStore = defineStore('plugin', () => {
         listPdkInstallationsApi(),
       ])
       const inventoryResources = installations.map(pdkInstallationToResourceItem)
-      const inventoryIds = new Set(inventoryResources.map((resource) => resource.id))
-      const inventoryRoots = new Set(inventoryResources.map((resource) => resource.path))
       const nextResources = [
         ...genericResources.filter(
-          (resource) =>
-            resource.type !== 'pdk' ||
-            resource.path === null ||
-            (!inventoryIds.has(resource.id) && !inventoryRoots.has(resource.path)),
+          (resource) => resource.type !== 'pdk' || resource.path === null,
         ),
         ...inventoryResources,
       ]
@@ -310,7 +313,7 @@ export const usePluginStore = defineStore('plugin', () => {
   async function uninstallResource(resourceId: string): Promise<void> {
     delete resourceErrors.value[resourceId]
     _syncLegacyToolError(resourceId)
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     const prevStatus = resource?.status
     const prevError = resource?.error ?? null
     try {
@@ -355,7 +358,11 @@ export const usePluginStore = defineStore('plugin', () => {
   }
 
   async function removePdkReference(resourceId: string): Promise<void> {
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = resources.value.find(
+      (item) =>
+        item.id === resourceId &&
+        (item.source === 'managed' || item.source === 'imported'),
+    )
     if (resource?.source === 'managed' || resource?.source === 'imported') {
       await removePdkInstallationApi(resourceId)
     } else {

@@ -148,7 +148,6 @@ function registerHandlers(
       cancelResource: vi.fn(),
       getResource: vi.fn(),
       readMpcSpec: vi.fn(),
-      recordPdkReference: vi.fn(),
       importLocalPath: vi.fn(),
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
@@ -905,11 +904,11 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.rpcPing).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects invalid backend PDKs before runtime workspace creation', async () => {
+  it('preserves and rejects an invalid existing Binding before workspace creation', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     const error = new Error('PDK validation failed for ics55')
-    services.pdkInventoryService.bindInstallation.mockResolvedValue({
+    services.pdkInventoryService.resolveBinding.mockResolvedValue({
       installationId: 'pdk-installation:ics55',
       projectId: 'proj_demo',
       projectRoot: '/tmp/project',
@@ -925,6 +924,11 @@ describe('registerIpc', () => {
           pdkInstallationId: 'pdk-installation:ics55',
           projectId: 'proj_demo',
           projectRoot: '/tmp/project',
+          pdkRequirement: {
+            familyId: 'ics55',
+            version: null,
+            manualConfig: null,
+          },
         },
       }),
     ).resolves.toEqual({
@@ -934,12 +938,17 @@ describe('registerIpc', () => {
     expect(services.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
       projectId: 'proj_demo',
       projectRoot: '/tmp/project',
-      manualConfig: null,
+      requirement: {
+        familyId: 'ics55',
+        version: null,
+        manualConfig: null,
+      },
     })
+    expect(services.pdkInventoryService.bindInstallation).not.toHaveBeenCalled()
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
-  it('records a validated backend PDK after runtime workspace creation', async () => {
+  it('uses the persisted Project Requirement for workspace creation', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     const payload = {
@@ -948,8 +957,38 @@ describe('registerIpc', () => {
       pdkInstallationId: 'pdk-installation:ics55',
       projectId: 'proj_demo',
       projectRoot: '/tmp/project',
+      pdkRequirement: {
+        familyId: 'ics55',
+        version: null,
+        manualConfig: null,
+      },
     }
     const result = { directory: '/tmp/workspace', workspaceHandle: 'workspace-handle' }
+    const persistedRequirement = {
+      familyId: 'ics55',
+      version: null,
+      manualConfig: {
+        techLef: 'tech.lef',
+        cellLefs: ['cells.lef'],
+        liberty: ['typ.lib'],
+      },
+    }
+    services.projectManagementReadService.readManifest.mockResolvedValue(
+      JSON.stringify({
+        schema_version: 1,
+        project_id: payload.projectId,
+        name: 'demo',
+        design_name: 'demo',
+        root_path: payload.projectRoot,
+        created_at: '2026-08-25T00:00:00.000Z',
+        updated_at: '2026-08-25T00:00:00.000Z',
+        base_design: { pdk_requirement: persistedRequirement, rtl_list: [] },
+        objectives: { primary: 'timing', directions: {} },
+        workspaces: [],
+        best_workspace: null,
+      }),
+    )
+    services.pdkInventoryService.resolveBinding.mockResolvedValue(null)
     services.pdkInventoryService.bindInstallation.mockResolvedValue({
       installationId: payload.pdkInstallationId,
       projectId: payload.projectId,
@@ -978,6 +1017,16 @@ describe('registerIpc', () => {
       familyId: payload.pdk,
       projectId: payload.projectId,
       projectRoot: payload.projectRoot,
+    })
+    expect(services.pdkInventoryService.resolveBinding).toHaveBeenCalledWith({
+      projectId: payload.projectId,
+      projectRoot: payload.projectRoot,
+      requirement: persistedRequirement,
+    })
+    expect(services.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: payload.projectId,
+      projectRoot: payload.projectRoot,
+      requirement: persistedRequirement,
     })
     expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith({
       directory: payload.directory,

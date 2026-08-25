@@ -71,6 +71,7 @@ import {
   type PdkImportRequest,
   type PdkInstallationSnapshot,
   type PdkLocateRequest,
+  type PdkRequirement,
   type PdkResolveBindingRequest,
   type DesktopShellDataEvent,
   type DesktopShellExitEvent,
@@ -84,6 +85,7 @@ import {
   type WorkspaceResourceIndex,
   type WorkspaceStepInfoRequest,
   type WorkspaceStepInfoResult,
+  parseProjectManifest,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import {
@@ -258,7 +260,6 @@ export interface DesktopBridgeServices {
     importPdkPath(path: string): Promise<unknown>
     importLocalPath(resourceId: string, path: string): Promise<unknown>
     validatePdkRootForWorkspace(pdkRoot: string): Promise<void>
-    recordPdkReference(projectPath: string, pdkRoot: string): Promise<void>
     refreshRegistry(): Promise<unknown>
     checkResourceUpdates(options?: {
       force?: boolean
@@ -451,6 +452,75 @@ function readWorkspaceHandleFromEvent(event: EccRuntimeEvent): string | undefine
 function requireDesignTool(value: unknown): DesignTool {
   if (value === 'backend' || value === 'frontend') return value
   throw new Error(`Unsupported design runtime: ${String(value)}`)
+}
+
+async function resolveWorkspacePdkContext(
+  services: DesktopBridgeServices,
+  requestedProjectId: string,
+  projectRoot: string,
+  requested: PdkRequirement,
+): Promise<{ projectId: string; requirement: PdkRequirement }> {
+  if (!projectRoot || !services.projectManagementReadService) {
+    return { projectId: requestedProjectId, requirement: requested }
+  }
+  const manifestText =
+    await services.projectManagementReadService.readManifest(projectRoot)
+  if (!manifestText) return { projectId: requestedProjectId, requirement: requested }
+  const manifest = parseProjectManifest(manifestText)
+  return {
+    projectId: manifest.project_id,
+    requirement: manifest.base_design.pdk_requirement ?? requested,
+  }
+}
+
+async function prepareEccWorkspaceCreateRequest(
+  services: DesktopBridgeServices,
+  request: EccWorkspaceCreateRequest,
+): Promise<EccWorkspaceCreateRequest> {
+  if (!request.pdkRequirement) {
+    await services.resourceManagerService.validatePdkRootForWorkspace(
+      request.pdkRoot ?? '',
+    )
+    return request
+  }
+
+  const projectRoot = request.projectRoot ?? ''
+  const context = await resolveWorkspacePdkContext(
+    services,
+    request.projectId ?? '',
+    projectRoot,
+    request.pdkRequirement,
+  )
+  const { projectId, requirement } = context
+  const binding = await services.pdkInventoryService.resolveBinding({
+    projectId,
+    projectRoot,
+    requirement,
+  })
+  if (!binding) {
+    if (!request.pdkInstallationId) {
+      throw new Error('Project PDK Requirement is unbound')
+    }
+    await services.pdkInventoryService.bindInstallation({
+      installationId: request.pdkInstallationId,
+      familyId: requirement.familyId,
+      projectId,
+      projectRoot,
+    })
+  }
+  const installation = await services.pdkInventoryService.validateWorkspace({
+    projectId,
+    projectRoot,
+    requirement,
+  })
+  const {
+    pdkInstallationId: _pdkInstallationId,
+    pdkRequirement: _pdkRequirement,
+    projectId: _projectId,
+    projectRoot: _projectRoot,
+    ...runtimeRequest
+  } = request
+  return { ...runtimeRequest, pdkRoot: installation.root }
 }
 
 function readWorkspaceDirectoryFromEvent(event: EccRuntimeEvent): string | undefined {
@@ -1768,44 +1838,13 @@ export function registerIpc(
       designTool === 'backend'
         ? (runtimeRequest.payload as unknown as EccWorkspaceCreateRequest)
         : null
-    let eccBackendRequest = backendRequest
-    if (backendRequest?.pdkInstallationId) {
-      const projectId = backendRequest.projectId ?? ''
-      const projectRoot = backendRequest.projectRoot ?? ''
-      await services.pdkInventoryService.bindInstallation({
-        installationId: backendRequest.pdkInstallationId,
-        familyId: backendRequest.pdk ?? '',
-        projectId,
-        projectRoot,
-      })
-      const installation = await services.pdkInventoryService.validateWorkspace({
-        projectId,
-        projectRoot,
-        manualConfig: backendRequest.manualPdkConfig ?? null,
-      })
-      const {
-        pdkInstallationId: _pdkInstallationId,
-        projectId: _projectId,
-        projectRoot: _projectRoot,
-        manualPdkConfig: _manualPdkConfig,
-        ...runtimeRequestPayload
-      } = backendRequest
-      eccBackendRequest = { ...runtimeRequestPayload, pdkRoot: installation.root }
-    } else if (backendRequest) {
-      await services.resourceManagerService.validatePdkRootForWorkspace(
-        backendRequest.pdkRoot ?? '',
-      )
-    }
+    const eccBackendRequest = backendRequest
+      ? await prepareEccWorkspaceCreateRequest(services, backendRequest)
+      : null
     const result =
       designTool === 'frontend'
         ? await services.frontendRpcRuntimeService.createWorkspace(runtimeRequest.payload)
         : await services.eccRuntimeService.createWorkspace(eccBackendRequest!)
-    if (backendRequest && !backendRequest.pdkInstallationId) {
-      await services.resourceManagerService.recordPdkReference(
-        backendRequest.directory,
-        backendRequest.pdkRoot ?? '',
-      )
-    }
     const workspaceHandle = workspaceHandleFromResult(result)
     if (workspaceHandle) {
       trackWorkspaceHandle(
@@ -1979,14 +2018,11 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccWorkspaceCreate, async (event, request) => {
     const createRequest = request as EccWorkspaceCreateRequest
-    await services.resourceManagerService.validatePdkRootForWorkspace(
-      createRequest.pdkRoot ?? '',
+    const validatedRequest = await prepareEccWorkspaceCreateRequest(
+      services,
+      createRequest,
     )
-    const result = await services.eccRuntimeService.createWorkspace(createRequest)
-    await services.resourceManagerService.recordPdkReference(
-      typeof createRequest.directory === 'string' ? createRequest.directory : '',
-      typeof createRequest.pdkRoot === 'string' ? createRequest.pdkRoot : '',
-    )
+    const result = await services.eccRuntimeService.createWorkspace(validatedRequest)
     const workspaceHandle = workspaceHandleFromResult(result)
     const directory = workspaceDirectoryFromResult(result)
     if (workspaceHandle) {

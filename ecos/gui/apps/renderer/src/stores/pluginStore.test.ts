@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import type { PdkInstallationSnapshot } from '@ecos-studio/shared'
 
 vi.mock('@/api/plugin', () => {
   return {
@@ -10,7 +11,31 @@ vi.mock('@/api/plugin', () => {
     installToolApi: vi.fn(),
     listResourcesApi: vi.fn(),
     listPdkInstallationsApi: vi.fn(async () => []),
-    pdkInstallationToResourceItem: vi.fn(),
+    pdkInstallationToResourceItem: vi.fn((installation) => ({
+      id: installation.id,
+      type: 'pdk',
+      name: installation.familyId,
+      display_name: installation.displayName,
+      description: installation.reason ?? '',
+      category: 'pdk',
+      status:
+        installation.readiness === 'ready' || installation.readiness === 'unverified'
+          ? 'installed'
+          : installation.readiness,
+      installed_version: installation.version,
+      available_versions: [],
+      active_version: null,
+      active: false,
+      path: installation.root,
+      managed_root: installation.ownership === 'managed' ? installation.root : null,
+      platform: null,
+      size: null,
+      source: installation.ownership,
+      homepage: '',
+      actions: [installation.ownership === 'managed' ? 'uninstall' : 'remove_reference'],
+      health: { readiness: installation.readiness },
+      error: installation.reason,
+    })),
     removePdkInstallationApi: vi.fn(),
     removePdkReferenceApi: vi.fn(),
     resourceListToTools: (payload: {
@@ -54,6 +79,7 @@ import {
   installResourceApi,
   listResourcesApi,
   listPdkInstallationsApi,
+  removePdkInstallationApi,
   subscribeResourceProgress,
   uninstallResourceApi,
   updateResourceApi,
@@ -114,6 +140,26 @@ function makePdkResource(overrides: Partial<ResourceItem> = {}): ResourceItem {
   }
 }
 
+function makePdkInstallation(
+  resource: ResourceItem = makePdkResource({
+    status: 'installed',
+    installed_version: '1.01',
+    path: '/tmp/pdks/ics55',
+  }),
+): PdkInstallationSnapshot {
+  return {
+    id: resource.id,
+    familyId: resource.name,
+    displayName: resource.display_name,
+    version: resource.installed_version,
+    root: resource.path ?? '/tmp/pdks/ics55',
+    ownership: resource.source === 'local' ? 'imported' : 'managed',
+    readiness: 'ready',
+    reason: null,
+    supportsEccDefaults: true,
+  }
+}
+
 async function flushPromises(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
 }
@@ -135,6 +181,7 @@ describe('pluginStore', () => {
     vi.mocked(listResourcesApi).mockReset()
     vi.mocked(listPdkInstallationsApi).mockReset()
     vi.mocked(listPdkInstallationsApi).mockResolvedValue([])
+    vi.mocked(removePdkInstallationApi).mockReset()
     vi.mocked(subscribeResourceProgress).mockReset()
     vi.mocked(uninstallResourceApi).mockReset()
     vi.mocked(updateResourceApi).mockReset()
@@ -149,13 +196,10 @@ describe('pluginStore', () => {
         path: '/tmp/tools/yosys/0.61',
         actions: ['uninstall'],
       }),
-      makePdkResource({
-        status: 'installed',
-        actions: ['validate'],
-        path: '/tmp/pdks/ics55',
-      }),
+      makePdkResource(),
     ]
     vi.mocked(listResourcesApi).mockResolvedValue(unifiedResources)
+    vi.mocked(listPdkInstallationsApi).mockResolvedValue([makePdkInstallation()])
 
     const store = usePluginStore()
     await store.fetchTools()
@@ -163,6 +207,7 @@ describe('pluginStore', () => {
     expect(listResourcesApi).toHaveBeenCalledTimes(1)
     expect(store.resources.map((resource) => resource.id)).toEqual([
       'tool:yosys',
+      'pdk:ics55',
       'pdk:ics55',
     ])
     expect(store.tools).toEqual([
@@ -248,7 +293,10 @@ describe('pluginStore', () => {
 
     vi.mocked(listResourcesApi)
       .mockResolvedValueOnce([availablePdk])
-      .mockResolvedValueOnce([installedPdk])
+      .mockResolvedValueOnce([availablePdk])
+    vi.mocked(listPdkInstallationsApi)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([makePdkInstallation(installedPdk)])
     vi.mocked(installResourceApi).mockResolvedValue({
       status: 'started',
       resource_id: 'pdk:ics55',
@@ -297,7 +345,7 @@ describe('pluginStore', () => {
     expect(close).toHaveBeenCalledTimes(1)
     expect(store.resourceProgress['pdk:ics55']).toBeUndefined()
     expect(store.resourceErrors['pdk:ics55']).toBeUndefined()
-    expect(store.resources[0]).toMatchObject({
+    expect(store.resources.find((resource) => resource.path)).toMatchObject({
       id: 'pdk:ics55',
       status: 'installed',
       installed_version: '1.01',
@@ -317,7 +365,10 @@ describe('pluginStore', () => {
 
     vi.mocked(listResourcesApi)
       .mockResolvedValueOnce([availablePdk])
-      .mockResolvedValueOnce([installedPdk])
+      .mockResolvedValueOnce([availablePdk])
+    vi.mocked(listPdkInstallationsApi)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([makePdkInstallation(installedPdk)])
     vi.mocked(subscribeResourceProgress).mockImplementation((resourceId, callback) => {
       expect(resourceId).toBe('pdk:ics55')
       onProgress = callback
@@ -348,7 +399,7 @@ describe('pluginStore', () => {
       vi.mocked(installResourceApi),
     )
     expect(close).toHaveBeenCalledTimes(1)
-    expect(store.resources[0]).toMatchObject({
+    expect(store.resources.find((resource) => resource.path)).toMatchObject({
       id: 'pdk:ics55',
       status: 'installed',
       installed_version: '1.01',
@@ -664,17 +715,20 @@ describe('pluginStore', () => {
     })
 
     vi.mocked(listResourcesApi)
-      .mockResolvedValueOnce([installedPdk])
-      .mockResolvedValueOnce([installedPdk])
-    vi.mocked(uninstallResourceApi).mockRejectedValue(new Error('Resource is busy'))
+      .mockResolvedValueOnce([makePdkResource()])
+      .mockResolvedValueOnce([makePdkResource()])
+    vi.mocked(listPdkInstallationsApi).mockResolvedValue([
+      makePdkInstallation(installedPdk),
+    ])
+    vi.mocked(removePdkInstallationApi).mockRejectedValue(new Error('Resource is busy'))
 
     const store = usePluginStore()
     await store.fetchTools()
     await store.uninstallResource('pdk:ics55')
 
-    expect(uninstallResourceApi).toHaveBeenCalledWith('pdk:ics55')
+    expect(removePdkInstallationApi).toHaveBeenCalledWith('pdk:ics55')
     expect(store.resourceErrors['pdk:ics55']).toBe('Resource is busy')
-    expect(store.resources[0]).toMatchObject({
+    expect(store.resources.find((resource) => resource.path)).toMatchObject({
       id: 'pdk:ics55',
       status: 'installed',
     })
@@ -689,21 +743,23 @@ describe('pluginStore', () => {
     })
 
     vi.mocked(listResourcesApi)
-      .mockResolvedValueOnce([installedPdk])
+      .mockResolvedValueOnce([makePdkResource()])
+      .mockResolvedValueOnce([makePdkResource()])
+    vi.mocked(listPdkInstallationsApi)
+      .mockResolvedValueOnce([makePdkInstallation(installedPdk)])
       .mockResolvedValueOnce([])
-    vi.mocked(uninstallResourceApi).mockResolvedValue({
-      status: 'uninstalled',
-      resource_id: 'pdk:ics55',
+    vi.mocked(removePdkInstallationApi).mockResolvedValue({
+      unboundProjectIds: [],
     })
 
     const store = usePluginStore()
     await store.fetchTools()
     await store.uninstallResource('pdk:ics55')
 
-    expect(uninstallResourceApi).toHaveBeenCalledWith('pdk:ics55')
+    expect(removePdkInstallationApi).toHaveBeenCalledWith('pdk:ics55')
     expect(subscribeResourceProgress).not.toHaveBeenCalled()
     expect(listResourcesApi).toHaveBeenCalledTimes(2)
-    expect(store.resources).toEqual([])
+    expect(store.resources).toEqual([makePdkResource()])
   })
 
   it('imports a local resource path, clears row errors, and refreshes resources', async () => {
@@ -752,7 +808,10 @@ describe('pluginStore', () => {
 
     vi.mocked(listResourcesApi)
       .mockResolvedValueOnce([makePdkResource()])
-      .mockResolvedValueOnce([localPdk])
+      .mockResolvedValueOnce([makePdkResource()])
+    vi.mocked(listPdkInstallationsApi)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([makePdkInstallation(localPdk)])
 
     const store = usePluginStore()
     await store.fetchTools()
@@ -764,10 +823,10 @@ describe('pluginStore', () => {
     expect(importLocalResourcePathApi).not.toHaveBeenCalled()
     expect(store.resourceErrors['pdk:ics55']).toBeUndefined()
     expect(listResourcesApi).toHaveBeenCalledTimes(2)
-    expect(store.resources[0]).toMatchObject({
+    expect(store.resources.find((resource) => resource.path)).toMatchObject({
       id: 'pdk:ics55',
       status: 'installed',
-      source: 'local',
+      source: 'imported',
       path: '/tmp/pdk',
     })
   })
