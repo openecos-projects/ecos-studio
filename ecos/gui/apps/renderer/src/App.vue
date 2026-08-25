@@ -112,41 +112,41 @@
     <DesignFilesManageDialog v-model="showManageDialog" />
 
     <Dialog
-      :visible="pdkFamilyIdDialogVisible"
+      :visible="pdkNameDialogVisible"
       modal
-      header="Confirm PDK Family"
+      header="Import PDK"
       :style="{ width: 'min(420px, calc(100vw - 32px))' }"
       :draggable="false"
-      @update:visible="updatePdkFamilyIdDialogVisibility"
+      @update:visible="updatePdkNameDialogVisibility"
     >
       <label
-        for="pdk-family-id"
+        for="pdk-name"
         class="mb-2 block text-sm font-semibold text-(--text-primary)"
       >
-        PDK Family ID
+        PDK Name
       </label>
       <InputText
-        id="pdk-family-id"
-        v-model="pdkFamilyIdDraft"
+        id="pdk-name"
+        v-model="pdkNameDraft"
         autofocus
         autocomplete="off"
         spellcheck="false"
         class="w-full"
-        @keydown.enter.prevent="confirmPdkFamilyId"
+        @keydown.enter.prevent="confirmPdkName"
       />
       <template #footer>
         <button
           type="button"
           class="rounded border border-(--border-color) px-3 py-1.5 text-sm text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
-          @click="cancelPdkFamilyId"
+          @click="cancelPdkName"
         >
           Cancel
         </button>
         <button
           type="button"
           class="rounded bg-(--accent-color) px-3 py-1.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="!pdkFamilyIdDraft.trim()"
-          @click="confirmPdkFamilyId"
+          :disabled="!pdkNameDraft.trim()"
+          @click="confirmPdkName"
         >
           Import
         </button>
@@ -281,13 +281,8 @@ const {
   runtimeBackendTitle,
   runtimeBackendSubtitle,
 } = useWorkspace()
-const {
-  loadPdks,
-  pdkFamilyIdDialogVisible,
-  pdkFamilyIdDraft,
-  confirmPdkFamilyId,
-  cancelPdkFamilyId,
-} = usePdkManager()
+const { loadPdks, pdkNameDialogVisible, pdkNameDraft, confirmPdkName, cancelPdkName } =
+  usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
 const { showManageDialog, openManageDialog } = useDesignFiles()
@@ -306,8 +301,8 @@ const {
 })
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 
-function updatePdkFamilyIdDialogVisibility(visible: boolean): void {
-  if (!visible) cancelPdkFamilyId()
+function updatePdkNameDialogVisibility(visible: boolean): void {
+  if (!visible) cancelPdkName()
 }
 
 watch(

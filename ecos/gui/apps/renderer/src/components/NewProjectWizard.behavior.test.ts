@@ -269,6 +269,7 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 5
     await flushPromises()
 
+    expect(wrapper.text()).toContain('Unverified')
     expect(wizard.canProceed).toBe(false)
     expect(wizard.stepFiveBlockedReason).toContain('Tech LEF, Cell LEF, Liberty')
     wrapper.unmount()

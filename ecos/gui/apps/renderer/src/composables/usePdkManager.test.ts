@@ -409,8 +409,8 @@ describe('usePdkManager', () => {
   it('does not use unsupported browser prompt for an unregistered PDK', async () => {
     scanPdkDirectory.mockResolvedValue({
       ...scannedPdk,
-      name: 'vendor-a',
-      pdkId: 'vendor-a',
+      name: 'Vendor A Folder',
+      pdkId: 'vendor_a_folder',
     })
     const prompt = vi.fn(() => {
       throw new Error('prompt() is not supported')
@@ -423,18 +423,18 @@ describe('usePdkManager', () => {
 
     const pendingImport = manager.importPdk()
     await vi.waitFor(() => {
-      expect(manager.pdkFamilyIdDialogVisible.value).toBe(true)
+      expect(manager.pdkNameDialogVisible.value).toBe(true)
     })
-    expect(manager.pdkFamilyIdDraft.value).toBe('vendor-a')
-    manager.pdkFamilyIdDraft.value = 'vendor-demo'
-    manager.confirmPdkFamilyId()
+    expect(manager.pdkNameDraft.value).toBe('Vendor A Folder')
+    manager.pdkNameDraft.value = 'Vendor Demo'
+    manager.confirmPdkName()
     const imported = await pendingImport
 
     expect(prompt).not.toHaveBeenCalled()
     expect(imported).not.toBeNull()
     expect(importPdkInstallation).toHaveBeenCalledWith({
-      displayName: 'vendor-a',
-      familyId: 'vendor-demo',
+      displayName: 'Vendor Demo',
+      familyId: 'vendor_demo',
       root: '/tmp/pdk',
     })
   })
@@ -449,9 +449,9 @@ describe('usePdkManager', () => {
 
     const pendingImport = manager.importPdk()
     await vi.waitFor(() => {
-      expect(manager.pdkFamilyIdDialogVisible.value).toBe(true)
+      expect(manager.pdkNameDialogVisible.value).toBe(true)
     })
-    manager.cancelPdkFamilyId()
+    manager.cancelPdkName()
 
     await expect(pendingImport).resolves.toBeNull()
     expect(importPdkInstallation).not.toHaveBeenCalled()

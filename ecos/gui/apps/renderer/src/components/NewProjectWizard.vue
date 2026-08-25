@@ -851,10 +851,21 @@
                                 >{{ pdk.version }}</span
                               >
                               <span
-                                v-if="!isPdkEligible(pdk)"
-                                class="mt-1 ml-1 inline-block rounded-md bg-red-500/10 px-2 py-0.5 text-xs font-semibold text-red-500"
+                                v-if="pdk.readiness !== 'ready'"
+                                class="mt-1 ml-1 inline-block rounded-md px-2 py-0.5 text-xs font-semibold"
+                                :class="
+                                  pdk.readiness === 'unverified'
+                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                    : 'bg-red-500/10 text-red-500'
+                                "
                               >
-                                {{ pdk.readiness === 'missing' ? 'Missing' : 'Invalid' }}
+                                {{
+                                  pdk.readiness === 'missing'
+                                    ? 'Missing'
+                                    : pdk.readiness === 'invalid'
+                                      ? 'Invalid'
+                                      : 'Unverified'
+                                }}
                               </span>
                             </span>
                             <i
@@ -875,9 +886,22 @@
                         </button>
                         <span
                           v-if="pdkValidationMessage(pdk)"
-                          class="mt-2 block text-xs leading-5 text-red-500"
+                          class="mt-2 block text-xs leading-5"
+                          :class="
+                            pdk.readiness === 'unverified'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-red-500'
+                          "
                         >
-                          <i class="ri-error-warning-line mr-1" aria-hidden="true"></i>
+                          <i
+                            :class="
+                              pdk.readiness === 'unverified'
+                                ? 'ri-information-line'
+                                : 'ri-error-warning-line'
+                            "
+                            class="mr-1"
+                            aria-hidden="true"
+                          ></i>
                           {{ pdkValidationMessage(pdk) }}
                         </span>
                         <button

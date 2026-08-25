@@ -6,34 +6,34 @@ import type { ImportedPdk } from '../types'
 
 const importedPdks = ref<ImportedPdk[]>([])
 const isLoaded = ref(false)
-const pdkFamilyIdDialogVisible = ref(false)
-const pdkFamilyIdDraft = ref('')
-let resolvePdkFamilyId: ((familyId: string | null) => void) | null = null
+const pdkNameDialogVisible = ref(false)
+const pdkNameDraft = ref('')
+let resolvePdkName: ((name: string | null) => void) | null = null
 const pdkImportCancelled = new Error('PDK import was cancelled')
 
-function requestPdkFamilyId(suggestedFamilyId: string): Promise<string | null> {
-  resolvePdkFamilyId?.(null)
-  pdkFamilyIdDraft.value = suggestedFamilyId
-  pdkFamilyIdDialogVisible.value = true
+function requestPdkName(suggestedName: string): Promise<string | null> {
+  resolvePdkName?.(null)
+  pdkNameDraft.value = suggestedName
+  pdkNameDialogVisible.value = true
   return new Promise((resolve) => {
-    resolvePdkFamilyId = resolve
+    resolvePdkName = resolve
   })
 }
 
-function finishPdkFamilyIdRequest(familyId: string | null): void {
-  const resolve = resolvePdkFamilyId
-  resolvePdkFamilyId = null
-  pdkFamilyIdDialogVisible.value = false
-  resolve?.(familyId)
+function finishPdkNameRequest(name: string | null): void {
+  const resolve = resolvePdkName
+  resolvePdkName = null
+  pdkNameDialogVisible.value = false
+  resolve?.(name)
 }
 
-function confirmPdkFamilyId(): void {
-  const familyId = pdkFamilyIdDraft.value.trim()
-  if (familyId) finishPdkFamilyIdRequest(familyId)
+function confirmPdkName(): void {
+  const name = pdkNameDraft.value.trim()
+  if (name) finishPdkNameRequest(name)
 }
 
-function cancelPdkFamilyId(): void {
-  finishPdkFamilyIdRequest(null)
+function cancelPdkName(): void {
+  finishPdkNameRequest(null)
 }
 
 function installationToPdk(installation: PdkInstallationSnapshot): ImportedPdk {
@@ -59,15 +59,21 @@ async function importPath(
   const desktopApi = await waitForDesktopApi()
   const scanned = await desktopApi.workspace.scanPdkDirectory(path)
   let familyId = requestedFamilyId || scanned.pdkId
+  let displayName = scanned.name || familyId
   if (!requestedFamilyId && familyId !== 'ics55') {
-    const confirmed = await requestPdkFamilyId(familyId)
+    const confirmed = await requestPdkName(displayName)
     if (confirmed === null) throw pdkImportCancelled
-    familyId = confirmed
+    displayName = confirmed
+    familyId =
+      confirmed
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '') || familyId
   }
   const installation = await desktopApi.pdkInventory.import({
     root: path,
     familyId,
-    displayName: scanned.name || familyId,
+    displayName,
   })
   return installationToPdk(installation)
 }
@@ -167,10 +173,10 @@ export function usePdkManager() {
     removePdk,
     locatePdk,
     validatePdk,
-    pdkFamilyIdDialogVisible,
-    pdkFamilyIdDraft,
-    confirmPdkFamilyId,
-    cancelPdkFamilyId,
+    pdkNameDialogVisible,
+    pdkNameDraft,
+    confirmPdkName,
+    cancelPdkName,
     getPdkById: (id: string) => importedPdks.value.find((pdk) => pdk.id === id),
   }
 }
