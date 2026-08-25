@@ -520,7 +520,11 @@ async function prepareEccWorkspaceCreateRequest(
     projectRoot: _projectRoot,
     ...runtimeRequest
   } = request
-  return { ...runtimeRequest, pdkRoot: installation.root }
+  return {
+    ...runtimeRequest,
+    pdk: requirement.familyId,
+    pdkRoot: installation.root,
+  }
 }
 
 function readWorkspaceDirectoryFromEvent(event: EccRuntimeEvent): string | undefined {
