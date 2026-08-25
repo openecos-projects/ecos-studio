@@ -503,7 +503,7 @@ async function prepareEccWorkspaceCreateRequest(
     }
     await services.pdkInventoryService.bindInstallation({
       installationId: request.pdkInstallationId,
-      familyId: requirement.familyId,
+      requirement,
       projectId,
       projectRoot,
     })

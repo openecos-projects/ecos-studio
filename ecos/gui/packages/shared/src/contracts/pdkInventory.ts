@@ -53,7 +53,7 @@ export interface PdkProjectRequest {
 
 export interface PdkBindRequest extends PdkProjectRequest {
   installationId: string
-  familyId: string
+  requirement: PdkRequirement
 }
 
 export interface PdkResolveBindingRequest extends PdkProjectRequest {

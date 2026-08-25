@@ -346,7 +346,6 @@ export interface ResourceManagerServiceOptions {
   commandRunner?: CommandRunner
   fetchImpl?: typeof fetch
   manifestWriter?: ManifestWriter
-  pdkInventoryService?: PdkInventoryService
   pdksDir?: string
   mpcsDir?: string
   registryUrl?: string
@@ -390,13 +389,12 @@ export class ResourceManagerService {
     this.mpcsDir = options.mpcsDir ?? join(xdgDataHome(), 'ecos-studio', 'mpcs')
     this.cacheDir = options.cacheDir ?? join(xdgCacheHome(), 'ecos-studio')
     this.manifestPath = join(this.resourcesDir, 'manifest.json')
-    this.pdkInventoryService =
-      options.pdkInventoryService ??
-      new PdkInventoryService({
-        inventoryPath: join(this.resourcesDir, 'pdk-inventory.json'),
-        legacyManifestPath: this.manifestPath,
-        managedRoot: this.pdksDir,
-      })
+    this.pdkInventoryService = new PdkInventoryService({
+      inventoryPath: join(this.resourcesDir, 'pdk-inventory.json'),
+      legacyManifestPath: this.manifestPath,
+      managedRoot: this.pdksDir,
+      legacyCleaner: () => this.removeLegacyPdkManifestData(),
+    })
     this.registryUrl =
       options.registryUrl ?? process.env.ECOS_REGISTRY_URL ?? DEFAULT_REGISTRY_URL
     this.commandRunner = options.commandRunner ?? runCommand
@@ -406,9 +404,13 @@ export class ResourceManagerService {
     this.manifestWriter = options.manifestWriter ?? writeFile
   }
 
+  getPdkInventoryService(): PdkInventoryService {
+    return this.pdkInventoryService
+  }
+
   async listResources(): Promise<ResourceList> {
     const state = await this.fetchRegistry()
-    await this.pdkInventoryService.listInstallations()
+    await this.pdkInventoryService.initialize()
     const manifest = await this.readManifestForListing()
     const updateChecks = await this.readUpdateCheckCache()
     const installedTools = getInstalledTools(manifest)
@@ -2107,6 +2109,39 @@ export class ResourceManagerService {
     })
   }
 
+  private async removeLegacyPdkManifestData(): Promise<void> {
+    await this.withManifestLock(async () => {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(await readFile(this.manifestPath, 'utf8'))
+      } catch (error) {
+        if (isFileNotFoundError(error)) return
+        throw error
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid legacy resource manifest')
+      }
+      const manifest = parsed as Record<string, unknown>
+      const installed = { ...readRecord(manifest.installed) }
+      const hasPdk = Object.values(installed).some(
+        (value) => readRecord(value).type === 'pdk',
+      )
+      const hasReferences = Array.isArray(manifest.pdk_references)
+        ? manifest.pdk_references.length > 0
+        : false
+      if (!hasPdk && !hasReferences) return
+      for (const [id, value] of Object.entries(installed)) {
+        if (readRecord(value).type === 'pdk') delete installed[id]
+      }
+      await this.writeManifestJson({
+        ...manifest,
+        schema_version: Math.max(Number(manifest.schema_version) || 1, 3),
+        installed,
+        pdk_references: [],
+      })
+    })
+  }
+
   private async withManifestLock<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.manifestOperationPromise
     let release!: () => void
@@ -2128,10 +2163,14 @@ export class ResourceManagerService {
     manifest.pdks_dir = this.pdksDir
     manifest.mpcs_dir = this.mpcsDir
     manifest.pdk_references ??= []
+    await this.writeManifestJson(manifest)
+  }
+
+  private async writeManifestJson(value: unknown): Promise<void> {
     await mkdir(dirname(this.manifestPath), { recursive: true })
     const tempPath = `${this.manifestPath}.${process.pid}.${randomUUID()}.tmp`
     try {
-      await this.manifestWriter(tempPath, JSON.stringify(manifest, null, 2))
+      await this.manifestWriter(tempPath, JSON.stringify(value, null, 2))
       await rename(tempPath, this.manifestPath)
     } finally {
       await rm(tempPath, { force: true }).catch(() => undefined)

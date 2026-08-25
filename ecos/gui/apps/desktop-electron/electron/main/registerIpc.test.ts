@@ -1014,7 +1014,7 @@ describe('registerIpc', () => {
     ).resolves.toEqual(result)
     expect(services.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
       installationId: payload.pdkInstallationId,
-      familyId: payload.pdk,
+      requirement: persistedRequirement,
       projectId: payload.projectId,
       projectRoot: payload.projectRoot,
     })

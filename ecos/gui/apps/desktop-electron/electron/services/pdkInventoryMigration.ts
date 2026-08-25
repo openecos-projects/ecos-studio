@@ -27,6 +27,7 @@ interface PdkInventoryMigrationOptions {
   legacyManifestPath: string
   managedRoot: string
   jsonWriter?: typeof writeJsonAtomic
+  legacyCleaner?: () => Promise<void>
 }
 
 export async function migrateLegacyPdkInventory(
@@ -106,14 +107,18 @@ export async function migrateLegacyPdkInventory(
     if (!installationId || !projectPath) continue
     const projectRoot = resolve(projectPath)
     inventory.bindings.push({
-      projectId: projectIdFromName(basename(projectRoot)),
+      projectId: await legacyProjectId(projectRoot),
       projectRoot,
       installationId,
     })
   }
 
   await jsonWriter(options.inventoryPath, inventory)
-  await stripLegacyPdkData(options.legacyManifestPath, legacy, jsonWriter)
+  if (options.legacyCleaner) {
+    await options.legacyCleaner()
+  } else {
+    await stripLegacyPdkData(options.legacyManifestPath, legacy, jsonWriter)
+  }
   return inventory
 }
 
@@ -143,11 +148,15 @@ export async function resumeLegacyPdkMigration(
   ) {
     return
   }
-  await stripLegacyPdkData(
-    options.legacyManifestPath,
-    legacy,
-    options.jsonWriter ?? writeJsonAtomic,
-  )
+  if (options.legacyCleaner) {
+    await options.legacyCleaner()
+  } else {
+    await stripLegacyPdkData(
+      options.legacyManifestPath,
+      legacy,
+      options.jsonWriter ?? writeJsonAtomic,
+    )
+  }
 }
 
 export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
@@ -184,4 +193,16 @@ async function stripLegacyPdkData(
 
 function resourceFamilyId(resourceId: string): string {
   return resourceId.split(':')[1] || 'unknown'
+}
+
+async function legacyProjectId(projectRoot: string): Promise<string> {
+  try {
+    const manifest = JSON.parse(
+      await readFile(join(projectRoot, 'project.json'), 'utf8'),
+    ) as { project_id?: unknown }
+    if (typeof manifest.project_id === 'string' && manifest.project_id.trim()) {
+      return manifest.project_id.trim()
+    }
+  } catch {}
+  return projectIdFromName(basename(projectRoot))
 }

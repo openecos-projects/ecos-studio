@@ -37,7 +37,7 @@ import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectManifestService } from '../services/projectManifestService'
 import { ProjectManagementReadService } from '../services/projectManagementReadService'
 import { ResourceManagerService } from '../services/resourceManagerService'
-import { PdkInventoryService } from '../services/pdkInventoryService'
+import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
 import {
@@ -153,8 +153,8 @@ function getDesktopServices() {
   const workspaceResourceService = new WorkspaceResourceService({
     projectScopeProvider: projectScopeService,
   })
-  const pdkInventoryService = new PdkInventoryService()
-  const resourceManagerService = new ResourceManagerService({ pdkInventoryService })
+  const resourceManagerService = new ResourceManagerService()
+  const pdkInventoryService = resourceManagerService.getPdkInventoryService()
   const runtimeEnvProvider = () =>
     resourceManagerService.createRuntimeEnv(runtimeEnv, {
       platform: process.platform,

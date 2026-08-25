@@ -85,6 +85,7 @@ describe('project manifest parsing', () => {
         workspacePath: '/work/gcd/ws_0001',
         config: {
           pdk: 'vendor-pdk',
+          pdk_root: '/machine-local/vendor-pdk',
           pdk_requirement: {
             familyId: 'vendor-pdk',
             version: null,
@@ -110,6 +111,7 @@ describe('project manifest parsing', () => {
         },
       },
     })
+    expect(manifest.base_design.pdk_root).toBeUndefined()
   })
 
   it('requires design_name and rejects a mismatched MPC spec path', () => {

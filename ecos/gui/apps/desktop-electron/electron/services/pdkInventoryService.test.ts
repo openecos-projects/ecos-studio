@@ -98,9 +98,25 @@ describe('PdkInventoryService', () => {
     await expect(
       service.bindInstallation({
         installationId: installation.id,
-        familyId: 'other-pdk',
+        requirement: {
+          familyId: 'other-pdk',
+          version: null,
+          manualConfig: null,
+        },
         projectId: 'proj_other',
         projectRoot: join(root, 'other-project'),
+      }),
+    ).rejects.toThrow('does not satisfy the Project Requirement')
+    await expect(
+      service.bindInstallation({
+        installationId: installation.id,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: '2.0',
+          manualConfig: null,
+        },
+        projectId: 'proj_wrong_version',
+        projectRoot: join(root, 'wrong-version-project'),
       }),
     ).rejects.toThrow('does not satisfy the Project Requirement')
   })
@@ -165,6 +181,21 @@ describe('PdkInventoryService', () => {
         },
       }),
     ).resolves.toMatchObject({ readiness: 'unverified' })
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          manualConfig: {
+            techLef: join(pdkRoot, 'tech.lef'),
+            cellLefs: ['cells.lef'],
+            liberty: ['typ.lib'],
+          },
+        },
+      }),
+    ).rejects.toThrow('must be relative')
     await expect(
       service.validateWorkspace({
         projectId: 'proj_demo',
@@ -374,6 +405,10 @@ describe('PdkInventoryService', () => {
     const inventoryPath = join(root, 'state', 'pdk-inventory.json')
     await mkdir(pdkRoot)
     await mkdir(projectRoot)
+    await writeFile(
+      join(projectRoot, 'project.json'),
+      JSON.stringify({ project_id: 'proj_custom_identity' }),
+    )
     await symlink(pdkRoot, pdkLink)
     await mkdir(join(root, 'state'))
     const entry = {
@@ -420,7 +455,7 @@ describe('PdkInventoryService', () => {
     expect(first).toHaveLength(1)
     expect(second).toEqual(first)
     const migrated = JSON.parse(await readFile(inventoryPath, 'utf8')) as {
-      bindings: Array<{ installationId: string }>
+      bindings: Array<{ installationId: string; projectId: string }>
       installations: Array<{ id: string; root: string }>
     }
     expect(migrated.installations[0]).toEqual({
@@ -432,6 +467,7 @@ describe('PdkInventoryService', () => {
       version: null,
     })
     expect(migrated.bindings[0]?.installationId).toBe('pdk:vendor-pdk:local:first')
+    expect(migrated.bindings[0]?.projectId).toBe('proj_custom_identity')
     const legacy = JSON.parse(await readFile(legacyManifestPath, 'utf8')) as {
       installed: Record<string, unknown>
       pdk_references: unknown[]

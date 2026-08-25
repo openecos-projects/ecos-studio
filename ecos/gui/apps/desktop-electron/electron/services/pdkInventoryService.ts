@@ -25,6 +25,7 @@ export interface PdkInventoryServiceOptions {
   legacyManifestPath?: string
   managedRoot?: string
   jsonWriter?: typeof writeJsonAtomic
+  legacyCleaner?: () => Promise<void>
 }
 
 export interface ManagedPdkInstallationRequest extends PdkImportRequest {
@@ -43,7 +44,8 @@ const ICS55_MARKERS = [
 export class PdkInventoryService {
   private operation: Promise<void> = Promise.resolve()
   private legacyCleanupComplete = false
-  private readonly options: Required<PdkInventoryServiceOptions>
+  private readonly options: Required<Omit<PdkInventoryServiceOptions, 'legacyCleaner'>> &
+    Pick<PdkInventoryServiceOptions, 'legacyCleaner'>
 
   constructor(options: PdkInventoryServiceOptions = {}) {
     const stateRoot = process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state')
@@ -57,6 +59,7 @@ export class PdkInventoryService {
         options.legacyManifestPath ?? join(dirname(inventoryPath), 'manifest.json'),
       managedRoot: options.managedRoot ?? join(dataRoot, 'ecos-studio', 'pdks'),
       jsonWriter: options.jsonWriter ?? writeJsonAtomic,
+      legacyCleaner: options.legacyCleaner,
     }
   }
 
@@ -129,6 +132,12 @@ export class PdkInventoryService {
     })
   }
 
+  async initialize(): Promise<void> {
+    await this.withLock(async () => {
+      await this.readInventory()
+    })
+  }
+
   async resolveBinding(request: PdkResolveBindingRequest): Promise<PdkBinding | null> {
     return await this.withLock(async () => {
       const projectRoot = normalizedProjectRoot(request.projectRoot)
@@ -142,11 +151,7 @@ export class PdkInventoryService {
 
       const matching: PdkInstallationRecord[] = []
       for (const installation of inventory.installations) {
-        if (
-          installation.familyId !== request.requirement.familyId ||
-          (request.requirement.version &&
-            installation.version !== request.requirement.version)
-        ) {
+        if (!installationSatisfiesRequirement(installation, request.requirement)) {
           continue
         }
         const readiness = (await this.snapshot(installation)).readiness
@@ -176,7 +181,7 @@ export class PdkInventoryService {
         (candidate) => candidate.id === request.installationId,
       )
       if (!installation) throw new Error('PDK Installation was not found')
-      if (installation.familyId !== requiredText(request.familyId, 'PDK Family ID')) {
+      if (!installationSatisfiesRequirement(installation, request.requirement)) {
         throw new Error('PDK Installation does not satisfy the Project Requirement')
       }
       const readiness = (await this.snapshot(installation)).readiness
@@ -214,11 +219,7 @@ export class PdkInventoryService {
         (candidate) => candidate.id === binding.installationId,
       )
       if (!installation) throw new Error('Bound PDK Installation was not found')
-      if (
-        installation.familyId !== request.requirement.familyId ||
-        (request.requirement.version &&
-          installation.version !== request.requirement.version)
-      ) {
+      if (!installationSatisfiesRequirement(installation, request.requirement)) {
         throw new Error('Bound PDK Installation does not satisfy the Project Requirement')
       }
       const snapshot = await this.snapshot(installation)
@@ -429,6 +430,16 @@ function normalizedProjectRoot(path: string): string {
   return resolve(requiredText(path, 'Project root'))
 }
 
+function installationSatisfiesRequirement(
+  installation: PdkInstallationRecord,
+  requirement: PdkResolveBindingRequest['requirement'],
+): boolean {
+  return (
+    installation.familyId === requiredText(requirement.familyId, 'PDK Family ID') &&
+    (!requirement.version || installation.version === requirement.version)
+  )
+}
+
 function localInstallationId(familyId: string, root: string): string {
   const digest = createHash('sha256').update(root).digest('hex').slice(0, 12)
   return `pdk:${requiredText(familyId, 'PDK Family ID')}:local:${digest}`
@@ -447,6 +458,9 @@ async function assertManualConfiguration(
     throw new Error('Manual PDK Configuration is incomplete')
   }
   for (const path of paths) {
+    if (isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path)) {
+      throw new Error(`Manual PDK resource path must be relative: ${path}`)
+    }
     const candidate = await realpath(resolve(root, requiredText(path, 'PDK resource')))
     const relativePath = relative(root, candidate)
     if (relativePath.startsWith('..') || isAbsolute(relativePath)) {

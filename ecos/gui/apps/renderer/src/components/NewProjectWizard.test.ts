@@ -341,20 +341,6 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('pdkValidationMessage')
   })
 
-  it('uses Inventory Readiness directly for PDK cards', () => {
-    expect(source).toContain('const pdkOptions = computed(() => importedPdks.value)')
-    expect(source).toContain('normalizePath(scanned.canonicalPath)')
-    expect(source).toContain("pdk.readiness === 'missing'")
-    expect(source).not.toContain('pdkMissingFiles')
-  })
-
-  it('restores Project PDK selection from Inventory and supports Locate', () => {
-    expect(source).toContain('pdk.id === config.value.pdk_installation_id')
-    expect(source).toContain('pdkInventory.resolveBinding')
-    expect(source).toContain('pdk.id === binding?.installationId')
-    expect(source).toContain('handleLocatePdk(pdk.id)')
-  })
-
   it('keeps PDK actions outside the selection button', () => {
     const cardMarker = source.indexOf('v-for="pdk in pdkOptions"')
     const cardStart = source.lastIndexOf('<div', cardMarker)

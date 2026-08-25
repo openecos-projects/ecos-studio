@@ -2140,7 +2140,10 @@ function mergeBaseDesignConfig(
 
   if (pdk) next.pdk = pdk
   if (pdkRoot) next.pdk_root = pdkRoot
-  if (config.pdk_requirement) next.pdk_requirement = config.pdk_requirement
+  if (config.pdk_requirement) {
+    next.pdk_requirement = config.pdk_requirement
+    delete next.pdk_root
+  }
   if (topModule) next.top_module = topModule
   if (clock) next.clock = clock
   if (originVerilog) next.origin_verilog = originVerilog

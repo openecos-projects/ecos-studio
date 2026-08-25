@@ -5813,6 +5813,44 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it('preserves concurrent tool imports while removing legacy PDK data', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const registryPath = join(root, 'registry.json')
+    const localYosys = join(root, 'local', 'yosys')
+    const pdkRoot = join(root, 'local', 'ics55')
+    await createLocalYosysRoot(localYosys)
+    await mkdir(pdkRoot, { recursive: true })
+    await writeYosysRegistry(registryPath)
+    await writeTestManifest(root, {
+      'pdk:ics55': {
+        type: 'pdk',
+        id: 'ics55',
+        pdk_id: 'ics55',
+        version: '',
+        canonical_path: pdkRoot,
+        path: pdkRoot,
+        active: true,
+        managed: false,
+      },
+    })
+    const service = new ResourceManagerService({
+      ...dirs,
+      registryUrl: `file://${registryPath}`,
+    })
+
+    await Promise.all([
+      service.listResources(),
+      service.importLocalPath('tool:yosys', localYosys),
+    ])
+
+    const manifest = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, unknown> }
+    expect(manifest.installed['tool:yosys']).toBeDefined()
+    expect(manifest.installed['pdk:ics55']).toBeUndefined()
+  })
+
   it('migrates a legacy managed PDK parent path to its installed version directory', async () => {
     const root = await createTempDir('ecos-resources-')
     const dirs = testResourceDirs(root)
