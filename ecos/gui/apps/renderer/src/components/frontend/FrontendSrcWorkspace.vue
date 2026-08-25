@@ -1,5 +1,6 @@
 <template>
   <div class="frontend-workspace src-workspace-clean">
+    <FrontendExperimentalBanner class="m-3" />
     <section class="source-layout source-layout-clean">
       <aside class="source-list">
         <div class="source-list-body">
@@ -47,6 +48,7 @@
 
 <script setup lang="ts">
 import FrontendSourceEditor from '@/components/FrontendSourceEditor.vue'
+import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 
 interface PathItem {
   label: string

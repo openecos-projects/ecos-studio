@@ -29,6 +29,8 @@
   />
 
   <div v-show="!isGlobalSrcView && !isGlobalWaveView" class="frontend-workspace">
+    <FrontendExperimentalBanner />
+
     <div class="frontend-header">
       <div>
         <p class="frontend-kicker">
@@ -1924,6 +1926,7 @@ import {
 } from '@/utils/simRunContext'
 import { getDesktopApi } from '@/platform/desktop'
 import FrontendDisassemblyViewer from '@/components/frontend/FrontendDisassemblyViewer.vue'
+import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
 import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
 import MonacoLogViewer from '@/components/MonacoLogViewer.vue'
