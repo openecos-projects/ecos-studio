@@ -226,6 +226,7 @@ function getDesktopServices() {
   const shellService = new ShellPtyService({
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
+    shellStartupDir: join(app.getPath('userData'), 'shell-rc'),
   })
   const surferProtocolService = new SurferProtocolService({
     appPath: app.getAppPath(),

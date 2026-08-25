@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createEccRuntimeEnv, resolveEccExecutable } from './runtimeEnv'
+import {
+  createEccRuntimeEnv,
+  resolveEccExecutable,
+  runtimeBinPathEnvVariable,
+  userZdotdirEnvVariable,
+} from './runtimeEnv'
 
 function createRepoFixture(): {
   appPath: string
@@ -46,6 +51,7 @@ describe('createEccRuntimeEnv', () => {
     const shimPath = join(runtimeBin, 'ecc')
 
     expect(env.PATH).toBe(`${runtimeBin}:/home/ecos/.local/ecos/ecc:/usr/bin`)
+    expect(env[runtimeBinPathEnvVariable]).toBe(runtimeBin)
     expect(existsSync(shimPath)).toBe(true)
   })
 
@@ -141,6 +147,29 @@ describe('createEccRuntimeEnv', () => {
     expect(env).toEqual({ PATH: '/usr/bin' })
   })
 
+  it('drops an inherited runtime bin path marker when no ecc bin dir is prepended', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ecos-studio-stale-marker-'))
+    const appPath = join(root, 'ecos', 'gui', 'apps', 'desktop-electron')
+    const userDataPath = join(root, 'user-data')
+    mkdirSync(appPath, { recursive: true })
+    mkdirSync(userDataPath, { recursive: true })
+
+    const env = createEccRuntimeEnv({
+      appPath,
+      cwd: appPath,
+      env: {
+        PATH: '/usr/bin',
+        [runtimeBinPathEnvVariable]: '/stale/runtime-bin',
+        [userZdotdirEnvVariable]: '/stale/zdotdir',
+      },
+      isPackaged: false,
+      platform: 'linux',
+      userDataPath,
+    })
+
+    expect(env).toEqual({ PATH: '/usr/bin' })
+  })
+
   it('prepends packaged runtime binaries when packaged resources include ecc', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
@@ -161,6 +190,7 @@ describe('createEccRuntimeEnv', () => {
     })
 
     expect(env.PATH).toBe(`${join(resourcesPath, 'binaries')}:/usr/bin`)
+    expect(env[runtimeBinPathEnvVariable]).toBe(join(resourcesPath, 'binaries'))
   })
 
   it('adds packaged ECC libraries for geometry snapshot subprocesses on Linux', () => {

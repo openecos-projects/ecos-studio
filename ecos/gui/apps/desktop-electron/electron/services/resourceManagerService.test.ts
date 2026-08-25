@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { runtimeBinPathEnvVariable } from './eccRpc/runtimeEnv'
 import {
   chmod,
   cp,
@@ -1745,6 +1746,14 @@ describe('ResourceManagerService', () => {
       join(riscvRoot, 'bin'),
       '/usr/bin',
     ])
+    expect(env[runtimeBinPathEnvVariable]?.split(':')).toEqual([
+      join(verilatorRoot, 'bin'),
+      join(yosysRoot, 'bin'),
+      join(duplicateRoot, 'bin'),
+      join(slangRoot, 'bin'),
+      join(eccFeRoot, 'bin'),
+      join(riscvRoot, 'bin'),
+    ])
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(yosysRoot)
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(yosysRoot)
     expect(env.ECOS_SLANG).toBe(join(slangRoot, 'bin', 'slang'))
@@ -1763,6 +1772,57 @@ describe('ResourceManagerService', () => {
     expect(env.KEEP_ME).toBe('yes')
     expect(env.PATH).not.toContain(join(inactiveRoot, 'bin'))
     expect(env.PATH).not.toContain(join(missingRoot, 'bin'))
+  })
+
+  it('rebuilds the runtime bin path marker in resolved PATH order and drops stale entries', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const pdksDir = join(root, 'data', 'pdks')
+    const yosysRoot = join(toolsDir, 'yosys', '2026-05-13')
+    await mkdir(join(yosysRoot, 'bin'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(yosysRoot, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(yosysRoot, 'bin', 'yosys'), 0o755)
+    const writeManifest = (installed: unknown) =>
+      writeFile(
+        join(resourcesDir, 'manifest.json'),
+        JSON.stringify({ schema_version: 1, installed }),
+        'utf8',
+      )
+    await writeManifest({
+      'tool:yosys': {
+        type: 'tool',
+        name: 'yosys',
+        version: '2026-05-13',
+        path: yosysRoot,
+        executable: 'bin/yosys',
+        active: true,
+        managed: true,
+      },
+    })
+    const service = new ResourceManagerService({
+      resourcesDir,
+      toolsDir,
+      pdksDir,
+    })
+    const baseEnv = {
+      PATH: '/ecc-runtime/bin:/usr/bin',
+      [runtimeBinPathEnvVariable]: '/stale/bin:/ecc-runtime/bin',
+    }
+
+    const env = await service.createRuntimeEnv(baseEnv, { platform: 'linux' })
+
+    expect(env.PATH).toBe(`${join(yosysRoot, 'bin')}:/ecc-runtime/bin:/usr/bin`)
+    expect(env[runtimeBinPathEnvVariable]).toBe(
+      `${join(yosysRoot, 'bin')}:/ecc-runtime/bin`,
+    )
+
+    await writeManifest({})
+    const envWithoutTools = await service.createRuntimeEnv(baseEnv, { platform: 'linux' })
+
+    expect(envWithoutTools.PATH).toBe('/ecc-runtime/bin:/usr/bin')
+    expect(envWithoutTools[runtimeBinPathEnvVariable]).toBe('/ecc-runtime/bin')
   })
 
   it('resolves OSS CAD Suite Yosys and Verilator executables separately', async () => {
