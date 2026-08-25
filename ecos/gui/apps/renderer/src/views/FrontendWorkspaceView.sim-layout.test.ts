@@ -62,17 +62,10 @@ describe('FrontendWorkspaceView simulation layout', () => {
       '...liveRuntimeStepOverrides.get(step.name.trim().toLowerCase())',
     )
   })
-
-  it('does not apply waveform case fallbacks from a stale detail request', () => {
+  it('opens waveform files through the scoped desktop path API', () => {
     expect(frontendWorkspaceViewSource).toContain(
-      'await hydrateWaveCasesFromWorkspaceResources(loadedDetail, isCurrentRequest)',
+      'getDesktopApi().workspace.openWaveformExternal(path)',
     )
-    expect(frontendWorkspaceViewSource).toContain(
-      'if (!isCurrentRequest() || !isGlobalWaveView.value) return',
-    )
-    expect(frontendWorkspaceViewSource).not.toContain('detail.value !== loadedDetail')
-    expect(frontendWorkspaceViewSource).not.toContain('detail.value === loadedDetail')
-    expect(frontendWorkspaceViewSource).toContain('...loadedDetail,')
-    expect(frontendWorkspaceViewSource).not.toContain('...detail.value,\n      cases:')
+    expect(frontendWorkspaceViewSource).not.toContain('pathToFileUrl')
   })
 })

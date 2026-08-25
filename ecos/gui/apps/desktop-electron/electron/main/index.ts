@@ -34,6 +34,7 @@ import {
   registerApplicationMenu,
 } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
+import { ProjectReadGrantStore } from '../services/projectReadGrantStore'
 import { ProjectManifestService } from '../services/projectManifestService'
 import { ProjectManagementReadService } from '../services/projectManagementReadService'
 import { ResourceManagerService } from '../services/resourceManagerService'
@@ -123,7 +124,12 @@ function getDesktopServices() {
   const settingsStore = new SettingsStore({
     filePath: join(app.getPath('userData'), 'settings.json'),
   })
-  projectScopeService = new ProjectScopeService()
+  const projectReadGrantStore = new ProjectReadGrantStore({
+    filePath: join(app.getPath('userData'), 'project-read-grants.json'),
+  })
+  projectScopeService = new ProjectScopeService({
+    readGrantProvider: projectReadGrantStore,
+  })
   const eccRuntimeOptions = {
     appPath: app.getAppPath(),
     cwd: process.cwd(),

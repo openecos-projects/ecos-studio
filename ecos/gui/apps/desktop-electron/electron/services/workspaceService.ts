@@ -37,9 +37,14 @@ import type {
 } from '@ecos-studio/shared'
 
 export interface ProjectScopeProvider {
+  approvePendingExternalReadRoots?(
+    expectedProjectRoot: string,
+    expectedRoots: string[],
+  ): Promise<string[]>
   clearProjectRoot(): Promise<void>
   getProjectRoot(): Promise<string>
   isProjectDirectory(path: string): Promise<boolean>
+  listPendingExternalReadRoots?(): Promise<string[]>
   requestProjectPathAccess(path: string): Promise<string>
   requestWritableProjectPathAccess(path: string): Promise<string>
   registerProjectReadRoot(path: string): Promise<string>
@@ -397,6 +402,22 @@ export class WorkspaceService {
 
   async registerProjectRoot(path: string): Promise<string> {
     return await this.projectScopeProvider.registerProjectRoot(path)
+  }
+
+  async listPendingExternalReadRoots(): Promise<string[]> {
+    return (await this.projectScopeProvider.listPendingExternalReadRoots?.()) ?? []
+  }
+
+  async approvePendingExternalReadRoots(
+    expectedProjectRoot: string,
+    expectedRoots: string[],
+  ): Promise<string[]> {
+    return (
+      (await this.projectScopeProvider.approvePendingExternalReadRoots?.(
+        expectedProjectRoot,
+        expectedRoots,
+      )) ?? []
+    )
   }
 
   async registerProjectReadRoot(path: string): Promise<string> {

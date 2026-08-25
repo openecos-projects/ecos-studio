@@ -50,13 +50,6 @@ export interface HomeData {
   parameters: string
   checklist: string
   metrics: Record<string, any>
-  monitor: MonitorData
-}
-
-/** monitor 数据结构（step 为固定字段，其余为动态指标） */
-export interface MonitorData {
-  step: string[]
-  [key: string]: (string | number)[]
 }
 
 /** checklist.json 中的单个检查项 */
@@ -371,7 +364,7 @@ function currentFlowLogStepName(segments: FlowLogSegment[]): string {
   return ''
 }
 
-// ============ Home 资源（monitor / checklist / layout / metrics）模块级持久化 ============
+// ============ Home 资源（checklist / layout / metrics）模块级持久化 ============
 //
 // HomeView 不在 KeepAlive：原实现每次 mount 都会
 //   1) 重读 checklist.json
@@ -384,7 +377,6 @@ function currentFlowLogStepName(segments: FlowLogSegment[]): string {
 // Blob URL 的 revoke 从"onUnmounted"推迟到"被新 blob 替换 / 项目切换"，
 // 确保 remount 时 <img :src> 拿到的依旧是活的 URL。
 
-const monitorDataState = ref<MonitorData | null>(null)
 const checklistItemsState = ref<ChecklistItem[]>([])
 const layoutBlobUrlState = ref<string>('')
 const analysisChartsState = ref<AnalysisChartItem[]>([])
@@ -419,23 +411,12 @@ function homeMetricSourceEntries(metrics: unknown): string[] {
     : []
 }
 
-function homeMonitorSignature(monitor: MonitorData | null | undefined): string {
-  if (!monitor || typeof monitor !== 'object') return ''
-  return JSON.stringify(
-    Object.entries(monitor)
-      .filter(([, value]) => Array.isArray(value))
-      .map(([key, value]) => [key, value])
-      .sort(([a], [b]) => String(a).localeCompare(String(b))),
-  )
-}
-
 function homeRerunContentSignature(data: HomeData | null): string {
   if (!data) return '__none__'
   return JSON.stringify({
     checklist: data.checklist ?? '',
     layout: data.layout ?? '',
     metrics: homeMetricSourceEntries(data.metrics),
-    monitor: homeMonitorSignature(data.monitor),
   })
 }
 
@@ -446,7 +427,6 @@ function currentDisplayedHomeRerunContentSignature(): string {
     checklist: _loadedChecklistPath,
     layout: _loadedLayoutPath,
     metrics: _loadedMetricsSignature,
-    monitor: homeMonitorSignature(monitorDataState.value),
   })
 }
 
@@ -479,7 +459,6 @@ function invalidateHomeAssetCache(): void {
   invalidateLayoutCache()
   invalidateMetricsCache()
   invalidateChecklistCache()
-  monitorDataState.value = null
   _loadedHomeResourceVersionSignature = ''
 }
 
@@ -613,12 +592,7 @@ function hasHomeRunArtifacts(data: HomeData | null): boolean {
   if (!data) return false
   const hasLayout = typeof data.layout === 'string' && data.layout.length > 0
   const hasMetrics = homeMetricSourceEntries(data.metrics).length > 0
-  const hasMonitor = Boolean(
-    data.monitor &&
-    typeof data.monitor === 'object' &&
-    Object.values(data.monitor).some((value) => Array.isArray(value) && value.length > 0),
-  )
-  return hasLayout || hasMetrics || hasMonitor
+  return hasLayout || hasMetrics
 }
 
 function shouldDeferHomeDataUntilRerunReset(
@@ -733,7 +707,7 @@ export function resetSharedHomeDataProjectState() {
 
 /**
  * Home 页面数据管理 Hook
- * 负责从 home.json 加载监控数据、checklist、layout 图片
+ * 负责从 home.json 加载 checklist、layout 图片和指标图表
  */
 export function useHomeData() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
@@ -743,7 +717,6 @@ export function useHomeData() {
 
   // 响应式数据全部走模块级——HomeView remount 时直接复用上一次加载结果，
   // 只有源数据真的变了（项目切换 / runtime event 推送 / 本地 flow 执行）才触发重读。
-  const monitorData = monitorDataState
   const checklistItems = checklistItemsState
   const layoutBlobUrl = layoutBlobUrlState
   const analysisCharts = analysisChartsState
@@ -1524,9 +1497,6 @@ export function useHomeData() {
   ): Promise<void> {
     const isCurrent = options.isCurrent ?? (() => true)
     if (!isCurrent()) return
-    if (homeData.monitor) {
-      monitorData.value = homeData.monitor
-    }
 
     const loaders: Array<Promise<void>> = [
       loadChecklist(homeData.checklist, isCurrent),
@@ -1798,7 +1768,6 @@ export function useHomeData() {
 
   return {
     // 状态
-    monitorData,
     checklistItems,
     layoutBlobUrl,
     analysisCharts,

@@ -224,3 +224,127 @@ jobs:
           retention-days: 14
           path: |
             build/**/*.AppImage
+
+  build-macos:
+    name: Build macOS App
+    needs: [changes, check-version, gui-checks, chip-viewer-rust]
+    if: >-
+      ${{
+        always() &&
+        (needs.changes.outputs.gui == 'true' ||
+         needs.changes.outputs.chip_viewer == 'true' ||
+         needs.changes.outputs.version == 'true' ||
+         needs.changes.outputs.build == 'true' ||
+         needs.changes.outputs.ci == 'true') &&
+        needs.check-version.result != 'failure' &&
+        needs.gui-checks.result != 'failure' &&
+        needs.chip-viewer-rust.result != 'failure'
+      }}
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          workspaces: ecos/chip-viewer
+
+      - name: Build chip-viewer-native
+        working-directory: ecos/chip-viewer
+        run: cargo build --release -p chip-viewer-native
+
+      - name: Stage resources
+        run: |
+          mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
+          mkdir -p ecos/gui/apps/desktop-electron/resources/agent
+          cp ecos/chip-viewer/target/release/chip-viewer-native \
+             ecos/gui/apps/desktop-electron/resources/binaries/
+
+      - name: Install GUI dependencies
+        working-directory: ecos/gui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build renderer
+        working-directory: ecos/gui
+        run: pnpm --filter @ecos-studio/desktop-electron run build
+
+      - name: Package macOS app
+        working-directory: ecos/gui/apps/desktop-electron
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm exec electron-builder --config electron-builder.yml
+
+      - name: Upload CI macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecos-studio-macos-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 14
+          path: ecos/gui/apps/desktop-electron/release/**/*.dmg
+
+  build-windows:
+    name: Build Windows App
+    needs: [changes, check-version, gui-checks, chip-viewer-rust]
+    if: >-
+      ${{
+        always() &&
+        (needs.changes.outputs.gui == 'true' ||
+         needs.changes.outputs.chip_viewer == 'true' ||
+         needs.changes.outputs.version == 'true' ||
+         needs.changes.outputs.build == 'true' ||
+         needs.changes.outputs.ci == 'true') &&
+        needs.check-version.result != 'failure' &&
+        needs.gui-checks.result != 'failure' &&
+        needs.chip-viewer-rust.result != 'failure'
+      }}
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          workspaces: ecos/chip-viewer
+
+      - name: Build chip-viewer-native
+        working-directory: ecos/chip-viewer
+        run: cargo build --release -p chip-viewer-native
+
+      - name: Stage resources
+        shell: bash
+        run: |
+          mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
+          mkdir -p ecos/gui/apps/desktop-electron/resources/agent
+          cp ecos/chip-viewer/target/release/chip-viewer-native.exe \
+             ecos/gui/apps/desktop-electron/resources/binaries/
+
+      - name: Install GUI dependencies
+        working-directory: ecos/gui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build renderer
+        working-directory: ecos/gui
+        run: pnpm --filter @ecos-studio/desktop-electron run build
+
+      - name: Package Windows app
+        working-directory: ecos/gui/apps/desktop-electron
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm exec electron-builder --config electron-builder.yml
+
+      - name: Upload CI Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecos-studio-windows-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 14
+          path: ecos/gui/apps/desktop-electron/release/**/*.exe

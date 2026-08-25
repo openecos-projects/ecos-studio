@@ -31,7 +31,6 @@ import {
 } from './useWorkspaceLifecycle'
 import {
   readWorkspaceFlowResourceApi,
-  readWorkspaceHomeResourceApi,
   readWorkspaceParametersResourceApi,
 } from '@/api/workspaceResources'
 import {
@@ -45,6 +44,7 @@ import {
   rewriteWorkspaceConfigPathsForReplacement,
   workspaceParentPath,
 } from './workspaceReplacement'
+import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
 
 interface SerializedProject {
   id: string
@@ -61,8 +61,6 @@ interface SerializedProject {
   completedSteps?: number
   currentStep?: string
   totalRuntime?: string
-  cellCount?: number
-  frequency?: number
 }
 
 const currentProject = ref<Project | null>()
@@ -426,6 +424,19 @@ export function useWorkspace() {
       }
     })
 
+  const registerProjectManagedReadScope = (workspacePath: string): Promise<void> =>
+    enqueueProjectRootMutation(async () => {
+      try {
+        const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
+        if (!projectContext) return
+
+        const desktopApi = await waitForDesktopApi()
+        await desktopApi.workspace.registerProjectReadRoot(projectContext.projectRoot)
+      } catch (error) {
+        console.warn('Failed to register managed project read scope:', error)
+      }
+    })
+
   const clearProjectRoot = (): Promise<void> =>
     enqueueProjectRootMutation(async () => {
       try {
@@ -588,6 +599,8 @@ export function useWorkspace() {
             await router.replace('/')
             return
           }
+          await registerProjectManagedReadScope(canonicalProjectRoot)
+          if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
           currentProject.value = {
             ...restored,
             path: canonicalProjectRoot,
@@ -811,6 +824,10 @@ export function useWorkspace() {
           }
           return false
         }
+        await registerProjectManagedReadScope(canonicalProjectRoot)
+        if (!isLatestOpenProjectRequest()) return false
+        if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
+          return false
 
         const existingProject = recentProjects.value.find(
           (p) => normalizePath(p.path) === resolvedPath,
@@ -1291,7 +1308,6 @@ export function useWorkspace() {
             'The project directory could not be registered for local file access.'
           return false
         }
-
         if (replacement && config?.keepReplacementBackup) {
           await recordWorkspaceReplacementBackup(replacement, config, showToast)
           committedReplacement = true
@@ -1498,24 +1514,6 @@ export function useWorkspace() {
       }
     } catch {
       console.warn('Failed to read parameters.json for snapshot')
-    }
-
-    try {
-      const homeData = await readWorkspaceHomeResourceApi()
-      if (!isCurrent()) return
-      const monitor = isRecord(homeData) ? homeData.monitor : null
-      if (isRecord(monitor)) {
-        if (Array.isArray(monitor.instance) && monitor.instance.length > 0) {
-          const cellCount = asNumber(monitor.instance[monitor.instance.length - 1])
-          if (cellCount !== undefined) snapshot.cellCount = cellCount
-        }
-        if (Array.isArray(monitor.frequency) && monitor.frequency.length > 0) {
-          const lastFreq = asNumber(monitor.frequency[monitor.frequency.length - 1])
-          if (lastFreq !== undefined && lastFreq > 0) snapshot.frequency = lastFreq
-        }
-      }
-    } catch {
-      console.warn('Failed to read home.json for snapshot')
     }
 
     const currentIdx = recentProjects.value.findIndex(

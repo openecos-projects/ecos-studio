@@ -61,6 +61,11 @@ export interface StepDashboardFloorplanSnapshot {
   label: string
   total: number
   unit: 'count' | 'um2' | ''
+  /**
+   * How the snapshot should be drawn: a few named parts of one whole, or many
+   * bins of one measure. Drives the data-summary dialog visuals.
+   */
+  kind: 'composition' | 'distribution'
   slices: DashboardPieSlice[]
 }
 
@@ -989,6 +994,7 @@ export function drcInsights(value: unknown): StepDashboardDrcInsights | null {
         label: 'Layer Totals',
         total: layerSlices.reduce((sum, slice) => sum + slice.value, 0),
         unit: 'count',
+        kind: 'distribution',
         slices: layerSlices,
       },
       {
@@ -996,6 +1002,7 @@ export function drcInsights(value: unknown): StepDashboardDrcInsights | null {
         label: 'Type Totals',
         total: typeSlices.reduce((sum, slice) => sum + slice.value, 0),
         unit: 'count',
+        kind: 'distribution',
         slices: typeSlices,
       },
     ],
@@ -1115,6 +1122,7 @@ function instanceCompositionSnapshot(
     label,
     total,
     unit,
+    kind: 'composition',
     slices: [
       { id: `${field}-macros`, label: 'Macros', value: macros, tone: 'warn' },
       { id: `${field}-logic`, label: 'Logic', value: logic, tone: 'good' },
@@ -1160,6 +1168,7 @@ function pinDistributionSnapshot(
     label,
     total: slices.reduce((sum, slice) => sum + slice.value, 0),
     unit: 'count',
+    kind: 'distribution',
     slices,
   }
 }
@@ -1193,6 +1202,7 @@ function layerDistributionSnapshot(
     label,
     total: layers.reduce((sum, layer) => sum + layer.value, 0),
     unit,
+    kind: 'distribution',
     slices: layers,
   }
 }
@@ -1331,6 +1341,60 @@ export function floorplanInsights(value: unknown): StepDashboardFloorplanInsight
   const source = record(value)
   if (!source) return null
   return { metrics: floorplanMetrics(source), snapshots: floorplanSnapshots(source) }
+}
+
+export interface StepDesignStatisRow {
+  id: string
+  label: string
+  value: string
+}
+
+export interface StepDesignStatisGroup {
+  id: 'design-layout' | 'design-statis'
+  label: string
+  rows: StepDesignStatisRow[]
+}
+
+export interface StepDesignStatis {
+  rowCount: number
+  groups: StepDesignStatisGroup[]
+}
+
+function designStatisGroup(
+  source: Record<string, unknown> | null,
+  id: StepDesignStatisGroup['id'],
+  label: string,
+): StepDesignStatisGroup | null {
+  if (!source) return null
+  const rows: StepDesignStatisRow[] = []
+  for (const [key, item] of Object.entries(source)) {
+    if (item === null || typeof item === 'object') continue
+    rows.push({
+      id: `${id}-${key}`,
+      label: humanize(key),
+      value: insightMetricValue(item),
+    })
+  }
+  return rows.length ? { id, label, rows } : null
+}
+
+/**
+ * Metric-table summary of the step database feature's `Design Layout` /
+ * `Design Statis` sections. Returns null when the step has no such data
+ * (e.g. Synthesis' yosys stat feature).
+ */
+export function designStatisSummary(value: unknown): StepDesignStatis | null {
+  const source = record(value)
+  if (!source) return null
+  const groups = [
+    designStatisGroup(record(source['Design Layout']), 'design-layout', 'Design Layout'),
+    designStatisGroup(record(source['Design Statis']), 'design-statis', 'Design Statis'),
+  ].filter((group): group is StepDesignStatisGroup => group !== null)
+  if (!groups.length) return null
+  return {
+    rowCount: groups.reduce((sum, group) => sum + group.rows.length, 0),
+    groups,
+  }
 }
 
 export function stepFeatureInsights(
