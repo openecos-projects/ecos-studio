@@ -188,9 +188,9 @@ def test_gui_stop_requests_terminal_closure_before_runner_close(tmp_path: Path) 
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
     assert runner.started.wait(timeout=2)
 
     provider.send_message({"sessionId": session_id, "message": "stop"})
@@ -215,9 +215,9 @@ def test_gui_stop_does_not_hide_a_terminal_closure_failure(tmp_path: Path) -> No
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
     assert runner.started.wait(timeout=2)
 
     provider.send_message({"sessionId": session_id, "message": "stop"})
@@ -242,9 +242,9 @@ def test_gui_stop_preserves_indeterminate_quarantine_phase(tmp_path: Path) -> No
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
     assert runner.started.wait(timeout=2)
 
     provider.send_message({"sessionId": session_id, "message": "stop"})
