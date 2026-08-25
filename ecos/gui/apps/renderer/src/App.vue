@@ -134,7 +134,7 @@
         class="w-full"
         @keydown.enter.prevent="confirmPdkName"
       />
-      <template #footer>
+      <div class="mt-6 flex justify-end gap-2">
         <button
           type="button"
           class="rounded border border-(--border-color) px-3 py-1.5 text-sm text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
@@ -150,7 +150,7 @@
         >
           Import
         </button>
-      </template>
+      </div>
     </Dialog>
 
     <Dialog
@@ -168,15 +168,6 @@
           ref="stepConfigDialogRef"
         />
       </div>
-      <template #footer>
-        <button
-          type="button"
-          class="rounded border border-(--border-color) px-3 py-1.5 text-xs text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
-          @click="closeStepConfigDialog"
-        >
-          Cancel
-        </button>
-      </template>
     </Dialog>
 
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
