@@ -180,6 +180,21 @@ export {
 } from './contracts/desktopEvents.ts'
 export type { DesktopErrorCode, DesktopErrorShape } from './contracts/errors.ts'
 export type {
+  ManualPdkConfiguration,
+  PdkBinding,
+  PdkBindRequest,
+  PdkImportRequest,
+  PdkInstallationRecord,
+  PdkInstallationSnapshot,
+  PdkLocateRequest,
+  PdkOwnership,
+  PdkProjectRequest,
+  PdkReadiness,
+  PdkRequirement,
+  PdkResolveBindingRequest,
+  PdkWorkspaceValidationRequest,
+} from './contracts/pdkInventory.ts'
+export type {
   DesktopFailure,
   DesktopResult,
   DesktopSuccess,

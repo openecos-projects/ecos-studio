@@ -340,17 +340,17 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('pdkValidationMessage')
   })
 
-  it('deduplicates PDK cards and only lists missing files for invalid PDKs', () => {
-    expect(source).toContain('const seenPaths = new Set<string>()')
-    expect(source).toContain('normalizePath(pdk.path)')
+  it('uses Inventory PDK cards and only lists missing files for invalid PDKs', () => {
+    expect(source).toContain('const pdkOptions = computed(() => importedPdks.value)')
     expect(source).toContain('normalizePath(scanned.canonicalPath)')
     expect(source).toContain('!pdk.valid && pdkMissingFiles(pdk).length > 0')
   })
 
-  it('rechecks project-pinned PDKs from their source path', () => {
-    expect(source).toContain("if (pdk.source === 'project')")
-    expect(source).toContain('scanPdkDirectory(pdk.path)')
-    expect(source).toContain('projectPinnedPdk.value = updatedPdk')
+  it('restores Project PDK selection from Inventory and supports Locate', () => {
+    expect(source).toContain('pdk.id === config.value.pdk_installation_id')
+    expect(source).toContain('pdk.pdkId === config.value.pdk && pdk.valid')
+    expect(source).toContain('if (matching.length === 1)')
+    expect(source).toContain('handleLocatePdk(pdk.id)')
   })
 
   it('keeps PDK actions outside the selection button', () => {

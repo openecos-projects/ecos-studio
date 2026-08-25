@@ -1242,6 +1242,7 @@ export function useWorkspace() {
           designTool: 'backend',
           pdk: pdkName,
           pdk_root: resolvedPdkRoot,
+          pdk_installation_id: creationConfig?.pdk_installation_id,
           parameters: backendParameters,
           origin_def: creationConfig?.origin_def,
           origin_verilog: creationConfig?.origin_verilog,

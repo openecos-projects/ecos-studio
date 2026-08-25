@@ -236,8 +236,7 @@
                         removalActionForRow(row) !== null ||
                         canImportLocalResource(row) ||
                         (row.statusKind !== 'installing' &&
-                          (row.actions.includes('activate') ||
-                            row.actions.includes('validate')))
+                          row.actions.includes('validate'))
                       "
                     >
                       <button
@@ -307,18 +306,6 @@
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-restart-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="
-                          row.statusKind !== 'installing' &&
-                          row.actions.includes('activate')
-                        "
-                        type="button"
-                        class="row-action-btn icon-only primary"
-                        data-title="Activate"
-                        @click.stop="handlePdkActivate(row)"
-                      >
-                        <i class="ri-check-line" aria-hidden="true"></i>
                       </button>
                       <button
                         v-else-if="
@@ -736,12 +723,6 @@ async function handleLocalImport(row: ResourceRow): Promise<void> {
     const done = new Set(importingResourceIds.value)
     done.delete(row.id)
     importingResourceIds.value = done
-  }
-}
-
-async function handlePdkActivate(row: ResourceRow): Promise<void> {
-  if (row.resource) {
-    await pluginStore.activatePdk(row.resource.id)
   }
 }
 

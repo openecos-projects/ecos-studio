@@ -151,10 +151,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         status: 'uninstalled',
         resource_id: resourceId,
       }),
-      activatePdk: async (resourceId) => ({
-        status: 'activated',
-        resource_id: resourceId,
-      }),
       validatePdk: async (resourceId) => ({
         resource_id: resourceId,
         health: { status: 'ok' },
@@ -179,6 +175,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       }),
       onProgress: () => () => undefined,
     },
+    pdkInventory: {} as DesktopApi['pdkInventory'],
     runtime: {} as DesktopApi['runtime'],
     ecc: {
       events: {

@@ -1,4 +1,5 @@
 import type { ProjectManifestMpc } from '../utils/projectManifest'
+import type { PdkRequirement } from '../contracts/pdkInventory'
 
 export type WorkspaceStatus =
   | 'success'
@@ -51,6 +52,8 @@ export interface WorkspaceConfig {
   cpu_rtl_files?: string[]
   pdk: string
   pdk_root: string
+  pdk_installation_id?: string
+  pdk_requirement?: PdkRequirement
   parameters: Partial<WorkspaceParameters> & Record<string, unknown>
   origin_def: string
   origin_verilog: string
@@ -79,6 +82,7 @@ export interface WorkspaceConfig {
     project_name: string
     project_root: string
     project_json_path: string
+    project_id?: string
   }
   source_context?: {
     projectName?: string

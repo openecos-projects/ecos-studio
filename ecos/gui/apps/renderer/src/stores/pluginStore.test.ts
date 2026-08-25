@@ -3,13 +3,15 @@ import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('@/api/plugin', () => {
   return {
-    activatePdkApi: vi.fn(),
     cancelResourceApi: vi.fn(),
     checkResourceUpdatesApi: vi.fn(),
     importLocalResourcePathApi: vi.fn(),
     installResourceApi: vi.fn(),
     installToolApi: vi.fn(),
     listResourcesApi: vi.fn(),
+    listPdkInstallationsApi: vi.fn(async () => []),
+    pdkInstallationToResourceItem: vi.fn(),
+    removePdkInstallationApi: vi.fn(),
     removePdkReferenceApi: vi.fn(),
     resourceListToTools: (payload: {
       resources: Array<{
@@ -51,6 +53,7 @@ import {
   importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
+  listPdkInstallationsApi,
   subscribeResourceProgress,
   uninstallResourceApi,
   updateResourceApi,
@@ -130,6 +133,8 @@ describe('pluginStore', () => {
     vi.mocked(importLocalResourcePathApi).mockReset()
     vi.mocked(installResourceApi).mockReset()
     vi.mocked(listResourcesApi).mockReset()
+    vi.mocked(listPdkInstallationsApi).mockReset()
+    vi.mocked(listPdkInstallationsApi).mockResolvedValue([])
     vi.mocked(subscribeResourceProgress).mockReset()
     vi.mocked(uninstallResourceApi).mockReset()
     vi.mocked(updateResourceApi).mockReset()
@@ -146,7 +151,7 @@ describe('pluginStore', () => {
       }),
       makePdkResource({
         status: 'installed',
-        actions: ['validate', 'activate'],
+        actions: ['validate'],
         path: '/tmp/pdks/ics55',
       }),
     ]
@@ -236,7 +241,7 @@ describe('pluginStore', () => {
       status: 'installed',
       installed_version: '1.01',
       path: '/tmp/pdks/ics55',
-      actions: ['validate', 'activate'],
+      actions: ['validate'],
     })
     let onProgress: ((progress: InstallProgress) => void) | undefined
     const close = vi.fn()
@@ -305,7 +310,7 @@ describe('pluginStore', () => {
       status: 'installed',
       installed_version: '1.01',
       path: '/tmp/pdks/ics55',
-      actions: ['validate', 'activate'],
+      actions: ['validate'],
     })
     let onProgress: ((progress: InstallProgress) => void) | undefined
     const close = vi.fn()

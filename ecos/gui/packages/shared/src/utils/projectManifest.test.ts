@@ -73,6 +73,45 @@ describe('project manifest parsing', () => {
     })
   })
 
+  it('persists the Project PDK Requirement independently from its local Binding', () => {
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        designName: 'gcd_core',
+      }),
+      {
+        projectRoot: '/work/gcd',
+        workspacePath: '/work/gcd/ws_0001',
+        config: {
+          pdk: 'vendor-pdk',
+          pdk_requirement: {
+            familyId: 'vendor-pdk',
+            version: null,
+            manualConfig: {
+              techLef: 'tech.lef',
+              cellLefs: ['cells.lef'],
+              liberty: ['typ.lib'],
+            },
+          },
+        },
+      },
+    )
+
+    expect(parseProjectManifest(JSON.stringify(manifest)).base_design).toMatchObject({
+      pdk: 'vendor-pdk',
+      pdk_requirement: {
+        familyId: 'vendor-pdk',
+        version: null,
+        manualConfig: {
+          techLef: 'tech.lef',
+          cellLefs: ['cells.lef'],
+          liberty: ['typ.lib'],
+        },
+      },
+    })
+  })
+
   it('requires design_name and rejects a mismatched MPC spec path', () => {
     const legacyManifest = {
       schema_version: 1,

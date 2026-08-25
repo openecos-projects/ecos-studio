@@ -1,13 +1,15 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
-  activatePdkApi,
   cancelResourceApi,
   checkResourceUpdatesApi,
   importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
+  listPdkInstallationsApi,
+  pdkInstallationToResourceItem,
   removePdkReferenceApi,
+  removePdkInstallationApi,
   resourceListToTools,
   subscribeResourceProgress,
   uninstallResourceApi,
@@ -169,7 +171,22 @@ export const usePluginStore = defineStore('plugin', () => {
     }
     error.value = null
     try {
-      const nextResources = await listResourcesApi()
+      const [genericResources, installations] = await Promise.all([
+        listResourcesApi(),
+        listPdkInstallationsApi(),
+      ])
+      const inventoryResources = installations.map(pdkInstallationToResourceItem)
+      const inventoryIds = new Set(inventoryResources.map((resource) => resource.id))
+      const inventoryRoots = new Set(inventoryResources.map((resource) => resource.path))
+      const nextResources = [
+        ...genericResources.filter(
+          (resource) =>
+            resource.type !== 'pdk' ||
+            resource.path === null ||
+            (!inventoryIds.has(resource.id) && !inventoryRoots.has(resource.path)),
+        ),
+        ...inventoryResources,
+      ]
       if (fetchSequence === _fetchSequence) {
         resources.value = nextResources
         _syncLegacyTools()
@@ -297,7 +314,11 @@ export const usePluginStore = defineStore('plugin', () => {
     const prevStatus = resource?.status
     const prevError = resource?.error ?? null
     try {
-      await uninstallResourceApi(resourceId)
+      if (resource?.source === 'managed' || resource?.source === 'imported') {
+        await removePdkInstallationApi(resourceId)
+      } else {
+        await uninstallResourceApi(resourceId)
+      }
       if (resource) {
         resource.status = resource.type === 'tool' ? 'uninstalling' : 'removing'
         resource.error = null
@@ -328,18 +349,18 @@ export const usePluginStore = defineStore('plugin', () => {
     await uninstallResource(_toolResourceId(name))
   }
 
-  async function activatePdk(resourceId: string): Promise<void> {
-    await activatePdkApi(resourceId)
-    await fetchTools({ silent: true })
-  }
-
   async function validatePdk(resourceId: string): Promise<void> {
     await validatePdkApi(resourceId)
     await fetchTools({ silent: true })
   }
 
   async function removePdkReference(resourceId: string): Promise<void> {
-    await removePdkReferenceApi(resourceId)
+    const resource = resources.value.find((item) => item.id === resourceId)
+    if (resource?.source === 'managed' || resource?.source === 'imported') {
+      await removePdkInstallationApi(resourceId)
+    } else {
+      await removePdkReferenceApi(resourceId)
+    }
     await fetchTools({ silent: true })
   }
 
@@ -403,7 +424,6 @@ export const usePluginStore = defineStore('plugin', () => {
     uninstallResource,
     install,
     uninstall,
-    activatePdk,
     validatePdk,
     removePdkReference,
     importLocalResource,

@@ -841,11 +841,7 @@
                               <span
                                 class="mt-1 ml-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
                                 >{{
-                                  pdk.source === 'registry'
-                                    ? 'Resource Manager'
-                                    : pdk.source === 'project'
-                                      ? 'Project Pinned'
-                                      : 'Local'
+                                  pdk.source === 'managed' ? 'Resource Manager' : 'Local'
                                 }}</span
                               >
                               <span
@@ -915,7 +911,16 @@
                           }}
                         </button>
                         <button
-                          v-if="pdk.source === 'local' && selectedPdkId !== pdk.id"
+                          v-if="pdk.status === 'missing'"
+                          type="button"
+                          class="mt-2 ml-4 inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-(--accent-color) hover:underline"
+                          @click.stop="handleLocatePdk(pdk.id)"
+                        >
+                          <i class="ri-folder-open-line" aria-hidden="true"></i>
+                          Locate
+                        </button>
+                        <button
+                          v-if="pdk.source === 'imported' && selectedPdkId !== pdk.id"
                           type="button"
                           class="absolute top-3 right-3 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-(--text-secondary) opacity-0 transition-colors duration-200 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-500"
                           title="Remove PDK"
@@ -1804,11 +1809,14 @@ const {
   loadPdks,
   importPdk: doImportPdk,
   removePdk,
+  locatePdk,
   validatePdk,
 } = usePdkManager()
 const { showToast } = useWorkspace()
 const selectedPdkId = ref<string>(
-  props.initialConfig?.pdk ?? props.initialConfig?.source_config?.pdk ?? '',
+  props.initialConfig?.pdk_installation_id ??
+    props.initialConfig?.source_config?.pdk_installation_id ??
+    '',
 )
 const hasLoadedPdks = ref(false)
 const validatingPdkId = ref('')
@@ -1854,6 +1862,8 @@ function createInitialConfig(
     ),
     pdk: initialConfig?.pdk ?? source_config?.pdk ?? 'ics55',
     pdk_root: initialConfig?.pdk_root ?? source_config?.pdk_root ?? '',
+    pdk_installation_id:
+      initialConfig?.pdk_installation_id ?? source_config?.pdk_installation_id ?? '',
     parameters: {
       design: '',
       description: '',
@@ -2097,13 +2107,6 @@ const ICS55_REQUIRED_PDK_FILES = [
   'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
 ]
 
-function hasValidKnownPdkLayout(pdkId: string, detectedFiles: PdkDetectedFiles): boolean {
-  return (
-    pdkId !== 'ics55' ||
-    ICS55_REQUIRED_PDK_FILES.every((file) => detectedFiles.files.includes(file))
-  )
-}
-
 const projectNameError = computed(() =>
   validateName(projectContext.value.project_name, 'Project name'),
 )
@@ -2224,19 +2227,7 @@ const activeDesignInput = computed(() =>
 const activePdkStep = computed(() =>
   pdkWizardSteps.find((item) => item.key === activePdkWizardStep.value),
 )
-const projectPinnedPdk = ref<import('../types').ImportedPdk | null>(null)
-const pdkOptions = computed(() => {
-  const seenPaths = new Set<string>()
-  return [
-    ...importedPdks.value,
-    ...(projectPinnedPdk.value ? [projectPinnedPdk.value] : []),
-  ].filter((pdk) => {
-    const path = normalizePath(pdk.path)
-    if (!path || seenPaths.has(path)) return false
-    seenPaths.add(path)
-    return true
-  })
-})
+const pdkOptions = computed(() => importedPdks.value)
 const selectedPdk = computed(() =>
   pdkOptions.value.find((pdk) => pdk.id === selectedPdkId.value),
 )
@@ -2819,15 +2810,20 @@ async function ensurePdksLoaded() {
   if (hasLoadedPdks.value) return
   hasLoadedPdks.value = true
   await loadPdks(true)
-  if (config.value.pdk || config.value.pdk_root) {
+  const selected = importedPdks.value.find(
+    (pdk) => pdk.id === config.value.pdk_installation_id,
+  )
+  if (selected) {
+    selectPdk(selected)
+    return
+  }
+  if (config.value.pdk_root) {
     const configuredPdkRoot = normalizePath(config.value.pdk_root)
-    const matchedPdk = config.value.pdk_root
-      ? importedPdks.value.find((pdk) => normalizePath(pdk.path) === configuredPdkRoot)
-      : importedPdks.value.find(
-          (pdk) => pdk.id === selectedPdkId.value || pdk.pdkId === config.value.pdk,
-        )
-    if (matchedPdk) {
-      selectPdk(matchedPdk)
+    const direct = importedPdks.value.find(
+      (pdk) => normalizePath(pdk.path) === configuredPdkRoot,
+    )
+    if (direct) {
+      selectPdk(direct)
       return
     }
     try {
@@ -2841,44 +2837,13 @@ async function ensurePdksLoaded() {
         selectPdk(canonicalPdk)
         return
       }
-      const valid = hasValidKnownPdkLayout(scanned.pdkId, scanned.detectedFiles)
-      projectPinnedPdk.value = {
-        id: `project-pinned:${scanned.canonicalPath}`,
-        name: scanned.name || config.value.pdk,
-        path: scanned.canonicalPath,
-        description: valid
-          ? 'PDK path pinned by the source project.'
-          : 'The source project PDK path is incomplete.',
-        techNode: scanned.techNode,
-        pdkId: scanned.pdkId || config.value.pdk,
-        importedAt: '',
-        detectedFiles: scanned.detectedFiles,
-        source: 'project',
-        status: valid ? 'installed' : 'invalid',
-        valid,
-        knownLayout: scanned.pdkId === 'ics55' && valid,
-      }
-      selectPdk(projectPinnedPdk.value)
-      return
-    } catch {
-      projectPinnedPdk.value = {
-        id: `project-pinned:${config.value.pdk_root}`,
-        name: config.value.pdk || 'Project Pinned PDK',
-        path: config.value.pdk_root,
-        description: 'The source project PDK path is unavailable.',
-        techNode: '',
-        pdkId: config.value.pdk,
-        importedAt: '',
-        source: 'project',
-        status: 'missing',
-        valid: false,
-        knownLayout: false,
-      }
-    }
+    } catch {}
   }
-  const activeValidPdks = importedPdks.value.filter((pdk) => pdk.active && pdk.valid)
-  if (activeValidPdks.length === 1) {
-    selectPdk(activeValidPdks[0])
+  const matching = importedPdks.value.filter(
+    (pdk) => pdk.pdkId === config.value.pdk && pdk.valid,
+  )
+  if (matching.length === 1) {
+    selectPdk(matching[0])
   }
 }
 
@@ -3186,6 +3151,12 @@ function selectPdk(pdk: import('../types').ImportedPdk) {
   selectedPdkId.value = pdk.id
   config.value.pdk = pdk.pdkId
   config.value.pdk_root = pdk.path
+  config.value.pdk_installation_id = pdk.id
+  config.value.pdk_requirement = {
+    familyId: pdk.pdkId,
+    version: pdk.version || null,
+    manualConfig: null,
+  }
   manualPdkDetectedFiles.value = pdk.detectedFiles ?? null
   if (!pdk.valid || !pdk.knownLayout) pdkConfigMode.value = 'manual'
   syncWorkspaceConfig()
@@ -3197,28 +3168,6 @@ async function handleValidatePdk(id: string): Promise<void> {
 
   validatingPdkId.value = id
   try {
-    if (pdk.source === 'project') {
-      const scanned = await getDesktopApi().workspace.scanPdkDirectory(pdk.path)
-      const valid = hasValidKnownPdkLayout(scanned.pdkId, scanned.detectedFiles)
-      const updatedPdk = {
-        ...pdk,
-        name: scanned.name || pdk.name,
-        path: scanned.canonicalPath,
-        techNode: scanned.techNode,
-        pdkId: scanned.pdkId || pdk.pdkId,
-        detectedFiles: scanned.detectedFiles,
-        description: valid
-          ? 'PDK path pinned by the source project.'
-          : 'The source project PDK path is incomplete.',
-        status: valid ? 'installed' : 'invalid',
-        valid,
-        knownLayout: scanned.pdkId === 'ics55' && valid,
-      }
-      projectPinnedPdk.value = updatedPdk
-      if (selectedPdkId.value === id) selectPdk(updatedPdk)
-      return
-    }
-
     await validatePdk(id)
   } catch (error) {
     showToast({
@@ -3244,6 +3193,7 @@ async function handleRemovePdk(id: string) {
     selectedPdkId.value = ''
     config.value.pdk = ''
     config.value.pdk_root = ''
+    config.value.pdk_installation_id = ''
     manualPdkDetectedFiles.value = null
     pdkSelections.value = {
       tech_lef: [],
@@ -3251,6 +3201,12 @@ async function handleRemovePdk(id: string) {
       liberty: [],
     }
   }
+}
+
+async function handleLocatePdk(id: string) {
+  await locatePdk(id)
+  const located = importedPdks.value.find((pdk) => pdk.id === id)
+  if (located) selectPdk(located)
 }
 
 async function scanManualPdkResources() {
@@ -3334,6 +3290,19 @@ function syncWorkspaceConfig() {
     tech_lef: pdkSelections.value.tech_lef,
     cell_lef: pdkSelections.value.cell_lef,
     liberty: pdkSelections.value.liberty,
+  }
+  if (config.value.pdk_requirement) {
+    config.value.pdk_requirement = {
+      ...config.value.pdk_requirement,
+      manualConfig:
+        pdkConfigMode.value === 'manual'
+          ? {
+              techLef: pdkSelections.value.tech_lef[0] ?? '',
+              cellLefs: [...pdkSelections.value.cell_lef],
+              liberty: [...pdkSelections.value.liberty],
+            }
+          : null,
+    }
   }
   config.value.mpc = projectMpc.value
   if (standaloneWorkspace.value) {

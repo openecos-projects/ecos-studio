@@ -145,7 +145,6 @@ function registerHandlers(
       resolveStepInfo: vi.fn(),
     },
     resourceManagerService: {
-      activatePdk: vi.fn(),
       cancelResource: vi.fn(),
       getResource: vi.fn(),
       readMpcSpec: vi.fn(),
@@ -161,6 +160,15 @@ function registerHandlers(
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
       validatePdkRootForWorkspace: vi.fn(),
+    },
+    pdkInventoryService: {
+      bindInstallation: vi.fn(),
+      importInstallation: vi.fn(),
+      listInstallations: vi.fn(),
+      locateInstallation: vi.fn(),
+      removeInstallation: vi.fn(),
+      resolveBinding: vi.fn(),
+      validateWorkspace: vi.fn(),
     },
     surferProtocolService: {
       authorizeWaveform: vi.fn(),
@@ -753,6 +761,28 @@ describe('registerIpc', () => {
     expect(services.appInfoService.getVersions).toHaveBeenCalledTimes(1)
   })
 
+  it('lists typed PDK Installation snapshots', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const installations = [
+      {
+        id: 'pdk-installation:1',
+        familyId: 'ics55',
+        displayName: 'ICS55',
+        version: '1.10.100',
+        root: '/tmp/pdk',
+        ownership: 'managed',
+        readiness: 'ready',
+        reason: null,
+      },
+    ]
+    services.pdkInventoryService.listInstallations.mockResolvedValue(installations)
+
+    await expect(handlers.get('pdk-inventory:list')?.(event)).resolves.toEqual(
+      installations,
+    )
+  })
+
   it('delegates resource manager calls to the resource manager service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
@@ -879,7 +909,12 @@ describe('registerIpc', () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     const error = new Error('PDK validation failed for ics55')
-    services.resourceManagerService.validatePdkRootForWorkspace.mockRejectedValue(error)
+    services.pdkInventoryService.bindInstallation.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
+    services.pdkInventoryService.validateWorkspace.mockRejectedValue(error)
 
     await expect(
       handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
@@ -887,16 +922,20 @@ describe('registerIpc', () => {
         payload: {
           directory: '/tmp/workspace',
           pdk: 'ics55',
-          pdkRoot: '/tmp/pdk',
+          pdkInstallationId: 'pdk-installation:ics55',
+          projectId: 'proj_demo',
+          projectRoot: '/tmp/project',
         },
       }),
     ).resolves.toEqual({
       error: { message: error.message, name: 'Error' },
       ok: false,
     })
-    expect(
-      services.resourceManagerService.validatePdkRootForWorkspace,
-    ).toHaveBeenCalledWith('/tmp/pdk')
+    expect(services.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+      manualConfig: null,
+    })
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
@@ -906,12 +945,26 @@ describe('registerIpc', () => {
     const payload = {
       directory: '/tmp/workspace',
       pdk: 'ics55',
-      pdkRoot: '/tmp/pdk',
+      pdkInstallationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
     }
     const result = { directory: '/tmp/workspace', workspaceHandle: 'workspace-handle' }
-    services.resourceManagerService.validatePdkRootForWorkspace.mockResolvedValue(
-      undefined,
-    )
+    services.pdkInventoryService.bindInstallation.mockResolvedValue({
+      installationId: payload.pdkInstallationId,
+      projectId: payload.projectId,
+      projectRoot: payload.projectRoot,
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: payload.pdkInstallationId,
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
     services.eccRuntimeService.createWorkspace.mockResolvedValue(result)
 
     await expect(
@@ -920,14 +973,17 @@ describe('registerIpc', () => {
         payload,
       }),
     ).resolves.toEqual(result)
-    expect(
-      services.resourceManagerService.validatePdkRootForWorkspace,
-    ).toHaveBeenCalledWith('/tmp/pdk')
-    expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith(payload)
-    expect(services.resourceManagerService.recordPdkReference).toHaveBeenCalledWith(
-      '/tmp/workspace',
-      '/tmp/pdk',
-    )
+    expect(services.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
+      installationId: payload.pdkInstallationId,
+      familyId: payload.pdk,
+      projectId: payload.projectId,
+      projectRoot: payload.projectRoot,
+    })
+    expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith({
+      directory: payload.directory,
+      pdk: payload.pdk,
+      pdkRoot: '/canonical/pdk',
+    })
   })
 
   it('waits for a runtime operation through the main-process tracker', async () => {

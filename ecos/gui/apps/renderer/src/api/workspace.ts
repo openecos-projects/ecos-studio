@@ -97,6 +97,7 @@ export function createWorkspaceApi(options: {
   origin_verilog?: string
   rtl_list?: string[]
   pdk_root?: string
+  pdk_installation_id?: string
   filelist?: string
   design_input_mode?: string
   sdc?: string
@@ -208,6 +209,7 @@ export function createWorkspaceApi(options: {
     origin_verilog: options.origin_verilog || '',
     rtl_list: options.rtl_list || [],
     pdk_root: options.pdk_root || '',
+    pdk_installation_id: options.pdk_installation_id || '',
     filelist: options.filelist || '',
     design_input_mode: options.design_input_mode || '',
     sdc: options.sdc || '',
@@ -230,6 +232,19 @@ export function createWorkspaceApi(options: {
         pdk: String(data.pdk ?? ''),
         pdkJson: data.pdk_json ?? null,
         pdkRoot: String(data.pdk_root ?? ''),
+        pdkInstallationId: String(data.pdk_installation_id ?? ''),
+        projectId: projectIdFromContext(
+          data.project_context as Record<string, unknown>,
+          String(data.directory ?? ''),
+        ),
+        projectRoot: projectRootFromContext(
+          data.project_context as Record<string, unknown>,
+          String(data.directory ?? ''),
+        ),
+        manualPdkConfig:
+          data.pdk_config_mode === 'manual'
+            ? manualConfiguration(data.pdk_config as Record<string, unknown>)
+            : null,
         rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
         sdc: String(data.sdc ?? ''),
       },
@@ -244,4 +259,36 @@ export function createWorkspaceApi(options: {
       message: [],
       response: ResponseEnum.success,
     })) as Promise<WorkspaceResponse>
+}
+
+function projectRootFromContext(
+  context: Record<string, unknown>,
+  workspaceDirectory: string,
+): string {
+  return String(context.project_root || workspaceDirectory)
+}
+
+function projectIdFromContext(
+  context: Record<string, unknown>,
+  workspaceDirectory: string,
+): string {
+  if (context.project_id) return String(context.project_id)
+  const name = String(
+    context.project_name || workspaceDirectory.split(/[/\\]/).pop() || 'project',
+  )
+  return `proj_${name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')}`
+}
+
+function manualConfiguration(config: Record<string, unknown>) {
+  const techLef = Array.isArray(config.tech_lef) ? config.tech_lef : []
+  const cellLefs = Array.isArray(config.cell_lef) ? config.cell_lef : []
+  const liberty = Array.isArray(config.liberty) ? config.liberty : []
+  return {
+    techLef: String(techLef[0] ?? ''),
+    cellLefs: cellLefs.map(String),
+    liberty: liberty.map(String),
+  }
 }

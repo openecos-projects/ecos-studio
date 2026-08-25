@@ -24,6 +24,8 @@ export interface EccRpcShutdownResult {
   }
 }
 
+import type { ManualPdkConfiguration } from './pdkInventory.ts'
+
 export interface EccWorkspaceCreateRequest {
   directory: string
   filelist?: string
@@ -34,6 +36,10 @@ export interface EccWorkspaceCreateRequest {
   pdk?: string
   pdkJson?: unknown
   pdkRoot?: string
+  pdkInstallationId?: string
+  projectId?: string
+  projectRoot?: string
+  manualPdkConfig?: ManualPdkConfiguration | null
   rtlList?: string[]
   sdc?: string
 }
