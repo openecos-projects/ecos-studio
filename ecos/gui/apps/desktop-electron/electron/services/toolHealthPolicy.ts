@@ -1,12 +1,16 @@
-export type ToolHealthMarkerKind = 'exists' | 'executable'
+export type ToolHealthMarkerKind = 'file' | 'directory' | 'executable'
 
 export interface ToolHealthMarker {
   path: string
   kind: ToolHealthMarkerKind
 }
 
-function exists(path: string): ToolHealthMarker {
-  return { path, kind: 'exists' }
+function file(path: string): ToolHealthMarker {
+  return { path, kind: 'file' }
+}
+
+function directory(path: string): ToolHealthMarker {
+  return { path, kind: 'directory' }
 }
 
 function executable(path: string): ToolHealthMarker {
@@ -17,7 +21,7 @@ const TOOL_HEALTH_POLICIES: Readonly<Record<string, readonly ToolHealthMarker[]>
   verilator: [
     executable('bin/verilator'),
     executable('bin/verilator_bin'),
-    exists('share/verilator/include/verilated.cpp'),
+    file('share/verilator/include/verilated.cpp'),
   ],
   'riscv-toolchain': [
     executable('bin/riscv64-unknown-elf-gcc'),
@@ -25,36 +29,36 @@ const TOOL_HEALTH_POLICIES: Readonly<Record<string, readonly ToolHealthMarker[]>
     executable('bin/riscv64-unknown-elf-objdump'),
     executable('bin/riscv64-unknown-elf-objcopy'),
   ],
-  'ecc-fe': [executable('bin/ecc-fe'), exists('fecompiler')],
+  'ecc-fe': [executable('bin/ecc-fe'), directory('fecompiler')],
   'ecc-fe-soc-ysyx-am': [
-    exists('manifest.json'),
-    exists('catalog.json'),
-    exists('filelist.soc.f'),
-    exists('driver/main.cpp'),
+    file('manifest.json'),
+    file('catalog.json'),
+    file('filelist.soc.f'),
+    file('driver/main.cpp'),
   ],
   'ecc-fe-cpu-rtl': [
-    exists('thirdparty/README'),
-    exists('thirdparty/cv32e40p'),
-    exists('thirdparty/cva6'),
-    exists('thirdparty/darkriscv'),
-    exists('thirdparty/ibex'),
-    exists('thirdparty/learn-fpga'),
-    exists('thirdparty/picorv32'),
-    exists('thirdparty/scr1'),
-    exists('thirdparty/serv'),
-    exists('thirdparty/vexriscv'),
+    file('thirdparty/README'),
+    directory('thirdparty/cv32e40p'),
+    directory('thirdparty/cva6'),
+    directory('thirdparty/darkriscv'),
+    directory('thirdparty/ibex'),
+    directory('thirdparty/learn-fpga'),
+    directory('thirdparty/picorv32'),
+    directory('thirdparty/scr1'),
+    directory('thirdparty/serv'),
+    directory('thirdparty/vexriscv'),
   ],
-  'ecc-fe-difftest-ref': [exists('tools/riscv32-spike-so')],
+  'ecc-fe-difftest-ref': [file('tools/riscv32-spike-so')],
   'ecc-fe-examples': [
-    exists('examples/ysyx_00000000/filelist.cpu.f'),
-    exists('examples/ysyx_00000000/rtl/ysyx_00000000.sv'),
-    exists('examples/ysyx_00000000/rtl/ysyx_00000000_difftest.sv'),
+    file('examples/ysyx_00000000/filelist.cpu.f'),
+    file('examples/ysyx_00000000/rtl/ysyx_00000000.sv'),
+    file('examples/ysyx_00000000/rtl/ysyx_00000000_difftest.sv'),
   ],
   surfer: [
-    exists('index.html'),
-    exists('integration.js'),
-    exists('surfer.js'),
-    exists('surfer_bg.wasm'),
+    file('index.html'),
+    file('integration.js'),
+    file('surfer.js'),
+    file('surfer_bg.wasm'),
   ],
 }
 
@@ -64,8 +68,8 @@ export function requiredToolHealthMarkers(
   if (normalizedName.startsWith('ecc-fe-cpu-')) {
     return normalizedName === 'ecc-fe-cpu-rtl'
       ? TOOL_HEALTH_POLICIES['ecc-fe-cpu-rtl']
-      : [exists('thirdparty')]
+      : [directory('thirdparty')]
   }
-  if (normalizedName.startsWith('ecc-fe-test-')) return [exists('tests')]
+  if (normalizedName.startsWith('ecc-fe-test-')) return [directory('tests')]
   return TOOL_HEALTH_POLICIES[normalizedName] ?? []
 }

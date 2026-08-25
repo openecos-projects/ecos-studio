@@ -22,15 +22,24 @@ describe('tool health policy', () => {
     }
   })
 
-  it('marks only executable tool entrypoints as executable', () => {
+  it('assigns the expected filesystem type to each marker', () => {
     expect(requiredToolHealthMarkers('verilator')).toEqual([
       { path: 'bin/verilator', kind: 'executable' },
       { path: 'bin/verilator_bin', kind: 'executable' },
-      { path: 'share/verilator/include/verilated.cpp', kind: 'exists' },
+      { path: 'share/verilator/include/verilated.cpp', kind: 'file' },
     ])
     expect(requiredToolHealthMarkers('ecc-fe')).toEqual([
       { path: 'bin/ecc-fe', kind: 'executable' },
-      { path: 'fecompiler', kind: 'exists' },
+      { path: 'fecompiler', kind: 'directory' },
+    ])
+    expect(requiredToolHealthMarkers('ecc-fe-cpu-custom')).toEqual([
+      { path: 'thirdparty', kind: 'directory' },
+    ])
+    expect(requiredToolHealthMarkers('ecc-fe-difftest-ref')).toEqual([
+      { path: 'tools/riscv32-spike-so', kind: 'file' },
+    ])
+    expect(requiredToolHealthMarkers('ecc-fe-test-smoke')).toEqual([
+      { path: 'tests', kind: 'directory' },
     ])
   })
 

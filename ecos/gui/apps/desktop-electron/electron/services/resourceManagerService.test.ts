@@ -1438,6 +1438,77 @@ describe('ResourceManagerService', () => {
     }
   })
 
+  it('marks installed tools as invalid when marker filesystem types are wrong', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    const eccFeRoot = join(dirs.toolsDir, 'ecc-fe', 'latest')
+    const verilatorRoot = join(dirs.toolsDir, 'verilator', '5.050')
+
+    await mkdir(join(eccFeRoot, 'bin'), { recursive: true })
+    await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o755)
+    await writeFile(join(eccFeRoot, 'fecompiler'), 'not a directory\n', 'utf8')
+
+    await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
+    await mkdir(join(verilatorRoot, 'share', 'verilator', 'include', 'verilated.cpp'), {
+      recursive: true,
+    })
+    for (const executable of ['verilator', 'verilator_bin']) {
+      await writeFile(join(verilatorRoot, 'bin', executable), '#!/bin/sh\n', 'utf8')
+      await chmod(join(verilatorRoot, 'bin', executable), 0o755)
+    }
+
+    await writeFile(
+      registryPath,
+      JSON.stringify({ schema_version: 2, tools: [], pdks: [] }),
+      'utf8',
+    )
+    await writeTestManifest(root, {
+      'tool:ecc-fe': {
+        type: 'tool',
+        name: 'ecc-fe',
+        version: 'latest',
+        path: eccFeRoot,
+        executable: 'bin/ecc-fe',
+        detected_executables: ['bin/ecc-fe'],
+        active: true,
+        managed: true,
+      },
+      'tool:verilator': {
+        type: 'tool',
+        name: 'verilator',
+        version: '5.050',
+        path: verilatorRoot,
+        executable: 'bin/verilator',
+        detected_executables: ['bin/verilator', 'bin/verilator_bin'],
+        active: true,
+        managed: true,
+      },
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['fecompiler'],
+      }),
+    })
+    await expect(service.getResource('tool:verilator')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['share/verilator/include/verilated.cpp'],
+      }),
+    })
+  })
+
   it('marks the RISC-V toolchain invalid when objdump is missing', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
@@ -2640,9 +2711,10 @@ describe('ResourceManagerService', () => {
     const sourceRoot = join(root, 'incomplete-ecc-fe-source')
     const sourceDir = join(sourceRoot, 'ecc-fe-runtime')
     const archivePath = join(root, 'incomplete-ecc-fe.tar')
-    await mkdir(join(sourceDir, 'bin', 'ecc-fe'), { recursive: true })
-    await mkdir(join(sourceDir, 'fecompiler'), { recursive: true })
-    await writeFile(join(sourceDir, 'fecompiler', '__init__.py'), '', 'utf8')
+    await mkdir(join(sourceDir, 'bin'), { recursive: true })
+    await writeFile(join(sourceDir, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(sourceDir, 'bin', 'ecc-fe'), 0o755)
+    await writeFile(join(sourceDir, 'fecompiler'), 'not a directory\n', 'utf8')
     await runFixtureCommand('tar', [
       '-cf',
       archivePath,
@@ -2716,7 +2788,7 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.updateResource('tool:ecc-fe')).rejects.toThrow(
-      'Extracted ecc-fe archive failed health validation: bin/ecc-fe',
+      'Extracted ecc-fe archive failed health validation: fecompiler',
     )
     await expect(
       readFile(join(destination, 'previous-version.txt'), 'utf8'),

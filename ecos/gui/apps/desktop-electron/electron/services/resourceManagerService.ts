@@ -29,7 +29,7 @@ import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { electronLogger } from './logger'
 import { isRelativePathOutsideRoot } from './pathScope'
-import { requiredToolHealthMarkers } from './toolHealthPolicy'
+import { requiredToolHealthMarkers, type ToolHealthMarkerKind } from './toolHealthPolicy'
 import {
   validateMpcSpec,
   type ResourceAction,
@@ -3457,6 +3457,23 @@ async function isExistingDirectory(path: string): Promise<boolean> {
   }
 }
 
+async function isExistingFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile()
+  } catch {
+    return false
+  }
+}
+
+async function isValidToolHealthMarker(
+  path: string,
+  kind: ToolHealthMarkerKind,
+): Promise<boolean> {
+  if (kind === 'executable') return isUsableExecutable(path, process.platform)
+  if (kind === 'directory') return isExistingDirectory(path)
+  return isExistingFile(path)
+}
+
 async function isSurferAssetsRoot(path: string): Promise<boolean> {
   return (
     (await pathExists(join(path, 'index.html'))) &&
@@ -3818,10 +3835,7 @@ async function checkToolEntryHealth(
   const missingMarkers: string[] = []
   for (const marker of markerDefinitions) {
     const markerPath = join(entry.path, marker.path)
-    const isValid =
-      marker.kind === 'executable'
-        ? await isUsableExecutable(markerPath, process.platform)
-        : await pathExists(markerPath)
+    const isValid = await isValidToolHealthMarker(markerPath, marker.kind)
     if (!isValid) {
       missingMarkers.push(marker.path)
     }
