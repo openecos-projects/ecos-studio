@@ -256,3 +256,40 @@ export type {
   ProjectManifestWorkspaceRegistrationInput,
   ProjectManifestWorkspaceStatus,
 } from './utils/projectManifest.ts'
+export type {
+  ClockMetrics,
+  CongestionMetrics,
+  CornerTimingRecord,
+  DesignInfo,
+  DesignReportData,
+  DesignReportExportOptions,
+  DesignReportFormat,
+  DesignReportWarning,
+  EvidenceProvenanceRecord,
+  ExecutionMetrics,
+  PhysicalMetrics,
+  PowerMetrics,
+  RoutingMetrics,
+  StageExecutionRecord,
+  TimingMetrics,
+  VerificationMetrics,
+} from './contracts/designReport.ts'
+export {
+  canonicalizeStageName,
+  extractDesignReportData,
+  formatDuration,
+  parsePowerRpt,
+  parseQorSummaryRpt,
+  parseRuntimeSeconds,
+  type ExtractDesignReportInput,
+  type ParsedPowerMetrics,
+  type ParsedQorSummaryMetrics,
+} from './utils/designReportExtract.ts'
+export {
+  formatCsvReport,
+  formatLatexReport,
+  formatMarkdownReport,
+  formatTextReport,
+  generateDesignReport,
+} from './utils/designReportFormatters/index.ts'
+

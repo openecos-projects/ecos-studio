@@ -117,25 +117,33 @@ function createApi() {
   const setActionEnabled = vi.fn().mockResolvedValue(undefined)
   const readFlow = vi.fn().mockResolvedValue(successfulFlow())
   const readParameters = vi.fn().mockResolvedValue({ Design: 'chip_top' })
+  const readHome = vi.fn().mockResolvedValue({})
+  const getVersions = vi.fn().mockResolvedValue({})
+  const writeProjectTextFile = vi.fn().mockResolvedValue(undefined)
   const inspectSignoff = vi.fn().mockResolvedValue(readyReview())
   const saveFile = vi.fn().mockResolvedValue('/exports/chip_top_signoff_package.tar.gz')
   const exportSignoff = vi.fn(async (request: { outputPath: string }) => ({
     outputPath: request.outputPath,
   }))
   testState.api = {
+    app: { getVersions },
     menu: { setActionEnabled },
-    workspaceResources: { readFlow, readParameters },
+    workspace: { writeProjectTextFile },
+    workspaceResources: { readFlow, readParameters, readHome },
     dialog: { saveFile },
     ecc: { workspace: { exportSignoff, inspectSignoff } },
   } as unknown as DesktopApi
 
   return {
     exportSignoff,
+    getVersions,
     inspectSignoff,
     readFlow,
+    readHome,
     readParameters,
     saveFile,
     setActionEnabled,
+    writeProjectTextFile,
   }
 }
 
@@ -544,6 +552,7 @@ describe('useSignoffPackageExport export action', () => {
       outputPath: '/tmp/rocket package.tar.gz',
       workspaceHandle: 'workspace-handle-1',
     })
+    expect(api.writeProjectTextFile).toHaveBeenCalledTimes(4)
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'success',

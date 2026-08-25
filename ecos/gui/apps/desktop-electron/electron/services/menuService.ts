@@ -22,6 +22,7 @@ export const workspaceDependentMenuActions: DesktopMenuEventId[] = [
   appMenuActionIds.reconfigureWorkspace,
   appMenuActionIds.manageDesignFiles,
   appMenuActionIds.exportSignoffPackage,
+  appMenuActionIds.exportDesignSummary,
 ]
 
 const menuStateByWindowId = new Map<number, Map<DesktopMenuEventId, boolean>>()
@@ -157,6 +158,12 @@ export function registerApplicationMenu(options: ApplicationMenuOptions = {}): v
         createMenuAction(
           'Export Signoff Package...',
           appMenuActionIds.exportSignoffPackage,
+          undefined,
+          false,
+        ),
+        createMenuAction(
+          'Export Design Summary...',
+          appMenuActionIds.exportDesignSummary,
           undefined,
           false,
         ),

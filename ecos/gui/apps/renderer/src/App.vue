@@ -7,6 +7,7 @@
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
         :signoff-package-export-enabled="signoffPackageExportEnabled"
+        :design-report-export-enabled="designReportExportEnabled"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
       />
@@ -109,6 +110,23 @@
       @refresh="refreshSignoffPackageReview"
     />
 
+    <DesignReportExportDialog
+      :content="generatedDesignReportContent"
+      :error="designReportError"
+      :loading="designReportLoading"
+      :options="designReportExportOptions"
+      :report-data="designReportData"
+      :selected-format="selectedDesignReportFormat"
+      :visible="showDesignReportDialog"
+      @close="closeDesignReportExport"
+      @copy="copyDesignReport"
+      @refresh="refreshDesignReportData"
+      @save-all="exportAllDesignReportFormats"
+      @save-current="saveDesignReport"
+      @update:options="Object.assign(designReportExportOptions, $event)"
+      @update:selected-format="selectedDesignReportFormat = $event"
+    />
+
     <DesignFilesManageDialog v-model="showManageDialog" />
 
     <Dialog
@@ -163,6 +181,7 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
+import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
@@ -178,6 +197,7 @@ import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
 import SignoffPackageReviewDialog from '@/components/SignoffPackageReviewDialog.vue'
+import DesignReportExportDialog from '@/components/DesignReportExportDialog.vue'
 import Toast from 'primevue/toast'
 import Dialog from 'primevue/dialog'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
@@ -246,6 +266,25 @@ const {
   showToast,
   workspaceSession,
 })
+const {
+  closeDesignReportExport,
+  copyToClipboard: copyDesignReport,
+  designReportExportEnabled,
+  dialogVisible: showDesignReportDialog,
+  error: designReportError,
+  exportAllFormats: exportAllDesignReportFormats,
+  exportOptions: designReportExportOptions,
+  generatedContent: generatedDesignReportContent,
+  loadWorkspaceReportData: refreshDesignReportData,
+  loading: designReportLoading,
+  openDesignReportExport,
+  reportData: designReportData,
+  saveCurrentReport: saveDesignReport,
+  selectedFormat: selectedDesignReportFormat,
+} = useDesignReportExport({
+  currentProject,
+  showToast,
+})
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 
 watch(
@@ -258,6 +297,7 @@ watch(
         await Promise.all([
           api.menu.setActionEnabled(appMenuActionIds.reconfigureWorkspace, hasWorkspace),
           api.menu.setActionEnabled(appMenuActionIds.manageDesignFiles, hasWorkspace),
+          api.menu.setActionEnabled(appMenuActionIds.exportDesignMetrics, hasWorkspace),
         ])
       } catch (error) {
         console.warn('[App] Failed to sync workspace menu availability:', error)
@@ -966,6 +1006,8 @@ const { handleMenuAction } = useAppMenuActions({
   showNewProjectWizard: showCreateWorkspaceWizard,
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
   exportSignoffPackage,
+  exportDesignSummary: openDesignReportExport,
+  exportDesignMetrics: openDesignReportExport,
   manageDesignFiles: openManageDialog,
   adjustZoom,
 })

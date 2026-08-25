@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { appMenuActionIds } from '@ecos-studio/shared'
+import { appMenuActionIds, type AppMenuAction } from '@ecos-studio/shared'
 
 const { useMenuEvents } = vi.hoisted(() => ({
   useMenuEvents: vi.fn(),
@@ -17,20 +17,7 @@ describe('useAppMenuActions', () => {
   })
 
   it('registers app-level native menu handlers that dispatch the real app actions', async () => {
-    let registeredHandlers:
-      | Partial<
-          Record<
-            | typeof appMenuActionIds.documentation
-            | typeof appMenuActionIds.newWindow
-            | typeof appMenuActionIds.newProject
-            | typeof appMenuActionIds.openProject
-            | typeof appMenuActionIds.reconfigureWorkspace
-            | typeof appMenuActionIds.exportSignoffPackage
-            | typeof appMenuActionIds.about,
-            () => void
-          >
-        >
-      | undefined
+    let registeredHandlers: Partial<Record<AppMenuAction, () => void>> | undefined
 
     useMenuEvents.mockImplementation((handlers) => {
       registeredHandlers = handlers
@@ -44,6 +31,7 @@ describe('useAppMenuActions', () => {
     const showAboutDialog = vi.fn()
     const reconfigureWorkspace = vi.fn()
     const exportSignoffPackage = vi.fn()
+    const exportDesignMetrics = vi.fn()
 
     const { handleMenuAction } = useAppMenuActions({
       createWindow,
@@ -52,6 +40,7 @@ describe('useAppMenuActions', () => {
       openProject,
       reconfigureWorkspace,
       exportSignoffPackage,
+      exportDesignMetrics,
       showAboutDialog,
       showNewProjectWizard,
     })
@@ -85,6 +74,11 @@ describe('useAppMenuActions', () => {
 
     expect(exportSignoffPackage).toHaveBeenCalledTimes(1)
 
+    registeredHandlers?.[appMenuActionIds.exportDesignMetrics]?.()
+    await Promise.resolve()
+
+    expect(exportDesignMetrics).toHaveBeenCalledTimes(1)
+
     registeredHandlers?.[appMenuActionIds.documentation]?.()
     await Promise.resolve()
 
@@ -111,6 +105,10 @@ describe('useAppMenuActions', () => {
     await handleMenuAction(appMenuActionIds.exportSignoffPackage)
 
     expect(exportSignoffPackage).toHaveBeenCalledTimes(2)
+
+    await handleMenuAction(appMenuActionIds.exportDesignMetrics)
+
+    expect(exportDesignMetrics).toHaveBeenCalledTimes(2)
   })
 
   it('does not navigate when opening a project is cancelled', async () => {
