@@ -32,6 +32,15 @@ from ecos_agent.optimization_contracts import (
 
 _DENSITY_VALUES = tuple(round(0.1 + 0.05 * index, 2) for index in range(18))
 _PADDING_VALUES = (0, 1, 2, 3)
+_DRC_GOAL_MARKERS = (
+    "drc",
+    "design rule",
+    "design-rule",
+    "设计规则",
+    "规则违例",
+)
+_METRIC_RELATIVE_TOLERANCE = 0.01
+_METRIC_ABSOLUTE_TOLERANCE = 0.01
 
 
 class IncumbentDecision(StrEnum):
@@ -107,11 +116,12 @@ def freeze_optimization_objective(
 ) -> OptimizationObjectiveContract:
     if not isinstance(goal_text, str) or not goal_text.strip():
         raise ValueError("optimization goal text is invalid")
+    preserve_metrics = _effective_preserve_metrics(goal_text, proposal)
     payload = {
         "schema_version": "ecos.optimization_objective.v1",
         "source_goal_sha256": canonical_sha256(goal_text.strip()),
         "primary_metric": proposal.primary_metric.value,
-        "preserve_metrics": [metric.value for metric in proposal.preserve_metrics],
+        "preserve_metrics": [metric.value for metric in preserve_metrics],
         "required_signoff_gates": list(REQUIRED_SIGNOFF_GATES),
         "rationale_summary": proposal.rationale_summary,
     }
@@ -119,6 +129,23 @@ def freeze_optimization_objective(
         **payload,
         contract_sha256=canonical_sha256(payload),
     )
+
+
+def _effective_preserve_metrics(
+    goal_text: str, proposal: OptimizationObjectiveProposal
+) -> tuple[ObjectiveMetric, ...]:
+    preserve_metrics = list(proposal.preserve_metrics)
+    mentions_drc = any(marker in goal_text.casefold() for marker in _DRC_GOAL_MARKERS)
+    drc_metric = ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
+    if (
+        mentions_drc
+        and proposal.primary_metric != drc_metric
+        and drc_metric not in preserve_metrics
+    ):
+        preserve_metrics.insert(0, drc_metric)
+    if len(preserve_metrics) > 2:
+        raise ValueError("optimization objective preserves too many metrics after DRC binding")
+    return tuple(preserve_metrics)
 
 
 def freeze_routability_objective(
@@ -155,28 +182,45 @@ def compare_incumbent(
     if not candidate.eligible_for_incumbent:
         return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
     for metric_id in TIMING_GUARDRAIL_ORDER:
-        degradation = incumbent.timing_guardrail[metric_id] - candidate.timing_guardrail[metric_id]
-        if degradation > 0:
+        incumbent_value = incumbent.timing_guardrail[metric_id]
+        candidate_value = candidate.timing_guardrail[metric_id]
+        if candidate_value < incumbent_value and _meaningful_metric_change(
+            incumbent_value, candidate_value
+        ):
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     if semantic_objective is not None:
         for metric_id in semantic_objective.preserve_metrics:
-            delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
-            if delta < 0:
+            incumbent_value = incumbent.metrics[metric_id]
+            candidate_value = candidate.metrics[metric_id]
+            if candidate_value > incumbent_value and _meaningful_metric_change(
+                incumbent_value, candidate_value
+            ):
                 return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
         metric_id = semantic_objective.primary_metric
-        delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
-        if delta > 0:
+        incumbent_value = incumbent.metrics[metric_id]
+        candidate_value = candidate.metrics[metric_id]
+        if candidate_value < incumbent_value:
             return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
-        if delta < 0:
+        if candidate_value > incumbent_value:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
         return IncumbentComparison(IncumbentDecision.NOISE_TIE, None)
     for metric_id in ROUTABILITY_OBJECTIVE_ORDER:
-        delta = incumbent.metrics[metric_id] - candidate.metrics[metric_id]
-        if delta > 0:
+        incumbent_value = incumbent.metrics[metric_id]
+        candidate_value = candidate.metrics[metric_id]
+        if candidate_value < incumbent_value:
             return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
-        if delta < 0:
+        if candidate_value > incumbent_value:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     return IncumbentComparison(IncumbentDecision.NOISE_TIE, None)
+
+
+def _meaningful_metric_change(reference: float, candidate: float) -> bool:
+    return not math.isclose(
+        reference,
+        candidate,
+        rel_tol=_METRIC_RELATIVE_TOLERANCE,
+        abs_tol=_METRIC_ABSOLUTE_TOLERANCE,
+    )
 
 
 def next_coordinate_selection(

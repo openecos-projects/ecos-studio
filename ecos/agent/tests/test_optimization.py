@@ -227,6 +227,20 @@ def test_natural_language_objective_is_frozen_with_required_signoff_gates() -> N
         "sta_setup_closed",
         "sta_hold_closed",
     )
+
+
+def test_drc_goal_is_locally_bound_to_detail_route_violations() -> None:
+    contract = freeze_optimization_objective(
+        "reduce routed wirelength while preserving DRC and timing",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            rationale_summary="Reduce wirelength without DRC or timing regressions.",
+        ),
+    )
+
+    assert contract.preserve_metrics == (
+        ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
+    )
     assert contract.contract_sha256.startswith("sha256:")
     assert OptimizationObjectiveContract.model_validate(contract.model_dump()) == contract
 
@@ -481,6 +495,67 @@ def test_semantic_objective_preserves_guardrails_before_primary_metric() -> None
     comparison = compare_incumbent(
         incumbent=_terminal("incumbent", dr=1, overflow=10, wirelength=100),
         candidate=_terminal("candidate", dr=1, overflow=10, wirelength=80),
+        objective=_objective(),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == ObjectiveMetric.ROUTE_WIRELENGTH
+
+
+def test_comparator_allows_one_percent_timing_and_preserve_metric_noise() -> None:
+    semantic = freeze_optimization_objective(
+        "reduce wirelength while preserving DRC and timing",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,),
+            rationale_summary="Keep DRC and timing within tolerance.",
+        ),
+    )
+    comparison = compare_incumbent(
+        incumbent=_terminal(
+            "incumbent",
+            dr=100,
+            overflow=10,
+            wirelength=100,
+            timing={
+                TimingMetric.STA_SETUP_WNS: 1.0,
+                TimingMetric.STA_SETUP_TNS: 0.0,
+                TimingMetric.STA_HOLD_WNS: 0.5,
+                TimingMetric.STA_HOLD_TNS: 0.0,
+            },
+        ),
+        candidate=_terminal(
+            "candidate",
+            dr=100.5,
+            overflow=10,
+            wirelength=98,
+            timing={
+                TimingMetric.STA_SETUP_WNS: 0.995,
+                TimingMetric.STA_SETUP_TNS: -0.005,
+                TimingMetric.STA_HOLD_WNS: 0.4975,
+                TimingMetric.STA_HOLD_TNS: -0.005,
+            },
+        ),
+        objective=_objective(),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == ObjectiveMetric.ROUTE_WIRELENGTH
+
+
+def test_comparator_accepts_any_primary_metric_improvement() -> None:
+    semantic = freeze_optimization_objective(
+        "reduce wirelength",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            rationale_summary="Reduce routed wirelength.",
+        ),
+    )
+    comparison = compare_incumbent(
+        incumbent=_terminal("incumbent", dr=0, overflow=0, wirelength=100),
+        candidate=_terminal("candidate", dr=0, overflow=0, wirelength=99.5),
         objective=_objective(),
         semantic_objective=semantic,
     )
