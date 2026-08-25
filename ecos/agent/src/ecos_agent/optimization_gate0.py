@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import platform
 import re
 import statistics
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -346,9 +348,12 @@ def run_gate0(
     *,
     run_id: str,
     design_ids: Sequence[str] = (),
+    max_workers: int = 3,
 ) -> dict[str, object]:
     if not _ID.fullmatch(run_id):
         raise Gate0Error("run id is invalid")
+    if type(max_workers) is not int or max_workers <= 0:
+        raise Gate0Error("max workers must be a positive integer")
     config_path = Path(config_path).resolve()
     config = load_gate0_config(config_path)
     readiness = readiness_report(config_path)
@@ -364,14 +369,28 @@ def run_gate0(
         "run_id": run_id,
         "config_sha256": readiness["config_sha256"],
         "design_ids": [item.design_id for item in selected],
+        "max_workers": max_workers,
         "readiness": readiness,
     })
     reports: dict[str, dict[str, object]] = {}
+    execution_slots = threading.BoundedSemaphore(max_workers)
     try:
-        for design in selected:
-            reports[design.design_id] = _run_design(
-                config_path, config, design, run_root / design.design_id, readiness
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = executor.map(
+                lambda design: _run_design(
+                    config_path,
+                    config,
+                    design,
+                    run_root / design.design_id,
+                    readiness,
+                    max_workers=max_workers,
+                    execution_slots=execution_slots,
+                ),
+                selected,
             )
+            reports = {
+                design.design_id: report for design, report in zip(selected, results)
+            }
     except Exception as exc:
         _write_json(run_root / "failure.v1.json", {"error_type": type(exc).__name__, "message": str(exc)})
         raise
@@ -392,41 +411,79 @@ def _run_design(
     design: Gate0Design,
     output: Path,
     readiness: Mapping[str, object],
+    *,
+    max_workers: int,
+    execution_slots: threading.Semaphore,
 ) -> dict[str, object]:
     output.mkdir(parents=True)
     workspace = output / "workspace"
     executable = Path(readiness["ecc"]["executable"])  # type: ignore[index]
-    client = EccContentLengthRpcClient(executable, response_timeout_seconds=30)
-    try:
-        canonical = _run_canonical(config_path, config, design, workspace, output, client, readiness)
-        workspace_id = canonical["workspace_id"]
-        observation = canonical["observation"]
-        if not isinstance(workspace_id, str) or not isinstance(observation, TerminalObservation):
-            raise Gate0Error("canonical baseline record is invalid")
-        site_width = int(readiness["pdk"]["site_width_dbu"])  # type: ignore[index]
-        defaults = [
-            run_pilot_candidate(
-                client, workspace_id, workspace, site_width, observation,
-                RequestedKnobValue(knob_id=OptimizationKnob.TARGET_DENSITY, value=config.baseline.target_density),
-                StrategyDirection.INCREASE, f"default-replay-{index}",
-                output / f"default-replay-{index}", readiness["config_sha256"],
-                float(config.terminal_timeout_seconds),
-            ).observation
-            for index in range(1, config.default_replays + 1)
-        ]
-        values = _baseline_values(config.baseline)
-        probes = {
-            probe.probe_id: run_pilot_candidate(
-                client, workspace_id, workspace, site_width, observation,
-                _probe_request(probe, values),
-                _probe_direction(probe, values[probe.knob_id.value]), probe.probe_id,
-                output / probe.probe_id,
-                readiness["config_sha256"], float(config.terminal_timeout_seconds),
-            ).observation
-            for probe in config.probes
-        }
-    finally:
-        client.close()
+    with execution_slots:
+        client = EccContentLengthRpcClient(executable, response_timeout_seconds=30)
+        try:
+            canonical = _run_canonical(
+                config_path, config, design, workspace, output, client, readiness
+            )
+        finally:
+            client.close()
+    workspace_id = canonical["workspace_id"]
+    observation = canonical["observation"]
+    if not isinstance(workspace_id, str) or not isinstance(observation, TerminalObservation):
+        raise Gate0Error("canonical baseline record is invalid")
+    site_width = int(readiness["pdk"]["site_width_dbu"])  # type: ignore[index]
+    values = _baseline_values(config.baseline)
+    specs = [
+        (
+            f"default-replay-{index}",
+            RequestedKnobValue(
+                knob_id=OptimizationKnob.TARGET_DENSITY,
+                value=config.baseline.target_density,
+            ),
+            StrategyDirection.INCREASE,
+        )
+        for index in range(1, config.default_replays + 1)
+    ] + [
+        (
+            probe.probe_id,
+            _probe_request(probe, values),
+            _probe_direction(probe, values[probe.knob_id.value]),
+        )
+        for probe in config.probes
+    ]
+
+    def execute(spec: tuple[str, RequestedKnobValue, StrategyDirection]) -> TerminalObservation:
+        candidate_id, requested, direction = spec
+        with execution_slots:
+            candidate_client = EccContentLengthRpcClient(
+                executable, response_timeout_seconds=30
+            )
+            try:
+                candidate_workspace_id = candidate_client.open_workspace(workspace)
+                return run_pilot_candidate(
+                    candidate_client,
+                    candidate_workspace_id,
+                    workspace,
+                    site_width,
+                    observation,
+                    requested,
+                    direction,
+                    candidate_id,
+                    output / candidate_id,
+                    readiness["config_sha256"],
+                    float(config.terminal_timeout_seconds),
+                ).observation
+            finally:
+                candidate_client.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        candidate_observations = list(executor.map(execute, specs))
+    defaults = candidate_observations[: config.default_replays]
+    probes = dict(
+        zip(
+            (probe.probe_id for probe in config.probes),
+            candidate_observations[config.default_replays :],
+        )
+    )
     report = qualify_design(observation, defaults, probes)
     report["canonical"] = observation.model_dump(mode="json")
     report["default_replays"] = [item.model_dump(mode="json") for item in defaults]
@@ -748,6 +805,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--readiness-only", action="store_true")
     parser.add_argument("--run-id", default=time.strftime("gate0-%Y%m%dT%H%M%S", time.gmtime()))
     parser.add_argument("--design", action="append", default=[])
+    parser.add_argument("--max-workers", type=int, default=3)
     args = parser.parse_args(argv)
     try:
         if args.readiness_only:
@@ -755,7 +813,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_json(args.results_root / "readiness.v1.json", report)
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
-        summary = run_gate0(args.config, args.results_root, run_id=args.run_id, design_ids=args.design)
+        summary = run_gate0(
+            args.config,
+            args.results_root,
+            run_id=args.run_id,
+            design_ids=args.design,
+            max_workers=args.max_workers,
+        )
         print(json.dumps(summary["pool"], indent=2, sort_keys=True))
         return 0 if summary["pool"]["qualified"] else 2
     except (Gate0Error, OSError, subprocess.SubprocessError, ValueError) as exc:

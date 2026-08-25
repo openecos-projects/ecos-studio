@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -115,6 +117,127 @@ def test_config_hash_locks_every_input(tmp_path: Path) -> None:
     snapshot.write_text("module changed; endmodule\n", encoding="utf-8")
     with pytest.raises(Gate0Error, match="hash"):
         load_gate0_config(config_path)
+
+
+def test_run_gate0_parallelizes_designs_with_deterministic_order(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config = gate0.Gate0Config.model_validate(_config(tmp_path / "input.v", HASH))
+    second = config.designs[0].model_copy(
+        update={"design_id": "i2c", "top_module": "i2c"}
+    )
+    config = config.model_copy(update={"designs": (config.designs[0], second)})
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def fake_run_design(*args, **kwargs):
+        nonlocal active, peak
+        design = args[2]
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.03 if design.design_id == "gcd" else 0.01)
+        with lock:
+            active -= 1
+        return {"qualified": True, "best_probe_id": design.design_id}
+
+    monkeypatch.setattr(gate0, "load_gate0_config", lambda _path: config)
+    monkeypatch.setattr(
+        gate0,
+        "readiness_report",
+        lambda _path: {"config_sha256": HASH, "ecc": {}, "pdk": {}},
+    )
+    monkeypatch.setattr(gate0, "_run_design", fake_run_design)
+
+    summary = gate0.run_gate0(
+        tmp_path / "pilot.json",
+        tmp_path / "results",
+        run_id="parallel-designs",
+        max_workers=2,
+    )
+
+    assert peak == 2
+    assert list(summary["designs"]) == ["gcd", "i2c"]
+    manifest = json.loads(
+        (tmp_path / "results/parallel-designs/run-manifest.v1.json").read_text()
+    )
+    assert manifest["max_workers"] == 2
+
+
+@pytest.mark.parametrize("max_workers", [0, -1, True, 1.5])
+def test_run_gate0_rejects_invalid_max_workers(
+    tmp_path: Path, max_workers: object
+) -> None:
+    with pytest.raises(Gate0Error, match="max workers"):
+        gate0.run_gate0(
+            tmp_path / "pilot.json",
+            tmp_path / "results",
+            run_id="invalid-workers",
+            max_workers=max_workers,  # type: ignore[arg-type]
+        )
+
+
+def test_design_candidates_use_parallel_independent_rpc_sessions(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config = gate0.Gate0Config.model_validate(_config(tmp_path / "input.v", HASH))
+    design = config.designs[0]
+    canonical = _terminal(10, 5, 100)
+    lock = threading.Lock()
+    created: list[FakeClient] = []
+    active = 0
+    peak = 0
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            with lock:
+                self.index = len(created)
+                created.append(self)
+            self.closed = False
+
+        def open_workspace(self, workspace: Path) -> str:
+            assert workspace == tmp_path / "design/workspace"
+            return f"workspace-{self.index}"
+
+        def close(self) -> None:
+            self.closed = True
+
+    def fake_canonical(*_args, **_kwargs):
+        return {"workspace_id": "workspace-canonical", "observation": canonical}
+
+    def fake_candidate(client, workspace_id, *_args, **_kwargs):
+        nonlocal active, peak
+        assert workspace_id == f"workspace-{client.index}"
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        candidate_id = _args[5]
+        time.sleep(0.02 if "default" in candidate_id else 0.01)
+        with lock:
+            active -= 1
+        value = float(candidate_id.rsplit("-", 1)[-1]) if "default" in candidate_id else 0
+        return gate0.PilotCandidateRun(_terminal(10, 5, 100 + value), object())
+
+    monkeypatch.setattr(gate0, "EccContentLengthRpcClient", FakeClient)
+    monkeypatch.setattr(gate0, "_run_canonical", fake_canonical)
+    monkeypatch.setattr(gate0, "run_pilot_candidate", fake_candidate)
+
+    report = gate0._run_design(
+        tmp_path / "pilot.json",
+        config,
+        design,
+        tmp_path / "design",
+        {"ecc": {"executable": "/ecc"}, "pdk": {"site_width_dbu": 200}, "config_sha256": HASH},
+        max_workers=3,
+        execution_slots=threading.BoundedSemaphore(3),
+    )
+
+    assert peak == 3
+    assert [item["metrics"]["route_wirelength"] for item in report["default_replays"]] == [101, 102, 103]
+    assert list(report["probe_observations"]) == [item.probe_id for item in config.probes]
+    assert len(created) == 9
+    assert all(client.closed for client in created)
 
 
 def test_noise_profile_and_comparison_use_default_replay_range() -> None:

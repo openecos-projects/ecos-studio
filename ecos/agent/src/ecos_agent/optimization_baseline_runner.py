@@ -7,9 +7,11 @@ import json
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from threading import BoundedSemaphore
+from typing import Callable, Mapping, Sequence, TypeVar
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_baselines import (
@@ -44,6 +46,8 @@ _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _PILOT_DESIGNS = frozenset({"gcd", "i2c"})
 _CANDIDATE_LIMIT = 6
 _DEFAULT_SEED = 20260824
+_DEFAULT_MAX_WORKERS = 3
+_T = TypeVar("_T")
 
 
 class BaselineRunnerError(RuntimeError):
@@ -159,12 +163,13 @@ def run_baseline_pilot(
     run_id: str,
     workspaces: Mapping[str, Path],
     random_seed: int = _DEFAULT_SEED,
+    max_workers: int = _DEFAULT_MAX_WORKERS,
 ) -> dict[str, object]:
     if not _ID.fullmatch(run_id):
         raise BaselineRunnerError("baseline run id is invalid")
     config_path = Path(config_path).resolve()
     config = load_gate0_config(config_path)
-    _validate_scope(config, workspaces, random_seed)
+    _validate_scope(config, workspaces, random_seed, max_workers)
     readiness = readiness_report(config_path)
     designs = {item.design_id: item for item in config.designs}
     workspace_bindings = {
@@ -185,6 +190,7 @@ def run_baseline_pilot(
         "methods": [BaselineMethod.DEFAULT, *ONLINE_BASELINE_METHODS],
         "candidate_execution_limit": _CANDIDATE_LIMIT,
         "random_seed": random_seed,
+        "max_workers": max_workers,
         "baseline_replay_counts": {
             design_id: designs[design_id].baseline_replay_count
             for design_id in sorted(workspaces)
@@ -196,19 +202,26 @@ def run_baseline_pilot(
         },
         "readiness": readiness,
     })
-    summaries = {}
+    design_ids = sorted(workspaces)
+    execution_slots = BoundedSemaphore(max_workers)
+
+    def run_design(design_id: str) -> dict[str, object]:
+        return _run_design(
+            config,
+            design_id,
+            Path(workspaces[design_id]),
+            run_root / design_id,
+            readiness,
+            run_id,
+            random_seed,
+            designs[design_id].baseline_replay_count,
+            max_workers,
+            execution_slots,
+        )
+
     try:
-        for design_id in sorted(workspaces):
-            summaries[design_id] = _run_design(
-                config,
-                design_id,
-                Path(workspaces[design_id]),
-                run_root / design_id,
-                readiness,
-                run_id,
-                random_seed,
-                designs[design_id].baseline_replay_count,
-            )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            summaries = dict(zip(design_ids, executor.map(run_design, design_ids)))
     except KeyboardInterrupt:
         _write_json(run_root / "interrupted.v1.json", {
             "schema_version": "ecos.optimization_baseline_interruption.v1",
@@ -239,38 +252,38 @@ def _run_design(
     run_id: str,
     random_seed: int,
     baseline_replay_count: int,
+    max_workers: int,
+    execution_slots: BoundedSemaphore,
 ) -> dict[str, object]:
     workspace = _canonical_workspace(workspace)
     output.mkdir()
     baseline = build_terminal_observation(workspace)
     if not baseline.eligible_for_incumbent:
         raise BaselineRunnerError("baseline workspace is not terminal eligible")
-    client = EccContentLengthRpcClient(
-        Path(readiness["ecc"]["executable"]), response_timeout_seconds=30  # type: ignore[index]
+    defaults = _default_replays(
+        workspace,
+        output,
+        config,
+        readiness,
+        run_id,
+        design_id,
+        baseline,
+        baseline_replay_count,
+        max_workers,
+        execution_slots,
     )
-    try:
-        workspace_id = client.open_workspace(workspace)
-        defaults = _default_replays(
-            client,
-            workspace_id,
+    profile = _baseline_noise_profile(defaults)
+    default_baseline = defaults[0]
+
+    def run_method(method: BaselineMethod) -> dict[str, object]:
+        method_output = output / method.value
+        return _run_rpc_task(
             workspace,
-            output,
-            config,
             readiness,
-            run_id,
-            design_id,
-            baseline,
-            baseline_replay_count,
-        )
-        profile = _baseline_noise_profile(defaults)
-        default_baseline = defaults[0]
-        methods = {
-            BaselineMethod.DEFAULT.value: _default_summary(
-                design_id, default_baseline, profile
-            )
-        }
-        for method in ONLINE_BASELINE_METHODS:
-            methods[method.value] = _run_online_method(
+            execution_slots,
+            method_output / "failure.v1.json",
+            method.value,
+            lambda client, workspace_id: _run_online_method(
                 method,
                 client,
                 workspace_id,
@@ -283,9 +296,17 @@ def _run_design(
                 default_baseline,
                 profile["epsilon"],
                 random_seed,
-            )
-    finally:
-        client.close()
+            ),
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        online_summaries = tuple(executor.map(run_method, ONLINE_BASELINE_METHODS))
+    methods = {
+        BaselineMethod.DEFAULT.value: _default_summary(
+            design_id, default_baseline, profile
+        ),
+        **dict(zip((method.value for method in ONLINE_BASELINE_METHODS), online_summaries)),
+    }
     summary = {
         "design_id": design_id,
         "baseline_replay_count": baseline_replay_count,
@@ -300,8 +321,6 @@ def _run_design(
 
 
 def _default_replays(
-    client: EccContentLengthRpcClient,
-    workspace_id: str,
     workspace: Path,
     output: Path,
     config: Gate0Config,
@@ -310,32 +329,44 @@ def _default_replays(
     design_id: str,
     baseline: TerminalObservation,
     replay_count: int,
+    max_workers: int,
+    execution_slots: BoundedSemaphore,
 ) -> tuple[TerminalObservation, ...]:
     if replay_count not in {1, 3}:
         raise BaselineRunnerError("baseline replay count must be 1 or 3")
-    results = []
     (output / "calibration").mkdir()
-    for index in range(1, replay_count + 1):
-        result = run_pilot_candidate(
-            client,
-            workspace_id,
+
+    def replay(index: int) -> TerminalObservation:
+        replay_output = output / "calibration" / f"default-replay-{index}"
+        result = _run_rpc_task(
             workspace,
-            int(readiness["pdk"]["site_width_dbu"]),  # type: ignore[index]
-            baseline,
-            RequestedKnobValue(
-                knob_id=OptimizationKnob.TARGET_DENSITY,
-                value=config.baseline.target_density,
+            readiness,
+            execution_slots,
+            replay_output / "failure.v1.json",
+            f"default-replay-{index}",
+            lambda client, workspace_id: run_pilot_candidate(
+                client,
+                workspace_id,
+                workspace,
+                int(readiness["pdk"]["site_width_dbu"]),  # type: ignore[index]
+                baseline,
+                RequestedKnobValue(
+                    knob_id=OptimizationKnob.TARGET_DENSITY,
+                    value=config.baseline.target_density,
+                ),
+                StrategyDirection.INCREASE,
+                f"calibration-{index}",
+                replay_output,
+                readiness["config_sha256"],
+                float(config.terminal_timeout_seconds),
+                episode_id=_episode_id(run_id, design_id, "calibration"),
+                rationale_summary="Execute one frozen default replay for baseline noise calibration.",
             ),
-            StrategyDirection.INCREASE,
-            f"calibration-{index}",
-            output / "calibration" / f"default-replay-{index}",
-            readiness["config_sha256"],
-            float(config.terminal_timeout_seconds),
-            episode_id=_episode_id(run_id, design_id, "calibration"),
-            rationale_summary="Execute one frozen default replay for baseline noise calibration.",
         )
-        results.append(result.observation)
-    return tuple(results)
+        return result.observation
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return tuple(executor.map(replay, range(1, replay_count + 1)))
 
 
 def _baseline_noise_profile(
@@ -484,8 +515,38 @@ def _baseline_values(config: Gate0Config) -> dict[str, bool | int | float]:
     }
 
 
+def _run_rpc_task(
+    workspace: Path,
+    readiness: Mapping[str, object],
+    execution_slots: BoundedSemaphore,
+    failure_path: Path,
+    task_id: str,
+    task: Callable[[EccContentLengthRpcClient, str], _T],
+) -> _T:
+    try:
+        with execution_slots:
+            client = EccContentLengthRpcClient(
+                Path(readiness["ecc"]["executable"]),  # type: ignore[index]
+                response_timeout_seconds=30,
+            )
+            try:
+                return task(client, client.open_workspace(workspace))
+            finally:
+                client.close()
+    except Exception as exc:
+        _write_json(failure_path, {
+            "task_id": task_id,
+            "error_type": type(exc).__name__,
+            "message": "parallel baseline task failed",
+        })
+        raise
+
+
 def _validate_scope(
-    config: Gate0Config, workspaces: Mapping[str, Path], random_seed: int
+    config: Gate0Config,
+    workspaces: Mapping[str, Path],
+    random_seed: int,
+    max_workers: int,
 ) -> None:
     if {item.design_id for item in config.designs} != _PILOT_DESIGNS:
         raise BaselineRunnerError("baseline pilot config must contain only gcd and i2c")
@@ -493,6 +554,8 @@ def _validate_scope(
         raise BaselineRunnerError("baseline pilot requires gcd and i2c workspaces")
     if type(random_seed) is not int:
         raise BaselineRunnerError("baseline random seed is invalid")
+    if type(max_workers) is not int or max_workers <= 0:
+        raise BaselineRunnerError("baseline max workers must be a positive integer")
 
 
 def _canonical_workspace(path: Path) -> Path:
@@ -599,6 +662,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--results-root", type=Path, default=agent_root / "experiments/pilot/results")
     parser.add_argument("--run-id", default=time.strftime("baseline-%Y%m%dT%H%M%S", time.gmtime()))
     parser.add_argument("--random-seed", type=int, default=_DEFAULT_SEED)
+    parser.add_argument("--max-workers", type=int, default=_DEFAULT_MAX_WORKERS)
     parser.add_argument("--workspace", action="append", type=_workspace_argument, required=True)
     args = parser.parse_args(argv)
     workspaces = dict(args.workspace)
@@ -611,6 +675,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_id=args.run_id,
             workspaces=workspaces,
             random_seed=args.random_seed,
+            max_workers=args.max_workers,
         )
     except KeyboardInterrupt:
         print("Baseline pilot interrupted before completion.", file=sys.stderr)
