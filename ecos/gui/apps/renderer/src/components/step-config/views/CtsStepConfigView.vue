@@ -3,8 +3,22 @@ import { computed } from 'vue'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
+import { useStepConfigDiff } from '../stepConfigDiff'
 
 const draft = defineModel<Record<string, unknown>>({ required: true })
+
+withDefaults(
+  defineProps<{
+    readonly?: boolean
+  }>(),
+  { readonly: false },
+)
+
+const diff = useStepConfigDiff()
+
+function isChanged(path: string): boolean {
+  return diff?.isChanged(path) ?? false
+}
 
 const onOffOptions = [
   { label: 'OFF', value: 'OFF' },
@@ -118,7 +132,12 @@ function setKey(k: string, v: unknown): void {
 </script>
 
 <template>
-  <div class="sc-pro sc-cards" data-accent="violet">
+  <div
+    class="sc-pro sc-cards"
+    :class="{ 'is-readonly': readonly }"
+    :inert="readonly"
+    data-accent="violet"
+  >
     <section v-for="gr in groups" :key="gr.id" class="sc-pro-section">
       <div class="sc-pro-section__head">
         <div class="sc-pro-section__stripe" />
@@ -130,7 +149,11 @@ function setKey(k: string, v: unknown): void {
       <div class="sc-pro-section__body space-y-3">
         <template v-for="k in gr.keys" :key="k">
           <!-- OFF/ON -->
-          <div v-if="isOnOffVal(draft[k])" class="field">
+          <div
+            v-if="isOnOffVal(draft[k])"
+            class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
+          >
             <label>{{ k }}</label>
             <Select
               :model-value="draft[k] as string"
@@ -144,7 +167,11 @@ function setKey(k: string, v: unknown): void {
             />
           </div>
           <!-- Number -->
-          <div v-else-if="typeof draft[k] === 'number'" class="field">
+          <div
+            v-else-if="typeof draft[k] === 'number'"
+            class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
+          >
             <label>{{ k }}</label>
             <InputNumber
               v-model="(draft as Record<string, number>)[k]"
@@ -155,7 +182,11 @@ function setKey(k: string, v: unknown): void {
             />
           </div>
           <!-- String scalar -->
-          <div v-else-if="typeof draft[k] === 'string'" class="field">
+          <div
+            v-else-if="typeof draft[k] === 'string'"
+            class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
+          >
             <label>{{ k }}</label>
             <InputText
               v-model="(draft as Record<string, string>)[k]"
@@ -171,6 +202,7 @@ function setKey(k: string, v: unknown): void {
               (draft[k] as unknown[]).every((x) => typeof x === 'number')
             "
             class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
           >
             <label>{{ k }}</label>
             <div class="w-full min-w-0 space-y-2">
@@ -178,6 +210,7 @@ function setKey(k: string, v: unknown): void {
                 v-for="(_x, i) in draft[k] as number[]"
                 :key="i"
                 class="flex w-full min-w-0 items-center gap-2 rounded border border-(--border-color) bg-(--bg-primary) px-2 py-1.5"
+                :class="{ 'sc-diff': isChanged(`${k}[${i}]`) }"
               >
                 <InputNumber
                   :model-value="(draft[k] as number[])[i]"
@@ -213,6 +246,7 @@ function setKey(k: string, v: unknown): void {
               (draft[k] as unknown[]).every((x) => typeof x === 'string')
             "
             class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
           >
             <label>{{ k }}</label>
             <div class="w-full min-w-0 space-y-1">
@@ -220,6 +254,7 @@ function setKey(k: string, v: unknown): void {
                 v-for="(_x, i) in draft[k] as string[]"
                 :key="i"
                 class="flex w-full min-w-0 items-center gap-2"
+                :class="{ 'sc-diff': isChanged(`${k}[${i}]`) }"
               >
                 <InputText
                   v-model="(draft[k] as string[])[i]"
@@ -246,13 +281,18 @@ function setKey(k: string, v: unknown): void {
             </div>
           </div>
           <!-- Mixed level_* string arrays -->
-          <div v-else-if="Array.isArray(draft[k])" class="field">
+          <div
+            v-else-if="Array.isArray(draft[k])"
+            class="field"
+            :class="{ 'sc-diff': isChanged(k) }"
+          >
             <label>{{ k }}</label>
             <div class="w-full min-w-0 space-y-1">
               <div
                 v-for="(_x, i) in draft[k] as unknown[]"
                 :key="i"
                 class="flex w-full min-w-0 items-center gap-2"
+                :class="{ 'sc-diff': isChanged(`${k}[${i}]`) }"
               >
                 <InputText
                   :model-value="String((draft[k] as unknown[])[i])"

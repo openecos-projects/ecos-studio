@@ -106,7 +106,7 @@ Click **New Workspace** to start the workspace wizard. The wizard guides you thr
 
 1. **Project Setup** - choose an existing project root or create a project root.
 2. **Basic Info** - set the workspace name and confirm its directory.
-3. **Flow Setup** - choose the fixed harden flow range from `Synthesis` through `Harden`.
+3. **Flow Setup** - choose the harden flow range. The flow may start from any step (for example start at `place` with an existing `DEF` netlist pair); for a new workspace the Start Step selector lists every step, and clicking a step card sets the end of the range.
 4. **Design Files** - provide RTL/filelist for synthesis starts, or `DEF` plus Verilog netlist for post-synthesis starts. `SDC` is configured here.
 5. **PDK Config** - use ECC default PDK config or manually select technology LEF, cell LEF, and Liberty files.
 6. **Spec Setting** - configure design, clock, die area, utilization, fanout, and related `parameters.json` fields.
@@ -126,7 +126,7 @@ Project Management can create a new workspace from an existing workspace step ou
 In this derived flow:
 
 - **New Workspace** shows where the workspace comes from: project, source workspace, and source step.
-- **Flow Setup** starts from the next runnable step. For a `Floorplan` source, the new workspace starts at `fixFanout`; `Synthesis` and `Floorplan` are shown as reused and cannot be selected.
+- **Flow Setup** starts from the next runnable step. For a `Floorplan` source, the new workspace starts at `fixFanout`; `Synthesis` and `Floorplan` are shown as reused and cannot be selected, and the Start Step stays pinned to the source output step.
 - **Design Files** reuses the source workspace data. `DEF` comes from the selected step output, while Verilog and `SDC` default to the source workspace configuration.
 - **PDK Config** defaults to the source workspace PDK selection, including tech LEF, cell LEF, Liberty, or ECC default PDK configuration.
 - **Spec Setting** defaults to the source workspace parameters.

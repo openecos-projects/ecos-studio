@@ -160,6 +160,10 @@ export interface DesktopBridgeServices {
     ): Promise<DesktopProjectManagementWorkspaceTextsResult>
   }
   workspaceService: {
+    approvePendingExternalReadRoots?(
+      expectedProjectRoot: string,
+      expectedRoots: string[],
+    ): Promise<string[]>
     clearProjectRoot(): Promise<void>
     isProjectDirectory(path: string): Promise<boolean>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
@@ -180,6 +184,7 @@ export interface DesktopBridgeServices {
       fromOffsetBytes: number,
       maxBytes: number,
     ): Promise<DesktopProjectTextFileChunk | null>
+    listPendingExternalReadRoots?(): Promise<string[]>
     subscribeProjectLogTail(
       path: string,
       options: {
@@ -1280,7 +1285,47 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.workspaceRegisterProjectRoot, async (_event, path) => {
-    return await services.workspaceService.registerProjectRoot(path as string)
+    const projectRoot = await services.workspaceService.registerProjectRoot(
+      path as string,
+    )
+    const pendingRoots =
+      (await services.workspaceService.listPendingExternalReadRoots?.()) ?? []
+    if (pendingRoots.length === 0) return projectRoot
+
+    const visibleRoots = pendingRoots.slice(0, 8)
+    const hiddenCount = pendingRoots.length - visibleRoots.length
+    const detail = [
+      'This frontend workspace references files outside its project directory:',
+      '',
+      ...visibleRoots.map((root) => `- ${root}`),
+      ...(hiddenCount > 0 ? [`- ...and ${hiddenCount} more`] : []),
+      '',
+      'Allow read-only access to these locations?',
+    ].join('\n')
+    const result = await dialog.showMessageBox(getEventWindow(_event), {
+      type: 'warning',
+      title: 'External Frontend Sources',
+      message: 'Allow this workspace to read external source locations?',
+      detail,
+      buttons: ['Not Now', 'Allow Access'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    })
+    if (result.response === 1) {
+      try {
+        await services.workspaceService.approvePendingExternalReadRoots?.(
+          projectRoot,
+          pendingRoots,
+        )
+      } catch (error) {
+        electronLogger.warn(
+          '[workspace] Failed to persist external source approval: %s',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+    }
+    return projectRoot
   })
 
   handle(desktopApiIpcChannels.workspaceRegisterProjectReadRoot, async (_event, path) => {
