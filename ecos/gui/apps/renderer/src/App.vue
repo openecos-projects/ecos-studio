@@ -112,6 +112,48 @@
     <DesignFilesManageDialog v-model="showManageDialog" />
 
     <Dialog
+      :visible="pdkFamilyIdDialogVisible"
+      modal
+      header="Confirm PDK Family"
+      :style="{ width: 'min(420px, calc(100vw - 32px))' }"
+      :draggable="false"
+      @update:visible="updatePdkFamilyIdDialogVisibility"
+    >
+      <label
+        for="pdk-family-id"
+        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+      >
+        PDK Family ID
+      </label>
+      <InputText
+        id="pdk-family-id"
+        v-model="pdkFamilyIdDraft"
+        autofocus
+        autocomplete="off"
+        spellcheck="false"
+        class="w-full"
+        @keydown.enter.prevent="confirmPdkFamilyId"
+      />
+      <template #footer>
+        <button
+          type="button"
+          class="rounded border border-(--border-color) px-3 py-1.5 text-sm text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
+          @click="cancelPdkFamilyId"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded bg-(--accent-color) px-3 py-1.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="!pdkFamilyIdDraft.trim()"
+          @click="confirmPdkFamilyId"
+        >
+          Import
+        </button>
+      </template>
+    </Dialog>
+
+    <Dialog
       :visible="showStepConfigDialog"
       modal
       maximizable
@@ -189,6 +231,7 @@ import AboutDialog from '@/components/AboutDialog.vue'
 import SignoffPackageReviewDialog from '@/components/SignoffPackageReviewDialog.vue'
 import Toast from 'primevue/toast'
 import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
@@ -238,7 +281,13 @@ const {
   runtimeBackendTitle,
   runtimeBackendSubtitle,
 } = useWorkspace()
-const { loadPdks } = usePdkManager()
+const {
+  loadPdks,
+  pdkFamilyIdDialogVisible,
+  pdkFamilyIdDraft,
+  confirmPdkFamilyId,
+  cancelPdkFamilyId,
+} = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
 const { showManageDialog, openManageDialog } = useDesignFiles()
@@ -256,6 +305,10 @@ const {
   workspaceSession,
 })
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+
+function updatePdkFamilyIdDialogVisibility(visible: boolean): void {
+  if (!visible) cancelPdkFamilyId()
+}
 
 watch(
   () => Boolean(currentProject.value?.path),

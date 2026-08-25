@@ -6,6 +6,35 @@ import type { ImportedPdk } from '../types'
 
 const importedPdks = ref<ImportedPdk[]>([])
 const isLoaded = ref(false)
+const pdkFamilyIdDialogVisible = ref(false)
+const pdkFamilyIdDraft = ref('')
+let resolvePdkFamilyId: ((familyId: string | null) => void) | null = null
+const pdkImportCancelled = new Error('PDK import was cancelled')
+
+function requestPdkFamilyId(suggestedFamilyId: string): Promise<string | null> {
+  resolvePdkFamilyId?.(null)
+  pdkFamilyIdDraft.value = suggestedFamilyId
+  pdkFamilyIdDialogVisible.value = true
+  return new Promise((resolve) => {
+    resolvePdkFamilyId = resolve
+  })
+}
+
+function finishPdkFamilyIdRequest(familyId: string | null): void {
+  const resolve = resolvePdkFamilyId
+  resolvePdkFamilyId = null
+  pdkFamilyIdDialogVisible.value = false
+  resolve?.(familyId)
+}
+
+function confirmPdkFamilyId(): void {
+  const familyId = pdkFamilyIdDraft.value.trim()
+  if (familyId) finishPdkFamilyIdRequest(familyId)
+}
+
+function cancelPdkFamilyId(): void {
+  finishPdkFamilyIdRequest(null)
+}
 
 function installationToPdk(installation: PdkInstallationSnapshot): ImportedPdk {
   return {
@@ -30,10 +59,10 @@ async function importPath(
   const desktopApi = await waitForDesktopApi()
   const scanned = await desktopApi.workspace.scanPdkDirectory(path)
   let familyId = requestedFamilyId || scanned.pdkId
-  if (!requestedFamilyId && familyId !== 'ics55' && typeof window !== 'undefined') {
-    const confirmed = window.prompt('PDK Family ID', familyId)
-    if (confirmed === null) throw new Error('PDK import was cancelled')
-    familyId = confirmed.trim()
+  if (!requestedFamilyId && familyId !== 'ics55') {
+    const confirmed = await requestPdkFamilyId(familyId)
+    if (confirmed === null) throw pdkImportCancelled
+    familyId = confirmed
   }
   const installation = await desktopApi.pdkInventory.import({
     root: path,
@@ -70,6 +99,7 @@ export function usePdkManager() {
       await loadPdks(true)
       return importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
     } catch (error) {
+      if (error === pdkImportCancelled) return null
       showToast({
         severity: 'error',
         summary: 'Failed to Import PDK',
@@ -88,6 +118,7 @@ export function usePdkManager() {
       await loadPdks(true)
       return importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
     } catch (error) {
+      if (error === pdkImportCancelled) return null
       showToast({
         severity: 'error',
         summary: 'Failed to Import PDK',
@@ -136,6 +167,10 @@ export function usePdkManager() {
     removePdk,
     locatePdk,
     validatePdk,
+    pdkFamilyIdDialogVisible,
+    pdkFamilyIdDraft,
+    confirmPdkFamilyId,
+    cancelPdkFamilyId,
     getPdkById: (id: string) => importedPdks.value.find((pdk) => pdk.id === id),
   }
 }

@@ -8,6 +8,7 @@ import type {
 } from '@ecos-studio/shared'
 
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
 
 const showToast = vi.fn()
 const settingsGet = vi.fn(
@@ -366,6 +367,11 @@ describe('usePdkManager', () => {
   })
 
   afterEach(() => {
+    if (originalWindow) {
+      Object.defineProperty(globalThis, 'window', originalWindow)
+    } else {
+      delete (globalThis as { window?: unknown }).window
+    }
     if (originalLocalStorage) {
       Object.defineProperty(globalThis, 'localStorage', originalLocalStorage)
       return
@@ -397,6 +403,58 @@ describe('usePdkManager', () => {
     ])
     expect(listPdkInstallations).toHaveBeenCalled()
     expect(settingsSet).not.toHaveBeenCalled()
+    expect(showToast).not.toHaveBeenCalled()
+  })
+
+  it('does not use unsupported browser prompt for an unregistered PDK', async () => {
+    scanPdkDirectory.mockResolvedValue({
+      ...scannedPdk,
+      name: 'vendor-a',
+      pdkId: 'vendor-a',
+    })
+    const prompt = vi.fn(() => {
+      throw new Error('prompt() is not supported')
+    })
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { prompt },
+    })
+    const manager = usePdkManager()
+
+    const pendingImport = manager.importPdk()
+    await vi.waitFor(() => {
+      expect(manager.pdkFamilyIdDialogVisible.value).toBe(true)
+    })
+    expect(manager.pdkFamilyIdDraft.value).toBe('vendor-a')
+    manager.pdkFamilyIdDraft.value = 'vendor-demo'
+    manager.confirmPdkFamilyId()
+    const imported = await pendingImport
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(imported).not.toBeNull()
+    expect(importPdkInstallation).toHaveBeenCalledWith({
+      displayName: 'vendor-a',
+      familyId: 'vendor-demo',
+      root: '/tmp/pdk',
+    })
+  })
+
+  it('cancels Family ID confirmation without reporting an import failure', async () => {
+    scanPdkDirectory.mockResolvedValue({
+      ...scannedPdk,
+      name: 'vendor-a',
+      pdkId: 'vendor-a',
+    })
+    const manager = usePdkManager()
+
+    const pendingImport = manager.importPdk()
+    await vi.waitFor(() => {
+      expect(manager.pdkFamilyIdDialogVisible.value).toBe(true)
+    })
+    manager.cancelPdkFamilyId()
+
+    await expect(pendingImport).resolves.toBeNull()
+    expect(importPdkInstallation).not.toHaveBeenCalled()
     expect(showToast).not.toHaveBeenCalled()
   })
 
