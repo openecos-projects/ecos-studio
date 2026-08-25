@@ -962,7 +962,7 @@ const projectSources = computed<Project[]>(() => projectHistory.value)
 const activeModal = computed<ModalId | null>(() => {
   if (showNewProjectDialog.value) return 'new-project'
   if (branchDraft.value) return 'workspace-draft'
-  if (pendingDeleteWorkspaceId.value) return 'delete-workspace'
+  if (pendingDeleteWorkspaceTarget.value) return 'delete-workspace'
   if (pendingDeleteProject.value) return 'delete-project'
   return null
 })
