@@ -16,13 +16,18 @@ export interface FrontendCatalogEntry {
   integration_level?: string
   isa?: string[]
   tags?: string[]
+  variant?: string
+  cpu_filelist?: string
+  requires_filelist?: boolean
+  top_module?: string
+  cpu_wrapper_top?: string
+  supports_difftest?: boolean
   required_cpu_top_module?: string
   required_cpu_top_port_contract?: FrontendCpuPortContract[]
   cpu_reset_vector?: string
   sim_program_link_base?: string
   default_program_link_base?: string
   bootloader_payload_link_base?: string
-  [key: string]: unknown
 }
 
 export interface FrontendCatalogPayload {
@@ -126,11 +131,19 @@ const CATALOG_ENTRY_ARRAYS = [
 ] as const
 const CATALOG_ENTRY_OPTIONAL_STRINGS = [
   'integration_level',
+  'variant',
+  'cpu_filelist',
+  'top_module',
+  'cpu_wrapper_top',
   'required_cpu_top_module',
   'cpu_reset_vector',
   'sim_program_link_base',
   'default_program_link_base',
   'bootloader_payload_link_base',
+] as const
+const CATALOG_ENTRY_OPTIONAL_BOOLEANS = [
+  'requires_filelist',
+  'supports_difftest',
 ] as const
 const COMPATIBILITY_SUPPORT_LEVELS = new Set(['supported', 'experimental', 'unsupported'])
 const CPU_PORT_DIRECTIONS = new Set(['input', 'output', 'inout'])
@@ -217,7 +230,6 @@ function parseCatalogEntries(value: unknown, path: string): FrontendCatalogEntry
 function parseCatalogEntry(value: unknown, path: string): FrontendCatalogEntry {
   const record = catalogRecord(value, path)
   const entry: FrontendCatalogEntry = {
-    ...record,
     id: catalogText(record, 'id', path),
     name: catalogText(record, 'name', path),
     description: catalogString(record, 'description', path),
@@ -226,6 +238,10 @@ function parseCatalogEntry(value: unknown, path: string): FrontendCatalogEntry {
 
   for (const key of CATALOG_ENTRY_OPTIONAL_STRINGS) {
     const field = optionalCatalogString(record, key, path)
+    if (field !== undefined) entry[key] = field
+  }
+  for (const key of CATALOG_ENTRY_OPTIONAL_BOOLEANS) {
+    const field = optionalCatalogBoolean(record, key, path)
     if (field !== undefined) entry[key] = field
   }
   const isa = optionalCatalogStringArray(record, 'isa', path)
@@ -300,7 +316,13 @@ function parseCompatibilityEntries(
     if (!COMPATIBILITY_SUPPORT_LEVELS.has(supportLevel)) {
       throw invalidCatalog(`${path}.support_level is invalid`)
     }
-    const supportedTestSuites = catalogStringArray(record, 'supported_test_suites', path)
+    const canCreateWorkspace = catalogBoolean(record, 'can_create_workspace', path)
+    const supportedTestSuites = catalogReferenceIds(record, 'supported_test_suites', path)
+    if (canCreateWorkspace && supportedTestSuites.length === 0) {
+      throw invalidCatalog(
+        `${path}.supported_test_suites must not be empty when can_create_workspace is true`,
+      )
+    }
     for (const testSuiteId of supportedTestSuites) {
       requireCatalogReference(
         ids.test_suites,
@@ -322,7 +344,7 @@ function parseCompatibilityEntries(
     return {
       core_id: coreId,
       soc_harness_id: socHarnessId,
-      can_create_workspace: catalogBoolean(record, 'can_create_workspace', path),
+      can_create_workspace: canCreateWorkspace,
       support_level: supportLevel as FrontendCompatibilityEntry['support_level'],
       status: catalogText(record, 'status', path),
       summary: catalogText(record, 'summary', path),
@@ -389,6 +411,29 @@ function optionalCatalogStringArray(
   return record[key] === undefined ? undefined : catalogStringArray(record, key, path)
 }
 
+function catalogReferenceIds(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): string[] {
+  const value = record[key]
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw invalidCatalog(`${path}.${key} must be an array of strings`)
+  }
+
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const [index, item] of value.entries()) {
+    const id = item.trim()
+    const itemPath = `${path}.${key}[${index}]`
+    if (!id) throw invalidCatalog(`${itemPath} must not be empty`)
+    if (seen.has(id)) throw invalidCatalog(`${itemPath} duplicates ${id}`)
+    seen.add(id)
+    ids.push(id)
+  }
+  return ids
+}
+
 function catalogBoolean(
   record: Record<string, unknown>,
   key: string,
@@ -398,6 +443,14 @@ function catalogBoolean(
     throw invalidCatalog(`${path}.${key} must be a boolean`)
   }
   return record[key]
+}
+
+function optionalCatalogBoolean(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): boolean | undefined {
+  return record[key] === undefined ? undefined : catalogBoolean(record, key, path)
 }
 
 function responseMessages(value: unknown): string[] {

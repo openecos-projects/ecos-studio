@@ -29,8 +29,14 @@ function validCatalog() {
       toolchain_id: 'toolchain',
       test_suite_id: 'tests',
     },
-    cores: [catalogEntry('cpu')],
-    soc_harnesses: [catalogEntry('soc')],
+    cores: [
+      {
+        ...catalogEntry('cpu'),
+        cpu_filelist: '/rtl/cpu.f',
+        requires_filelist: false,
+      },
+    ],
+    soc_harnesses: [{ ...catalogEntry('soc'), variant: 'soc1' }],
     toolchains: [catalogEntry('toolchain')],
     test_suites: [catalogEntry('tests')],
     compatibility: [
@@ -123,7 +129,8 @@ describe('frontend catalog desktop bridge', () => {
       data: {
         version: 1,
         defaults: { core_id: 'cpu' },
-        cores: [{ id: 'cpu' }],
+        cores: [{ id: 'cpu', cpu_filelist: '/rtl/cpu.f', requires_filelist: false }],
+        soc_harnesses: [{ id: 'soc', variant: 'soc1' }],
       },
       message: ['frontend catalog list loaded'],
       response: 'success',
@@ -194,6 +201,46 @@ describe('frontend catalog desktop bridge', () => {
       },
       message:
         'Invalid frontend catalog: compatibility[0].supported_test_suites references unknown id missing.',
+    },
+    {
+      label: 'a malformed SoC variant',
+      mutate: (catalog: ReturnType<typeof validCatalog>) => {
+        const malformed = catalog.soc_harnesses[0] as unknown as { variant: unknown }
+        malformed.variant = { unexpected: true }
+      },
+      message: 'Invalid frontend catalog: soc_harnesses[0].variant must be a string.',
+    },
+    {
+      label: 'a malformed CPU filelist requirement',
+      mutate: (catalog: ReturnType<typeof validCatalog>) => {
+        const malformed = catalog.cores[0] as unknown as { requires_filelist: unknown }
+        malformed.requires_filelist = 'false'
+      },
+      message: 'Invalid frontend catalog: cores[0].requires_filelist must be a boolean.',
+    },
+    {
+      label: 'a blank compatibility test suite id',
+      mutate: (catalog: ReturnType<typeof validCatalog>) => {
+        catalog.compatibility[0].supported_test_suites = ['tests', '  ']
+      },
+      message:
+        'Invalid frontend catalog: compatibility[0].supported_test_suites[1] must not be empty.',
+    },
+    {
+      label: 'a duplicate compatibility test suite id',
+      mutate: (catalog: ReturnType<typeof validCatalog>) => {
+        catalog.compatibility[0].supported_test_suites = ['tests', ' tests ']
+      },
+      message:
+        'Invalid frontend catalog: compatibility[0].supported_test_suites[1] duplicates tests.',
+    },
+    {
+      label: 'a creatable compatibility pair without test suites',
+      mutate: (catalog: ReturnType<typeof validCatalog>) => {
+        catalog.compatibility[0].supported_test_suites = []
+      },
+      message:
+        'Invalid frontend catalog: compatibility[0].supported_test_suites must not be empty when can_create_workspace is true.',
     },
   ])('rejects $label', async ({ mutate, message }) => {
     const payload = validCatalog()

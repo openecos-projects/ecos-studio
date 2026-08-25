@@ -1434,7 +1434,10 @@ function sortedCatalogEntries(entries: FrontendCatalogEntry[]): FrontendCatalogE
   })
 }
 
-function stringField(entry: FrontendCatalogEntry | null, field: string): string {
+function stringField(
+  entry: FrontendCatalogEntry | null,
+  field: keyof FrontendCatalogEntry,
+): string {
   const value = entry?.[field]
   return typeof value === 'string' ? value : ''
 }
