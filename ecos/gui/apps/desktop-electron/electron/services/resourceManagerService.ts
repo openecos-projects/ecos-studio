@@ -1360,6 +1360,7 @@ export class ResourceManagerService {
         action === 'update' &&
         target?.version === version &&
         target?.readiness === 'ready' &&
+        target.registrySha256 === resolvedAsset.sha256.toLowerCase() &&
         (await isExistingDirectory(target.root))
       ) {
         this.publish(listener, {

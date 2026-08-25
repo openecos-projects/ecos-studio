@@ -5181,12 +5181,24 @@ describe('ResourceManagerService', () => {
       size: null,
       actions: ['validate', 'uninstall'],
     })
+    await service.getPdkInventoryService().registerManagedInstallation({
+      id: 'pdk:ics55',
+      familyId: 'ics55',
+      displayName: 'ICsprout 55nm PDK',
+      root: join(root, 'data', 'pdks', 'ics55', '1.10.101'),
+      version: '1.10.101',
+      registrySha256: 'stale-sha',
+    })
     await expect(service.updateResource('pdk:ics55:managed:1.10.100')).resolves.toEqual({
       status: 'started',
       resource_id: 'pdk:ics55',
       version: '1.10.101',
     })
-    expect(verifySha256).toHaveBeenCalledTimes(1)
+    expect(verifySha256).toHaveBeenCalledTimes(2)
+    const updatedInventory = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
+    ) as { installations: Array<{ registrySha256: string }> }
+    expect(updatedInventory.installations[0]?.registrySha256).toBe(archive.sha256)
   })
 
   it('downloads only locked PDK supplemental assets before post-install', async () => {
