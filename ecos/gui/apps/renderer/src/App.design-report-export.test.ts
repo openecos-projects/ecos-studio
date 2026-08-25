@@ -7,7 +7,9 @@ describe('App design report export wiring', () => {
     expect(appSource).toContain('DesignReportExportDialog')
     expect(appSource).toContain('openDesignReportExport')
     expect(appSource).toContain('exportDesignSummary: openDesignReportExport')
-    expect(appSource).toContain(':design-report-export-enabled="designReportExportEnabled"')
+    expect(appSource).toContain(
+      ':design-report-export-enabled="designReportExportEnabled"',
+    )
   })
 
   it('mounts DesignReportExportDialog with full handlers and bindings', () => {

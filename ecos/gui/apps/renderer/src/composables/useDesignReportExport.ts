@@ -72,7 +72,9 @@ function formatFileExtension(format: DesignReportFormat): string {
   }
 }
 
-async function readJsonFrom(path: string | undefined): Promise<Record<string, unknown> | null> {
+async function readJsonFrom(
+  path: string | undefined,
+): Promise<Record<string, unknown> | null> {
   if (!path) return null
   const authorized = await resolveProjectPathAccess(path)
   const pathToRead = authorized || path
@@ -261,7 +263,7 @@ export function useDesignReportExport({
         /* ignore */
       }
       if (pdkJson) {
-        homeData = { ...(homeData || {}), ...pdkJson }
+        homeData = { ...homeData, ...pdkJson }
       }
 
       const topModule =
@@ -277,9 +279,13 @@ export function useDesignReportExport({
       const stepHotspots: Record<string, unknown> = {}
 
       const stepList =
-        (resourceIndex && Array.isArray(resourceIndex.flow?.steps) && resourceIndex.flow.steps.length > 0)
+        resourceIndex &&
+        Array.isArray(resourceIndex.flow?.steps) &&
+        resourceIndex.flow.steps.length > 0
           ? resourceIndex.flow.steps
-          : (Array.isArray(flow?.steps) ? flow!.steps : [])
+          : Array.isArray(flow?.steps)
+            ? flow!.steps
+            : []
 
       await Promise.all(
         stepList.map(async (rawStep: unknown) => {
@@ -287,27 +293,44 @@ export function useDesignReportExport({
           const stepObj = rawStep as Record<string, unknown>
           const stepName = typeof stepObj.name === 'string' ? stepObj.name : ''
           const stepDir =
-            typeof stepObj.directory === 'string' ? stepObj.directory.replace(/\/+$/, '') : stepName
+            typeof stepObj.directory === 'string'
+              ? stepObj.directory.replace(/\/+$/, '')
+              : stepName
           if (!stepName) return
 
           const canonical = canonicalizeStageName(stepName)
           const resources =
             typeof stepObj.resources === 'object' && stepObj.resources !== null
-              ? (stepObj.resources as Record<string, Record<string, { exists: boolean; path: string }>>)
+              ? (stepObj.resources as Record<
+                  string,
+                  Record<string, { exists: boolean; path: string }>
+                >)
               : null
 
           // 4.1 Check analysis metrics
           if (resources?.analysis?.metrics?.exists) {
             const m = await readJsonFrom(resources.analysis.metrics.path)
             if (m) {
-              stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...m }
-              stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...m }
+              stepMetrics[stepName] = {
+                ...(stepMetrics[stepName] as Record<string, unknown>),
+                ...m,
+              }
+              stepMetrics[canonical] = {
+                ...(stepMetrics[canonical] as Record<string, unknown>),
+                ...m,
+              }
             }
           } else {
             const m = await readJsonFrom(`${stepDir}/analysis/qor_metrics.json`)
             if (m) {
-              stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...m }
-              stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...m }
+              stepMetrics[stepName] = {
+                ...(stepMetrics[stepName] as Record<string, unknown>),
+                ...m,
+              }
+              stepMetrics[canonical] = {
+                ...(stepMetrics[canonical] as Record<string, unknown>),
+                ...m,
+              }
             }
           }
 
@@ -315,14 +338,26 @@ export function useDesignReportExport({
           if (resources?.analysis?.summary?.exists) {
             const s = await readJsonFrom(resources.analysis.summary.path)
             if (s) {
-              stepSummaries[stepName] = { ...(stepSummaries[stepName] as Record<string, unknown> || {}), ...s }
-              stepSummaries[canonical] = { ...(stepSummaries[canonical] as Record<string, unknown> || {}), ...s }
+              stepSummaries[stepName] = {
+                ...(stepSummaries[stepName] as Record<string, unknown>),
+                ...s,
+              }
+              stepSummaries[canonical] = {
+                ...(stepSummaries[canonical] as Record<string, unknown>),
+                ...s,
+              }
             }
           } else {
             const s = await readJsonFrom(`${stepDir}/analysis/qor_summary.json`)
             if (s) {
-              stepSummaries[stepName] = { ...(stepSummaries[stepName] as Record<string, unknown> || {}), ...s }
-              stepSummaries[canonical] = { ...(stepSummaries[canonical] as Record<string, unknown> || {}), ...s }
+              stepSummaries[stepName] = {
+                ...(stepSummaries[stepName] as Record<string, unknown>),
+                ...s,
+              }
+              stepSummaries[canonical] = {
+                ...(stepSummaries[canonical] as Record<string, unknown>),
+                ...s,
+              }
             }
           }
 
@@ -330,8 +365,14 @@ export function useDesignReportExport({
           if (resources?.feature?.db?.exists) {
             const db = await readJsonFrom(resources.feature.db.path)
             if (db) {
-              stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...db }
-              stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...db }
+              stepMetrics[stepName] = {
+                ...(stepMetrics[stepName] as Record<string, unknown>),
+                ...db,
+              }
+              stepMetrics[canonical] = {
+                ...(stepMetrics[canonical] as Record<string, unknown>),
+                ...db,
+              }
             }
           } else {
             const dbCandidates = [
@@ -343,29 +384,46 @@ export function useDesignReportExport({
             for (const cand of dbCandidates) {
               const db = await readJsonFrom(cand)
               if (db) {
-                stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...db }
-                stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...db }
+                stepMetrics[stepName] = {
+                  ...(stepMetrics[stepName] as Record<string, unknown>),
+                  ...db,
+                }
+                stepMetrics[canonical] = {
+                  ...(stepMetrics[canonical] as Record<string, unknown>),
+                  ...db,
+                }
                 break
               }
             }
           }
 
           // 4.4 Check feature stat (Synthesis_stat.json)
-          const statFile =
-            resources?.feature?.stat ?? resources?.feature?.generic_stat
+          const statFile = resources?.feature?.stat ?? resources?.feature?.generic_stat
           if (statFile?.exists) {
             const stat = await readJsonFrom(statFile.path)
             if (stat) {
-              stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...stat }
-              stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...stat }
+              stepMetrics[stepName] = {
+                ...(stepMetrics[stepName] as Record<string, unknown>),
+                ...stat,
+              }
+              stepMetrics[canonical] = {
+                ...(stepMetrics[canonical] as Record<string, unknown>),
+                ...stat,
+              }
             }
           } else {
             const stat =
               (await readJsonFrom(`${stepDir}/feature/Synthesis_stat.json`)) ||
               (await readJsonFrom(`${stepDir}/report/Synthesis_stat.json`))
             if (stat) {
-              stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...stat }
-              stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...stat }
+              stepMetrics[stepName] = {
+                ...(stepMetrics[stepName] as Record<string, unknown>),
+                ...stat,
+              }
+              stepMetrics[canonical] = {
+                ...(stepMetrics[canonical] as Record<string, unknown>),
+                ...stat,
+              }
             }
           }
 
@@ -376,12 +434,20 @@ export function useDesignReportExport({
           } else {
             stepJson =
               (await readJsonFrom(`${stepDir}/feature/${stepName}.step.json`)) ||
-              (await readJsonFrom(`${stepDir}/feature/${canonical.toLowerCase()}.step.json`)) ||
+              (await readJsonFrom(
+                `${stepDir}/feature/${canonical.toLowerCase()}.step.json`,
+              )) ||
               (await readJsonFrom(`${stepDir}/feature/step.json`))
           }
           if (stepJson) {
-            stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...stepJson }
-            stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...stepJson }
+            stepMetrics[stepName] = {
+              ...(stepMetrics[stepName] as Record<string, unknown>),
+              ...stepJson,
+            }
+            stepMetrics[canonical] = {
+              ...(stepMetrics[canonical] as Record<string, unknown>),
+              ...stepJson,
+            }
           }
 
           // 4.6 Check DRC statis CSV
@@ -399,7 +465,9 @@ export function useDesignReportExport({
               }
             }
           } else if (canonical === 'DRC') {
-            const drcCsv = await readOptionalTextFrom(`${stepDir}/analysis/drc_statis.csv`)
+            const drcCsv = await readOptionalTextFrom(
+              `${stepDir}/analysis/drc_statis.csv`,
+            )
             if (drcCsv) {
               const parsedDrc = parseDrcStatisCsv(drcCsv)
               if (parsedDrc) {
@@ -415,21 +483,39 @@ export function useDesignReportExport({
 
           // 4.7 Scan for power.rpt and qor_summary.rpt at step level
           const directPowerRpt =
-            (await readOptionalTextFrom(`${stepDir}/data/sta/power_reporter/power.rpt`)) ||
+            (await readOptionalTextFrom(
+              `${stepDir}/data/sta/power_reporter/power.rpt`,
+            )) ||
             (await readOptionalTextFrom(`${stepDir}/report/post_synthesis/power.rpt`))
           if (directPowerRpt) {
             const parsed = parsePowerRpt(directPowerRpt)
-            stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...parsed }
-            stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...parsed }
+            stepMetrics[stepName] = {
+              ...(stepMetrics[stepName] as Record<string, unknown>),
+              ...parsed,
+            }
+            stepMetrics[canonical] = {
+              ...(stepMetrics[canonical] as Record<string, unknown>),
+              ...parsed,
+            }
           }
 
           const directQorRpt =
-            (await readOptionalTextFrom(`${stepDir}/data/sta/timing_reporter/qor_summary.rpt`)) ||
-            (await readOptionalTextFrom(`${stepDir}/report/post_synthesis/qor_summary.rpt`))
+            (await readOptionalTextFrom(
+              `${stepDir}/data/sta/timing_reporter/qor_summary.rpt`,
+            )) ||
+            (await readOptionalTextFrom(
+              `${stepDir}/report/post_synthesis/qor_summary.rpt`,
+            ))
           if (directQorRpt) {
             const parsed = parseQorSummaryRpt(directQorRpt)
-            stepMetrics[stepName] = { ...(stepMetrics[stepName] as Record<string, unknown> || {}), ...parsed }
-            stepMetrics[canonical] = { ...(stepMetrics[canonical] as Record<string, unknown> || {}), ...parsed }
+            stepMetrics[stepName] = {
+              ...(stepMetrics[stepName] as Record<string, unknown>),
+              ...parsed,
+            }
+            stepMetrics[canonical] = {
+              ...(stepMetrics[canonical] as Record<string, unknown>),
+              ...parsed,
+            }
           }
 
           // 4.8 Scan for Multi-Corner reports (under feature/<corner>/ and report/<corner>/)
@@ -437,33 +523,49 @@ export function useDesignReportExport({
 
           await Promise.all(
             COMMON_CORNER_CANDIDATES.map(async (corner) => {
-              const qorJson = await readJsonFrom(`${stepDir}/feature/${corner}/qor_summary.json`)
-              const powerJson = await readJsonFrom(`${stepDir}/feature/${corner}/power_summary.json`)
-              const pathsJson = await readJsonFrom(`${stepDir}/feature/${corner}/timing_paths.json`)
-              const powerRptText = await readOptionalTextFrom(`${stepDir}/report/${corner}/power.rpt`)
-              const qorRptText = await readOptionalTextFrom(`${stepDir}/report/${corner}/qor_summary.rpt`)
+              const qorJson = await readJsonFrom(
+                `${stepDir}/feature/${corner}/qor_summary.json`,
+              )
+              const powerJson = await readJsonFrom(
+                `${stepDir}/feature/${corner}/power_summary.json`,
+              )
+              const pathsJson = await readJsonFrom(
+                `${stepDir}/feature/${corner}/timing_paths.json`,
+              )
+              const powerRptText = await readOptionalTextFrom(
+                `${stepDir}/report/${corner}/power.rpt`,
+              )
+              const qorRptText = await readOptionalTextFrom(
+                `${stepDir}/report/${corner}/qor_summary.rpt`,
+              )
 
-              let cornerData: Record<string, unknown> | null = null
+              let cornerData: Record<string, unknown> = {}
+              let hasCornerData = false
 
               if (qorJson) {
-                cornerData = { ...(cornerData || {}), ...qorJson }
+                cornerData = { ...cornerData, ...qorJson }
+                hasCornerData = true
               }
               if (powerJson) {
-                cornerData = { ...(cornerData || {}), ...powerJson }
+                cornerData = { ...cornerData, ...powerJson }
+                hasCornerData = true
               }
               if (pathsJson) {
-                cornerData = { ...(cornerData || {}), ...pathsJson }
+                cornerData = { ...cornerData, ...pathsJson }
+                hasCornerData = true
               }
               if (powerRptText) {
                 const parsedPower = parsePowerRpt(powerRptText)
-                cornerData = { ...(cornerData || {}), ...parsedPower }
+                cornerData = { ...cornerData, ...parsedPower }
+                hasCornerData = true
               }
               if (qorRptText) {
                 const parsedQor = parseQorSummaryRpt(qorRptText)
-                cornerData = { ...(cornerData || {}), ...parsedQor }
+                cornerData = { ...cornerData, ...parsedQor }
+                hasCornerData = true
               }
 
-              if (cornerData) {
+              if (hasCornerData) {
                 cornersMap[corner] = cornerData
               }
             }),
@@ -475,7 +577,7 @@ export function useDesignReportExport({
             stepMetrics[targetKey] = {
               ...existing,
               corners: {
-                ...((existing.corners as Record<string, unknown>) || {}),
+                ...(existing.corners as Record<string, unknown>),
                 ...cornersMap,
               },
             }

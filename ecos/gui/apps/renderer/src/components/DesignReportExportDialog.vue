@@ -47,7 +47,11 @@
             :disabled="loading"
             @click="emit('refresh')"
           >
-            <i class="ri-refresh-line" :class="{ 'animate-spin': loading }" aria-hidden="true" />
+            <i
+              class="ri-refresh-line"
+              :class="{ 'animate-spin': loading }"
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>
@@ -58,7 +62,12 @@
           <input
             type="checkbox"
             :checked="options.includeMultiCorner"
-            @change="updateOption('includeMultiCorner', ($event.target as HTMLInputElement).checked)"
+            @change="
+              updateOption(
+                'includeMultiCorner',
+                ($event.target as HTMLInputElement).checked,
+              )
+            "
           />
           <span>Multi-Corner Timing</span>
         </label>
@@ -66,7 +75,12 @@
           <input
             type="checkbox"
             :checked="options.includeStageBreakdown"
-            @change="updateOption('includeStageBreakdown', ($event.target as HTMLInputElement).checked)"
+            @change="
+              updateOption(
+                'includeStageBreakdown',
+                ($event.target as HTMLInputElement).checked,
+              )
+            "
           />
           <span>Stage Execution Breakdown</span>
         </label>
@@ -75,7 +89,9 @@
           <input
             type="checkbox"
             :checked="options.latexStandalone"
-            @change="updateOption('latexStandalone', ($event.target as HTMLInputElement).checked)"
+            @change="
+              updateOption('latexStandalone', ($event.target as HTMLInputElement).checked)
+            "
           />
           <span>Standalone Document (IEEEtran)</span>
         </label>
@@ -94,15 +110,15 @@
             <strong>Failed to generate design report</strong>
             <p>{{ error }}</p>
           </div>
-          <button type="button" class="retry-btn" @click="emit('refresh')">
-            Retry
-          </button>
+          <button type="button" class="retry-btn" @click="emit('refresh')">Retry</button>
         </div>
 
         <div v-else-if="content" class="preview-code-wrap">
           <div class="preview-header-info">
             <span class="preview-lang-tag">{{ formatLabel(selectedFormat) }}</span>
-            <span class="preview-size-tag">{{ lineCount }} lines ({{ charCount }} bytes)</span>
+            <span class="preview-size-tag"
+              >{{ lineCount }} lines ({{ charCount }} bytes)</span
+            >
           </div>
           <pre class="preview-code" tabindex="0"><code>{{ content }}</code></pre>
         </div>
@@ -186,7 +202,12 @@ const emit = defineEmits<{
   'update:selectedFormat': [format: DesignReportFormat]
 }>()
 
-const formats: Array<{ id: DesignReportFormat; label: string; ext: string; icon: string }> = [
+const formats: Array<{
+  id: DesignReportFormat
+  label: string
+  ext: string
+  icon: string
+}> = [
   { id: 'latex', label: 'LaTeX Paper', ext: '.tex', icon: 'ri-brackets-line' },
   { id: 'markdown', label: 'Markdown Docs', ext: '.md', icon: 'ri-markdown-line' },
   { id: 'csv', label: 'CSV Table', ext: '.csv', icon: 'ri-table-line' },

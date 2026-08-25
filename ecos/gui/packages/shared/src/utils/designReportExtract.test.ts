@@ -107,15 +107,69 @@ Summary                  16.882        0.0       0     321MHz      0.256        
         flow: {
           timestamp: '2026-08-25T12:00:00Z',
           steps: [
-            { name: 'Synthesis_yosys', tool: 'Yosys', state: 'Success', runtime: '0:0:30', 'peak memory (mb)': 120 },
-            { name: 'Floorplan_ecc', tool: 'OpenROAD', state: 'Success', runtime: '0:0:15', 'peak memory (mb)': 200 },
-            { name: 'place_dreamplace', tool: 'DreamPlace', state: 'Success', runtime: '0:1:00', 'peak memory (mb)': 450 },
-            { name: 'CTS_ecc', tool: 'OpenROAD', state: 'Success', runtime: '0:0:45', 'peak memory (mb)': 310 },
-            { name: 'route_ecc', tool: 'OpenROAD', state: 'Success', runtime: '0:2:30', 'peak memory (mb)': 600 },
-            { name: 'sta_ecc', tool: 'OpenSTA', state: 'Success', runtime: '0:0:20', 'peak memory (mb)': 280 },
-            { name: 'drc_ecc', tool: 'KLayout', state: 'Success', runtime: '0:0:10', 'peak memory (mb)': 150 },
-            { name: 'lvs_ecc', tool: 'Netgen', state: 'Success', runtime: '0:0:10', 'peak memory (mb)': 140 },
-            { name: 'Harden_ecc', tool: 'OpenROAD', state: 'Success', runtime: '0:0:40', 'peak memory (mb)': 520 },
+            {
+              name: 'Synthesis_yosys',
+              tool: 'Yosys',
+              state: 'Success',
+              runtime: '0:0:30',
+              'peak memory (mb)': 120,
+            },
+            {
+              name: 'Floorplan_ecc',
+              tool: 'OpenROAD',
+              state: 'Success',
+              runtime: '0:0:15',
+              'peak memory (mb)': 200,
+            },
+            {
+              name: 'place_dreamplace',
+              tool: 'DreamPlace',
+              state: 'Success',
+              runtime: '0:1:00',
+              'peak memory (mb)': 450,
+            },
+            {
+              name: 'CTS_ecc',
+              tool: 'OpenROAD',
+              state: 'Success',
+              runtime: '0:0:45',
+              'peak memory (mb)': 310,
+            },
+            {
+              name: 'route_ecc',
+              tool: 'OpenROAD',
+              state: 'Success',
+              runtime: '0:2:30',
+              'peak memory (mb)': 600,
+            },
+            {
+              name: 'sta_ecc',
+              tool: 'OpenSTA',
+              state: 'Success',
+              runtime: '0:0:20',
+              'peak memory (mb)': 280,
+            },
+            {
+              name: 'drc_ecc',
+              tool: 'KLayout',
+              state: 'Success',
+              runtime: '0:0:10',
+              'peak memory (mb)': 150,
+            },
+            {
+              name: 'lvs_ecc',
+              tool: 'Netgen',
+              state: 'Success',
+              runtime: '0:0:10',
+              'peak memory (mb)': 140,
+            },
+            {
+              name: 'Harden_ecc',
+              tool: 'OpenROAD',
+              state: 'Success',
+              runtime: '0:0:40',
+              'peak memory (mb)': 520,
+            },
           ],
         },
         stepMetrics: {
@@ -151,7 +205,7 @@ Summary                  16.882        0.0       0     321MHz      0.256        
             clock_wirelength: 4500,
           },
           Route: {
-            'Nets': {
+            Nets: {
               wire_len: 158000,
               num_via: 3200,
             },
@@ -211,7 +265,7 @@ Summary                  16.882        0.0       0     321MHz      0.256        
             'Design Layout': {
               die_area: 100000,
             },
-            'Instances': {
+            Instances: {
               total: {
                 area: 38800,
                 num: 572,

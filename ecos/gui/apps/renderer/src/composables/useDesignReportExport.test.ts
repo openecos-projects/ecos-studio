@@ -87,10 +87,16 @@ describe('useDesignReportExport', () => {
             directory: '/projects/gcd/ws_001/Synthesis_yosys',
             resources: {
               analysis: {
-                metrics: { exists: true, path: '/projects/gcd/ws_001/Synthesis_yosys/analysis/qor_metrics.json' },
+                metrics: {
+                  exists: true,
+                  path: '/projects/gcd/ws_001/Synthesis_yosys/analysis/qor_metrics.json',
+                },
               },
               feature: {
-                stat: { exists: true, path: '/projects/gcd/ws_001/Synthesis_yosys/feature/Synthesis_stat.json' },
+                stat: {
+                  exists: true,
+                  path: '/projects/gcd/ws_001/Synthesis_yosys/feature/Synthesis_stat.json',
+                },
               },
             },
           },
@@ -101,7 +107,13 @@ describe('useDesignReportExport', () => {
       design: 'gcd',
       pdk: 'ic55',
       steps: [
-        { name: 'Synthesis_yosys', tool: 'Yosys', state: 'Success', runtime: '0:0:30', 'peak memory (mb)': 120 },
+        {
+          name: 'Synthesis_yosys',
+          tool: 'Yosys',
+          state: 'Success',
+          runtime: '0:0:30',
+          'peak memory (mb)': 120,
+        },
       ],
     })
     mockReadParameters.mockResolvedValue({
@@ -131,13 +143,19 @@ describe('useDesignReportExport', () => {
     })
 
     expect(composable.designReportExportEnabled.value).toBe(false)
-    expect(mockSetActionEnabled).toHaveBeenCalledWith(appMenuActionIds.exportDesignSummary, false)
+    expect(mockSetActionEnabled).toHaveBeenCalledWith(
+      appMenuActionIds.exportDesignSummary,
+      false,
+    )
 
     currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
     await Promise.resolve()
 
     expect(composable.designReportExportEnabled.value).toBe(true)
-    expect(mockSetActionEnabled).toHaveBeenCalledWith(appMenuActionIds.exportDesignSummary, true)
+    expect(mockSetActionEnabled).toHaveBeenCalledWith(
+      appMenuActionIds.exportDesignSummary,
+      true,
+    )
   })
 
   it('loads workspace data and generates report content on openDesignReportExport', async () => {

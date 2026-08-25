@@ -58,7 +58,9 @@ function parseJsonSafely(value: unknown): Record<string, unknown> | null {
   return null
 }
 
-export function parseRuntimeSeconds(runtime: string | number | null | undefined): number | null {
+export function parseRuntimeSeconds(
+  runtime: string | number | null | undefined,
+): number | null {
   if (typeof runtime === 'number' && Number.isFinite(runtime)) return runtime
   if (typeof runtime !== 'string' || !runtime.trim()) return null
   const parts = runtime.split(':').map((p) => Number(p.trim()))
@@ -221,7 +223,9 @@ export interface ParsedQorSummaryMetrics {
   holdNvp: number | null
 }
 
-export function parseQorSummaryRpt(text: string | null | undefined): ParsedQorSummaryMetrics {
+export function parseQorSummaryRpt(
+  text: string | null | undefined,
+): ParsedQorSummaryMetrics {
   if (!text) {
     return {
       wns: null,
@@ -271,7 +275,6 @@ export function parseQorSummaryRpt(text: string | null | undefined): ParsedQorSu
   }
 }
 
-
 interface RawMetricFinding {
   value: unknown
   sourceKey: string
@@ -313,11 +316,19 @@ function findMetricInRecord(
   if (Array.isArray(metricsRecord.metrics)) {
     for (const item of metricsRecord.metrics) {
       if (!isRecord(item)) continue
-      const id = typeof item.id === 'string' ? item.id.toLowerCase().replace(/[\s_-]/g, '') : ''
-      const displayName = typeof item.display_name === 'string' ? item.display_name.toLowerCase().replace(/[\s_-]/g, '') : ''
+      const id =
+        typeof item.id === 'string' ? item.id.toLowerCase().replace(/[\s_-]/g, '') : ''
+      const displayName =
+        typeof item.display_name === 'string'
+          ? item.display_name.toLowerCase().replace(/[\s_-]/g, '')
+          : ''
       for (const alias of aliases) {
         const normAlias = alias.toLowerCase().replace(/[\s_-]/g, '')
-        if ((id === normAlias || displayName === normAlias) && item.value !== undefined && item.value !== null) {
+        if (
+          (id === normAlias || displayName === normAlias) &&
+          item.value !== undefined &&
+          item.value !== null
+        ) {
           return {
             value: item.value,
             sourceKey: typeof item.id === 'string' ? item.id : alias,
@@ -330,7 +341,11 @@ function findMetricInRecord(
 
   // 2. Direct property matches on root
   for (const alias of aliases) {
-    if (alias in metricsRecord && metricsRecord[alias] !== undefined && metricsRecord[alias] !== null) {
+    if (
+      alias in metricsRecord &&
+      metricsRecord[alias] !== undefined &&
+      metricsRecord[alias] !== null
+    ) {
       return {
         value: metricsRecord[alias],
         sourceKey: alias,
@@ -374,7 +389,11 @@ function findMetricInRecord(
     const normAlias = alias.toLowerCase().replace(/[\s_-]/g, '')
     for (const key of Object.keys(metricsRecord)) {
       const normKey = key.toLowerCase().replace(/[\s_-]/g, '')
-      if (normKey === normAlias && metricsRecord[key] !== undefined && metricsRecord[key] !== null) {
+      if (
+        normKey === normAlias &&
+        metricsRecord[key] !== undefined &&
+        metricsRecord[key] !== null
+      ) {
         return {
           value: metricsRecord[key],
           sourceKey: key,
@@ -400,7 +419,9 @@ function parseNumber(val: unknown): number | null {
   return null
 }
 
-export function extractDesignReportData(input: ExtractDesignReportInput): DesignReportData {
+export function extractDesignReportData(
+  input: ExtractDesignReportInput,
+): DesignReportData {
   const warnings: DesignReportWarning[] = []
   const provenance: EvidenceProvenanceRecord[] = []
 
@@ -462,7 +483,9 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
     (typeof params.ECC_TOOL === 'string' && params.ECC_TOOL) ||
     (typeof params.ecc_tool === 'string' && params.ecc_tool) ||
     (typeof flow.tool === 'string' && flow.tool) ||
-    (Array.isArray(flow.steps) && typeof (flow.steps[0] as Record<string, unknown>)?.tool === 'string' && (flow.steps[0] as Record<string, unknown>).tool as string) ||
+    (Array.isArray(flow.steps) &&
+      typeof (flow.steps[0] as Record<string, unknown>)?.tool === 'string' &&
+      ((flow.steps[0] as Record<string, unknown>).tool as string)) ||
     'ecc'
 
   if (eccTool === 'unknown') {
@@ -509,9 +532,9 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
     const canonical = canonicalizeStageName(key)
     const parsed = parseJsonSafely(value)
     if (parsed) {
-      normalizedStepMetrics[key] = { ...(normalizedStepMetrics[key] || {}), ...parsed }
+      normalizedStepMetrics[key] = { ...normalizedStepMetrics[key], ...parsed }
       normalizedStepMetrics[canonical] = {
-        ...(normalizedStepMetrics[canonical] || {}),
+        ...normalizedStepMetrics[canonical],
         ...parsed,
       }
     }
@@ -521,9 +544,9 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
     const canonical = canonicalizeStageName(key)
     const parsed = parseJsonSafely(value)
     if (parsed) {
-      normalizedStepMetrics[key] = { ...(normalizedStepMetrics[key] || {}), ...parsed }
+      normalizedStepMetrics[key] = { ...normalizedStepMetrics[key], ...parsed }
       normalizedStepMetrics[canonical] = {
-        ...(normalizedStepMetrics[canonical] || {}),
+        ...normalizedStepMetrics[canonical],
         ...parsed,
       }
     }
@@ -533,9 +556,9 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
     const canonical = canonicalizeStageName(key)
     const parsed = parseJsonSafely(value)
     if (parsed) {
-      normalizedStepMetrics[key] = { ...(normalizedStepMetrics[key] || {}), ...parsed }
+      normalizedStepMetrics[key] = { ...normalizedStepMetrics[key], ...parsed }
       normalizedStepMetrics[canonical] = {
-        ...(normalizedStepMetrics[canonical] || {}),
+        ...normalizedStepMetrics[canonical],
         ...parsed,
       }
     }
@@ -543,25 +566,25 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
 
   if (staTimingIssues) {
     normalizedStepMetrics['STA'] = {
-      ...(normalizedStepMetrics['STA'] || {}),
+      ...normalizedStepMetrics['STA'],
       ...staTimingIssues,
     }
   }
 
   if (params && Object.keys(params).length > 0) {
     normalizedStepMetrics['Parameters'] = {
-      ...(normalizedStepMetrics['Parameters'] || {}),
+      ...normalizedStepMetrics['Parameters'],
       ...params,
     }
   }
 
   if (home && Object.keys(home).length > 0) {
     normalizedStepMetrics['Home'] = {
-      ...(normalizedStepMetrics['Home'] || {}),
+      ...normalizedStepMetrics['Home'],
       ...home,
     }
     normalizedStepMetrics['Parameters'] = {
-      ...(normalizedStepMetrics['Parameters'] || {}),
+      ...normalizedStepMetrics['Parameters'],
       ...home,
     }
   }
@@ -682,11 +705,18 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
     '%',
   )
   let coreUtilizationPct = utilRes.value
-  if (coreUtilizationPct !== null && coreUtilizationPct > 0 && coreUtilizationPct <= 1.0) {
+  if (
+    coreUtilizationPct !== null &&
+    coreUtilizationPct > 0 &&
+    coreUtilizationPct <= 1.0
+  ) {
     coreUtilizationPct = +(coreUtilizationPct * 100).toFixed(2)
   }
 
-  if (coreUtilizationPct !== null && (coreUtilizationPct < 0 || coreUtilizationPct > 100)) {
+  if (
+    coreUtilizationPct !== null &&
+    (coreUtilizationPct < 0 || coreUtilizationPct > 100)
+  ) {
     warnings.push({
       code: 'PHYS_UTIL_OUT_OF_RANGE',
       message: `Core utilization ${coreUtilizationPct}% is outside standard range (0-100%).`,
@@ -752,7 +782,14 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
     'Physical',
     'Sequential Cell Count',
     ['Harden', 'Route', 'CTS', 'Place', 'Synth'],
-    ['Instances.clock.num', 'sequential_cells', 'seq_cells', 'sequential_cell_count', 'flip_flops', 'registers'],
+    [
+      'Instances.clock.num',
+      'sequential_cells',
+      'seq_cells',
+      'sequential_cell_count',
+      'flip_flops',
+      'registers',
+    ],
     'count',
   )
   const sequentialCellCount = seqCellRes.value
@@ -761,7 +798,13 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
     'Physical',
     'Combinational Cell Count',
     ['Harden', 'Route', 'Place', 'Synth'],
-    ['Instances.logic.num', 'combinational_cells', 'comb_cells', 'combinational_cell_count', 'logic_cells'],
+    [
+      'Instances.logic.num',
+      'combinational_cells',
+      'comb_cells',
+      'combinational_cell_count',
+      'logic_cells',
+    ],
     'count',
   )
   const combinationalCellCount = combCellRes.value
@@ -788,7 +831,14 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
     'Physical',
     'Total Nets',
     ['Harden', 'Route', 'Legal', 'Place', 'CTS', 'Fanout', 'Floor', 'Synth'],
-    ['Design Statis.num_nets', 'design.num_wires', 'net_count', 'nets', 'netCount', 'num_wires'],
+    [
+      'Design Statis.num_nets',
+      'design.num_wires',
+      'net_count',
+      'nets',
+      'netCount',
+      'num_wires',
+    ],
     'count',
   )
   const netCount = netCountRes.value
@@ -976,42 +1026,42 @@ export function extractDesignReportData(input: ExtractDesignReportInput): Design
   )
   violatingEndpointsHold = endpHoldRes.value
 
-function parseCornerAttributes(name: string): {
-  process: string | null
-  temperatureC: number | null
-  voltageV: number | null
-  rcCorner: string | null
-} {
-  let process: string | null = null
-  let temperatureC: number | null = null
-  let voltageV: number | null = null
-  let rcCorner: string | null = null
+  function parseCornerAttributes(name: string): {
+    process: string | null
+    temperatureC: number | null
+    voltageV: number | null
+    rcCorner: string | null
+  } {
+    let process: string | null = null
+    let temperatureC: number | null = null
+    let voltageV: number | null = null
+    let rcCorner: string | null = null
 
-  const parts = name.split(/[/_]/)
-  for (const p of parts) {
-    const trimmed = p.trim()
-    if (/^(MAX|MIN|ML|TYP|WCL|ss|ff|tt|fs|sf)$/i.test(trimmed)) {
-      process = trimmed.toUpperCase()
-    }
-    const tempMatch = trimmed.match(/^(?:m(\d+)|(-?\d+)C?)$/i)
-    if (tempMatch) {
-      if (tempMatch[1]) {
-        temperatureC = -Number(tempMatch[1])
-      } else if (tempMatch[2]) {
-        temperatureC = Number(tempMatch[2])
+    const parts = name.split(/[/_]/)
+    for (const p of parts) {
+      const trimmed = p.trim()
+      if (/^(MAX|MIN|ML|TYP|WCL|ss|ff|tt|fs|sf)$/i.test(trimmed)) {
+        process = trimmed.toUpperCase()
+      }
+      const tempMatch = trimmed.match(/^(?:m(\d+)|(-?\d+)C?)$/i)
+      if (tempMatch) {
+        if (tempMatch[1]) {
+          temperatureC = -Number(tempMatch[1])
+        } else if (tempMatch[2]) {
+          temperatureC = Number(tempMatch[2])
+        }
+      }
+      const voltMatch = trimmed.match(/(\d+)v(\d+)/i)
+      if (voltMatch) {
+        voltageV = Number(`${voltMatch[1]}.${voltMatch[2]}`)
+      }
+      if (/^(Cworst|RCworst|Cbest|RCbest|TYPICAL|typical|best|worst)$/i.test(trimmed)) {
+        rcCorner = trimmed
       }
     }
-    const voltMatch = trimmed.match(/(\d+)v(\d+)/i)
-    if (voltMatch) {
-      voltageV = Number(`${voltMatch[1]}.${voltMatch[2]}`)
-    }
-    if (/^(Cworst|RCworst|Cbest|RCbest|TYPICAL|typical|best|worst)$/i.test(trimmed)) {
-      rcCorner = trimmed
-    }
-  }
 
-  return { process, temperatureC, voltageV, rcCorner }
-}
+    return { process, temperatureC, voltageV, rcCorner }
+  }
 
   // 4. Multi-Corner Timing Extraction
   const multiCornerTiming: CornerTimingRecord[] = []
@@ -1027,7 +1077,7 @@ function parseCornerAttributes(name: string): {
     if (isRecord(cSrc)) {
       for (const [cName, cData] of Object.entries(cSrc)) {
         if (isRecord(cData)) {
-          mergedCorners[cName] = { ...(mergedCorners[cName] || {}), ...cData }
+          mergedCorners[cName] = { ...mergedCorners[cName], ...cData }
         }
       }
     }
@@ -1043,18 +1093,30 @@ function parseCornerAttributes(name: string): {
     const summarySetup = isRecord(summaryObj?.setup) ? summaryObj.setup : null
     const summaryHold = isRecord(summaryObj?.hold) ? summaryObj.hold : null
 
-    const cSetupWns = parseNumber(cVal.setup_wns ?? cVal.wns ?? setupObj?.wns ?? summarySetup?.wns)
-    const cSetupTns = parseNumber(cVal.setup_tns ?? cVal.tns ?? setupObj?.tns ?? summarySetup?.tns)
+    const cSetupWns = parseNumber(
+      cVal.setup_wns ?? cVal.wns ?? setupObj?.wns ?? summarySetup?.wns,
+    )
+    const cSetupTns = parseNumber(
+      cVal.setup_tns ?? cVal.tns ?? setupObj?.tns ?? summarySetup?.tns,
+    )
     const cHoldWns = parseNumber(cVal.hold_wns ?? holdObj?.wns ?? summaryHold?.wns)
     const cHoldTns = parseNumber(cVal.hold_tns ?? holdObj?.tns ?? summaryHold?.tns)
     const cVoltage = parseNumber(cVal.voltage ?? cVal.voltage_v ?? inferred.voltageV)
-    const cTemp = parseNumber(cVal.temperature ?? cVal.temperature_c ?? inferred.temperatureC)
-    const cProcess = (typeof cVal.process === 'string' && cVal.process) || inferred.process
+    const cTemp = parseNumber(
+      cVal.temperature ?? cVal.temperature_c ?? inferred.temperatureC,
+    )
+    const cProcess =
+      (typeof cVal.process === 'string' && cVal.process) || inferred.process
     const cRc = (typeof cVal.rc === 'string' && cVal.rc) || inferred.rcCorner
-    const cEndpSetup = parseNumber(cVal.violating_endpoints_setup ?? setupObj?.nvp ?? summarySetup?.nvp)
-    const cEndpHold = parseNumber(cVal.violating_endpoints_hold ?? holdObj?.nvp ?? summaryHold?.nvp)
+    const cEndpSetup = parseNumber(
+      cVal.violating_endpoints_setup ?? setupObj?.nvp ?? summarySetup?.nvp,
+    )
+    const cEndpHold = parseNumber(
+      cVal.violating_endpoints_hold ?? holdObj?.nvp ?? summaryHold?.nvp,
+    )
 
-    const pass = (cSetupWns === null || cSetupWns >= 0) && (cHoldWns === null || cHoldWns >= 0)
+    const pass =
+      (cSetupWns === null || cSetupWns >= 0) && (cHoldWns === null || cHoldWns >= 0)
     const status = pass ? 'pass' : 'fail'
 
     multiCornerTiming.push({
@@ -1075,10 +1137,18 @@ function parseCornerAttributes(name: string): {
 
   // If top-level timing metrics were missing, roll them up from multi-corner timing
   if (multiCornerTiming.length > 0) {
-    const validSetupWns = multiCornerTiming.map((c) => c.setupWnsNs).filter((v): v is number => v !== null)
-    const validSetupTns = multiCornerTiming.map((c) => c.setupTnsNs).filter((v): v is number => v !== null)
-    const validHoldWns = multiCornerTiming.map((c) => c.holdWnsNs).filter((v): v is number => v !== null)
-    const validHoldTns = multiCornerTiming.map((c) => c.holdTnsNs).filter((v): v is number => v !== null)
+    const validSetupWns = multiCornerTiming
+      .map((c) => c.setupWnsNs)
+      .filter((v): v is number => v !== null)
+    const validSetupTns = multiCornerTiming
+      .map((c) => c.setupTnsNs)
+      .filter((v): v is number => v !== null)
+    const validHoldWns = multiCornerTiming
+      .map((c) => c.holdWnsNs)
+      .filter((v): v is number => v !== null)
+    const validHoldTns = multiCornerTiming
+      .map((c) => c.holdTnsNs)
+      .filter((v): v is number => v !== null)
 
     if (setupWnsNs === null && validSetupWns.length > 0) {
       setupWnsNs = Math.min(...validSetupWns)
@@ -1138,7 +1208,19 @@ function parseCornerAttributes(name: string): {
     'Timing',
     'Max Slew Violations',
     ['STA', 'Route', 'CTS', 'Synth'],
-    ['slew_violations', 'max_slew_violations', 'slew_viols', 'trans_violations', 'transition_violations', 'max_transition_violations', 'max_slew', 'slew_violation_count', 'summary.slew.violations', 'slew.violations', 'check_slew'],
+    [
+      'slew_violations',
+      'max_slew_violations',
+      'slew_viols',
+      'trans_violations',
+      'transition_violations',
+      'max_transition_violations',
+      'max_slew',
+      'slew_violation_count',
+      'summary.slew.violations',
+      'slew.violations',
+      'check_slew',
+    ],
     'violations',
   )
   let slewViolations = slewViolRes.value
@@ -1150,7 +1232,18 @@ function parseCornerAttributes(name: string): {
     'Timing',
     'Max Cap Violations',
     ['STA', 'Route', 'CTS', 'Synth'],
-    ['cap_violations', 'max_cap_violations', 'cap_viols', 'max_cap', 'capacitance_violations', 'max_capacitance_violations', 'cap_violation_count', 'summary.cap.violations', 'cap.violations', 'check_cap'],
+    [
+      'cap_violations',
+      'max_cap_violations',
+      'cap_viols',
+      'max_cap',
+      'capacitance_violations',
+      'max_capacitance_violations',
+      'cap_violation_count',
+      'summary.cap.violations',
+      'cap.violations',
+      'check_cap',
+    ],
     'violations',
   )
   let capViolations = capViolRes.value
@@ -1162,7 +1255,17 @@ function parseCornerAttributes(name: string): {
     'Timing',
     'Max Fanout Violations',
     ['STA', 'Route', 'Fanout', 'CTS', 'Synth'],
-    ['fanout_violations', 'max_fanout_violations', 'fanout_viols', 'fanout_max_violations', 'max_fanout', 'fanout_violation_count', 'summary.fanout.violations', 'fanout.violations', 'check_fanout'],
+    [
+      'fanout_violations',
+      'max_fanout_violations',
+      'fanout_viols',
+      'fanout_max_violations',
+      'max_fanout',
+      'fanout_violation_count',
+      'summary.fanout.violations',
+      'fanout.violations',
+      'check_fanout',
+    ],
     'violations',
   )
   let fanoutViolations = fanoutViolRes.value
@@ -1174,11 +1277,24 @@ function parseCornerAttributes(name: string): {
     'Timing',
     'Critical Path Delay',
     ['STA', 'Route', 'CTS', 'Synth'],
-    ['critical_path_delay', 'critical_path_delay_ns', 'crit_path_delay', 'data_path_delay', 'arrival_time', 'data_arrival_time', 'path_delay', 'worst_path_delay'],
+    [
+      'critical_path_delay',
+      'critical_path_delay_ns',
+      'crit_path_delay',
+      'data_path_delay',
+      'arrival_time',
+      'data_arrival_time',
+      'path_delay',
+      'worst_path_delay',
+    ],
     'ns',
   )
   let criticalPathDelayNs = critPathRes.value
-  if (criticalPathDelayNs === null && targetClockPeriodNs !== null && setupWnsNs !== null) {
+  if (
+    criticalPathDelayNs === null &&
+    targetClockPeriodNs !== null &&
+    setupWnsNs !== null
+  ) {
     const derived = targetClockPeriodNs - setupWnsNs
     if (derived > 0) {
       criticalPathDelayNs = +derived.toFixed(3)
@@ -1273,11 +1389,7 @@ function parseCornerAttributes(name: string): {
     'Clock',
     'Max Clock Wirelength',
     ['CTS', 'Route'],
-    [
-      'cts_clock_wirelength_max',
-      'max_clock_wirelength',
-      'CTS.max_clock_wirelength',
-    ],
+    ['cts_clock_wirelength_max', 'max_clock_wirelength', 'CTS.max_clock_wirelength'],
     'um',
   )
   const clockMaxWirelengthUm = clockMaxWirelengthRes.value
@@ -1302,12 +1414,7 @@ function parseCornerAttributes(name: string): {
     'Clock',
     'Clock Buffer Area',
     ['CTS', 'Route'],
-    [
-      'cts_buffer_area',
-      'CTS.buffer_area',
-      'buffer_area',
-      'clock_buffer_area',
-    ],
+    ['cts_buffer_area', 'CTS.buffer_area', 'buffer_area', 'clock_buffer_area'],
     'um2',
   )
   const clockBufferAreaUm2 = clockBufferAreaRes.value
@@ -1316,11 +1423,7 @@ function parseCornerAttributes(name: string): {
     'Clock',
     'Clock Path Max Buffer',
     ['CTS'],
-    [
-      'clock_path_max_buffer',
-      'CTS.clock_path_max_buffer',
-      'max_buffer_per_path',
-    ],
+    ['clock_path_max_buffer', 'CTS.clock_path_max_buffer', 'max_buffer_per_path'],
     'count',
   )
   const clockPathMaxBuffer = clockPathMaxBufferRes.value
@@ -1329,11 +1432,7 @@ function parseCornerAttributes(name: string): {
     'Clock',
     'Clock Path Min Buffer',
     ['CTS'],
-    [
-      'clock_path_min_buffer',
-      'CTS.clock_path_min_buffer',
-      'min_buffer_per_path',
-    ],
+    ['clock_path_min_buffer', 'CTS.clock_path_min_buffer', 'min_buffer_per_path'],
     'count',
   )
   const clockPathMinBuffer = clockPathMinBufferRes.value
@@ -1342,12 +1441,7 @@ function parseCornerAttributes(name: string): {
     'Clock',
     'Clock Nets Count',
     ['CTS', 'Route', 'Harden'],
-    [
-      'Nets.num_clock',
-      'num_clock_nets',
-      'clock_nets',
-      'num_clock',
-    ],
+    ['Nets.num_clock', 'num_clock_nets', 'clock_nets', 'num_clock'],
     'count',
   )
   const clockNetsCount = clockNetsCountRes.value
@@ -1431,7 +1525,12 @@ function parseCornerAttributes(name: string): {
     'Routing',
     'Estimated Wirelength',
     ['Place', 'CTS', 'Route'],
-    ['place_flute_wirelength', 'place_grwl', 'estimated_wirelength', 'estimated_wirelength_um'],
+    [
+      'place_flute_wirelength',
+      'place_grwl',
+      'estimated_wirelength',
+      'estimated_wirelength_um',
+    ],
     'um',
   )
   const estimatedWirelengthUm = estWirelengthRes.value
@@ -1489,7 +1588,11 @@ function parseCornerAttributes(name: string): {
     '%',
   )
   let routingCompletionPct = routingCompletionRes.value
-  if (routingCompletionPct !== null && routingCompletionPct > 0 && routingCompletionPct <= 1.0) {
+  if (
+    routingCompletionPct !== null &&
+    routingCompletionPct > 0 &&
+    routingCompletionPct <= 1.0
+  ) {
     routingCompletionPct = +(routingCompletionPct * 100).toFixed(1)
   }
   if (routingCompletionPct === null) {
@@ -1559,11 +1662,7 @@ function parseCornerAttributes(name: string): {
     'Congestion',
     'Max Overflow',
     ['Route', 'Place'],
-    [
-      'place_congestion_egr_overflow_max',
-      'max_overflow',
-      'peak_overflow',
-    ],
+    ['place_congestion_egr_overflow_max', 'max_overflow', 'peak_overflow'],
     'tracks',
   )
   const maxOverflow = maxOverflowRes.value
@@ -1586,11 +1685,7 @@ function parseCornerAttributes(name: string): {
     'Congestion',
     'Vertical Congestion Pct',
     ['Place', 'Route'],
-    [
-      'place_rudy_utilization_max',
-      'vertical_congestion_pct',
-      'v_congestion_pct',
-    ],
+    ['place_rudy_utilization_max', 'vertical_congestion_pct', 'v_congestion_pct'],
     '%',
   )
   const verticalCongestionPct = vCongestionRes.value
@@ -1619,7 +1714,15 @@ function parseCornerAttributes(name: string): {
     'Power',
     'Total Power',
     ['Power', 'STA', 'Route', 'Harden'],
-    ['total_power', 'total_power_mw', 'power.total', 'power_total', 'power_mw', 'sta_total_power', 'power.total_power'],
+    [
+      'total_power',
+      'total_power_mw',
+      'power.total',
+      'power_total',
+      'power_mw',
+      'sta_total_power',
+      'power.total_power',
+    ],
     'mW',
   )
   totalPowerMw = totPowerRes.value
@@ -1628,7 +1731,13 @@ function parseCornerAttributes(name: string): {
     'Power',
     'Dynamic Power',
     ['Power', 'STA', 'Route', 'Harden'],
-    ['dynamic_power', 'dynamic_power_mw', 'power.dynamic', 'power_dynamic', 'sta_dynamic_power'],
+    [
+      'dynamic_power',
+      'dynamic_power_mw',
+      'power.dynamic',
+      'power_dynamic',
+      'sta_dynamic_power',
+    ],
     'mW',
   )
   const dynamicPowerMw = dynPowerRes.value
@@ -1655,7 +1764,13 @@ function parseCornerAttributes(name: string): {
     'Power',
     'Leakage Power',
     ['Power', 'STA', 'Route', 'Harden'],
-    ['leakage_power', 'leakage_power_mw', 'power.leakage', 'power_leakage', 'sta_leakage_power'],
+    [
+      'leakage_power',
+      'leakage_power_mw',
+      'power.leakage',
+      'power_leakage',
+      'sta_leakage_power',
+    ],
     'mW',
   )
   const leakagePowerMw = leakPowerRes.value
@@ -1691,7 +1806,8 @@ function parseCornerAttributes(name: string): {
     voltageV,
     temperatureC,
     corner: typeof params.POWER_CORNER === 'string' ? params.POWER_CORNER : null,
-    activityMethod: typeof params.POWER_ACTIVITY === 'string' ? params.POWER_ACTIVITY : null,
+    activityMethod:
+      typeof params.POWER_ACTIVITY === 'string' ? params.POWER_ACTIVITY : null,
   }
 
   // 9. Physical Verification & Signoff
@@ -1703,8 +1819,7 @@ function parseCornerAttributes(name: string): {
     'violations',
   )
   const drcCount = drcCountRes.value
-  const drcStatus =
-    drcCount === null ? 'unrun' : drcCount === 0 ? 'clean' : 'violations'
+  const drcStatus = drcCount === null ? 'unrun' : drcCount === 0 ? 'clean' : 'violations'
 
   const lvsCountRes = queryMetric(
     'Verification',
@@ -1777,7 +1892,9 @@ function parseCornerAttributes(name: string): {
       const state = typeof rawStep.state === 'string' ? rawStep.state : 'Unknown'
       const runtimeRaw = rawStep.runtime
       const runtimeSec = parseRuntimeSeconds(
-        typeof runtimeRaw === 'string' || typeof runtimeRaw === 'number' ? runtimeRaw : null,
+        typeof runtimeRaw === 'string' || typeof runtimeRaw === 'number'
+          ? runtimeRaw
+          : null,
       )
       const memoryRaw =
         rawStep['peak memory (mb)'] ??

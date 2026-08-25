@@ -367,7 +367,9 @@ export function useSignoffPackageExport({
       try {
         const flow = await api.workspaceResources.readFlow().catch(() => null)
         const home = await api.workspaceResources.readHome().catch(() => null)
-        const versions = await api.app.getVersions().catch(() => ({ gui: '', ecc: '', eccTools: '' }))
+        const versions = await api.app
+          .getVersions()
+          .catch(() => ({ gui: '', ecc: '', eccTools: '' }))
         const reportData = extractDesignReportData({
           workspacePath: workspace.workspacePath,
           parameters: isRecord(parameters) ? parameters : undefined,
@@ -377,7 +379,8 @@ export function useSignoffPackageExport({
             ? {
                 gui: typeof versions.gui === 'string' ? versions.gui : undefined,
                 ecc: typeof versions.ecc === 'string' ? versions.ecc : undefined,
-                eccTools: typeof versions.eccTools === 'string' ? versions.eccTools : undefined,
+                eccTools:
+                  typeof versions.eccTools === 'string' ? versions.eccTools : undefined,
               }
             : undefined,
         })
@@ -399,14 +402,22 @@ export function useSignoffPackageExport({
               includeVerificationBreakdown: true,
               latexStandalone: true,
             })
-            const summaryPath = joinLocalPath(exportDir, `${design}_design_summary.${ext}`)
-            await api.workspace.writeProjectTextFile(summaryPath, content).catch((err) => {
-              console.warn(`[signoff-export] Failed to write ${summaryPath}:`, err)
-            })
+            const summaryPath = joinLocalPath(
+              exportDir,
+              `${design}_design_summary.${ext}`,
+            )
+            await api.workspace
+              .writeProjectTextFile(summaryPath, content)
+              .catch((err) => {
+                console.warn(`[signoff-export] Failed to write ${summaryPath}:`, err)
+              })
           }),
         )
       } catch (repErr) {
-        console.warn('[signoff-export] Failed to generate signoff design summary reports:', repErr)
+        console.warn(
+          '[signoff-export] Failed to generate signoff design summary reports:',
+          repErr,
+        )
       }
 
       showToast({

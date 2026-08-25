@@ -15,7 +15,13 @@ describe('latexFormatter', () => {
     },
     flow: {
       steps: [
-        { name: 'Synthesis_yosys', tool: 'Yosys', state: 'Success', runtime: '0:0:30', 'peak memory (mb)': 120 },
+        {
+          name: 'Synthesis_yosys',
+          tool: 'Yosys',
+          state: 'Success',
+          runtime: '0:0:30',
+          'peak memory (mb)': 120,
+        },
       ],
     },
     stepMetrics: {

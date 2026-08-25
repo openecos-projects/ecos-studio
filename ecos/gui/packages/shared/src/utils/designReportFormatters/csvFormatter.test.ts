@@ -16,7 +16,13 @@ describe('csvFormatter', () => {
     },
     flow: {
       steps: [
-        { name: 'Synthesis_yosys', tool: 'Yosys', state: 'Success', runtime: '0:0:45', 'peak memory (mb)': 180 },
+        {
+          name: 'Synthesis_yosys',
+          tool: 'Yosys',
+          state: 'Success',
+          runtime: '0:0:45',
+          'peak memory (mb)': 180,
+        },
       ],
     },
     stepMetrics: {

@@ -8,10 +8,10 @@ describe('DesignReportExportDialog', () => {
     expect(source).toContain('Markdown Docs')
     expect(source).toContain('CSV Table')
     expect(source).toContain('Plain Text Log')
-    expect(source).toContain(".tex")
-    expect(source).toContain(".md")
-    expect(source).toContain(".csv")
-    expect(source).toContain(".txt")
+    expect(source).toContain('.tex')
+    expect(source).toContain('.md')
+    expect(source).toContain('.csv')
+    expect(source).toContain('.txt')
   })
 
   it('renders configuration options for multi-corner, stage breakdown, and standalone LaTeX without provenance or manual verification toggle', () => {

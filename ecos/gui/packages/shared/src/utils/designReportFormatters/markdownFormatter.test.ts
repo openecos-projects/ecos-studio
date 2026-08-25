@@ -15,7 +15,13 @@ describe('markdownFormatter', () => {
     },
     flow: {
       steps: [
-        { name: 'Synthesis_yosys', tool: 'Yosys', state: 'Success', runtime: '0:1:15', 'peak memory (mb)': 220 },
+        {
+          name: 'Synthesis_yosys',
+          tool: 'Yosys',
+          state: 'Success',
+          runtime: '0:1:15',
+          'peak memory (mb)': 220,
+        },
       ],
     },
     stepMetrics: {
@@ -52,7 +58,9 @@ describe('markdownFormatter', () => {
     expect(md).toContain('52 %')
     expect(md).toContain('Pass')
     expect(md).toContain('| Clock Tree Depth | 3 | levels | Maximum clock tree level |')
-    expect(md).toContain('| Clock Buffers | 5 (14.20 μm²) | count | CTS inserted clock buffers |')
+    expect(md).toContain(
+      '| Clock Buffers | 5 (14.20 μm²) | count | CTS inserted clock buffers |',
+    )
   })
 
   it('renders multi-corner table with timing measurements only', () => {
@@ -69,13 +77,17 @@ describe('markdownFormatter', () => {
           setupTnsNs: 0,
           holdWnsNs: 0.05,
           holdTnsNs: 0,
+          violatingEndpointsSetup: 0,
+          violatingEndpointsHold: 0,
           status: 'pass' as const,
         },
       ],
     }
     const md = formatMarkdownReport(dataWithCorners)
     expect(md).toContain('## 4. Multi-Corner Timing Analysis')
-    expect(md).toContain('| Corner | Setup WNS (ns) | Setup TNS (ns) | Hold WNS (ns) | Hold TNS (ns) | Status |')
+    expect(md).toContain(
+      '| Corner | Setup WNS (ns) | Setup TNS (ns) | Hold WNS (ns) | Hold TNS (ns) | Status |',
+    )
     expect(md).toContain('| `WCL_m40_RCworst` | 0.12 | 0 | 0.05 | 0 | PASS |')
     expect(md).not.toContain('| Corner | Process |')
   })
