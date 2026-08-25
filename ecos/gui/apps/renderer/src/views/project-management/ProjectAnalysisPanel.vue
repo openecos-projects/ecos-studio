@@ -1,65 +1,26 @@
 <template>
-  <FrontendProjectAnalysisPanel
-    v-if="
-      project.projectType === 'frontend' &&
-      project.frontendAnalysis &&
-      project.workspaces.length > 0
-    "
-    :project="project"
-    :selected-analysis-tab="selectedAnalysisTab"
-    :selected-step="selectedStep"
-    :selected-workspace-id="selectedWorkspaceId"
-    @select-analysis-tab="selectAnalysisTab"
-    @select-step="selectStep"
-    @select-workspace="selectWorkspace"
-  />
-  <section v-else class="analysis-panel mockup-analysis-panel" aria-label="Analysis">
-    <div class="analysis-heading">
-      <div class="analysis-title-group">
-        <p id="project-analysis-subtitle" class="analysis-subtitle">
-          {{ analysisSubtitle }}
-        </p>
-        <p v-if="analysisContext" class="analysis-context">
-          {{ analysisContext }}
-        </p>
-      </div>
-      <div
-        v-if="hasProjectData"
-        class="analysis-tabs"
-        role="tablist"
-        aria-label="Analysis views"
-      >
-        <button
-          id="analysis-tab-dashboard"
-          type="button"
-          role="tab"
-          :aria-selected="selectedAnalysisTab === 'dashboard'"
-          :tabindex="selectedAnalysisTab === 'dashboard' ? 0 : -1"
-          aria-controls="analysis-dashboard-panel"
-          :class="{ selected: selectedAnalysisTab === 'dashboard' }"
-          @click="selectAnalysisTab('dashboard')"
-          @keydown="handleAnalysisTabKeydown($event, 'dashboard')"
-        >
-          Dashboard
-        </button>
-        <button
-          id="analysis-tab-step"
-          type="button"
-          role="tab"
-          :aria-selected="selectedAnalysisTab === 'step'"
-          :tabindex="selectedAnalysisTab === 'step' ? 0 : -1"
-          aria-controls="analysis-step-panel"
-          :class="{ selected: selectedAnalysisTab === 'step' }"
-          @click="selectAnalysisTab('step')"
-          @keydown="handleAnalysisTabKeydown($event, 'step')"
-        >
-          Step Analysis
-        </button>
-      </div>
-    </div>
+  <ProjectAnalysisFrame
+    :subtitle="analysisSubtitle"
+    :context="analysisContext"
+    :has-project-data="hasProjectData"
+    :selected-tab="selectedAnalysisTab"
+    @select-tab="selectAnalysisTab"
+  >
+    <FrontendProjectAnalysisPanel
+      v-if="
+        hasProjectData && project.projectType === 'frontend' && project.frontendAnalysis
+      "
+      :project="project"
+      :selected-analysis-tab="selectedAnalysisTab"
+      :selected-step="selectedStep"
+      :selected-workspace-id="selectedWorkspaceId"
+      @select-analysis-tab="selectAnalysisTab"
+      @select-step="selectStep"
+      @select-workspace="selectWorkspace"
+    />
 
     <div
-      v-if="hasProjectData"
+      v-if="hasProjectData && project.projectType === 'backend'"
       id="analysis-dashboard-panel"
       role="tabpanel"
       aria-labelledby="analysis-tab-dashboard"
@@ -455,7 +416,7 @@
     </div>
 
     <div
-      v-if="hasProjectData"
+      v-if="hasProjectData && project.projectType === 'backend'"
       id="analysis-step-panel"
       role="tabpanel"
       aria-labelledby="analysis-tab-step"
@@ -497,13 +458,14 @@
         </button>
       </div>
     </div>
-  </section>
+  </ProjectAnalysisFrame>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import ProjectQorScoreChart from '@/components/ProjectQorScoreChart.vue'
 import ProjectStepAnalysisPanel from '@/components/ProjectStepAnalysisPanel.vue'
+import ProjectAnalysisFrame from './ProjectAnalysisFrame.vue'
 import FrontendProjectAnalysisPanel from './FrontendProjectAnalysisPanel.vue'
 import {
   type FlowStep,
@@ -595,6 +557,11 @@ const backendSelectedStep = computed<FlowStep>(() =>
 const analysisSubtitle = computed(() => {
   const count = props.project.workspaces.length
   const workspaceLabel = `${count} workspace${count === 1 ? '' : 's'}`
+  if (props.project.projectType === 'frontend') {
+    return props.selectedAnalysisTab === 'dashboard'
+      ? `${workspaceLabel} · project overview`
+      : `${workspaceLabel} · frontend step comparison`
+  }
   if (props.selectedAnalysisTab === 'dashboard') {
     return `${workspaceLabel} · project overview`
   }
@@ -608,6 +575,9 @@ const selectedWorkspace = computed(() =>
 const analysisContext = computed(() => {
   const workspaceId = selectedWorkspace.value?.id
   if (!workspaceId) return ''
+  if (props.project.projectType === 'frontend') {
+    return `${props.project.name} / ${workspaceId} · ${props.project.objective}`
+  }
   const baselineId = props.project.qorTrendSummary.baselineWorkspaceId
   if (!baselineId || baselineId === workspaceId) {
     return `${props.project.name} / ${workspaceId} is the QoR reference workspace`
@@ -848,24 +818,6 @@ function drillDown(
 
 function selectAnalysisTab(tab: AnalysisTab): void {
   emit('select-analysis-tab', tab)
-}
-
-function handleAnalysisTabKeydown(event: KeyboardEvent, currentTab: AnalysisTab): void {
-  const tabs: AnalysisTab[] = ['dashboard', 'step']
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-
-  event.preventDefault()
-  const currentIndex = tabs.indexOf(currentTab)
-  const nextIndex =
-    event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? tabs.length - 1
-        : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) %
-          tabs.length
-  const nextTab = tabs[nextIndex]
-  selectAnalysisTab(nextTab)
-  document.getElementById(`analysis-tab-${nextTab}`)?.focus()
 }
 
 function selectStep(step: ProjectStage): void {

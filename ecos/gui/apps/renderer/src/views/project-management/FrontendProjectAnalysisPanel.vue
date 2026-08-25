@@ -1,33 +1,12 @@
 <template>
-  <section class="fe-analysis-panel" aria-label="Frontend project analysis">
-    <header class="fe-analysis-heading">
-      <div>
-        <p class="fe-analysis-subtitle">{{ analysisSubtitle }}</p>
-        <p class="fe-analysis-context">{{ project.objective }}</p>
-      </div>
-      <div class="fe-analysis-tabs" role="tablist" aria-label="Analysis views">
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="selectedAnalysisTab === 'dashboard'"
-          :class="{ selected: selectedAnalysisTab === 'dashboard' }"
-          @click="emit('select-analysis-tab', 'dashboard')"
-        >
-          Dashboard
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="selectedAnalysisTab === 'step'"
-          :class="{ selected: selectedAnalysisTab === 'step' }"
-          @click="emit('select-analysis-tab', 'step')"
-        >
-          Step Analysis
-        </button>
-      </div>
-    </header>
-
-    <div v-show="selectedAnalysisTab === 'dashboard'" class="fe-dashboard">
+  <div class="frontend-analysis-content" aria-label="Frontend project analysis">
+    <div
+      v-show="selectedAnalysisTab === 'dashboard'"
+      id="analysis-dashboard-panel"
+      class="analysis-dashboard fe-dashboard"
+      role="tabpanel"
+      aria-labelledby="analysis-tab-dashboard"
+    >
       <section class="fe-health-band" aria-label="Verification health">
         <div class="fe-flow-progress">
           <span class="fe-eyebrow">Frontend flow</span>
@@ -158,7 +137,13 @@
       </section>
     </div>
 
-    <div v-show="selectedAnalysisTab === 'step'" class="fe-step-analysis">
+    <div
+      v-show="selectedAnalysisTab === 'step'"
+      id="analysis-step-panel"
+      class="analysis-step-panel fe-step-analysis"
+      role="tabpanel"
+      aria-labelledby="analysis-tab-step"
+    >
       <nav class="fe-stage-tabs" aria-label="Frontend flow steps">
         <button
           v-for="stage in frontendStages"
@@ -245,7 +230,7 @@
         </div>
       </section>
     </div>
-  </section>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -298,11 +283,6 @@ const visibleFindings = computed(() =>
     ? analysis.value.findings
     : analysis.value.findings.slice(0, FINDING_PREVIEW_LIMIT),
 )
-const analysisSubtitle = computed(() => {
-  const count = analysis.value.workspaceCount
-  return `${count} workspace${count === 1 ? '' : 's'} · frontend verification`
-})
-
 watch(
   () => props.project.id,
   () => {

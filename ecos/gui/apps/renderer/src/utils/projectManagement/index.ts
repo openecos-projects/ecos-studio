@@ -72,6 +72,7 @@ export function resolveProjectSelectionUpdate(
   previousProjectKey: string | null,
   project: ProjectManagementProject,
   currentWorkspaceId: string,
+  requestedWorkspaceId?: string,
 ): {
   nextProjectKey: string
   mode: ProjectSelectionUpdateMode
@@ -80,7 +81,14 @@ export function resolveProjectSelectionUpdate(
 } {
   const nextProjectKey = project.path || project.id
   if (nextProjectKey !== previousProjectKey) {
-    return { nextProjectKey, mode: 'reset', selection: createSelectionState(project) }
+    const selection = createSelectionState(project)
+    if (
+      requestedWorkspaceId &&
+      project.workspaces.some((workspace) => workspace.id === requestedWorkspaceId)
+    ) {
+      selection.selectedWorkspaceId = requestedWorkspaceId
+    }
+    return { nextProjectKey, mode: 'reset', selection }
   }
   const workspaceIds = project.workspaces.map((workspace) => workspace.id)
   if (currentWorkspaceId && workspaceIds.includes(currentWorkspaceId)) {

@@ -15,6 +15,7 @@ import {
   parseWorkspaceFlowStateMap,
   projectMpcOptionFromResource,
   resolveProjectQorBaselineWorkspace,
+  resolveProjectSelectionUpdate,
   workspaceStatusFromFlow,
   type FlowStep,
   type ProjectStepStatus,
@@ -488,6 +489,13 @@ describe('project management V3 model', () => {
       ['ws_0003', 1],
       ['ws_0002', 0],
     ])
+
+    expect(
+      resolveProjectSelectionUpdate('/projects/other', model, 'ws_0001', 'ws_0002'),
+    ).toMatchObject({
+      mode: 'reset',
+      selection: { selectedWorkspaceId: 'ws_0002' },
+    })
   })
 
   it('derives dashboard keys and step-specific Step Analysis metrics from schema v3 ids', () => {

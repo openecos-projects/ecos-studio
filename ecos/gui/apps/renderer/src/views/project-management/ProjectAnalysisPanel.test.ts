@@ -70,9 +70,11 @@ describe('ProjectAnalysisPanel dashboard health', () => {
       }),
     )
 
-    expect(wrapper.find('.fe-analysis-panel').exists()).toBe(true)
+    expect(wrapper.find('.analysis-panel').exists()).toBe(true)
+    expect(wrapper.find('.frontend-analysis-content').exists()).toBe(true)
     expect(wrapper.find('.fe-flow-progress').text()).toContain('5/5 steps complete')
-    expect(wrapper.find('.analysis-dashboard').exists()).toBe(false)
+    expect(wrapper.find('.analysis-dashboard').exists()).toBe(true)
+    expect(wrapper.find('.dash-health').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('QoR')
     expect(wrapper.text()).not.toContain('Signoff')
   })
