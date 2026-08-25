@@ -86,6 +86,7 @@ def frozen_workspace(tmp_path: Path) -> Path:
         root / "route_ecc/analysis/qor_metrics.json",
         _metrics(
             ("route_dr_total_violation_count", 0),
+            ("route_dr_total_wirelength", 9999),
             ("route_la_total_overflow", 1),
             ("route_wirelength", 5243.741),
         ),
@@ -211,6 +212,20 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert observation.eligible_for_incumbent is True
 
 
+def test_terminal_observation_maps_blocked_ecc_checklist_to_failed_gate(
+    frozen_workspace: Path,
+) -> None:
+    path = frozen_workspace / "lvs_ecc/checklist.json"
+    payload = _checklist(("quality.lvs.clean", "failed"))
+    payload["status"] = "blocked"
+    _write_json(path, payload)
+
+    observation = build_terminal_observation(frozen_workspace)
+
+    assert observation.signoff_gates.lvs_clean.value == "fail"
+    assert observation.eligible_for_incumbent is False
+
+
 @pytest.mark.parametrize("metric_id", [metric.value for metric in TimingMetric])
 def test_terminal_observation_requires_each_timing_guardrail_metric(
     frozen_workspace: Path, metric_id: str
@@ -328,6 +343,34 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
 
     assert observation.observation_id == "terminal-Harden"
     assert observation.metrics["route_la_total_overflow"] == 1.0
+
+    candidate_flow = candidate_root / "home/flow.json"
+    candidate_flow.write_text(candidate_flow.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    candidate_2_root = frozen_workspace / ".agent/candidates/candidate-2"
+    shutil.copytree(candidate_root, candidate_2_root)
+    manifest_2_ref = ".agent/candidates/candidate-2/analysis/candidate_workspace.v1.json"
+    manifest_2_path = frozen_workspace / manifest_2_ref
+    _write_json(
+        manifest_2_path,
+        {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": "candidate-2",
+            "candidate_root_ref": ".agent/candidates/candidate-2",
+            "parent_candidate_root_ref": ".agent/candidates/candidate-1",
+            "parent_flow_sha256": file_sha256(candidate_flow),
+            "candidate_flow_sha256": file_sha256(candidate_2_root / "home/flow.json"),
+        },
+    )
+    evidence_2 = CandidateExecutionEvidence(
+        candidate_root_ref=".agent/candidates/candidate-2",
+        candidate_manifest_ref=manifest_2_ref,
+        candidate_manifest_sha256=file_sha256(manifest_2_path),
+    )
+
+    assert build_candidate_terminal_observation(frozen_workspace, evidence_2).observation_id == (
+        "terminal-Harden"
+    )
 
 
 class _RecordingRetriever:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,11 +17,16 @@ from ecos_agent.optimization_contracts import (
 )
 from ecos_agent.optimization_runtime import (
     OptimizationRuntimeError,
+    _design_id,
+    _incumbent_workspace,
+    _wait_for_terminal_receipt,
     _optimization_objective,
     _parent_manifest_sha256,
     _place_to_harden_runtime_seconds,
     create_optimization_runner,
 )
+from ecos_agent.optimization_controller import CandidateExecutionReceipt
+from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_rules import freeze_optimization_objective
 
 
@@ -101,6 +107,28 @@ def test_place_to_harden_runtime_fails_closed_on_incomplete_stage(tmp_path: Path
         _place_to_harden_runtime_seconds(tmp_path)
 
 
+def test_design_id_comes_from_workspace_parameters_and_fails_closed(tmp_path: Path) -> None:
+    (tmp_path / "home").mkdir()
+    parameters = tmp_path / "home" / "parameters.json"
+    parameters.write_text(json.dumps({"Design": "aes_core"}), encoding="utf-8")
+    assert _design_id(tmp_path) == "aes_core"
+
+    parameters.write_text(json.dumps({"Design": "../other"}), encoding="utf-8")
+    with pytest.raises(OptimizationRuntimeError, match="identifier is invalid"):
+        _design_id(tmp_path)
+
+
+def test_incumbent_workspace_resolves_only_registered_candidate_roots(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    candidate = workspace / ".agent" / "candidates" / "candidate-1"
+    candidate.mkdir(parents=True)
+
+    assert _incumbent_workspace(workspace, None) == workspace
+    assert _incumbent_workspace(workspace, ".agent/candidates/candidate-1") == candidate
+    with pytest.raises(OptimizationRuntimeError, match="incumbent candidate workspace"):
+        _incumbent_workspace(workspace, "../outside")
+
+
 def test_parent_manifest_binds_terminal_evidence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         "ecos_agent.optimization_runtime.build_optimization_artifact_manifest",
@@ -128,6 +156,66 @@ def test_runtime_requires_a_hash_bound_optimization_objective() -> None:
         _optimization_objective(objective)
 
 
+def test_terminal_waiter_propagates_stop_to_cancel_and_returns_terminal_receipt() -> None:
+    events: list[str] = []
+    stop = threading.Event()
+    stop.set()
+
+    class Executor:
+        def wait_for_terminal(self, *_args: object, **_kwargs: object):
+            events.append("wait")
+            return CandidateExecutionReceipt(execution_id="operation-1", started=True)
+
+        def cancel(self, execution_id: str):
+            events.extend(("operation.cancel", "terminal.receipt"))
+            return CandidateExecutionReceipt(
+                execution_id=execution_id,
+                started=True,
+                outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+            )
+
+    receipt = _wait_for_terminal_receipt(
+        Executor(),
+        "operation-1",
+        timeout_seconds=5.0,
+        stop_event=stop,
+    )
+
+    assert events == ["operation.cancel", "terminal.receipt"]
+    assert receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED
+
+
+def test_terminal_waiter_cancels_when_timeout_expires_between_clock_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    clock = iter((0.0, 0.05, 0.2))
+    monkeypatch.setattr("ecos_agent.optimization_runtime._monotonic", lambda: next(clock))
+
+    class Executor:
+        def wait_for_terminal(self, *_args: object, **_kwargs: object):
+            calls.append("wait")
+            raise AssertionError("expired timeout must not reach ECC wait")
+
+        def cancel(self, execution_id: str):
+            calls.append("cancel")
+            return CandidateExecutionReceipt(
+                execution_id=execution_id,
+                started=True,
+                outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+            )
+
+    receipt = _wait_for_terminal_receipt(
+        Executor(),
+        "operation-1",
+        timeout_seconds=0.1,
+        stop_event=threading.Event(),
+    )
+
+    assert calls == ["cancel"]
+    assert receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED
+
+
 class _FakeRpc:
     def __init__(self, _executable: Path) -> None:
         self.calls: list[Path] = []
@@ -146,6 +234,10 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    (workspace / "home").mkdir()
+    (workspace / "home" / "parameters.json").write_text(
+        json.dumps({"Design": "design-a"}), encoding="utf-8"
+    )
     rpc = _FakeRpc(Path("ecc"))
     monkeypatch.setattr(
         "ecos_agent.optimization_runtime.EccContentLengthRpcClient", lambda _path: rpc
@@ -180,5 +272,11 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
 
     assert rpc.calls == [workspace]
     assert not (workspace / ".agent/optimization/baseline-replays.v2.json").exists()
+    episode_root = workspace / ".agent" / "optimization" / "episode-new"
+    assert (episode_root / "optimization-task-memory-scope.v1.json").is_file()
+    state = json.loads(
+        (episode_root / "optimization-episode-state.v6.json").read_text(encoding="utf-8")
+    )
+    assert state["task_memory_scope_sha256"].startswith("sha256:")
     runner.close()
     assert rpc.closed is True

@@ -216,17 +216,62 @@ class LegalAction(_ContractModel):
         return self
 
 
-class PlanningProviderEvidence(_ContractModel):
-    """Opaque proof that a Codex planner turn produced one response."""
+class PlanningProviderEnvelope(_ContractModel):
+    """Exact model-visible request, excluding hidden reasoning and response text."""
 
-    schema_version: Literal["ecos.optimization_planning_provider_evidence.v1"] = (
-        "ecos.optimization_planning_provider_evidence.v1"
+    schema_version: Literal["ecos.optimization_planning_provider_envelope.v1"] = (
+        "ecos.optimization_planning_provider_envelope.v1"
+    )
+    provider_id: Literal["codex_app_server"]
+    requested_model: str | None = None
+    prompt: str
+    output_schema: dict[str, object]
+    planner_payload_sha256: str
+    envelope_sha256: str
+
+    @field_validator("requested_model")
+    @classmethod
+    def validate_model(cls, value: str | None) -> str | None:
+        if value is not None and (not value or len(value) > 512):
+            raise ValueError("planning provider model is invalid")
+        return value
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        if not value or len(value.encode("utf-8")) > 1024 * 1024:
+            raise ValueError("planning provider prompt is invalid")
+        return value
+
+    @field_validator("planner_payload_sha256", "envelope_sha256")
+    @classmethod
+    def validate_envelope_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("planning provider envelope hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> "PlanningProviderEnvelope":
+        expected = canonical_sha256(
+            self.model_dump(mode="json", exclude={"envelope_sha256"})
+        )
+        if self.envelope_sha256 != expected:
+            raise ValueError("planning provider envelope hash does not match")
+        return self
+
+
+class PlanningProviderEvidence(_ContractModel):
+    """Hash-bound proof that one exact planner request produced a response."""
+
+    schema_version: Literal["ecos.optimization_planning_provider_evidence.v2"] = (
+        "ecos.optimization_planning_provider_evidence.v2"
     )
     provider_id: Literal["codex_app_server"]
     thread_id: str
     turn_id: str
     response_sha256: str
     diagnostics_sha256: str | None = None
+    envelope: PlanningProviderEnvelope
 
     @field_validator("thread_id", "turn_id")
     @classmethod
@@ -320,6 +365,17 @@ class KnowledgeReference(_ContractModel):
         return value
 
 
+class OptimizationTaskMemoryReference(_ContractModel):
+    summary_sha256: str
+
+    @field_validator("summary_sha256")
+    @classmethod
+    def validate_summary_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("task memory summary hash is invalid")
+        return value
+
+
 class ExpectedEffect(_ContractModel):
     metric_id: ObjectiveMetric
     direction: ExpectedEffectDirection
@@ -361,6 +417,9 @@ class OptimizationProposal(_ContractModel):
     observation_refs: tuple[ObservationReference, ...] = Field(min_length=1, max_length=13)
     history_refs: tuple[HistoryReference, ...] = Field(default=(), max_length=6)
     knowledge_refs: tuple[KnowledgeReference, ...] = Field(default=(), max_length=6)
+    task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = Field(
+        default=(), max_length=6, exclude_if=lambda value: not value
+    )
     action: ProposalAction | None = None
 
     @field_validator("rationale_summary")
@@ -371,7 +430,9 @@ class OptimizationProposal(_ContractModel):
             raise ValueError("proposal rationale is invalid")
         return value
 
-    @field_validator("observation_refs", "history_refs", "knowledge_refs")
+    @field_validator(
+        "observation_refs", "history_refs", "knowledge_refs", "task_memory_refs"
+    )
     @classmethod
     def validate_unique_references(cls, value: tuple[object, ...]) -> tuple[object, ...]:
         identifiers = [next(iter(item.model_dump().values())) for item in value]
@@ -491,10 +552,10 @@ class KnobApplicationReceipt(_ContractModel):
 
 
 class EpisodeBudget(_ContractModel):
-    schema_version: Literal["ecos.optimization_budget.v3"] = "ecos.optimization_budget.v3"
+    schema_version: Literal["ecos.optimization_budget.v4"] = "ecos.optimization_budget.v4"
     candidate_execution_limit: Literal[6] = 6
     planning_call_limit: Literal[18] = 18
-    minimum_candidate_executions: Literal[2] = 2
+    minimum_candidate_executions: Literal[6] = 6
     max_planning_only_turns: Literal[2] = 2
     reference_place_to_harden_seconds: float
     wall_time_limit_seconds: float

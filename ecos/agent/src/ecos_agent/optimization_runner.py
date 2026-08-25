@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Callable, Mapping
 
@@ -9,6 +10,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     OptimizationEpisodeState,
     OptimizationObjectiveContract,
+    RequestedKnobValue,
     RoutabilityObjectiveContract,
     StageObservation,
     TerminalObservation,
@@ -59,14 +61,16 @@ class OptimizationEpisodeRunner:
         ]
         | None = None,
         objective: RoutabilityObjectiveContract | None = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         self._controller = controller
         self._observation_supplier = observation_supplier
         self._retrieval_supplier = retrieval_supplier
-        self._current_values = current_values
+        self._current_values = dict(current_values)
         self._terminal_waiter = terminal_waiter
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
+        self._stop_event = stop_event or threading.Event()
 
     @property
     def state(self) -> OptimizationEpisodeState:
@@ -94,6 +98,9 @@ class OptimizationEpisodeRunner:
         if callable(close):
             close()
 
+    def request_stop(self) -> None:
+        self._stop_event.set()
+
     def run_turn(self) -> OptimizationEpisodeTurn:
         if self._controller.state not in {
             OptimizationEpisodeState.CREATED,
@@ -108,6 +115,9 @@ class OptimizationEpisodeRunner:
         planning = self._controller.plan(observation, retrieval, self._current_values)
         if planning.state != OptimizationEpisodeState.AWAITING_EXECUTION:
             return OptimizationEpisodeTurn(observation, retrieval, planning, None)
+        if self._stop_event.is_set():
+            stopped = self._controller.stop_before_execution()
+            return OptimizationEpisodeTurn(observation, retrieval, planning, stopped)
         execution = self._controller.execute()
         if execution.state != OptimizationEpisodeState.EXECUTING:
             return OptimizationEpisodeTurn(observation, retrieval, planning, execution)
@@ -140,7 +150,7 @@ class OptimizationEpisodeRunner:
             incumbent_decision=comparison.decision.value if comparison else None,
             decisive_metric=comparison.decisive_metric if comparison else None,
         )
-        self._promote(terminal_observation, comparison, receipt)
+        self._promote(terminal_observation, comparison, receipt, planning.requested)
         return OptimizationEpisodeTurn(
             observation,
             retrieval,
@@ -194,6 +204,7 @@ class OptimizationEpisodeRunner:
         candidate: TerminalObservation | None,
         comparison: IncumbentComparison | None,
         receipt: CandidateExecutionReceipt,
+        requested: RequestedKnobValue | None,
     ) -> None:
         if (
             candidate is not None
@@ -203,6 +214,8 @@ class OptimizationEpisodeRunner:
             in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
         ):
             self._controller.promote_incumbent(candidate, receipt.evidence)
+            if requested is not None:
+                self._current_values[requested.knob_id.value] = requested.value
 
     def _indeterminate_turn(
         self,

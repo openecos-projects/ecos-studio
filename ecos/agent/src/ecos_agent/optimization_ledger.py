@@ -30,6 +30,8 @@ from ecos_agent.optimization_contracts import (
     ProposalContextRef,
     ProposalAction,
     RequestedKnobValue,
+    KnobApplicationReceipt,
+    OptimizationTaskMemoryReference,
     SelectionMetric,
     TerminalObservation,
 )
@@ -184,6 +186,7 @@ class OptimizationTerminalOutcome(_LedgerModel):
     receipt_sha256: str | None = None
     terminal_observation_sha256: str | None = None
     terminal_observation: TerminalObservation | None = None
+    application_receipt: KnobApplicationReceipt | None = None
     incumbent_decision: IncumbentDecision | None = None
     decisive_metric: SelectionMetric | None = None
     outcome_details_sha256: str
@@ -293,6 +296,12 @@ class OptimizationPlanningAuditEntry(_LedgerModel):
     history_count: StrictInt = Field(ge=0, le=6)
     budget_snapshot_sha256: str
     incumbent_sha256: str | None = None
+    task_memory_snapshot_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = Field(
+        default=(), max_length=6, exclude_if=lambda value: not value
+    )
     planner_payload_sha256: str
     entry_sha256: str
 
@@ -301,6 +310,7 @@ class OptimizationPlanningAuditEntry(_LedgerModel):
         "context_input_sha256",
         "budget_snapshot_sha256",
         "incumbent_sha256",
+        "task_memory_snapshot_sha256",
         "planner_payload_sha256",
         "entry_sha256",
     )
@@ -319,6 +329,8 @@ class OptimizationPlanningAuditEntry(_LedgerModel):
             or len(self.history_outcomes) != self.history_count
         ):
             raise ValueError("planning history count does not match history references")
+        if self.task_memory_refs and self.task_memory_snapshot_sha256 is None:
+            raise ValueError("planning task memory references require a snapshot")
         expected = _planning_audit_entry_sha256(
             self.sequence,
             self.previous_entry_sha256,
@@ -355,6 +367,8 @@ class OptimizationPlanningAudit:
         budget_snapshot: BudgetSnapshot,
         incumbent: TerminalObservation | None,
         planner_payload_sha256: str,
+        task_memory_snapshot_sha256: str | None = None,
+        task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = (),
     ) -> OptimizationPlanningAuditEntry:
         with self._exclusive_lock():
             replay = self._verify_locked()
@@ -373,6 +387,12 @@ class OptimizationPlanningAudit:
                 ),
                 "planner_payload_sha256": planner_payload_sha256,
             }
+            if task_memory_snapshot_sha256 is not None:
+                entry_payload["task_memory_snapshot_sha256"] = task_memory_snapshot_sha256
+            if task_memory_refs:
+                entry_payload["task_memory_refs"] = [
+                    item.model_dump(mode="json") for item in task_memory_refs
+                ]
             entry = OptimizationPlanningAuditEntry(
                 sequence=len(replay.entries) + 1,
                 previous_entry_sha256=replay.chain_head_sha256,
@@ -757,6 +777,14 @@ def _replay_entries(entries: tuple[OptimizationLedgerEntry, ...]) -> Optimizatio
         else:
             if payload.intervention_id not in starts or payload.intervention_id in terminal_by_id:
                 raise OptimizationLedgerIntegrityError("terminal outcome does not match one pending intervention")
+            start = starts[payload.intervention_id]
+            if payload.application_receipt is not None and (
+                start.requested is None
+                or payload.application_receipt.requested != start.requested
+            ):
+                raise OptimizationLedgerIntegrityError(
+                    "terminal application receipt does not match intervention request"
+                )
             terminal_by_id[payload.intervention_id] = payload
             outcomes.append(payload)
         previous_hash = entry.entry_sha256

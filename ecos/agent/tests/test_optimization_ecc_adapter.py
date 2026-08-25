@@ -120,6 +120,21 @@ def _running_operation() -> dict[str, object]:
     }
 
 
+def _application_receipt_payload(
+    *, requested: object = 0.65, written: object = 0.65
+) -> dict[str, object]:
+    value = {"knobId": "place.target_density", "value": written}
+    return {
+        "receiptId": "receipt-1",
+        "requested": {"knobId": "place.target_density", "value": requested},
+        "written": value,
+        "effectiveInitial": value,
+        "runtimeAdjustments": [],
+        "effectiveFinal": value,
+        "evidenceSha256": HASH,
+    }
+
+
 def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
     rpc = _FakeEccRpc(_running_operation())
     adapter = EccCandidateRerunAdapter(
@@ -147,6 +162,22 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
             },
         )
     ]
+
+
+def test_adapter_reruns_from_the_incumbent_candidate_workspace() -> None:
+    rpc = _FakeEccRpc(_running_operation())
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    adapter.start(
+        replace(
+            _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+            parent_candidate_root_ref=".agent/candidates/candidate-1",
+        )
+    )
+
+    assert rpc.calls[0][1]["parentCandidateRootRef"] == ".agent/candidates/candidate-1"
 
 
 def test_adapter_materializes_logical_padding_sites_to_dbu() -> None:
@@ -267,6 +298,70 @@ def test_adapter_retains_valid_candidate_manifest_evidence() -> None:
     assert receipt.evidence is not None
     assert receipt.evidence.candidate_manifest_sha256 == HASH
     assert receipt.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+
+
+def test_adapter_binds_and_returns_effective_value_receipt() -> None:
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {"knobApplicationReceipt": _application_receipt_payload()},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+    receipt = adapter.wait_for_terminal("operation-1")
+
+    assert receipt.application_receipt is not None
+    assert receipt.application_receipt.effective_final.value == 0.65
+
+
+def test_adapter_rejects_an_application_receipt_with_wrong_request_or_written_value() -> None:
+    for payload in (
+        _application_receipt_payload(requested=0.7),
+        _application_receipt_payload(written=0.7),
+    ):
+        rpc = _FakeEccRpc(
+            _running_operation(),
+            terminal_response={
+                "operationId": "operation-1",
+                "workspaceId": "workspace-1",
+                "state": "succeeded",
+                "result": {"knobApplicationReceipt": payload},
+            },
+        )
+        adapter = EccCandidateRerunAdapter(
+            rpc, workspace_id="workspace-1", site_width_dbu=200
+        )
+        adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+        with pytest.raises(OptimizationEccAdapterError, match="application receipt"):
+            adapter.wait_for_terminal("operation-1")
+
+
+def test_adapter_rejects_a_malformed_application_receipt() -> None:
+    payload = _application_receipt_payload()
+    del payload["effectiveFinal"]
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {"knobApplicationReceipt": payload},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    with pytest.raises(OptimizationEccAdapterError, match="application receipt"):
+        adapter.wait_for_terminal("operation-1")
 
 
 def test_adapter_rejects_absolute_candidate_evidence_reference() -> None:

@@ -32,9 +32,8 @@ def _normalised_tree(root: Path) -> dict[Path, bytes]:
     tree = _tree(root)
     for sources_path in (path for path in tree if path.name == "sources.json"):
         sources = json.loads(tree[sources_path])
-        if "ecos_studio" not in sources["repositories"]:
-            continue
-        sources["repositories"]["ecos_studio"] = "<workspace-revision>"
+        for repository in sources["repositories"]:
+            sources["repositories"][repository] = "<workspace-revision>"
         sources_bytes = _json_bytes(sources)
         tree[sources_path] = sources_bytes
         manifest_path = sources_path.with_name("manifest.json")

@@ -773,9 +773,8 @@ class EcosAgentProvider:
     def interrupt(self, request: Mapping[str, Any] | None = None) -> None:
         session = self._session(request or {})
         if self._optimization_thread_active(session):
-            session.optimization_stop.set()
-            if session.optimization_provider is not None:
-                session.optimization_provider.interrupt()
+            self._request_optimization_stop(session)
+            session.optimization_phase = "stopping"
             self._emit_status(session, "interrupted")
             return
         if not session.running:
@@ -827,10 +826,15 @@ class EcosAgentProvider:
         }
 
     def stop(self, _request: Mapping[str, Any] | None = None) -> None:
+        optimization_threads = []
         for session in self.sessions.values():
-            session.optimization_stop.set()
-            if session.optimization_provider is not None:
-                session.optimization_provider.interrupt()
+            self._request_optimization_stop(session)
+            if self._optimization_thread_active(session):
+                optimization_threads.append(session.optimization_thread)
+        for thread in optimization_threads:
+            if thread is not None and thread is not threading.current_thread():
+                thread.join()
+        for session in self.sessions.values():
             if session.codex_provider is not None:
                 session.codex_provider.close()
         self.stopped = True
@@ -1277,16 +1281,26 @@ class EcosAgentProvider:
                         ),
                     },
                 )
+                if runner.state == OptimizationEpisodeState.QUARANTINED:
+                    final_phase = "quarantined"
+                    break
+                if session.optimization_stop.is_set():
+                    final_phase = "stopped"
+                    break
                 if runner.state not in {
                     OptimizationEpisodeState.CREATED,
                     OptimizationEpisodeState.PLANNING,
                 }:
-                    if runner.state == OptimizationEpisodeState.QUARANTINED:
-                        final_phase = "quarantined"
                     break
         except Exception as exc:
-            final_phase = "error"
-            self._emit(session, "error", f"Optimization episode stopped: {exc}")
+            if (
+                session.optimization_stop.is_set()
+                and runner.state != OptimizationEpisodeState.EXECUTING
+            ):
+                final_phase = "stopped"
+            else:
+                final_phase = "error"
+                self._emit(session, "error", f"Optimization episode stopped: {exc}")
         finally:
             if runner is not None:
                 runner.close()
@@ -1324,9 +1338,7 @@ class EcosAgentProvider:
             self._emit_status(session, "running")
             return
         if command in {"stop", "停止", "cancel", "取消"}:
-            session.optimization_stop.set()
-            if session.optimization_provider is not None:
-                session.optimization_provider.interrupt()
+            self._request_optimization_stop(session)
             session.optimization_phase = "stopping"
             self._emit_status(session, "interrupted")
             return
@@ -1340,6 +1352,15 @@ class EcosAgentProvider:
                 "turn_count": session.optimization_turn_count,
             },
         )
+
+    @staticmethod
+    def _request_optimization_stop(session: _Session) -> None:
+        session.optimization_stop.set()
+        if session.optimization_runner is not None:
+            session.optimization_runner.request_stop()
+        if session.optimization_provider is not None:
+            session.optimization_provider.interrupt()
+
     def _resolve_operation_choice(self, session: _Session, message: str) -> str | None:
         resolve_mode = "home" if session.phase == "home_ready" else session.mode
         allowed_options = _allowed_operation_options(

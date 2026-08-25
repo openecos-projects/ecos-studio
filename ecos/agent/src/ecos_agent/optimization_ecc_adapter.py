@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import queue
 import re
@@ -14,7 +13,12 @@ import time
 from pathlib import Path
 from typing import Mapping, Protocol
 
-from ecos_agent.optimization_contracts import OptimizationKnob
+from ecos_agent.optimization_contracts import (
+    AppliedKnobValue,
+    KnobApplicationReceipt,
+    OptimizationKnob,
+    RequestedKnobValue,
+)
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
@@ -66,6 +70,7 @@ class EccCandidateRerunAdapter:
         self._rpc = rpc
         self._workspace_id = workspace_id
         self._site_width_dbu = site_width_dbu
+        self._requested_by_execution_id: dict[str, RequestedKnobValue] = {}
 
     def close(self) -> None:
         close = getattr(self._rpc, "close", None)
@@ -82,6 +87,8 @@ class EccCandidateRerunAdapter:
             candidate_id=_candidate_id(request.episode_id, request.intervention_id),
             idempotency_key=f"{request.episode_id}.{request.intervention_id}",
             patch=patch,
+            requested=request.requested,
+            parent_candidate_root_ref=request.parent_candidate_root_ref,
         )
 
     def _start_rerun(
@@ -90,34 +97,51 @@ class EccCandidateRerunAdapter:
         candidate_id: str,
         idempotency_key: str,
         patch: dict[str, object],
+        requested: RequestedKnobValue,
+        parent_candidate_root_ref: str | None,
     ) -> CandidateExecutionReceipt:
-        response = self._rpc.call(
-            "candidate.rerun",
-            {
-                "workspaceId": self._workspace_id,
-                "targetStep": "place",
-                "endStep": "Harden",
-                "candidateId": candidate_id,
-                "patch": [patch],
-                "executionScope": "full_flow",
-                "idempotencyKey": idempotency_key,
-            },
-        )
+        params = {
+            "workspaceId": self._workspace_id,
+            "targetStep": "place",
+            "endStep": "Harden",
+            "candidateId": candidate_id,
+            "patch": [patch],
+            "executionScope": "full_flow",
+            "idempotencyKey": idempotency_key,
+        }
+        if parent_candidate_root_ref is not None:
+            params["parentCandidateRootRef"] = parent_candidate_root_ref
+        response = self._rpc.call("candidate.rerun", params)
         operation_id, state = self._validate_operation(response)
         evidence = self._evidence(response)
+        application_receipt = self._application_receipt(response, requested, state)
+        self._requested_by_execution_id[operation_id] = requested
         if state == "failed":
+            self._requested_by_execution_id.pop(operation_id, None)
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,
                 outcome=OptimizationOutcomeKind.EXECUTION_FAILED,
                 evidence=evidence,
+                application_receipt=application_receipt,
             )
         if state == "cancelled":
+            self._requested_by_execution_id.pop(operation_id, None)
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,
                 outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
                 evidence=evidence,
+                application_receipt=application_receipt,
+            )
+        if state == "succeeded":
+            self._requested_by_execution_id.pop(operation_id, None)
+            return CandidateExecutionReceipt(
+                execution_id=operation_id,
+                started=True,
+                outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+                evidence=evidence,
+                application_receipt=application_receipt,
             )
         return CandidateExecutionReceipt(execution_id=operation_id, started=True)
 
@@ -139,8 +163,15 @@ class EccCandidateRerunAdapter:
             if state in {"cancelled", "failed"}
             else None
         )
+        application_receipt = self._application_receipt(
+            terminal, self._requested_by_execution_id.get(intervention_id), state
+        )
+        self._requested_by_execution_id.pop(intervention_id, None)
         return CandidateExecutionReceipt(
-            execution_id=intervention_id, started=True, outcome=outcome
+            execution_id=intervention_id,
+            started=True,
+            outcome=outcome,
+            application_receipt=application_receipt,
         )
 
     def wait_for_terminal(
@@ -166,20 +197,23 @@ class EccCandidateRerunAdapter:
             "failed": OptimizationOutcomeKind.EXECUTION_FAILED,
             "cancelled": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
         }.get(state)
+        application_receipt = self._application_receipt(
+            terminal, self._requested_by_execution_id.get(execution_id), state
+        )
+        self._requested_by_execution_id.pop(execution_id, None)
         return CandidateExecutionReceipt(
             execution_id=execution_id,
             started=True,
             outcome=outcome,
             evidence=self._evidence(terminal),
+            application_receipt=application_receipt,
         )
 
     @staticmethod
     def _evidence(response: Mapping[str, object]) -> CandidateExecutionEvidence | None:
-        result = response.get("result")
+        result = EccCandidateRerunAdapter._result(response)
         if result is None:
             return None
-        if not isinstance(result, Mapping):
-            raise OptimizationEccAdapterError("candidate terminal result is invalid")
         values = {
             "candidate_root_ref": result.get("candidateRootRef"),
             "candidate_manifest_ref": result.get("candidateManifestRef"),
@@ -193,6 +227,46 @@ class EccCandidateRerunAdapter:
             return CandidateExecutionEvidence(**values)
         except ValueError as exc:
             raise OptimizationEccAdapterError("candidate terminal evidence is invalid") from exc
+
+    @staticmethod
+    def _result(response: Mapping[str, object]) -> Mapping[str, object] | None:
+        result = response.get("result")
+        if result is None:
+            return None
+        if not isinstance(result, Mapping):
+            raise OptimizationEccAdapterError("candidate terminal result is invalid")
+        return result
+
+    def _application_receipt(
+        self,
+        response: Mapping[str, object],
+        requested: RequestedKnobValue | None,
+        state: str,
+    ) -> KnobApplicationReceipt | None:
+        result = self._result(response)
+        if result is None or "knobApplicationReceipt" not in result:
+            return None
+        if requested is None:
+            raise OptimizationEccAdapterError("application receipt cannot be bound")
+        if state not in _TERMINAL_STATES:
+            raise OptimizationEccAdapterError("application receipt is non-terminal")
+        raw = result["knobApplicationReceipt"]
+        try:
+            receipt = KnobApplicationReceipt.model_validate(
+                _normalize_receipt_payload(raw)
+            )
+        except (TypeError, ValueError) as exc:
+            raise OptimizationEccAdapterError("application receipt is invalid") from exc
+        if receipt.requested != requested:
+            raise OptimizationEccAdapterError("application receipt request does not match")
+        expected_written = requested.value
+        if requested.knob_id == OptimizationKnob.CELL_PADDING_X:
+            expected_written *= self._site_width_dbu
+        if receipt.written != AppliedKnobValue(
+            knob_id=requested.knob_id, value=expected_written
+        ):
+            raise OptimizationEccAdapterError("application receipt written value does not match")
+        return receipt
 
     def _materialize_patch(
         self, request: CandidateExecutionRequest
@@ -232,6 +306,22 @@ class EccCandidateRerunAdapter:
         if require_workspace and response.get("workspaceId") != self._workspace_id:
             raise OptimizationEccAdapterError("operation workspace does not match")
         return operation_id, state
+
+
+def _normalize_receipt_payload(value: object) -> object:
+    if isinstance(value, Mapping):
+        normalized: dict[str, object] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("application receipt field name is invalid")
+            snake_key = re.sub(r"(?<!^)([A-Z])", r"_\1", key).lower()
+            if snake_key in normalized:
+                raise ValueError("application receipt contains duplicate fields")
+            normalized[snake_key] = _normalize_receipt_payload(item)
+        return normalized
+    if isinstance(value, (list, tuple)):
+        return [_normalize_receipt_payload(item) for item in value]
+    return value
 
 
 class EccContentLengthRpcClient:

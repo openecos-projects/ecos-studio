@@ -227,7 +227,9 @@ def select_requested_value(
         else CoordinateDirection.DECREASE
     )
     coordinate_action = CoordinateAction(action.knob_id, direction)
-    for value in _directional_lattice_values(coordinate_action, current):
+    for value in _directional_lattice_values(
+        coordinate_action, current, (*attempted_values, *aliases)
+    ):
         request = _unexcluded_request(action.knob_id, value, attempted_values, aliases)
         if request is not None:
             return request
@@ -245,7 +247,7 @@ def _next_requested_value(
         if any(item.knob_id == action.knob_id for item in attempted):
             return None
         return _unexcluded_request(action.knob_id, not current, attempted, aliases)
-    candidates = _directional_lattice_values(action, current)
+    candidates = _directional_lattice_values(action, current, (*attempted, *aliases))
     for value in candidates:
         request = _unexcluded_request(action.knob_id, value, attempted, aliases)
         if request is not None:
@@ -280,16 +282,36 @@ def _current_value(
 
 
 def _directional_lattice_values(
-    action: CoordinateAction, current: bool | int | float
+    action: CoordinateAction,
+    current: bool | int | float,
+    known: tuple[RequestedKnobValue, ...] = (),
 ) -> tuple[float | int, ...]:
     values = (
         _DENSITY_VALUES
         if action.knob_id == OptimizationKnob.TARGET_DENSITY
         else _PADDING_VALUES
     )
-    if action.direction == CoordinateDirection.DECREASE:
-        return tuple(value for value in reversed(values) if value < current)
-    return tuple(value for value in values if value > current)
+    candidates = (
+        tuple(value for value in reversed(values) if value < current)
+        if action.direction == CoordinateDirection.DECREASE
+        else tuple(value for value in values if value > current)
+    )
+    if not candidates:
+        return ()
+    # The boundary is a virtual anchor, so maximin ordering bisects unexplored intervals.
+    boundary = values[0] if action.direction == CoordinateDirection.DECREASE else values[-1]
+    anchors = (current, boundary) + tuple(
+        item.value
+        for item in known
+        if item.knob_id == action.knob_id
+        and min(boundary, current) <= item.value <= max(boundary, current)
+    )
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda value: -min(abs(value - anchor) for anchor in anchors),
+        )
+    )
 
 
 def _unexcluded_request(

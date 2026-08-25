@@ -6,7 +6,10 @@ from typing import Callable
 
 import pytest
 
+from ecos_agent.codex_rpc import CodexProviderError
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
+    AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
@@ -17,8 +20,12 @@ from ecos_agent.optimization_contracts import (
     OptimizationEpisodeState,
     OptimizationObjectiveContract,
     OptimizationObjectiveProposal,
+    PlanningProviderEnvelope,
     PlanningProviderEvidence,
     ProposalReason,
+    KnobApplicationReceipt,
+    RequestedKnobValue,
+    RuntimeAdjustment,
     StageObservation,
     StrategyDirection,
 )
@@ -27,6 +34,7 @@ from ecos_agent.optimization_controller import (
     OptimizationAgentMode,
     OptimizationEpisodeController,
     OptimizationEpisodeControllerError,
+    planning_context_payload,
 )
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
@@ -45,6 +53,10 @@ from ecos_agent.optimization_retrieval import (
     OptimizationRetrievalResult,
 )
 from ecos_agent.optimization_rules import freeze_optimization_objective
+from ecos_agent.optimization_memory import (
+    OptimizationTaskMemoryStore,
+    build_task_memory_scope,
+)
 
 
 HASH = "sha256:" + "a" * 64
@@ -81,12 +93,25 @@ class _FakeCodex:
 
 class _AuditedFakeCodex(_FakeCodex):
     def consume_planning_evidence(self) -> PlanningProviderEvidence | None:
+        payload = {
+            "schema_version": "ecos.optimization_planning_provider_envelope.v1",
+            "provider_id": "codex_app_server",
+            "requested_model": "test-model",
+            "prompt": "bounded test prompt",
+            "output_schema": {"type": "object"},
+            "planner_payload_sha256": canonical_sha256(
+                planning_context_payload(self.contexts[-1])
+            ),
+        }
         return PlanningProviderEvidence(
             provider_id="codex_app_server",
             thread_id="thread-1",
             turn_id=f"turn-{len(self.contexts)}",
             response_sha256=HASH,
             diagnostics_sha256=HASH,
+            envelope=PlanningProviderEnvelope(
+                **payload, envelope_sha256=canonical_sha256(payload)
+            ),
         )
 
 
@@ -172,6 +197,7 @@ def _proposal(
     knowledge_refs: list[dict[str, str]] | None = None,
     context_ref: dict[str, str] | None = None,
     observation_refs: list[dict[str, str]] | None = None,
+    task_memory_refs: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     expected_context = getattr(context, "context_ref")
     expected_observation = getattr(context, "observation_ref")
@@ -188,6 +214,7 @@ def _proposal(
             if knowledge_refs is not None
             else [reference.model_dump() for reference in expected_knowledge]
         ),
+        "task_memory_refs": task_memory_refs or [],
         "action": {
             "knob_id": "place.cell_padding_x",
             "direction": StrategyDirection.INCREASE,
@@ -210,6 +237,7 @@ def _controller(
     budget: BudgetSnapshot | None = None,
     clock: _Clock | None = None,
     objective: OptimizationObjectiveContract | None = None,
+    task_memory=None,
 ) -> OptimizationEpisodeController:
     return OptimizationEpisodeController(
         episode_id="episode-1",
@@ -221,6 +249,10 @@ def _controller(
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=clock or _Clock(),
         objective=objective,
+        task_memory_scope_sha256=(
+            task_memory.scope.scope_sha256 if task_memory is not None else None
+        ),
+        task_memory_supplier=(lambda: task_memory) if task_memory is not None else None,
     )
 
 
@@ -233,6 +265,38 @@ def _terminal(
     execution_id: str = "execution-1",
 ) -> CandidateExecutionReceipt:
     return CandidateExecutionReceipt(execution_id=execution_id, started=True, outcome=outcome)
+
+
+def _application_receipt() -> KnobApplicationReceipt:
+    return KnobApplicationReceipt(
+        receipt_id="receipt-1",
+        requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=3),
+        written=AppliedKnobValue(knob_id="place.cell_padding_x", value=600),
+        effective_initial=AppliedKnobValue(knob_id="place.cell_padding_x", value=600),
+        runtime_adjustments=(
+            RuntimeAdjustment(
+                effective_value=AppliedKnobValue(
+                    knob_id="place.cell_padding_x", value=400
+                ),
+                reason="capacity_cap",
+                evidence_sha256=HASH,
+            ),
+        ),
+        effective_final=AppliedKnobValue(knob_id="place.cell_padding_x", value=400),
+        evidence_sha256=HASH,
+    )
+
+
+def _task_memory_snapshot(tmp_path: Path):
+    objective = _objective()
+    scope = build_task_memory_scope(
+        workspace_manifest_sha256=HASH,
+        design_id="design-a",
+        checkpoint_id="checkpoint-1",
+        episode_id="episode-1",
+        objective_contract_sha256=objective.contract_sha256,
+    )
+    return OptimizationTaskMemoryStore(tmp_path / "task-memory", scope).snapshot()
 
 
 def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(tmp_path: Path) -> None:
@@ -277,6 +341,53 @@ def test_controller_binds_codex_turn_evidence_to_the_planning_audit(tmp_path: Pa
         clock=_Clock(),
     )
     assert recovered.state == OptimizationEpisodeState.AWAITING_EXECUTION
+
+
+def test_controller_binds_task_memory_snapshot_and_rejects_unknown_refs(
+    tmp_path: Path,
+) -> None:
+    snapshot = _task_memory_snapshot(tmp_path)
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(_started()),
+        objective=_objective(),
+        task_memory=snapshot,
+    )
+
+    planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert planned.state == OptimizationEpisodeState.AWAITING_EXECUTION
+    assert controller.planner.contexts[0].task_memory == snapshot
+    audit = OptimizationPlanningAudit(tmp_path / "episode").replay().entries[0]
+    assert audit.task_memory_snapshot_sha256 == snapshot.snapshot_sha256
+    assert audit.task_memory_refs == ()
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert state["task_memory_scope_sha256"] == snapshot.scope.scope_sha256
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal),
+        executor=_FakeEcc(_started()),
+        ledger=controller.ledger,
+        clock=_Clock(),
+        task_memory_scope_sha256=snapshot.scope.scope_sha256,
+        task_memory_supplier=lambda: snapshot,
+    )
+    assert recovered.task_memory_scope_sha256 == snapshot.scope.scope_sha256
+
+    def unknown_ref(context):
+        return _proposal(
+            context,
+            task_memory_refs=[{"summary_sha256": HASH}],
+        )
+
+    rejected = _controller(
+        tmp_path / "unknown",
+        _FakeCodex(unknown_ref),
+        _FakeEcc(_started()),
+        objective=_objective(),
+        task_memory=snapshot,
+    ).plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert rejected.rejection_reason == "task_memory_reference"
 
 
 def test_controller_persists_attempted_requested_values(tmp_path: Path) -> None:
@@ -421,7 +532,33 @@ def test_controller_defers_early_stop_then_uses_local_fallback(tmp_path: Path) -
     assert second.rejection_reason == "controlled_coordinate_fallback"
 
 
-def test_stop_is_accepted_after_minimum_candidate_executions(tmp_path: Path) -> None:
+def test_controller_uses_local_fallback_after_codex_parse_error(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _AuditedFakeCodex(
+            lambda context: _proposal(
+                context,
+                observation_refs=[
+                    context.observation_ref.model_dump(),
+                    ObservationReference(
+                        observation_id="terminal-Harden", sha256=HASH
+                    ).model_dump(),
+                ],
+            ),
+            CodexProviderError("schema validation", failure_class="parse_error"),
+        ),
+        _FakeEcc(_started()),
+    )
+
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert first.rejection_reason == "observation_reference"
+    assert second.state == OptimizationEpisodeState.AWAITING_EXECUTION
+    assert second.rejection_reason == "controlled_coordinate_fallback"
+
+
+def test_stop_is_deferred_until_fixed_candidate_budget_is_exhausted(tmp_path: Path) -> None:
     def stop(context: object) -> dict[str, object]:
         proposal = _proposal(context)
         proposal.update(
@@ -441,7 +578,8 @@ def test_stop_is_accepted_after_minimum_candidate_executions(tmp_path: Path) -> 
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
-    assert result.state == OptimizationEpisodeState.STOPPED
+    assert result.state == OptimizationEpisodeState.PLANNING
+    assert result.rejection_reason == "minimum_candidates_not_met"
 
 
 def test_planning_decisions_are_hash_bound_and_replayable(tmp_path: Path) -> None:
@@ -581,6 +719,25 @@ def test_terminal_outcome_can_only_complete_the_pending_execution(tmp_path: Path
 
     assert result.state == OptimizationEpisodeState.PLANNING
     assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
+
+
+def test_controller_persists_effective_value_receipt_in_terminal_ledger(tmp_path: Path) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    controller.execute()
+
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.DEGRADED,
+            application_receipt=_application_receipt(),
+        )
+    )
+
+    outcome = controller.ledger.replay().terminal_outcomes[0]
+    assert outcome.application_receipt is not None
+    assert outcome.application_receipt.effective_final.value == 400
 
 
 def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_path: Path) -> None:

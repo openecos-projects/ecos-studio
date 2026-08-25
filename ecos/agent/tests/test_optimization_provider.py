@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -85,6 +86,42 @@ class _CompletedRunner(_FailingRunner):
         return ".agent/candidates/candidate-winner"
 
 
+class _BlockingRunner(_CompletedRunner):
+    def __init__(self, lifecycle: list[str]) -> None:
+        super().__init__()
+        self.lifecycle = lifecycle
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def run_turn(self):
+        self.started.set()
+        assert self.release.wait(timeout=2)
+        self.lifecycle.append("terminal-ledger")
+        return super().run_turn()
+
+    def request_stop(self) -> None:
+        self.lifecycle.append("request-stop")
+        self.release.set()
+
+    def close(self) -> None:
+        self.lifecycle.append("runner-close")
+
+
+class _BrokenClosureRunner(_BlockingRunner):
+    def run_turn(self):
+        self.started.set()
+        assert self.release.wait(timeout=2)
+        self._controller.state = OptimizationEpisodeState.EXECUTING
+        raise RuntimeError("terminal closure failed")
+
+
+class _QuarantinedRunner(_BlockingRunner):
+    def run_turn(self):
+        turn = super().run_turn()
+        self._controller.state = OptimizationEpisodeState.QUARANTINED
+        return turn
+
+
 def test_gui_optimization_authorization_holds_and_closes_codex_provider(
     tmp_path: Path,
 ) -> None:
@@ -136,6 +173,87 @@ def test_gui_optimization_authorization_holds_and_closes_codex_provider(
     assert factory_calls[2]["context"]["objective"]["primary_metric"] == "route_wirelength"
     assert any(event["type"] == "optimization" for event in events) is False
     assert any(event["type"] == "error" and "test stop" in str(event["text"]) for event in events)
+
+
+def test_gui_stop_requests_terminal_closure_before_runner_close(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    lifecycle: list[str] = []
+    runner = _BlockingRunner(lifecycle)
+    provider = EcosAgentProvider(
+        emit=lambda _event: None,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda _context, _planner: runner,
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    provider.send_message({"sessionId": session_id, "message": "4"})
+    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
+    provider.send_message({"sessionId": session_id, "message": "1"})
+    assert runner.started.wait(timeout=2)
+
+    provider.send_message({"sessionId": session_id, "message": "stop"})
+    deadline = time.monotonic() + 2
+    while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert lifecycle == ["request-stop", "terminal-ledger", "runner-close"]
+    assert provider.sessions[session_id].optimization_phase == "stopped"
+
+
+def test_gui_stop_does_not_hide_a_terminal_closure_failure(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    lifecycle: list[str] = []
+    runner = _BrokenClosureRunner(lifecycle)
+    provider = EcosAgentProvider(
+        emit=lambda _event: None,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda _context, _planner: runner,
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    provider.send_message({"sessionId": session_id, "message": "4"})
+    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
+    provider.send_message({"sessionId": session_id, "message": "1"})
+    assert runner.started.wait(timeout=2)
+
+    provider.send_message({"sessionId": session_id, "message": "stop"})
+    deadline = time.monotonic() + 2
+    while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert lifecycle == ["request-stop", "runner-close"]
+    assert provider.sessions[session_id].optimization_phase == "error"
+
+
+def test_gui_stop_preserves_indeterminate_quarantine_phase(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    lifecycle: list[str] = []
+    runner = _QuarantinedRunner(lifecycle)
+    provider = EcosAgentProvider(
+        emit=lambda _event: None,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda _context, _planner: runner,
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    provider.send_message({"sessionId": session_id, "message": "4"})
+    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
+    provider.send_message({"sessionId": session_id, "message": "1"})
+    assert runner.started.wait(timeout=2)
+
+    provider.send_message({"sessionId": session_id, "message": "stop"})
+    deadline = time.monotonic() + 2
+    while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert lifecycle == ["request-stop", "terminal-ledger", "runner-close"]
+    assert provider.sessions[session_id].optimization_phase == "quarantined"
 
 
 def test_gui_optimization_fails_closed_without_runner_factory(tmp_path: Path) -> None:

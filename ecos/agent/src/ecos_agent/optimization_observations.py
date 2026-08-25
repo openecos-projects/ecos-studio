@@ -179,9 +179,9 @@ def build_candidate_terminal_observation(
         or payload.get("candidate_root_ref") != evidence.candidate_root_ref
     ):
         raise OptimizationObservationError("candidate workspace manifest is invalid")
-    parent_flow = _safe_file(parent, "home/flow.json")
+    parent_flow = _candidate_parent_flow(parent, payload.get("parent_candidate_root_ref"))
     if file_sha256(parent_flow) != payload.get("parent_flow_sha256"):
-        raise OptimizationObservationError("candidate parent flow does not match the baseline")
+        raise OptimizationObservationError("candidate parent flow does not match its manifest")
     return build_terminal_observation(candidate_root)
 
 
@@ -190,6 +190,17 @@ def _workspace_root(workspace_root: Path) -> Path:
     if root.is_symlink() or not root.is_dir():
         raise OptimizationObservationError("workspace root is unavailable or unsafe")
     return root.resolve()
+
+
+def _candidate_parent_flow(parent: Path, candidate_root_ref: object) -> Path:
+    if candidate_root_ref is None:
+        return _safe_file(parent, "home/flow.json")
+    if not isinstance(candidate_root_ref, str):
+        raise OptimizationObservationError("candidate parent workspace reference is invalid")
+    parts = Path(candidate_root_ref).parts
+    if len(parts) != 3 or parts[:2] != (".agent", "candidates") or not parts[2]:
+        raise OptimizationObservationError("candidate parent workspace reference is invalid")
+    return _safe_file(parent, f"{candidate_root_ref}/home/flow.json")
 
 
 def _canonical_stage(stage: ECCStepName | str) -> ECCStepName:
@@ -311,7 +322,9 @@ def _harden_output_paths(parameters: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def _checklist_gate(payload: dict[str, Any], gate_id: str) -> GateResult:
-    if payload.get("status") != "ready" or not isinstance(payload.get("checklist"), list):
+    if payload.get("status") not in {"ready", "blocked"} or not isinstance(
+        payload.get("checklist"), list
+    ):
         raise OptimizationObservationError("workspace signoff checklist is invalid")
     matches = [item for item in payload["checklist"] if isinstance(item, dict) and item.get("id") == gate_id]
     if len(matches) != 1:
@@ -319,7 +332,7 @@ def _checklist_gate(payload: dict[str, Any], gate_id: str) -> GateResult:
     state = matches[0].get("state")
     if state == "pass":
         return GateResult.PASS
-    if state in {"fail", "blocked"}:
+    if state in {"fail", "failed", "blocked"}:
         return GateResult.FAIL
     return GateResult.UNAVAILABLE
 

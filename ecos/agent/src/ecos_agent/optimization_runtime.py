@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -19,7 +20,6 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization_controller import (
-    CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     OptimizationAgentMode,
     OptimizationEpisodeController,
@@ -32,6 +32,10 @@ from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
     build_optimization_artifact_manifest,
+)
+from ecos_agent.optimization_memory import (
+    OptimizationTaskMemoryStore,
+    build_task_memory_scope,
 )
 from ecos_agent.optimization_observations import (
     build_candidate_terminal_observation,
@@ -62,6 +66,7 @@ _PLACE_TO_HARDEN_STAGES = (
     "sta",
     "Harden",
 )
+_DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 
 
 def create_optimization_runner(
@@ -73,8 +78,8 @@ def create_optimization_runner(
     checkpoint_id = "place"
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
-    current_values = _current_values(workspace, site_width_dbu)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
+    design_id = _design_id(workspace)
     routability_objective = freeze_routability_objective(terminal_observation)
     budget = BudgetSnapshot(
         budget=EpisodeBudget.from_reference_rerun(
@@ -82,6 +87,14 @@ def create_optimization_runner(
         )
     )
     ledger_root = workspace / ".agent" / "optimization" / episode_id
+    memory_scope = build_task_memory_scope(
+        workspace_manifest_sha256=parent_manifest,
+        design_id=design_id,
+        checkpoint_id=checkpoint_id,
+        episode_id=episode_id,
+        objective_contract_sha256=objective.contract_sha256,
+    )
+    memory_store = OptimizationTaskMemoryStore(ledger_root.parent, memory_scope)
     rpc = EccContentLengthRpcClient(_ecc_executable())
     ledger = _ledger(ledger_root)
     try:
@@ -99,11 +112,14 @@ def create_optimization_runner(
             ledger_root / "optimization-episode-state.v5.json",
         )
         if state_path.is_file():
+            memory_store.verify_episode_scope(ledger_root)
             controller = OptimizationEpisodeController.recover(
                 planner=planner,
                 executor=executor,
                 ledger=ledger,
                 clock=_monotonic,
+                task_memory_scope_sha256=memory_scope.scope_sha256,
+                task_memory_supplier=memory_store.snapshot,
             )
             if controller.objective != objective:
                 raise OptimizationRuntimeError(
@@ -120,6 +136,7 @@ def create_optimization_runner(
         elif ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
             raise OptimizationRuntimeError("optimization episode state is missing")
         else:
+            memory_store.ensure_episode_scope(ledger_root)
             controller = OptimizationEpisodeController(
                 episode_id=episode_id,
                 checkpoint_id=checkpoint_id,
@@ -132,12 +149,19 @@ def create_optimization_runner(
                 incumbent=terminal_observation,
                 parent_manifest_sha256=parent_manifest,
                 objective=objective,
+                task_memory_scope_sha256=memory_scope.scope_sha256,
+                task_memory_supplier=memory_store.snapshot,
             )
     except Exception:
         rpc.close()
         raise
 
     retrieval = OptimizationKnowledgeRetriever()
+    stop_event = threading.Event()
+    current_values = _current_values(
+        _incumbent_workspace(workspace, controller.incumbent_candidate_root_ref),
+        site_width_dbu,
+    )
 
     def observation_supplier(current_budget: BudgetSnapshot):
         return build_stage_observation(workspace, checkpoint_id, budget=current_budget)
@@ -154,15 +178,12 @@ def create_optimization_runner(
 
     def terminal_waiter(execution_id: str):
         remaining = controller.budget.remaining_wall_time_seconds
-        if remaining <= 0:
-            return executor.cancel(execution_id)
-        receipt = executor.wait_for_terminal(
+        return _wait_for_terminal_receipt(
+            executor,
             execution_id,
             timeout_seconds=min(_terminal_timeout_seconds(), remaining),
+            stop_event=stop_event,
         )
-        if receipt.outcome is None:
-            return executor.cancel(execution_id)
-        return receipt
 
     def terminal_observation_supplier(_observation, receipt):
         if receipt.evidence is None:
@@ -177,7 +198,34 @@ def create_optimization_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
+        stop_event=stop_event,
     )
+
+
+def _wait_for_terminal_receipt(
+    executor: EccCandidateRerunAdapter,
+    execution_id: str,
+    *,
+    timeout_seconds: float,
+    stop_event: threading.Event,
+) -> CandidateExecutionReceipt:
+    deadline = _monotonic() + max(0.0, timeout_seconds)
+    while not stop_event.is_set() and _monotonic() < deadline:
+        remaining = deadline - _monotonic()
+        if remaining <= 0:
+            break
+        try:
+            receipt = executor.wait_for_terminal(
+                execution_id, timeout_seconds=min(1.0, remaining)
+            )
+        except Exception:
+            if stop_event.is_set():
+                return executor.cancel(execution_id)
+            raise
+        if receipt.outcome is not None:
+            return receipt
+        stop_event.wait(min(0.05, max(0.0, deadline - _monotonic())))
+    return executor.cancel(execution_id)
 
 
 def _optimization_objective(value: object) -> OptimizationObjectiveContract:
@@ -215,10 +263,44 @@ def _workspace(value: object) -> Path:
     return path.resolve()
 
 
+def _incumbent_workspace(workspace: Path, candidate_root_ref: str | None) -> Path:
+    if candidate_root_ref is None:
+        return workspace
+    parts = Path(candidate_root_ref).parts
+    if len(parts) != 3 or parts[:2] != (".agent", "candidates") or not parts[2]:
+        raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    candidate = workspace
+    for part in parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(workspace)
+    except (OSError, ValueError) as exc:
+        raise OptimizationRuntimeError("incumbent candidate workspace is invalid") from exc
+    if not resolved.is_dir():
+        raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
+    return resolved
+
+
 def _text(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise OptimizationRuntimeError(f"optimization {label} is missing")
     return value.strip()
+
+
+def _design_id(workspace: Path) -> str:
+    try:
+        payload = json.loads(
+            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OptimizationRuntimeError("workspace design identifier is unavailable") from exc
+    value = payload.get("Design")
+    if not isinstance(value, str) or not _DESIGN_ID.fullmatch(value):
+        raise OptimizationRuntimeError("workspace design identifier is invalid")
+    return value
 
 
 def _place_to_harden_runtime_seconds(workspace: Path) -> float:
