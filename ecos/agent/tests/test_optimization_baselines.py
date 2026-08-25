@@ -65,6 +65,29 @@ def test_pilot_uses_two_designs_and_only_non_llm_online_baselines() -> None:
         "random_action",
         "rule_guided_direction",
     )
+    assert {
+        item.design_id: item.baseline_replay_count for item in config.designs
+    } == {"gcd": 1, "i2c": 3}
+
+
+def test_baseline_profile_uses_first_replay_as_reference() -> None:
+    defaults = (
+        _terminal(0, 0, 100),
+        _terminal(0, 0, 104),
+        _terminal(0, 0, 102),
+    )
+
+    profile = baseline_runner._baseline_noise_profile(defaults)
+
+    assert profile["reference"]["route_wirelength"] == 100
+    assert profile["epsilon"]["route_wirelength"] == 4
+
+
+def test_single_replay_profile_disables_noise_band() -> None:
+    profile = baseline_runner._baseline_noise_profile((_terminal(0, 0, 100),))
+
+    assert profile["reference"]["route_wirelength"] == 100
+    assert profile["epsilon"]["route_wirelength"] == 0
 
 
 def test_controlled_coordinate_reuses_fixed_direction_order_without_duplicates() -> None:
@@ -343,6 +366,7 @@ def test_pilot_runner_writes_a_two_design_non_llm_manifest(monkeypatch, tmp_path
         (tmp_path / "baseline-test/run-manifest.v1.json").read_text(encoding="utf-8")
     )
     assert manifest["designs"] == ["gcd", "i2c"]
+    assert manifest["baseline_replay_counts"] == {"gcd": 1, "i2c": 3}
     assert manifest["methods"] == [
         "default_ecos",
         "controlled_coordinate",

@@ -44,6 +44,7 @@
       "design_id": "gcd",
       "top_module": "gcd",
       "clock_name": "clk",
+      "baseline_replay_count": 1,
       "rtl": {
         "path": "designs/gcd/rtl/gcd.v",
         "sha256": "sha256:b4bd14574f723adb907d70efac29b19cf78c4df58b734bfede3286c4d0800c0e"
@@ -61,6 +62,7 @@
       "design_id": "i2c",
       "top_module": "i2c",
       "clock_name": "wb_clk_i",
+      "baseline_replay_count": 3,
       "rtl": {
         "path": "designs/i2c/rtl/i2c.v",
         "sha256": "sha256:5a4e34b1fa2de6c638990eac0a583f6c0222a1d50a6d8362dfb97001cd7fbd3f"

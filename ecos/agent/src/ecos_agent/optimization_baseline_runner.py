@@ -34,7 +34,6 @@ from ecos_agent.optimization_gate0 import (
     PilotCandidateExecutionError,
     compare_observations,
     load_gate0_config,
-    noise_profile,
     readiness_report,
     run_pilot_candidate,
 )
@@ -186,6 +185,10 @@ def run_baseline_pilot(
         "methods": [BaselineMethod.DEFAULT, *ONLINE_BASELINE_METHODS],
         "candidate_execution_limit": _CANDIDATE_LIMIT,
         "random_seed": random_seed,
+        "baseline_replay_counts": {
+            design_id: designs[design_id].baseline_replay_count
+            for design_id in sorted(workspaces)
+        },
         "workspaces": {key: str(Path(value).resolve()) for key, value in sorted(workspaces.items())},
         "workspace_bindings": workspace_bindings,
         "policies": {
@@ -204,6 +207,7 @@ def run_baseline_pilot(
                 readiness,
                 run_id,
                 random_seed,
+                designs[design_id].baseline_replay_count,
             )
     except KeyboardInterrupt:
         _write_json(run_root / "interrupted.v1.json", {
@@ -234,6 +238,7 @@ def _run_design(
     readiness: Mapping[str, object],
     run_id: str,
     random_seed: int,
+    baseline_replay_count: int,
 ) -> dict[str, object]:
     workspace = _canonical_workspace(workspace)
     output.mkdir()
@@ -246,11 +251,23 @@ def _run_design(
     try:
         workspace_id = client.open_workspace(workspace)
         defaults = _default_replays(
-            client, workspace_id, workspace, output, config, readiness, run_id, design_id, baseline
+            client,
+            workspace_id,
+            workspace,
+            output,
+            config,
+            readiness,
+            run_id,
+            design_id,
+            baseline,
+            baseline_replay_count,
         )
-        profile = noise_profile(defaults)
+        profile = _baseline_noise_profile(defaults)
+        default_baseline = defaults[0]
         methods = {
-            BaselineMethod.DEFAULT.value: _default_summary(design_id, baseline, profile)
+            BaselineMethod.DEFAULT.value: _default_summary(
+                design_id, default_baseline, profile
+            )
         }
         for method in ONLINE_BASELINE_METHODS:
             methods[method.value] = _run_online_method(
@@ -263,13 +280,21 @@ def _run_design(
                 readiness,
                 run_id,
                 design_id,
-                baseline,
+                default_baseline,
                 profile["epsilon"],
                 random_seed,
             )
     finally:
         client.close()
-    summary = {"design_id": design_id, "noise_profile": profile, "methods": methods}
+    summary = {
+        "design_id": design_id,
+        "baseline_replay_count": baseline_replay_count,
+        "canonical_terminal_observation": baseline.model_dump(mode="json"),
+        "default_baseline": default_baseline.model_dump(mode="json"),
+        "default_replays": [item.model_dump(mode="json") for item in defaults],
+        "noise_profile": profile,
+        "methods": methods,
+    }
     _write_json(output / "design-summary.v1.json", summary)
     return summary
 
@@ -284,10 +309,13 @@ def _default_replays(
     run_id: str,
     design_id: str,
     baseline: TerminalObservation,
+    replay_count: int,
 ) -> tuple[TerminalObservation, ...]:
+    if replay_count not in {1, 3}:
+        raise BaselineRunnerError("baseline replay count must be 1 or 3")
     results = []
     (output / "calibration").mkdir()
-    for index in range(1, config.default_replays + 1):
+    for index in range(1, replay_count + 1):
         result = run_pilot_candidate(
             client,
             workspace_id,
@@ -308,6 +336,25 @@ def _default_replays(
         )
         results.append(result.observation)
     return tuple(results)
+
+
+def _baseline_noise_profile(
+    default_replays: Sequence[TerminalObservation],
+) -> dict[str, dict[str, float]]:
+    """Use the first fresh no-op replay as Default and later replays as a band."""
+    if not default_replays or any(
+        not item.eligible_for_incumbent for item in default_replays
+    ):
+        raise BaselineRunnerError("default replay cannot define a baseline")
+    rows = [_terminal_metrics(item) for item in default_replays]
+    keys = tuple(rows[0])
+    return {
+        "reference": dict(rows[0]),
+        "epsilon": {
+            key: max(row[key] for row in rows) - min(row[key] for row in rows)
+            for key in keys
+        },
+    }
 
 
 def _run_online_method(

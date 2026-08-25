@@ -115,6 +115,7 @@ class Gate0Design(_Model):
     design_id: str
     top_module: str
     clock_name: str
+    baseline_replay_count: Literal[1, 3] = 3
     rtl: Gate0Snapshot
     filelist: Gate0Snapshot
     sdc: Gate0Snapshot
