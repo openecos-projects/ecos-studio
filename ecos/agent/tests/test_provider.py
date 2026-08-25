@@ -9,7 +9,7 @@ import ecos_agent.provider as provider_module
 from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
 from ecos_agent.contracts import GuiWorkspaceSetupProposal, StageRoutingProposal
 from ecos_agent.ecc_contracts import ECCStepName
-from ecos_agent.messages import EMPTY_CHOICE_VALUE
+from ecos_agent.messages import EMPTY_CHOICE_VALUE, home_ready_prompt, operation_prompt
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
 from ecos_agent.source_retriever import SourceCodeRetriever
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
@@ -466,6 +466,7 @@ def test_operation_choice_uses_interaction_request_and_dedicated_answer() -> Non
     assert request["schema_version"] == "flow-agent.interaction_request.v1"
     assert request["purpose"] == "execution"
     assert request["kind"] == "choice"
+    assert request["description"] == home_ready_prompt("en")
     assert events.index(interaction_event) > max(
         index for index, event in enumerate(events) if event["type"] == "message"
     )
@@ -549,6 +550,62 @@ def test_interaction_undo_restores_the_previous_choice_in_the_same_session() -> 
     assert session.pending_interaction["request"].get("canUndo") is not True
 
 
+def test_interaction_undo_can_walk_back_multiple_choices_in_the_same_session() -> None:
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session(
+        {
+            "mode": "home",
+            "knownProjects": [{"name": "demo", "path": "/projects/demo"}],
+        }
+    )["sessionId"]
+    session = provider.sessions[session_id]
+    first = session.pending_interaction["request"]
+
+    _send(provider, session_id, "1")
+    second = session.pending_interaction["request"]
+    _send(provider, session_id, "1")
+    third = session.pending_interaction["request"]
+
+    provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": third["requestId"],
+            "kind": third["kind"],
+            "undo": True,
+        }
+    )
+    assert session.pending_interaction["request"]["requestId"] == second["requestId"]
+    assert session.pending_interaction["request"]["canUndo"] is True
+
+    provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": second["requestId"],
+            "kind": second["kind"],
+            "undo": True,
+        }
+    )
+    assert session.pending_interaction["request"]["requestId"] == first["requestId"]
+    assert session.pending_interaction["request"].get("canUndo") is not True
+
+
+def test_interaction_undo_history_clears_at_an_execution_boundary() -> None:
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    session.interaction_undo.append(provider._capture_interaction_state(session))
+
+    provider._run_turn(
+        session,
+        "confirm",
+        lambda current, _message: setattr(
+            current, "phase", "workspace_creation_pending"
+        ),
+    )
+
+    assert session.interaction_undo == []
+
+
 def test_interaction_undo_restores_a_choice_before_a_free_text_step(tmp_path: Path) -> None:
     quick_run_project = tmp_path / "quick_run"
     quick_run_project.mkdir()
@@ -575,13 +632,24 @@ def test_interaction_undo_restores_a_choice_before_a_free_text_step(tmp_path: Pa
 
     assert answer["canUndo"] is True
     assert session.phase == "workspace_rtl"
-    assert session.pending_interaction is None
+    assert session.pending_interaction is not None
+    rtl_request = session.pending_interaction["request"]
+    assert rtl_request["kind"] == "form"
+    assert rtl_request["interaction"]["fields"] == [
+        {
+            "extensions": ["v", "sv"],
+            "id": "value",
+            "kind": "path",
+            "label": "RTL path",
+            "required": True,
+        }
+    ]
 
     result = provider.answer_interaction(
         {
             "sessionId": session_id,
-            "requestId": original["requestId"],
-            "kind": original["kind"],
+            "requestId": rtl_request["requestId"],
+            "kind": rtl_request["kind"],
             "undo": True,
         }
     )
@@ -589,6 +657,68 @@ def test_interaction_undo_restores_a_choice_before_a_free_text_step(tmp_path: Pa
     assert result["undoneRequestId"] == original["requestId"]
     assert session.phase == "home_ready"
     assert session.pending_interaction["request"]["requestId"] == original["requestId"]
+
+
+def test_free_text_answer_does_not_create_undo_history() -> None:
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    request = session.pending_interaction["request"]
+
+    result = provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": request["requestId"],
+            "kind": request["kind"],
+            "text": "1",
+        }
+    )
+
+    assert result.get("canUndo") is not True
+    assert session.interaction_undo == []
+    assert session.pending_interaction["request"].get("canUndo") is not True
+
+
+def test_form_answer_preserves_previous_selection_without_becoming_undoable(
+    tmp_path: Path,
+) -> None:
+    quick_run_project = tmp_path / "quick_run"
+    quick_run_project.mkdir()
+    rtl = tmp_path / "gcd.v"
+    rtl.write_text("module gcd; endmodule\n", encoding="utf-8")
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session(
+        {"mode": "home", "quickRunProjectRoot": str(quick_run_project)}
+    )["sessionId"]
+    session = provider.sessions[session_id]
+    request = session.pending_interaction["request"]
+    quick_run = next(
+        option
+        for option in request["interaction"]["options"]
+        if option["label"] == "Run a flow from RTL (quick setup)"
+    )
+    provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": request["requestId"],
+            "kind": request["kind"],
+            "optionId": quick_run["id"],
+        }
+    )
+    rtl_request = session.pending_interaction["request"]
+
+    result = provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": rtl_request["requestId"],
+            "kind": rtl_request["kind"],
+            "values": {"value": str(rtl)},
+        }
+    )
+
+    assert result.get("canUndo") is not True
+    assert len(session.interaction_undo) == 1
+    assert session.pending_interaction["request"]["canUndo"] is True
 
 
 def test_interaction_answers_are_one_time_and_resume_reuses_the_pending_request() -> None:
@@ -902,7 +1032,8 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
     assert "bounded optimization episode" in choice["options"][1]["label"]
     assert "Run a flow from RTL" in choice["options"][2]["label"]
     welcome = next(event["text"] for event in events if event["type"] == "message")
-    assert "quick RTL setup, manual flow setup, or bounded optimization" in str(welcome)
+    assert "state-controlled, PPA-oriented design-flow agent" in str(welcome)
+    assert "Choose quick RTL setup" not in str(welcome)
     assert "Choose an operation below" not in str(welcome)
 
     _send(provider, session_id, "2")
@@ -2100,8 +2231,13 @@ def test_start_session_binds_project_root_and_welcome_shows_both_contexts(
     welcome = next(event["text"] for event in events if event["type"] == "message")
     assert f"Project: {project}" in str(welcome)
     assert f"Workspace: {workspace}" in str(welcome)
+    assert "Choose an operation below" not in str(welcome)
     operation = _last_event(events, "interaction")["interaction"]
     assert operation["kind"] == "choice"
+    operation_request = next(
+        event["interaction"] for event in reversed(events) if event["type"] == "interaction"
+    )
+    assert operation_request["description"] == operation_prompt("en")
     assert len(operation["options"]) == 4
 
 
@@ -2402,6 +2538,25 @@ def test_workspace_mode_option_three_prefills_project_root(tmp_path: Path) -> No
     session = provider.sessions[session_id]
     assert session.phase == "workspace_name"
     assert session.workspace_inputs.project_root == str(project)
+
+    _send(provider, session_id, "ws_0002")
+    assert session.phase == "workspace_design"
+    _send(provider, session_id, "gcd_next")
+    assert session.phase == "workspace_flow_end"
+    flow_end_request = session.pending_interaction["request"]
+    assert flow_end_request["kind"] == "choice"
+    assert flow_end_request["canUndo"] is True
+
+    provider.answer_interaction(
+        {
+            "sessionId": session_id,
+            "requestId": flow_end_request["requestId"],
+            "kind": flow_end_request["kind"],
+            "undo": True,
+        }
+    )
+    assert session.phase == "operation"
+    assert session.pending_interaction["request"]["title"] == "Choose an operation"
 
 
 def test_tool_streaming_reuses_one_message_id_for_all_turn_deltas(tmp_path: Path) -> None:

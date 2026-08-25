@@ -48,16 +48,14 @@ def welcome_message(
         return (
             "ECOS Agent is bound to the open workspace."
             f"{location}\n\n"
-            f"It can {capabilities}.\n\n"
-            "Choose an operation below."
+            f"It can {capabilities}."
         )
     return (
         "ECOS Agent is a state-controlled, PPA-oriented design-flow agent. "
         "From the home screen it selects or creates a Project "
         "(directory with project.json), then creates a Workspace under that Project "
         "and runs a full ECC physical-design flow. It can also start a bounded optimization episode "
-        "from an existing baseline workspace completed through Harden.\n\n"
-        "Choose quick RTL setup, manual flow setup, or bounded optimization below."
+        "from an existing baseline workspace completed through Harden."
     )
 
 
@@ -617,6 +615,11 @@ def known_project_choice(
             for index, (label, path) in enumerate(projects, 1)
         ],
         "allowFreeText": True,
+        "description": _prompt(
+            language,
+            "请选择已有 Project，或输入其他 Project 根目录。",
+            "Choose an existing Project, or enter another Project Root.",
+        ),
         "variant": "list",
     }
 
@@ -739,7 +742,7 @@ def mpc_choice(language: str, prompt_id: str) -> dict[str, Any]:
 def recommended_path_choice(
     language: str,
     prompt_id: str,
-    recommendation: str,
+    recommendation: str = "",
     *,
     field: str = "PDK",
 ) -> dict[str, Any]:
@@ -750,10 +753,9 @@ def recommended_path_choice(
         variant="buttons",
         allow_free_text=True,
         labeled_values=(
-            (
-                _prompt(language, "使用推荐路径", "Use recommended path"),
-                recommendation,
-            ),
+            ((_prompt(language, "使用推荐路径", "Use recommended path"), recommendation),)
+            if recommendation
+            else ()
         ),
     )
 

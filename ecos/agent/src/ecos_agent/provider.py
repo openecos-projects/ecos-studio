@@ -332,6 +332,42 @@ _INTERACTION_UNDO_FIELDS = (
     "pending_interaction",
     "interaction_history",
 )
+_INTERACTION_UNDO_LIMIT = 20
+_INTERACTION_UNDO_BARRIER_PHASES = {
+    "optimization_preparing",
+    "optimization_running",
+    "workspace_continue_pending",
+    "workspace_creation_pending",
+    "workspace_parameter_pending",
+    "workspace_rerun_pending",
+    "workspace_signoff_export_pending",
+}
+_INTERACTION_DESCRIPTION_PHASES = {
+    "home_ready",
+    "operation",
+    "rerun_source_run",
+    "rerun_stage",
+    "rerun_parameter",
+    "rerun_scope",
+    "rerun_workspace",
+    "workspace_clock",
+    "workspace_confirmation",
+    "workspace_density",
+    "workspace_design",
+    "workspace_filelist",
+    "workspace_flow_end",
+    "workspace_frequency",
+    "workspace_max_fanout",
+    "workspace_mpc",
+    "workspace_name",
+    "workspace_overflow",
+    "workspace_pdk",
+    "workspace_project_mode",
+    "workspace_rtl",
+    "workspace_sdc",
+    "workspace_top",
+    "workspace_utilization",
+}
 
 
 @dataclass
@@ -384,7 +420,7 @@ class _Session:
     pending_interaction: dict[str, Any] | None = None
     interaction_retry: dict[str, Any] | None = None
     interaction_history: dict[str, str] = field(default_factory=dict)
-    interaction_undo: dict[str, Any] | None = None
+    interaction_undo: list[dict[str, Any]] = field(default_factory=list)
 
 
 class EcosAgentProvider:
@@ -481,7 +517,7 @@ class EcosAgentProvider:
         if session.pending_interaction is not None:
             raise ValueError("An interaction answer is required for this session.")
         message = _required_message(request.get("message"))
-        session.interaction_undo = None
+        session.interaction_undo.clear()
         if self._optimization_thread_active(session):
             self._handle_optimization_control(session, message)
             return {
@@ -512,6 +548,8 @@ class EcosAgentProvider:
         try:
             (handler or self._handle_input)(session, message)
             self._check_interrupted(session)
+            if session.phase in _INTERACTION_UNDO_BARRIER_PHASES:
+                session.interaction_undo.clear()
         except CodexProviderError as exc:
             if exc.failure_class != "interrupted":
                 self._emit_status(session, "error")
@@ -540,7 +578,7 @@ class EcosAgentProvider:
         pending = session.pending_interaction
         if pending is None:
             if request.get("undo") is True:
-                state = session.interaction_undo
+                state = session.interaction_undo[-1] if session.interaction_undo else None
                 restored = state.get("pending_interaction") if state is not None else None
                 restored_request = restored.get("request") if isinstance(restored, dict) else None
                 if (
@@ -576,6 +614,7 @@ class EcosAgentProvider:
         if request.get("undo") is True:
             return self._undo_interaction(session, pending)
 
+        reversible_selection = False
         if pending["request"]["kind"] == "form":
             values = request.get("values")
             if not isinstance(values, dict):
@@ -623,13 +662,16 @@ class EcosAgentProvider:
                 message = pending["values"].get(option_id)
                 if message is None:
                     raise ValueError("Interaction option is not available.")
+                reversible_selection = True
             elif isinstance(typed_text, str) and typed_text.strip():
                 message = typed_text.strip()
             else:
                 raise ValueError("Interaction option or text answer is required.")
 
         undo_state = self._capture_interaction_state(session)
-        session.interaction_undo = undo_state
+        if reversible_selection:
+            session.interaction_undo.append(undo_state)
+            del session.interaction_undo[:-_INTERACTION_UNDO_LIMIT]
         session.pending_interaction = None
         session.interaction_retry = pending
         continuation = pending.get("continuation")
@@ -651,10 +693,13 @@ class EcosAgentProvider:
                 if session.interaction_retry is pending:
                     self._restore_interaction_state(session, undo_state)
                     session.interaction_retry = None
-                    session.interaction_undo = None
+                    if session.interaction_undo and session.interaction_undo[-1] is undo_state:
+                        session.interaction_undo.pop()
                 raise
             if session.pending_interaction is pending:
                 session.interaction_retry = None
+                if session.interaction_undo and session.interaction_undo[-1] is undo_state:
+                    session.interaction_undo.pop()
                 return
             if session.interaction_retry is pending:
                 session.interaction_history[pending["request"]["requestId"]] = (
@@ -663,7 +708,6 @@ class EcosAgentProvider:
                     else "answered"
                 )
                 session.interaction_retry = None
-
         if defer:
             session.running = True
             thread = threading.Thread(target=run_answer, daemon=True)
@@ -675,7 +719,7 @@ class EcosAgentProvider:
             "requestId": pending["request"]["requestId"],
             "sessionId": session.session_id,
         }
-        if session.interaction_undo is not None:
+        if reversible_selection and session.interaction_undo:
             result["canUndo"] = True
         return result
 
@@ -694,11 +738,11 @@ class EcosAgentProvider:
     def _undo_interaction(
         self, session: _Session, current: dict[str, Any] | None
     ) -> dict[str, Any]:
-        state = session.interaction_undo
-        if state is None or (
+        if not session.interaction_undo or (
             current is not None and current["request"].get("canUndo") is not True
         ):
             raise ValueError("No interaction selection is available to undo.")
+        state = session.interaction_undo.pop()
         restored_before_undo = state.get("pending_interaction")
         if not isinstance(restored_before_undo, dict):
             raise ValueError("The previous interaction is unavailable.")
@@ -708,11 +752,13 @@ class EcosAgentProvider:
             else restored_before_undo["request"]["requestId"]
         )
         self._restore_interaction_state(session, state)
-        session.interaction_undo = None
         restored = session.pending_interaction
         if restored is None:
             raise ValueError("The previous interaction is unavailable.")
-        restored["request"].pop("canUndo", None)
+        if session.interaction_undo:
+            restored["request"]["canUndo"] = True
+        else:
+            restored["request"].pop("canUndo", None)
         if current is not None:
             session.interaction_history[current_request_id] = "superseded"
         request = restored["request"]
@@ -3057,13 +3103,12 @@ class EcosAgentProvider:
             )
         elif session.phase == "workspace_rtl":
             recommendation = _recommended_path(session, "rtl")
-            if recommendation:
-                choice = recommended_path_choice(
-                    session.language,
-                    prompt_id,
-                    recommendation,
-                    field="RTL",
-                )
+            choice = recommended_path_choice(
+                session.language,
+                prompt_id,
+                recommendation,
+                field="RTL",
+            )
         elif session.phase == "workspace_filelist":
             choice = optional_file_choice(
                 session.language,
@@ -3220,6 +3265,8 @@ class EcosAgentProvider:
                     if field_kind == "number"
                     else default
                 )
+            if session.phase == "workspace_rtl":
+                field["extensions"] = ["v", "sv"]
             interaction = {"fields": [field], "kind": "form"}
             kind = "form"
         else:
@@ -3240,10 +3287,12 @@ class EcosAgentProvider:
             "status": "pending",
             "title": choice["title"],
         }
-        if session.interaction_undo is not None:
+        if session.interaction_undo:
             request["canUndo"] = True
         if choice.get("description"):
             request["description"] = choice["description"]
+        elif session.phase in _INTERACTION_DESCRIPTION_PHASES:
+            request["description"] = _prompt_for_phase(session)
         return request, values
 
     def _emit_clarification(
@@ -3430,7 +3479,7 @@ class EcosAgentProvider:
         session.workspace_parameter_update = None
         session.workspace_signoff_id = None
         session.workspace_signoff_workspace = None
-        session.interaction_undo = None
+        session.interaction_undo.clear()
 
 
 def main() -> int:
