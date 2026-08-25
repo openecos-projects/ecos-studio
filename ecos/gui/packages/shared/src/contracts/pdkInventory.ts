@@ -8,6 +8,7 @@ export interface PdkInstallationRecord {
   version: string | null
   root: string
   ownership: PdkOwnership
+  registrySha256: string | null
 }
 
 export interface PdkInstallationSnapshot extends PdkInstallationRecord {

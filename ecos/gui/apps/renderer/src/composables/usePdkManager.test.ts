@@ -53,6 +53,7 @@ const pdkInstallation: PdkInstallationSnapshot = {
   version: null,
   root: '/tmp/pdk',
   ownership: 'imported',
+  registrySha256: null,
   readiness: 'ready',
   reason: null,
   supportsEccDefaults: true,

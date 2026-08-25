@@ -121,6 +121,47 @@ describe('PdkInventoryService', () => {
     ).rejects.toThrow('does not satisfy the Project Requirement')
   })
 
+  it('uses one Binding for a Project real path and symlink', async () => {
+    const root = await createTempDir()
+    const pdkRoot = join(root, 'vendor-pdk')
+    const projectRoot = join(root, 'project')
+    const projectLink = join(root, 'project-link')
+    await mkdir(pdkRoot)
+    await mkdir(projectRoot)
+    await symlink(projectRoot, projectLink)
+    const service = new PdkInventoryService({
+      inventoryPath: join(root, 'state', 'pdk-inventory.json'),
+      managedRoot: join(root, 'managed-pdks'),
+    })
+    const installation = await service.importInstallation({
+      displayName: 'Vendor PDK',
+      familyId: 'vendor-pdk',
+      root: pdkRoot,
+    })
+    const request = {
+      projectId: 'proj_demo',
+      requirement: {
+        familyId: 'vendor-pdk',
+        version: null,
+        manualConfig: null,
+      },
+    }
+
+    await expect(
+      service.resolveBinding({ ...request, projectRoot: projectLink }),
+    ).resolves.toMatchObject({
+      installationId: installation.id,
+      projectRoot,
+    })
+    await expect(
+      service.resolveBinding({ ...request, projectRoot }),
+    ).resolves.toMatchObject({ installationId: installation.id })
+    const inventory = JSON.parse(
+      await readFile(join(root, 'state', 'pdk-inventory.json'), 'utf8'),
+    ) as { bindings: unknown[] }
+    expect(inventory.bindings).toHaveLength(1)
+  })
+
   it('rejects Manual PDK Configuration paths outside the bound Installation', async () => {
     const root = await createTempDir()
     const pdkRoot = join(root, 'vendor-pdk')
@@ -374,9 +415,11 @@ describe('PdkInventoryService', () => {
     const pdkRoot = join(root, 'vendor-pdk')
     const projectRoot = join(root, 'project')
     const replacementRoot = join(root, 'vendor-pdk-replacement')
+    const otherRoot = join(root, 'other-pdk')
     await mkdir(pdkRoot, { recursive: true })
     await mkdir(projectRoot, { recursive: true })
     await mkdir(replacementRoot, { recursive: true })
+    await mkdir(otherRoot, { recursive: true })
     const service = new PdkInventoryService({
       inventoryPath: join(root, 'state', 'pdk-inventory.json'),
       managedRoot: join(root, 'managed-pdks'),
@@ -400,14 +443,22 @@ describe('PdkInventoryService', () => {
       familyId: 'vendor-pdk',
       root: replacementRoot,
     })
+    const other = await service.importInstallation({
+      displayName: 'Other PDK',
+      familyId: 'other-pdk',
+      root: otherRoot,
+    })
 
     await expect(service.removeInstallation(installation.id)).resolves.toEqual({
       unboundProjectIds: ['proj_demo'],
     })
     await expect(stat(pdkRoot)).resolves.toMatchObject({})
-    await expect(service.listInstallations()).resolves.toEqual([
-      expect.objectContaining({ id: replacement.id }),
-    ])
+    await expect(service.listInstallations()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: replacement.id }),
+        expect.objectContaining({ id: other.id }),
+      ]),
+    )
     await expect(
       service.resolveBinding({
         projectId: 'proj_demo',
@@ -419,11 +470,12 @@ describe('PdkInventoryService', () => {
         },
       }),
     ).resolves.toBeNull()
+    const restarted = new PdkInventoryService({
+      inventoryPath: join(root, 'state', 'pdk-inventory.json'),
+      managedRoot: join(root, 'managed-pdks'),
+    })
     await expect(
-      new PdkInventoryService({
-        inventoryPath: join(root, 'state', 'pdk-inventory.json'),
-        managedRoot: join(root, 'managed-pdks'),
-      }).resolveBinding({
+      restarted.resolveBinding({
         projectId: 'proj_demo',
         projectRoot,
         requirement: {
@@ -433,6 +485,17 @@ describe('PdkInventoryService', () => {
         },
       }),
     ).resolves.toBeNull()
+    await expect(
+      restarted.resolveBinding({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'other-pdk',
+          manualConfig: null,
+          version: null,
+        },
+      }),
+    ).resolves.toMatchObject({ installationId: other.id })
     await service.bindInstallation({
       installationId: replacement.id,
       projectId: 'proj_demo',
@@ -523,6 +586,7 @@ describe('PdkInventoryService', () => {
       familyId: 'vendor-pdk',
       id: 'pdk:vendor-pdk:local:first',
       ownership: 'imported',
+      registrySha256: null,
       root: pdkRoot,
       version: null,
     })
@@ -674,6 +738,7 @@ describe('PdkInventoryService', () => {
       familyId: 'ics55',
       root: pdkRoot,
       version: '1.10.100',
+      registrySha256: 'managed-sha',
     })
 
     await service.removeInstallation(installation.id)

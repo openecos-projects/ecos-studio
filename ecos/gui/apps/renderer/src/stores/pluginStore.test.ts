@@ -154,6 +154,7 @@ function makePdkInstallation(
     version: resource.installed_version,
     root: resource.path ?? '/tmp/pdks/ics55',
     ownership: resource.source === 'local' ? 'imported' : 'managed',
+    registrySha256: resource.source === 'local' ? null : 'managed-sha',
     readiness: 'ready',
     reason: null,
     supportsEccDefaults: true,

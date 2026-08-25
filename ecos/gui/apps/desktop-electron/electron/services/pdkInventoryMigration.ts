@@ -12,15 +12,21 @@ import {
 import { basename, dirname, join, resolve } from 'node:path'
 import {
   projectIdFromName,
-  type PdkBinding,
   type PdkInstallationRecord,
+  type PdkRequirement,
 } from '@ecos-studio/shared'
+
+export interface PdkInventoryBinding {
+  projectId: string
+  projectRoot: string
+  installationId: string | null
+  requirement?: PdkRequirement
+}
 
 export interface PdkInventoryFile {
   schemaVersion: 1
   installations: PdkInstallationRecord[]
-  bindings: PdkBinding[]
-  autoBindingBlocks: Array<Pick<PdkBinding, 'projectId' | 'projectRoot'>>
+  bindings: PdkInventoryBinding[]
 }
 
 interface PdkInventoryMigrationOptions {
@@ -38,7 +44,6 @@ export async function migrateLegacyPdkInventory(
     schemaVersion: 1,
     installations: [],
     bindings: [],
-    autoBindingBlocks: [],
   }
   const jsonWriter = options.jsonWriter ?? writeJsonAtomic
   let legacyText: string
@@ -94,6 +99,10 @@ export async function migrateLegacyPdkInventory(
       version: version || null,
       root,
       ownership: value.managed === true ? 'managed' : 'imported',
+      registrySha256:
+        value.managed === true && String(value.sha256 || '').trim()
+          ? String(value.sha256).trim().toLowerCase()
+          : null,
     }
     installationByRoot.set(root, installation)
     replacementIds.set(id, installation.id)
@@ -107,11 +116,23 @@ export async function migrateLegacyPdkInventory(
     const installationId = replacementIds.get(String(reference.resource_id || ''))
     const projectPath = String(reference.project_path || '').trim()
     if (!installationId || !projectPath) continue
-    const projectRoot = resolve(projectPath)
+    const resolvedProjectRoot = resolve(projectPath)
+    const projectRoot = await realpath(resolvedProjectRoot).catch(
+      () => resolvedProjectRoot,
+    )
+    const installation = inventory.installations.find(
+      (candidate) => candidate.id === installationId,
+    )
+    if (!installation) continue
     inventory.bindings.push({
       projectId: await legacyProjectId(projectRoot),
       projectRoot,
       installationId,
+      requirement: {
+        familyId: installation.familyId,
+        version: installation.version,
+        manualConfig: null,
+      },
     })
   }
 

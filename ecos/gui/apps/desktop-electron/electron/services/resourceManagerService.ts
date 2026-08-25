@@ -1509,6 +1509,7 @@ export class ResourceManagerService {
           displayName: scanned.name || displayName,
           root: destination,
           version,
+          registrySha256: resolvedAsset.sha256,
         })
       })
       this.publish(listener, {
@@ -2904,7 +2905,9 @@ function resourceMatchesRegistryLock(
       (installation) =>
         installation.familyId === pdkId &&
         installation.version === lock.version &&
-        installation.readiness === 'ready',
+        installation.readiness === 'ready' &&
+        installation.ownership === 'managed' &&
+        installation.registrySha256 === lock.sha256.toLowerCase(),
     )
   }
   if (!isInstalledResource(manifest, resourceId, toolHealth)) return false

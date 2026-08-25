@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { homedir } from 'node:os'
 import { mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
-  ManualPdkConfiguration,
   PdkBindRequest,
   PdkBinding,
   PdkImportRequest,
@@ -18,7 +18,9 @@ import {
   resumeLegacyPdkMigration,
   writeJsonAtomic,
   type PdkInventoryFile,
+  type PdkInventoryBinding,
 } from './pdkInventoryMigration'
+import { assertManualPdkConfiguration } from './pdkManualConfiguration'
 
 export interface PdkInventoryServiceOptions {
   inventoryPath?: string
@@ -30,6 +32,7 @@ export interface PdkInventoryServiceOptions {
 
 export interface ManagedPdkInstallationRequest extends PdkImportRequest {
   id: string
+  registrySha256: string
   version: string
 }
 
@@ -79,6 +82,7 @@ export class PdkInventoryService {
         version: request.version?.trim() || null,
         root,
         ownership: 'imported',
+        registrySha256: null,
       }
       inventory.installations.push(installation)
       await this.writeInventory(inventory)
@@ -107,6 +111,10 @@ export class PdkInventoryService {
         installation.version = request.version.trim() || null
         installation.root = root
         installation.ownership = 'managed'
+        installation.registrySha256 = requiredText(
+          request.registrySha256,
+          'PDK registry SHA256',
+        ).toLowerCase()
       } else {
         installation = {
           id: requiredText(request.id, 'PDK Installation ID'),
@@ -115,6 +123,10 @@ export class PdkInventoryService {
           version: request.version.trim() || null,
           root,
           ownership: 'managed',
+          registrySha256: requiredText(
+            request.registrySha256,
+            'PDK registry SHA256',
+          ).toLowerCase(),
         }
         inventory.installations.push(installation)
       }
@@ -134,21 +146,22 @@ export class PdkInventoryService {
 
   async resolveBinding(request: PdkResolveBindingRequest): Promise<PdkBinding | null> {
     return await this.withLock(async () => {
-      const projectRoot = normalizedProjectRoot(request.projectRoot)
+      const projectRoot = await normalizedProjectRoot(request.projectRoot)
       const projectId = requiredText(request.projectId, 'Project ID')
       const inventory = await this.readInventory()
       const existing = inventory.bindings.find(
         (binding) =>
           binding.projectId === projectId && binding.projectRoot === projectRoot,
       )
-      if (existing) return existing
-      if (
-        inventory.autoBindingBlocks.some(
-          (blocked) =>
-            blocked.projectId === projectId && blocked.projectRoot === projectRoot,
-        )
-      )
+      if (existing?.installationId) return publicBinding(existing)
+      if (existing && isDeepStrictEqual(existing.requirement, request.requirement)) {
         return null
+      }
+      if (existing) {
+        inventory.bindings = inventory.bindings.filter(
+          (candidate) => candidate !== existing,
+        )
+      }
 
       const matching: PdkInstallationRecord[] = []
       for (const installation of inventory.installations) {
@@ -162,20 +175,21 @@ export class PdkInventoryService {
       }
       if (matching.length !== 1) return null
 
-      const binding: PdkBinding = {
+      const binding: PdkInventoryBinding = {
         projectId,
         projectRoot,
         installationId: matching[0].id,
+        requirement: request.requirement,
       }
       inventory.bindings.push(binding)
       await this.writeInventory(inventory)
-      return binding
+      return publicBinding(binding)
     })
   }
 
   async bindInstallation(request: PdkBindRequest): Promise<PdkBinding> {
     return await this.withLock(async () => {
-      const projectRoot = normalizedProjectRoot(request.projectRoot)
+      const projectRoot = await normalizedProjectRoot(request.projectRoot)
       const projectId = requiredText(request.projectId, 'Project ID')
       const inventory = await this.readInventory()
       const installation = inventory.installations.find(
@@ -189,22 +203,19 @@ export class PdkInventoryService {
       if (readiness !== 'ready' && readiness !== 'unverified') {
         throw new Error('PDK Installation is not eligible for Binding')
       }
-      const binding: PdkBinding = {
+      const binding: PdkInventoryBinding = {
         projectId,
         projectRoot,
         installationId: installation.id,
+        requirement: request.requirement,
       }
       inventory.bindings = inventory.bindings.filter(
         (candidate) =>
           candidate.projectId !== projectId || candidate.projectRoot !== projectRoot,
       )
-      inventory.autoBindingBlocks = inventory.autoBindingBlocks.filter(
-        (blocked) =>
-          blocked.projectId !== projectId || blocked.projectRoot !== projectRoot,
-      )
       inventory.bindings.push(binding)
       await this.writeInventory(inventory)
-      return binding
+      return publicBinding(binding)
     })
   }
 
@@ -212,14 +223,14 @@ export class PdkInventoryService {
     request: PdkWorkspaceValidationRequest,
   ): Promise<PdkInstallationSnapshot> {
     return await this.withLock(async () => {
-      const projectRoot = normalizedProjectRoot(request.projectRoot)
+      const projectRoot = await normalizedProjectRoot(request.projectRoot)
       const inventory = await this.readInventory()
       const binding = inventory.bindings.find(
         (candidate) =>
           candidate.projectId === request.projectId.trim() &&
           candidate.projectRoot === projectRoot,
       )
-      if (!binding) throw new Error('Project PDK Requirement is unbound')
+      if (!binding?.installationId) throw new Error('Project PDK Requirement is unbound')
       const installation = inventory.installations.find(
         (candidate) => candidate.id === binding.installationId,
       )
@@ -235,7 +246,7 @@ export class PdkInventoryService {
         throw new Error('Manual PDK Configuration is required')
       }
       if (request.requirement.manualConfig) {
-        await assertManualConfiguration(
+        await assertManualPdkConfiguration(
           installation.root,
           request.requirement.manualConfig,
         )
@@ -297,10 +308,16 @@ export class PdkInventoryService {
       inventory.bindings = inventory.bindings.filter(
         (binding) => binding.installationId !== installation.id,
       )
-      inventory.autoBindingBlocks.push(
-        ...removedBindings.map(({ projectId, projectRoot }) => ({
+      inventory.bindings.push(
+        ...removedBindings.map(({ projectId, projectRoot, requirement }) => ({
           projectId,
           projectRoot,
+          installationId: null,
+          requirement: requirement ?? {
+            familyId: installation.familyId,
+            version: installation.version,
+            manualConfig: null,
+          },
         })),
       )
       inventory.installations = inventory.installations.filter(
@@ -396,8 +413,7 @@ export class PdkInventoryService {
       if (
         value.schemaVersion !== 1 ||
         !Array.isArray(value.installations) ||
-        !Array.isArray(value.bindings) ||
-        (value.autoBindingBlocks !== undefined && !Array.isArray(value.autoBindingBlocks))
+        !Array.isArray(value.bindings)
       ) {
         throw new Error('Invalid PDK Inventory')
       }
@@ -405,10 +421,7 @@ export class PdkInventoryService {
         await resumeLegacyPdkMigration(this.options)
         this.legacyCleanupComplete = true
       }
-      return {
-        ...value,
-        autoBindingBlocks: value.autoBindingBlocks ?? [],
-      } as PdkInventoryFile
+      return value as PdkInventoryFile
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         const inventory = await migrateLegacyPdkInventory(this.options)
@@ -450,8 +463,20 @@ function requiredText(value: string, label: string): string {
   return text
 }
 
-function normalizedProjectRoot(path: string): string {
-  return resolve(requiredText(path, 'Project root'))
+async function normalizedProjectRoot(path: string): Promise<string> {
+  const root = resolve(requiredText(path, 'Project root'))
+  return await realpath(root).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return root
+    throw error
+  })
+}
+
+function publicBinding(binding: PdkInventoryBinding): PdkBinding {
+  return {
+    projectId: binding.projectId,
+    projectRoot: binding.projectRoot,
+    installationId: requiredText(binding.installationId ?? '', 'PDK Installation ID'),
+  }
 }
 
 function installationSatisfiesRequirement(
@@ -467,31 +492,4 @@ function installationSatisfiesRequirement(
 function localInstallationId(familyId: string, root: string): string {
   const digest = createHash('sha256').update(root).digest('hex').slice(0, 12)
   return `pdk:${requiredText(familyId, 'PDK Family ID')}:local:${digest}`
-}
-
-async function assertManualConfiguration(
-  root: string,
-  configuration: ManualPdkConfiguration,
-): Promise<void> {
-  const paths = [
-    requiredText(configuration.techLef, 'Tech LEF'),
-    ...configuration.cellLefs,
-    ...configuration.liberty,
-  ]
-  if (configuration.cellLefs.length === 0 || configuration.liberty.length === 0) {
-    throw new Error('Manual PDK Configuration is incomplete')
-  }
-  for (const path of paths) {
-    if (isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path)) {
-      throw new Error(`Manual PDK resource path must be relative: ${path}`)
-    }
-    const candidate = await realpath(resolve(root, requiredText(path, 'PDK resource')))
-    const relativePath = relative(root, candidate)
-    if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
-      throw new Error(`Manual PDK resource is outside the PDK root: ${path}`)
-    }
-    if (!(await stat(candidate)).isFile()) {
-      throw new Error(`Manual PDK resource is not a file: ${path}`)
-    }
-  }
 }

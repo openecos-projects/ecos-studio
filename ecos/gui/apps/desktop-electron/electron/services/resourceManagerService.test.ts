@@ -3008,15 +3008,30 @@ describe('ResourceManagerService', () => {
       ...dirs,
       registryUrl: `file://${registryPath}`,
     })
+    const imported = await service.getPdkInventoryService().importInstallation({
+      displayName: 'Local ICS55',
+      familyId: 'ics55',
+      root: pdkRoot,
+      version: '1.10.100',
+    })
+    let yosys = (await service.listResources()).resources.find(
+      (resource) => resource.id === 'tool:yosys',
+    )
+    expect(yosys).toMatchObject({
+      installed_requires: [],
+      missing_requires: ['pdk:ics55'],
+    })
+    await service.getPdkInventoryService().removeInstallation(imported.id)
     await service.getPdkInventoryService().registerManagedInstallation({
       id: 'pdk:ics55:managed:1.10.100',
       displayName: 'ICS55',
       familyId: 'ics55',
       root: pdkRoot,
       version: '1.10.100',
+      registrySha256: 'pdk-sha',
     })
 
-    const yosys = (await service.listResources()).resources.find(
+    yosys = (await service.listResources()).resources.find(
       (resource) => resource.id === 'tool:yosys',
     )
     expect(yosys).toMatchObject({
