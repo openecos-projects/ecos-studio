@@ -153,12 +153,49 @@ describe('messageStore', () => {
     store.addInteraction(interaction, 'interaction-duplicate')
 
     expect(store.messages).toHaveLength(1)
-    expect(store.answerInteraction('request-1')).toBe(true)
-    expect(store.answerInteraction('request-1')).toBe(false)
+    expect(store.answerInteraction('request-1', 'Run')).toBe(true)
+    expect(store.answerInteraction('request-1', 'Run')).toBe(false)
     expect(store.messages[0]).toMatchObject({
+      interactionAnswer: 'Run',
       interaction: { requestId: 'request-1', status: 'answered' },
       interactionAnswered: true,
     })
+  })
+
+  it('binds only an explicitly matching interaction description to its preceding prompt', () => {
+    const store = useMessageStore()
+    const promptId = store.addAssistantMessage('Choose a run mode.', 'done')
+    store.addInteraction(
+      {
+        interaction: {
+          kind: 'choice',
+          options: [{ id: 'quick', label: 'Quick run' }],
+          variant: 'list',
+        },
+        kind: 'choice',
+        description: 'Choose a run mode.',
+        purpose: 'execution',
+        requestId: 'mode',
+        schema_version: 'flow-agent.interaction_request.v1',
+        status: 'pending',
+        title: 'Run mode',
+      },
+      'mode-interaction',
+    )
+
+    expect(store.messages[1]).toMatchObject({ interactionCompanionId: promptId })
+
+    store.addAssistantMessage('Persistent workspace context.', 'done')
+    store.addInteraction(
+      {
+        ...store.messages[1]!.interaction!,
+        description: 'Choose another operation.',
+        requestId: 'operation',
+        status: 'pending',
+      },
+      'operation-interaction',
+    )
+    expect(store.messages[store.messages.length - 1]?.interactionCompanionId).toBeUndefined()
   })
 
   it('rewinds messages to the restored interaction after undo', () => {
@@ -178,7 +215,7 @@ describe('messageStore', () => {
     }
     store.addInteraction(interaction, 'interaction-1')
     store.addAssistantMessage('Welcome shown before the selection.', 'done')
-    store.answerInteraction('request-1')
+    store.answerInteraction('request-1', 'Run')
     store.addAssistantMessage('Prompt created by the wrong selection.', 'done')
     store.addInteraction(
       { ...interaction, canUndo: true, requestId: 'request-2' },
@@ -190,6 +227,7 @@ describe('messageStore', () => {
     expect(store.messages[0]).toMatchObject({
       interaction: { canUndo: false, requestId: 'request-1', status: 'pending' },
       interactionAnswered: false,
+      interactionAnswer: undefined,
     })
     expect(store.messages[1]?.content).toBe('Welcome shown before the selection.')
   })

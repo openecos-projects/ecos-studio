@@ -110,4 +110,104 @@ describe('AgentInteractionCard', () => {
     await wrapper.get('form').trigger('submit')
     expect(wrapper.emitted('answer')).toEqual([[{ values: { density: 0.35 } }]])
   })
+
+  it('does not present selection undo inside a form', () => {
+    const wrapper = mount(AgentInteractionCard, {
+      props: {
+        interaction: {
+          canUndo: true,
+          interaction: {
+            fields: [{ id: 'name', kind: 'text', label: 'Workspace Name' }],
+            kind: 'form',
+          },
+          kind: 'form',
+          purpose: 'execution',
+          requestId: 'workspace-name',
+          schema_version: 'flow-agent.interaction_request.v1',
+          status: 'pending',
+          title: 'Workspace Name',
+        },
+      },
+    })
+
+    expect(wrapper.find('button[aria-label="Undo last selection"]').exists()).toBe(false)
+  })
+
+  it('renders parameter values and offers an explicit no-change action', async () => {
+    const wrapper = mount(AgentInteractionCard, {
+      props: {
+        interaction: {
+          description: [
+            'Parameters available for this stage:',
+            '| Parameter | Current value |',
+            '| --- | --- |',
+            '| floorplan.aspect_ratio | 0.996 |',
+            '| floorplan.die_height | 53.0 |',
+            'Describe the parameter change and value.',
+          ].join('\n'),
+          interaction: {
+            fields: [
+              {
+                id: 'value',
+                kind: 'text',
+                label: 'Parameter changes',
+                required: false,
+              },
+            ],
+            kind: 'form',
+          },
+          kind: 'form',
+          purpose: 'execution',
+          requestId: 'parameters',
+          schema_version: 'flow-agent.interaction_request.v1',
+          status: 'pending',
+          title: 'Parameter changes',
+        },
+      },
+    })
+
+    expect(wrapper.findAll('.interaction-card__parameter-list div').map((row) => row.text())).toEqual([
+      'floorplan.aspect_ratio0.996',
+      'floorplan.die_height53.0',
+    ])
+    expect(wrapper.find('.interaction-card__parameter-summary').text()).not.toContain('| --- |')
+    expect(wrapper.text().split('Parameter changes')).toHaveLength(2)
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('button[type="button"]').trigger('click')
+    expect(wrapper.emitted('answer')).toEqual([[{ values: { value: '' } }]])
+  })
+
+  it('requests an RTL file and applies it to the path field', async () => {
+    const wrapper = mount(AgentInteractionCard, {
+      props: {
+        interaction: {
+          interaction: {
+            fields: [
+              {
+                extensions: ['v', 'sv'],
+                id: 'value',
+                kind: 'path',
+                label: 'RTL path',
+                required: true,
+              },
+            ],
+            kind: 'form',
+          },
+          kind: 'form',
+          purpose: 'execution',
+          requestId: 'rtl-path',
+          schema_version: 'flow-agent.interaction_request.v1',
+          status: 'pending',
+          title: 'RTL path',
+        },
+      },
+    })
+
+    await wrapper.get('button[aria-label="Choose RTL file"]').trigger('click')
+    expect(wrapper.emitted('browseRtl')).toHaveLength(1)
+    wrapper.vm.setFieldValue('value', '/design/gcd.v')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('answer')).toEqual([[{ values: { value: '/design/gcd.v' } }]])
+  })
 })

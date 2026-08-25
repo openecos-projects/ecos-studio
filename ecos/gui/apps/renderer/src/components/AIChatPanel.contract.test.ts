@@ -6,7 +6,7 @@ describe('AIChatPanel flow contracts', () => {
   it('routes structured interactions through request id and dedicated answers', () => {
     expect(source).toContain("event.type === 'interaction'")
     expect(source).toContain('messageStore.upsertAgentEvent(event)')
-    expect(source).toContain('messageStore.answerInteraction(requestId)')
+    expect(source).toContain('messageStore.answerInteraction(')
     expect(source).toContain('agent.answerInteraction(request)')
   })
 
@@ -15,7 +15,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('conversationTurns')
     expect(source).toContain('chat-turn__user')
     expect(source).toContain('position: sticky')
-    expect(source).toContain('v-for="msg in visibleResponses(turn.responses)"')
+    expect(source).toContain('v-for="msg in turn.responses"')
     expect(source).toContain('pendingInteractionPresentation(messages.value)')
     expect(source).toContain('turnIndex === conversationTurns.length - 1')
     expect(source).toContain('.chat-turn__body')
@@ -38,13 +38,19 @@ describe('AIChatPanel flow contracts', () => {
     )
   })
 
-  it('keeps confirmed run plans above progress and awaiting plans after Q&A', () => {
+  it('anchors confirmed plans to their confirmation message', () => {
     expect(source).toContain('AgentSessionContractPanels')
     expect(source).toContain('mode="committed"')
     expect(source).toContain('mode="awaiting"')
-    const responseList = 'v-for="msg in visibleResponses'
-    expect(source.indexOf('mode="committed"')).toBeLessThan(source.indexOf(responseList))
-    expect(source.indexOf(responseList)).toBeLessThan(source.indexOf('mode="awaiting"'))
+    expect(source).toContain('v-for="msg in turn.responses"')
+    expect(source).toContain(':message-id="msg.id"')
+    expect(source).toContain('isVisibleResponse(msg)')
+    expect(source).toContain('isAnsweredInteraction(msg)')
+    expect(source).toContain('class="interaction-receipt"')
+    expect(source).toContain('describeInteractionAnswer(interaction, answer)')
+    expect(source).toContain('interactionCompanionIds')
+    expect(source).toContain('v-if="isContractAnchorMessage(msg.id)"')
+    expect(source).toContain('workspaceSetupAnchorMessageId')
     expect(source).toContain('markContractInteractionAnswered(sessionId, requestId)')
   })
 
@@ -69,6 +75,15 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('<details')
     expect(source).toContain('class="interaction-dock__summary"')
     expect(source).toContain('syncInteractionExpanded')
+    expect(source).toContain('@browse-rtl="browseInteractionRtl"')
+    expect(source).toContain('desktopApi.dialog.pickRtlSources({')
+    expect(source).toContain("return interaction.kind !== 'form'")
+    expect(source).toContain('--interaction-dock-max-height: min(42vh, 28rem)')
+    expect(source).toContain('class="interaction-dock__content custom-scrollbar"')
+    expect(source).toContain(
+      'max-height: calc(var(--interaction-dock-max-height) - 3rem)',
+    )
+    expect(source).toContain('overflow-y: auto')
     expect(source).not.toContain(
       'if (requestId !== previousRequestId) interactionExpanded.value = false',
     )
@@ -78,12 +93,16 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('<AgentInteractionCard')
     expect(source).toContain('@undo="undoLastInteraction"')
     expect(source).toContain('aria-label="Undo last selection"')
+    expect(source).toContain('v-else-if="undoInteraction && !isRunning"')
+    expect(source).toMatch(
+      /event\.type === 'workspace_create'[\s\S]*ui\.undoInteraction = undefined/,
+    )
     expect(source).toContain('undo: true')
     expect(source).toContain('messageStore.rewindToInteraction(')
     expect(source).toContain('<div class="composer-footer">')
     expect(source).not.toContain('@other="focusComposer"')
     expect(source).not.toContain('composerInputRef.value?.focus()')
-    expect(source).toContain("if ('text' in answer) messageStore.addMessage(answer.text)")
+    expect(source).not.toContain("if ('text' in answer) messageStore.addMessage(answer.text)")
     expect(source).toContain('handleInteractionText')
     expect(source).toContain('text: message')
     expect(source).toContain('if (isRunning.value) {')
@@ -208,6 +227,10 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("risk.severity === 'blocked'")
     expect(source).toContain('workspace_signoff_inspection:')
     expect(source).toContain('review.status')
+    expect(source).toContain('ui.workspaceSignoffReview = review')
+    expect(source).toContain('workspaceSignoffRows')
+    expect(source).toContain('if (isWorkspaceSignoffPending.value)')
+    expect(source).toContain("? 'Exporting' : 'Checking'")
     expect(source).toContain("contract.action === 'inspect'")
     expect(source).not.toContain('dialog.saveFile({')
     expect(source).toContain('workspaceSignoffOutputPath')
@@ -338,7 +361,7 @@ describe('AIChatPanel flow contracts', () => {
   })
 
   it('prevents replaying stale interactions after the conversation moves on', () => {
-    expect(source).toContain('messageStore.answerInteraction(requestId)')
+    expect(source).toContain('messageStore.answerInteraction(')
     expect(source).toContain('messageStore.restoreInteraction(requestId)')
   })
 

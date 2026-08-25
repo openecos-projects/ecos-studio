@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../types'
-import { groupMessagesIntoTurns, pendingInteractionPresentation } from './chatTurns'
+import {
+  describeInteractionAnswer,
+  groupMessagesIntoTurns,
+  pendingInteractionPresentation,
+} from './chatTurns'
 
 function msg(partial: Pick<Message, 'id' | 'role'> & Partial<Message>): Message {
   return {
@@ -12,6 +16,39 @@ function msg(partial: Pick<Message, 'id' | 'role'> & Partial<Message>): Message 
 }
 
 describe('groupMessagesIntoTurns', () => {
+  it('describes structured interaction answers for the transcript', () => {
+    const choice = {
+      interaction: {
+        kind: 'choice' as const,
+        options: [{ id: 'quick', label: 'Quick run' }],
+        variant: 'list' as const,
+      },
+      kind: 'choice' as const,
+      purpose: 'execution' as const,
+      requestId: 'mode',
+      schema_version: 'flow-agent.interaction_request.v1' as const,
+      status: 'pending' as const,
+      title: 'Run mode',
+    }
+    const parameterForm = {
+      ...choice,
+      interaction: {
+        fields: [{ id: 'value', kind: 'text' as const, label: 'Parameter changes' }],
+        kind: 'form' as const,
+      },
+      kind: 'form' as const,
+      title: 'Parameter changes',
+    }
+
+    expect(describeInteractionAnswer(choice, { optionId: 'quick' })).toBe('Quick run')
+    expect(describeInteractionAnswer(parameterForm, { values: { value: '' } })).toBe(
+      'Keep current values',
+    )
+    expect(describeInteractionAnswer(parameterForm, { values: { value: 'density = 0.4' } })).toBe(
+      'density = 0.4',
+    )
+  })
+
   it('anchors each user message as a turn header for following assistant nodes', () => {
     const turns = groupMessagesIntoTurns([
       msg({ id: 'u1', role: 'user', content: 'run flow' }),
@@ -40,7 +77,7 @@ describe('groupMessagesIntoTurns', () => {
     expect(turns[1]?.user?.id).toBe('u1')
   })
 
-  it('moves the prompt immediately before a pending interaction into its card', () => {
+  it('does not infer that preceding transcript context belongs to an interaction', () => {
     const presentation = pendingInteractionPresentation([
       msg({ id: 'welcome', role: 'assistant', content: 'Welcome' }),
       msg({
@@ -67,10 +104,8 @@ describe('groupMessagesIntoTurns', () => {
       }),
     ])
 
-    expect(presentation.companionMessageId).toBe('rtl-prompt')
-    expect(presentation.interaction?.description).toBe(
-      'What is the RTL file path? Enter a local .v / .sv file path.',
-    )
+    expect(presentation.companionMessageId).toBeUndefined()
+    expect(presentation.interaction?.description).toBeUndefined()
   })
 
   it('keeps an explicit interaction description instead of consuming transcript text', () => {

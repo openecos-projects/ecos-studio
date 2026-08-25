@@ -201,6 +201,16 @@ export const useMessageStore = defineStore('messages', () => {
     const bucket = targetSessionId
       ? sessionMessages(targetSessionId)
       : requireActiveMessages()
+    const previous = bucket[bucket.length - 1]
+    const description = interaction.description?.trim()
+    const companionId =
+      description &&
+      previous?.role === 'assistant' &&
+      previous.type === 'text' &&
+      previous.status === 'done' &&
+      previous.content.trim() === description
+        ? previous.id
+        : undefined
     for (const message of bucket) {
       if (message.interaction && message.interaction.status === 'pending') {
         message.interaction = { ...message.interaction, status: 'superseded' }
@@ -222,11 +232,12 @@ export const useMessageStore = defineStore('messages', () => {
       type: 'interaction',
       status: 'done',
       interaction,
+      ...(companionId ? { interactionCompanionId: companionId } : {}),
     })
     return id
   }
 
-  const answerInteraction = (requestId: string): boolean => {
+  const answerInteraction = (requestId: string, answer: string): boolean => {
     const bucket = tryActiveMessages()
     const message = bucket?.find(
       (candidate) => candidate.interaction?.requestId === requestId,
@@ -237,6 +248,7 @@ export const useMessageStore = defineStore('messages', () => {
       interactionUndoLengths.set(sessionId, new Map([[requestId, bucket.length]]))
     }
     message.interactionAnswered = true
+    message.interactionAnswer = answer
     message.interaction = { ...message.interaction, status: 'answered' }
     return true
   }
@@ -248,6 +260,7 @@ export const useMessageStore = defineStore('messages', () => {
     if (message?.interaction?.status === 'answered') {
       message.interaction = { ...message.interaction, status: 'pending' }
       message.interactionAnswered = false
+      message.interactionAnswer = undefined
     }
   }
 
@@ -267,6 +280,7 @@ export const useMessageStore = defineStore('messages', () => {
       status: 'pending',
     }
     restored.interactionAnswered = false
+    restored.interactionAnswer = undefined
     const undoLength = interactionUndoLengths.get(resolvedId)?.get(requestId)
     interactionUndoLengths.get(resolvedId)?.delete(requestId)
     messagesBySessionId.value = {

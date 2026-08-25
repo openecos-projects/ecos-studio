@@ -59,6 +59,8 @@ export interface Message {
   mapData?: MapData
   interaction?: DesktopAgentInteractionRequest
   interactionAnswered?: boolean
+  interactionAnswer?: string
+  interactionCompanionId?: string
 }
 
 export interface Thumbnail {

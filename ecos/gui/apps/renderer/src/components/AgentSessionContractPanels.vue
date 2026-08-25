@@ -35,7 +35,7 @@
     <AgentExecutionContractPanel
       :answered-option-id="workspaceSignoffAnsweredOptionId"
       :execution-state="workspaceSignoffExecutionState"
-      :rows="[]"
+      :rows="workspaceSignoffRows"
       :title="workspaceSignoffTitle"
     />
   </template>
@@ -53,33 +53,34 @@ import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
 
 const props = defineProps<{
   isLastTurn?: boolean
+  messageId?: string
   mode: 'awaiting' | 'committed'
-  turnId: string
   workspaceContinueAnsweredOptionId: string
-  workspaceContinueAnchorTurnId?: string
+  workspaceContinueAnchorMessageId?: string
   workspaceContinueExecutionState: string
   workspaceContinueMessage: string
   workspaceContinueRows: [string, string][]
   workspaceContinueTitle: string
   workspaceCreateSetupId?: string
   workspaceParameterAnsweredOptionId: string
-  workspaceParameterAnchorTurnId?: string
+  workspaceParameterAnchorMessageId?: string
   workspaceParameterExecutionState: string
   workspaceParameterMessage: string
   workspaceParameterRows: [string, string][]
   workspaceParameterTitle: string
   workspaceRerunAnsweredOptionId: string
-  workspaceRerunAnchorTurnId?: string
+  workspaceRerunAnchorMessageId?: string
   workspaceRerunExecutionState: string
   workspaceRerunMessage: string
   workspaceRerunRows: [string, string][]
   workspaceRerunTitle: string
   workspaceSignoffAnsweredOptionId: string
-  workspaceSignoffAnchorTurnId?: string
+  workspaceSignoffAnchorMessageId?: string
   workspaceSignoffExecutionState: string
+  workspaceSignoffRows: [string, string][]
   workspaceSignoffTitle: string
   workspaceSetupAnsweredOptionId: string
-  workspaceSetupAnchorTurnId?: string
+  workspaceSetupAnchorMessageId?: string
   workspaceSetupContract?: DesktopAgentEvent['workspaceSetup']
   workspaceSetupMessage: string
 }>()
@@ -92,42 +93,42 @@ const showSetup = computed(() =>
   visibleForMode(
     Boolean(props.workspaceSetupContract),
     props.workspaceSetupAnsweredOptionId,
-    props.workspaceSetupAnchorTurnId,
+    props.workspaceSetupAnchorMessageId,
   ),
 )
 const showRerun = computed(() =>
   visibleForMode(
     Boolean(props.workspaceRerunTitle),
     props.workspaceRerunAnsweredOptionId,
-    props.workspaceRerunAnchorTurnId,
+    props.workspaceRerunAnchorMessageId,
   ),
 )
 const showContinue = computed(() =>
   visibleForMode(
     Boolean(props.workspaceContinueTitle),
     props.workspaceContinueAnsweredOptionId,
-    props.workspaceContinueAnchorTurnId,
+    props.workspaceContinueAnchorMessageId,
   ),
 )
 const showParameter = computed(() =>
   visibleForMode(
     Boolean(props.workspaceParameterTitle),
     props.workspaceParameterAnsweredOptionId,
-    props.workspaceParameterAnchorTurnId,
+    props.workspaceParameterAnchorMessageId,
   ),
 )
 const showSignoff = computed(() =>
   visibleForMode(
     Boolean(props.workspaceSignoffTitle),
     props.workspaceSignoffAnsweredOptionId,
-    props.workspaceSignoffAnchorTurnId,
+    props.workspaceSignoffAnchorMessageId,
   ),
 )
 
 function visibleForMode(
   hasContract: boolean,
   answeredOptionId: string,
-  anchorTurnId: string | undefined,
+  anchorMessageId: string | undefined,
 ): boolean {
   if (!hasContract) return false
   const committed = Boolean(answeredOptionId)
@@ -135,8 +136,7 @@ function visibleForMode(
     return !committed && Boolean(props.isLastTurn)
   }
   if (!committed) return false
-  if (anchorTurnId) return anchorTurnId === props.turnId
-  return Boolean(props.isLastTurn)
+  return Boolean(anchorMessageId && anchorMessageId === props.messageId)
 }
 
 function onCreateWorkspace(

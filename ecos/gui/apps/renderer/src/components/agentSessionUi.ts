@@ -3,6 +3,7 @@ import type {
   DesktopAgentEvent,
   DesktopAgentInteractionRequest,
   DesktopAgentRunStatus,
+  EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
 
 export type AgentContractSurface =
@@ -49,24 +50,25 @@ export interface AgentSessionUiState {
   workspaceSetupContract?: DesktopAgentEvent['workspaceSetup']
   workspaceSetupMessage: string
   workspaceSetupAnsweredOptionId: string
-  workspaceSetupAnchorTurnId?: string
+  workspaceSetupAnchorMessageId?: string
   workspaceSetupStartedId?: string
   workspaceCreateSetupId?: string
   workspaceRerunContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceRerunMessage: string
   workspaceRerunAnsweredOptionId: string
-  workspaceRerunAnchorTurnId?: string
+  workspaceRerunAnchorMessageId?: string
   workspaceContinueContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceContinueMessage: string
   workspaceContinueAnsweredOptionId: string
-  workspaceContinueAnchorTurnId?: string
+  workspaceContinueAnchorMessageId?: string
   workspaceParameterContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceParameterMessage: string
   workspaceParameterAnsweredOptionId: string
-  workspaceParameterAnchorTurnId?: string
+  workspaceParameterAnchorMessageId?: string
   workspaceSignoffAnsweredOptionId: string
-  workspaceSignoffAnchorTurnId?: string
+  workspaceSignoffAnchorMessageId?: string
   workspaceSignoffOutputPath: string
+  workspaceSignoffReview?: EccWorkspaceInspectSignoffResult
   pendingParameterUpdate?: NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>
   lastContractSurface?: AgentContractSurface
   pendingGuiAction?: PendingGuiAction

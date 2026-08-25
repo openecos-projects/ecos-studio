@@ -66,21 +66,30 @@
             </div>
           </header>
           <div class="chat-turn__body">
-            <!-- Confirmed plans stay above the run progress they produced -->
-            <AgentSessionContractPanels
-              mode="committed"
-              :is-last-turn="turnIndex === conversationTurns.length - 1"
-              :turn-id="turn.id"
-              v-bind="contractPanelBind"
-              @create-workspace="createWorkspaceFromAgent"
-            />
-            <MessageItem
-              v-for="msg in visibleResponses(turn.responses)"
-              :key="msg.id"
-              :message="msg"
-              @img-load="onImageLoad"
-              class="message-item w-full max-w-full min-w-0"
-            />
+            <template v-for="msg in turn.responses" :key="msg.id">
+              <div
+                v-if="isAnsweredInteraction(msg)"
+                class="interaction-receipt"
+                :aria-label="`${msg.interaction?.title}: ${msg.interactionAnswer}`"
+              >
+                <i class="ri-check-line" aria-hidden="true"></i>
+                <span class="interaction-receipt__question">{{ msg.interaction?.title }}</span>
+                <strong class="interaction-receipt__answer">{{ msg.interactionAnswer }}</strong>
+              </div>
+              <MessageItem
+                v-else-if="isVisibleResponse(msg)"
+                :message="msg"
+                @img-load="onImageLoad"
+                class="message-item w-full max-w-full min-w-0"
+              />
+              <AgentSessionContractPanels
+                v-if="isContractAnchorMessage(msg.id)"
+                mode="committed"
+                :message-id="msg.id"
+                v-bind="contractPanelBind"
+                @create-workspace="createWorkspaceFromAgent"
+              />
+            </template>
             <div
               v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
               class="agent-pending"
@@ -97,7 +106,6 @@
               v-if="turnIndex === conversationTurns.length - 1"
               mode="awaiting"
               :is-last-turn="true"
-              :turn-id="turn.id"
               v-bind="contractPanelBind"
               @create-workspace="createWorkspaceFromAgent"
             />
@@ -110,7 +118,7 @@
       <details
         v-if="pendingInteraction"
         ref="interactionDockRef"
-        class="interaction-dock custom-scrollbar"
+        class="interaction-dock"
         :open="interactionExpanded"
         @toggle="syncInteractionExpanded"
       >
@@ -128,10 +136,12 @@
             aria-hidden="true"
           ></i>
         </summary>
-        <div class="interaction-dock__content">
+        <div class="interaction-dock__content custom-scrollbar">
           <AgentInteractionCard
+            ref="interactionCardRef"
             :interaction="pendingInteraction"
             :disabled="isRunning"
+            @browse-rtl="browseInteractionRtl"
             @undo="undoLastInteraction"
             @answer="
               handleInteraction(
@@ -144,7 +154,7 @@
         </div>
       </details>
       <div
-        v-else-if="undoInteraction"
+        v-else-if="undoInteraction && !isRunning"
         ref="interactionDockRef"
         class="interaction-dock custom-scrollbar"
       >
@@ -251,7 +261,12 @@ import {
   type PendingGuiAction,
 } from './agentSessionUi'
 import { displayAgentContractTitle } from './agentContractDisplay'
-import { groupMessagesIntoTurns, pendingInteractionPresentation } from './chatTurns'
+import {
+  describeInteractionAnswer,
+  groupMessagesIntoTurns,
+  pendingInteractionPresentation,
+  type InteractionAnswer,
+} from './chatTurns'
 import type { Message } from '../types'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
@@ -294,6 +309,14 @@ const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(ag
 const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
 const interactionPresentation = computed(() =>
   pendingInteractionPresentation(messages.value),
+)
+const interactionCompanionIds = computed(
+  () =>
+    new Set(
+      messages.value
+        .map((message) => message.interactionCompanionId)
+        .filter((id): id is string => Boolean(id)),
+    ),
 )
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 const router = useRouter()
@@ -456,6 +479,25 @@ const workspaceParameterRows = computed<[string, string][]>(
     workspaceParameterContract.value?.fields.map(({ label, value }) => [label, value]) ??
     [],
 )
+const workspaceSignoffRows = computed<[string, string][]>(() => {
+  const review = activeUi.value.workspaceSignoffReview
+  if (!review) return []
+  return [
+    ['Overall', review.status],
+    ...review.groups.map(
+      (group): [string, string] => [
+        group.label,
+        `${group.available}/${group.expected} · ${group.summary}`,
+      ],
+    ),
+    ...review.risks.map(
+      (risk): [string, string] => [
+        `${risk.severity === 'blocked' ? 'Blocked' : 'Warning'}: ${risk.title}`,
+        risk.summary,
+      ],
+    ),
+  ]
+})
 const workspaceRerunExecutionState = computed(() =>
   isWorkspaceRerunPending.value
     ? 'Running'
@@ -477,13 +519,18 @@ const workspaceParameterExecutionState = computed(() =>
       ? 'Confirmed'
       : 'Review',
 )
-const workspaceSignoffExecutionState = computed(() =>
-  workspaceSignoffAnsweredOptionId.value ? 'Confirmed' : 'Review',
-)
+const workspaceSignoffExecutionState = computed(() => {
+  if (isWorkspaceSignoffPending.value) {
+    return activeUi.value.workspaceSignoffReview ? 'Exporting' : 'Checking'
+  }
+  if (workspaceSignoffAnsweredOptionId.value) return 'Confirmed'
+  const status = activeUi.value.workspaceSignoffReview?.status
+  return status ? `${status[0]?.toUpperCase()}${status.slice(1)}` : 'Review'
+})
 
 const contractPanelBind = computed(() => ({
   workspaceContinueAnsweredOptionId: workspaceContinueAnsweredOptionId.value,
-  workspaceContinueAnchorTurnId: activeUi.value.workspaceContinueAnchorTurnId,
+  workspaceContinueAnchorMessageId: activeUi.value.workspaceContinueAnchorMessageId,
   workspaceContinueExecutionState: workspaceContinueExecutionState.value,
   workspaceContinueMessage: workspaceContinueMessage.value,
   workspaceContinueRows: workspaceContinueRows.value,
@@ -492,7 +539,7 @@ const contractPanelBind = computed(() => ({
   ),
   workspaceCreateSetupId: workspaceCreateSetupId.value,
   workspaceParameterAnsweredOptionId: workspaceParameterAnsweredOptionId.value,
-  workspaceParameterAnchorTurnId: activeUi.value.workspaceParameterAnchorTurnId,
+  workspaceParameterAnchorMessageId: activeUi.value.workspaceParameterAnchorMessageId,
   workspaceParameterExecutionState: workspaceParameterExecutionState.value,
   workspaceParameterMessage: workspaceParameterMessage.value,
   workspaceParameterRows: workspaceParameterRows.value,
@@ -500,7 +547,7 @@ const contractPanelBind = computed(() => ({
     workspaceParameterContract.value?.title ?? '',
   ),
   workspaceRerunAnsweredOptionId: workspaceRerunAnsweredOptionId.value,
-  workspaceRerunAnchorTurnId: activeUi.value.workspaceRerunAnchorTurnId,
+  workspaceRerunAnchorMessageId: activeUi.value.workspaceRerunAnchorMessageId,
   workspaceRerunExecutionState: workspaceRerunExecutionState.value,
   workspaceRerunMessage: workspaceRerunMessage.value,
   workspaceRerunRows: workspaceRerunRows.value,
@@ -508,13 +555,14 @@ const contractPanelBind = computed(() => ({
     workspaceRerunContract.value?.title ?? '',
   ),
   workspaceSignoffAnsweredOptionId: workspaceSignoffAnsweredOptionId.value,
-  workspaceSignoffAnchorTurnId: activeUi.value.workspaceSignoffAnchorTurnId,
+  workspaceSignoffAnchorMessageId: activeUi.value.workspaceSignoffAnchorMessageId,
   workspaceSignoffExecutionState: workspaceSignoffExecutionState.value,
   workspaceSignoffOutputPath: workspaceSignoffOutputPath.value,
+  workspaceSignoffRows: workspaceSignoffRows.value,
   workspaceSignoffTitle:
     activeUi.value.lastContractSurface === 'signoff' ? 'Signoff package export' : '',
   workspaceSetupAnsweredOptionId: workspaceSetupAnsweredOptionId.value,
-  workspaceSetupAnchorTurnId: activeUi.value.workspaceSetupAnchorTurnId,
+  workspaceSetupAnchorMessageId: activeUi.value.workspaceSetupAnchorMessageId,
   workspaceSetupContract: workspaceSetupContract.value,
   workspaceSetupMessage: workspaceSetupMessage.value,
 }))
@@ -531,6 +579,9 @@ const isRunning = computed(
 )
 const pendingInteraction = computed(() => interactionPresentation.value.interaction)
 const undoInteraction = computed(() => activeUi.value.undoInteraction)
+const interactionCardRef = ref<{
+  setFieldValue(fieldId: string, value: string): void
+} | null>(null)
 const interactionExpanded = ref(false)
 
 watch(
@@ -545,19 +596,32 @@ function syncInteractionExpanded(event: Event): void {
   void nextTick(bindInteractionDockObserver)
 }
 
-function visibleResponses(responses: Message[]): Message[] {
-  const companionId = interactionPresentation.value.companionMessageId
-  return responses.filter(
-    (message) => message.type !== 'interaction' && message.id !== companionId,
+function isVisibleResponse(message: Message): boolean {
+  return message.type !== 'interaction' && !interactionCompanionIds.value.has(message.id)
+}
+
+function isAnsweredInteraction(message: Message): boolean {
+  return (
+    message.type === 'interaction' &&
+    message.interaction?.status === 'answered' &&
+    Boolean(message.interactionAnswer)
   )
+}
+
+function isContractAnchorMessage(messageId: string): boolean {
+  const ui = activeUi.value
+  return [
+    ui.workspaceSetupAnchorMessageId,
+    ui.workspaceRerunAnchorMessageId,
+    ui.workspaceContinueAnchorMessageId,
+    ui.workspaceParameterAnchorMessageId,
+    ui.workspaceSignoffAnchorMessageId,
+  ].includes(messageId)
 }
 const pendingInteractionAcceptsText = computed(() => {
   const interaction = pendingInteraction.value
   if (!interaction) return false
-  if (interaction.kind !== 'form') return true
-  if (interaction.interaction.kind !== 'form') return false
-  const field = interaction.interaction.fields[0]
-  return interaction.interaction.fields.length === 1 && field?.kind !== 'select'
+  return interaction.kind !== 'form'
 })
 const composerLocked = computed(
   () =>
@@ -1069,7 +1133,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       ui.workspaceRerunContract = event.contract
       ui.workspaceRerunMessage = event.text ?? ''
       ui.workspaceRerunAnsweredOptionId = ''
-      ui.workspaceRerunAnchorTurnId = undefined
+      ui.workspaceRerunAnchorMessageId = undefined
       ui.lastContractSurface = 'rerun'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1078,7 +1142,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       ui.workspaceContinueContract = event.contract
       ui.workspaceContinueMessage = event.text ?? ''
       ui.workspaceContinueAnsweredOptionId = ''
-      ui.workspaceContinueAnchorTurnId = undefined
+      ui.workspaceContinueAnchorMessageId = undefined
       ui.lastContractSurface = 'continue'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1087,7 +1151,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
       ui.workspaceParameterContract = event.contract
       ui.workspaceParameterMessage = event.text ?? ''
       ui.workspaceParameterAnsweredOptionId = ''
-      ui.workspaceParameterAnchorTurnId = undefined
+      ui.workspaceParameterAnchorMessageId = undefined
       ui.lastContractSurface = 'parameter'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1099,7 +1163,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     ui.workspaceSetupContract = event.workspaceSetup
     ui.workspaceSetupMessage = event.text ?? ''
     ui.workspaceSetupAnsweredOptionId = ''
-    ui.workspaceSetupAnchorTurnId = undefined
+    ui.workspaceSetupAnchorMessageId = undefined
     ui.workspaceSetupStartedId = undefined
     ui.lastContractSurface = 'setup'
     if (isActive) scrollWorkspaceSetupIntoView()
@@ -1115,6 +1179,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
+    ui.undoInteraction = undefined
     ui.workspaceCreateSetupId = event.workspaceCreateSetupId
     return
   }
@@ -1123,6 +1188,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     event.workspaceRerun &&
     event.workspaceRerunToken
   ) {
+    ui.undoInteraction = undefined
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`,
@@ -1145,6 +1211,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_continue' && event.workspaceContinue) {
+    ui.undoInteraction = undefined
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? 'Continuing unfinished flow.',
@@ -1162,6 +1229,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_parameter_update' && event.workspaceParameterUpdate) {
+    ui.undoInteraction = undefined
     ui.pendingParameterUpdate = event.workspaceParameterUpdate
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
@@ -1180,10 +1248,12 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_signoff' && event.workspaceSignoff) {
+    ui.undoInteraction = undefined
     ui.lastContractSurface = 'signoff'
     if (event.workspaceSignoff.action === 'inspect') {
       ui.workspaceSignoffAnsweredOptionId = ''
-      ui.workspaceSignoffAnchorTurnId = undefined
+      ui.workspaceSignoffAnchorMessageId = undefined
+      ui.workspaceSignoffReview = undefined
     }
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
@@ -1401,10 +1471,7 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
 async function handleInteraction(
   requestId: string,
   kind: 'choice' | 'confirm' | 'form',
-  answer:
-    | { optionId: string }
-    | { text: string }
-    | { values: Record<string, string | number | null> },
+  answer: InteractionAnswer,
 ): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   const agent = desktopApi?.agent
@@ -1414,8 +1481,11 @@ async function handleInteraction(
   const interaction = messages.value.find(
     (message) => message.interaction?.requestId === requestId,
   )?.interaction
-  if (!interaction || !messageStore.answerInteraction(requestId)) return
-  if ('text' in answer) messageStore.addMessage(answer.text)
+  if (
+    !interaction ||
+    !messageStore.answerInteraction(requestId, describeInteractionAnswer(interaction, answer))
+  )
+    return
   isAgentRequestPending.value = true
   try {
     const request =
@@ -1448,6 +1518,21 @@ async function handleInteraction(
   }
 }
 
+async function browseInteractionRtl(fieldId: string): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  if (!desktopApi) return
+  try {
+    const picked = await desktopApi.dialog.pickRtlSources({
+      multiple: false,
+      title: 'Choose RTL file',
+    })
+    const path = picked?.files[0]
+    if (path) interactionCardRef.value?.setFieldValue(fieldId, path)
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  }
+}
+
 async function handleInteractionText(
   interaction: DesktopAgentInteractionRequest,
   message: string,
@@ -1466,14 +1551,29 @@ async function handleInteractionText(
 
 function markContractInteractionAnswered(sessionId: string, requestId: string): void {
   const ui = sessionUi(sessionId)
-  if (ui.lastContractSurface === 'setup') ui.workspaceSetupAnsweredOptionId = requestId
-  if (ui.lastContractSurface === 'rerun') ui.workspaceRerunAnsweredOptionId = requestId
-  if (ui.lastContractSurface === 'continue')
+  const anchorMessageId = messages.value.find(
+    (message) => message.interaction?.requestId === requestId,
+  )?.id
+  if (ui.lastContractSurface === 'setup') {
+    ui.workspaceSetupAnsweredOptionId = requestId
+    ui.workspaceSetupAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'rerun') {
+    ui.workspaceRerunAnsweredOptionId = requestId
+    ui.workspaceRerunAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'continue') {
     ui.workspaceContinueAnsweredOptionId = requestId
-  if (ui.lastContractSurface === 'parameter')
+    ui.workspaceContinueAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'parameter') {
     ui.workspaceParameterAnsweredOptionId = requestId
-  if (ui.lastContractSurface === 'signoff')
+    ui.workspaceParameterAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'signoff') {
     ui.workspaceSignoffAnsweredOptionId = requestId
+    ui.workspaceSignoffAnchorMessageId = anchorMessageId
+  }
 }
 
 function sendSuggestion(suggestion: { label: string; value: string }): void {
@@ -1892,6 +1992,7 @@ async function executeWorkspaceSignoff(
     }
     if (contract.action === 'inspect') {
       const review = await desktopApi.ecc.workspace.inspectSignoff({ workspaceHandle })
+      ui.workspaceSignoffReview = review
       const blocked = review.risks
         .filter((risk) => risk.severity === 'blocked')
         .map((risk) => `${risk.title}: ${risk.summary}`)
@@ -2271,9 +2372,49 @@ const handleKeyDown = (e: KeyboardEvent) => {
   color: var(--text-primary);
 }
 
+.interaction-receipt {
+  display: grid;
+  grid-template-columns: 1rem minmax(8rem, 0.7fr) minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+  min-height: 2rem;
+  padding: 0.375rem 0.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 52%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.interaction-receipt > i {
+  color: var(--accent-color);
+}
+
+.interaction-receipt__question,
+.interaction-receipt__answer {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.interaction-receipt__question {
+  font-weight: 500;
+}
+
+.interaction-receipt__answer {
+  color: var(--text-primary);
+  font-weight: 550;
+}
+
 @media (max-width: 640px) {
   .chat-turn__user-inner {
     width: 92%;
+  }
+
+  .interaction-receipt {
+    grid-template-columns: 1rem minmax(0, 1fr);
+  }
+
+  .interaction-receipt__answer {
+    grid-column: 2;
   }
 }
 
@@ -2388,19 +2529,26 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 .interaction-dock {
+  --interaction-dock-max-height: min(42vh, 28rem);
+
   position: absolute;
   right: 0.875rem;
   bottom: 100%;
   left: 0.875rem;
   z-index: 8;
-  max-height: min(60vh, 36rem);
-  overflow-y: auto;
+  max-height: var(--interaction-dock-max-height);
+  overflow: hidden;
   margin-bottom: 0.5rem;
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--bg-secondary) 52%, var(--bg-primary));
   box-shadow: 0 8px 24px color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.interaction-dock[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 .interaction-dock__summary {
@@ -2412,6 +2560,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
   color: var(--text-primary);
   cursor: pointer;
   list-style: none;
+  flex: 0 0 auto;
 }
 
 .interaction-dock__summary::-webkit-details-marker {
@@ -2471,6 +2620,12 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 .interaction-dock__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: calc(var(--interaction-dock-max-height) - 3rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 0.875rem;
 }
 
