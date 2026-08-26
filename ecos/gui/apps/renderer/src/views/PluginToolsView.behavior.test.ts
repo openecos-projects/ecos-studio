@@ -6,6 +6,8 @@ import PluginToolsView from './PluginToolsView.vue'
 
 const viewMocks = vi.hoisted(() => ({
   push: vi.fn(),
+  importPdk: vi.fn(async () => ({ id: 'pdk-installation:ics55' })),
+  waitForDesktopApi: vi.fn(),
   store: {
     resources: [] as ResourceItem[],
     loading: false,
@@ -26,12 +28,12 @@ const viewMocks = vi.hoisted(() => ({
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: viewMocks.push }) }))
 vi.mock('@/stores/pluginStore', () => ({ usePluginStore: () => viewMocks.store }))
 vi.mock('@/composables/usePdkManager', () => ({
-  usePdkManager: () => ({ importPdkForResource: vi.fn() }),
+  usePdkManager: () => ({ importPdk: viewMocks.importPdk }),
 }))
 vi.mock('@/platform/desktop', () => ({
   getOptionalDesktopApi: () => null,
   hasDesktopApi: () => false,
-  waitForDesktopApi: vi.fn(),
+  waitForDesktopApi: viewMocks.waitForDesktopApi,
 }))
 
 function pdkResource(overrides: Partial<ResourceItem>): ResourceItem {
@@ -84,6 +86,34 @@ describe('PluginToolsView PDK behavior', () => {
     await tabs.find((button) => button.text().includes('Installed'))!.trigger('click')
     expect(wrapper.findAll('.resource-row')).toHaveLength(1)
     expect(wrapper.find('.resource-row').text()).toContain('Installed')
+    wrapper.unmount()
+  })
+
+  it('reuses the wizard PDK import flow', async () => {
+    viewMocks.store.resources = [pdkResource({})]
+    const wrapper = mount(PluginToolsView)
+    viewMocks.importPdk.mockClear()
+    viewMocks.waitForDesktopApi.mockClear()
+    viewMocks.store.fetchTools.mockClear()
+
+    await wrapper.find('[data-title="Import Local"]').trigger('click')
+
+    expect(viewMocks.importPdk).toHaveBeenCalledOnce()
+    expect(viewMocks.waitForDesktopApi).not.toHaveBeenCalled()
+    expect(viewMocks.store.fetchTools).toHaveBeenCalledWith({ silent: true })
+    wrapper.unmount()
+  })
+
+  it('stops the import spinner before the background resource refresh finishes', async () => {
+    viewMocks.store.resources = [pdkResource({})]
+    viewMocks.store.fetchTools.mockResolvedValue(undefined)
+    const wrapper = mount(PluginToolsView)
+    viewMocks.store.fetchTools.mockImplementationOnce(() => new Promise(() => {}))
+
+    await wrapper.find('[data-title="Import Local"]').trigger('click')
+    await vi.waitFor(() => expect(viewMocks.importPdk).toHaveBeenCalled())
+
+    expect(wrapper.find('[data-title="Import Local"] i').classes()).not.toContain('spin')
     wrapper.unmount()
   })
 })

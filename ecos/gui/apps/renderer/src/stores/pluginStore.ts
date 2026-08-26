@@ -19,8 +19,6 @@ import {
 import type { InstallProgress, ResourceItem, ToolInfo } from '@/api/plugin'
 
 const PROGRESS_UPDATE_INTERVAL_MS = 180
-type LocalResourceImporter = (resourceId: string, path: string) => Promise<unknown>
-
 export const usePluginStore = defineStore('plugin', () => {
   const resources = ref<ResourceItem[]>([])
   const tools = ref<ToolInfo[]>([])
@@ -371,15 +369,11 @@ export const usePluginStore = defineStore('plugin', () => {
     await fetchTools({ silent: true })
   }
 
-  async function importLocalResource(
-    resourceId: string,
-    path: string,
-    importer: LocalResourceImporter = importLocalResourcePathApi,
-  ): Promise<void> {
+  async function importLocalResource(resourceId: string, path: string): Promise<void> {
     delete resourceErrors.value[resourceId]
     _syncLegacyToolError(resourceId)
     try {
-      await importer(resourceId, path)
+      await importLocalResourcePathApi(resourceId, path)
       await fetchTools({ silent: true })
     } catch (e) {
       _setResourceError(

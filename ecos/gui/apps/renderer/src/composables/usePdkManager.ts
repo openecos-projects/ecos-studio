@@ -52,15 +52,12 @@ function installationToPdk(installation: PdkInstallationSnapshot): ImportedPdk {
   }
 }
 
-async function importPath(
-  path: string,
-  requestedFamilyId?: string,
-): Promise<ImportedPdk> {
+async function importPath(path: string): Promise<ImportedPdk> {
   const desktopApi = await waitForDesktopApi()
   const scanned = await desktopApi.workspace.scanPdkDirectory(path)
-  let familyId = requestedFamilyId || scanned.pdkId
+  let familyId = scanned.pdkId
   let displayName = scanned.name || familyId
-  if (!requestedFamilyId && familyId !== 'ics55') {
+  if (familyId !== 'ics55') {
     const confirmed = await requestPdkName(displayName)
     if (confirmed === null) throw pdkImportCancelled
     displayName = confirmed
@@ -103,7 +100,13 @@ export function usePdkManager() {
       if (!path) return null
       const imported = await importPath(path)
       await loadPdks(true)
-      return importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
+      const linked = importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
+      showToast({
+        severity: 'success',
+        summary: 'PDK Linked',
+        detail: `${linked.name} is ready at ${linked.path}. Files remain in the source directory.`,
+      })
+      return linked
     } catch (error) {
       if (error === pdkImportCancelled) return null
       showToast({
@@ -137,15 +140,6 @@ export function usePdkManager() {
     }
   }
 
-  const importPdkForResource = async (
-    resourceId: string,
-    path: string,
-  ): Promise<ImportedPdk> => {
-    const imported = await importPath(path, resourceId.replace(/^pdk:/, ''))
-    await loadPdks(true)
-    return importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
-  }
-
   const removePdk = async (installationId: string): Promise<void> => {
     const desktopApi = await waitForDesktopApi()
     await desktopApi.pdkInventory.remove(installationId)
@@ -169,7 +163,6 @@ export function usePdkManager() {
     loadPdks,
     importPdk,
     importPdkByPath,
-    importPdkForResource,
     removePdk,
     locatePdk,
     validatePdk,

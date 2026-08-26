@@ -469,7 +469,7 @@ type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
 
 const router = useRouter()
 const pluginStore = usePluginStore()
-const { importPdkForResource } = usePdkManager()
+const { importPdk } = usePdkManager()
 
 const searchQuery = ref('')
 const searchInput = ref('')
@@ -706,6 +706,13 @@ async function handleLocalImport(row: ResourceRow): Promise<void> {
   next.add(row.id)
   importingResourceIds.value = next
   try {
+    if (row.type === 'pdk') {
+      if (await importPdk()) {
+        void pluginStore.fetchTools({ silent: true })
+      }
+      return
+    }
+
     const desktopApi = await waitForDesktopApi()
     const path = await desktopApi.dialog.pickDirectory({
       title: `Select Local ${row.name} Directory`,
@@ -714,11 +721,7 @@ async function handleLocalImport(row: ResourceRow): Promise<void> {
       return
     }
 
-    await pluginStore.importLocalResource(
-      row.id,
-      path,
-      row.type === 'pdk' ? importPdkForResource : undefined,
-    )
+    await pluginStore.importLocalResource(row.id, path)
   } finally {
     const done = new Set(importingResourceIds.value)
     done.delete(row.id)

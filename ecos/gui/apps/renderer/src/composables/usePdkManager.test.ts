@@ -404,7 +404,11 @@ describe('usePdkManager', () => {
     ])
     expect(listPdkInstallations).toHaveBeenCalled()
     expect(settingsSet).not.toHaveBeenCalled()
-    expect(showToast).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'success',
+      summary: 'PDK Linked',
+      detail: 'ICS55 is ready at /tmp/pdk. Files remain in the source directory.',
+    })
   })
 
   it('does not use unsupported browser prompt for an unregistered PDK', async () => {
@@ -502,25 +506,6 @@ describe('usePdkManager', () => {
     expect(importedPdks.value).toHaveLength(1)
     expect(settingsGet).not.toHaveBeenCalled()
     expect(settingsSet).not.toHaveBeenCalled()
-  })
-
-  it('imports a row-bound PDK through the typed Inventory API', async () => {
-    const { importPdkForResource, importedPdks } = usePdkManager()
-
-    const imported = await importPdkForResource('pdk:ics55', '/tmp/pdk')
-
-    expect(imported).toMatchObject({
-      path: '/tmp/pdk',
-      pdkId: 'ics55',
-    })
-    expect(importPdkInstallation).toHaveBeenCalledWith({
-      displayName: 'ics55',
-      familyId: 'ics55',
-      root: '/tmp/pdk',
-    })
-    expect(importPdkPath).not.toHaveBeenCalled()
-    expect(importedPdks.value).toHaveLength(1)
-    expect(showToast).not.toHaveBeenCalled()
   })
 
   it('removes an Installation through the typed Inventory API', async () => {

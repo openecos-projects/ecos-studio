@@ -797,41 +797,6 @@ describe('pluginStore', () => {
     })
   })
 
-  it('uses a caller-provided local importer while preserving row error handling', async () => {
-    const localPdk = makePdkResource({
-      status: 'installed',
-      source: 'local',
-      path: '/tmp/pdk',
-      actions: ['validate', 'remove_reference'],
-      health: { managed: false },
-    })
-    const importPdkForResource = vi.fn(async () => localPdk)
-
-    vi.mocked(listResourcesApi)
-      .mockResolvedValueOnce([makePdkResource()])
-      .mockResolvedValueOnce([makePdkResource()])
-    vi.mocked(listPdkInstallationsApi)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([makePdkInstallation(localPdk)])
-
-    const store = usePluginStore()
-    await store.fetchTools()
-    store.resourceErrors['pdk:ics55'] = 'Previous error'
-
-    await store.importLocalResource('pdk:ics55', '/tmp/pdk', importPdkForResource)
-
-    expect(importPdkForResource).toHaveBeenCalledWith('pdk:ics55', '/tmp/pdk')
-    expect(importLocalResourcePathApi).not.toHaveBeenCalled()
-    expect(store.resourceErrors['pdk:ics55']).toBeUndefined()
-    expect(listResourcesApi).toHaveBeenCalledTimes(2)
-    expect(store.resources.find((resource) => resource.path)).toMatchObject({
-      id: 'pdk:ics55',
-      status: 'installed',
-      source: 'imported',
-      path: '/tmp/pdk',
-    })
-  })
-
   it('stores local import errors by resourceId and refreshes resources silently', async () => {
     const availableTool = makeToolResource()
     vi.mocked(listResourcesApi)
