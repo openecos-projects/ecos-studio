@@ -28,7 +28,7 @@ type StepFileBuckets = WorkspaceStepResource['resources']
 interface WorkspaceResourceServiceOptions {
   projectScopeProvider: Pick<
     ProjectScopeProvider,
-    'getProjectRoot' | 'requestProjectPathAccess'
+    'getProjectRoot' | 'requestProjectPathAccess' | 'requestWritableProjectPathAccess'
   >
   runtimeMutationGuard?: RuntimeMutationGuard
 }
@@ -115,14 +115,18 @@ export class WorkspaceResourceService {
         `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
       )
     }
-    await this.projectScopeProvider.requestProjectPathAccess(location.path)
+    const canonicalPath =
+      await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
     if (
       this.runtimeMutationGuard &&
       (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(root))
     ) {
       throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
     }
-    const written = await writeWorkspaceParameters(root, request.parameters)
+    const written = await writeWorkspaceParameters(root, request.parameters, {
+      format: location.format,
+      path: canonicalPath,
+    })
     return { format: written.format, path: written.path }
   }
 

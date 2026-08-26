@@ -416,3 +416,22 @@ describe('editWorkspaceParameters with an authorized location', () => {
     expect(parameters?.max_fanout).toBe(48)
   })
 })
+
+describe('json_path hardening', () => {
+  it('rejects prototype-related segments instead of mutating Object.prototype', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['__proto__', 'toString'], value: 1 }]),
+    ).rejects.toThrow(/not allowed/i)
+    expect(({} as Record<string, unknown>).toString).toBe(Object.prototype.toString)
+  })
+
+  it('rejects a constructor segment on a legacy workspace', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['constructor'], value: {} }]),
+    ).rejects.toThrow(/not allowed/i)
+  })
+})

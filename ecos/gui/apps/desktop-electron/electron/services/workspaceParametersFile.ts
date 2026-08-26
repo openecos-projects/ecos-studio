@@ -233,12 +233,18 @@ export function mergePayloadIntoTomlDocument(
  * Persist workspace parameters. On a TOML workspace the payload is merged
  * into `home/ecc.toml`; on a legacy/frontend (parameters.json) workspace
  * the JSON file is rewritten as-is. Throws when neither file exists.
+ *
+ * When `authorizedLocation` is provided (a path already authorized and
+ * canonicalized by the caller's path scope), the write uses exactly that
+ * file instead of re-locating it, closing the locate→authorize→write
+ * symlink swap window.
  */
 export async function writeWorkspaceParameters(
   root: string,
   payload: Record<string, unknown>,
+  authorizedLocation?: WorkspaceParametersFileLocation,
 ): Promise<WorkspaceParametersFileLocation> {
-  const location = await locateWorkspaceParametersFile(root)
+  const location = authorizedLocation ?? (await locateWorkspaceParametersFile(root))
   if (!location) {
     throw new Error(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
@@ -263,16 +269,21 @@ function detectJsonIndent(raw: string): number {
   return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 4
 }
 
+const FORBIDDEN_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
+
 function readJsonPathSegment(node: unknown, key: string | number): unknown {
   if (typeof key === 'number') {
     return Array.isArray(node) && key < node.length ? node[key] : undefined
   }
-  return isRecord(node) ? node[key] : undefined
+  return isRecord(node) && Object.hasOwn(node, key) ? node[key] : undefined
 }
 
 /**
  * Existing-path-only set: every segment of the path must already exist,
- * mirroring the agent write contract (no invented keys).
+ * mirroring the agent write contract (no invented keys). String segments
+ * must be own properties — an inherited lookup (`__proto__`, `constructor`)
+ * would otherwise pass the existence check and let an assignment mutate
+ * `Object.prototype` inside the Electron main process.
  */
 function setJsonPathValue(
   document: Record<string, unknown>,
@@ -284,6 +295,13 @@ function setJsonPathValue(
     throw new Error(
       `Parameter path ${JSON.stringify(jsonPath)} does not exist in ${label}.`,
     )
+  }
+  for (const segment of jsonPath) {
+    if (typeof segment === 'string' && FORBIDDEN_PATH_SEGMENTS.has(segment)) {
+      throw new Error(
+        `Parameter path ${JSON.stringify(jsonPath)} is not allowed in ${label}.`,
+      )
+    }
   }
   let node: unknown = document
   for (const key of jsonPath.slice(0, -1)) {

@@ -31,6 +31,7 @@ function provider(root: string): ProjectScopeProviderDouble {
   return {
     getProjectRoot: vi.fn().mockResolvedValue(root),
     requestProjectPathAccess: vi.fn(async (path: string) => path),
+    requestWritableProjectPathAccess: vi.fn(async (path: string) => path),
   }
 }
 
