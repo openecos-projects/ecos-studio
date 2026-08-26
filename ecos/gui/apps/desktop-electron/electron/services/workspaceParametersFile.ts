@@ -168,6 +168,32 @@ export async function writeTextAtomically(path: string, content: string): Promis
 }
 
 /**
+ * Per-path serialization for read-modify-write operations. The GUI save and
+ * the agent/rerun edit paths both read the current configuration, merge in
+ * memory, then atomically replace the file; without a shared lock, two
+ * overlapping operations can read the same revision and the later rename
+ * silently discards the earlier operation's unrelated changes.
+ */
+const parameterWriteQueues = new Map<string, Promise<unknown>>()
+
+async function enqueueParameterWrite<T>(
+  path: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = parameterWriteQueues.get(path) ?? Promise.resolve()
+  const next = previous.then(operation, operation)
+  const settled = next.catch(() => undefined)
+  parameterWriteQueues.set(path, settled)
+  try {
+    return await next
+  } finally {
+    if (parameterWriteQueues.get(path) === settled) {
+      parameterWriteQueues.delete(path)
+    }
+  }
+}
+
+/**
  * Merge a parameter payload into the existing TOML document. `[params]` is
  * updated wholesale per top-level key (display keys are normalized first,
  * mirroring ecc's `normalize_parameter_dict`), the `[design]`/`[pdk]`
@@ -256,16 +282,18 @@ export async function writeWorkspaceParameters(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
     )
   }
-  if (location.format === 'json') {
-    await writeTextAtomically(location.path, `${JSON.stringify(payload, null, 4)}\n`)
+  return await enqueueParameterWrite(location.path, async () => {
+    if (location.format === 'json') {
+      await writeTextAtomically(location.path, `${JSON.stringify(payload, null, 4)}\n`)
+      return location
+    }
+    const document = parse(await readFile(location.path, 'utf8'), {
+      integersAsBigInt: 'asNeeded',
+    }) as Record<string, unknown>
+    const merged = mergePayloadIntoTomlDocument(document, payload, root)
+    await writeTextAtomically(location.path, stringify(merged))
     return location
-  }
-  const document = parse(await readFile(location.path, 'utf8'), {
-    integersAsBigInt: 'asNeeded',
-  }) as Record<string, unknown>
-  const merged = mergePayloadIntoTomlDocument(document, payload, root)
-  await writeTextAtomically(location.path, stringify(merged))
-  return location
+  })
 }
 
 export interface WorkspaceParameterEdit {
@@ -345,29 +373,34 @@ export async function editWorkspaceParameters(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
     )
   }
-  const raw = await readFile(location.path, 'utf8')
-  if (location.format === 'json') {
-    const parsed: unknown = JSON.parse(raw)
-    const document = isRecord(parsed) ? parsed : {}
-    for (const edit of edits) {
-      setJsonPathValue(document, edit.json_path, edit.value, location.path)
+  return await enqueueParameterWrite(location.path, async () => {
+    const raw = await readFile(location.path, 'utf8')
+    if (location.format === 'json') {
+      const parsed: unknown = JSON.parse(raw)
+      const document = isRecord(parsed) ? parsed : {}
+      for (const edit of edits) {
+        setJsonPathValue(document, edit.json_path, edit.value, location.path)
+      }
+      const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
+      await writeTextAtomically(
+        location.path,
+        raw.endsWith('\n') ? `${serialized}\n` : serialized,
+      )
+      return location
     }
-    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
-    await writeTextAtomically(
-      location.path,
-      raw.endsWith('\n') ? `${serialized}\n` : serialized,
-    )
+    const document = parse(raw, { integersAsBigInt: 'asNeeded' }) as Record<
+      string,
+      unknown
+    >
+    const parameters = mergeTomlSections(document, root)
+    for (const edit of edits) {
+      const normalizedPath = edit.json_path.map((segment) =>
+        typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
+      )
+      setJsonPathValue(parameters, normalizedPath, edit.value, location.path)
+    }
+    const merged = mergePayloadIntoTomlDocument(document, parameters, root)
+    await writeTextAtomically(location.path, stringify(merged))
     return location
-  }
-  const document = parse(raw, { integersAsBigInt: 'asNeeded' }) as Record<string, unknown>
-  const parameters = mergeTomlSections(document, root)
-  for (const edit of edits) {
-    const normalizedPath = edit.json_path.map((segment) =>
-      typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
-    )
-    setJsonPathValue(parameters, normalizedPath, edit.value, location.path)
-  }
-  const merged = mergePayloadIntoTomlDocument(document, parameters, root)
-  await writeTextAtomically(location.path, stringify(merged))
-  return location
+  })
 }

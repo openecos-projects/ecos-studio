@@ -455,3 +455,20 @@ describe('write hardening', () => {
     expect((await staleTemps).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })
 })
+
+describe('parameter write serialization', () => {
+  it('serializes overlapping save and edit operations so no update is lost', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+
+    const [saved] = await Promise.all([
+      writeWorkspaceParameters(root, { 'Frequency max [MHz]': 175 }),
+      editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 48 }]),
+    ])
+
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.frequency_max).toBe(175)
+    expect(parameters?.max_fanout).toBe(48)
+    expect(saved.format).toBe('toml')
+  })
+})
