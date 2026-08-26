@@ -29,6 +29,7 @@ from ecos_agent.optimization_contracts import (
 )
 from ecos_agent.optimization_gate0 import load_gate0_config
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
+from ecos_agent.optimization_statistics import baseline_design_statistics
 
 HASH = "sha256:" + "a" * 64
 
@@ -326,6 +327,18 @@ def test_online_method_counts_failures_and_promotes_only_improvements() -> None:
     assert summary["success_at_k"] == {
         str(index): index >= 2 for index in range(1, 21)
     }
+    assert summary["auc_success_at_20"] == pytest.approx(19 / 20)
+    assert summary["best_so_far_at_k"]["1"] == {
+        "route_dr_total_violation_count": 10.0,
+        "route_la_total_overflow": 5.0,
+        "route_wirelength": 100.0,
+    }
+    assert summary["best_so_far_at_k"]["2"] == {
+        "route_dr_total_violation_count": 9.0,
+        "route_la_total_overflow": 5.0,
+        "route_wirelength": 102.0,
+    }
+    assert summary["best_so_far_at_k"]["3"] == summary["best_so_far_at_k"]["2"]
     assert parent_refs[:3] == [None, None, ".agent/candidates/candidate-2"]
 
 
@@ -555,6 +568,11 @@ def test_pilot_runner_writes_a_two_design_non_llm_manifest(monkeypatch, tmp_path
     monkeypatch.setattr(baseline_runner, "_run_design", run_design)
     monkeypatch.setattr(
         baseline_runner,
+        "baseline_design_statistics",
+        lambda designs: {"design_count": len(designs)},
+    )
+    monkeypatch.setattr(
+        baseline_runner,
         "_workspace_binding",
         lambda _config, design, workspace, _site_width: {
             "design_id": design.design_id,
@@ -640,3 +658,90 @@ def test_pilot_runner_marks_an_interrupted_run(monkeypatch, tmp_path: Path) -> N
         )
     )
     assert marker["schema_version"] == "ecos.optimization_baseline_interruption.v1"
+
+
+def test_online_method_reports_auc_and_best_so_far_effect_size() -> None:
+    baseline = _terminal(10, 5, 100)
+
+    def execute(index, _selection, _parent_candidate_root_ref, _incumbent):
+        if index == 1:
+            return BaselineCandidateFailure(
+                "execution-1", OptimizationOutcomeKind.EXECUTION_FAILED
+            )
+        return BaselineCandidateExecution(
+            observation=_terminal(9 if index == 2 else 10, 5, 100 + index),
+            candidate_root_ref=f".agent/candidates/candidate-{index}",
+        )
+
+    summary = evaluate_online_method(
+        BaselineMethod.CONTROLLED_COORDINATE,
+        design_id="gcd",
+        baseline=baseline,
+        current_values=_values(),
+        epsilon={
+            **{metric.value: 0.0 for metric in ObjectiveMetric},
+            **{metric.value: 0.0 for metric in TimingMetric},
+        },
+        random_seed=17,
+        execute=execute,
+    )
+
+    assert summary["auc_success_at_20"] == pytest.approx(19 / 20)
+    assert summary["best_so_far_tuple"] == [9.0, 5.0, 102.0]
+    assert summary["best_so_far_delta"] == {
+        "route_dr_total_violation_count": -1.0,
+        "route_la_total_overflow": 0.0,
+        "route_wirelength": 2.0,
+    }
+    assert summary["candidates"][0]["best_so_far_tuple"] == [10.0, 5.0, 100.0]
+    assert summary["candidates"][1]["decisive_metric"] == "route_dr_total_violation_count"
+    assert summary["candidates"][1]["best_so_far_tuple"] == [9.0, 5.0, 102.0]
+
+
+def test_design_block_statistics_reports_win_tie_loss_and_holm() -> None:
+    baseline = _terminal(10, 5, 100).model_dump(mode="json")
+    better = _terminal(9, 5, 100).model_dump(mode="json")
+    epsilon = {
+        **{metric.value: 0.0 for metric in ObjectiveMetric},
+        **{metric.value: 0.0 for metric in TimingMetric},
+    }
+
+    def method(auc, success, observation):
+        return {
+            "auc_success_at_20": auc,
+            "lex_success_at_20": success,
+            "best_terminal_observation": observation,
+        }
+
+    summary = baseline_design_statistics(
+        {
+            "gcd": {
+                "noise_profile": {"epsilon": epsilon},
+                "methods": {
+                    "default_ecos": {"terminal_observation": baseline},
+                    "controlled_coordinate": method(0.5, True, better),
+                    "random_action": method(0.0, False, baseline),
+                    "rule_guided_direction": method(0.0, False, baseline),
+                },
+            },
+            "i2c": {
+                "noise_profile": {"epsilon": epsilon},
+                "methods": {
+                    "default_ecos": {"terminal_observation": baseline},
+                    "controlled_coordinate": method(0.0, False, baseline),
+                    "random_action": method(1.0, True, better),
+                    "rule_guided_direction": method(0.0, False, baseline),
+                },
+            },
+        }
+    )
+
+    controlled = summary["methods"]["controlled_coordinate"]
+    assert controlled["design_count"] == 2
+    assert controlled["median_auc_success_at_20"] == pytest.approx(0.25)
+    assert controlled["lex_success_at_20_count"] == 1
+    assert controlled["win_tie_loss_vs_default"] == {"win": 1, "tie": 1, "loss": 0}
+    comparisons = summary["paired_auc_permutation_tests"]
+    comparison = comparisons["controlled_coordinate__vs__random_action"]
+    assert comparison["n_designs"] == 2
+    assert comparison["holm_adjusted_p_value"] >= comparison["p_value"]

@@ -26,9 +26,11 @@ from ecos_agent.optimization_contracts import (
     KnobScalar,
     ObjectiveMetric,
     OptimizationKnob,
+    ROUTABILITY_OBJECTIVE_ORDER,
     RequestedKnobValue,
     StrategyDirection,
     TerminalObservation,
+    TIMING_GUARDRAIL_ORDER,
     TimingMetric,
 )
 from ecos_agent.optimization_ecc_adapter import EccContentLengthRpcClient
@@ -45,6 +47,12 @@ from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_observations import build_terminal_observation
 from ecos_agent.optimization_rules import coordinate_value_from_receipt
 from ecos_agent.optimization_runtime import _current_values
+from ecos_agent.optimization_statistics import (
+    baseline_design_statistics,
+    objective_delta,
+    objective_tuple,
+    success_curve_auc,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _PILOT_DESIGNS = frozenset({"gcd", "i2c"})
@@ -100,6 +108,7 @@ def evaluate_online_method(
     first_improvement = None
     success = False
     failures = 0
+    best_so_far: dict[str, dict[str, float]] = {}
     started = time.monotonic()
     for turn_index in range(_CANDIDATE_LIMIT):
         selection = select_baseline_candidate(
@@ -129,10 +138,15 @@ def evaluate_online_method(
                 execution_id=execution.execution_id,
             )
         else:
-            comparison = compare_observations(
-                _terminal_metrics(incumbent), execution.observation, epsilon
-            )
+            reference = _terminal_metrics(incumbent)
+            comparison = compare_observations(reference, execution.observation, epsilon)
             row["comparison"] = comparison
+            row["decisive_metric"] = _decisive_metric(
+                reference, execution.observation, epsilon
+            )
+            row["candidate_delta"] = objective_delta(
+                baseline, execution.observation
+            )
             row["candidate_root_ref"] = execution.candidate_root_ref
             if comparison == "better":
                 success = True
@@ -145,7 +159,12 @@ def evaluate_online_method(
                     else selection.requested.value
                 )
         row["success_by_candidate"] = success
+        row["best_so_far_tuple"] = objective_tuple(incumbent)
         rows.append(row)
+        best_so_far[str(turn_index + 1)] = _objective_metrics(incumbent)
+    success_at_k = {
+        str(row["candidate_index"]): row["success_by_candidate"] for row in rows
+    }
     return {
         "schema_version": "ecos.optimization_baseline_method.v2",
         "method": method.value,
@@ -154,9 +173,11 @@ def evaluate_online_method(
         "failed_candidate_count": failures,
         "first_improvement_candidate_index": first_improvement,
         "lex_success_at_20": success,
-        "success_at_k": {
-            str(row["candidate_index"]): row["success_by_candidate"] for row in rows
-        },
+        "success_at_k": success_at_k,
+        "auc_success_at_20": success_curve_auc(success_at_k),
+        "best_so_far_at_k": best_so_far,
+        "best_so_far_tuple": objective_tuple(incumbent),
+        "best_so_far_delta": objective_delta(baseline, incumbent),
         "planning_call_count": 0,
         "wall_time_seconds": time.monotonic() - started,
         "random_seed": random_seed if method == BaselineMethod.RANDOM_ACTION else None,
@@ -247,6 +268,7 @@ def run_baseline_pilot(
         "schema_version": "ecos.optimization_baseline_summary.v1",
         "run_id": run_id,
         "designs": summaries,
+        "design_block_statistics": baseline_design_statistics(summaries),
     }
     _write_json(run_root / "baseline-summary.v1.json", summary)
     return summary
@@ -525,6 +547,35 @@ def _terminal_metrics(observation: TerminalObservation) -> dict[str, float]:
         **{metric.value: float(observation.metrics[metric]) for metric in ObjectiveMetric},
         **{metric.value: float(observation.timing_guardrail[metric]) for metric in TimingMetric},
     }
+
+
+def _objective_metrics(observation: TerminalObservation) -> dict[str, float]:
+    return {
+        metric.value: float(observation.metrics[metric])
+        for metric in ROUTABILITY_OBJECTIVE_ORDER
+    }
+
+
+def _decisive_metric(
+    reference: Mapping[str, float],
+    candidate: TerminalObservation,
+    epsilon: Mapping[str, float],
+) -> str | None:
+    if not candidate.eligible_for_incumbent:
+        return None
+    metrics = _terminal_metrics(candidate)
+    for metric in TIMING_GUARDRAIL_ORDER:
+        key = metric.value
+        if metrics[key] < reference[key] - epsilon[key]:
+            return key
+    for metric in ROUTABILITY_OBJECTIVE_ORDER:
+        key = metric.value
+        if (
+            metrics[key] < reference[key] - epsilon[key]
+            or metrics[key] > reference[key] + epsilon[key]
+        ):
+            return key
+    return None
 
 
 def _run_rpc_task(
