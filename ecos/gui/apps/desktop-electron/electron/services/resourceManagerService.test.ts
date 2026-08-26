@@ -18,6 +18,7 @@ import {
 } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { writeJsonAtomic } from './pdkInventoryMigration'
 import { ResourceManagerService } from './resourceManagerService'
 
 const tempDirectories: string[] = []
@@ -5079,6 +5080,391 @@ describe('ResourceManagerService', () => {
       archive.sha256,
       expect.any(AbortSignal),
     )
+  })
+
+  it('rolls back a tool install cancelled during its manifest commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      manifestWriter: async (path, content) => {
+        commitStarted.resolve()
+        await allowCommit.promise
+        await writeFile(path, content, 'utf8')
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('tool:yosys', undefined, progress)
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+
+    let cancellationCompleted = false
+    const cancellation = service.cancelResource('tool:yosys').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      expect(cancellationCompleted).toBe(false)
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).resolves.toEqual({
+        status: 'cancelled',
+        resource_id: 'tool:yosys',
+      })
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message: 'Cancelled download for tool:yosys',
+      })
+      await expect(
+        stat(join(root, 'data', 'tools', 'yosys', '2026-05-13')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+        status: 'available',
+      })
+      expect(progress).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: 'done' }),
+      )
+      expect(progress).toHaveBeenLastCalledWith(
+        expect.objectContaining({ phase: 'cancelled' }),
+      )
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('preserves tool files when a cancelled manifest cannot be restored', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    let manifestWriteCount = 0
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      manifestWriter: async (path, content) => {
+        manifestWriteCount += 1
+        if (manifestWriteCount === 1) {
+          commitStarted.resolve()
+          await allowCommit.promise
+          await writeFile(path, content, 'utf8')
+          return
+        }
+        throw new Error('manifest restore failed')
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('tool:yosys')
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+    const cancellation = service.cancelResource('tool:yosys')
+
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).rejects.toThrow(
+        'Resource installation was cancelled but its manifest could not be restored',
+      )
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message:
+          'Resource installation was cancelled but its manifest could not be restored',
+      })
+      await expect(
+        stat(join(root, 'data', 'tools', 'yosys', '2026-05-13')),
+      ).resolves.toMatchObject({})
+      await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+        status: 'installed',
+        installed_version: '2026-05-13',
+      })
+      expect(manifestWriteCount).toBe(2)
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('rolls back an MPC install cancelled during its manifest commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeMpcRegistry(registryPath, archive)
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir: join(root, 'data', 'mpcs'),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await mkdir(join(destination, 'spec'), { recursive: true })
+        await writeFile(join(destination, 'FrameTop.sv'), 'module FrameTop; endmodule\n')
+        await writeFile(
+          join(destination, 'spec', 'spec.json.in'),
+          JSON.stringify({ designs: [{ core_template: { name: 'frame' } }] }),
+        )
+      },
+      manifestWriter: async (path, content) => {
+        commitStarted.resolve()
+        await allowCommit.promise
+        await writeFile(path, content, 'utf8')
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('mpc:mpc-frame', undefined, progress)
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+
+    let cancellationCompleted = false
+    const cancellation = service.cancelResource('mpc:mpc-frame').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      expect(cancellationCompleted).toBe(false)
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).resolves.toEqual({
+        status: 'cancelled',
+        resource_id: 'mpc:mpc-frame',
+      })
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message: 'Cancelled download for mpc:mpc-frame',
+      })
+      await expect(
+        stat(join(root, 'data', 'mpcs', 'mpc-frame', '0.1.0')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+        status: 'available',
+      })
+      expect(progress).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: 'done' }),
+      )
+      expect(progress).toHaveBeenLastCalledWith(
+        expect.objectContaining({ phase: 'cancelled' }),
+      )
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('rolls back a PDK install cancelled during its inventory commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createPdkArchive(root)
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await cp(join(root, 'pdk-source', 'icsprout55-pdk-1.10.100'), destination, {
+          recursive: true,
+        })
+      },
+      pdkInventoryWriter: async (path, value) => {
+        commitStarted.resolve()
+        await allowCommit.promise
+        await writeJsonAtomic(path, value)
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('pdk:ics55', '1.10.100', progress)
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+
+    let cancellationCompleted = false
+    const cancellation = service.cancelResource('pdk:ics55').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      expect(cancellationCompleted).toBe(false)
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).resolves.toEqual({
+        status: 'cancelled',
+        resource_id: 'pdk:ics55',
+      })
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message: 'Cancelled download for pdk:ics55',
+      })
+      await expect(
+        stat(join(root, 'data', 'pdks', 'ics55', '1.10.100')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(service.getPdkInventoryService().listInstallations()).resolves.toEqual(
+        [],
+      )
+      expect(progress).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: 'done' }),
+      )
+      expect(progress).toHaveBeenLastCalledWith(
+        expect.objectContaining({ phase: 'cancelled' }),
+      )
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('preserves PDK files when a cancelled inventory cannot be restored', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createPdkArchive(root)
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    let inventoryWriteCount = 0
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await cp(join(root, 'pdk-source', 'icsprout55-pdk-1.10.100'), destination, {
+          recursive: true,
+        })
+      },
+      pdkInventoryWriter: async (path, value) => {
+        inventoryWriteCount += 1
+        if (inventoryWriteCount === 1) {
+          commitStarted.resolve()
+          await allowCommit.promise
+          await writeJsonAtomic(path, value)
+          return
+        }
+        throw new Error('inventory restore failed')
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('pdk:ics55', '1.10.100')
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+    const cancellation = service.cancelResource('pdk:ics55')
+
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).rejects.toThrow(
+        'PDK installation was cancelled but its inventory could not be restored',
+      )
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message: 'PDK installation was cancelled but its inventory could not be restored',
+      })
+      await expect(
+        stat(join(root, 'data', 'pdks', 'ics55', '1.10.100')),
+      ).resolves.toMatchObject({})
+      await expect(service.getPdkInventoryService().listInstallations()).resolves.toEqual(
+        [
+          expect.objectContaining({
+            familyId: 'ics55',
+            version: '1.10.100',
+            readiness: 'ready',
+          }),
+        ],
+      )
+      expect(inventoryWriteCount).toBe(2)
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('uses a unique completed archive path for each repeated install', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const completedArchives: string[] = []
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (archivePath, destination) => {
+        completedArchives.push(archivePath)
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await service.installResource('tool:yosys')
+    await service.installResource('tool:yosys')
+
+    expect(completedArchives).toHaveLength(2)
+    expect(completedArchives[0]).not.toBe(completedArchives[1])
   })
 
   it('aborts extraction and waits for extractor cleanup before reporting cancellation', async () => {

@@ -1,3 +1,5 @@
+import { ResourceMetadataRestoreError } from './resourceInstallErrors'
+
 export interface ResourceInstallSubscriber<TEvent> {
   readonly signal: AbortSignal
   cancel(): Promise<void>
@@ -39,7 +41,11 @@ export class ResourceInstallCoordinator<TEvent, TResult> {
       signal: controller.signal,
       async cancel() {
         controller.abort()
-        await root.completion?.catch(() => undefined)
+        try {
+          await root.completion
+        } catch (error) {
+          if (error instanceof ResourceMetadataRestoreError) throw error
+        }
       },
       publish(event) {
         listener?.(event)
@@ -168,12 +174,18 @@ export class ResourceInstallCoordinator<TEvent, TResult> {
   ): Promise<void> {
     operation.acceptingSubscribers = false
     operation.controller.abort()
-    await Promise.all([
-      operation.promise.catch(() => undefined),
+    const results = await Promise.allSettled([
+      operation.promise,
       ...Array.from(operation.subscribers, async (subscriber) => {
         await subscriber.cancel()
       }),
     ])
+    const metadataRestoreFailure = results.find(
+      (result): result is PromiseRejectedResult =>
+        result.status === 'rejected' &&
+        result.reason instanceof ResourceMetadataRestoreError,
+    )
+    if (metadataRestoreFailure) throw metadataRestoreFailure.reason
   }
 
   private finishOperation(operation: SharedInstall<TEvent, TResult>): void {

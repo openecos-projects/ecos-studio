@@ -21,6 +21,7 @@ import {
   type PdkInventoryBinding,
 } from './pdkInventoryMigration'
 import { assertManualPdkConfiguration } from './pdkManualConfiguration'
+import { ResourceMetadataRestoreError } from './resourceInstallErrors'
 
 export interface PdkInventoryServiceOptions {
   inventoryPath?: string
@@ -92,16 +93,22 @@ export class PdkInventoryService {
 
   async registerManagedInstallation(
     request: ManagedPdkInstallationRequest,
+    signal?: AbortSignal,
   ): Promise<PdkInstallationSnapshot> {
     return await this.withLock(async () => {
+      throwIfAborted(signal)
       const root = await canonicalDirectory(request.root)
+      throwIfAborted(signal)
       await mkdir(this.options.managedRoot, { recursive: true })
       const managedRoot = await realpath(resolve(this.options.managedRoot))
+      throwIfAborted(signal)
       const relativePath = relative(managedRoot, root)
       if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
         throw new Error('Managed PDK Installation is outside the managed root')
       }
       const inventory = await this.readInventory()
+      throwIfAborted(signal)
+      const originalInventory = structuredClone(inventory)
       let installation = inventory.installations.find(
         (candidate) => candidate.id === request.id || candidate.root === root,
       )
@@ -130,8 +137,25 @@ export class PdkInventoryService {
         }
         inventory.installations.push(installation)
       }
+      throwIfAborted(signal)
       await this.writeInventory(inventory)
-      return await this.snapshot(installation)
+      try {
+        throwIfAborted(signal)
+        const result = await this.snapshot(installation)
+        throwIfAborted(signal)
+        return result
+      } catch (error) {
+        if (!signal?.aborted) throw error
+        try {
+          await this.writeInventory(originalInventory)
+        } catch (rollbackError) {
+          throw new ResourceMetadataRestoreError(
+            [error, rollbackError],
+            'PDK installation was cancelled but its inventory could not be restored',
+          )
+        }
+        throw error
+      }
     })
   }
 
@@ -461,6 +485,11 @@ function requiredText(value: string, label: string): string {
   const text = value.trim()
   if (!text) throw new Error(`${label} is required`)
   return text
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  throw new DOMException('The operation was aborted.', 'AbortError')
 }
 
 async function normalizedProjectRoot(path: string): Promise<string> {

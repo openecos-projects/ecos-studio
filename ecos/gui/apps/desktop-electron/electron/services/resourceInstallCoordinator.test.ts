@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { ResourceMetadataRestoreError } from './resourceInstallErrors'
 import { ResourceInstallCoordinator } from './resourceInstallCoordinator'
 
 describe('ResourceInstallCoordinator', () => {
@@ -111,6 +112,30 @@ describe('ResourceInstallCoordinator', () => {
     expect(dependencyTask).toHaveBeenCalledTimes(1)
     expect(coordinator.isActive('tool:first')).toBe(false)
     expect(coordinator.isActive('tool:second')).toBe(false)
+  })
+
+  it('reports a metadata restore failure instead of a successful cancellation', async () => {
+    const coordinator = new ResourceInstallCoordinator<string, string>()
+    const started = deferred()
+    const root = coordinator.runRoot('tool:root', undefined, async (subscriber) => {
+      return await coordinator.runShared('tool:shared', subscriber, async (context) => {
+        started.resolve()
+        await new Promise<void>((resolve) => {
+          context.signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+        throw new ResourceMetadataRestoreError(
+          [new Error('restore failed')],
+          'metadata restore failed',
+        )
+      })
+    })
+    const rootResult = root.catch((error: unknown) => error)
+    await started.promise
+
+    await expect(coordinator.cancelAndWait('tool:shared')).rejects.toThrow(
+      'metadata restore failed',
+    )
+    await expect(rootResult).resolves.toBeInstanceOf(ResourceMetadataRestoreError)
   })
 })
 

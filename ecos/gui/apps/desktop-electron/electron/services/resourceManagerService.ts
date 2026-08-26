@@ -32,7 +32,11 @@ import {
   ResourceInstallCoordinator,
   type ResourceInstallSubscriber,
 } from './resourceInstallCoordinator'
-import { PdkInventoryService } from './pdkInventoryService'
+import { ResourceMetadataRestoreError } from './resourceInstallErrors'
+import {
+  PdkInventoryService,
+  type PdkInventoryServiceOptions,
+} from './pdkInventoryService'
 import { requiredToolHealthMarkers, type ToolHealthMarkerKind } from './toolHealthPolicy'
 import {
   validateMpcSpec,
@@ -350,6 +354,7 @@ export interface ResourceManagerServiceOptions {
   commandRunner?: CommandRunner
   fetchImpl?: typeof fetch
   manifestWriter?: ManifestWriter
+  pdkInventoryWriter?: PdkInventoryServiceOptions['jsonWriter']
   pdksDir?: string
   mpcsDir?: string
   registryUrl?: string
@@ -399,6 +404,7 @@ export class ResourceManagerService {
       inventoryPath: join(this.resourcesDir, 'pdk-inventory.json'),
       legacyManifestPath: this.manifestPath,
       managedRoot: this.pdksDir,
+      jsonWriter: options.pdkInventoryWriter,
       legacyCleaner: () => this.removeLegacyPdkManifestData(),
     })
     this.registryUrl =
@@ -691,6 +697,7 @@ export class ResourceManagerService {
             rootSubscriber,
           )
         } catch (error) {
+          if (error instanceof ResourceMetadataRestoreError) throw error
           if (!rootSubscriber.signal.aborted) throw error
 
           const originalMessage = error instanceof Error ? error.message : String(error)
@@ -1247,17 +1254,24 @@ export class ResourceManagerService {
       const resolvedAsset = await this.resolvePlatformAsset(asset)
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
-      tempArchive = resourceArchivePath(
+      const resumableArchive = resourceArchivePath(
         this.resourcesDir,
         resourceId,
         version,
         resolvedAsset.url,
       )
-      partialArchive = `${tempArchive}.part`
+      tempArchive = resourceArchivePath(
+        this.resourcesDir,
+        resourceId,
+        version,
+        resolvedAsset.url,
+        randomUUID(),
+      )
+      partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
-      await recoverPartialArchive(tempArchive, partialArchive)
+      await recoverPartialArchive(resumableArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1351,6 +1365,7 @@ export class ResourceManagerService {
       const detected = await detectExecutables(tempExtract)
       const executable = selectToolExecutable(name, detected)
       await assertStagedToolHealth(name, tempExtract, detected, executable)
+      throwIfAborted(signal)
       const manifestEntry: ToolInventoryEntry = {
         type: 'tool',
         name,
@@ -1366,11 +1381,20 @@ export class ResourceManagerService {
       if (resolvedAsset.size && resolvedAsset.size > 0) {
         manifestEntry.size = resolvedAsset.size
       }
-      await replaceDirectoryWithRollback(tempExtract, destination, async () => {
-        await this.mutateManifest((manifest) => {
-          manifest.installed[resourceId] = manifestEntry
-        })
-      })
+      await replaceDirectoryWithRollback(
+        tempExtract,
+        destination,
+        async () => {
+          await this.mutateManifest((manifest) => {
+            manifest.installed[resourceId] = manifestEntry
+          }, signal)
+        },
+        signal,
+      )
+      tempExtract = ''
+      const installedArchive = tempArchive
+      tempArchive = ''
+      removeCompletedArchive(installedArchive, resourceId)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1387,7 +1411,10 @@ export class ResourceManagerService {
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (isAbortError(error) || signal.aborted) {
+      if (
+        !(error instanceof ResourceMetadataRestoreError) &&
+        (isAbortError(error) || signal.aborted)
+      ) {
         const cancelMessage = `Cancelled download for ${resourceId}`
         electronLogger.info('[resources] Cancelled %s', resourceId)
         this.publish(listener, {
@@ -1471,17 +1498,24 @@ export class ResourceManagerService {
         })
         return { status: 'started', resource_id: resourceId, version }
       }
-      tempArchive = resourceArchivePath(
+      const resumableArchive = resourceArchivePath(
         this.resourcesDir,
         resourceId,
         version,
         resolvedAsset.url,
       )
-      partialArchive = `${tempArchive}.part`
+      tempArchive = resourceArchivePath(
+        this.resourcesDir,
+        resourceId,
+        version,
+        resolvedAsset.url,
+        randomUUID(),
+      )
+      partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
-      await recoverPartialArchive(tempArchive, partialArchive)
+      await recoverPartialArchive(resumableArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1606,19 +1640,32 @@ export class ResourceManagerService {
 
       const scanned = await scanPdkDirectory(tempExtract)
       const health = await validateScannedPdk({ ...scanned, pdkId })
+      throwIfAborted(signal)
       if (health !== 'ok') {
         throw new Error(`PDK validation failed for ${pdkId} v${version}`)
       }
-      await replaceDirectoryWithRollback(tempExtract, destination, async () => {
-        await this.pdkInventoryService.registerManagedInstallation({
-          id: targetInstanceId,
-          familyId: pdkId,
-          displayName: scanned.name || displayName,
-          root: destination,
-          version,
-          registrySha256: resolvedAsset.sha256,
-        })
-      })
+      await replaceDirectoryWithRollback(
+        tempExtract,
+        destination,
+        async () => {
+          await this.pdkInventoryService.registerManagedInstallation(
+            {
+              id: targetInstanceId,
+              familyId: pdkId,
+              displayName: scanned.name || displayName,
+              root: destination,
+              version,
+              registrySha256: resolvedAsset.sha256,
+            },
+            signal,
+          )
+        },
+        signal,
+      )
+      tempExtract = ''
+      const installedArchive = tempArchive
+      tempArchive = ''
+      removeCompletedArchive(installedArchive, resourceId)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1635,7 +1682,10 @@ export class ResourceManagerService {
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (isAbortError(error) || signal.aborted) {
+      if (
+        !(error instanceof ResourceMetadataRestoreError) &&
+        (isAbortError(error) || signal.aborted)
+      ) {
         const cancelMessage = `Cancelled download for ${resourceId}`
         electronLogger.info('[resources] Cancelled %s', resourceId)
         this.publish(listener, {
@@ -1691,12 +1741,24 @@ export class ResourceManagerService {
       const version = versionEntry.version
       const displayName = mpc.display_name || mpcId
       const destination = join(this.mpcsDir, mpcId, version)
-      tempArchive = resourceArchivePath(this.resourcesDir, resourceId, version, asset.url)
-      partialArchive = `${tempArchive}.part`
+      const resumableArchive = resourceArchivePath(
+        this.resourcesDir,
+        resourceId,
+        version,
+        asset.url,
+      )
+      tempArchive = resourceArchivePath(
+        this.resourcesDir,
+        resourceId,
+        version,
+        asset.url,
+        randomUUID(),
+      )
+      partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.mpcsDir, mpcId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
-      await recoverPartialArchive(tempArchive, partialArchive)
+      await recoverPartialArchive(resumableArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1761,8 +1823,8 @@ export class ResourceManagerService {
       )
       throwIfAborted(signal)
       await readMpcSpecFromDirectory(tempExtract)
-      const manifest = await this.readManifest()
-      manifest.installed[resourceId] = {
+      throwIfAborted(signal)
+      const manifestEntry: MpcInventoryEntry = {
         type: 'mpc',
         id: mpcId,
         name: displayName,
@@ -1775,7 +1837,20 @@ export class ResourceManagerService {
         managed: true,
         health: 'ok',
       }
-      await this.commitMpcInstall(tempExtract, destination, manifest, signal)
+      await replaceDirectoryWithRollback(
+        tempExtract,
+        destination,
+        async () => {
+          await this.mutateManifest((manifest) => {
+            manifest.installed[resourceId] = manifestEntry
+          }, signal)
+        },
+        signal,
+      )
+      tempExtract = ''
+      const installedArchive = tempArchive
+      tempArchive = ''
+      removeCompletedArchive(installedArchive, resourceId)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1792,7 +1867,10 @@ export class ResourceManagerService {
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (isAbortError(error) || signal.aborted) {
+      if (
+        !(error instanceof ResourceMetadataRestoreError) &&
+        (isAbortError(error) || signal.aborted)
+      ) {
         const cancelMessage = `Cancelled download for ${resourceId}`
         electronLogger.info('[resources] Cancelled %s', resourceId)
         this.publish(listener, {
@@ -1819,58 +1897,6 @@ export class ResourceManagerService {
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
       if (tempExtract)
         await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
-    }
-  }
-
-  private async commitMpcInstall(
-    source: string,
-    destination: string,
-    manifest: ResourceManifest,
-    signal: AbortSignal,
-  ): Promise<void> {
-    const backup = `${destination}.backup-${randomUUID()}`
-    let movedExistingInstall = false
-    let movedNewInstall = false
-
-    await mkdir(dirname(destination), { recursive: true })
-    try {
-      if (await pathExists(destination)) {
-        await rename(destination, backup)
-        movedExistingInstall = true
-      }
-      await rename(source, destination)
-      movedNewInstall = true
-      throwIfAborted(signal)
-      await this.writeManifest(manifest)
-    } catch (error) {
-      const rollbackErrors: unknown[] = []
-      if (movedNewInstall) {
-        await rm(destination, { force: true, recursive: true }).catch((rollbackError) => {
-          rollbackErrors.push(rollbackError)
-        })
-      }
-      if (movedExistingInstall) {
-        await rename(backup, destination).catch((rollbackError) => {
-          rollbackErrors.push(rollbackError)
-        })
-      }
-      if (rollbackErrors.length > 0) {
-        throw new AggregateError(
-          [error, ...rollbackErrors],
-          `Failed to install and roll back MPC directory at ${destination}`,
-        )
-      }
-      throw error
-    }
-
-    if (movedExistingInstall) {
-      await rm(backup, { force: true, recursive: true }).catch((error) => {
-        electronLogger.warn(
-          '[resources] Failed to remove MPC update backup at %s: %s',
-          backup,
-          error instanceof Error ? error.message : String(error),
-        )
-      })
     }
   }
 
@@ -2231,11 +2257,28 @@ export class ResourceManagerService {
 
   private async mutateManifest(
     mutator: (manifest: ResourceManifest) => void | Promise<void>,
+    signal?: AbortSignal,
   ): Promise<void> {
     await this.withManifestLock(async () => {
-      const manifest = await this.readManifest()
+      throwIfAborted(signal)
+      const originalManifest = await this.readManifest()
+      throwIfAborted(signal)
+      const manifest = structuredClone(originalManifest)
       await mutator(manifest)
+      throwIfAborted(signal)
       await this.writeManifestFile(manifest)
+      if (!signal?.aborted) return
+
+      const abortError = new DOMException('The operation was aborted.', 'AbortError')
+      try {
+        await this.writeManifestFile(originalManifest)
+      } catch (rollbackError) {
+        throw new ResourceMetadataRestoreError(
+          [abortError, rollbackError],
+          'Resource installation was cancelled but its manifest could not be restored',
+        )
+      }
+      throw abortError
     })
   }
 
@@ -4783,14 +4826,16 @@ function resourceArchivePath(
   resourceId: string,
   version: string,
   sourceUrl: string,
+  operationId?: string,
 ): string {
   const safeId = resourceId.replace(/[^A-Za-z0-9._-]+/g, '-')
   const safeVersion = version.replace(/[^A-Za-z0-9._-]+/g, '-')
   const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
+  const operationSuffix = operationId ? `-${operationId}` : ''
   return join(
     resourcesDir,
     'downloads',
-    `${safeId}-${safeVersion}-${sourceHash}${archiveExtensionFromUrl(sourceUrl)}`,
+    `${safeId}-${safeVersion}-${sourceHash}${operationSuffix}${archiveExtensionFromUrl(sourceUrl)}`,
   )
 }
 
@@ -4804,6 +4849,17 @@ async function recoverPartialArchive(
     return
   }
   await rename(archivePath, partialArchivePath)
+}
+
+function removeCompletedArchive(path: string, resourceId: string): void {
+  void rm(path, { force: true }).catch((error) => {
+    electronLogger.warn(
+      '[resources] Installed %s but failed to remove completed archive %s: %s',
+      resourceId,
+      path,
+      error instanceof Error ? error.message : String(error),
+    )
+  })
 }
 
 async function readMpcSpecFromDirectory(
@@ -5100,30 +5156,50 @@ async function replaceDirectoryWithRollback(
   stagedPath: string,
   destination: string,
   commit: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal)
   const backupPath = join(
     dirname(destination),
     `.backup-${basename(destination)}-${randomUUID()}`,
   )
   const hadPrevious = await pathExists(destination)
+  throwIfAborted(signal)
   await mkdir(dirname(destination), { recursive: true })
   await rm(backupPath, { force: true, recursive: true })
+  throwIfAborted(signal)
 
-  if (hadPrevious) {
-    await rename(destination, backupPath)
-  }
-
+  let previousMoved = false
   let stagedInstalled = false
   try {
+    if (hadPrevious) {
+      await rename(destination, backupPath)
+      previousMoved = true
+      throwIfAborted(signal)
+    }
     await rename(stagedPath, destination)
     stagedInstalled = true
+    throwIfAborted(signal)
     await commit()
   } catch (error) {
+    if (error instanceof ResourceMetadataRestoreError) {
+      if (previousMoved) {
+        await rm(backupPath, { force: true, recursive: true }).catch((cleanupError) => {
+          electronLogger.warn(
+            '[resources] Preserved the new installation at %s but failed to remove backup %s: %s',
+            destination,
+            backupPath,
+            cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          )
+        })
+      }
+      throw error
+    }
     try {
       if (stagedInstalled) {
         await rm(destination, { force: true, recursive: true })
       }
-      if (hadPrevious && (await pathExists(backupPath))) {
+      if (previousMoved && (await pathExists(backupPath))) {
         await rename(backupPath, destination)
       }
     } catch (rollbackError) {
@@ -5135,8 +5211,8 @@ async function replaceDirectoryWithRollback(
     throw error
   }
 
-  if (hadPrevious) {
-    await rm(backupPath, { force: true, recursive: true }).catch((error) => {
+  if (previousMoved) {
+    void rm(backupPath, { force: true, recursive: true }).catch((error) => {
       electronLogger.warn(
         '[resources] Installed %s but failed to remove backup %s: %s',
         destination,
