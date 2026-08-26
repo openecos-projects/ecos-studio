@@ -282,4 +282,93 @@ describe('useDesignReportExport', () => {
       }),
     )
   })
+
+  it('invalidates in-flight report data when switching workspaces directly from A to B', async () => {
+    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    const composable = useDesignReportExport({
+      currentProject,
+      showToast,
+    })
+
+    let resolveFirstFlow!: (value: Record<string, unknown>) => void
+    const firstFlowPromise = new Promise<Record<string, unknown>>((resolve) => {
+      resolveFirstFlow = resolve
+    })
+
+    mockReadFlow
+      .mockImplementationOnce(() => firstFlowPromise)
+      .mockResolvedValueOnce({
+        design: 'aes',
+        pdk: 'ic55',
+        steps: [
+          {
+            name: 'Synthesis_yosys',
+            tool: 'Yosys',
+            state: 'Success',
+            runtime: '0:0:45',
+          },
+        ],
+      })
+
+    mockReadParameters
+      .mockResolvedValueOnce({ Design: 'gcd' })
+      .mockResolvedValueOnce({ Design: 'aes' })
+
+    mockGetIndex
+      .mockResolvedValueOnce({ design: 'gcd' })
+      .mockResolvedValueOnce({ design: 'aes' })
+
+    // Open export dialog for workspace A (triggers load)
+    composable.openDesignReportExport('latex')
+    expect(composable.dialogVisible.value).toBe(true)
+    expect(composable.loading.value).toBe(true)
+
+    // Switch directly from workspace A to workspace B while A is still in-flight
+    currentProject.value = { path: '/projects/aes/ws_002', name: 'aes_run' }
+    await Promise.resolve()
+
+    // Resolve the delayed in-flight read for workspace A
+    resolveFirstFlow({
+      design: 'gcd_stale',
+      pdk: 'ic55',
+      steps: [],
+    })
+
+    // Wait for the new load for workspace B to finish
+    await vi.waitFor(() => expect(composable.loading.value).toBe(false))
+
+    // Ensure reportData reflects workspace B only and did not get overwritten or mixed with A
+    expect(composable.reportData.value?.design.designName).toBe('aes')
+    expect(composable.reportData.value?.design.workspacePath).toBe('/projects/aes/ws_002')
+  })
+
+  it('invalidates in-flight report data when dialog is closed', async () => {
+    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    const composable = useDesignReportExport({
+      currentProject,
+      showToast,
+    })
+
+    let resolveFlow!: (value: Record<string, unknown>) => void
+    const flowPromise = new Promise<Record<string, unknown>>((resolve) => {
+      resolveFlow = resolve
+    })
+    mockReadFlow.mockImplementationOnce(() => flowPromise)
+
+    composable.openDesignReportExport('latex')
+    expect(composable.dialogVisible.value).toBe(true)
+    expect(composable.loading.value).toBe(true)
+
+    // Close the dialog while load is in flight
+    composable.closeDesignReportExport()
+    expect(composable.dialogVisible.value).toBe(false)
+    expect(composable.reportData.value).toBeNull()
+
+    // Resolve the delayed read
+    resolveFlow({ design: 'gcd' })
+    await Promise.resolve()
+
+    // reportData remains null because generation was invalidated
+    expect(composable.reportData.value).toBeNull()
+  })
 })

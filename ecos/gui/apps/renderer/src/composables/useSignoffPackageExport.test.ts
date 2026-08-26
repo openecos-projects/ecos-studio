@@ -800,4 +800,27 @@ describe('useSignoffPackageExport export action', () => {
 
     expect(mounted.showToast).not.toHaveBeenCalled()
   })
+
+  it('propagates summary write failure and shows error toast when writeProjectTextFile rejects', async () => {
+    const api = createApi()
+    api.writeProjectTextFile.mockRejectedValueOnce(
+      new Error('Refusing to grant access outside current project root'),
+    )
+    const mounted = mountComposable()
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    await openReviewAndConfirm(mounted)
+
+    expect(api.exportSignoff).not.toHaveBeenCalled()
+    expect(mounted.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        summary: 'Failed to Export Signoff Package',
+        detail: expect.stringContaining(
+          'Refusing to grant access outside current project root',
+        ),
+      }),
+    )
+  })
 })

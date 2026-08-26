@@ -160,10 +160,19 @@ export function useDesignReportExport({
 
   watch(
     () => currentProject.value?.path,
-    () => {
+    (newPath, oldPath) => {
       void syncMenuEligibility()
-      if (dialogVisible.value && !currentProject.value?.path) {
-        closeDesignReportExport()
+      if (newPath !== oldPath) {
+        loadGeneration++
+        reportData.value = null
+        error.value = ''
+        if (dialogVisible.value) {
+          if (newPath) {
+            void loadWorkspaceReportData()
+          } else {
+            closeDesignReportExport()
+          }
+        }
       }
     },
     { immediate: true },
@@ -646,6 +655,7 @@ export function useDesignReportExport({
   }
 
   function closeDesignReportExport(): void {
+    loadGeneration++
     dialogVisible.value = false
     loading.value = false
     error.value = ''

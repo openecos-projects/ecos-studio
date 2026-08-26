@@ -358,68 +358,57 @@ export function useSignoffPackageExport({
         return
       }
 
-      try {
-        const flow = await api.workspaceResources.readFlow().catch(() => null)
-        const home = await api.workspaceResources.readHome().catch(() => null)
-        const versions = await api.app
-          .getVersions()
-          .catch(() => ({ gui: '', ecc: '', eccTools: '' }))
-        const reportData = extractDesignReportData({
-          workspacePath: workspace.workspacePath,
-          parameters: isRecord(parameters) ? parameters : undefined,
-          flow,
-          homeData: isRecord(home) ? home : undefined,
-          versionInfo: isRecord(versions)
-            ? {
-                gui: typeof versions.gui === 'string' ? versions.gui : undefined,
-                ecc: typeof versions.ecc === 'string' ? versions.ecc : undefined,
-                eccTools:
-                  typeof versions.eccTools === 'string' ? versions.eccTools : undefined,
-              }
-            : undefined,
-        })
+      const flow = await api.workspaceResources.readFlow().catch(() => null)
+      const home = await api.workspaceResources.readHome().catch(() => null)
+      const versions = await api.app
+        .getVersions()
+        .catch(() => ({ gui: '', ecc: '', eccTools: '' }))
+      const reportData = extractDesignReportData({
+        workspacePath: workspace.workspacePath,
+        parameters: isRecord(parameters) ? parameters : undefined,
+        flow,
+        homeData: isRecord(home) ? home : undefined,
+        versionInfo: isRecord(versions)
+          ? {
+              gui: typeof versions.gui === 'string' ? versions.gui : undefined,
+              ecc: typeof versions.ecc === 'string' ? versions.ecc : undefined,
+              eccTools:
+                typeof versions.eccTools === 'string' ? versions.eccTools : undefined,
+            }
+          : undefined,
+      })
 
-        const reportFormats: DesignReportFormat[] = [
-          'latex',
-          'markdown',
-          'typst',
-          'csv',
-          'text',
-        ]
-        const formatExtMap: Record<DesignReportFormat, string> = {
-          latex: 'tex',
-          markdown: 'md',
-          typst: 'typ',
-          csv: 'csv',
-          text: 'txt',
-        }
-        await Promise.all(
-          reportFormats.map(async (fmt) => {
-            const ext = formatExtMap[fmt]
-            const content = generateDesignReport(reportData, fmt, {
-              includeMultiCorner: true,
-              includeStageBreakdown: true,
-              includeVerificationBreakdown: true,
-              latexStandalone: true,
-              typstStandalone: true,
-            })
-            const summaryPath = joinLocalPath(
-              workspace.workspacePath,
-              `${design}_design_summary.${ext}`,
-            )
-            await api.workspace
-              .writeProjectTextFile(summaryPath, content)
-              .catch((err) => {
-                console.warn(`[signoff-export] Failed to write ${summaryPath}:`, err)
-              })
-          }),
-        )
-      } catch (repErr) {
-        console.warn(
-          '[signoff-export] Failed to generate signoff design summary reports:',
-          repErr,
-        )
+      const reportFormats: DesignReportFormat[] = [
+        'latex',
+        'markdown',
+        'typst',
+        'csv',
+        'text',
+      ]
+      const formatExtMap: Record<DesignReportFormat, string> = {
+        latex: 'tex',
+        markdown: 'md',
+        typst: 'typ',
+        csv: 'csv',
+        text: 'txt',
       }
+      await Promise.all(
+        reportFormats.map(async (fmt) => {
+          const ext = formatExtMap[fmt]
+          const content = generateDesignReport(reportData, fmt, {
+            includeMultiCorner: true,
+            includeStageBreakdown: true,
+            includeVerificationBreakdown: true,
+            latexStandalone: true,
+            typstStandalone: true,
+          })
+          const summaryPath = joinLocalPath(
+            workspace.workspacePath,
+            `${design}_design_summary.${ext}`,
+          )
+          await api.workspace.writeProjectTextFile(summaryPath, content)
+        }),
+      )
 
       const result = await api.ecc.workspace.exportSignoff({
         outputPath,
