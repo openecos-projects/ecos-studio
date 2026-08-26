@@ -78,11 +78,22 @@ export async function locateWorkspaceParametersFile(
  * A workspace-relative `pdk_config` resolves against the workspace root.
  * Keys are canonicalized on the way out so a hand-authored display key
  * (e.g. `Target density`) cannot shadow the same parameter elsewhere.
+ * A section that exists but is not a table is a configuration error,
+ * never a silently-empty section.
  */
 export function mergeTomlSections(
   document: Record<string, unknown>,
   workspaceRoot: string,
 ): Record<string, unknown> {
+  for (const section of ['params', 'design', 'pdk'] as const) {
+    if (section in document && !isRecord(document[section])) {
+      throw new Error(
+        `Invalid workspace configuration: [${section}] must be a table, got ${
+          Array.isArray(document[section]) ? 'array' : typeof document[section]
+        }`,
+      )
+    }
+  }
   const params: Record<string, unknown> = {
     ...(normalizeParameterKeys(
       isRecord(document.params) ? document.params : {},
@@ -291,12 +302,18 @@ function setJsonPathValue(
  * on-disk file's vocabulary: display keys for JSON, and for TOML every
  * string segment is canonicalized through the ecc mechanical rule, so an
  * agent emitting display-key paths keeps working after the migration.
+ *
+ * When `authorizedLocation` is provided (a path already authorized and
+ * canonicalized by the caller's path scope), the operation uses exactly
+ * that file instead of re-locating it, closing the locate→authorize→read
+ * symlink swap window.
  */
 export async function editWorkspaceParameters(
   root: string,
   edits: readonly WorkspaceParameterEdit[],
+  authorizedLocation?: WorkspaceParametersFileLocation,
 ): Promise<WorkspaceParametersFileLocation> {
-  const location = await locateWorkspaceParametersFile(root)
+  const location = authorizedLocation ?? (await locateWorkspaceParametersFile(root))
   if (!location) {
     throw new Error(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,

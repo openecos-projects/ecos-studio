@@ -498,7 +498,10 @@ export class WorkspaceService {
     const canonicalPath =
       await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
     await this.assertCanWriteProjectTextFile(canonicalPath)
-    return await editWorkspaceParametersFile(workspacePath, edits)
+    return await editWorkspaceParametersFile(workspacePath, edits, {
+      format: location.format,
+      path: canonicalPath,
+    })
   }
 
   async readProjectTextFileTail(path: string, maxChars: number): Promise<string | null> {

@@ -388,3 +388,31 @@ describe('hand-authored display keys in TOML', () => {
     expect(updated?.target_density).toBe(0.55)
   })
 })
+
+describe('malformed TOML sections', () => {
+  it('rejects a non-table [params] section instead of treating it as empty', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', 'params = [1]\n')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
+  })
+
+  it('rejects a scalar [design] section', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', 'design = "gcd"\n[params]\ntop_module = "gcd"\n')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
+  })
+})
+
+describe('editWorkspaceParameters with an authorized location', () => {
+  it('operates on exactly the authorized file instead of re-locating', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    const authorized = join(root, 'home', 'ecc.toml')
+    await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 48 }], {
+      format: 'toml',
+      path: authorized,
+    })
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.max_fanout).toBe(48)
+  })
+})
