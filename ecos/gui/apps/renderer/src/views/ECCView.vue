@@ -210,7 +210,10 @@ import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
 import { waitForDesktopApi } from '@/platform/desktop'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import {
+  readOptionalProjectTextFile,
+  readWorkspaceParametersFile,
+} from '@/utils/projectFiles'
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
@@ -394,17 +397,14 @@ async function loadSourceWorkspaceInitialConfig(
   if (!sourceWorkspacePath) return undefined
 
   try {
-    const [parametersText, pdkText, dbConfigText] = await Promise.all([
-      readOptionalProjectTextFile('home/parameters.json', {
-        projectPath: sourceWorkspacePath,
-      }),
+    const [parametersJson, pdkText, dbConfigText] = await Promise.all([
+      readWorkspaceParametersFile(sourceWorkspacePath),
       readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
       readOptionalProjectTextFile('config/db_ecc.json', {
         projectPath: sourceWorkspacePath,
       }),
     ])
 
-    const parametersJson = parseOptionalJson(parametersText)
     const pdkJson = parseOptionalJson(pdkText)
     const dbConfigJson = parseOptionalJson(dbConfigText)
     const dbInput = optionalRecord(dbConfigJson?.INPUT)
@@ -472,7 +472,8 @@ function normalizeSourceParameters(
 ): Record<string, unknown> {
   if (!parametersJson) return {}
   const dieAreaRecord = optionalRecord(parametersJson['Die Area']) ?? {}
-  const core = optionalRecord(parametersJson.Core) ?? {}
+  const core =
+    optionalRecord(parametersJson.Core) ?? optionalRecord(parametersJson.core) ?? {}
 
   return {
     design:
@@ -494,7 +495,10 @@ function normalizeSourceParameters(
     die_width: optionalNumber(dieAreaRecord.width ?? parametersJson.die_width, 100),
     die_height: optionalNumber(dieAreaRecord.height ?? parametersJson.die_height, 100),
     utilitization: optionalNumber(
-      dieAreaRecord.utilitization ?? core.Utilitization ?? parametersJson.utilitization,
+      dieAreaRecord.utilitization ??
+        core.Utilitization ??
+        core.utilitization ??
+        parametersJson.utilitization,
       0.6,
     ),
     margin: optionalNumber(dieAreaRecord.margin ?? parametersJson.margin, 0),

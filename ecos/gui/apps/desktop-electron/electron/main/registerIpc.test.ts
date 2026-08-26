@@ -119,6 +119,7 @@ function registerHandlers(
       listPendingExternalReadRoots: vi.fn(),
       readProjectBinaryFile: vi.fn(),
       readOptionalProjectTextFile: vi.fn(),
+      readWorkspaceParameters: vi.fn(),
       readOptionalProjectTextFileChunk: vi.fn(),
       readOptionalProjectTextFileTail: vi.fn(),
       readOptionalProjectTextFileUpdate: vi.fn(),

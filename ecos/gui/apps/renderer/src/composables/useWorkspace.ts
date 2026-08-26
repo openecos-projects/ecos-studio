@@ -1511,20 +1511,22 @@ export function useWorkspace() {
       const params = await readWorkspaceParametersResourceApi()
       if (!isCurrent()) return
       if (isRecord(params)) {
-        const pdk = asString(params['PDK'])
-        const topModule = asString(params['Top module'])
-        const frequencyTarget = asNumber(params['Frequency max [MHz]'])
+        const pdk = asString(params['PDK']) ?? asString(params['pdk'])
+        const topModule = asString(params['Top module']) ?? asString(params['top_module'])
+        const frequencyTarget =
+          asNumber(params['Frequency max [MHz]']) ?? asNumber(params['frequency_max'])
         if (pdk !== undefined) snapshot.pdk = pdk
         if (topModule !== undefined) snapshot.topModule = topModule
         if (frequencyTarget !== undefined) snapshot.frequencyTarget = frequencyTarget
-        const core = params['Core']
+        const core = params['Core'] ?? params['core']
         if (isRecord(core)) {
-          const coreUtilization = asNumber(core['Utilitization'])
+          const coreUtilization =
+            asNumber(core['Utilitization']) ?? asNumber(core['utilitization'])
           if (coreUtilization !== undefined) snapshot.coreUtilization = coreUtilization
         }
       }
     } catch {
-      console.warn('Failed to read parameters.json for snapshot')
+      console.warn('Failed to read workspace parameters for snapshot')
     }
 
     const currentIdx = recentProjects.value.findIndex(

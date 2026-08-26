@@ -55,7 +55,7 @@ describe('ECCView project management handoff', () => {
   it('reuses only source workspace config files when creating a branch workspace', () => {
     expect(source).toContain('loadSourceWorkspaceInitialConfig')
     expect(source).toContain('sourceWorkspacePath')
-    expect(source).toContain("readOptionalProjectTextFile('home/parameters.json'")
+    expect(source).toContain('readWorkspaceParametersFile(sourceWorkspacePath)')
     expect(source).not.toContain("readOptionalProjectTextFile('home/flow.json'")
     expect(source).toContain("readOptionalProjectTextFile('home/pdk.json'")
     expect(source).toContain("readOptionalProjectTextFile('config/db_ecc.json'")

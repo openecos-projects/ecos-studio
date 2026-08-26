@@ -176,6 +176,9 @@ export interface DesktopBridgeServices {
     isProjectDirectory(path: string): Promise<boolean>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     readOptionalProjectTextFile(path: string): Promise<string | null>
+    readWorkspaceParameters(
+      workspacePath: string,
+    ): Promise<Record<string, unknown> | null>
     readProjectTextFile(path: string): Promise<string>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail(
@@ -1470,6 +1473,15 @@ export function registerIpc(
     desktopApiIpcChannels.workspaceReadOptionalProjectTextFile,
     async (_event, path) => {
       return await services.workspaceService.readOptionalProjectTextFile(path as string)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceReadWorkspaceParameters,
+    async (_event, workspacePath) => {
+      return await services.workspaceService.readWorkspaceParameters(
+        workspacePath as string,
+      )
     },
   )
 

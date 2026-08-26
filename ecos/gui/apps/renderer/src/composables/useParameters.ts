@@ -4,7 +4,7 @@ import { useDesktopRuntime } from './useDesktopRuntime'
 import { fetchSharedHomeData, convertRemoteToLocalPath } from './useHomeData'
 import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { readProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
+import { readWorkspaceParametersFile, writeProjectTextFile } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { refreshConfigApi } from '@/api/flow'
@@ -182,11 +182,12 @@ function firstResponseMessage(
 function normalizeDie(d: unknown): ParametersData['Die'] {
   if (!d || typeof d !== 'object') return { Size: [], Area: 0 }
   const o = d as Record<string, unknown>
-  const size = o.Size
+  const size = o.Size ?? o.size
+  const area = o.Area ?? o.area
   const arr = Array.isArray(size) ? size.map(Number) : []
   return {
     Size: arr,
-    Area: o.Area != null ? Number(o.Area) : 0,
+    Area: area != null ? Number(area) : 0,
   }
 }
 
@@ -202,20 +203,21 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
     }
   }
   const o = c as Record<string, unknown>
-  const size = o.Size
+  const size = o.Size ?? o.size
+  const area = o.Area ?? o.area
   const arr = Array.isArray(size) ? size.map(Number) : []
-  const margin = o.Margin
+  const margin = o.Margin ?? o.margin
   let m: [number, number] = [2, 2]
   if (Array.isArray(margin) && margin.length >= 2) {
     m = [Number(margin[0]), Number(margin[1])]
   }
   return {
     Size: arr,
-    Area: o.Area != null ? Number(o.Area) : 0,
-    'Bounding box': String(o['Bounding box'] ?? ''),
-    Utilitization: Number(o.Utilitization ?? 0.4),
+    Area: area != null ? Number(area) : 0,
+    'Bounding box': String(o['Bounding box'] ?? o.bounding_box ?? ''),
+    Utilitization: Number(o.Utilitization ?? o.utilitization ?? 0.4),
     Margin: m,
-    'Aspect ratio': Number(o['Aspect ratio'] ?? 1),
+    'Aspect ratio': Number(o['Aspect ratio'] ?? o.aspect_ratio ?? 1),
   }
 }
 
@@ -237,6 +239,7 @@ export function parametersHaveChipIdentity(
     record.design,
     record['Top module'],
     record.topModule,
+    record.top_module,
     record.Clock,
     record.clock,
   ]
@@ -251,31 +254,49 @@ export function parametersHaveChipIdentity(
   return Number.isFinite(area) && area > 0
 }
 
-export function parseParametersData(fileContent: string): ParametersData {
-  const raw = JSON.parse(fileContent) as Record<string, unknown>
+/**
+ * Normalize a raw parameters record into ParametersData. Accepts both the
+ * legacy display-key shape (home/parameters.json) and the canonical flat
+ * snake_case shape (home/ecc.toml / workspace.snapshot).
+ */
+export function parseParametersRecord(raw: Record<string, unknown>): ParametersData {
   return {
-    PDK: String(raw.PDK ?? ''),
+    PDK: String(raw.PDK ?? raw.pdk ?? ''),
     Design: String(raw.Design ?? raw.design ?? ''),
     design: raw.design != null ? String(raw.design) : undefined,
     description: raw.description != null ? String(raw.description) : undefined,
-    'Design Tool': raw['Design Tool'] != null ? String(raw['Design Tool']) : undefined,
+    'Design Tool':
+      raw['Design Tool'] != null
+        ? String(raw['Design Tool'])
+        : raw.design_tool != null
+          ? String(raw.design_tool)
+          : undefined,
     'Top module': String(raw['Top module'] ?? raw.top_module ?? ''),
     top_module: raw.top_module != null ? String(raw.top_module) : undefined,
-    Die: normalizeDie(raw.Die),
-    Core: normalizeCore(raw.Core),
-    'Max fanout': Number(raw['Max fanout'] ?? 20),
-    'Target density': Number(raw['Target density'] ?? 0.3),
-    'Target overflow': Number(raw['Target overflow'] ?? 0.1),
-    'Global right padding': Number(raw['Global right padding'] ?? 0),
-    'Cell padding x': Number(raw['Cell padding x'] ?? 600),
-    'Routability opt flag': Number(raw['Routability opt flag'] ?? 1),
+    Die: normalizeDie(raw.Die ?? raw.die),
+    Core: normalizeCore(raw.Core ?? raw.core),
+    'Max fanout': Number(raw['Max fanout'] ?? raw.max_fanout ?? 20),
+    'Target density': Number(raw['Target density'] ?? raw.target_density ?? 0.3),
+    'Target overflow': Number(raw['Target overflow'] ?? raw.target_overflow ?? 0.1),
+    'Global right padding': Number(
+      raw['Global right padding'] ?? raw.global_right_padding ?? 0,
+    ),
+    'Cell padding x': Number(raw['Cell padding x'] ?? raw.cell_padding_x ?? 600),
+    'Routability opt flag': Number(
+      raw['Routability opt flag'] ?? raw.routability_opt_flag ?? 1,
+    ),
     Clock: String(raw.Clock ?? raw.clock ?? ''),
     clock: raw.clock != null ? String(raw.clock) : undefined,
     'Frequency max [MHz]': Number(raw['Frequency max [MHz]'] ?? raw.frequency_max ?? 100),
     frequency_max: raw.frequency_max != null ? Number(raw.frequency_max) : undefined,
-    'Bottom layer': String(raw['Bottom layer'] ?? FIXED_BOTTOM_LAYER),
-    'Top layer': String(raw['Top layer'] ?? FIXED_TOP_LAYER),
-    'PDK Root': raw['PDK Root'] != null ? String(raw['PDK Root']) : undefined,
+    'Bottom layer': String(raw['Bottom layer'] ?? raw.bottom_layer ?? FIXED_BOTTOM_LAYER),
+    'Top layer': String(raw['Top layer'] ?? raw.top_layer ?? FIXED_TOP_LAYER),
+    'PDK Root':
+      raw['PDK Root'] != null
+        ? String(raw['PDK Root'])
+        : raw.pdk_root != null
+          ? String(raw.pdk_root)
+          : undefined,
     cpu_filelist: raw.cpu_filelist != null ? String(raw.cpu_filelist) : undefined,
     soc_filelist: raw.soc_filelist != null ? String(raw.soc_filelist) : undefined,
     soc_variant: raw.soc_variant != null ? String(raw.soc_variant) : undefined,
@@ -299,6 +320,10 @@ export function parseParametersData(fileContent: string): ParametersData {
     sim_program_names: normalizeStringArray(raw.sim_program_names),
     sim_all_tests: Boolean(raw.sim_all_tests),
   }
+}
+
+export function parseParametersData(fileContent: string): ParametersData {
+  return parseParametersRecord(JSON.parse(fileContent) as Record<string, unknown>)
 }
 
 export function transformParametersToConfig(data: ParametersData): ConfigData {
@@ -500,10 +525,6 @@ export function useParameters() {
     return true
   }
 
-  function applyParametersFileContent(fileContent: string): void {
-    applyParametersData(parseParametersData(fileContent))
-  }
-
   function isParametersRecord(
     value: unknown,
   ): value is ParametersData & Record<string, unknown> {
@@ -562,7 +583,9 @@ export function useParameters() {
           parametersHaveChipIdentity(snapshot.parameters) &&
           loadResourceToken === parametersResourceToken
         ) {
-          applyParametersData(snapshot.parameters as unknown as ParametersData)
+          applyParametersData(
+            parseParametersRecord(snapshot.parameters as Record<string, unknown>),
+          )
           return true
         }
       }
@@ -584,16 +607,24 @@ export function useParameters() {
         return true
       }
 
-      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
-        readProjectTextFile(resolvedPath),
+      const parametersRecord = await workspaceLifecycle.runForSession(sessionId, () =>
+        readWorkspaceParametersFile(projectPath),
       )
-      if (fileContent === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
+      if (
+        parametersRecord === undefined &&
+        !workspaceLifecycle.isCurrentSession(sessionId)
+      )
         return true
-      if (fileContent === undefined) return true
+      if (parametersRecord === undefined) return true
       if (loadResourceToken !== parametersResourceToken) return true
 
       resolvedParametersPath = resolvedPath
-      applyParametersFileContent(fileContent)
+      if (parametersRecord) {
+        applyParametersData(parseParametersRecord(parametersRecord))
+      } else {
+        if (keepLastParametersDuringFlowReload()) return true
+        resetParametersState()
+      }
       return true
     } catch (err) {
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return true
@@ -693,7 +724,9 @@ export function useParameters() {
           }
           if (loadResourceToken !== parametersResourceToken) return
           resolvedParametersPath = resolvedPath ?? parametersPath
-          applyParametersData(snapshot.parameters as unknown as ParametersData)
+          applyParametersData(
+            parseParametersRecord(snapshot.parameters as Record<string, unknown>),
+          )
           return
         }
       }
@@ -709,17 +742,25 @@ export function useParameters() {
         return
       }
 
-      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
-        readProjectTextFile(resolvedPath),
+      const parametersRecord = await workspaceLifecycle.runForSession(sessionId, () =>
+        readWorkspaceParametersFile(projectPath),
       )
-      if (fileContent === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
+      if (
+        parametersRecord === undefined &&
+        !workspaceLifecycle.isCurrentSession(sessionId)
+      )
         return
-      if (fileContent === undefined) return
+      if (parametersRecord === undefined) return
 
       if (loadResourceToken !== parametersResourceToken) return
       resolvedParametersPath = resolvedPath
 
-      applyParametersFileContent(fileContent)
+      if (parametersRecord) {
+        applyParametersData(parseParametersRecord(parametersRecord))
+      } else {
+        if (keepLastParametersDuringFlowReload() || originalConfig) return
+        resetParametersState()
+      }
     } catch (err) {
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return
       console.error('Failed to load parameters:', err)

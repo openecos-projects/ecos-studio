@@ -105,6 +105,7 @@ const desktopBridge = {
     openWaveformExternal: async (_path: string) => undefined,
     readProjectTextFile: async () => '',
     readOptionalProjectTextFile: async () => null,
+    readWorkspaceParameters: async () => null,
     readProjectTextFileTail: async () => null,
     readProjectBinaryFile: async () => new Uint8Array(),
     writeProjectTextFile: async () => undefined,

@@ -175,6 +175,11 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectTextFile, path),
     readOptionalProjectTextFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadOptionalProjectTextFile, path),
+    readWorkspaceParameters: (workspacePath) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceReadWorkspaceParameters,
+        workspacePath,
+      ),
     readProjectTextFileTail: (path, maxChars) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceReadProjectTextFileTail,

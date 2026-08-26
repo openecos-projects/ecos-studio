@@ -35,6 +35,7 @@ export const desktopApiIpcChannels = {
   workspaceOpenWaveformExternal: 'workspace:open-waveform-external',
   workspaceReadProjectTextFile: 'workspace:read-project-text-file',
   workspaceReadOptionalProjectTextFile: 'workspace:read-optional-project-text-file',
+  workspaceReadWorkspaceParameters: 'workspace:read-workspace-parameters',
   workspaceReadProjectTextFileTail: 'workspace:read-project-text-file-tail',
   workspaceReadOptionalProjectTextFileTail:
     'workspace:read-optional-project-text-file-tail',

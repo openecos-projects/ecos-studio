@@ -31,6 +31,10 @@ import {
   listWorkspaceDesignFiles,
   removeWorkspaceDesignFile,
 } from './designFileService'
+import {
+  locateWorkspaceParametersFile,
+  parseWorkspaceParametersText,
+} from './workspaceParametersFile'
 import type {
   WorkspaceDesignFileAddResult,
   WorkspaceDesignFileEntry,
@@ -442,6 +446,31 @@ export class WorkspaceService {
   async readOptionalProjectTextFile(path: string): Promise<string | null> {
     try {
       return await this.readProjectTextFile(path)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return null
+      }
+
+      throw error
+    }
+  }
+
+  /**
+   * Read a workspace's persisted parameters (home/ecc.toml preferred, legacy
+   * home/parameters.json fallback) for callers that only know the workspace
+   * directory — e.g. wizard prefill before the workspace is opened.
+   */
+  async readWorkspaceParameters(
+    workspacePath: string,
+  ): Promise<Record<string, unknown> | null> {
+    const location = await locateWorkspaceParametersFile(workspacePath)
+    if (!location) return null
+    try {
+      const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
+        location.path,
+      )
+      const raw = await readFile(canonicalPath, 'utf8')
+      return parseWorkspaceParametersText(raw, location.format, workspacePath)
     } catch (error) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
         return null

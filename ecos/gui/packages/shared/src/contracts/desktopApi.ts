@@ -282,6 +282,9 @@ export interface DesktopApi {
     openWaveformExternal(path: string): Promise<void>
     readProjectTextFile(path: string): Promise<string>
     readOptionalProjectTextFile(path: string): Promise<string | null>
+    readWorkspaceParameters(
+      workspacePath: string,
+    ): Promise<Record<string, unknown> | null>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail?(
       path: string,

@@ -252,7 +252,10 @@ import {
   requestOpenStepConfigAfterCreate,
   usePendingOpenStepConfigAfterCreate,
 } from '@/composables/openStepConfigAfterCreate'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import {
+  readOptionalProjectTextFile,
+  readWorkspaceParametersFile,
+} from '@/utils/projectFiles'
 import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
   projectContextFromWorkspaceConfig,
@@ -606,8 +609,8 @@ async function buildReconfigureWizardInitialConfig(
     projectContext === undefined
       ? await resolveProjectRouteContextForWorkspace(workspacePath)
       : projectContext
-  const [parametersText, pdkText, dbConfigText, flowText] = await Promise.all([
-    readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
+  const [parametersJson, pdkText, dbConfigText, flowText] = await Promise.all([
+    readWorkspaceParametersFile(workspacePath),
     readOptionalProjectTextFile('home/pdk.json', { projectPath: workspacePath }),
     readOptionalProjectTextFile('config/db_ecc.json', {
       projectPath: workspacePath,
@@ -615,7 +618,6 @@ async function buildReconfigureWizardInitialConfig(
     readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
   ])
 
-  const parametersJson = parseOptionalJson(parametersText)
   const pdkJson = parseOptionalJson(pdkText)
   const dbConfigJson = parseOptionalJson(dbConfigText)
   const flowConfig = normalizeWorkspaceFlowConfig(flowText)
@@ -732,10 +734,12 @@ function normalizeWorkspaceParameters(
   workspacePath: string,
 ): WorkspaceConfig['parameters'] {
   const dieArea = optionalRecord(parametersJson?.['Die Area']) ?? {}
-  const die = optionalRecord(parametersJson?.Die) ?? {}
-  const core = optionalRecord(parametersJson?.Core) ?? {}
-  const dieSize = numberList(die.Size)
-  const coreMargin = numberList(core.Margin)
+  const die =
+    optionalRecord(parametersJson?.Die) ?? optionalRecord(parametersJson?.die) ?? {}
+  const core =
+    optionalRecord(parametersJson?.Core) ?? optionalRecord(parametersJson?.core) ?? {}
+  const dieSize = numberList(die.Size ?? die.size)
+  const coreMargin = numberList(core.Margin ?? core.margin)
   const hasDieSize = dieSize.length >= 2
 
   return {
@@ -763,7 +767,10 @@ function normalizeWorkspaceParameters(
     die_width: optionalNumber(dieArea.width ?? dieSize[0], 100),
     die_height: optionalNumber(dieArea.height ?? dieSize[1], 100),
     utilitization: optionalNumber(
-      dieArea.utilitization ?? core.Utilitization ?? parametersJson?.utilitization,
+      dieArea.utilitization ??
+        core.Utilitization ??
+        core.utilitization ??
+        parametersJson?.utilitization,
       0.6,
     ),
     margin: optionalNumber(dieArea.margin ?? coreMargin[0] ?? parametersJson?.margin, 0),

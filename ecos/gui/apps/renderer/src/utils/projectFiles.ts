@@ -107,6 +107,21 @@ export async function readOptionalProjectTextFile(
   }
 }
 
+/**
+ * Read a workspace's persisted parameters (home/ecc.toml preferred, legacy
+ * home/parameters.json fallback) by workspace directory. The main process
+ * owns the on-disk format; the renderer always gets a JSON object.
+ */
+export async function readWorkspaceParametersFile(
+  workspacePath: string,
+): Promise<Record<string, unknown> | null> {
+  const workspace = getDesktopApi().workspace
+  if (typeof workspace.readWorkspaceParameters !== 'function') {
+    return null
+  }
+  return await workspace.readWorkspaceParameters(workspacePath)
+}
+
 export async function readProjectTextFileTail(
   path: string,
   maxChars: number,
