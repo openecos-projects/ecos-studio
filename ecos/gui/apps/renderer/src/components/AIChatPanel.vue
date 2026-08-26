@@ -639,7 +639,7 @@ const canSubmit = computed(
 const composerPlaceholder = computed(() => {
   if (isAgentConnecting.value) return 'Connecting…'
   if (!agentSessionId.value) return 'Unavailable'
-  if (pendingInteraction.value) return 'Reply to the request above'
+  if (pendingInteraction.value) return 'Ask anything or reply…'
   if (isRunning.value) return 'Add a follow-up…'
   return 'Ask anything…'
 })
@@ -1472,6 +1472,7 @@ async function handleInteraction(
   requestId: string,
   kind: 'choice' | 'confirm' | 'form',
   answer: InteractionAnswer,
+  displayAsMessage = false,
 ): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   const agent = desktopApi?.agent
@@ -1481,11 +1482,16 @@ async function handleInteraction(
   const interaction = messages.value.find(
     (message) => message.interaction?.requestId === requestId,
   )?.interaction
+  const textMessage = displayAsMessage && 'text' in answer ? answer.text.trim() : ''
   if (
     !interaction ||
-    !messageStore.answerInteraction(requestId, describeInteractionAnswer(interaction, answer))
+    !messageStore.answerInteraction(
+      requestId,
+      textMessage ? '' : describeInteractionAnswer(interaction, answer),
+    )
   )
     return
+  if (textMessage) messageStore.addMessage(textMessage)
   isAgentRequestPending.value = true
   try {
     const request =
@@ -1546,7 +1552,12 @@ async function handleInteractionText(
     })
     return
   }
-  await handleInteraction(interaction.requestId, interaction.kind, { text: message })
+  await handleInteraction(
+    interaction.requestId,
+    interaction.kind,
+    { text: message },
+    true,
+  )
 }
 
 function markContractInteractionAnswered(sessionId: string, requestId: string): void {
@@ -2337,7 +2348,8 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 .chat-turn__user-inner {
   position: relative;
-  width: min(82%, 52rem);
+  width: fit-content;
+  max-width: min(82%, 52rem);
   min-width: 0;
   padding: 0.625rem 0.875rem;
   border: 1px solid color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
@@ -2353,7 +2365,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
   line-height: 1.5;
   text-align: left;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* Keep each Agent response visually distinct from the surrounding transcript. */
@@ -2406,7 +2418,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 @media (max-width: 640px) {
   .chat-turn__user-inner {
-    width: 92%;
+    max-width: 92%;
   }
 
   .interaction-receipt {

@@ -102,9 +102,13 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('<div class="composer-footer">')
     expect(source).not.toContain('@other="focusComposer"')
     expect(source).not.toContain('composerInputRef.value?.focus()')
-    expect(source).not.toContain("if ('text' in answer) messageStore.addMessage(answer.text)")
+    expect(source).toContain('if (textMessage) messageStore.addMessage(textMessage)')
+    expect(source).toContain(
+      "textMessage ? '' : describeInteractionAnswer(interaction, answer)",
+    )
+    expect(source).toContain('Boolean(message.interactionAnswer)')
     expect(source).toContain('handleInteractionText')
-    expect(source).toContain('text: message')
+    expect(source).toMatch(/\{ text: message \},\s*true/)
     expect(source).toContain('if (isRunning.value) {')
     expect(source).toContain('queuedMessage.value = message')
     expect(source).toContain('watch(isRunning')
@@ -123,13 +127,19 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('run-status-dot')
     expect(source).toContain('@click="cancelQueuedMessage"')
     expect(source).toContain("return 'Add a follow-up…'")
-    expect(source).toContain("return 'Reply to the request above'")
+    expect(source).toContain("return 'Ask anything or reply…'")
     expect(source).toContain("return 'Ask anything…'")
     expect(source).toContain("return 'Connecting…'")
     expect(source).toContain("return 'Unavailable'")
     expect(source).not.toContain('Connecting to ECOS Agent')
     expect(source).not.toContain('ECOS Agent unavailable')
     expect(source).not.toContain('Message ECOS Agent')
+  })
+
+  it('sizes user messages to their content and wraps long text', () => {
+    expect(source).toContain('width: fit-content')
+    expect(source).toContain('max-width: min(82%, 52rem)')
+    expect(source).toContain('overflow-wrap: anywhere')
   })
 
   it('overlays interactions without hiding the scrollable conversation tail', () => {
