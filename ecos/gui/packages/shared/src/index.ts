@@ -218,7 +218,9 @@ export {
 export { isHdlFilePath } from './utils/hdlPath.ts'
 export {
   projectManagementStaTimingIssuesPath,
+  projectManagementWorkspaceReadablePaths,
   projectManagementWorkspaceStepAnalysisSpecs,
+  projectManagementWorkspaceStepConfigPaths,
   projectManagementWorkspaceSummaryPaths,
 } from './utils/projectManagementSummary.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'

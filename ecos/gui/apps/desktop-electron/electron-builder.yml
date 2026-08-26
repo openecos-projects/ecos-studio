@@ -21,3 +21,15 @@ linux:
   target:
     - AppImage
     - deb
+
+mac:
+  artifactName: ECOS-Studio_${version}_${arch}.${ext}
+  executableName: ecos-studio
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+
+win:
+  artifactName: ECOS-Studio_${version}_${arch}.${ext}
+  target:
+    - nsis

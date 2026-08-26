@@ -174,4 +174,34 @@ describe('ProjectManagementReadService', () => {
       }),
     ).rejects.toThrow('outside its workspace')
   })
+
+  it('serves step-config files from a declared workspace but rejects unlisted config paths', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const configDir = join(workspaceRoot, 'config')
+    await mkdir(configDir)
+    await writeFile(join(configDir, 'cts_ecc.json'), '{"cts_buf_list":"BUF"}')
+    const service = new ProjectManagementReadService()
+
+    await expect(
+      service.readWorkspaceTexts({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        paths: ['home/flow.json', 'config/cts_ecc.json', 'config/rcx.json'],
+      }),
+    ).resolves.toEqual({
+      texts: {
+        'home/flow.json': '{"steps":[]}',
+        'config/cts_ecc.json': '{"cts_buf_list":"BUF"}',
+        'config/rcx.json': null,
+      },
+      unavailablePaths: [],
+    })
+    await expect(
+      service.readWorkspaceTexts({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        paths: ['config/evil.json'],
+      }),
+    ).rejects.toThrow('not allowed')
+  })
 })

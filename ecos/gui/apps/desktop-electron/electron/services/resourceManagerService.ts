@@ -29,6 +29,7 @@ import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { electronLogger } from './logger'
 import { isRelativePathOutsideRoot } from './pathScope'
+import { requiredToolHealthMarkers, type ToolHealthMarkerKind } from './toolHealthPolicy'
 import {
   validateMpcSpec,
   type ResourceAction,
@@ -3524,6 +3525,7 @@ async function isUsableExecutable(
   platform: NodeJS.Platform,
 ): Promise<boolean> {
   try {
+    if (!(await stat(path)).isFile()) return false
     await access(path, platform === 'win32' ? constants.F_OK : constants.X_OK)
     return true
   } catch {
@@ -3537,6 +3539,23 @@ async function isExistingDirectory(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+async function isExistingFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile()
+  } catch {
+    return false
+  }
+}
+
+async function isValidToolHealthMarker(
+  path: string,
+  kind: ToolHealthMarkerKind,
+): Promise<boolean> {
+  if (kind === 'executable') return isUsableExecutable(path, process.platform)
+  if (kind === 'directory') return isExistingDirectory(path)
+  return isExistingFile(path)
 }
 
 async function isSurferAssetsRoot(path: string): Promise<boolean> {
@@ -3884,7 +3903,9 @@ async function assertStagedToolHealth(
 async function checkToolEntryHealth(
   entry: ToolInventoryEntry,
 ): Promise<ToolHealthStatus> {
-  const requiredMarkers = requiredToolMarkers(normalizeToolName(entry.name))
+  const normalizedName = normalizeToolName(entry.name)
+  const markerDefinitions = requiredToolHealthMarkers(normalizedName)
+  const requiredMarkers = markerDefinitions.map((marker) => marker.path)
   const rootExists = await isExistingDirectory(entry.path)
   if (!rootExists) {
     return {
@@ -3896,9 +3917,11 @@ async function checkToolEntryHealth(
   }
 
   const missingMarkers: string[] = []
-  for (const marker of requiredMarkers) {
-    if (!(await pathExists(join(entry.path, marker)))) {
-      missingMarkers.push(marker)
+  for (const marker of markerDefinitions) {
+    const markerPath = join(entry.path, marker.path)
+    const isValid = await isValidToolHealthMarker(markerPath, marker.kind)
+    if (!isValid) {
+      missingMarkers.push(marker.path)
     }
   }
 
@@ -3929,60 +3952,6 @@ async function checkToolEntryHealth(
     required_markers: requiredMarkers,
     missing_markers: [],
   }
-}
-
-function requiredToolMarkers(normalizedName: string): string[] {
-  if (normalizedName === 'verilator') {
-    return ['bin/verilator', 'bin/verilator_bin', 'share/verilator/include/verilated.cpp']
-  }
-  if (normalizedName === 'riscv-toolchain') {
-    return [
-      'bin/riscv64-unknown-elf-gcc',
-      'bin/riscv64-unknown-elf-ld',
-      'bin/riscv64-unknown-elf-objdump',
-      'bin/riscv64-unknown-elf-objcopy',
-    ]
-  }
-  if (normalizedName === 'ecc-fe') {
-    return ['bin/ecc-fe', 'fecompiler']
-  }
-  if (normalizedName === 'ecc-fe-soc-ysyx-am') {
-    return ['manifest.json', 'catalog.json', 'filelist.soc.f', 'driver/main.cpp']
-  }
-  if (normalizedName === 'ecc-fe-cpu-rtl') {
-    return [
-      'thirdparty/README',
-      'thirdparty/cv32e40p',
-      'thirdparty/cva6',
-      'thirdparty/darkriscv',
-      'thirdparty/ibex',
-      'thirdparty/learn-fpga',
-      'thirdparty/picorv32',
-      'thirdparty/scr1',
-      'thirdparty/serv',
-      'thirdparty/vexriscv',
-    ]
-  }
-  if (normalizedName.startsWith('ecc-fe-cpu-')) {
-    return ['thirdparty']
-  }
-  if (normalizedName === 'ecc-fe-difftest-ref') {
-    return ['tools/riscv32-spike-so']
-  }
-  if (normalizedName === 'ecc-fe-examples') {
-    return [
-      'examples/ysyx_00000000/filelist.cpu.f',
-      'examples/ysyx_00000000/rtl/ysyx_00000000.sv',
-      'examples/ysyx_00000000/rtl/ysyx_00000000_difftest.sv',
-    ]
-  }
-  if (normalizedName.startsWith('ecc-fe-test-')) {
-    return ['tests']
-  }
-  if (normalizedName === 'surfer') {
-    return ['index.html', 'integration.js', 'surfer.js', 'surfer_bg.wasm']
-  }
-  return []
 }
 
 function executableHealthMarkers(entry: ToolInventoryEntry): string[] {

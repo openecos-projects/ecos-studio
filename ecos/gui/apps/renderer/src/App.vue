@@ -116,7 +116,7 @@
       modal
       maximizable
       header="Step Configuration"
-      :style="{ width: 'min(1120px, calc(100vw - 32px))' }"
+      :style="{ width: 'min(1440px, calc(100vw - 32px))' }"
       :draggable="false"
       @update:visible="updateStepConfigDialogVisibility"
     >
@@ -126,15 +126,6 @@
           ref="stepConfigDialogRef"
         />
       </div>
-      <template #footer>
-        <button
-          type="button"
-          class="rounded border border-(--border-color) px-3 py-1.5 text-xs text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
-          @click="closeStepConfigDialog"
-        >
-          Cancel
-        </button>
-      </template>
     </Dialog>
 
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
@@ -1371,6 +1362,12 @@ body.window-maximized .app-container {
 .step-config-dialog {
   height: min(72vh, 720px);
   min-height: 420px;
+}
+
+/* Maximized dialog: the config area fills the window (above the footer)
+   instead of stopping at the normal-mode height. */
+.p-dialog-maximized .step-config-dialog {
+  height: 100%;
 }
 
 .workspace-update-backup-overlay {

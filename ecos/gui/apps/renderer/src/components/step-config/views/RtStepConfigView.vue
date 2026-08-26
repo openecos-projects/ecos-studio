@@ -1,18 +1,34 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import InputText from 'primevue/inputtext'
+import { useStepConfigDiff } from '../stepConfigDiff'
 
 const draft = defineModel<Record<string, unknown>>({ required: true })
+
+withDefaults(
+  defineProps<{
+    readonly?: boolean
+  }>(),
+  { readonly: false },
+)
+
+const diff = useStepConfigDiff()
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
+
+const rtPrefix = computed(() => (isObj(draft.value.RT) ? 'RT.' : ''))
 
 const rtEntries = computed(() => {
   const inner = draft.value.RT
   const block = isObj(inner) ? inner : draft.value
   return Object.entries(block).sort(([a], [b]) => a.localeCompare(b))
 })
+
+function isEntryChanged(key: string): boolean {
+  return diff?.isChanged(rtPrefix.value + key) ?? false
+}
 
 function isFixedRoutingLayerKey(k: string): boolean {
   return k === '-bottom_routing_layer' || k === '-top_routing_layer'
@@ -30,7 +46,12 @@ function setRtKey(k: string, val: string | undefined): void {
 </script>
 
 <template>
-  <div class="sc-pro sc-cards" data-accent="cyan">
+  <div
+    class="sc-pro sc-cards"
+    :class="{ 'is-readonly': readonly }"
+    :inert="readonly"
+    data-accent="cyan"
+  >
     <section class="sc-pro-section">
       <div class="sc-pro-section__head">
         <div class="sc-pro-section__stripe" />
@@ -42,7 +63,12 @@ function setRtKey(k: string, val: string | undefined): void {
         </div>
       </div>
       <div class="sc-pro-section__body flex flex-col gap-2">
-        <div v-for="[k, v] in rtEntries" :key="k" class="sc-pro-flag">
+        <div
+          v-for="[k, v] in rtEntries"
+          :key="k"
+          class="sc-pro-flag"
+          :class="{ 'sc-diff': isEntryChanged(k) }"
+        >
           <div class="sc-pro-flag__key">{{ k }}</div>
           <div class="sc-pro-flag__val min-w-0">
             <div v-if="isFixedRoutingLayerKey(k)" class="sc-pro-fixed-value">
