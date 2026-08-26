@@ -247,6 +247,9 @@ export interface DesktopBridgeServices {
     readHome(): Promise<Record<string, unknown> | null>
     readFlow(): Promise<Record<string, unknown> | null>
     readParameters(): Promise<Record<string, unknown> | null>
+    writeParameters(request: {
+      parameters: Record<string, unknown>
+    }): Promise<{ format: 'toml' | 'json'; path: string }>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
   }
   resourceManagerService: {
@@ -1735,6 +1738,15 @@ export function registerIpc(
   handle(desktopApiIpcChannels.workspaceResourcesReadParameters, async () => {
     return await services.workspaceResourceService.readParameters()
   })
+
+  handle(
+    desktopApiIpcChannels.workspaceResourcesWriteParameters,
+    async (_event, request) => {
+      return await services.workspaceResourceService.writeParameters(
+        request as { parameters: Record<string, unknown> },
+      )
+    },
+  )
 
   handle(
     desktopApiIpcChannels.workspaceResourcesResolveStepInfo,

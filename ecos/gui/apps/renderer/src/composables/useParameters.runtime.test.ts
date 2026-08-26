@@ -11,7 +11,7 @@ const {
   runtimeEvents,
   resourceVersions,
   workspaceSession,
-  writeProjectTextFile,
+  writeWorkspaceParametersResourceApi,
   resolveProjectPathAccess,
 } = vi.hoisted(() => ({
   currentProject: {
@@ -46,7 +46,7 @@ const {
       all: 0,
     },
   },
-  writeProjectTextFile: vi.fn(),
+  writeWorkspaceParametersResourceApi: vi.fn(),
   resolveProjectPathAccess: vi.fn(async (path: string) => path),
 }))
 
@@ -73,7 +73,6 @@ vi.mock('./useHomeData', () => ({
 
 vi.mock('@/utils/projectFiles', () => ({
   readWorkspaceParametersFile,
-  writeProjectTextFile,
 }))
 
 vi.mock('@/utils/projectFs', () => ({
@@ -86,6 +85,7 @@ vi.mock('@/api/flow', () => ({
 
 vi.mock('@/api/workspaceResources', () => ({
   getWorkspaceRuntimeSnapshotApi,
+  writeWorkspaceParametersResourceApi,
 }))
 
 import { useParameters } from './useParameters'
@@ -184,7 +184,7 @@ describe('useParameters desktop bridge integration', () => {
       message: ['refreshed'],
       response: 'success',
     })
-    writeProjectTextFile.mockReset()
+    writeWorkspaceParametersResourceApi.mockReset()
     resolveProjectPathAccess.mockClear()
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
@@ -241,8 +241,7 @@ describe('useParameters desktop bridge integration', () => {
     expect(resolveProjectPathAccess).toHaveBeenCalledWith(
       '/workspace/demo/home/parameters.json',
     )
-    const savedContent = writeProjectTextFile.mock.calls[0][1] as string
-    expect(JSON.parse(savedContent)).toMatchObject({
+    expect(writeWorkspaceParametersResourceApi.mock.calls[0][0]).toMatchObject({
       Design: 'updated_demo',
       'Bottom layer': 'MET2',
       'Top layer': 'MET5',
@@ -661,7 +660,7 @@ describe('useParameters desktop bridge integration', () => {
 
     await expect(parameters.saveParameters()).resolves.toBe(false)
 
-    expect(writeProjectTextFile).not.toHaveBeenCalled()
+    expect(writeWorkspaceParametersResourceApi).not.toHaveBeenCalled()
     expect(parameters.error.value).toContain('Flow is running')
   })
 
@@ -762,9 +761,8 @@ describe('useParameters desktop bridge integration', () => {
 
     await expect(parameters.saveParameters()).resolves.toBe(true)
 
-    expect(writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspace/demo/home/parameters.json',
-      expect.stringContaining('"Max fanout": 64'),
+    expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledWith(
+      expect.objectContaining({ 'Max fanout': 64 }),
     )
     expect(refreshConfigApi).toHaveBeenCalledWith({
       cmd: 'refresh_config',
@@ -808,7 +806,7 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    writeProjectTextFile.mockRejectedValue(new Error('disk full'))
+    writeWorkspaceParametersResourceApi.mockRejectedValue(new Error('disk full'))
 
     const parameters = useParameters()
 
@@ -875,7 +873,7 @@ describe('useParameters desktop bridge integration', () => {
 
     await expect(parameters.saveParameters()).resolves.toBe(false)
 
-    expect(writeProjectTextFile).toHaveBeenCalled()
+    expect(writeWorkspaceParametersResourceApi).toHaveBeenCalled()
     expect(parameters.hasChanges.value).toBe(false)
     expect(parameters.error.value).toBe('refresh failed')
   })
@@ -915,7 +913,7 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    writeProjectTextFile.mockReturnValue(
+    writeWorkspaceParametersResourceApi.mockReturnValue(
       new Promise<void>((resolve) => {
         resolveWrite = resolve
       }),
@@ -932,7 +930,7 @@ describe('useParameters desktop bridge integration', () => {
     const savePromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     const lifecycle = useWorkspaceLifecycle()
@@ -995,7 +993,7 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    writeProjectTextFile.mockReturnValue(
+    writeWorkspaceParametersResourceApi.mockReturnValue(
       new Promise<void>((resolve) => {
         resolveWrite = resolve
       }),
@@ -1011,7 +1009,7 @@ describe('useParameters desktop bridge integration', () => {
     const savePromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     currentProject.value = { path: '/workspace/other' }
@@ -1106,7 +1104,7 @@ describe('useParameters desktop bridge integration', () => {
           }),
         ),
       )
-    writeProjectTextFile.mockReturnValue(
+    writeWorkspaceParametersResourceApi.mockReturnValue(
       new Promise<void>((resolve) => {
         resolveWrite = resolve
       }),
@@ -1122,7 +1120,7 @@ describe('useParameters desktop bridge integration', () => {
     const savePromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     const lifecycle = useWorkspaceLifecycle()
@@ -1196,7 +1194,7 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    writeProjectTextFile
+    writeWorkspaceParametersResourceApi
       .mockReturnValueOnce(
         new Promise<void>((resolve) => {
           resolveFirstWrite = resolve
@@ -1218,7 +1216,7 @@ describe('useParameters desktop bridge integration', () => {
     const saveAPromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     parameters.config.design = 'save_b'
@@ -1239,7 +1237,7 @@ describe('useParameters desktop bridge integration', () => {
     expect(resourceVersions.value).toEqual(initialVersions)
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(2)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(2)
     })
 
     resolveSecondWrite?.()
@@ -1290,20 +1288,20 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    writeProjectTextFile
-      .mockImplementationOnce(async (_path: string, content: string) => {
+    writeWorkspaceParametersResourceApi
+      .mockImplementationOnce(async (payload: Record<string, unknown>) => {
         inFlightWrites += 1
         await new Promise<void>((resolve) => {
           resolveFirstWrite = () => {
-            persistedContent = content
+            persistedContent = JSON.stringify(payload, null, 4)
             inFlightWrites -= 1
             resolve()
           }
         })
       })
-      .mockImplementationOnce(async (_path: string, content: string) => {
+      .mockImplementationOnce(async (payload: Record<string, unknown>) => {
         inFlightWrites += 1
-        persistedContent = content
+        persistedContent = JSON.stringify(payload, null, 4)
         inFlightWrites -= 1
       })
 
@@ -1317,7 +1315,7 @@ describe('useParameters desktop bridge integration', () => {
     const saveAPromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
       expect(inFlightWrites).toBe(1)
     })
 
@@ -1325,14 +1323,14 @@ describe('useParameters desktop bridge integration', () => {
     const saveBPromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     resolveFirstWrite?.()
     await expect(saveAPromise).resolves.toBe(true)
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(2)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(2)
     })
     expect(inFlightWrites).toBe(0)
 
@@ -1376,43 +1374,38 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    resolveProjectPathAccess
-      .mockResolvedValueOnce('/workspace/demo/home/parameters.json')
-      .mockReturnValueOnce(resolveFirstPath.promise)
-      .mockResolvedValueOnce('/workspace/demo/home/parameters.json')
-    writeProjectTextFile.mockImplementation(async (_path: string, content: string) => {
-      persistedContent = content
-    })
+    writeWorkspaceParametersResourceApi
+      .mockImplementationOnce(async (payload: Record<string, unknown>) => {
+        await resolveFirstPath.promise
+        persistedContent = JSON.stringify(payload, null, 4)
+      })
+      .mockImplementation(async (payload: Record<string, unknown>) => {
+        persistedContent = JSON.stringify(payload, null, 4)
+      })
 
     const parameters = useParameters()
 
     await vi.waitFor(() => {
       expect(parameters.config.design).toBe('demo')
     })
-    expect(resolveProjectPathAccess).toHaveBeenCalledTimes(1)
 
     parameters.config.design = 'save_a'
     const saveAPromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(resolveProjectPathAccess).toHaveBeenCalledTimes(2)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
-    expect(writeProjectTextFile).toHaveBeenCalledTimes(0)
 
     parameters.config.design = 'save_b'
     const saveBPromise = parameters.saveParameters()
 
-    await vi.waitFor(() => {
-      expect(resolveProjectPathAccess).toHaveBeenCalledTimes(2)
-    })
-    expect(writeProjectTextFile).toHaveBeenCalledTimes(0)
+    expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
 
     parameters.config.design = 'save_a_late'
-    resolveFirstPath.resolve('/workspace/demo/home/parameters.json')
+    resolveFirstPath.resolve('')
     await expect(saveAPromise).resolves.toBe(true)
     await vi.waitFor(() => {
-      expect(resolveProjectPathAccess).toHaveBeenCalledTimes(3)
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(2)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(2)
     })
     await expect(saveBPromise).resolves.toBe(true)
 
@@ -1454,7 +1447,7 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    writeProjectTextFile.mockReturnValue(
+    writeWorkspaceParametersResourceApi.mockReturnValue(
       new Promise<void>((resolve) => {
         resolveWrite = resolve
       }),
@@ -1470,7 +1463,7 @@ describe('useParameters desktop bridge integration', () => {
     const savePromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     parameters.config.design = 'edited_after_save_started'
@@ -1663,7 +1656,7 @@ describe('useParameters desktop bridge integration', () => {
           }),
         ),
       )
-    writeProjectTextFile.mockReturnValueOnce(firstWrite.promise)
+    writeWorkspaceParametersResourceApi.mockReturnValueOnce(firstWrite.promise)
 
     const parameters = useParameters()
 
@@ -1675,7 +1668,7 @@ describe('useParameters desktop bridge integration', () => {
     const savePromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     currentProject.value = { path: '/workspace/other' }
@@ -1749,7 +1742,7 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    writeProjectTextFile
+    writeWorkspaceParametersResourceApi
       .mockReturnValueOnce(firstWrite.promise)
       .mockReturnValueOnce(secondWrite.promise)
 
@@ -1763,7 +1756,7 @@ describe('useParameters desktop bridge integration', () => {
     const saveAPromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     currentProject.value = null
@@ -1784,13 +1777,13 @@ describe('useParameters desktop bridge integration', () => {
     await vi.waitFor(() => {
       expect(parameters.isSaving.value).toBe(true)
     })
-    expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+    expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
 
     firstWrite.resolve()
     await expect(saveAPromise).resolves.toBe(true)
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(2)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(2)
     })
 
     secondWrite.resolve()
@@ -1836,7 +1829,7 @@ describe('useParameters desktop bridge integration', () => {
         }),
       ),
     )
-    writeProjectTextFile
+    writeWorkspaceParametersResourceApi
       .mockReturnValueOnce(firstWrite.promise)
       .mockResolvedValueOnce(asParametersRecord(undefined))
 
@@ -1851,7 +1844,7 @@ describe('useParameters desktop bridge integration', () => {
     const saveAPromise = parameters.saveParameters()
 
     await vi.waitFor(() => {
-      expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+      expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     })
 
     parameters.config.design = 'save_b'
@@ -1860,8 +1853,7 @@ describe('useParameters desktop bridge integration', () => {
     await vi.waitFor(() => {
       expect(parameters.isSaving.value).toBe(true)
     })
-    expect(resolveProjectPathAccess).toHaveBeenCalledTimes(2)
-    expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+    expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
 
     currentProject.value = null
     await parameters.loadParameters()
@@ -1873,8 +1865,7 @@ describe('useParameters desktop bridge integration', () => {
     await expect(saveAPromise).resolves.toBe(true)
     await expect(saveBPromise).resolves.toBe(false)
 
-    expect(resolveProjectPathAccess).toHaveBeenCalledTimes(2)
-    expect(writeProjectTextFile).toHaveBeenCalledTimes(1)
+    expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledTimes(1)
     expect(parameters.isSaving.value).toBe(false)
   })
 })

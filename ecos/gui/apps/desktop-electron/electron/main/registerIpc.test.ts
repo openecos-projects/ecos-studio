@@ -151,6 +151,7 @@ function registerHandlers(
       readFlow: vi.fn(),
       readHome: vi.fn(),
       readParameters: vi.fn(),
+      writeParameters: vi.fn(),
       resolveStepInfo: vi.fn(),
     },
     resourceManagerService: {

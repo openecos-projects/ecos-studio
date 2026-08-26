@@ -125,6 +125,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       readHome: async () => null,
       readFlow: async () => null,
       readParameters: async () => null,
+      writeParameters: async () => ({ format: 'toml', path: '/tmp/home/ecc.toml' }),
       resolveStepInfo: async (request) => ({
         step: request.step,
         id: request.id,

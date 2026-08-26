@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { WorkspaceResourceFile } from '@ecos-studio/shared'
@@ -972,5 +972,82 @@ describe('WorkspaceResourceService', () => {
 
     expect(index.status).toBe('error')
     expect(index.messages.join('\n')).toContain('Failed to parse')
+  })
+})
+
+describe('writeParameters', () => {
+  it('writes parameters into home/ecc.toml and reports the format', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'ecc.toml'),
+      [
+        '[design]',
+        'name = "gcd"',
+        '',
+        '[params]',
+        'design = "gcd"',
+        'frequency_max = 100.0',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.writeParameters({
+      parameters: { 'Frequency max [MHz]': 150 },
+    })
+
+    expect(result.format).toBe('toml')
+    expect(result.path).toBe(join(root, 'home', 'ecc.toml'))
+    const parameters = await service.readParameters()
+    expect(parameters).toMatchObject({ design: 'gcd', frequency_max: 150 })
+  })
+
+  it('writes legacy parameters.json workspaces as JSON', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeJson(join(root, 'home', 'parameters.json'), { Design: 'gcd' })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.writeParameters({
+      parameters: { Design: 'gcd', 'Max fanout': 24 },
+    })
+
+    expect(result.format).toBe('json')
+    const written = JSON.parse(
+      await readFile(join(root, 'home', 'parameters.json'), 'utf8'),
+    )
+    expect(written).toEqual({ Design: 'gcd', 'Max fanout': 24 })
+  })
+
+  it('refuses to write while the workspace runtime is active', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'ecc.toml'),
+      ['[params]', 'design = "gcd"', ''].join('\n'),
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({
+      projectScopeProvider: provider(root),
+      runtimeMutationGuard: { isWorkspaceRuntimeActive: async () => true },
+    })
+
+    await expect(
+      service.writeParameters({ parameters: { frequency_max: 150 } }),
+    ).rejects.toThrow(/flow is running/i)
+    const parameters = await service.readParameters()
+    expect(parameters).toMatchObject({ design: 'gcd' })
+    expect(parameters?.frequency_max).toBeUndefined()
+  })
+
+  it('rejects a malformed write request', async () => {
+    const root = await tempWorkspace()
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    await expect(
+      service.writeParameters({} as { parameters: Record<string, unknown> }),
+    ).rejects.toThrow(/parameters object/i)
   })
 })

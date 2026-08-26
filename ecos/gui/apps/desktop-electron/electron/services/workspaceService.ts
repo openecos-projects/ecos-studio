@@ -92,7 +92,7 @@ interface DirectoryReplacementJournalRecord {
 }
 
 const UTF8_MAX_BYTES_PER_CODE_UNIT = 4
-const WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE =
+export const WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE =
   'Cannot save workspace configuration while the workspace flow is running. Wait for it to finish before editing parameters or step config.'
 const WORKSPACE_REPLACEMENT_BLOCKED_MESSAGE =
   'Cannot replace a workspace while its flow is running. Wait for it to finish before deleting or replacing the workspace.'
@@ -228,6 +228,7 @@ function isRuntimeProtectedProjectPath(
 ): boolean {
   const relativePath = normalizeRelativePathForMatch(relative(projectRoot, canonicalPath))
   return (
+    relativePath === 'home/ecc.toml' ||
     relativePath === 'home/parameters.json' ||
     (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
   )

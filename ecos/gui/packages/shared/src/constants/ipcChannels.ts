@@ -69,6 +69,7 @@ export const desktopApiIpcChannels = {
   workspaceResourcesReadHome: 'workspace-resources:read-home',
   workspaceResourcesReadFlow: 'workspace-resources:read-flow',
   workspaceResourcesReadParameters: 'workspace-resources:read-parameters',
+  workspaceResourcesWriteParameters: 'workspace-resources:write-parameters',
   workspaceResourcesResolveStepInfo: 'workspace-resources:resolve-step-info',
   resourcesList: 'resources:list',
   resourcesGet: 'resources:get',

@@ -9,13 +9,15 @@ import type {
   WorkspaceStepResource,
   WorkspaceTechResources,
 } from '@ecos-studio/shared'
-import type { ProjectScopeProvider } from './workspaceService'
+import type { ProjectScopeProvider, RuntimeMutationGuard } from './workspaceService'
+import { WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE } from './workspaceService'
 import { migrateWorkspaceConfigFilenames } from './eccRpc/workspaceConfigMigration'
 import {
   locateWorkspaceParametersFile,
   LEGACY_PARAMETERS_BASENAME,
   parseWorkspaceParametersText,
   WORKSPACE_CONFIG_BASENAME,
+  writeWorkspaceParameters,
   type WorkspaceParametersFileLocation,
 } from './workspaceParametersFile'
 
@@ -28,6 +30,7 @@ interface WorkspaceResourceServiceOptions {
     ProjectScopeProvider,
     'getProjectRoot' | 'requestProjectPathAccess'
   >
+  runtimeMutationGuard?: RuntimeMutationGuard
 }
 
 interface FlowStepInput {
@@ -50,9 +53,11 @@ interface StepInfoBuildResult {
 
 export class WorkspaceResourceService {
   private readonly projectScopeProvider: WorkspaceResourceServiceOptions['projectScopeProvider']
+  private readonly runtimeMutationGuard?: RuntimeMutationGuard
 
   constructor(options: WorkspaceResourceServiceOptions) {
     this.projectScopeProvider = options.projectScopeProvider
+    this.runtimeMutationGuard = options.runtimeMutationGuard
   }
 
   async getIndex(): Promise<WorkspaceResourceIndex> {
@@ -89,6 +94,36 @@ export class WorkspaceResourceService {
       }
       throw error
     }
+  }
+
+  /**
+   * Persist workspace parameters in the workspace's own format
+   * (home/ecc.toml preferred, legacy parameters.json fallback). Refused
+   * while the workspace runtime is active, mirroring the mutation guard on
+   * direct config file writes.
+   */
+  async writeParameters(request: {
+    parameters: Record<string, unknown>
+  }): Promise<{ format: WorkspaceParametersFileLocation['format']; path: string }> {
+    if (!request || typeof request !== 'object' || !isRecord(request.parameters)) {
+      throw new Error('Workspace parameters write requires a parameters object')
+    }
+    const root = await this.projectScopeProvider.getProjectRoot()
+    const location = await locateWorkspaceParametersFile(root)
+    if (!location) {
+      throw new Error(
+        `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+      )
+    }
+    await this.projectScopeProvider.requestProjectPathAccess(location.path)
+    if (
+      this.runtimeMutationGuard &&
+      (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(root))
+    ) {
+      throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
+    }
+    const written = await writeWorkspaceParameters(root, request.parameters)
+    return { format: written.format, path: written.path }
   }
 
   async resolveStepInfo(

@@ -2,9 +2,12 @@ import { ref, reactive, watch, computed, getCurrentScope, onScopeDispose } from 
 import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { fetchSharedHomeData, convertRemoteToLocalPath } from './useHomeData'
-import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
+import {
+  getWorkspaceRuntimeSnapshotApi,
+  writeWorkspaceParametersResourceApi,
+} from '@/api/workspaceResources'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { readWorkspaceParametersFile, writeProjectTextFile } from '@/utils/projectFiles'
+import { readWorkspaceParametersFile } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { refreshConfigApi } from '@/api/flow'
@@ -805,7 +808,6 @@ export function useParameters() {
     try {
       const savedConfigSnapshot = JSON.stringify(config)
       const parametersData = transformConfigToParameters(config)
-      const fileContent = JSON.stringify(parametersData, null, 4)
       let writeSucceeded = false
 
       const writeTask = saveWriteQueue.then(async () => {
@@ -823,13 +825,11 @@ export function useParameters() {
         if (blockSaveWhileFlowRunning(saveProjectPath)) {
           return
         }
-        console.log('Saving parameters to:', saveParametersPath)
-        const resolvedPath = await resolveProjectPathAccess(saveParametersPath)
-        if (!resolvedPath) {
-          return
-        }
+        console.log('Saving parameters for workspace:', saveProjectPath)
 
-        await writeProjectTextFile(resolvedPath, fileContent)
+        await writeWorkspaceParametersResourceApi(
+          parametersData as unknown as Record<string, unknown>,
+        )
         writeSucceeded = true
       })
       saveWriteQueue = writeTask.catch(() => {})
