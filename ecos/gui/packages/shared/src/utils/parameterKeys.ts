@@ -26,13 +26,15 @@ export function normalizeParameterKey(key: string): string {
  * Recursively normalize every dict key, preserving the plain object shape.
  * The input is not mutated. When a long display key and its already-canonical
  * form collide, the long-key value wins and the flat duplicate is dropped
- * (same rule as ecc's `normalize_parameter_dict`).
+ * (same rule as ecc's `normalize_parameter_dict`). Only plain records are
+ * traversed: scalar-like objects (e.g. `Date` from TOML datetimes) pass
+ * through untouched, matching ecc's scalar-preserving normalization.
  */
 export function normalizeParameterKeys(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => normalizeParameterKeys(item))
   }
-  if (!value || typeof value !== 'object') {
+  if (!isPlainRecord(value)) {
     return value
   }
   const result: Record<string, unknown> = {}
@@ -46,4 +48,12 @@ export function normalizeParameterKeys(value: unknown): unknown {
     result[canonical] = normalizeParameterKeys(item)
   }
   return result
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }

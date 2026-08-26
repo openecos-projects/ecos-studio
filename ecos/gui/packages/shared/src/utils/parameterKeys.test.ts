@@ -73,3 +73,21 @@ describe('normalizeParameterKeys', () => {
     expect(normalizeParameterKeys(null)).toBe(null)
   })
 })
+
+describe('scalar-like objects', () => {
+  it('passes Date instances through untouched (TOML datetimes)', () => {
+    const when = new Date('2026-08-26T00:00:00Z')
+    const input = { 'Release Date': when, nested: { at: when } }
+    const normalized = normalizeParameterKeys(input) as Record<string, unknown>
+    expect(normalized.release_date).toBe(when)
+    expect((normalized.nested as Record<string, unknown>).at).toBe(when)
+  })
+
+  it('passes class instances through untouched', () => {
+    class Box {
+      constructor(public value: number) {}
+    }
+    const box = new Box(7)
+    expect(normalizeParameterKeys({ 'Some Box': box })).toEqual({ some_box: box })
+  })
+})
