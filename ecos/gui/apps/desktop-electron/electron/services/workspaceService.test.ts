@@ -7,6 +7,7 @@ import {
   readdir,
   rename,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -917,5 +918,41 @@ describe('WorkspaceService', () => {
     await delay(150)
 
     expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe('editWorkspaceParameters', () => {
+  it('refuses to edit parameters through a symlinked config file', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const homeDir = join(directory, 'home')
+    await mkdir(homeDir, { recursive: true })
+    const externalPath = join(directory, 'external.toml')
+    await writeFile(externalPath, '[params]\ndesign = "gcd"\n', 'utf8')
+    await symlink(externalPath, join(homeDir, 'ecc.toml'))
+
+    const { service } = createWorkspaceService(directory, externalPath)
+
+    await expect(
+      service.editWorkspaceParameters(directory, [{ json_path: ['design'], value: 'x' }]),
+    ).rejects.toThrow(/symlink/i)
+    await expect(readFile(externalPath, 'utf8')).resolves.toBe(
+      '[params]\ndesign = "gcd"\n',
+    )
+  })
+
+  it('edits parameters in a real ecc.toml file', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const homeDir = join(directory, 'home')
+    await mkdir(homeDir, { recursive: true })
+    const tomlPath = join(homeDir, 'ecc.toml')
+    await writeFile(tomlPath, '[params]\ndesign = "gcd"\n', 'utf8')
+
+    const { service } = createWorkspaceService(directory, tomlPath)
+    const result = await service.editWorkspaceParameters(directory, [
+      { json_path: ['design'], value: 'updated' },
+    ])
+
+    expect(result.format).toBe('toml')
+    await expect(readFile(tomlPath, 'utf8')).resolves.toContain('design = "updated"')
   })
 })

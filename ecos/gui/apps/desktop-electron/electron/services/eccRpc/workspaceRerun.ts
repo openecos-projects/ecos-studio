@@ -629,8 +629,15 @@ async function materializeParameterSurfaceWrites(
       `Workspace rerun parameter file is invalid: neither home/ecc.toml nor home/parameters.json exists`,
     )
   }
-  await resolvePathWithinWorkspace(workspace, location.path, 'workspace configuration')
-  await editWorkspaceParameters(workspace, writes)
+  const validatedPath = await resolvePathWithinWorkspace(
+    workspace,
+    location.path,
+    'workspace configuration',
+  )
+  await editWorkspaceParameters(workspace, writes, {
+    format: location.format,
+    path: validatedPath,
+  })
 }
 
 function parseWorkspaceParameterDocument(

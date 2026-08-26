@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  lstat,
   mkdir,
   open,
   readFile,
@@ -494,6 +495,15 @@ export class WorkspaceService {
     const location = await locateWorkspaceParametersFile(workspacePath)
     if (!location) {
       throw new Error(`Workspace parameters file not found under: ${workspacePath}`)
+    }
+    const targetStats = await lstat(location.path)
+    if (targetStats.isSymbolicLink()) {
+      // A symlinked config path escapes the runtime mutation guard's
+      // spelled-path protection and makes the write target ambiguous —
+      // refuse it, matching ECC's own refusal to write through symlinks.
+      throw new Error(
+        `Refusing to edit workspace parameters through a symlink: ${location.path}`,
+      )
     }
     const canonicalPath =
       await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
