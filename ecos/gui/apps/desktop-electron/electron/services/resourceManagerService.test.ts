@@ -1444,6 +1444,9 @@ describe('ResourceManagerService', () => {
     const dirs = testResourceDirs(root)
     const eccFeRoot = join(dirs.toolsDir, 'ecc-fe', 'latest')
     const verilatorRoot = join(dirs.toolsDir, 'verilator', '5.050')
+    const customCpuRoot = join(dirs.toolsDir, 'ecc-fe-cpu-custom', 'latest')
+    const difftestRoot = join(dirs.toolsDir, 'ecc-fe-difftest-ref', 'latest')
+    const smokeTestRoot = join(dirs.toolsDir, 'ecc-fe-test-smoke', 'latest')
 
     await mkdir(join(eccFeRoot, 'bin'), { recursive: true })
     await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
@@ -1458,6 +1461,12 @@ describe('ResourceManagerService', () => {
       await writeFile(join(verilatorRoot, 'bin', executable), '#!/bin/sh\n', 'utf8')
       await chmod(join(verilatorRoot, 'bin', executable), 0o755)
     }
+
+    await mkdir(customCpuRoot, { recursive: true })
+    await writeFile(join(customCpuRoot, 'thirdparty'), 'not a directory\n', 'utf8')
+    await mkdir(join(difftestRoot, 'tools', 'riscv32-spike-so'), { recursive: true })
+    await mkdir(smokeTestRoot, { recursive: true })
+    await writeFile(join(smokeTestRoot, 'tests'), 'not a directory\n', 'utf8')
 
     await writeFile(
       registryPath,
@@ -1485,6 +1494,36 @@ describe('ResourceManagerService', () => {
         active: true,
         managed: true,
       },
+      'tool:ecc-fe-cpu-custom': {
+        type: 'tool',
+        name: 'ecc-fe-cpu-custom',
+        version: 'latest',
+        path: customCpuRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
+      'tool:ecc-fe-difftest-ref': {
+        type: 'tool',
+        name: 'ecc-fe-difftest-ref',
+        version: 'latest',
+        path: difftestRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
+      'tool:ecc-fe-test-smoke': {
+        type: 'tool',
+        name: 'ecc-fe-test-smoke',
+        version: 'latest',
+        path: smokeTestRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
     })
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
@@ -1505,6 +1544,30 @@ describe('ResourceManagerService', () => {
       health: expect.objectContaining({
         status: 'invalid',
         missing_markers: ['share/verilator/include/verilated.cpp'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-cpu-custom')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['thirdparty'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-difftest-ref')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['tools/riscv32-spike-so'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-test-smoke')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['tests'],
       }),
     })
   })
