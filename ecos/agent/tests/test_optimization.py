@@ -1,6 +1,4 @@
 import pytest
-from pydantic import ValidationError
-
 from ecos_agent.optimization_contracts import (
     AppliedKnobValue,
     BudgetSnapshot,
@@ -10,10 +8,10 @@ from ecos_agent.optimization_contracts import (
     KnobApplicationReceipt,
     KnowledgeReference,
     ObjectiveMetric,
-    OptimizationObjectiveContract,
-    OptimizationObjectiveProposal,
     ObservationReference,
     OptimizationDecision,
+    OptimizationObjectiveContract,
+    OptimizationObjectiveProposal,
     OptimizationProposal,
     ProposalAction,
     ProposalContextRef,
@@ -32,10 +30,10 @@ from ecos_agent.optimization_rules import (
     compare_incumbent,
     freeze_optimization_objective,
     freeze_routability_objective,
-    next_coordinate_selection,
     legal_actions,
+    next_coordinate_selection,
 )
-
+from pydantic import ValidationError
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -450,6 +448,34 @@ def test_objective_is_frozen_from_one_parent_terminal_observation() -> None:
                 signoff=GateResult.FAIL,
             )
         )
+
+
+def test_legacy_terminal_observation_dump_excludes_v3_defaults() -> None:
+    payload = _terminal("legacy", dr=0, overflow=0, wirelength=100).model_dump(mode="json")
+
+    assert payload["schema_version"] == "ecos.terminal_observation.v2"
+    assert "evaluation_metrics" not in payload
+    assert "evaluation_metrics_complete" not in payload
+    assert "sta_corner_ids" not in payload
+    assert "sta_corner_set_sha256" not in payload
+
+
+def test_legacy_terminal_observation_rejects_v3_metrics() -> None:
+    payload = _terminal("legacy", dr=0, overflow=0, wirelength=100).model_dump(mode="json")
+    payload["evaluation_metrics"] = [
+        {
+            "metric_id": "drc_count",
+            "value": 1,
+            "unit": "count",
+            "category": "eligibility",
+            "role": "gate",
+            "direction": "exact",
+            "source_refs": ["drc_ecc/analysis/qor_metrics.json"],
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="v3 fields"):
+        TerminalObservation.model_validate(payload)
 
 
 def test_comparator_rejects_any_timing_regression() -> None:

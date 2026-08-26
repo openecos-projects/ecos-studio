@@ -1,6 +1,6 @@
 # ECOS Agent FSE Published-Work Comparison Plan
 
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## 1. Decision
 
@@ -45,7 +45,7 @@ planning but less freedom than direct numerical generation.
 8. `Full Agent: Direction-Only`: the ECOS method.
 9. `Offline Exhaustive Oracle`: analysis-only upper bound and regret reference for the small lattice.
 
-For the current three-knob, six-candidate Gate 0, coordinate search, random
+For the current three-knob, 20-candidate Gate 0, coordinate search, random
 search, and the exhaustive oracle are more interpretable than a full BO suite.
 If the knob space grows or the paper makes an optimization-algorithm claim, add
 one mature implementation such as TPE, SMAC, or the applicable OpenROAD
@@ -82,7 +82,7 @@ submission. They may be discussed as recent concurrent work.
 All executable conditions must share:
 
 - the same designs, PDK, tool versions, baseline checkpoint, and action lattice;
-- the same limit of six side-effecting candidate executions;
+- the same limit of 20 side-effecting candidate executions;
 - the same wall-time and, for LLM methods, planning-call budgets;
 - the same fixed `candidate.rerun` execution boundary and terminal endpoint;
 - the same DRC, LVS, RCX, STA, artifact, and incumbent eligibility checks;
@@ -92,11 +92,26 @@ All executable conditions must share:
   and deterministic local numerical selection outside the authority condition
   under study.
 
-The primary utility results should report `lex_success@6`, `success@k`,
+The primary utility results should report `lex_success@20`, `success@k`,
 best-so-far terminal QoR, design-blocked win/tie/loss, failure categories, and
 wall time. The control axis should report unauthorized accepted actions,
 invalid proposals, post-rejection side effects, terminal receipt completeness,
 manifest completeness, ledger verification, and replay fidelity.
+
+Every `terminal-Harden` observation uses the following metric roles:
+
+| Role | Metrics | Decision effect |
+|---|---|---|
+| Objective | Detailed-route violations, layer-assignment overflow, routed wirelength | Frozen lexicographic incumbent comparison |
+| Timing guardrail | Worst setup/hold WNS and TNS across configured corners | Reject a meaningful regression before objective comparison |
+| Eligibility | Numeric DRC/LVS, RCX/STA coverage and violations, Harden completeness | Candidate must pass |
+| PPA report | Standard-cell area, typical and worst-corner dynamic/leakage power | Report only |
+| Diagnostics and cost | Via/patch counts, place-to-Harden tool runtime and peak memory | Report only |
+| Corner robustness | Per-corner timing and power vector plus corner-set hash | Audited artifact, not a weighted score |
+
+PPA, diagnostics, cost, and corner-robustness metrics do not enter the
+lexicographic objective. Their source paths, units, corners, and metric roles
+are bound into the terminal observation and its artifact manifest.
 
 ## 7. Execution Order and Go/No-Go
 

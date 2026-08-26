@@ -20,7 +20,11 @@ from pydantic import (
 
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256
-
+from ecos_agent.optimization_metric_contracts import (
+    EvaluationMetricCategory,
+    TerminalEvaluationMetric,
+    safe_relative_ref,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _METRIC_ID = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -712,7 +716,9 @@ class SignoffGates(_ContractModel):
 
 
 class TerminalObservation(_ContractModel):
-    schema_version: Literal["ecos.terminal_observation.v2"] = "ecos.terminal_observation.v2"
+    schema_version: Literal[
+        "ecos.terminal_observation.v2", "ecos.terminal_observation.v3"
+    ] = "ecos.terminal_observation.v2"
     observation_id: str
     evidence_manifest_sha256: str
     evidence_valid: bool
@@ -720,6 +726,16 @@ class TerminalObservation(_ContractModel):
     signoff_gates: SignoffGates
     metrics: dict[ObjectiveMetric, float]
     timing_guardrail: dict[TimingMetric, float]
+    evaluation_metrics: tuple[TerminalEvaluationMetric, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    evaluation_metrics_complete: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    sta_corner_ids: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
+    sta_corner_set_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator("observation_id")
     @classmethod
@@ -755,9 +771,85 @@ class TerminalObservation(_ContractModel):
             raise ValueError("terminal timing guardrail metrics must be finite")
         return value
 
+    @field_validator("evaluation_metrics")
+    @classmethod
+    def validate_evaluation_metrics(
+        cls, value: tuple[TerminalEvaluationMetric, ...]
+    ) -> tuple[TerminalEvaluationMetric, ...]:
+        keys = [(item.metric_id, item.corner) for item in value]
+        if len(set(keys)) != len(keys):
+            raise ValueError("terminal evaluation metrics must be unique")
+        return value
+
+    @field_validator("sta_corner_ids")
+    @classmethod
+    def validate_sta_corner_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if value != tuple(sorted(set(value))) or any(
+            not safe_relative_ref(item) for item in value
+        ):
+            raise ValueError("terminal STA corner ids are invalid")
+        return value
+
+    @field_validator("sta_corner_set_sha256")
+    @classmethod
+    def validate_optional_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("terminal STA corner set hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_extended_metrics(self) -> "TerminalObservation":
+        if self.schema_version == "ecos.terminal_observation.v2":
+            if (
+                self.evaluation_metrics
+                or self.evaluation_metrics_complete is not None
+                or self.sta_corner_ids
+                or self.sta_corner_set_sha256 is not None
+            ):
+                raise ValueError("terminal observation v3 fields require the v3 schema")
+            return self
+        if self.evaluation_metrics_complete is None:
+            raise ValueError("terminal evaluation metric coverage is unavailable")
+        expected = canonical_sha256({"corners": self.sta_corner_ids})
+        if self.sta_corner_set_sha256 != expected:
+            raise ValueError("terminal STA corner set hash does not match")
+        return self
+
     @property
     def eligible_for_incumbent(self) -> bool:
-        return self.evidence_valid and self.harden_artifacts_complete and self.signoff_gates.passed
+        return (
+            self.evidence_valid
+            and self.harden_artifacts_complete
+            and self.signoff_gates.passed
+            and self._numeric_eligibility_passed
+        )
+
+    @property
+    def _numeric_eligibility_passed(self) -> bool:
+        if self.schema_version == "ecos.terminal_observation.v2":
+            return True
+        values = {
+            item.metric_id: item.value
+            for item in self.evaluation_metrics
+            if item.category == EvaluationMetricCategory.ELIGIBILITY
+        }
+        zero_metrics = (
+            "drc_count",
+            "lvs_count",
+            "rcx_missing_corner_count",
+            "rcx_spef_parse_failure_count",
+            "sta_missing_corner_count",
+            "sta_setup_violation_count",
+            "sta_hold_violation_count",
+            "harden_artifact_missing_count",
+        )
+        return (
+            all(values.get(metric_id) == 0 for metric_id in zero_metrics)
+            and values.get("rcx_expected_corner_count", 0) > 0
+            and values.get("rcx_spef_file_count") == values.get("rcx_expected_corner_count")
+            and values.get("sta_expected_corner_count", 0) > 0
+            and values.get("sta_corner_count") == values.get("sta_expected_corner_count")
+        )
 
 
 class MetricReference(_ContractModel):

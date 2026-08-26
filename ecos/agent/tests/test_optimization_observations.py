@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-
 from ecos_agent.hashing import file_sha256
 from ecos_agent.knowledge_bundle import KnowledgeAnswer
 from ecos_agent.optimization_contracts import (
@@ -64,6 +63,8 @@ def frozen_workspace(tmp_path: Path) -> Path:
         {
             "steps": [
                 {"name": "place", "state": "Success"},
+                {"name": "CTS", "state": "Success"},
+                {"name": "legalization", "state": "Success"},
                 {"name": "route", "state": "Success"},
                 {"name": "drc", "state": "Success"},
                 {"name": "lvs", "state": "Success"},
@@ -80,7 +81,20 @@ def frozen_workspace(tmp_path: Path) -> Path:
     )
     _write_json(
         root / "place_dreamplace/analysis/qor_metrics.json",
-        _metrics(("place_lutrudy_utilization_max", 0.88), ("place_total_wirelength", 123.0)),
+        _metrics(
+            ("place_lutrudy_utilization_max", 0.88),
+            ("place_total_wirelength", 123.0),
+            ("runtime_seconds", 1.0),
+            ("peak_memory_mb", 100.0),
+        ),
+    )
+    _write_json(
+        root / "CTS_ecc/analysis/qor_metrics.json",
+        _metrics(("runtime_seconds", 2.0), ("peak_memory_mb", 200.0)),
+    )
+    _write_json(
+        root / "legalization_dreamplace/analysis/qor_metrics.json",
+        _metrics(("runtime_seconds", 3.0), ("peak_memory_mb", 0.0)),
     )
     _write_json(
         root / "route_ecc/analysis/qor_metrics.json",
@@ -89,9 +103,35 @@ def frozen_workspace(tmp_path: Path) -> Path:
             ("route_dr_total_wirelength", 9999),
             ("route_la_total_overflow", 1),
             ("route_wirelength", 5243.741),
+            ("route_via_count", 1705),
+            ("route_dr_total_patch_count", 126),
+            ("runtime_seconds", 4.0),
+            ("peak_memory_mb", 300.0),
         ),
     )
-    _write_json(root / "drc_ecc/analysis/qor_metrics.json", _metrics(("drc_count", 0)))
+    _write_json(
+        root / "drc_ecc/analysis/qor_metrics.json",
+        _metrics(("drc_count", 0), ("runtime_seconds", 5.0), ("peak_memory_mb", 100.0)),
+    )
+    _write_json(
+        root / "lvs_ecc/analysis/qor_metrics.json",
+        _metrics(("lvs_count", 0), ("runtime_seconds", 6.0), ("peak_memory_mb", 150.0)),
+    )
+    _write_json(
+        root / "filler_ecc/analysis/qor_metrics.json",
+        _metrics(("runtime_seconds", 7.0), ("peak_memory_mb", 0.0)),
+    )
+    _write_json(
+        root / "RCX_ecc/analysis/qor_metrics.json",
+        _metrics(
+            ("rcx_expected_corner_count", 3),
+            ("rcx_spef_file_count", 3),
+            ("rcx_missing_corner_count", 0),
+            ("rcx_spef_parse_failure_count", 0),
+            ("runtime_seconds", 8.0),
+            ("peak_memory_mb", 400.0),
+        ),
+    )
     _write_json(
         root / "sta_ecc/analysis/qor_metrics.json",
         _metrics(
@@ -101,11 +141,67 @@ def frozen_workspace(tmp_path: Path) -> Path:
             ("sta_setup_tns", 0.0),
             ("sta_hold_wns", 0.1),
             ("sta_hold_tns", 0.0),
+            ("sta_corner_count", 3),
+            ("sta_expected_corner_count", 3),
+            ("sta_missing_corner_count", 0),
+            ("runtime_seconds", 9.0),
+            ("peak_memory_mb", 500.0),
         ),
     )
     _write_json(
         root / "Harden_ecc/analysis/qor_metrics.json",
-        _metrics(("harden_artifact_missing_count", 0)),
+        _metrics(
+            ("harden_artifact_missing_count", 0),
+            ("runtime_seconds", 10.0),
+            ("peak_memory_mb", 250.0),
+        ),
+    )
+    corners = {
+        "MAX_125/Cworst": (6.8, 0.2, 313, 105.2, 80.0),
+        "ML_125/RCworst": (8.9, 0.1, 964, 103.3, 89.1),
+        "TYP_25/TYPICAL": (8.5, 0.14, 672, 66.8, 0.267),
+    }
+    for corner, (setup_wns, hold_wns, frequency_mhz, dynamic_uw, leakage_uw) in corners.items():
+        feature_root = root / "sta_ecc/feature" / corner
+        _write_json(
+            feature_root / "qor_summary.json",
+            {
+                "summary": {
+                    "setup": {
+                        "wns": setup_wns,
+                        "tns": 0.0,
+                        "nvp": 0,
+                        "frequency_mhz": frequency_mhz,
+                    },
+                    "hold": {"wns": hold_wns, "tns": 0.0, "nvp": 0},
+                },
+                "design_statistics": {"cella": 1140.0},
+            },
+        )
+        _write_json(
+            feature_root / "power_summary.json",
+            {
+                "schema_version": 1,
+                "internal_uw": dynamic_uw - 10.0,
+                "switching_uw": 10.0,
+                "dynamic_uw": dynamic_uw,
+                "leakage_uw": leakage_uw,
+            },
+        )
+    configured_corners = sorted(corners)
+    _write_json(
+        root / "sta_ecc/feature/sta.step.json",
+        {
+            "sta": {
+                "expected_corner_count": len(configured_corners),
+                "loaded_corners": configured_corners,
+                "signoff_metrics": {
+                    "corners": [
+                        {"sta_corner": corner} for corner in configured_corners
+                    ]
+                },
+            }
+        },
     )
     _write_json(root / "drc_ecc/checklist.json", _checklist(("quality.drc.clean", "pass")))
     _write_json(root / "lvs_ecc/checklist.json", _checklist(("quality.lvs.clean", "pass")))
@@ -151,6 +247,8 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
     assert observation.metrics == {
         "place_lutrudy_utilization_max": 0.88,
         "place_total_wirelength": 123.0,
+        "runtime_seconds": 1.0,
+        "peak_memory_mb": 100.0,
     }
     assert observation.requested_knobs == ()
     assert observation.budget.remaining_candidates == 19
@@ -210,6 +308,34 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert observation.signoff_gates.mpc_maximum_area.value == "not_applicable"
     assert observation.harden_artifacts_complete is True
     assert observation.eligible_for_incumbent is True
+    assert observation.schema_version == "ecos.terminal_observation.v3"
+    by_id = {
+        (item.category.value, item.metric_id, item.corner): item
+        for item in observation.evaluation_metrics
+    }
+    assert by_id[("eligibility", "drc_count", None)].value == 0
+    assert by_id[("eligibility", "lvs_count", None)].value == 0
+    assert by_id[("eligibility", "sta_corner_count", None)].value == 3
+    assert by_id[("ppa", "sta_standard_cell_area", None)].value == 1140
+    assert by_id[("ppa", "sta_typical_dynamic_power", "TYP_25/TYPICAL")].value == 66.8
+    assert by_id[("ppa", "sta_typical_leakage_power", "TYP_25/TYPICAL")].value == 0.267
+    assert by_id[("ppa", "sta_worst_dynamic_power", "MAX_125/Cworst")].value == 105.2
+    assert by_id[("ppa", "sta_worst_leakage_power", "ML_125/RCworst")].value == 89.1
+    assert by_id[("routing_diagnostic", "route_via_count", None)].value == 1705
+    assert by_id[("routing_diagnostic", "route_dr_total_patch_count", None)].value == 126
+    assert by_id[("cost", "flow_tool_runtime", None)].value == 55
+    assert by_id[("cost", "flow_peak_memory", None)].value == 500
+    assert by_id[("cost", "flow_stage_count", None)].value == 10
+    assert by_id[("cost", "flow_nonzero_peak_memory_stage_count", None)].value == 8
+    assert by_id[("corner_robustness", "sta_setup_wns", "TYP_25/TYPICAL")].value == 8.5
+    assert by_id[("corner_robustness", "sta_dynamic_power", "TYP_25/TYPICAL")].value == 66.8
+    assert observation.sta_corner_ids == (
+        "MAX_125/Cworst",
+        "ML_125/RCworst",
+        "TYP_25/TYPICAL",
+    )
+    assert observation.sta_corner_set_sha256.startswith("sha256:")
+    assert observation.evaluation_metrics_complete is True
 
 
 def test_terminal_observation_maps_blocked_ecc_checklist_to_failed_gate(
@@ -224,6 +350,110 @@ def test_terminal_observation_maps_blocked_ecc_checklist_to_failed_gate(
 
     assert observation.signoff_gates.lvs_clean.value == "fail"
     assert observation.eligible_for_incumbent is False
+
+
+def test_terminal_observation_fails_closed_without_numeric_eligibility(
+    frozen_workspace: Path,
+) -> None:
+    path = frozen_workspace / "lvs_ecc/analysis/qor_metrics.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["metrics"] = [item for item in payload["metrics"] if item["id"] != "lvs_count"]
+    _write_json(path, payload)
+
+    with pytest.raises(OptimizationObservationError, match="evaluation metric is unavailable"):
+        build_terminal_observation(frozen_workspace)
+
+
+def test_terminal_observation_rejects_nonzero_numeric_eligibility(
+    frozen_workspace: Path,
+) -> None:
+    path = frozen_workspace / "drc_ecc/analysis/qor_metrics.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    next(item for item in payload["metrics"] if item["id"] == "drc_count")["value"] = 1
+    _write_json(path, payload)
+
+    observation = build_terminal_observation(frozen_workspace)
+
+    assert observation.signoff_gates.drc_clean.value == "pass"
+    assert observation.eligible_for_incumbent is False
+
+
+def test_terminal_observation_marks_missing_power_as_report_incomplete(
+    frozen_workspace: Path,
+) -> None:
+    power_path = frozen_workspace / "sta_ecc/feature/MAX_125/Cworst/power_summary.json"
+    power_path.unlink()
+
+    observation = build_terminal_observation(frozen_workspace)
+
+    assert observation.eligible_for_incumbent is True
+    assert observation.evaluation_metrics_complete is False
+    assert not any(
+        metric.metric_id in {"sta_worst_dynamic_power", "sta_worst_leakage_power"}
+        for metric in observation.evaluation_metrics
+    )
+
+
+def test_terminal_observation_marks_missing_cost_as_report_incomplete(
+    frozen_workspace: Path,
+) -> None:
+    (frozen_workspace / "CTS_ecc/analysis/qor_metrics.json").unlink()
+
+    observation = build_terminal_observation(frozen_workspace)
+
+    assert observation.eligible_for_incumbent is True
+    assert observation.evaluation_metrics_complete is False
+    by_id = {metric.metric_id: metric.value for metric in observation.evaluation_metrics}
+    assert by_id["flow_stage_count"] == 10
+    assert by_id["flow_cost_covered_stage_count"] == 9
+    assert "flow_tool_runtime" not in by_id
+
+
+def test_terminal_manifest_binds_corner_power_evidence(frozen_workspace: Path) -> None:
+    before = build_terminal_observation(frozen_workspace)
+    power_path = frozen_workspace / "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
+    power = json.loads(power_path.read_text(encoding="utf-8"))
+    power["dynamic_uw"] = 67.0
+    _write_json(power_path, power)
+
+    after = build_terminal_observation(frozen_workspace)
+
+    assert after.evidence_manifest_sha256 != before.evidence_manifest_sha256
+
+
+@pytest.mark.parametrize("case", ["missing", "extra", "mismatched"])
+def test_terminal_observation_rejects_sta_corner_identity_mismatch(
+    frozen_workspace: Path, case: str
+) -> None:
+    if case == "missing":
+        (frozen_workspace / "sta_ecc/feature/MAX_125/Cworst/qor_summary.json").unlink()
+    elif case == "extra":
+        source = frozen_workspace / "sta_ecc/feature/MAX_125/Cworst"
+        shutil.copytree(source, frozen_workspace / "sta_ecc/feature/EXTRA/RCextra")
+    else:
+        path = frozen_workspace / "sta_ecc/feature/sta.step.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["sta"]["signoff_metrics"]["corners"][0]["sta_corner"] = "OTHER/Cworst"
+        _write_json(path, payload)
+
+    with pytest.raises(OptimizationObservationError, match="configured corners"):
+        build_terminal_observation(frozen_workspace)
+
+
+@pytest.mark.parametrize(
+    ("section", "metric_id"),
+    [("setup", "nvp"), ("hold", "nvp"), ("setup", "frequency_mhz")],
+)
+def test_terminal_observation_rejects_negative_corner_counts_and_frequency(
+    frozen_workspace: Path, section: str, metric_id: str
+) -> None:
+    path = frozen_workspace / "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["summary"][section][metric_id] = -1
+    _write_json(path, payload)
+
+    with pytest.raises(OptimizationObservationError, match="terminal metric payload"):
+        build_terminal_observation(frozen_workspace)
 
 
 @pytest.mark.parametrize("metric_id", [metric.value for metric in TimingMetric])
