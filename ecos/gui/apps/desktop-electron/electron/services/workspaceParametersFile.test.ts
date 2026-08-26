@@ -435,3 +435,23 @@ describe('json_path hardening', () => {
     ).rejects.toThrow(/not allowed/i)
   })
 })
+
+describe('write hardening', () => {
+  it('parses 64-bit TOML integers beyond the 53-bit safe range', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', '[params]\nseed = 9007199254740993\ndesign = "gcd"\n')
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.seed).toBe(9007199254740993n)
+    expect(parameters?.design).toBe('gcd')
+  })
+
+  it('writes atomically without reusing an existing temp file', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    const staleTemps = (await import('node:fs/promises')).readdir(join(root, 'home'))
+    await writeWorkspaceParameters(root, { 'Frequency max [MHz]': 175 })
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.frequency_max).toBe(175)
+    expect((await staleTemps).filter((name) => name.endsWith('.tmp'))).toEqual([])
+  })
+})

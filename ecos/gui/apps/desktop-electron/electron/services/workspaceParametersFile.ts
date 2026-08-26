@@ -1,4 +1,5 @@
 import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { randomInt } from 'node:crypto'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { parse, stringify } from 'smol-toml'
@@ -132,7 +133,10 @@ export function parseWorkspaceParametersText(
     const parsed: unknown = JSON.parse(text)
     return isRecord(parsed) ? parsed : {}
   }
-  const document = parse(text) as Record<string, unknown>
+  const document = parse(text, { integersAsBigInt: 'asNeeded' }) as Record<
+    string,
+    unknown
+  >
   return mergeTomlSections(document, workspaceRoot)
 }
 
@@ -151,9 +155,11 @@ export async function readWorkspaceParameters(
 }
 
 export async function writeTextAtomically(path: string, content: string): Promise<void> {
-  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`
+  // Random suffix + exclusive create: a predictable name could be reused by a
+  // concurrent writer, and a pre-planted symlink could redirect the write.
+  const temporaryPath = `${path}.${process.pid}.${Date.now()}.${randomInt(0, 1_000_000)}.tmp`
   try {
-    await writeFile(temporaryPath, content, 'utf8')
+    await writeFile(temporaryPath, content, { encoding: 'utf8', flag: 'wx' })
     await rename(temporaryPath, path)
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => undefined)
@@ -254,7 +260,9 @@ export async function writeWorkspaceParameters(
     await writeTextAtomically(location.path, `${JSON.stringify(payload, null, 4)}\n`)
     return location
   }
-  const document = parse(await readFile(location.path, 'utf8')) as Record<string, unknown>
+  const document = parse(await readFile(location.path, 'utf8'), {
+    integersAsBigInt: 'asNeeded',
+  }) as Record<string, unknown>
   const merged = mergePayloadIntoTomlDocument(document, payload, root)
   await writeTextAtomically(location.path, stringify(merged))
   return location
@@ -351,7 +359,7 @@ export async function editWorkspaceParameters(
     )
     return location
   }
-  const document = parse(raw) as Record<string, unknown>
+  const document = parse(raw, { integersAsBigInt: 'asNeeded' }) as Record<string, unknown>
   const parameters = mergeTomlSections(document, root)
   for (const edit of edits) {
     const normalizedPath = edit.json_path.map((segment) =>

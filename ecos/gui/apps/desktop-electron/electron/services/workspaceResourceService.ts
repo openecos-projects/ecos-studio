@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { lstat, readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type {
   WorkspaceResourceFile,
@@ -113,6 +113,15 @@ export class WorkspaceResourceService {
     if (!location) {
       throw new Error(
         `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+      )
+    }
+    const locationStats = await lstat(location.path)
+    if (locationStats.isSymbolicLink()) {
+      // A symlinked config path escapes the runtime mutation guard's
+      // spelled-path protection and makes the write target ambiguous —
+      // refuse it, matching the edit path and ECC's own symlink refusal.
+      throw new Error(
+        `Refusing to write workspace parameters through a symlink: ${location.path}`,
       )
     }
     const canonicalPath =
