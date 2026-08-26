@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
 import {
   access,
-  copyFile,
   lstat,
   mkdir,
   open,
@@ -26,9 +25,13 @@ import {
   sep,
 } from 'node:path'
 import { homedir } from 'node:os'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { electronLogger } from './logger'
 import { isRelativePathOutsideRoot } from './pathScope'
+import {
+  ResourceInstallCoordinator,
+  type ResourceInstallSubscriber,
+} from './resourceInstallCoordinator'
 import { requiredToolHealthMarkers, type ToolHealthMarkerKind } from './toolHealthPolicy'
 import {
   validateMpcSpec,
@@ -56,6 +59,7 @@ type ArchiveExtractor = (
   archivePath: string,
   destination: string,
   stripPrefix?: string | null,
+  signal?: AbortSignal,
 ) => Promise<void>
 type CommandRunner = (
   command: string,
@@ -63,11 +67,16 @@ type CommandRunner = (
   options?: CommandRunnerOptions,
 ) => Promise<void>
 type DownloadProgressListener = (progress: DownloadProgress) => void
-type Sha256Verifier = (filePath: string, expected: string) => Promise<boolean>
+type Sha256Verifier = (
+  filePath: string,
+  expected: string,
+  signal?: AbortSignal,
+) => Promise<boolean>
 type ManifestWriter = (filePath: string, content: string) => Promise<void>
 
 interface CommandRunnerOptions {
   cwd?: string
+  signal?: AbortSignal
 }
 
 interface DownloadProgress {
@@ -333,17 +342,6 @@ interface RegistryCacheResult {
   diagnostics: string[]
 }
 
-interface ActiveResourceJob {
-  action: ResourceAction
-  controller: AbortController
-  listener?: (event: ResourceJob) => void
-}
-
-interface ResourceInstallContext {
-  controller: AbortController
-  rootResourceId: string
-}
-
 export interface ResourceManagerServiceOptions {
   archiveExtractor?: ArchiveExtractor
   cacheDir?: string
@@ -380,9 +378,11 @@ export class ResourceManagerService {
   private registryRefreshPromise: Promise<void> | null = null
   private updateCheckMemory: ResourceUpdateCheckCache | null = null
   private updateCheckPromise: Promise<ResourceUpdateCheckResult> | null = null
-  private activeJobs = new Map<string, ActiveResourceJob>()
+  private readonly installCoordinator = new ResourceInstallCoordinator<
+    ResourceJob,
+    ResourceOperationResult
+  >()
   private manifestOperationPromise: Promise<void> = Promise.resolve()
-  private resourceOperationPromises = new Map<string, Promise<ResourceOperationResult>>()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
     this.resourcesDir =
@@ -685,29 +685,16 @@ export class ResourceManagerService {
     version?: string,
     listener?: (event: ResourceJob) => void,
   ): Promise<ResourceOperationResult> {
-    return await this.installResourceWithDependencies(
-      resourceId,
-      version,
-      'install',
-      listener,
-      new Set(),
-    )
+    return await this.runRootInstall(resourceId, version, 'install', listener)
   }
 
-  private async installResourceWithDependencies(
+  private async runRootInstall(
     resourceId: string,
     version: string | undefined,
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
-    visiting: Set<string>,
-    context?: ResourceInstallContext,
   ): Promise<ResourceOperationResult> {
-    if (visiting.has(resourceId)) {
-      throw new Error(`Resource dependency cycle detected at ${resourceId}`)
-    }
-
-    const existingOperation = this.resourceOperationPromises.get(resourceId)
-    if (existingOperation) {
+    if (this.installCoordinator.hasActiveRoot(resourceId)) {
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -715,71 +702,111 @@ export class ResourceManagerService {
         progress: 0,
         message: `Waiting for active job: ${resourceNameFromAnyId(resourceId)}...`,
       })
-      return context
-        ? await waitForOperationWithAbort(existingOperation, context.controller.signal)
-        : await existingOperation
+    }
+    return await this.installCoordinator.runRoot(
+      resourceId,
+      listener,
+      async (rootSubscriber) => {
+        try {
+          return await this.installResourceWithDependencies(
+            resourceId,
+            version,
+            action,
+            new Set(),
+            rootSubscriber,
+          )
+        } catch (error) {
+          if (!rootSubscriber.signal.aborted) throw error
+
+          const originalMessage = error instanceof Error ? error.message : String(error)
+          if (
+            originalMessage === `Cancelled download for ${resourceId}` ||
+            originalMessage === `Cancelled installation for ${resourceId}`
+          ) {
+            throw error
+          }
+
+          const cancelMessage = `Cancelled installation for ${resourceId}`
+          this.publish(rootSubscriber.publish, {
+            resource_id: resourceId,
+            action,
+            phase: 'cancelled',
+            progress: 0,
+            message: cancelMessage,
+            error: cancelMessage,
+          })
+          throw new Error(cancelMessage, { cause: error })
+        }
+      },
+    )
+  }
+
+  private async installResourceWithDependencies(
+    resourceId: string,
+    version: string | undefined,
+    action: ResourceAction,
+    visiting: Set<string>,
+    subscriber: ResourceInstallSubscriber<ResourceJob>,
+  ): Promise<ResourceOperationResult> {
+    if (visiting.has(resourceId)) {
+      throw new Error(`Resource dependency cycle detected at ${resourceId}`)
     }
 
-    const ownsContext = context === undefined
-    const installContext =
-      context ??
-      ({
-        controller: new AbortController(),
-        rootResourceId: resourceId,
-      } satisfies ResourceInstallContext)
-    if (ownsContext) {
-      if (this.activeJobs.has(resourceId)) {
-        throw new Error(`Job already active for ${resourceId}`)
-      }
-      this.activeJobs.set(resourceId, {
-        action,
-        controller: installContext.controller,
-        listener,
-      })
-    }
-
-    const operation = this.runInstallResourceWithDependencies(
+    const operation = await this.resolveInstallOperation(
       resourceId,
       version,
-      action,
-      listener,
-      visiting,
-      installContext,
+      subscriber.signal,
     )
-    this.resourceOperationPromises.set(resourceId, operation)
-    try {
-      return await operation
-    } catch (error) {
-      if (!ownsContext || !installContext.controller.signal.aborted) throw error
 
-      const originalMessage = error instanceof Error ? error.message : String(error)
-      if (
-        originalMessage === `Cancelled download for ${resourceId}` ||
-        originalMessage === `Cancelled installation for ${resourceId}`
-      ) {
-        throw error
-      }
-
-      const cancelMessage = `Cancelled installation for ${resourceId}`
-      this.publish(listener, {
+    if (this.installCoordinator.hasActiveOperation(operation.resourceId)) {
+      this.publish(subscriber.publish, {
         resource_id: resourceId,
         action,
-        phase: 'cancelled',
+        phase: 'waiting_for_active_job',
         progress: 0,
-        message: cancelMessage,
-        error: cancelMessage,
+        message: `Waiting for active job: ${resourceNameFromAnyId(resourceId)}...`,
       })
-      throw new Error(cancelMessage, { cause: error })
-    } finally {
-      if (this.resourceOperationPromises.get(resourceId) === operation) {
-        this.resourceOperationPromises.delete(resourceId)
+    }
+
+    return await this.installCoordinator.runShared(
+      operation.resourceId,
+      subscriber,
+      async (operationContext) =>
+        await this.runInstallResourceWithDependencies(
+          resourceId,
+          operation.version,
+          action,
+          visiting,
+          operationContext,
+        ),
+    )
+  }
+
+  private async resolveInstallOperation(
+    resourceId: string,
+    requestedVersion?: string,
+    signal?: AbortSignal,
+  ): Promise<{ resourceId: string; version: string | undefined }> {
+    if (!resourceId.startsWith('pdk:')) {
+      return { resourceId, version: requestedVersion }
+    }
+
+    const pdkId = pdkIdFromResourceId(resourceId)
+    if (requestedVersion) {
+      return {
+        resourceId: managedPdkResourceId(pdkId, requestedVersion),
+        version: requestedVersion,
       }
-      if (
-        ownsContext &&
-        this.activeJobs.get(resourceId)?.controller === installContext.controller
-      ) {
-        this.activeJobs.delete(resourceId)
-      }
+    }
+
+    const state = await this.fetchRegistry(false, signal)
+    const pdk = state.registry?.pdks.find((candidate) => candidate.id === pdkId)
+    const selectedVersion = selectRegistryVersion(pdk?.versions)?.version
+    return {
+      resourceId: selectedVersion
+        ? managedPdkResourceId(pdkId, selectedVersion)
+        : `pdk:${pdkId}`,
+      version: selectedVersion,
     }
   }
 
@@ -787,15 +814,15 @@ export class ResourceManagerService {
     resourceId: string,
     version: string | undefined,
     action: ResourceAction,
-    listener: ((event: ResourceJob) => void) | undefined,
     visiting: Set<string>,
-    context: ResourceInstallContext,
+    context: ResourceInstallSubscriber<ResourceJob>,
   ): Promise<ResourceOperationResult> {
+    const listener = context.publish
     visiting.add(resourceId)
     try {
-      throwIfAborted(context.controller.signal)
-      const state = await this.fetchRegistry()
-      throwIfAborted(context.controller.signal)
+      throwIfAborted(context.signal)
+      const state = await this.fetchRegistry(false, context.signal)
+      throwIfAborted(context.signal)
       const manifest = await this.readManifest()
       const toolHealth = await checkInstalledToolHealth(getInstalledTools(manifest))
       const dependencies = this.registryRequiresForResource(
@@ -823,7 +850,7 @@ export class ResourceManagerService {
       }
 
       for (const [index, dependencyId] of unsatisfiedDependencies.entries()) {
-        throwIfAborted(context.controller.signal)
+        throwIfAborted(context.signal)
         const latestManifest = await this.readManifest()
         const latestToolHealth = await checkInstalledToolHealth(
           getInstalledTools(latestManifest),
@@ -860,14 +887,13 @@ export class ResourceManagerService {
           dependencyId,
           undefined,
           dependencyAction,
-          listener,
           visiting,
           context,
         )
-        throwIfAborted(context.controller.signal)
+        throwIfAborted(context.signal)
       }
 
-      throwIfAborted(context.controller.signal)
+      throwIfAborted(context.signal)
       if (resourceId.startsWith('tool:')) {
         return await this.installTool(
           resourceId.slice('tool:'.length),
@@ -905,13 +931,7 @@ export class ResourceManagerService {
     resourceId: string,
     listener?: (event: ResourceJob) => void,
   ): Promise<ResourceOperationResult> {
-    return await this.installResourceWithDependencies(
-      resourceId,
-      undefined,
-      'update',
-      listener,
-      new Set(),
-    )
+    return await this.runRootInstall(resourceId, undefined, 'update', listener)
   }
 
   private registryRequiresForResource(
@@ -935,11 +955,16 @@ export class ResourceManagerService {
   }
 
   async cancelResource(resourceId: string): Promise<ResourceOperationResult> {
-    const job = this.activeJobs.get(resourceId)
-    if (!job) {
+    let cancelled = await this.installCoordinator.cancelAndWait(resourceId)
+    if (!cancelled) {
+      const operation = await this.resolveInstallOperation(resourceId)
+      if (operation.resourceId !== resourceId) {
+        cancelled = await this.installCoordinator.cancelAndWait(operation.resourceId)
+      }
+    }
+    if (!cancelled) {
       throw new Error(`No active job for ${resourceId}`)
     }
-    job.controller.abort()
     return { status: 'cancelled', resource_id: resourceId }
   }
 
@@ -1345,48 +1370,21 @@ export class ResourceManagerService {
     )
   }
 
-  private trackInstallLeaf(
-    resourceId: string,
-    action: ResourceAction,
-    listener: ((event: ResourceJob) => void) | undefined,
-    context: ResourceInstallContext,
-  ): () => void {
-    const existingJob = this.activeJobs.get(resourceId)
-    if (existingJob) {
-      if (existingJob.controller !== context.controller) {
-        throw new Error(`Job already active for ${resourceId}`)
-      }
-      return () => undefined
-    }
-
-    this.activeJobs.set(resourceId, {
-      action,
-      controller: context.controller,
-      listener,
-    })
-    return () => {
-      if (this.activeJobs.get(resourceId)?.controller === context.controller) {
-        this.activeJobs.delete(resourceId)
-      }
-    }
-  }
-
   private async installTool(
     name: string,
     requestedVersion: string | undefined,
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
-    context: ResourceInstallContext,
+    context: ResourceInstallSubscriber<ResourceJob>,
   ): Promise<ResourceOperationResult> {
     const resourceId = `tool:${name}`
-    const releaseActiveJob = this.trackInstallLeaf(resourceId, action, listener, context)
-    const controller = context.controller
+    const signal = context.signal
     let tempArchive = ''
     let partialArchive = ''
     let tempExtract = ''
 
     try {
-      const state = await this.fetchRegistry()
+      const state = await this.fetchRegistry(false, signal)
       const tool = state.registry?.tools.find((candidate) => candidate.name === name)
       if (!tool) throw new Error(`Tool '${name}' not found in registry`)
       const versionEntry = requestedVersion
@@ -1453,10 +1451,10 @@ export class ResourceManagerService {
             Math.round(progress.progress * 100),
           )
         },
-        controller.signal,
+        signal,
       )
       await rename(partialArchive, tempArchive)
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1472,17 +1470,33 @@ export class ResourceManagerService {
       if (!resolvedAsset.sha256) {
         throw new Error(`Missing SHA256 checksum for ${name}`)
       }
-      const verified = await this.sha256Verifier(tempArchive, resolvedAsset.sha256)
+      const verified = await this.sha256Verifier(
+        tempArchive,
+        resolvedAsset.sha256,
+        signal,
+      )
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${name}`)
       }
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       electronLogger.debug('[resources] Extracting %s into %s', resourceId, destination)
       await rm(tempExtract, { force: true, recursive: true })
-      await this.withExtractProgress(resourceId, action, name, listener, async () => {
-        await this.archiveExtractor(tempArchive, tempExtract, resolvedAsset.strip_prefix)
-      })
-      throwIfAborted(controller.signal)
+      await this.withExtractProgress(
+        resourceId,
+        action,
+        name,
+        listener,
+        signal,
+        async () => {
+          await this.archiveExtractor(
+            tempArchive,
+            tempExtract,
+            resolvedAsset.strip_prefix,
+            signal,
+          )
+        },
+      )
+      throwIfAborted(signal)
       const detected = await detectExecutables(tempExtract)
       const executable = selectToolExecutable(name, detected)
       await assertStagedToolHealth(name, tempExtract, detected, executable)
@@ -1522,7 +1536,7 @@ export class ResourceManagerService {
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (isAbortError(error) || controller.signal.aborted) {
+      if (isAbortError(error) || signal.aborted) {
         const cancelMessage = `Cancelled download for ${resourceId}`
         electronLogger.info('[resources] Cancelled %s', resourceId)
         this.publish(listener, {
@@ -1546,7 +1560,6 @@ export class ResourceManagerService {
       })
       throw error
     } finally {
-      releaseActiveJob()
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
       if (tempExtract)
         await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
@@ -1558,17 +1571,16 @@ export class ResourceManagerService {
     requestedVersion: string | undefined,
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
-    context: ResourceInstallContext,
+    context: ResourceInstallSubscriber<ResourceJob>,
   ): Promise<ResourceOperationResult> {
     const resourceId = `pdk:${pdkId}`
-    const releaseActiveJob = this.trackInstallLeaf(resourceId, action, listener, context)
-    const controller = context.controller
+    const signal = context.signal
     let tempArchive = ''
     let partialArchive = ''
     let tempExtract = ''
 
     try {
-      const state = await this.fetchRegistry()
+      const state = await this.fetchRegistry(false, signal)
       const pdk = state.registry?.pdks.find((candidate) => candidate.id === pdkId)
       if (!pdk) throw new Error(`PDK '${pdkId}' not found in registry`)
       const versionEntry = requestedVersion
@@ -1653,10 +1665,10 @@ export class ResourceManagerService {
             Math.round(progress.progress * 100),
           )
         },
-        controller.signal,
+        signal,
       )
       await rename(partialArchive, tempArchive)
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1672,11 +1684,15 @@ export class ResourceManagerService {
       if (!resolvedAsset.sha256) {
         throw new Error(`Missing SHA256 checksum for ${pdkId}`)
       }
-      const verified = await this.sha256Verifier(tempArchive, resolvedAsset.sha256)
+      const verified = await this.sha256Verifier(
+        tempArchive,
+        resolvedAsset.sha256,
+        signal,
+      )
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${pdkId}`)
       }
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       electronLogger.debug('[resources] Extracting %s into %s', resourceId, destination)
       await rm(tempExtract, { force: true, recursive: true })
       await this.withExtractProgress(
@@ -1684,15 +1700,17 @@ export class ResourceManagerService {
         action,
         displayName,
         listener,
+        signal,
         async () => {
           await this.archiveExtractor(
             tempArchive,
             tempExtract,
             resolvedAsset.strip_prefix,
+            signal,
           )
         },
       )
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       await this.downloadSupplementalAssets(
         resourceId,
         action,
@@ -1700,9 +1718,9 @@ export class ResourceManagerService {
         tempExtract,
         resolvedAsset.supplemental_assets,
         listener,
-        controller.signal,
+        signal,
       )
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       await this.preDownloadPdkReleaseAssets(
         resourceId,
         action,
@@ -1711,9 +1729,9 @@ export class ResourceManagerService {
         version,
         resolvedAsset,
         listener,
-        controller.signal,
+        signal,
       )
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       await this.runPostInstallSteps(
         resourceId,
         action,
@@ -1721,8 +1739,9 @@ export class ResourceManagerService {
         tempExtract,
         resolvedAsset.post_install,
         listener,
+        signal,
       )
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
 
       const scanned = await scanPdkDirectory(tempExtract)
       const health = await validateScannedPdk({ ...scanned, pdkId })
@@ -1796,7 +1815,7 @@ export class ResourceManagerService {
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (isAbortError(error) || controller.signal.aborted) {
+      if (isAbortError(error) || signal.aborted) {
         const cancelMessage = `Cancelled download for ${resourceId}`
         electronLogger.info('[resources] Cancelled %s', resourceId)
         this.publish(listener, {
@@ -1820,7 +1839,6 @@ export class ResourceManagerService {
       })
       throw error
     } finally {
-      releaseActiveJob()
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
       if (tempExtract)
         await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
@@ -1832,17 +1850,16 @@ export class ResourceManagerService {
     requestedVersion: string | undefined,
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
-    context: ResourceInstallContext,
+    context: ResourceInstallSubscriber<ResourceJob>,
   ): Promise<ResourceOperationResult> {
     const resourceId = `mpc:${mpcId}`
-    const releaseActiveJob = this.trackInstallLeaf(resourceId, action, listener, context)
-    const controller = context.controller
+    const signal = context.signal
     let tempArchive = ''
     let partialArchive = ''
     let tempExtract = ''
 
     try {
-      const state = await this.fetchRegistry()
+      const state = await this.fetchRegistry(false, signal)
       const mpc = state.registry?.mpcs.find((candidate) => candidate.id === mpcId)
       if (!mpc) throw new Error(`MPC '${mpcId}' not found in registry`)
       const versionEntry = requestedVersion
@@ -1890,10 +1907,10 @@ export class ResourceManagerService {
             message: `Downloading ${displayName} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
           })
         },
-        controller.signal,
+        signal,
       )
       await rename(partialArchive, tempArchive)
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1901,22 +1918,28 @@ export class ResourceManagerService {
         progress: 0,
         message: 'Verifying SHA256...',
       })
-      const verified = await this.sha256Verifier(tempArchive, asset.sha256)
+      const verified = await this.sha256Verifier(tempArchive, asset.sha256, signal)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${mpcId}`)
       }
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       await rm(tempExtract, { force: true, recursive: true })
       await this.withExtractProgress(
         resourceId,
         action,
         displayName,
         listener,
+        signal,
         async () => {
-          await this.archiveExtractor(tempArchive, tempExtract, asset.strip_prefix)
+          await this.archiveExtractor(
+            tempArchive,
+            tempExtract,
+            asset.strip_prefix,
+            signal,
+          )
         },
       )
-      throwIfAborted(controller.signal)
+      throwIfAborted(signal)
       await readMpcSpecFromDirectory(tempExtract)
       const manifest = await this.readManifest()
       manifest.installed[resourceId] = {
@@ -1932,7 +1955,7 @@ export class ResourceManagerService {
         managed: true,
         health: 'ok',
       }
-      await this.commitMpcInstall(tempExtract, destination, manifest, controller.signal)
+      await this.commitMpcInstall(tempExtract, destination, manifest, signal)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1949,7 +1972,7 @@ export class ResourceManagerService {
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (isAbortError(error) || controller.signal.aborted) {
+      if (isAbortError(error) || signal.aborted) {
         const cancelMessage = `Cancelled download for ${resourceId}`
         electronLogger.info('[resources] Cancelled %s', resourceId)
         this.publish(listener, {
@@ -1973,7 +1996,6 @@ export class ResourceManagerService {
       })
       throw error
     } finally {
-      releaseActiveJob()
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
       if (tempExtract)
         await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
@@ -2039,8 +2061,10 @@ export class ResourceManagerService {
     destination: string,
     steps: RegistryPostInstallStep[],
     listener?: (event: ResourceJob) => void,
+    signal?: AbortSignal,
   ): Promise<void> {
     for (const [index, step] of steps.entries()) {
+      throwIfAborted(signal)
       const [command, ...args] = step.command
       if (!command) continue
       const cwd = resolveInside(destination, step.cwd || '.')
@@ -2051,7 +2075,7 @@ export class ResourceManagerService {
         progress: 0.98,
         message: `Running post-install step ${index + 1}/${steps.length} for ${name}: ${command}`,
       })
-      await this.commandRunner(command, args, { cwd })
+      await this.commandRunner(command, args, { cwd, signal })
     }
   }
 
@@ -2141,7 +2165,7 @@ export class ResourceManagerService {
             `Supplemental asset size mismatch for ${asset.path}: expected ${asset.size}, got ${actualSize}`,
           )
         }
-        const verified = await this.sha256Verifier(temporaryPath, asset.sha256)
+        const verified = await this.sha256Verifier(temporaryPath, asset.sha256, signal)
         if (!verified) {
           throw new Error(
             `SHA256 verification failed for supplemental asset ${asset.path}`,
@@ -2200,7 +2224,11 @@ export class ResourceManagerService {
     await this.writeManifest(manifest)
   }
 
-  private async fetchRegistry(force = false): Promise<RegistryState> {
+  private async fetchRegistry(
+    force = false,
+    signal?: AbortSignal,
+  ): Promise<RegistryState> {
+    throwIfAborted(signal)
     if (this.registryMemory && !force) {
       return { registry: this.registryMemory, diagnostics: [] }
     }
@@ -2216,16 +2244,23 @@ export class ResourceManagerService {
 
     const diagnostics: string[] = []
     try {
-      const remoteRegistry = await readRegistryFromUrl(this.registryUrl, this.fetchImpl)
+      const remoteRegistry = await readRegistryFromUrl(
+        this.registryUrl,
+        this.fetchImpl,
+        signal,
+      )
+      throwIfAborted(signal)
       const registry = withBuiltinMpcs(remoteRegistry, this.registryUrl)
       await mkdir(dirname(cacheFile), { recursive: true })
       await writeFile(cacheFile, serializeRegistryCache(remoteRegistry), 'utf8')
       this.registryMemory = registry
       return { registry, diagnostics }
-    } catch {
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw error
       diagnostics.push(`Registry unavailable at ${this.registryUrl}`)
     }
 
+    throwIfAborted(signal)
     try {
       const registry = withBuiltinMpcs(
         parseCachedRegistry(
@@ -2447,7 +2482,7 @@ export class ResourceManagerService {
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
 
-    if (this.activeJobs.has(resourceId)) {
+    if (this.installCoordinator.isActive(resourceId)) {
       status = 'installing'
       actions = []
     } else if (local) {
@@ -2583,7 +2618,7 @@ export class ResourceManagerService {
   ): ResourceInfo {
     const resourceId = `tool:${name}`
     const toolHealth = health ?? unknownToolHealth(entry)
-    const status: ResourceStatus = this.activeJobs.has(resourceId)
+    const status: ResourceStatus = this.installCoordinator.isActive(resourceId)
       ? 'installing'
       : toolHealth.status === 'ok'
         ? 'installed'
@@ -2626,7 +2661,7 @@ export class ResourceManagerService {
       ? selectPlatformAsset(latest)
       : { platform: currentPlatform(), asset: null }
     const resourceId = `pdk:${pdk.id}`
-    const isActive = this.activeJobs.has(resourceId)
+    const isActive = this.isPdkInstallActive(pdk.id, pdk)
     const requirements = latest?.requires ?? []
     const requirementState = dependencyStateFor(
       requirements,
@@ -2667,7 +2702,7 @@ export class ResourceManagerService {
       ? selectPlatformAsset(latest)
       : { platform: currentPlatform(), asset: null }
     const resourceId = `mpc:${mpc.id}`
-    const isActive = this.activeJobs.has(resourceId)
+    const isActive = this.installCoordinator.isActive(resourceId)
     return {
       id: resourceId,
       type: 'mpc',
@@ -2727,7 +2762,8 @@ export class ResourceManagerService {
         getUpdateCheck(updateChecks ?? null, registryResourceId),
       )
     const status: ResourceStatus =
-      this.activeJobs.has(resourceId) || this.activeJobs.has(registryResourceId)
+      this.installCoordinator.isActive(resourceId) ||
+      this.isPdkInstallActive(entry.pdk_id, registryPdk)
         ? 'installing'
         : entry.health === 'missing'
           ? 'missing'
@@ -2772,6 +2808,15 @@ export class ResourceManagerService {
       installed_requires: requirementState.installed,
       missing_requires: requirementState.missing,
     }
+  }
+
+  private isPdkInstallActive(pdkId: string, registryPdk?: RegistryPdk): boolean {
+    if (this.installCoordinator.isActive(`pdk:${pdkId}`)) return true
+    return Boolean(
+      registryPdk?.versions.some((version) =>
+        this.installCoordinator.isActive(managedPdkResourceId(pdkId, version.version)),
+      ),
+    )
   }
 
   private async migratePdkManifest(manifest: ResourceManifest): Promise<void> {
@@ -2882,7 +2927,7 @@ export class ResourceManagerService {
       Boolean(latestVersion?.version) &&
       (latestVersion?.version !== entry.version ||
         (Boolean(latestAsset?.sha256) && latestAsset?.sha256 !== entry.sha256))
-    const status: ResourceStatus = this.activeJobs.has(resourceId)
+    const status: ResourceStatus = this.installCoordinator.isActive(resourceId)
       ? 'installing'
       : entry.health === 'missing'
         ? 'missing'
@@ -2940,11 +2985,13 @@ export class ResourceManagerService {
     action: ResourceAction,
     name: string,
     listener: ((event: ResourceJob) => void) | undefined,
+    signal: AbortSignal,
     task: () => Promise<void>,
   ): Promise<void> {
     let progress = 0.05
     let timer: NodeJS.Timeout | null = null
     const publishExtracting = (value: number): void => {
+      if (signal.aborted) return
       progress = Math.max(progress, Math.min(value, 0.98))
       this.publish(listener, {
         resource_id: resourceId,
@@ -2955,6 +3002,7 @@ export class ResourceManagerService {
       })
     }
 
+    throwIfAborted(signal)
     publishExtracting(progress)
     timer = setInterval(() => {
       if (progress >= 0.95) return
@@ -2963,6 +3011,7 @@ export class ResourceManagerService {
 
     try {
       await task()
+      throwIfAborted(signal)
       publishExtracting(0.98)
     } finally {
       if (timer) clearInterval(timer)
@@ -3570,11 +3619,15 @@ async function isSurferAssetsRoot(path: string): Promise<boolean> {
 async function readRegistryFromUrl(
   url: string,
   fetchImpl: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<ResourceRegistry> {
+  throwIfAborted(signal)
   if (url.startsWith('file://')) {
-    return parseRegistry(JSON.parse(await readFile(new URL(url), 'utf8')))
+    return parseRegistry(
+      JSON.parse(await readFile(new URL(url), { encoding: 'utf8', signal })),
+    )
   }
-  const response = await fetchImpl(url)
+  const response = await fetchImpl(url, { signal })
   if (!response.ok) {
     throw new Error(`Registry request failed with ${response.status}: ${url}`)
   }
@@ -4314,15 +4367,7 @@ async function downloadAsset(
   throwIfAborted(signal)
   if (url.startsWith('file://')) {
     const fileUrl = new URL(url)
-    await copyFile(fileUrl, destination)
-    const size = await stat(fileUrl)
-      .then((value) => value.size)
-      .catch(() => 0)
-    onProgress?.({
-      downloadedBytes: size,
-      progress: 1,
-      totalBytes: size > 0 ? size : null,
-    })
+    await copyLocalAsset(fileUrl, destination, onProgress, signal)
     return
   }
 
@@ -4454,6 +4499,68 @@ async function downloadAsset(
   })
 }
 
+async function copyLocalAsset(
+  sourcePath: URL,
+  destination: string,
+  onProgress?: DownloadProgressListener,
+  signal?: AbortSignal,
+): Promise<void> {
+  throwIfAborted(signal)
+  const totalBytes = await stat(sourcePath).then((value) => value.size)
+  const publishProgress = createDownloadProgressPublisher(onProgress, totalBytes, 0)
+  const source = await open(sourcePath, 'r')
+  let downloadedBytes = 0
+
+  try {
+    const target = await open(destination, 'w')
+    const buffer = Buffer.allocUnsafe(1024 * 1024)
+    try {
+      while (downloadedBytes < totalBytes) {
+        throwIfAborted(signal)
+        const { bytesRead } = await source.read(
+          buffer,
+          0,
+          Math.min(buffer.byteLength, totalBytes - downloadedBytes),
+          downloadedBytes,
+        )
+        throwIfAborted(signal)
+        if (bytesRead === 0) break
+
+        let writtenBytes = 0
+        while (writtenBytes < bytesRead) {
+          throwIfAborted(signal)
+          const result = await target.write(
+            buffer,
+            writtenBytes,
+            bytesRead - writtenBytes,
+            downloadedBytes + writtenBytes,
+          )
+          if (result.bytesWritten === 0) {
+            throw new Error(`Unable to copy local asset to ${destination}`)
+          }
+          writtenBytes += result.bytesWritten
+        }
+        downloadedBytes += bytesRead
+        publishProgress(downloadedBytes, downloadedBytes === totalBytes)
+      }
+    } finally {
+      await target.close()
+    }
+  } finally {
+    await source.close()
+  }
+
+  throwIfAborted(signal)
+  if (downloadedBytes !== totalBytes) {
+    throw new Error(
+      `Local asset copy ended early: expected ${totalBytes} bytes, received ${downloadedBytes} bytes`,
+    )
+  }
+  if (totalBytes === 0) {
+    onProgress?.({ downloadedBytes: 0, progress: 1, totalBytes: 0 })
+  }
+}
+
 function createDownloadProgressPublisher(
   listener: DownloadProgressListener | undefined,
   totalBytes: number | null,
@@ -4562,21 +4669,6 @@ function isAbortError(error: unknown): boolean {
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return
   throw new DOMException('The operation was aborted.', 'AbortError')
-}
-
-async function waitForOperationWithAbort<T>(
-  operation: Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  throwIfAborted(signal)
-  return await new Promise<T>((resolve, reject) => {
-    const abort = () =>
-      reject(new DOMException('The operation was aborted.', 'AbortError'))
-    signal.addEventListener('abort', abort, { once: true })
-    operation.then(resolve, reject).finally(() => {
-      signal.removeEventListener('abort', abort)
-    })
-  })
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -4786,15 +4878,29 @@ function assertPathInside(root: string, path: string, label: string): void {
   }
 }
 
-async function verifySha256(filePath: string, expected: string): Promise<boolean> {
+async function verifySha256(
+  filePath: string,
+  expected: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  throwIfAborted(signal)
   if (!expected) return false
   const hash = createHash('sha256')
-  await new Promise<void>((resolvePromise, reject) => {
-    const stream = createReadStream(filePath)
-    stream.on('data', (chunk) => hash.update(chunk))
-    stream.on('error', reject)
-    stream.on('end', () => resolvePromise())
-  })
+  const stream = createReadStream(filePath)
+  const abort = (): void => {
+    stream.destroy(abortError())
+  }
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    for await (const chunk of stream) {
+      throwIfAborted(signal)
+      hash.update(chunk)
+    }
+  } finally {
+    signal?.removeEventListener('abort', abort)
+    stream.destroy()
+  }
+  throwIfAborted(signal)
   return hash.digest('hex') === expected.toLowerCase()
 }
 
@@ -4923,14 +5029,17 @@ function parseZipInfoSymlinkName(line: string): string | null {
 async function assertSafeTarArchive(
   archivePath: string,
   stripPrefix?: string | null,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const entries = await runCommandOutput('tar', ['-tf', archivePath])
+  const entries = await runCommandOutput('tar', ['-tf', archivePath], { signal })
   for (const entry of entries.split(/\r?\n/)) {
     if (!entry) continue
     assertMemberPathInsideExtractRoot(entry, stripPrefix)
   }
 
-  const verboseEntries = await runCommandOutput('tar', ['-tvf', archivePath])
+  const verboseEntries = await runCommandOutput('tar', ['-tvf', archivePath], {
+    signal,
+  })
   for (const line of verboseEntries.split(/\r?\n/)) {
     if (!line) continue
     const link = parseTarVerboseLink(line)
@@ -4947,14 +5056,19 @@ async function assertSafeTarArchive(
 async function assertSafeZipArchive(
   archivePath: string,
   stripPrefix?: string | null,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const listing = await runCommandOutput('unzip', ['-Z', '-1', archivePath])
+  const listing = await runCommandOutput('unzip', ['-Z', '-1', archivePath], {
+    signal,
+  })
   for (const entry of listing.split(/\r?\n/)) {
     if (!entry) continue
     assertMemberPathInsideExtractRoot(entry, stripPrefix)
   }
 
-  const verboseListing = await runCommandOutput('unzip', ['-Z', archivePath])
+  const verboseListing = await runCommandOutput('unzip', ['-Z', archivePath], {
+    signal,
+  })
   const symlinkNames: string[] = []
   for (const line of verboseListing.split(/\r?\n/)) {
     if (!line) continue
@@ -4963,7 +5077,7 @@ async function assertSafeZipArchive(
   }
   for (const memberPath of symlinkNames) {
     const target = (
-      await runCommandOutput('unzip', ['-p', archivePath, memberPath])
+      await runCommandOutput('unzip', ['-p', archivePath, memberPath], { signal })
     ).replace(/\r?\n$/, '')
     assertLinkTargetInsideExtractRoot(memberPath, target, stripPrefix)
   }
@@ -4973,15 +5087,17 @@ async function extractZipArchive(
   archivePath: string,
   destination: string,
   stripPrefix?: string | null,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!stripPrefix) {
-    await runCommand('unzip', ['-q', archivePath, '-d', destination])
+    await runCommand('unzip', ['-q', archivePath, '-d', destination], { signal })
     return
   }
   const tempDestination = `${destination}.zip-${randomUUID()}`
   await mkdir(tempDestination, { recursive: true })
   try {
-    await runCommand('unzip', ['-q', archivePath, '-d', tempDestination])
+    await runCommand('unzip', ['-q', archivePath, '-d', tempDestination], { signal })
+    throwIfAborted(signal)
     await moveStrippedPrefix(tempDestination, destination, stripPrefix)
   } finally {
     await rm(tempDestination, { force: true, recursive: true })
@@ -4992,25 +5108,30 @@ async function extractArchive(
   archivePath: string,
   destination: string,
   stripPrefix?: string | null,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal)
   const zipArchive = await isZipArchive(archivePath)
   if (zipArchive) {
-    await assertSafeZipArchive(archivePath, stripPrefix)
+    await assertSafeZipArchive(archivePath, stripPrefix, signal)
   } else {
-    await assertSafeTarArchive(archivePath, stripPrefix)
+    await assertSafeTarArchive(archivePath, stripPrefix, signal)
   }
+  throwIfAborted(signal)
   await mkdir(destination, { recursive: true })
   if (zipArchive) {
-    await extractZipArchive(archivePath, destination, stripPrefix)
-    await assertExtractedLinksStayInsideRoot(destination)
+    await extractZipArchive(archivePath, destination, stripPrefix, signal)
+    throwIfAborted(signal)
+    await assertExtractedLinksStayInsideRoot(destination, '', signal)
     return
   }
   const args = ['-xf', archivePath, '-C', destination]
   if (stripPrefix) {
     args.push('--strip-components', '1')
   }
-  await runCommand('tar', args)
-  await assertExtractedLinksStayInsideRoot(destination)
+  await runCommand('tar', args, { signal })
+  throwIfAborted(signal)
+  await assertExtractedLinksStayInsideRoot(destination, '', signal)
 }
 
 async function replaceDirectoryWithRollback(
@@ -5067,9 +5188,12 @@ async function replaceDirectoryWithRollback(
 async function assertExtractedLinksStayInsideRoot(
   root: string,
   relativeDirectory = '',
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal)
   const entries = await readdir(root, { withFileTypes: true })
   for (const entry of entries) {
+    throwIfAborted(signal)
     const relativePath = relativeDirectory
       ? `${relativeDirectory}/${entry.name}`
       : entry.name
@@ -5080,7 +5204,7 @@ async function assertExtractedLinksStayInsideRoot(
       continue
     }
     if (stats.isDirectory()) {
-      await assertExtractedLinksStayInsideRoot(path, relativePath)
+      await assertExtractedLinksStayInsideRoot(path, relativePath, signal)
     }
   }
 }
@@ -5114,11 +5238,95 @@ async function runCommand(
   args: string[],
   options?: CommandRunnerOptions,
 ): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(command, args, { cwd: options?.cwd, stdio: 'pipe' })
+  await runChildProcess(command, args, options, false)
+}
+
+async function runCommandOutput(
+  command: string,
+  args: string[],
+  options?: CommandRunnerOptions,
+): Promise<string> {
+  return await runChildProcess(command, args, options, true)
+}
+
+async function runChildProcess(
+  command: string,
+  args: string[],
+  options: CommandRunnerOptions | undefined,
+  captureStdout: boolean,
+): Promise<string> {
+  throwIfAborted(options?.signal)
+  return await new Promise<string>((resolvePromise, reject) => {
+    const child = spawn(command, args, {
+      cwd: options?.cwd,
+      detached: process.platform !== 'win32',
+      stdio: 'pipe',
+      windowsHide: true,
+    })
+    let stdout = ''
     let stderr = ''
-    child.stdout?.on('data', () => {
-      // Consume noisy command output so verbose tools cannot block on pipe backpressure.
+    let killTimer: NodeJS.Timeout | null = null
+    let killEscalation: Promise<void> | null = null
+    let resolveKillEscalation: (() => void) | null = null
+    let windowsTermination: Promise<void> | null = null
+    let abortStarted = false
+    let settled = false
+    const cancelKillEscalation = (): void => {
+      if (killTimer) clearTimeout(killTimer)
+      killTimer = null
+      resolveKillEscalation?.()
+      resolveKillEscalation = null
+    }
+    const cleanup = (): void => {
+      cancelKillEscalation()
+      options?.signal?.removeEventListener('abort', abort)
+    }
+    const finish = (callback: () => void): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+    const abort = (): void => {
+      if (abortStarted) return
+      abortStarted = true
+      if (process.platform === 'win32') {
+        windowsTermination = terminateWindowsProcessTree(child)
+        return
+      }
+      terminateChildProcess(child, 'SIGTERM')
+      killEscalation = new Promise<void>((resolveEscalation) => {
+        resolveKillEscalation = resolveEscalation
+        killTimer = setTimeout(() => {
+          killTimer = null
+          resolveKillEscalation = null
+          terminateChildProcess(child, 'SIGKILL')
+          resolveEscalation()
+        }, 1000)
+        killTimer.unref()
+      })
+    }
+    const rejectAfterAbort = (): void => {
+      if (windowsTermination) {
+        void windowsTermination.then(() => finish(() => reject(abortError())))
+        return
+      }
+      if (!hasRunningProcessGroup(child)) {
+        finish(() => reject(abortError()))
+        return
+      }
+      const escalation = killEscalation
+      if (!escalation) {
+        finish(() => reject(abortError()))
+        return
+      }
+      void escalation.then(() => finish(() => reject(abortError())))
+    }
+
+    child.stdout?.on('data', (chunk) => {
+      if (captureStdout) {
+        stdout += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+      }
     })
     child.stderr?.on('data', (chunk) => {
       stderr = `${stderr}${Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)}`
@@ -5126,46 +5334,83 @@ async function runCommand(
         stderr = stderr.slice(-COMMAND_ERROR_OUTPUT_LIMIT)
       }
     })
-    child.on('error', reject)
-    child.on('close', (code) => {
+    child.once('error', (error) => {
+      if (options?.signal?.aborted) {
+        rejectAfterAbort()
+        return
+      }
+      finish(() => reject(error))
+    })
+    child.once('close', (code) => {
+      if (options?.signal?.aborted) {
+        rejectAfterAbort()
+        return
+      }
       if (code === 0) {
-        resolvePromise()
+        finish(() => resolvePromise(stdout))
       } else {
         const details = stderr.trim()
-        reject(
-          new Error(
-            `${command} failed with exit code ${code}${details ? `: ${details}` : ''}`,
+        finish(() =>
+          reject(
+            new Error(
+              `${command} failed with exit code ${code}${details ? `: ${details}` : ''}`,
+            ),
           ),
         )
       }
     })
+
+    options?.signal?.addEventListener('abort', abort, { once: true })
+    if (options?.signal?.aborted) abort()
   })
 }
 
-async function runCommandOutput(command: string, args: string[]): Promise<string> {
-  return await new Promise<string>((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: 'pipe' })
-    let stdout = ''
-    let stderr = ''
-    child.stdout?.on('data', (chunk) => {
-      stdout += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+function abortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError')
+}
+
+function terminateChildProcess(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid
+  if (!pid) return
+
+  try {
+    process.kill(-pid, signal)
+  } catch {
+    child.kill(signal)
+  }
+}
+
+async function terminateWindowsProcessTree(child: ChildProcess): Promise<void> {
+  const pid = child.pid
+  if (!pid) return
+  await new Promise<void>((resolvePromise) => {
+    const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
     })
-    child.stderr?.on('data', (chunk) => {
-      stderr = `${stderr}${Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)}`
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      resolvePromise()
+    }
+    killer.once('error', () => {
+      child.kill('SIGKILL')
+      finish()
     })
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolvePromise(stdout)
-      } else {
-        reject(
-          new Error(
-            `${command} failed with exit code ${code}${stderr.trim() ? `: ${stderr.trim()}` : ''}`,
-          ),
-        )
-      }
-    })
+    killer.once('close', finish)
   })
+}
+
+function hasRunningProcessGroup(child: ChildProcess): boolean {
+  const pid = child.pid
+  if (!pid || process.platform === 'win32') return false
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
 }
 
 async function detectExecutables(root: string): Promise<string[]> {
