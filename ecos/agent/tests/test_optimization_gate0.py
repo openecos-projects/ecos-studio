@@ -447,6 +447,10 @@ def test_materialization_receipt_binds_requested_and_written_value(tmp_path: Pat
     assert receipt.effective_initial.value == 0.726439
     assert receipt.effective_final.value == 0.758653
     assert len(receipt.runtime_adjustments) == 1
+    assert {item.metric: item.value for item in receipt.runtime_observations} == {
+        "effective_target_density": 0.758653,
+        "target_density_adjustment_count": 1,
+    }
     assert receipt.evidence_sha256 == canonical_sha256({
         "materialization": file_sha256(receipt_path),
         "place_log": file_sha256(place_log),
@@ -515,40 +519,112 @@ def _runtime_receipt_fixture(
     )
 
 
-@pytest.mark.parametrize(
-    "knob_id,requested,runtime_key",
-    [
-        ("place.target_overflow", 0.08, "stop_overflow"),
-        ("place.routability_opt", True, "routability_opt_flag"),
-    ],
-)
-def test_place_receipt_uses_the_runtime_loaded_parameter(
-    tmp_path: Path, knob_id: str, requested: object, runtime_key: str
-) -> None:
-    stored = int(requested) if isinstance(requested, bool) else requested
+def test_target_overflow_receipt_records_runtime_threshold_result(tmp_path: Path) -> None:
+    requested = 0.08
     evidence = _runtime_receipt_fixture(
         tmp_path,
-        knob_id=knob_id,
+        knob_id="place.target_overflow",
         written=requested,
         target_step="place",
         config_key="dreamplace",
         config_ref="config/dreamplace_ecc.json",
-        config_payload={runtime_key: stored},
+        config_payload={"stop_overflow": requested},
     )
     log = tmp_path / evidence.candidate_root_ref / "place_dreamplace/log/place.log"
     log.parent.mkdir(parents=True)
-    log.write_text(f"[INFO] parameters = {{{runtime_key!r}: {stored!r}}}\n", encoding="utf-8")
+    log.write_text(
+        "[INFO] parameters = {'stop_overflow': 0.08}\n"
+        "[INFO] iteration 1, DensityWeight 1E-03, Overflow 1.2E-01\n"
+        "[INFO] iteration 2, DensityWeight 2E-03, Overflow 7.5E-02\n"
+        "[INFO] iteration 3, DensityWeight 3E-03, Overflow 9.0E-02\n",
+        encoding="utf-8",
+    )
 
     receipt = build_materialization_application_receipt(
         tmp_path,
         evidence,
-        RequestedKnobValue(knob_id=knob_id, value=requested),
+        RequestedKnobValue(knob_id="place.target_overflow", value=requested),
         site_width_dbu=200,
     )
 
     assert receipt.effective_initial.value == requested
     assert receipt.effective_final.value == requested
     assert receipt.runtime_adjustments == ()
+    assert {item.metric: item.value for item in receipt.runtime_observations} == {
+        "final_overflow": 0.09,
+        "minimum_overflow": 0.075,
+        "target_overflow_reached": True,
+    }
+
+
+def test_routability_receipt_records_runtime_area_adjustments(tmp_path: Path) -> None:
+    evidence = _runtime_receipt_fixture(
+        tmp_path,
+        knob_id="place.routability_opt",
+        written=True,
+        target_step="place",
+        config_key="dreamplace",
+        config_ref="config/dreamplace_ecc.json",
+        config_payload={"routability_opt_flag": 1},
+    )
+    log = tmp_path / evidence.candidate_root_ref / "place_dreamplace/log/place.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        "[INFO] parameters = {'routability_opt_flag': 1}\n"
+        "[INFO] old total movable nodes area 1.000E+02, filler area 1\n"
+        "[INFO] new total movable nodes area 1.100E+02, filler area 1\n"
+        "[INFO] routability optimization round 0: adjust area flags = "
+        "(1, 1, 0) -> (1, 1, 0)\n",
+        encoding="utf-8",
+    )
+
+    receipt = build_materialization_application_receipt(
+        tmp_path,
+        evidence,
+        RequestedKnobValue(knob_id="place.routability_opt", value=True),
+        site_width_dbu=200,
+    )
+
+    assert receipt.effective_initial.value is True
+    assert receipt.effective_final.value is True
+    assert {item.metric: item.value for item in receipt.runtime_observations} == {
+        "area_adjustment_applied": True,
+        "area_adjustment_count": 1,
+        "final_movable_area": 110.0,
+        "initial_movable_area": 100.0,
+        "routability_round_count": 1,
+    }
+
+
+def test_enabled_routability_receipt_records_when_no_action_occurs(tmp_path: Path) -> None:
+    evidence = _runtime_receipt_fixture(
+        tmp_path,
+        knob_id="place.routability_opt",
+        written=True,
+        target_step="place",
+        config_key="dreamplace",
+        config_ref="config/dreamplace_ecc.json",
+        config_payload={"routability_opt_flag": 1},
+    )
+    log = tmp_path / evidence.candidate_root_ref / "place_dreamplace/log/place.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        "[INFO] parameters = {'routability_opt_flag': 1}\n",
+        encoding="utf-8",
+    )
+
+    receipt = build_materialization_application_receipt(
+        tmp_path,
+        evidence,
+        RequestedKnobValue(knob_id="place.routability_opt", value=True),
+        site_width_dbu=200,
+    )
+
+    assert {item.metric: item.value for item in receipt.runtime_observations} == {
+        "area_adjustment_applied": False,
+        "area_adjustment_count": 0,
+        "routability_round_count": 0,
+    }
 
 
 def test_density_weight_receipt_records_runtime_derived_values(tmp_path: Path) -> None:
@@ -582,6 +658,10 @@ def test_density_weight_receipt_records_runtime_derived_values(tmp_path: Path) -
     assert receipt.effective_initial.value == 4.302304e-07
     assert receipt.effective_final.value == 0.002717005
     assert len(receipt.runtime_adjustments) == 1
+    assert {item.metric: item.value for item in receipt.runtime_observations} == {
+        "final_density_weight": 0.002717005,
+        "initial_density_weight": 4.302304e-07,
+    }
 
 
 def test_cell_padding_receipt_records_the_runtime_capacity_cap(tmp_path: Path) -> None:
@@ -613,17 +693,21 @@ def test_cell_padding_receipt_records_the_runtime_capacity_cap(tmp_path: Path) -
     assert receipt.effective_initial.value == 400
     assert receipt.effective_final.value == 200
     assert receipt.runtime_adjustments[0].reason == "DreamPlace cell-padding capacity cap"
+    assert {item.metric: item.value for item in receipt.runtime_observations} == {
+        "applied_cell_padding_dbu": 200,
+        "cell_padding_capacity_cap_count": 1,
+    }
 
 
 @pytest.mark.parametrize(
-    "knob_id,requested,effective_final",
+    "knob_id,requested,achieved_value",
     [
-        ("floorplan.core_util", 0.6, 0.6),
+        ("floorplan.core_util", 0.6, 0.58),
         ("floorplan.aspect_ratio", 1.33, 1.28),
     ],
 )
 def test_floorplan_receipt_uses_ifp_runtime_and_layout_result(
-    tmp_path: Path, knob_id: str, requested: float, effective_final: float
+    tmp_path: Path, knob_id: str, requested: float, achieved_value: float
 ) -> None:
     core_key = "Utilitization" if knob_id.endswith("core_util") else "Aspect ratio"
     evidence = _runtime_receipt_fixture(
@@ -640,8 +724,16 @@ def test_floorplan_receipt_uses_ifp_runtime_and_layout_result(
     (candidate / "Floorplan_ecc/log/Floorplan.log").write_text(
         "aspect_ratio: 1.33, utilization: 0.6\n", encoding="utf-8"
     )
-    (candidate / "home/parameters.json").write_text(
-        json.dumps({"Core": {"Utilitization": 0.6, "Aspect ratio": 1.28}}),
+    feature = candidate / "Floorplan_ecc/feature/Floorplan.db.json"
+    feature.parent.mkdir(parents=True)
+    feature.write_text(
+        json.dumps({
+            "Design Layout": {
+                "core_usage": 0.58,
+                "core_bounding_width": 64.0,
+                "core_bounding_height": 50.0,
+            }
+        }),
         encoding="utf-8",
     )
 
@@ -653,7 +745,16 @@ def test_floorplan_receipt_uses_ifp_runtime_and_layout_result(
     )
 
     assert receipt.effective_initial.value == requested
-    assert receipt.effective_final.value == effective_final
+    assert receipt.effective_final.value == requested
+    assert receipt.runtime_adjustments == ()
+    expected_metric = (
+        "achieved_core_utilization"
+        if knob_id == "floorplan.core_util"
+        else "achieved_core_aspect_ratio"
+    )
+    assert {item.metric: item.value for item in receipt.runtime_observations} == {
+        expected_metric: achieved_value
+    }
 
 
 def test_fixfanout_receipt_uses_the_native_runtime_limit(tmp_path: Path) -> None:
@@ -668,7 +769,12 @@ def test_fixfanout_receipt_uses_the_native_runtime_limit(tmp_path: Path) -> None
     )
     log = tmp_path / evidence.candidate_root_ref / "fixFanout_ecc/log/fixFanout.log"
     log.parent.mkdir(parents=True)
-    log.write_text("ZH fixFanout\n  max_fanout: 24\n", encoding="utf-8")
+    log.write_text(
+        "ZH fixFanout\n"
+        "  max_fanout: 24\n"
+        "Total fixed 2 nets, inserted 4 nets and 4 buffers\n",
+        encoding="utf-8",
+    )
 
     receipt = build_materialization_application_receipt(
         tmp_path,
@@ -679,3 +785,9 @@ def test_fixfanout_receipt_uses_the_native_runtime_limit(tmp_path: Path) -> None
 
     assert receipt.effective_initial.value == 24
     assert receipt.effective_final.value == 24
+    assert {item.metric: item.value for item in receipt.runtime_observations} == {
+        "fanout_fix_completed": True,
+        "fixed_net_count": 2,
+        "inserted_buffer_count": 4,
+        "inserted_net_count": 4,
+    }

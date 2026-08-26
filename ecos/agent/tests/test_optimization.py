@@ -17,6 +17,7 @@ from ecos_agent.optimization_contracts import (
     RequestedKnobValue,
     RoutabilityObjectiveContract,
     RuntimeAdjustment,
+    RuntimeObservation,
     SignoffGates,
     StageObservation,
     StrategyDirection,
@@ -332,6 +333,7 @@ def test_knob_receipt_binds_requested_written_and_runtime_effective_values() -> 
 
     assert receipt.effective_final.value == 200
     assert coordinate_value_from_receipt(receipt, site_width_dbu=200) == 1
+    assert "runtime_observations" not in receipt.model_dump(mode="json")
 
     with pytest.raises(ValidationError, match="final value"):
         invalid_receipt = receipt.model_dump()
@@ -383,6 +385,30 @@ def test_knob_receipt_rejects_a_mismatched_runtime_knob() -> None:
             ),
             effective_final=AppliedKnobValue(knob_id="place.target_density", value=0.2),
             evidence_sha256=HASH,
+        )
+
+
+def test_knob_receipt_rejects_duplicate_runtime_observation_metrics() -> None:
+    observation = RuntimeObservation(
+        metric="final_overflow", value=0.1, evidence_sha256=HASH
+    )
+    applied = AppliedKnobValue(knob_id="place.target_overflow", value=0.1)
+    with pytest.raises(ValidationError, match="metrics must be unique"):
+        KnobApplicationReceipt(
+            receipt_id="receipt-1",
+            requested=RequestedKnobValue(
+                knob_id="place.target_overflow", value=0.1
+            ),
+            written=applied,
+            effective_initial=applied,
+            runtime_observations=(observation, observation),
+            effective_final=applied,
+            evidence_sha256=HASH,
+        )
+
+    with pytest.raises(ValidationError, match="observation value"):
+        RuntimeObservation(
+            metric="final_overflow", value=float("inf"), evidence_sha256=HASH
         )
 
 

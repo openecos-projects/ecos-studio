@@ -16,6 +16,7 @@ from ecos_agent.optimization_contracts import (
     OptimizationKnob,
     RequestedKnobValue,
     RuntimeAdjustment,
+    RuntimeObservation,
 )
 from ecos_agent.optimization_controller import CandidateExecutionEvidence
 
@@ -30,10 +31,19 @@ _RUNTIME_DENSITY_WEIGHT = re.compile(r"density_weight\s*=\s*([0-9.eE+-]+)")
 _ITERATION_DENSITY_WEIGHT = re.compile(
     r"iteration\s+\d+.*?DensityWeight\s+([0-9.eE+-]+)"
 )
+_ITERATION_OVERFLOW = re.compile(r"iteration\s+\d+.*?\bOverflow\s+([0-9.eE+-]+)")
+_ROUTABILITY_ROUND = re.compile(
+    r"routability optimization round\s+\d+:.*?->\s*\(([01]),\s*([01]),\s*([01])\)"
+)
+_OLD_MOVABLE_AREA = re.compile(r"old total movable nodes area\s+([0-9.eE+-]+)")
+_NEW_MOVABLE_AREA = re.compile(r"new total movable nodes area\s+([0-9.eE+-]+)")
 _FLOORPLAN_PARAMETERS = re.compile(
     r"aspect_ratio:\s*([0-9.eE+-]+),\s*utilization:\s*([0-9.eE+-]+)"
 )
 _MAX_FANOUT = re.compile(r"max_fanout:\s*([0-9]+)")
+_FANOUT_RESULT = re.compile(
+    r"Total fixed\s+(\d+)\s+nets, inserted\s+(\d+)\s+nets and\s+(\d+)\s+buffers"
+)
 _TARGET_STEPS = {
     OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
@@ -91,7 +101,7 @@ def build_materialization_application_receipt(
     written_value = _written_value(requested, site_width_dbu)
     target = knob_spec(requested.knob_id.value).read_target
     _validate_materialization(candidate, payload, target, requested, written_value)
-    initial, adjustments, final, runtime_evidence = _runtime_values(
+    initial, adjustments, final, observations, runtime_evidence = _runtime_values(
         candidate, target, requested, written_value, site_width_dbu
     )
     evidence_sha256 = canonical_sha256(
@@ -106,6 +116,7 @@ def build_materialization_application_receipt(
         written=AppliedKnobValue(knob_id=requested.knob_id, value=written_value),
         effective_initial=initial,
         runtime_adjustments=adjustments,
+        runtime_observations=observations,
         effective_final=final,
         evidence_sha256=evidence_sha256,
     )
@@ -183,6 +194,7 @@ def _runtime_values(
     AppliedKnobValue,
     tuple[RuntimeAdjustment, ...],
     AppliedKnobValue,
+    tuple[RuntimeObservation, ...],
     dict[str, str],
 ]:
     if requested.knob_id in {
@@ -207,6 +219,7 @@ def _place_runtime_values(
     AppliedKnobValue,
     tuple[RuntimeAdjustment, ...],
     AppliedKnobValue,
+    tuple[RuntimeObservation, ...],
     dict[str, str],
 ]:
     log_path = _candidate_artifact(candidate, "place_dreamplace/log/place.log")
@@ -244,7 +257,74 @@ def _place_runtime_values(
         for value in adjusted_values
     )
     final = adjustments[-1].effective_value if adjustments else initial
-    return initial, adjustments, final, {"place_log": log_sha256}
+    observations = _place_runtime_observations(
+        requested, log, initial, final, len(adjusted_values), log_sha256
+    )
+    return initial, adjustments, final, observations, {"place_log": log_sha256}
+
+
+def _place_runtime_observations(
+    requested: RequestedKnobValue,
+    log: str,
+    initial: AppliedKnobValue,
+    final: AppliedKnobValue,
+    adjustment_count: int,
+    evidence_sha256: str,
+) -> tuple[RuntimeObservation, ...]:
+    knob_id = requested.knob_id
+    if knob_id == OptimizationKnob.TARGET_DENSITY:
+        values = {
+            "effective_target_density": final.value,
+            "target_density_adjustment_count": adjustment_count,
+        }
+    elif knob_id == OptimizationKnob.TARGET_OVERFLOW:
+        overflows = [float(value) for value in _ITERATION_OVERFLOW.findall(log)]
+        if not overflows:
+            raise Gate0ReceiptError("candidate target-overflow runtime evidence is invalid")
+        values = {
+            "final_overflow": overflows[-1],
+            "minimum_overflow": min(overflows),
+            "target_overflow_reached": min(overflows) <= float(requested.value),
+        }
+    elif knob_id == OptimizationKnob.CELL_PADDING_X:
+        values = {
+            "applied_cell_padding_dbu": final.value,
+            "cell_padding_capacity_cap_count": adjustment_count,
+        }
+    elif knob_id == OptimizationKnob.ROUTABILITY_OPT:
+        values = _routability_observation_values(log, bool(initial.value))
+    else:
+        values = {
+            "final_density_weight": final.value,
+            "initial_density_weight": initial.value,
+        }
+    return tuple(
+        RuntimeObservation(metric=metric, value=value, evidence_sha256=evidence_sha256)
+        for metric, value in values.items()
+    )
+
+
+def _routability_observation_values(
+    log: str, enabled: bool
+) -> dict[str, bool | int | float]:
+    rounds = _ROUTABILITY_ROUND.findall(log)
+    applied = sum(int(flags[0]) for flags in rounds)
+    if not enabled and rounds:
+        raise Gate0ReceiptError("candidate routability runtime evidence is invalid")
+    values: dict[str, bool | int | float] = {
+        "area_adjustment_applied": applied > 0,
+        "area_adjustment_count": applied,
+        "routability_round_count": len(rounds),
+    }
+    old_areas = [float(value) for value in _OLD_MOVABLE_AREA.findall(log)]
+    new_areas = [float(value) for value in _NEW_MOVABLE_AREA.findall(log)]
+    if applied and (not old_areas or not new_areas):
+        raise Gate0ReceiptError("candidate routability area evidence is invalid")
+    if old_areas and new_areas:
+        values.update(
+            initial_movable_area=old_areas[0], final_movable_area=new_areas[-1]
+        )
+    return values
 
 
 def _place_log(log_path: Path) -> tuple[str, dict[str, object]]:
@@ -283,6 +363,7 @@ def _floorplan_runtime_values(
     AppliedKnobValue,
     tuple[RuntimeAdjustment, ...],
     AppliedKnobValue,
+    tuple[RuntimeObservation, ...],
     dict[str, str],
 ]:
     log_path = _candidate_artifact(candidate, "Floorplan_ecc/log/Floorplan.log")
@@ -303,23 +384,41 @@ def _floorplan_runtime_values(
         raise Gate0ReceiptError("candidate materialization config value does not match runtime")
     initial = AppliedKnobValue(knob_id=requested.knob_id, value=initial_value)
     evidence = {"floorplan_log": file_sha256(log_path)}
-    if requested.knob_id == OptimizationKnob.FLOORPLAN_CORE_UTIL:
-        return initial, (), initial, evidence
-    parameters_path = _candidate_artifact(candidate, "home/parameters.json")
-    target = knob_spec(requested.knob_id.value).read_target
-    final_value = _mapping_value(
-        _read_json(parameters_path, "candidate final parameters"), target
+    feature_path = _candidate_artifact(
+        candidate, "Floorplan_ecc/feature/Floorplan.db.json"
     )
-    final = AppliedKnobValue(knob_id=requested.knob_id, value=final_value)
-    evidence["final_parameters"] = file_sha256(parameters_path)
-    if final == initial:
-        return initial, (), final, evidence
-    adjustment = RuntimeAdjustment(
-        effective_value=final,
-        reason="Floorplan layout-derived aspect ratio",
-        evidence_sha256=evidence["final_parameters"],
+    layout = _read_json(feature_path, "candidate Floorplan feature").get(
+        "Design Layout"
     )
-    return initial, (adjustment,), final, evidence
+    if not isinstance(layout, dict):
+        raise Gate0ReceiptError("candidate Floorplan feature is invalid")
+    core_usage = _finite_float(layout.get("core_usage"), "Floorplan core usage")
+    core_width = _finite_float(
+        layout.get("core_bounding_width"), "Floorplan core width"
+    )
+    core_height = _finite_float(
+        layout.get("core_bounding_height"), "Floorplan core height"
+    )
+    if not 0 < core_usage <= 1 or core_width <= 0 or core_height <= 0:
+        raise Gate0ReceiptError("candidate Floorplan core geometry is invalid")
+    achieved_value = (
+        core_usage
+        if requested.knob_id == OptimizationKnob.FLOORPLAN_CORE_UTIL
+        else core_width / core_height
+    )
+    feature_sha256 = file_sha256(feature_path)
+    evidence["floorplan_feature"] = feature_sha256
+    metric = (
+        "achieved_core_utilization"
+        if requested.knob_id == OptimizationKnob.FLOORPLAN_CORE_UTIL
+        else "achieved_core_aspect_ratio"
+    )
+    observations = (
+        RuntimeObservation(
+            metric=metric, value=achieved_value, evidence_sha256=feature_sha256
+        ),
+    )
+    return initial, (), initial, observations, evidence
 
 
 def _fixfanout_runtime_values(
@@ -330,6 +429,7 @@ def _fixfanout_runtime_values(
     AppliedKnobValue,
     tuple[RuntimeAdjustment, ...],
     AppliedKnobValue,
+    tuple[RuntimeObservation, ...],
     dict[str, str],
 ]:
     log_path = _candidate_artifact(candidate, "fixFanout_ecc/log/fixFanout.log")
@@ -340,8 +440,29 @@ def _fixfanout_runtime_values(
     match = _MAX_FANOUT.search(log)
     if match is None or int(match.group(1)) != written_value:
         raise Gate0ReceiptError("candidate materialization config value does not match runtime")
+    result = _FANOUT_RESULT.search(log)
+    if result is None:
+        raise Gate0ReceiptError("candidate fixFanout action evidence is invalid")
     effective = AppliedKnobValue(knob_id=requested.knob_id, value=int(match.group(1)))
-    return effective, (), effective, {"fixfanout_log": file_sha256(log_path)}
+    log_sha256 = file_sha256(log_path)
+    fixed_nets, inserted_nets, inserted_buffers = (int(value) for value in result.groups())
+    values: dict[str, bool | int] = {
+        "fanout_fix_completed": True,
+        "fixed_net_count": fixed_nets,
+        "inserted_buffer_count": inserted_buffers,
+        "inserted_net_count": inserted_nets,
+    }
+    observations = tuple(
+        RuntimeObservation(metric=metric, value=value, evidence_sha256=log_sha256)
+        for metric, value in values.items()
+    )
+    return effective, (), effective, observations, {"fixfanout_log": log_sha256}
+
+
+def _finite_float(value: object, label: str) -> float:
+    if type(value) not in {int, float} or not math.isfinite(float(value)):
+        raise Gate0ReceiptError(f"candidate {label} is invalid")
+    return float(value)
 
 
 def _written_value(requested: RequestedKnobValue, site_width_dbu: int) -> bool | int | float:
