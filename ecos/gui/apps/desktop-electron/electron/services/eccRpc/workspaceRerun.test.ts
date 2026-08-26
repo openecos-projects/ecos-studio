@@ -514,7 +514,7 @@ describe('prepareWorkspaceRerun', () => {
 })
 
 describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
-  it('applies parameter writes to home/ecc.toml in flat-key form', async () => {
+  it('applies parameter writes to home/ecc.toml after display-key canonicalization', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     await rm(join(source, 'home', 'parameters.json'))
     await writeFile(
@@ -533,7 +533,7 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     contract.writes = [
       {
         file: 'home/ecc.toml',
-        json_path: ['target_density'],
+        json_path: ['Target density'],
         knob_id: 'place.target_density',
         surface: 'parameters',
         value: 0.55,

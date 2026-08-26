@@ -36,6 +36,7 @@ export const desktopApiIpcChannels = {
   workspaceReadProjectTextFile: 'workspace:read-project-text-file',
   workspaceReadOptionalProjectTextFile: 'workspace:read-optional-project-text-file',
   workspaceReadWorkspaceParameters: 'workspace:read-workspace-parameters',
+  workspaceEditWorkspaceParameters: 'workspace:edit-workspace-parameters',
   workspaceReadProjectTextFileTail: 'workspace:read-project-text-file-tail',
   workspaceReadOptionalProjectTextFileTail:
     'workspace:read-optional-project-text-file-tail',

@@ -180,6 +180,12 @@ const desktopApi: DesktopApi = {
         desktopApiIpcChannels.workspaceReadWorkspaceParameters,
         workspacePath,
       ),
+    editWorkspaceParameters: (workspacePath, edits) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceEditWorkspaceParameters,
+        workspacePath,
+        edits,
+      ),
     readProjectTextFileTail: (path, maxChars) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceReadProjectTextFileTail,

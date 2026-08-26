@@ -32,6 +32,7 @@ import {
   removeWorkspaceDesignFile,
 } from './designFileService'
 import {
+  editWorkspaceParameters as editWorkspaceParametersFile,
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
 } from './workspaceParametersFile'
@@ -479,6 +480,25 @@ export class WorkspaceService {
 
       throw error
     }
+  }
+
+  /**
+   * Apply existing-path-only parameter edits (agent surface) to the
+   * workspace configuration on disk. The path vocabulary is interpreted in
+   * the on-disk file's format by the shared helper.
+   */
+  async editWorkspaceParameters(
+    workspacePath: string,
+    edits: { json_path: (string | number)[]; value: unknown }[],
+  ): Promise<{ format: 'toml' | 'json'; path: string }> {
+    const location = await locateWorkspaceParametersFile(workspacePath)
+    if (!location) {
+      throw new Error(`Workspace parameters file not found under: ${workspacePath}`)
+    }
+    const canonicalPath =
+      await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
+    await this.assertCanWriteProjectTextFile(canonicalPath)
+    return await editWorkspaceParametersFile(workspacePath, edits)
   }
 
   async readProjectTextFileTail(path: string, maxChars: number): Promise<string | null> {

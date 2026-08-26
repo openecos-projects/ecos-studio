@@ -2,7 +2,7 @@ import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { parse, stringify } from 'smol-toml'
-import { normalizeParameterKeys } from '@ecos-studio/shared'
+import { normalizeParameterKey, normalizeParameterKeys } from '@ecos-studio/shared'
 
 export const WORKSPACE_CONFIG_BASENAME = 'ecc.toml'
 export const LEGACY_PARAMETERS_BASENAME = 'parameters.json'
@@ -154,6 +154,12 @@ export async function writeTextAtomically(path: string, content: string): Promis
  * `_split_payload`), `pdk_config` absolutes inside the workspace are stored
  * relative (mirroring `render_workspace_config`), and every other section
  * (`[flow]`, unknown sections) is preserved untouched.
+ *
+ * Existing `[params]` keys are canonicalized before merging: a hand-authored
+ * display key (e.g. `Target density`) would otherwise shadow the edit,
+ * because ecc gives the long key precedence on collisions. Mirrors of an
+ * emptied parameter are deleted so a stale non-empty section value cannot
+ * resurrect it on the next load.
  */
 export function mergePayloadIntoTomlDocument(
   document: Record<string, unknown>,
@@ -165,8 +171,11 @@ export function mergePayloadIntoTomlDocument(
   params: Record<string, unknown>
 } {
   const flatPayload = normalizeParameterKeys(payload) as Record<string, unknown>
+  const existingParams = normalizeParameterKeys(
+    isRecord(document.params) ? document.params : {},
+  ) as Record<string, unknown>
   const params: Record<string, unknown> = {
-    ...(isRecord(document.params) ? document.params : {}),
+    ...existingParams,
     ...flatPayload,
   }
 
@@ -187,6 +196,8 @@ export function mergePayloadIntoTomlDocument(
     const value = params[paramKey]
     if (hasValue(value)) {
       design[sectionKey] = value
+    } else {
+      delete design[sectionKey]
     }
   }
 
@@ -195,6 +206,8 @@ export function mergePayloadIntoTomlDocument(
     const value = params[paramKey]
     if (hasValue(value)) {
       pdk[sectionKey] = value
+    } else {
+      delete pdk[sectionKey]
     }
   }
 
@@ -222,6 +235,92 @@ export async function writeWorkspaceParameters(
   }
   const document = parse(await readFile(location.path, 'utf8')) as Record<string, unknown>
   const merged = mergePayloadIntoTomlDocument(document, payload, root)
+  await writeTextAtomically(location.path, stringify(merged))
+  return location
+}
+
+export interface WorkspaceParameterEdit {
+  json_path: readonly (string | number)[]
+  value: unknown
+}
+
+function detectJsonIndent(raw: string): number {
+  return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 4
+}
+
+function readJsonPathSegment(node: unknown, key: string | number): unknown {
+  if (typeof key === 'number') {
+    return Array.isArray(node) && key < node.length ? node[key] : undefined
+  }
+  return isRecord(node) ? node[key] : undefined
+}
+
+/**
+ * Existing-path-only set: every segment of the path must already exist,
+ * mirroring the agent write contract (no invented keys).
+ */
+function setJsonPathValue(
+  document: Record<string, unknown>,
+  jsonPath: readonly (string | number)[],
+  value: unknown,
+  label: string,
+): void {
+  const missing = (): never => {
+    throw new Error(
+      `Parameter path ${JSON.stringify(jsonPath)} does not exist in ${label}.`,
+    )
+  }
+  let node: unknown = document
+  for (const key of jsonPath.slice(0, -1)) {
+    node = readJsonPathSegment(node, key) ?? missing()
+  }
+  const last = jsonPath[jsonPath.length - 1]
+  if (last === undefined || readJsonPathSegment(node, last) === undefined) missing()
+  if (typeof last === 'number') (node as unknown[])[last] = value
+  else (node as Record<string, unknown>)[last] = value
+}
+
+/**
+ * Apply existing-path-only edits to the workspace configuration that
+ * actually exists on disk (`home/ecc.toml` preferred, legacy
+ * `home/parameters.json` fallback). Edit paths are interpreted in the
+ * on-disk file's vocabulary: display keys for JSON, and for TOML every
+ * string segment is canonicalized through the ecc mechanical rule, so an
+ * agent emitting display-key paths keeps working after the migration.
+ */
+export async function editWorkspaceParameters(
+  root: string,
+  edits: readonly WorkspaceParameterEdit[],
+): Promise<WorkspaceParametersFileLocation> {
+  const location = await locateWorkspaceParametersFile(root)
+  if (!location) {
+    throw new Error(
+      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+    )
+  }
+  const raw = await readFile(location.path, 'utf8')
+  if (location.format === 'json') {
+    const parsed: unknown = JSON.parse(raw)
+    const document = isRecord(parsed) ? parsed : {}
+    for (const edit of edits) {
+      setJsonPathValue(document, edit.json_path, edit.value, location.path)
+    }
+    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
+    await writeTextAtomically(
+      location.path,
+      raw.endsWith('\n') ? `${serialized}\n` : serialized,
+    )
+    return location
+  }
+  const document = parse(raw) as Record<string, unknown>
+  const parameters = mergeTomlSections(document, root)
+  for (const edit of edits) {
+    const normalizedPath = edit.json_path.map((segment) =>
+      typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
+    )
+    setJsonPathValue(parameters, normalizedPath, edit.value, location.path)
+  }
+  const merged = mergePayloadIntoTomlDocument(document, parameters, root)
   await writeTextAtomically(location.path, stringify(merged))
   return location
 }

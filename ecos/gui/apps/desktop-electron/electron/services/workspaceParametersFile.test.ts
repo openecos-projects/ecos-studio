@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  editWorkspaceParameters,
   locateWorkspaceParametersFile,
   mergePayloadIntoTomlDocument,
   mergeTomlSections,
@@ -295,5 +296,81 @@ describe('writeWorkspaceParameters', () => {
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /not found/i,
     )
+  })
+})
+
+describe('mergePayloadIntoTomlDocument regressions', () => {
+  it('deletes a mirror key when the corresponding parameter is emptied', () => {
+    const document = {
+      design: { name: 'gcd', top: 'gcd' },
+      pdk: { root: '/pdk/ics55' },
+      params: { design: '', top_module: 'gcd', pdk_root: '' },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { design: '', pdk_root: '' },
+      '/ws',
+    )
+    expect('name' in merged.design).toBe(false)
+    expect(merged.design.top).toBe('gcd')
+    expect('root' in merged.pdk).toBe(false)
+  })
+
+  it('canonicalizes a hand-authored display key before merging so the edit wins', () => {
+    const document = {
+      params: { 'Target density': 0.45, design: 'gcd' },
+    }
+    const merged = mergePayloadIntoTomlDocument(document, { target_density: 0.55 }, '/ws')
+    expect(merged.params.target_density).toBe(0.55)
+    expect('Target density' in merged.params).toBe(false)
+  })
+})
+
+describe('editWorkspaceParameters', () => {
+  it('applies display-key paths to a TOML workspace after canonicalizing them', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    await editWorkspaceParameters(root, [
+      { json_path: ['Target density'], value: 0.55 },
+      { json_path: ['Core', 'Utilitization'], value: 0.45 },
+    ])
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.target_density).toBe(0.55)
+    expect(parameters?.core).toMatchObject({ utilitization: 0.45, margin: [2, 2] })
+  })
+
+  it('applies flat paths to a TOML workspace unchanged', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64 }])
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.max_fanout).toBe(64)
+  })
+
+  it('rejects edits to parameters that do not exist', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['nonexistent_knob'], value: 1 }]),
+    ).rejects.toThrow(/does not exist/i)
+  })
+
+  it('applies display-key paths to a legacy parameters.json workspace', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    await editWorkspaceParameters(root, [
+      { json_path: ['Frequency max [MHz]'], value: 200 },
+    ])
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(written['Frequency max [MHz]']).toBe(200)
+  })
+
+  it('throws when no parameters file exists', async () => {
+    const root = createWorkspace()
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['design'], value: 'x' }]),
+    ).rejects.toThrow(/not found/i)
   })
 })

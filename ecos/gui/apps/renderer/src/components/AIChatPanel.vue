@@ -1776,7 +1776,15 @@ async function applyWorkspaceParameterWrites(
     if (group) group.push(write)
     else byFile.set(write.file, [write])
   }
+  const parameterSurfaceWrites: DesktopAgentWorkspaceParameterWrite[] = []
   for (const [file, fileWrites] of byFile) {
+    if (file === 'home/ecc.toml' || file === 'home/parameters.json') {
+      // The on-disk configuration format (ecc.toml vs parameters.json) is
+      // resolved in the main process; edit paths are interpreted in the
+      // actual file's vocabulary there.
+      parameterSurfaceWrites.push(...fileWrites)
+      continue
+    }
     const path = `${workspaceRoot}/${file}`
     const raw = await desktopApi.workspace.readProjectTextFile(path)
     if (!raw.trim()) throw new Error(`${file} is missing or empty in this workspace.`)
@@ -1788,6 +1796,15 @@ async function applyWorkspaceParameterWrites(
     await desktopApi.workspace.writeProjectTextFile(
       path,
       raw.endsWith('\n') ? `${serialized}\n` : serialized,
+    )
+  }
+  if (parameterSurfaceWrites.length > 0) {
+    await desktopApi.workspace.editWorkspaceParameters(
+      workspaceRoot,
+      parameterSurfaceWrites.map((write) => ({
+        json_path: write.json_path,
+        value: write.value,
+      })),
     )
   }
 }

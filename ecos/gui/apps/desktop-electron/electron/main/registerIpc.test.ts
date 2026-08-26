@@ -120,6 +120,7 @@ function registerHandlers(
       readProjectBinaryFile: vi.fn(),
       readOptionalProjectTextFile: vi.fn(),
       readWorkspaceParameters: vi.fn(),
+      editWorkspaceParameters: vi.fn(),
       readOptionalProjectTextFileChunk: vi.fn(),
       readOptionalProjectTextFileTail: vi.fn(),
       readOptionalProjectTextFileUpdate: vi.fn(),

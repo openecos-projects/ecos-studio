@@ -179,6 +179,10 @@ export interface DesktopBridgeServices {
     readWorkspaceParameters(
       workspacePath: string,
     ): Promise<Record<string, unknown> | null>
+    editWorkspaceParameters(
+      workspacePath: string,
+      edits: { json_path: (string | number)[]; value: unknown }[],
+    ): Promise<{ format: 'toml' | 'json'; path: string }>
     readProjectTextFile(path: string): Promise<string>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail(
@@ -1484,6 +1488,16 @@ export function registerIpc(
     async (_event, workspacePath) => {
       return await services.workspaceService.readWorkspaceParameters(
         workspacePath as string,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceEditWorkspaceParameters,
+    async (_event, workspacePath, edits) => {
+      return await services.workspaceService.editWorkspaceParameters(
+        workspacePath as string,
+        edits as { json_path: (string | number)[]; value: unknown }[],
       )
     },
   )

@@ -285,6 +285,10 @@ export interface DesktopApi {
     readWorkspaceParameters(
       workspacePath: string,
     ): Promise<Record<string, unknown> | null>
+    editWorkspaceParameters(
+      workspacePath: string,
+      edits: { json_path: (string | number)[]; value: unknown }[],
+    ): Promise<{ format: 'toml' | 'json'; path: string }>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail?(
       path: string,

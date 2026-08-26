@@ -19,12 +19,9 @@ import {
 } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 import {
+  editWorkspaceParameters,
   locateWorkspaceParametersFile,
-  mergePayloadIntoTomlDocument,
-  mergeTomlSections,
-  writeTextAtomically,
 } from '../workspaceParametersFile'
-import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
@@ -632,26 +629,8 @@ async function materializeParameterSurfaceWrites(
       `Workspace rerun parameter file is invalid: neither home/ecc.toml nor home/parameters.json exists`,
     )
   }
-  const path = await resolvePathWithinWorkspace(
-    workspace,
-    location.path,
-    'workspace configuration',
-  )
-  const raw = await readFile(path, 'utf8')
-
-  if (location.format === 'json') {
-    const document = parseWorkspaceParameterDocument(raw, location.path)
-    for (const write of writes) setWorkspaceParameterValue(document, write)
-    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
-    await writeFile(path, raw.endsWith('\n') ? `${serialized}\n` : serialized, 'utf8')
-    return
-  }
-
-  const document = parseToml(raw) as Record<string, unknown>
-  const parameters = mergeTomlSections(document, workspace)
-  for (const write of writes) setWorkspaceParameterValue(parameters, write)
-  const merged = mergePayloadIntoTomlDocument(document, parameters, workspace)
-  await writeTextAtomically(path, stringifyToml(merged))
+  await resolvePathWithinWorkspace(workspace, location.path, 'workspace configuration')
+  await editWorkspaceParameters(workspace, writes)
 }
 
 function parseWorkspaceParameterDocument(
