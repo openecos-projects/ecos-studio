@@ -135,7 +135,7 @@ export async function readWorkspaceParameters(
   return parseWorkspaceParametersText(text, location.format, root)
 }
 
-async function writeTextAtomically(path: string, content: string): Promise<void> {
+export async function writeTextAtomically(path: string, content: string): Promise<void> {
   const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`
   try {
     await writeFile(temporaryPath, content, 'utf8')

@@ -512,3 +512,69 @@ describe('prepareWorkspaceRerun', () => {
     await expect(prepareWorkspaceRerun(contract)).rejects.toThrow('outside')
   })
 })
+
+describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
+  it('applies parameter writes to home/ecc.toml in flat-key form', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    await writeFile(
+      join(source, 'home', 'ecc.toml'),
+      [
+        '[design]',
+        'name = "gcd"',
+        '',
+        '[params]',
+        'design = "gcd"',
+        'target_density = 0.45',
+        '',
+      ].join('\n'),
+    )
+    const contract = contractFor(source, flow, artifact)
+    contract.writes = [
+      {
+        file: 'home/ecc.toml',
+        json_path: ['target_density'],
+        knob_id: 'place.target_density',
+        surface: 'parameters',
+        value: 0.55,
+      },
+    ]
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+
+    const written = await readFile(`${contract.target_workspace}/home/ecc.toml`, 'utf8')
+    expect(written).toContain('target_density = 0.55')
+    expect(written).not.toContain('0.45')
+  })
+
+  it('follows disk reality when the contract file says parameters.json but ecc.toml exists', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    await writeFile(
+      join(source, 'home', 'ecc.toml'),
+      ['[params]', 'target_density = 0.45', ''].join('\n'),
+    )
+    const contract = contractFor(source, flow, artifact)
+    contract.writes = [
+      {
+        file: 'home/parameters.json',
+        json_path: ['target_density'],
+        knob_id: 'place.target_density',
+        surface: 'parameters',
+        value: 0.55,
+      },
+    ]
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+
+    const written = await readFile(`${contract.target_workspace}/home/ecc.toml`, 'utf8')
+    expect(written).toContain('target_density = 0.55')
+    await expect(
+      readFile(`${contract.target_workspace}/home/parameters.json`, 'utf8'),
+    ).rejects.toThrow(/ENOENT/)
+  })
+})

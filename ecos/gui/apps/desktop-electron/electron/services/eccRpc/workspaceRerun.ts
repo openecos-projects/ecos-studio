@@ -18,6 +18,13 @@ import {
   type DesktopAgentWorkspaceRerunContract,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
+import {
+  locateWorkspaceParametersFile,
+  mergePayloadIntoTomlDocument,
+  mergeTomlSections,
+  writeTextAtomically,
+} from '../workspaceParametersFile'
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
@@ -464,8 +471,11 @@ function hasValidParameterWrites(
       writeKnobs.has(write.knob_id) ||
       writePaths.has(pathKey) ||
       !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
-      (write.surface === 'parameters' && write.file !== 'home/parameters.json') ||
-      (write.surface === 'step_config' && write.file === 'home/parameters.json') ||
+      (write.surface === 'parameters' &&
+        write.file !== 'home/ecc.toml' &&
+        write.file !== 'home/parameters.json') ||
+      (write.surface === 'step_config' &&
+        (write.file === 'home/ecc.toml' || write.file === 'home/parameters.json')) ||
       !hasValidJsonPath(write.json_path) ||
       !isValidParameterValue(write.value) ||
       !writeValueMatchesPatch(write, patchItem)
@@ -587,6 +597,10 @@ async function materializeWorkspaceRerunParameterWrites(
     writesByFile.set(write.file, fileWrites)
   }
   for (const [file, fileWrites] of writesByFile) {
+    if (file === 'home/ecc.toml' || file === 'home/parameters.json') {
+      await materializeParameterSurfaceWrites(workspace, fileWrites)
+      continue
+    }
     const path = await resolvePathWithinWorkspace(
       workspace,
       join(workspace, file),
@@ -598,6 +612,46 @@ async function materializeWorkspaceRerunParameterWrites(
     const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
     await writeFile(path, raw.endsWith('\n') ? `${serialized}\n` : serialized, 'utf8')
   }
+}
+
+/**
+ * Apply `surface: 'parameters'` writes to the workspace configuration that
+ * actually exists on disk: `home/ecc.toml` when present, legacy
+ * `home/parameters.json` otherwise. The contract's `file` field names the
+ * format the Agent saw; disk reality wins when the two disagree, and the
+ * `json_path` keys are interpreted in the on-disk file's vocabulary
+ * (display keys for JSON, flat snake_case for TOML).
+ */
+async function materializeParameterSurfaceWrites(
+  workspace: string,
+  writes: DesktopAgentWorkspaceParameterWrite[],
+): Promise<void> {
+  const location = await locateWorkspaceParametersFile(workspace)
+  if (!location) {
+    throw new Error(
+      `Workspace rerun parameter file is invalid: neither home/ecc.toml nor home/parameters.json exists`,
+    )
+  }
+  const path = await resolvePathWithinWorkspace(
+    workspace,
+    location.path,
+    'workspace configuration',
+  )
+  const raw = await readFile(path, 'utf8')
+
+  if (location.format === 'json') {
+    const document = parseWorkspaceParameterDocument(raw, location.path)
+    for (const write of writes) setWorkspaceParameterValue(document, write)
+    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
+    await writeFile(path, raw.endsWith('\n') ? `${serialized}\n` : serialized, 'utf8')
+    return
+  }
+
+  const document = parseToml(raw) as Record<string, unknown>
+  const parameters = mergeTomlSections(document, workspace)
+  for (const write of writes) setWorkspaceParameterValue(parameters, write)
+  const merged = mergePayloadIntoTomlDocument(document, parameters, workspace)
+  await writeTextAtomically(path, stringifyToml(merged))
 }
 
 function parseWorkspaceParameterDocument(
