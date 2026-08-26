@@ -1,4 +1,8 @@
-import { ensureProjectQorBaseline, type ResourceInfo } from '@ecos-studio/shared'
+import {
+  ensureProjectQorBaseline,
+  type PdkRequirement,
+  type ResourceInfo,
+} from '@ecos-studio/shared'
 import type { Project } from '@/types'
 import {
   buildProjectQorTrendSummary,
@@ -62,6 +66,7 @@ export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlow
 export interface ProjectManifestBaseDesign {
   pdk?: string
   pdk_root?: string
+  pdk_requirement?: PdkRequirement
   top_module?: string
   clock?: string
   rtl_list?: string[]
@@ -384,6 +389,7 @@ export interface ProjectWorkspaceRegistrationInput {
   config?: {
     pdk?: string
     pdk_root?: string
+    pdk_requirement?: PdkRequirement
     rtl_list?: string[]
     origin_verilog?: string
     origin_def?: string
@@ -2134,6 +2140,10 @@ function mergeBaseDesignConfig(
 
   if (pdk) next.pdk = pdk
   if (pdkRoot) next.pdk_root = pdkRoot
+  if (config.pdk_requirement) {
+    next.pdk_requirement = config.pdk_requirement
+    delete next.pdk_root
+  }
   if (topModule) next.top_module = topModule
   if (clock) next.clock = clock
   if (originVerilog) next.origin_verilog = originVerilog

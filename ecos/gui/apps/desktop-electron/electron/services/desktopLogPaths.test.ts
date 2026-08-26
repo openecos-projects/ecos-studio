@@ -1,6 +1,13 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 const { electronApp } = vi.hoisted(() => ({
@@ -13,20 +20,24 @@ vi.mock('electron', () => ({
   app: electronApp,
 }))
 
-import {
-  getElectronLatestMainLogFile,
-  getElectronMainLogFile,
-  getLogSessionId,
-  pruneOldLogSessions,
-} from './desktopLogPaths'
+import { prepareDesktopLogs } from './desktopLogPaths'
 
 describe('desktopLogPaths', () => {
-  it('keeps stable latest log paths and per-launch session log paths', () => {
-    expect(getLogSessionId()).toMatch(/^\d{8}-\d{6}-\d+$/)
-    expect(getElectronLatestMainLogFile()).toBe('/tmp/ecos-user-data/logs/main.log')
-    expect(getElectronMainLogFile()).toMatch(
-      /^\/tmp\/ecos-user-data\/logs\/sessions\/\d{8}-\d{6}-\d+\/main\.log$/,
-    )
+  it('returns one per-launch main log and removes the legacy latest file', () => {
+    const userData = mkdtempSync(join(tmpdir(), 'ecos-log-session-'))
+    const legacyMainLog = join(userData, 'logs', 'main.log')
+    mkdirSync(join(userData, 'logs'), { recursive: true })
+    writeFileSync(legacyMainLog, 'duplicate')
+    electronApp.getPath.mockReturnValue(userData)
+
+    const paths = prepareDesktopLogs()
+
+    expect(paths.mainLogFile).toBe(join(paths.sessionDirectory, 'main.log'))
+    expect(dirname(paths.mainLogFile)).toBe(paths.sessionDirectory)
+    expect(basename(paths.sessionDirectory)).toMatch(/^\d{8}-\d{6}-\d+$/)
+    expect(existsSync(legacyMainLog)).toBe(false)
+    rmSync(userData, { force: true, recursive: true })
+    electronApp.getPath.mockReturnValue('/tmp/ecos-user-data')
   })
 
   it('keeps the newest session directories', () => {
@@ -40,12 +51,12 @@ describe('desktopLogPaths', () => {
       writeFileSync(join(sessions, name, 'main.log'), 'x')
     }
 
-    pruneOldLogSessions()
+    prepareDesktopLogs()
 
     const remaining = readdirSync(sessions).sort()
     expect(remaining).toHaveLength(20)
-    expect(remaining[0]).toBe('20260101-000003-3')
-    expect(remaining.at(-1)).toBe('20260101-000022-22')
+    expect(remaining[0]).toBe('20260101-000004-4')
+    expect(remaining).toContain('20260101-000022-22')
     rmSync(userData, { force: true, recursive: true })
     electronApp.getPath.mockReturnValue('/tmp/ecos-user-data')
   })

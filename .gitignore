@@ -16,7 +16,7 @@ result
 .trellis/
 .humanize*
 .humanize/
-docs/
+/docs/
 .superpowers/
 .worktrees/
 

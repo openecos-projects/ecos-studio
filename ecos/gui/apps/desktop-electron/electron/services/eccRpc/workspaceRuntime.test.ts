@@ -251,6 +251,58 @@ describe('EccWorkspaceRuntime', () => {
     ])
   })
 
+  it('invalidates the cached flow snapshot after refreshing workspace config', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        directory: '/work/demo',
+        flow: {
+          steps: [
+            { name: 'Synthesis', runtime: '0:0:10', state: 'Success', tool: 'yosys' },
+            { name: 'Floorplan', runtime: '0:0:05', state: 'Incomplete', tool: 'ecc' },
+          ],
+        },
+        home: {},
+        lastEventId: 'workspace-1:failed',
+        operations: [],
+        parameters: {},
+      },
+      { directory: '/work/demo', refreshed: true },
+      {
+        directory: '/work/demo',
+        flow: {
+          steps: [
+            { name: 'Synthesis', runtime: '0:0:10', state: 'Success', tool: 'yosys' },
+            { name: 'Floorplan', runtime: '0:0:05', state: 'Incomplete', tool: 'ecc' },
+            { name: 'fixFanout', runtime: '', state: 'Unstart', tool: 'ecc' },
+          ],
+        },
+        home: {},
+        lastEventId: 'workspace-1:refreshed',
+        operations: [],
+        parameters: {},
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    await service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
+
+    await service.refreshConfig({ workspaceHandle: workspace.workspaceHandle })
+    const snapshot = await service.workspaceSnapshot({
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    expect(snapshot.flow.steps.map((step) => step.name)).toEqual([
+      'Synthesis',
+      'Floorplan',
+      'fixFanout',
+    ])
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.snapshot'),
+    ).toHaveLength(2)
+  })
+
   it('maps protocol notifications to the matching GUI workspace handle', async () => {
     const { client, events, service, sidecarNotification } = createService()
     client.responses.push(
@@ -1204,6 +1256,7 @@ describe('EccWorkspaceRuntime', () => {
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
+      { recovered: [] },
       { rerun: false },
     )
 
@@ -1215,6 +1268,13 @@ describe('EccWorkspaceRuntime', () => {
       type: 'runtime.exited',
     })
 
+    await vi.waitFor(() => {
+      expect(client.calls).toContainEqual({
+        method: 'workspace.recover_interrupted',
+        params: { workspaceId: 'workspace-2' },
+      })
+    })
+
     await expect(
       service.runFlow({
         rerun: false,
@@ -1222,10 +1282,11 @@ describe('EccWorkspaceRuntime', () => {
       }),
     ).resolves.toEqual({ rerun: false })
 
-    expect(sidecar.startCount).toBe(2)
+    expect(sidecar.startCount).toBe(3)
     expect(client.calls.slice(2)).toEqual([
       { method: 'rpc.hello', params: { version: 1 } },
       { method: 'workspace.open', params: { directory: '/work/demo' } },
+      { method: 'workspace.recover_interrupted', params: { workspaceId: 'workspace-2' } },
       {
         method: 'flow.run',
         options: { timeoutMs: 0 },
@@ -1234,6 +1295,259 @@ describe('EccWorkspaceRuntime', () => {
           workspaceId: 'workspace-2',
         },
       },
+    ])
+  })
+
+  it('recovers a persisted interruption when the start notification was lost', async () => {
+    const { client, service, sidecarEvent } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-2' },
+      { recovered: [] },
+    )
+    await service.openWorkspace({ directory: '/work/demo' })
+
+    sidecarEvent({
+      code: 1,
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+    })
+
+    await vi.waitFor(() => {
+      expect(client.calls).toContainEqual({
+        method: 'workspace.recover_interrupted',
+        params: { workspaceId: 'workspace-2' },
+      })
+    })
+    expect(client.calls.at(-1)?.params).not.toHaveProperty('operationId')
+  })
+
+  it('retries crash recovery on the next workspace snapshot after a transient failure', async () => {
+    const { client, service, sidecarEvent } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-2' },
+      new Error('temporary recovery failure'),
+      {
+        recovered: [
+          {
+            logFile: '/work/demo/place_dreamplace/log/place.log',
+            operationId: 'operation-place',
+            step: 'place',
+            tool: 'dreamplace',
+          },
+        ],
+      },
+      {
+        directory: '/work/demo',
+        flow: { steps: [{ name: 'place', state: 'Incomplete' }] },
+        home: {},
+        lastEventId: 'workspace-2:2',
+        operations: [],
+        parameters: {},
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    sidecarEvent({
+      code: 1,
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+    })
+    await vi.waitFor(() => {
+      expect(
+        client.calls.filter((call) => call.method === 'workspace.recover_interrupted'),
+      ).toHaveLength(1)
+    })
+
+    await expect(
+      service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle }),
+    ).resolves.toMatchObject({
+      flow: { steps: [expect.objectContaining({ state: 'Incomplete' })] },
+    })
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.recover_interrupted'),
+    ).toHaveLength(2)
+  })
+
+  it('restarts once and recovers only the interrupted protocol operation', async () => {
+    const { client, events, service, sidecar, sidecarEvent, sidecarNotification } =
+      createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        operationId: 'operation-place',
+        state: 'running',
+      },
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-2' },
+      {
+        recovered: [
+          {
+            logFile: '/work/demo/place_dreamplace/log/place.log',
+            operationId: 'operation-place',
+            step: 'place',
+            tool: 'dreamplace',
+          },
+        ],
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    await service.startStepOperation({
+      idempotencyKey: 'place-1',
+      step: 'place',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'runtime-1:operation-place:1',
+        kind: 'step',
+        operationId: 'operation-place',
+        origin: 'gui',
+        payload: {},
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.started',
+        workspaceId: 'workspace-1',
+      },
+    })
+    const startsBeforeCrash = sidecar.startCount
+
+    sidecarEvent({
+      code: 1,
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+    })
+
+    await vi.waitFor(() => {
+      expect(client.calls).toContainEqual({
+        method: 'workspace.recover_interrupted',
+        params: {
+          operationId: 'operation-place',
+          workspaceId: 'workspace-2',
+        },
+      })
+    })
+    expect(sidecar.startCount).toBe(startsBeforeCrash + 1)
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        interruptedOperationId: 'operation-place',
+        type: 'runtime.exited',
+      }),
+    )
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        code: 'interrupted',
+        logFile: '/work/demo/place_dreamplace/log/place.log',
+        operationId: 'operation-place',
+        step: 'place',
+        type: 'operation.failed',
+      }),
+    )
+
+    sidecarEvent({
+      code: 1,
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+    })
+    await waitForQueuedOperation()
+    expect(sidecar.startCount).toBe(startsBeforeCrash + 1)
+  })
+
+  it('replays previous-run recovery after the workspace snapshot is requested', async () => {
+    const { client, events, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        recovered: [
+          {
+            logFile: '/work/demo/place_dreamplace/log/place.log',
+            operationId: 'operation-previous',
+            step: 'place',
+            tool: 'dreamplace',
+          },
+        ],
+      },
+      {
+        directory: '/work/demo',
+        flow: { steps: [] },
+        home: {},
+        lastEventId: 'workspace-1:0',
+        operations: [],
+        parameters: {},
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    await service.recoverInterrupted(workspace.workspaceHandle)
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ operationId: 'operation-previous' }),
+    )
+    await service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        message: 'Previous place run was interrupted.',
+        operationId: 'operation-previous',
+        type: 'operation.failed',
+      }),
+    )
+  })
+
+  it('invalidates a cached snapshot after recovering an interrupted step', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        directory: '/work/demo',
+        flow: { steps: [{ name: 'place', state: 'Ongoing' }] },
+        home: {},
+        lastEventId: 'workspace-1:1',
+        operations: [],
+        parameters: {},
+      },
+      {
+        recovered: [
+          {
+            logFile: '/work/demo/place_dreamplace/log/place.log',
+            operationId: 'operation-place',
+            step: 'place',
+            tool: 'dreamplace',
+          },
+        ],
+      },
+      {
+        directory: '/work/demo',
+        flow: { steps: [{ name: 'place', state: 'Incomplete' }] },
+        home: {},
+        lastEventId: 'workspace-1:2',
+        operations: [],
+        parameters: {},
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    await service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
+
+    await service.recoverInterrupted(workspace.workspaceHandle, 'operation-place')
+    const snapshot = await service.workspaceSnapshot({
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    expect(snapshot.flow.steps).toEqual([
+      expect.objectContaining({ name: 'place', state: 'Incomplete' }),
     ])
   })
 

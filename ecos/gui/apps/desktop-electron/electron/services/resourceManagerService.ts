@@ -32,6 +32,7 @@ import {
   ResourceInstallCoordinator,
   type ResourceInstallSubscriber,
 } from './resourceInstallCoordinator'
+import { PdkInventoryService } from './pdkInventoryService'
 import { requiredToolHealthMarkers, type ToolHealthMarkerKind } from './toolHealthPolicy'
 import {
   validateMpcSpec,
@@ -42,6 +43,7 @@ import {
   type MpcSpecReadResult,
   type ResourceOperationResult,
   type ResourceStatus,
+  type PdkInstallationSnapshot,
 } from '@ecos-studio/shared'
 
 const DEFAULT_REGISTRY_URL = 'https://emin017.github.io/ecos-registry/tool-registry.json'
@@ -369,6 +371,7 @@ export class ResourceManagerService {
   private readonly manifestWriter: ManifestWriter
   private readonly mpcsDir: string
   private readonly pdksDir: string
+  private readonly pdkInventoryService: PdkInventoryService
   private readonly registryUrl: string
   private readonly resourcesDir: string
   private readonly sha256Verifier: Sha256Verifier
@@ -392,6 +395,12 @@ export class ResourceManagerService {
     this.mpcsDir = options.mpcsDir ?? join(xdgDataHome(), 'ecos-studio', 'mpcs')
     this.cacheDir = options.cacheDir ?? join(xdgCacheHome(), 'ecos-studio')
     this.manifestPath = join(this.resourcesDir, 'manifest.json')
+    this.pdkInventoryService = new PdkInventoryService({
+      inventoryPath: join(this.resourcesDir, 'pdk-inventory.json'),
+      legacyManifestPath: this.manifestPath,
+      managedRoot: this.pdksDir,
+      legacyCleaner: () => this.removeLegacyPdkManifestData(),
+    })
     this.registryUrl =
       options.registryUrl ?? process.env.ECOS_REGISTRY_URL ?? DEFAULT_REGISTRY_URL
     this.commandRunner = options.commandRunner ?? runCommand
@@ -401,14 +410,17 @@ export class ResourceManagerService {
     this.manifestWriter = options.manifestWriter ?? writeFile
   }
 
+  getPdkInventoryService(): PdkInventoryService {
+    return this.pdkInventoryService
+  }
+
   async listResources(): Promise<ResourceList> {
     const state = await this.fetchRegistry()
-    const manifest = await this.readManifest()
+    const pdkInstallations = await this.pdkInventoryService.listInstallations()
+    const manifest = await this.readManifestForListing()
     const updateChecks = await this.readUpdateCheckCache()
     const installedTools = getInstalledTools(manifest)
-    const installedPdks = getInstalledPdks(manifest)
     const toolHealth = await checkInstalledToolHealth(installedTools)
-    const installedPdkIds = new Set(installedPdks.map(({ resourceId }) => resourceId))
     const installedMpcs = getInstalledMpcs(manifest)
     const resources: ResourceInfo[] = []
     const registry = state.registry
@@ -422,18 +434,14 @@ export class ResourceManagerService {
           manifest,
           updateChecks,
           toolHealth,
+          pdkInstallations,
         ),
       )
     }
     for (const pdk of registry?.pdks ?? []) {
-      if (
-        !installedPdks.some(
-          ({ entry }) =>
-            entry.pdk_id === pdk.id && entry.managed && entry.health === 'ok',
-        )
-      ) {
-        resources.push(this.registryPdkToResource(pdk, registry, manifest, toolHealth))
-      }
+      resources.push(
+        this.registryPdkToResource(pdk, registry, manifest, toolHealth, pdkInstallations),
+      )
     }
     for (const mpc of state.registry?.mpcs ?? []) {
       const local = installedMpcs[mpc.id]
@@ -445,20 +453,6 @@ export class ResourceManagerService {
           this.installedToolToResource(name, entry, toolHealth[`tool:${name}`]),
         )
       }
-    }
-    for (const { resourceId, entry } of installedPdks) {
-      resources.push(
-        this.pdkEntryToResource(
-          resourceId,
-          entry,
-          this.findRegistryPdk(state.registry, entry.pdk_id),
-          installedPdkIds,
-          registry,
-          manifest,
-          updateChecks,
-          toolHealth,
-        ),
-      )
     }
     for (const [id, entry] of Object.entries(installedMpcs)) {
       resources.push(
@@ -473,18 +467,17 @@ export class ResourceManagerService {
   }
 
   async getResource(resourceId: string): Promise<ResourceInfo> {
-    const resources = (await this.listResources()).resources
-    if (isPdkRegistryId(resourceId)) {
-      const pdkId = resourceNameFromId(resourceId, 'pdk')
-      const active = resources.find(
-        (item) =>
-          item.type === 'pdk' &&
-          item.id !== resourceId &&
-          item.name === pdkId &&
-          item.active,
-      )
-      if (active) return active
+    if (resourceId.startsWith('pdk:')) {
+      const installations = await this.pdkInventoryService.listInstallations()
+      const pdkId = pdkIdFromResourceId(resourceId)
+      const installation =
+        installations.find((candidate) => candidate.id === resourceId) ??
+        (isPdkRegistryId(resourceId)
+          ? installations.find((candidate) => candidate.familyId === pdkId)
+          : undefined)
+      if (installation) return pdkSnapshotToResource(installation)
     }
+    const resources = (await this.listResources()).resources
     const resource = resources.find((item) => item.id === resourceId)
     if (!resource) {
       throw new Error(`Resource '${resourceId}' not found`)
@@ -659,24 +652,6 @@ export class ResourceManagerService {
       env.ECOS_FE_SOC_ROOT = activeSocRoot
     }
 
-    for (const entry of Object.values(manifest.installed)) {
-      if (!isPdkEntry(entry) || !entry.active || entry.health !== 'ok') continue
-      if (!(await isExistingDirectory(entry.canonical_path))) {
-        electronLogger.debug(
-          '[resources] Skipping runtime PDK %s: canonical path is missing at %s',
-          entry.id,
-          entry.canonical_path,
-        )
-        continue
-      }
-
-      const pdkId = (entry.pdk_id || entry.id).toUpperCase().replace(/[^A-Z0-9]/g, '_')
-      env[`CHIPCOMPILER_${pdkId}_PDK_ROOT`] = entry.canonical_path
-      if (pdkId === 'ICS55') {
-        env.ICS55_PDK_ROOT = entry.canonical_path
-      }
-    }
-
     return env
   }
 
@@ -825,6 +800,7 @@ export class ResourceManagerService {
       throwIfAborted(context.signal)
       const manifest = await this.readManifest()
       const toolHealth = await checkInstalledToolHealth(getInstalledTools(manifest))
+      const pdkInstallations = await this.pdkInventoryService.listInstallations()
       const dependencies = this.registryRequiresForResource(
         state.registry,
         resourceId,
@@ -836,6 +812,7 @@ export class ResourceManagerService {
           manifest,
           dependencyId,
           toolHealth,
+          pdkInstallations,
         )
       })
 
@@ -855,19 +832,22 @@ export class ResourceManagerService {
         const latestToolHealth = await checkInstalledToolHealth(
           getInstalledTools(latestManifest),
         )
+        const latestPdkInstallations = await this.pdkInventoryService.listInstallations()
         if (
           resourceMatchesRegistryLock(
             state.registry,
             latestManifest,
             dependencyId,
             latestToolHealth,
+            latestPdkInstallations,
           )
         ) {
           continue
         }
         const hasInstalledDependency = dependencyId.startsWith('pdk:')
-          ? getInstalledPdks(latestManifest).some(
-              ({ entry }) => entry.pdk_id === pdkIdFromResourceId(dependencyId),
+          ? latestPdkInstallations.some(
+              (installation) =>
+                installation.familyId === pdkIdFromResourceId(dependencyId),
             )
           : Boolean(latestManifest.installed[dependencyId])
         const dependencyAction: ResourceAction = hasInstalledDependency
@@ -910,6 +890,7 @@ export class ResourceManagerService {
           action,
           listener,
           context,
+          resourceId,
         )
       }
       if (resourceId.startsWith('mpc:')) {
@@ -971,7 +952,7 @@ export class ResourceManagerService {
   async uninstallResource(resourceId: string): Promise<ResourceOperationResult> {
     if (!resourceId.startsWith('tool:')) {
       if (resourceId.startsWith('pdk:')) {
-        await this.removeManagedPdk(resourceId)
+        await this.pdkInventoryService.removeInstallation(resourceId)
         return { status: 'uninstalled', resource_id: resourceId }
       }
       if (resourceId.startsWith('mpc:')) {
@@ -1002,42 +983,15 @@ export class ResourceManagerService {
     }
   }
 
-  async recordPdkReference(projectPath: string, pdkRoot: string): Promise<void> {
-    if (!projectPath || !pdkRoot) return
-    const canonicalRoot = await realpath(resolve(pdkRoot)).catch(() => resolve(pdkRoot))
-    await this.mutateManifest((manifest) => {
-      const resourceId = Object.entries(manifest.installed).find(
-        ([, entry]) => isPdkEntry(entry) && entry.canonical_path === canonicalRoot,
-      )?.[0]
-      if (!resourceId) return
-      manifest.pdk_references = manifest.pdk_references.filter(
-        (reference) => reference.project_path !== projectPath,
-      )
-      manifest.pdk_references.push({
-        project_path: projectPath,
-        pdk_root: canonicalRoot,
-        resource_id: resourceId,
-      })
-    })
-  }
-
   async validatePdkRootForWorkspace(pdkRoot: string): Promise<void> {
     if (!pdkRoot.trim()) throw new Error('PDK path is missing')
     const canonicalRoot = await realpath(resolve(pdkRoot))
-    let inventoryPdkId: string | null = null
-    let inventoryHealth: string | null = null
-    await this.mutateManifest(async (manifest) => {
-      const inventoryEntry = Object.values(manifest.installed).find(
-        (entry) => isPdkEntry(entry) && entry.canonical_path === canonicalRoot,
-      )
-      if (!isPdkEntry(inventoryEntry)) return
-      inventoryPdkId = inventoryEntry.pdk_id
-      inventoryHealth = await validatePdkEntry(inventoryEntry)
-      inventoryEntry.health = inventoryHealth
-    })
-    if (inventoryPdkId !== null) {
-      if (inventoryHealth !== 'ok') {
-        throw new Error(`PDK validation failed for ${inventoryPdkId}`)
+    const installation = (await this.pdkInventoryService.listInstallations()).find(
+      (candidate) => candidate.root === canonicalRoot,
+    )
+    if (installation) {
+      if (installation.readiness === 'missing' || installation.readiness === 'invalid') {
+        throw new Error(`PDK validation failed for ${installation.familyId}`)
       }
       return
     }
@@ -1048,102 +1002,33 @@ export class ResourceManagerService {
     }
   }
 
-  async activatePdk(resourceId: string): Promise<ResourceOperationResult> {
-    await this.mutateManifest((manifest) => {
-      const entry = manifest.installed[resourceId]
-      if (!isPdkEntry(entry)) {
-        throw new Error(`PDK '${resourceId}' not found in inventory`)
-      }
-      for (const [id, candidate] of Object.entries(manifest.installed)) {
-        if (isPdkEntry(candidate) && candidate.pdk_id === entry.pdk_id) {
-          candidate.active = id === resourceId
-        }
-      }
-    })
-    return { status: 'activated', resource_id: resourceId }
-  }
-
   async validatePdk(
     resourceId: string,
   ): Promise<{ resource_id: string; health: { status: string } }> {
-    let health = 'ok'
-    await this.mutateManifest(async (manifest) => {
-      const entry = manifest.installed[resourceId]
-      if (!isPdkEntry(entry)) {
-        throw new Error(`PDK '${resourceId}' not found in inventory`)
-      }
-      health = await validatePdkEntry(entry)
-      entry.health = health
-    })
+    const installation = (await this.pdkInventoryService.listInstallations()).find(
+      (candidate) => candidate.id === resourceId,
+    )
+    if (!installation) throw new Error(`PDK '${resourceId}' not found in inventory`)
+    const health =
+      installation.readiness === 'ready' || installation.readiness === 'unverified'
+        ? 'ok'
+        : installation.readiness
     return { resource_id: resourceId, health: { status: health } }
   }
 
   async removePdkReference(resourceId: string): Promise<ResourceOperationResult> {
-    await this.mutateManifest((manifest) => {
-      const entry = manifest.installed[resourceId]
-      if (!entry) {
-        throw new Error(`PDK '${resourceId}' not found`)
-      }
-      if (isPdkEntry(entry) && entry.managed) {
-        throw new Error(
-          `PDK '${resourceId}' is managed and cannot remove reference; use uninstall`,
-        )
-      }
-      delete manifest.installed[resourceId]
-    })
+    await this.pdkInventoryService.removeInstallation(resourceId)
     return { status: 'removed', resource_id: resourceId }
   }
 
   async importPdkPath(path: string): Promise<ResourceInfo> {
     const scanned = await scanPdkDirectory(path)
-    const resourceId = localPdkResourceId(scanned.pdkId, scanned.canonicalPath)
-    const scannedHealth = await validateScannedPdk(scanned)
-    let entry!: PdkInventoryEntry
-    await this.mutateManifest((manifest) => {
-      const existing = manifest.installed[resourceId]
-      if (isPdkEntry(existing)) {
-        existing.id = scanned.pdkId
-        existing.name = scanned.name
-        existing.pdk_id = scanned.pdkId
-        existing.canonical_path = scanned.canonicalPath
-        existing.path = scanned.canonicalPath
-        existing.detected_files = [
-          ...scanned.detectedFiles.directories,
-          ...scanned.detectedFiles.files,
-        ]
-        existing.detected_file_groups = scanned.detectedFiles
-        existing.health = scannedHealth
-        entry = existing
-        return
-      }
-      const hasActiveSibling = Object.values(manifest.installed).some(
-        (candidate) =>
-          isPdkEntry(candidate) && candidate.pdk_id === scanned.pdkId && candidate.active,
-      )
-      entry = {
-        type: 'pdk',
-        id: scanned.pdkId,
-        name: scanned.name,
-        pdk_id: scanned.pdkId,
-        version: '',
-        sha256: '',
-        source: 'local',
-        source_url: '',
-        canonical_path: scanned.canonicalPath,
-        path: scanned.canonicalPath,
-        detected_files: [
-          ...scanned.detectedFiles.directories,
-          ...scanned.detectedFiles.files,
-        ],
-        detected_file_groups: scanned.detectedFiles,
-        imported_at: utcNowIso(),
-        active: !hasActiveSibling,
-        managed: false,
-        health: scannedHealth,
-      }
-      manifest.installed[resourceId] = entry
+    const installation = await this.pdkInventoryService.importInstallation({
+      familyId: scanned.pdkId,
+      displayName: scanned.name,
+      root: scanned.canonicalPath,
     })
-    return this.pdkEntryToResource(resourceId, entry)
+    return pdkSnapshotToResource(installation, scanned.detectedFiles)
   }
 
   async importLocalPath(resourceId: string, path: string): Promise<ResourceInfo> {
@@ -1328,46 +1213,12 @@ export class ResourceManagerService {
       )
     }
 
-    const instanceId = localPdkResourceId(pdkId, scanned.canonicalPath)
-    const scannedHealth = await validateScannedPdk(scanned)
-    let entry!: PdkInventoryEntry
-    await this.mutateManifest((manifest) => {
-      const previous = manifest.installed[instanceId]
-      const hasActiveSibling = Object.entries(manifest.installed).some(
-        ([id, candidate]) =>
-          id !== instanceId &&
-          isPdkEntry(candidate) &&
-          candidate.pdk_id === pdkId &&
-          candidate.active,
-      )
-      entry = {
-        type: 'pdk',
-        id: pdkId,
-        name: scanned.name,
-        pdk_id: pdkId,
-        version: '',
-        sha256: '',
-        source: 'local',
-        source_url: '',
-        canonical_path: scanned.canonicalPath,
-        path: scanned.canonicalPath,
-        detected_files: [
-          ...scanned.detectedFiles.directories,
-          ...scanned.detectedFiles.files,
-        ],
-        detected_file_groups: scanned.detectedFiles,
-        imported_at: utcNowIso(),
-        active: isPdkEntry(previous) ? previous.active : !hasActiveSibling,
-        managed: false,
-        health: scannedHealth,
-      }
-      manifest.installed[instanceId] = entry
+    const installation = await this.pdkInventoryService.importInstallation({
+      familyId: pdkId,
+      displayName: scanned.name,
+      root: scanned.canonicalPath,
     })
-    return this.pdkEntryToResource(
-      instanceId,
-      entry,
-      this.findRegistryPdk(this.registryMemory, pdkId),
-    )
+    return pdkSnapshotToResource(installation, scanned.detectedFiles)
   }
 
   private async installTool(
@@ -1572,6 +1423,7 @@ export class ResourceManagerService {
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
     context: ResourceInstallSubscriber<ResourceJob>,
+    installationId?: string,
   ): Promise<ResourceOperationResult> {
     const resourceId = `pdk:${pdkId}`
     const signal = context.signal
@@ -1593,13 +1445,22 @@ export class ResourceManagerService {
       const version = versionEntry.version
       const displayName = pdk.display_name || pdkId
       const destination = join(this.pdksDir, pdkId, version)
-      const targetInstanceId = managedPdkResourceId(pdkId, version)
-      const target = (await this.readManifest()).installed[targetInstanceId]
+      const installations = await this.pdkInventoryService.listInstallations()
+      const target =
+        installations.find((installation) => installation.id === installationId) ??
+        installations.find(
+          (installation) =>
+            installation.familyId === pdkId &&
+            installation.version === version &&
+            installation.ownership === 'managed',
+        )
+      const targetInstanceId = target?.id ?? managedPdkResourceId(pdkId, version)
       if (
         action === 'update' &&
-        isPdkEntry(target) &&
-        target.health === 'ok' &&
-        (await isExistingDirectory(target.canonical_path))
+        target?.version === version &&
+        target?.readiness === 'ready' &&
+        target.registrySha256 === resolvedAsset.sha256.toLowerCase() &&
+        (await isExistingDirectory(target.root))
       ) {
         this.publish(listener, {
           resource_id: resourceId,
@@ -1749,54 +1610,13 @@ export class ResourceManagerService {
         throw new Error(`PDK validation failed for ${pdkId} v${version}`)
       }
       await replaceDirectoryWithRollback(tempExtract, destination, async () => {
-        await this.mutateManifest((manifest) => {
-          const instanceId = targetInstanceId
-          const previous = manifest.installed[instanceId]
-          const hasOtherActivePdk = Object.entries(manifest.installed).some(
-            ([id, entry]) => {
-              return (
-                id !== instanceId &&
-                isPdkEntry(entry) &&
-                entry.pdk_id === pdkId &&
-                entry.active
-              )
-            },
-          )
-          const active =
-            action === 'update' ||
-            (isPdkEntry(previous) ? previous.active : !hasOtherActivePdk)
-          if (active) {
-            for (const [id, entry] of Object.entries(manifest.installed)) {
-              if (id !== instanceId && isPdkEntry(entry) && entry.pdk_id === pdkId) {
-                entry.active = false
-              }
-            }
-          }
-          const manifestEntry: PdkInventoryEntry = {
-            type: 'pdk',
-            id: pdkId,
-            name: scanned.name || displayName,
-            pdk_id: pdkId,
-            version,
-            sha256: resolvedAsset.sha256,
-            source: 'registry',
-            source_url: resolvedAsset.url,
-            canonical_path: destination,
-            path: destination,
-            detected_files: [
-              ...scanned.detectedFiles.directories,
-              ...scanned.detectedFiles.files,
-            ],
-            detected_file_groups: scanned.detectedFiles,
-            imported_at: utcNowIso(),
-            active,
-            managed: true,
-            health: 'ok',
-          }
-          if (resolvedAsset.size && resolvedAsset.size > 0) {
-            manifestEntry.size = resolvedAsset.size
-          }
-          manifest.installed[instanceId] = manifestEntry
+        await this.pdkInventoryService.registerManagedInstallation({
+          id: targetInstanceId,
+          familyId: pdkId,
+          displayName: scanned.name || displayName,
+          root: destination,
+          version,
+          registrySha256: resolvedAsset.sha256,
         })
       })
       this.publish(listener, {
@@ -2356,10 +2176,13 @@ export class ResourceManagerService {
         this.pdksDir,
         this.mpcsDir,
       )
+      let changed = false
       if (manifest.schema_version < 3) {
         await this.migratePdkManifest(manifest)
-        await this.writeManifestFile(manifest)
+        changed = true
       }
+      if (await deduplicatePdkEntries(manifest)) changed = true
+      if (changed) await this.writeManifestFile(manifest)
       return manifest
     } catch (error) {
       if (isFileNotFoundError(error)) return this.emptyManifest()
@@ -2368,6 +2191,14 @@ export class ResourceManagerService {
         { cause: error },
       )
     }
+  }
+
+  private async readManifestForListing(): Promise<ResourceManifest> {
+    let manifest!: ResourceManifest
+    await this.withManifestLock(async () => {
+      manifest = await this.readManifest()
+    })
+    return manifest
   }
 
   private async readRuntimeManifest(): Promise<ResourceManifest> {
@@ -2379,10 +2210,13 @@ export class ResourceManagerService {
         this.pdksDir,
         this.mpcsDir,
       )
+      let changed = false
       if (manifest.schema_version < 3) {
         await this.migratePdkManifest(manifest)
-        await this.writeManifest(manifest)
+        changed = true
       }
+      if (await deduplicatePdkEntries(manifest)) changed = true
+      if (changed) await this.writeManifest(manifest)
       return manifest
     } catch (error) {
       if (!isFileNotFoundError(error)) {
@@ -2402,6 +2236,39 @@ export class ResourceManagerService {
       const manifest = await this.readManifest()
       await mutator(manifest)
       await this.writeManifestFile(manifest)
+    })
+  }
+
+  private async removeLegacyPdkManifestData(): Promise<void> {
+    await this.withManifestLock(async () => {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(await readFile(this.manifestPath, 'utf8'))
+      } catch (error) {
+        if (isFileNotFoundError(error)) return
+        throw error
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid legacy resource manifest')
+      }
+      const manifest = parsed as Record<string, unknown>
+      const installed = { ...readRecord(manifest.installed) }
+      const hasPdk = Object.values(installed).some(
+        (value) => readRecord(value).type === 'pdk',
+      )
+      const hasReferences = Array.isArray(manifest.pdk_references)
+        ? manifest.pdk_references.length > 0
+        : false
+      if (!hasPdk && !hasReferences) return
+      for (const [id, value] of Object.entries(installed)) {
+        if (readRecord(value).type === 'pdk') delete installed[id]
+      }
+      await this.writeManifestJson({
+        ...manifest,
+        schema_version: Math.max(Number(manifest.schema_version) || 1, 3),
+        installed,
+        pdk_references: [],
+      })
     })
   }
 
@@ -2426,10 +2293,14 @@ export class ResourceManagerService {
     manifest.pdks_dir = this.pdksDir
     manifest.mpcs_dir = this.mpcsDir
     manifest.pdk_references ??= []
+    await this.writeManifestJson(manifest)
+  }
+
+  private async writeManifestJson(value: unknown): Promise<void> {
     await mkdir(dirname(this.manifestPath), { recursive: true })
     const tempPath = `${this.manifestPath}.${process.pid}.${randomUUID()}.tmp`
     try {
-      await this.manifestWriter(tempPath, JSON.stringify(manifest, null, 2))
+      await this.manifestWriter(tempPath, JSON.stringify(value, null, 2))
       await rename(tempPath, this.manifestPath)
     } finally {
       await rm(tempPath, { force: true }).catch(() => undefined)
@@ -2461,6 +2332,7 @@ export class ResourceManagerService {
     manifest: ResourceManifest,
     updateChecks: ResourceUpdateCheckCache | null,
     toolHealth: ToolHealthByResourceId,
+    pdkInstallations: readonly PdkInstallationSnapshot[],
   ): ResourceInfo {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
@@ -2478,6 +2350,7 @@ export class ResourceManagerService {
       registry,
       manifest,
       toolHealth,
+      pdkInstallations,
     )
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
@@ -2655,6 +2528,7 @@ export class ResourceManagerService {
     registry: ResourceRegistry | null,
     manifest: ResourceManifest,
     toolHealth: ToolHealthByResourceId = {},
+    pdkInstallations: readonly PdkInstallationSnapshot[] = [],
   ): ResourceInfo {
     const latest = pdk.versions[0]
     const { platform, asset } = latest
@@ -2668,6 +2542,7 @@ export class ResourceManagerService {
       registry,
       manifest,
       toolHealth,
+      pdkInstallations,
     )
     return {
       id: resourceId,
@@ -2774,7 +2649,6 @@ export class ResourceManagerService {
               : 'installed'
     const actions: ResourceAction[] = []
     if (status !== 'installing') {
-      if (!entry.active) actions.push('activate')
       actions.push('validate')
       if (hasUpdate) actions.push('update')
       actions.push(entry.managed ? 'uninstall' : 'remove_reference')
@@ -2790,8 +2664,8 @@ export class ResourceManagerService {
       status,
       installed_version: entry.version || null,
       available_versions: registryPdk?.versions.map((version) => version.version) ?? [],
-      active_version: entry.active ? entry.version || null : null,
-      active: entry.active,
+      active_version: null,
+      active: false,
       path: entry.canonical_path,
       managed_root: entry.managed ? this.pdksDir : null,
       platform,
@@ -3130,11 +3004,20 @@ function dependencyStateFor(
   registry: ResourceRegistry | null,
   manifest: ResourceManifest,
   toolHealth: ToolHealthByResourceId = {},
+  pdkInstallations: readonly PdkInstallationSnapshot[] = [],
 ): { installed: string[]; missing: string[] } {
   const installed: string[] = []
   const missing: string[] = []
   for (const dependencyId of dependencies) {
-    if (resourceMatchesRegistryLock(registry, manifest, dependencyId, toolHealth))
+    if (
+      resourceMatchesRegistryLock(
+        registry,
+        manifest,
+        dependencyId,
+        toolHealth,
+        pdkInstallations,
+      )
+    )
       installed.push(dependencyId)
     else missing.push(dependencyId)
   }
@@ -3146,21 +3029,20 @@ function resourceMatchesRegistryLock(
   manifest: ResourceManifest,
   resourceId: string,
   toolHealth: ToolHealthByResourceId = {},
+  pdkInstallations: readonly PdkInstallationSnapshot[] = [],
 ): boolean {
   if (!registry) return false
   const lock = registryLockForResource(registry, resourceId)
   if (!lock || !lock.sha256) return false
   if (resourceId.startsWith('pdk:')) {
     const pdkId = pdkIdFromResourceId(resourceId)
-    return Object.values(manifest.installed).some(
-      (entry) =>
-        isPdkEntry(entry) &&
-        entry.pdk_id === pdkId &&
-        entry.active &&
-        entry.health !== 'missing' &&
-        entry.health !== 'invalid' &&
-        entry.version === lock.version &&
-        entry.sha256.toLowerCase() === lock.sha256.toLowerCase(),
+    return pdkInstallations.some(
+      (installation) =>
+        installation.familyId === pdkId &&
+        installation.version === lock.version &&
+        installation.readiness === 'ready' &&
+        installation.ownership === 'managed' &&
+        installation.registrySha256 === lock.sha256.toLowerCase(),
     )
   }
   if (!isInstalledResource(manifest, resourceId, toolHealth)) return false
@@ -3644,14 +3526,62 @@ function getInstalledTools(
   return entries
 }
 
-function getInstalledPdks(
-  manifest: ResourceManifest,
-): Array<{ resourceId: string; entry: PdkInventoryEntry }> {
-  const entries: Array<{ resourceId: string; entry: PdkInventoryEntry }> = []
+async function deduplicatePdkEntries(manifest: ResourceManifest): Promise<boolean> {
+  let changed = false
+  const groups = new Map<
+    string,
+    Array<{ resourceId: string; entry: PdkInventoryEntry }>
+  >()
   for (const [resourceId, entry] of Object.entries(manifest.installed)) {
-    if (isPdkEntry(entry)) entries.push({ resourceId, entry })
+    if (!isPdkEntry(entry)) continue
+    const path = entry.canonical_path || entry.path
+    if (!path) continue
+    const canonicalPath = await realpath(resolve(path)).catch(() => null)
+    const key = canonicalPath ?? resolve(path)
+    if (
+      canonicalPath &&
+      (entry.canonical_path !== canonicalPath || entry.path !== canonicalPath)
+    ) {
+      entry.canonical_path = canonicalPath
+      entry.path = canonicalPath
+      changed = true
+    }
+    const group = groups.get(key) ?? []
+    group.push({ resourceId, entry })
+    groups.set(key, group)
   }
-  return entries
+
+  const replacements = new Map<string, string>()
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    const winner = group.reduce((best, candidate) =>
+      pdkEntryScore(candidate) > pdkEntryScore(best) ? candidate : best,
+    )
+    for (const candidate of group) {
+      if (candidate.resourceId === winner.resourceId) continue
+      delete manifest.installed[candidate.resourceId]
+      replacements.set(candidate.resourceId, winner.resourceId)
+    }
+  }
+
+  if (replacements.size === 0) return changed
+  manifest.pdk_references = manifest.pdk_references.map((reference) => ({
+    ...reference,
+    resource_id: replacements.get(reference.resource_id) ?? reference.resource_id,
+  }))
+  return true
+}
+
+function pdkEntryScore(candidate: {
+  resourceId: string
+  entry: PdkInventoryEntry
+}): number {
+  return (
+    (isPdkRegistryId(candidate.resourceId) ? 0 : 4) +
+    (candidate.entry.health === 'ok' ? 2 : 0) +
+    (candidate.entry.active ? 1 : 0) +
+    (candidate.entry.managed ? 1 : 0)
+  )
 }
 
 function getInstalledMpcs(manifest: ResourceManifest): Record<string, MpcInventoryEntry> {
@@ -4188,6 +4118,49 @@ function pdkHealth(entry: PdkInventoryEntry): Record<string, unknown> {
   }
 }
 
+function pdkSnapshotToResource(
+  installation: PdkInstallationSnapshot,
+  detectedFiles: { directories: string[]; files: string[] } = {
+    directories: [],
+    files: [],
+  },
+): ResourceInfo {
+  const status: ResourceStatus =
+    installation.readiness === 'ready' || installation.readiness === 'unverified'
+      ? 'installed'
+      : installation.readiness
+  return {
+    id: installation.id,
+    type: 'pdk',
+    name: installation.familyId,
+    display_name: installation.displayName,
+    description: installation.reason ?? '',
+    category: 'pdk',
+    status,
+    installed_version: installation.version,
+    available_versions: [],
+    active_version: null,
+    active: false,
+    path: installation.root,
+    managed_root: installation.ownership === 'managed' ? installation.root : null,
+    platform: null,
+    size: null,
+    source: installation.ownership === 'managed' ? 'registry' : 'local',
+    homepage: '',
+    actions: [
+      'validate',
+      installation.ownership === 'managed' ? 'uninstall' : 'remove_reference',
+    ],
+    health: {
+      detected_file_groups: detectedFiles,
+      known_layout: installation.familyId === 'ics55',
+      managed: installation.ownership === 'managed',
+      status: status === 'installed' ? 'ok' : installation.readiness,
+    },
+    error: installation.reason,
+  }
+}
+
 function withUpdateCheckHealth(
   health: Record<string, unknown>,
   updateCheck: CachedResourceUpdateCheckItem | null,
@@ -4210,17 +4183,6 @@ function withUpdateCheckHealth(
 
 function isKnownPdk(pdkId: string): boolean {
   return pdkId === 'ics55'
-}
-
-async function validatePdkEntry(entry: PdkInventoryEntry): Promise<string> {
-  try {
-    const pathStats = await stat(entry.canonical_path)
-    if (!pathStats.isDirectory()) return 'invalid'
-    const scanned = await scanPdkDirectory(entry.canonical_path)
-    return await validateScannedPdk({ ...scanned, pdkId: entry.pdk_id })
-  } catch {
-    return 'missing'
-  }
 }
 
 async function validateScannedPdk(scanned: {

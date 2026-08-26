@@ -16,7 +16,6 @@ export type ResourceAction =
   | 'update'
   | 'uninstall'
   | 'validate'
-  | 'activate'
   | 'remove_reference'
   | 'cancel'
 

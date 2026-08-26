@@ -6,6 +6,7 @@ import type {
   MpcSpecReadResult as DesktopMpcSpecReadResult,
   ResourceStatus as DesktopResourceStatus,
   ResourceType as DesktopResourceType,
+  PdkInstallationSnapshot,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 
@@ -87,6 +88,37 @@ export function resourceToResourceItem(resource: ResourceInfo): ResourceItem {
   return { ...resource }
 }
 
+export function pdkInstallationToResourceItem(
+  installation: PdkInstallationSnapshot,
+): ResourceItem {
+  const status =
+    installation.readiness === 'ready' || installation.readiness === 'unverified'
+      ? 'installed'
+      : installation.readiness
+  return {
+    id: installation.id,
+    type: 'pdk',
+    name: installation.familyId,
+    display_name: installation.displayName,
+    description: installation.reason ?? '',
+    category: 'pdk',
+    status,
+    installed_version: installation.version,
+    available_versions: [],
+    active_version: null,
+    active: false,
+    path: installation.root,
+    managed_root: installation.ownership === 'managed' ? installation.root : null,
+    platform: null,
+    size: null,
+    source: installation.ownership,
+    homepage: '',
+    actions: [installation.ownership === 'managed' ? 'uninstall' : 'remove_reference'],
+    health: { readiness: installation.readiness },
+    error: installation.reason,
+  }
+}
+
 export function resourceListToTools(payload: ResourceList): ToolInfo[] {
   return payload.resources
     .filter((resource) => resource.type === 'tool')
@@ -119,6 +151,14 @@ export async function listResourcesApi(): Promise<ResourceItem[]> {
   return resourceListToResources(payload)
 }
 
+export function listPdkInstallationsApi(): Promise<PdkInstallationSnapshot[]> {
+  return getDesktopApi().pdkInventory.list()
+}
+
+export function removePdkInstallationApi(installationId: string) {
+  return getDesktopApi().pdkInventory.remove(installationId)
+}
+
 export async function getToolStatusApi(name: string): Promise<ToolInfo> {
   const resource = await getDesktopApi().resources.get(resourceIdForTool(name))
   return resourceToToolInfo(resource)
@@ -126,10 +166,6 @@ export async function getToolStatusApi(name: string): Promise<ToolInfo> {
 
 export function readMpcSpecApi(resourceId: string): Promise<MpcSpecReadResult> {
   return getDesktopApi().resources.readMpcSpec(resourceId)
-}
-
-export function activatePdkApi(resourceId: string) {
-  return getDesktopApi().resources.activatePdk(resourceId)
 }
 
 export function validatePdkApi(resourceId: string) {

@@ -1,3 +1,5 @@
+import type { PdkRequirement } from '../contracts/pdkInventory.ts'
+
 export const projectManifestFlowSteps = [
   'Synth',
   'Floor',
@@ -27,6 +29,7 @@ export type ProjectManifestWorkspaceStatus =
 export interface ProjectManifestBaseDesign {
   pdk?: string
   pdk_root?: string
+  pdk_requirement?: PdkRequirement
   top_module?: string
   clock?: string
   rtl_list?: string[]
@@ -130,6 +133,7 @@ export interface ProjectManifestWorkspaceRegistrationInput {
   config?: {
     pdk?: string
     pdk_root?: string
+    pdk_requirement?: PdkRequirement
     rtl_list?: string[]
     origin_verilog?: string
     origin_def?: string
@@ -232,7 +236,7 @@ export function createProjectManifestDraft(
   if (!designName) throw new Error('Project manifest design_name is required.')
   return {
     schema_version: 1,
-    project_id: `proj_${slugify(name)}`,
+    project_id: projectIdFromName(name),
     name,
     design_name: designName,
     description: '',
@@ -259,6 +263,10 @@ export function createProjectManifestDraft(
     best_workspace: null,
     qor_baseline: null,
   }
+}
+
+export function projectIdFromName(name: string): string {
+  return `proj_${slugify(name)}`
 }
 
 export function serializeProjectManifest(manifest: ProjectManifest): string {
@@ -713,12 +721,14 @@ function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null 
 
 function normalizeBaseDesign(value: unknown): ProjectManifestBaseDesign {
   const source = recordValue(value) ?? {}
+  const pdkRequirement = normalizePdkRequirement(source.pdk_requirement)
   return {
     ...source,
     ...(optionalString(source.pdk) ? { pdk: optionalString(source.pdk) } : {}),
     ...(optionalString(source.pdk_root)
       ? { pdk_root: optionalString(source.pdk_root) }
       : {}),
+    ...(pdkRequirement ? { pdk_requirement: pdkRequirement } : {}),
     ...(optionalString(source.top_module)
       ? { top_module: optionalString(source.top_module) }
       : {}),
@@ -852,12 +862,39 @@ function mergeBaseDesignConfig(
   const originDef = optionalString(config.origin_def)
   if (pdk) next.pdk = pdk
   if (pdkRoot) next.pdk_root = pdkRoot
+  if (config.pdk_requirement) {
+    next.pdk_requirement = config.pdk_requirement
+    delete next.pdk_root
+  }
   if (topModule) next.top_module = topModule
   if (clock) next.clock = clock
   if (originVerilog) next.origin_verilog = originVerilog
   if (originDef) next.origin_def = originDef
   if (config.rtl_list && config.rtl_list.length > 0) next.rtl_list = [...config.rtl_list]
   return next
+}
+
+function normalizePdkRequirement(value: unknown): PdkRequirement | null {
+  const record = recordValue(value)
+  if (!record) return null
+  const familyId = optionalString(record.familyId)
+  if (!familyId) return null
+  const manual = recordValue(record.manualConfig)
+  return {
+    familyId,
+    version: optionalString(record.version) || null,
+    manualConfig: manual
+      ? {
+          techLef: optionalString(manual.techLef),
+          cellLefs: Array.isArray(manual.cellLefs)
+            ? manual.cellLefs.filter((item): item is string => typeof item === 'string')
+            : [],
+          liberty: Array.isArray(manual.liberty)
+            ? manual.liberty.filter((item): item is string => typeof item === 'string')
+            : [],
+        }
+      : null,
+  }
 }
 
 function withProjectDesignName(

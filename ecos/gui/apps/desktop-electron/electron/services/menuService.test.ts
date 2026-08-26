@@ -81,6 +81,9 @@ describe('menuService', () => {
     const exportSignoffPackage = fileMenu?.submenu?.find(
       (item) => item.label === 'Export Signoff Package...',
     )
+    const exportDesignSummary = fileMenu?.submenu?.find(
+      (item) => item.label === 'Export Design Summary...',
+    )
     const documentation = helpMenu?.submenu?.find(
       (item) => item.label === 'Documentation',
     )
@@ -102,6 +105,10 @@ describe('menuService', () => {
     expect(exportSignoffPackage).toMatchObject({
       enabled: false,
       id: desktopMenuEventIds.exportSignoffPackage,
+    })
+    expect(exportDesignSummary).toMatchObject({
+      enabled: false,
+      id: desktopMenuEventIds.exportDesignSummary,
     })
     const designMenu = capturedTemplate.find((item) => item.label === 'Design')
     const manageRtl = designMenu?.submenu?.find(
@@ -126,6 +133,7 @@ describe('menuService', () => {
     newWorkspace?.click?.()
     reconfigureWorkspace?.click?.()
     exportSignoffPackage?.click?.()
+    exportDesignSummary?.click?.()
     documentation?.click?.()
     about?.click?.()
 
@@ -148,10 +156,15 @@ describe('menuService', () => {
     expect(send).toHaveBeenNthCalledWith(
       4,
       desktopApiEventChannels.menuAction,
-      desktopMenuEventIds.documentation,
+      desktopMenuEventIds.exportDesignSummary,
     )
     expect(send).toHaveBeenNthCalledWith(
       5,
+      desktopApiEventChannels.menuAction,
+      desktopMenuEventIds.documentation,
+    )
+    expect(send).toHaveBeenNthCalledWith(
+      6,
       desktopApiEventChannels.menuAction,
       desktopMenuEventIds.about,
     )

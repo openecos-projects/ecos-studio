@@ -10,12 +10,7 @@ import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
-import {
-  getElectronLatestMainLogFile,
-  getElectronMainLogFile,
-  getLogSessionDirectory,
-  pruneOldLogSessions,
-} from '../services/desktopLogPaths'
+import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
@@ -38,6 +33,7 @@ import { ProjectReadGrantStore } from '../services/projectReadGrantStore'
 import { ProjectManifestService } from '../services/projectManifestService'
 import { ProjectManagementReadService } from '../services/projectManagementReadService'
 import { ResourceManagerService } from '../services/resourceManagerService'
+import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
 import {
@@ -70,6 +66,7 @@ let services: {
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
+  pdkInventoryService: PdkInventoryService
   chipViewerService: ChipViewerService
   shellService: ShellPtyService
   surferProtocolService: SurferProtocolService
@@ -94,15 +91,9 @@ configureGpuMode({
   platform: process.platform,
 })
 
-const mainLogFile = getElectronMainLogFile()
-const mainLatestLogFile = getElectronLatestMainLogFile()
-configureElectronLoggerFile({
-  latestFilePath: mainLatestLogFile,
-  sessionFilePath: mainLogFile,
-})
-pruneOldLogSessions()
+const { mainLogFile, sessionDirectory: logSessionDirectory } = prepareDesktopLogs()
+configureElectronLoggerFile(mainLogFile)
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
-electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
 electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')
 registerSurferProtocolSchemes(protocol)
 
@@ -158,6 +149,7 @@ function getDesktopServices() {
     projectScopeProvider: projectScopeService,
   })
   const resourceManagerService = new ResourceManagerService()
+  const pdkInventoryService = resourceManagerService.getPdkInventoryService()
   const runtimeEnvProvider = () =>
     resourceManagerService.createRuntimeEnv(runtimeEnv, {
       platform: process.platform,
@@ -168,8 +160,7 @@ function getDesktopServices() {
         command: eccExecutable ?? 'ecc',
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
-        logDirectoryProvider: () =>
-          resolveEccSidecarLogDirectory(getLogSessionDirectory()),
+        logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
         onEvent,
         onNotification,
       }),
@@ -188,8 +179,7 @@ function getDesktopServices() {
       new EccRpcSidecarProcess({
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
-        logDirectoryProvider: () =>
-          resolveEccSidecarLogDirectory(getLogSessionDirectory()),
+        logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
         onEvent,
         onNotification: (notification) => {
           const event = frontendRuntimeEventFromNotification(
@@ -246,7 +236,7 @@ function getDesktopServices() {
     isPackaged: app.isPackaged,
     platform: process.platform,
     resourcesPath: process.resourcesPath,
-    viewerLogDirectory: join(getLogSessionDirectory(), 'chip-viewer'),
+    viewerLogDirectory: join(logSessionDirectory, 'chip-viewer'),
     layoutEditRuntime: eccRuntimeService,
     workspaceResourceService,
   })
@@ -267,6 +257,7 @@ function getDesktopServices() {
     eccRuntimeService,
     projectManagementReadService,
     projectManifestService,
+    pdkInventoryService,
     resourceManagerService,
     settingsStore,
     shellService,
@@ -312,6 +303,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       projectManagementReadService: desktopServices.projectManagementReadService,
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
+      pdkInventoryService: desktopServices.pdkInventoryService,
       chipViewerService: desktopServices.chipViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,

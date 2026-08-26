@@ -85,6 +85,7 @@ export type {
   EccWorkspaceCreateResult,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
+  SignoffAdditionalFile,
   EccWorkspaceHandleRequest,
   EccWorkspaceHomeResult,
   EccWorkspaceInspectSignoffResult,
@@ -180,6 +181,21 @@ export {
 } from './contracts/desktopEvents.ts'
 export type { DesktopErrorCode, DesktopErrorShape } from './contracts/errors.ts'
 export type {
+  ManualPdkConfiguration,
+  PdkBinding,
+  PdkBindRequest,
+  PdkImportRequest,
+  PdkInstallationRecord,
+  PdkInstallationSnapshot,
+  PdkLocateRequest,
+  PdkOwnership,
+  PdkProjectRequest,
+  PdkReadiness,
+  PdkRequirement,
+  PdkResolveBindingRequest,
+  PdkWorkspaceValidationRequest,
+} from './contracts/pdkInventory.ts'
+export type {
   DesktopFailure,
   DesktopResult,
   DesktopSuccess,
@@ -232,6 +248,7 @@ export {
   deleteWorkspaceFromManifest,
   ensureProjectQorBaseline,
   parseProjectManifest,
+  projectIdFromName,
   projectManifestFlowSteps,
   recordReplacementBackupInManifest,
   registerWorkspaceInManifest,
@@ -256,3 +273,40 @@ export type {
   ProjectManifestWorkspaceRegistrationInput,
   ProjectManifestWorkspaceStatus,
 } from './utils/projectManifest.ts'
+export type {
+  ClockMetrics,
+  CongestionMetrics,
+  CornerTimingRecord,
+  DesignInfo,
+  DesignReportData,
+  DesignReportExportOptions,
+  DesignReportFormat,
+  DesignReportWarning,
+  EvidenceProvenanceRecord,
+  ExecutionMetrics,
+  PhysicalMetrics,
+  PowerMetrics,
+  RoutingMetrics,
+  StageExecutionRecord,
+  TimingMetrics,
+  VerificationMetrics,
+} from './contracts/designReport.ts'
+export {
+  canonicalizeStageName,
+  extractDesignReportData,
+  formatDuration,
+  parsePowerRpt,
+  parseQorSummaryRpt,
+  parseRuntimeSeconds,
+  type ExtractDesignReportInput,
+  type ParsedPowerMetrics,
+  type ParsedQorSummaryMetrics,
+} from './utils/designReportExtract.ts'
+export {
+  formatCsvReport,
+  formatLatexReport,
+  formatMarkdownReport,
+  formatTextReport,
+  formatTypstReport,
+  generateDesignReport,
+} from './utils/designReportFormatters/index.ts'

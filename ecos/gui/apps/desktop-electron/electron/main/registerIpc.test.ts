@@ -153,11 +153,9 @@ function registerHandlers(
       resolveStepInfo: vi.fn(),
     },
     resourceManagerService: {
-      activatePdk: vi.fn(),
       cancelResource: vi.fn(),
       getResource: vi.fn(),
       readMpcSpec: vi.fn(),
-      recordPdkReference: vi.fn(),
       importLocalPath: vi.fn(),
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
@@ -169,6 +167,15 @@ function registerHandlers(
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
       validatePdkRootForWorkspace: vi.fn(),
+    },
+    pdkInventoryService: {
+      bindInstallation: vi.fn(),
+      importInstallation: vi.fn(),
+      listInstallations: vi.fn(),
+      locateInstallation: vi.fn(),
+      removeInstallation: vi.fn(),
+      resolveBinding: vi.fn(),
+      validateWorkspace: vi.fn(),
     },
     surferProtocolService: {
       authorizeWaveform: vi.fn(),
@@ -817,6 +824,28 @@ describe('registerIpc', () => {
     expect(services.appInfoService.getVersions).toHaveBeenCalledTimes(1)
   })
 
+  it('lists typed PDK Installation snapshots', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const installations = [
+      {
+        id: 'pdk-installation:1',
+        familyId: 'ics55',
+        displayName: 'ICS55',
+        version: '1.10.100',
+        root: '/tmp/pdk',
+        ownership: 'managed',
+        readiness: 'ready',
+        reason: null,
+      },
+    ]
+    services.pdkInventoryService.listInstallations.mockResolvedValue(installations)
+
+    await expect(handlers.get('pdk-inventory:list')?.(event)).resolves.toEqual(
+      installations,
+    )
+  })
+
   it('delegates resource manager calls to the resource manager service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
@@ -937,6 +966,163 @@ describe('registerIpc', () => {
       handlers.get(desktopApiIpcChannels.eccRpcPing)?.(event),
     ).resolves.toEqual({ ok: true })
     expect(services.eccRuntimeService.rpcPing).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves and rejects an invalid existing Binding before workspace creation', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const error = new Error('PDK validation failed for ics55')
+    services.pdkInventoryService.resolveBinding.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
+    services.pdkInventoryService.validateWorkspace.mockRejectedValue(error)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
+        designTool: 'backend',
+        payload: {
+          directory: '/tmp/workspace',
+          pdk: 'ics55',
+          pdkInstallationId: 'pdk-installation:ics55',
+          projectId: 'proj_demo',
+          projectRoot: '/tmp/project',
+          pdkRequirement: {
+            familyId: 'ics55',
+            version: null,
+            manualConfig: null,
+          },
+        },
+      }),
+    ).resolves.toEqual({
+      error: { message: error.message, name: 'Error' },
+      ok: false,
+    })
+    expect(services.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+      requirement: {
+        familyId: 'ics55',
+        version: null,
+        manualConfig: null,
+      },
+    })
+    expect(services.pdkInventoryService.bindInstallation).not.toHaveBeenCalled()
+    expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('rejects backend workspace creation without a PDK Requirement', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
+        designTool: 'backend',
+        payload: {
+          directory: '/tmp/workspace',
+          pdk: 'vendor-pdk',
+          pdkRoot: '/tmp/vendor-pdk',
+        },
+      }),
+    ).resolves.toEqual({
+      error: {
+        message: 'PDK Requirement is required for backend workspace creation',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(
+      services.resourceManagerService.validatePdkRootForWorkspace,
+    ).not.toHaveBeenCalled()
+    expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('uses the persisted Project Requirement for workspace creation', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const payload = {
+      directory: '/tmp/workspace',
+      pdk: 'ics55',
+      pdkInstallationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+      pdkRequirement: {
+        familyId: 'ics55',
+        version: null,
+        manualConfig: null,
+      },
+    }
+    const result = { directory: '/tmp/workspace', workspaceHandle: 'workspace-handle' }
+    const persistedRequirement = {
+      familyId: 'ics55',
+      version: null,
+      manualConfig: {
+        techLef: 'tech.lef',
+        cellLefs: ['cells.lef'],
+        liberty: ['typ.lib'],
+      },
+    }
+    services.projectManagementReadService.readManifest.mockResolvedValue(
+      JSON.stringify({
+        schema_version: 1,
+        project_id: payload.projectId,
+        name: 'demo',
+        design_name: 'demo',
+        root_path: payload.projectRoot,
+        created_at: '2026-08-25T00:00:00.000Z',
+        updated_at: '2026-08-25T00:00:00.000Z',
+        base_design: { pdk_requirement: persistedRequirement, rtl_list: [] },
+        objectives: { primary: 'timing', directions: {} },
+        workspaces: [],
+        best_workspace: null,
+      }),
+    )
+    services.pdkInventoryService.resolveBinding.mockResolvedValue(null)
+    services.pdkInventoryService.bindInstallation.mockResolvedValue({
+      installationId: payload.pdkInstallationId,
+      projectId: payload.projectId,
+      projectRoot: payload.projectRoot,
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: payload.pdkInstallationId,
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
+    services.eccRuntimeService.createWorkspace.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
+        designTool: 'backend',
+        payload,
+      }),
+    ).resolves.toEqual(result)
+    expect(services.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
+      installationId: payload.pdkInstallationId,
+      requirement: persistedRequirement,
+      projectId: payload.projectId,
+      projectRoot: payload.projectRoot,
+    })
+    expect(services.pdkInventoryService.resolveBinding).toHaveBeenCalledWith({
+      projectId: payload.projectId,
+      projectRoot: payload.projectRoot,
+      requirement: persistedRequirement,
+    })
+    expect(services.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: payload.projectId,
+      projectRoot: payload.projectRoot,
+      requirement: persistedRequirement,
+    })
+    expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith({
+      directory: payload.directory,
+      pdk: payload.pdk,
+      pdkRoot: '/canonical/pdk',
+    })
   })
 
   it('waits for a runtime operation through the main-process tracker', async () => {

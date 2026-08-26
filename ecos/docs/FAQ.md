@@ -40,11 +40,29 @@ chmod +x ECOS-Studio_*.AppImage
 ./ECOS-Studio_*.AppImage
 ```
 
+The AppImage runtime requires FUSE 2 (`libfuse2`), which most distributions ship by default. On FUSE-3-only systems such as Ubuntu 24.04, see the Troubleshooting section below if the app fails to launch.
+
 ## Usage
 
 See the [User Guide](user-guide.md) for detailed instructions on creating workspaces, running the RTL-to-GDS flow, and viewing results.
 
 ## Troubleshooting
+
+**Q: AppImage fails to launch with `dlopen(): error loading libfuse.so.2`**
+
+The AppImage runtime requires FUSE 2, but some distributions (e.g. Ubuntu 24.04) only ship FUSE 3. Either install FUSE 2:
+
+```bash
+sudo apt install libfuse2  # Debian/Ubuntu
+```
+
+or run the AppImage without FUSE by extracting and running it directly:
+
+```bash
+./ECOS-Studio_*.AppImage --appimage-extract-and-run
+```
+
+See [#173](https://github.com/openecos-projects/ecos-studio/issues/173) for details.
 
 **Q: AppImage fails to launch on a virtual machine (GL / GVFS / ATK errors)**
 

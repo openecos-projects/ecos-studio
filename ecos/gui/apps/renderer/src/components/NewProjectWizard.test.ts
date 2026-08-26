@@ -59,6 +59,7 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('readProjectManifestForProject')
     expect(source).toContain('applyProjectManifestDefaults')
     expect(source).toContain('manifest.base_design')
+    expect(source).toContain('projectContext.value.project_id = manifest.project_id')
     expect(source).toContain('config.value.pdk = baseDesign.pdk')
     expect(source).toContain('config.value.pdk_root = baseDesign.pdk_root')
     expectSourceCall('setStringParameterDefault', "'top_module'")
@@ -370,12 +371,6 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('PDK path is unavailable.')
     expect(source).toContain('ECC defaults are only available for a known PDK layout.')
     expect(source).toContain('pdkValidationMessage')
-  })
-
-  it('rechecks project-pinned PDKs from their source path', () => {
-    expect(source).toContain("if (pdk.source === 'project')")
-    expect(source).toContain('scanPdkDirectory(pdk.path)')
-    expect(source).toContain('projectPinnedPdk.value = updatedPdk')
   })
 
   it('keeps PDK actions outside the selection button', () => {

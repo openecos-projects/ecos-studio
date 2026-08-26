@@ -7,6 +7,8 @@ interface AppMenuActionDependencies {
   openDocumentation(): Promise<void>
   openProject(): Promise<boolean | undefined>
   exportSignoffPackage?(): void | Promise<void>
+  exportDesignSummary?(): void | Promise<void>
+  exportDesignMetrics?(): void | Promise<void>
   reconfigureWorkspace?(): void | Promise<void>
   showAboutDialog(): void
   showNewProjectWizard(): void
@@ -20,6 +22,8 @@ export function useAppMenuActions({
   openDocumentation,
   openProject,
   exportSignoffPackage,
+  exportDesignSummary,
+  exportDesignMetrics,
   reconfigureWorkspace,
   showAboutDialog,
   showNewProjectWizard,
@@ -47,6 +51,10 @@ export function useAppMenuActions({
         break
       case appMenuActionIds.exportSignoffPackage:
         await exportSignoffPackage?.()
+        break
+      case appMenuActionIds.exportDesignSummary:
+      case appMenuActionIds.exportDesignMetrics:
+        await (exportDesignSummary || exportDesignMetrics)?.()
         break
       case appMenuActionIds.documentation:
         await openDocumentation()
@@ -88,6 +96,9 @@ export function useAppMenuActions({
     },
     [appMenuActionIds.exportSignoffPackage]: () => {
       void handleMenuAction(appMenuActionIds.exportSignoffPackage)
+    },
+    [appMenuActionIds.exportDesignSummary]: () => {
+      void handleMenuAction(appMenuActionIds.exportDesignSummary)
     },
     [appMenuActionIds.zoomIn]: () => void handleMenuAction(appMenuActionIds.zoomIn),
     [appMenuActionIds.zoomOut]: () => void handleMenuAction(appMenuActionIds.zoomOut),

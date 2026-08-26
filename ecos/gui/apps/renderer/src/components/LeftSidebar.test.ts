@@ -24,4 +24,9 @@ describe('LeftSidebar workspace navigation', () => {
     expect(source).toContain('break-words')
     expect(source).not.toContain('scale-90')
   })
+
+  it('shows a status badge for skipped flow steps', () => {
+    expect(source).toContain(`stage.state === 'Skipped'`)
+    expect(source).toContain('aria-label="Skipped"')
+  })
 })

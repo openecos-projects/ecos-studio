@@ -1,4 +1,3 @@
-import { lstatSync, readlinkSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -153,7 +152,7 @@ describe('createElectronLogger', () => {
     )
   })
 
-  it('writes configured file logs to the launch session and latest files', async () => {
+  it('writes configured file logs to one launch session file', async () => {
     const directory = await createTempDirectory('ecos-logger-session-')
     tempDirectories.push(directory)
     const sessionFilePath = join(
@@ -163,20 +162,11 @@ describe('createElectronLogger', () => {
       '20260512-223000-1234',
       'main.log',
     )
-    const latestFilePath = join(directory, 'logs', 'main.log')
-
-    configureElectronLoggerFile({
-      latestFilePath,
-      sessionFilePath,
-    })
+    configureElectronLoggerFile(sessionFilePath)
 
     electronLogger.info('[desktop] Launch message for %s', 'debugging')
 
     const sessionContent = await readFile(sessionFilePath, 'utf8')
-    const latestContent = await readFile(latestFilePath, 'utf8')
     expect(sessionContent).toContain('INFO [desktop] Launch message for debugging')
-    expect(latestContent).toBe(sessionContent)
-    expect(lstatSync(latestFilePath).isSymbolicLink()).toBe(true)
-    expect(readlinkSync(latestFilePath)).toBe(sessionFilePath)
   })
 })

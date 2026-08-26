@@ -366,10 +366,10 @@ export function createPrimaryActionTask(
 ): Promise<void> | null {
   const action = primaryActionForRow(row)
   if (action === 'update') {
-    return executor.updateResource(row.id)
+    return executor.updateResource(row.resource.id)
   }
   if (action === 'install' || action === 'replace') {
-    return executor.installResource(row.id)
+    return executor.installResource(row.resource.id)
   }
   return null
 }
@@ -538,7 +538,10 @@ export function resourceToRow(
   const flowTags = frontendFlowTagsFor(resource)
 
   return {
-    id: resource.id,
+    id:
+      resource.type === 'pdk' && resource.path
+        ? `installation:${resource.id}`
+        : resource.id,
     type: resource.type,
     name: resource.display_name || resource.name,
     resourceName: resource.name,

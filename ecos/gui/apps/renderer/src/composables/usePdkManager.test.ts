@@ -3,10 +3,12 @@ import type {
   DesktopApi,
   DesktopSettingsValue,
   ResourceInfo,
+  PdkInstallationSnapshot,
   ScannedPdkDirectory,
 } from '@ecos-studio/shared'
 
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
 
 const showToast = vi.fn()
 const settingsGet = vi.fn(
@@ -35,7 +37,7 @@ const pdkResource: ResourceInfo = {
   size: null,
   source: 'local',
   homepage: '',
-  actions: ['validate', 'activate', 'remove_reference'],
+  actions: ['validate', 'remove_reference'],
   health: {
     detected_file_groups: { directories: ['IP', 'prtech'], files: [] },
     known_layout: true,
@@ -45,6 +47,21 @@ const pdkResource: ResourceInfo = {
 const importPdkPath = vi.fn(async () => pdkResource)
 const importLocalPath = vi.fn(async () => pdkResource)
 const listResources = vi.fn(async () => ({ diagnostics: [], resources: [pdkResource] }))
+const pdkInstallation: PdkInstallationSnapshot = {
+  id: 'pdk-installation:ics55',
+  familyId: 'ics55',
+  displayName: 'ICS55',
+  version: null,
+  root: '/tmp/pdk',
+  ownership: 'imported',
+  registrySha256: null,
+  readiness: 'ready',
+  reason: null,
+  supportsEccDefaults: true,
+}
+const listPdkInstallations = vi.fn(async () => [pdkInstallation])
+const importPdkInstallation = vi.fn(async () => pdkInstallation)
+const removePdkInstallation = vi.fn(async () => ({ unboundProjectIds: [] }))
 const removePdkReference = vi.fn(async (resourceId: string) => ({
   status: 'removed',
   resource_id: resourceId,
@@ -203,7 +220,6 @@ const desktopBridge = {
     update: async (resourceId) => ({ status: 'started', resource_id: resourceId }),
     cancel: async (resourceId) => ({ status: 'cancelled', resource_id: resourceId }),
     uninstall: async (resourceId) => ({ status: 'uninstalled', resource_id: resourceId }),
-    activatePdk: async (resourceId) => ({ status: 'activated', resource_id: resourceId }),
     validatePdk: async (resourceId) => ({
       resource_id: resourceId,
       health: { status: 'ok' },
@@ -220,6 +236,13 @@ const desktopBridge = {
       resources: [],
     }),
     onProgress: () => () => undefined,
+  },
+  pdkInventory: {
+    list: listPdkInstallations,
+    import: importPdkInstallation,
+    locate: async () => pdkInstallation,
+    remove: removePdkInstallation,
+    resolveBinding: async () => null,
   },
   runtime: {} as DesktopApi['runtime'],
   ecc: {
@@ -306,6 +329,9 @@ describe('usePdkManager', () => {
     importPdkPath.mockReset()
     importLocalPath.mockReset()
     listResources.mockReset()
+    listPdkInstallations.mockReset()
+    importPdkInstallation.mockReset()
+    removePdkInstallation.mockReset()
     removePdkReference.mockReset()
     scanPdkDirectory.mockReset()
     localStorageState.clear()
@@ -328,6 +354,9 @@ describe('usePdkManager', () => {
     importPdkPath.mockResolvedValue(pdkResource)
     importLocalPath.mockResolvedValue(pdkResource)
     listResources.mockResolvedValue({ diagnostics: [], resources: [pdkResource] })
+    listPdkInstallations.mockResolvedValue([pdkInstallation])
+    importPdkInstallation.mockResolvedValue(pdkInstallation)
+    removePdkInstallation.mockResolvedValue({ unboundProjectIds: [] })
     removePdkReference.mockImplementation(async (resourceId: string) => ({
       status: 'removed',
       resource_id: resourceId,
@@ -339,6 +368,11 @@ describe('usePdkManager', () => {
   })
 
   afterEach(() => {
+    if (originalWindow) {
+      Object.defineProperty(globalThis, 'window', originalWindow)
+    } else {
+      delete (globalThis as { window?: unknown }).window
+    }
     if (originalLocalStorage) {
       Object.defineProperty(globalThis, 'localStorage', originalLocalStorage)
       return
@@ -347,7 +381,7 @@ describe('usePdkManager', () => {
     delete (globalThis as { localStorage?: unknown }).localStorage
   })
 
-  it('loads PDK instances from Resource Manager after importing a local directory', async () => {
+  it('loads PDK Installations after importing a local directory', async () => {
     const { importPdk, importedPdks } = usePdkManager()
 
     const imported = await importPdk()
@@ -356,20 +390,98 @@ describe('usePdkManager', () => {
       path: '/tmp/pdk',
       pdkId: 'ics55',
     })
-    expect(importPdkPath).toHaveBeenCalledWith({ path: '/tmp/pdk' })
+    expect(importPdkInstallation).toHaveBeenCalledWith({
+      displayName: 'ics55',
+      familyId: 'ics55',
+      root: '/tmp/pdk',
+    })
     expect(importedPdks.value).toEqual([
       expect.objectContaining({
-        id: 'pdk:ics55:local:test',
-        source: 'local',
-        valid: true,
+        id: 'pdk-installation:ics55',
+        source: 'imported',
+        readiness: 'ready',
       }),
     ])
-    expect(listResources).toHaveBeenCalled()
-    expect(settingsSet).toHaveBeenCalledWith('pdk_inventory_migrated_v1', true)
+    expect(listPdkInstallations).toHaveBeenCalled()
+    expect(settingsSet).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'success',
+      summary: 'PDK Linked',
+      detail: 'ICS55 is ready at /tmp/pdk. Files remain in the source directory.',
+    })
+  })
+
+  it('does not use unsupported browser prompt for an unregistered PDK', async () => {
+    scanPdkDirectory.mockResolvedValue({
+      ...scannedPdk,
+      name: 'Vendor A Folder',
+      pdkId: 'vendor_a_folder',
+    })
+    const prompt = vi.fn(() => {
+      throw new Error('prompt() is not supported')
+    })
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { prompt },
+    })
+    const manager = usePdkManager()
+
+    const pendingImport = manager.importPdk()
+    await vi.waitFor(() => {
+      expect(manager.pdkNameDialogVisible.value).toBe(true)
+    })
+    expect(manager.pdkNameDraft.value).toBe('Vendor A Folder')
+    manager.pdkNameDraft.value = 'Vendor Demo'
+    manager.confirmPdkName()
+    const imported = await pendingImport
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(imported).not.toBeNull()
+    expect(importPdkInstallation).toHaveBeenCalledWith({
+      displayName: 'Vendor Demo',
+      familyId: 'vendor_demo',
+      root: '/tmp/pdk',
+    })
+  })
+
+  it('cancels Family ID confirmation without reporting an import failure', async () => {
+    scanPdkDirectory.mockResolvedValue({
+      ...scannedPdk,
+      name: 'vendor-a',
+      pdkId: 'vendor-a',
+    })
+    const manager = usePdkManager()
+
+    const pendingImport = manager.importPdk()
+    await vi.waitFor(() => {
+      expect(manager.pdkNameDialogVisible.value).toBe(true)
+    })
+    manager.cancelPdkName()
+
+    await expect(pendingImport).resolves.toBeNull()
+    expect(importPdkInstallation).not.toHaveBeenCalled()
     expect(showToast).not.toHaveBeenCalled()
   })
 
-  it('imports legacy settings once without writing them back', async () => {
+  it('projects typed Inventory snapshots without interpreting ResourceInfo health', async () => {
+    listResources.mockResolvedValue({ diagnostics: [], resources: [] })
+    const { loadPdks, importedPdks } = usePdkManager()
+
+    await loadPdks(true)
+
+    expect(listPdkInstallations).toHaveBeenCalledOnce()
+    expect(importedPdks.value).toEqual([
+      expect.objectContaining({
+        id: 'pdk-installation:ics55',
+        path: '/tmp/pdk',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+      }),
+    ])
+  })
+
+  it('leaves legacy migration to the backend Inventory', async () => {
     settingsGet.mockResolvedValueOnce(null).mockResolvedValueOnce([
       {
         id: 'local-ics55',
@@ -379,6 +491,8 @@ describe('usePdkManager', () => {
         techNode: '55nm',
         pdkId: 'ics55',
         importedAt: '2026-05-14T00:00:00Z',
+        readiness: 'ready',
+        supportsEccDefaults: true,
         detectedFiles: {
           directories: ['IP', 'prtech'],
           files: [],
@@ -388,30 +502,13 @@ describe('usePdkManager', () => {
     const { loadPdks, importedPdks } = usePdkManager()
     await loadPdks(true)
 
-    expect(importPdkPath).toHaveBeenCalledWith({ path: '/tmp/pdks/ics55' })
+    expect(importPdkInstallation).not.toHaveBeenCalled()
     expect(importedPdks.value).toHaveLength(1)
-    expect(settingsSet).toHaveBeenCalledWith('pdk_inventory_migrated_v1', true)
+    expect(settingsGet).not.toHaveBeenCalled()
+    expect(settingsSet).not.toHaveBeenCalled()
   })
 
-  it('imports a row-bound PDK through the local resource API', async () => {
-    const { importPdkForResource, importedPdks } = usePdkManager()
-
-    const imported = await importPdkForResource('pdk:ics55', '/tmp/pdk')
-
-    expect(imported).toMatchObject({
-      path: '/tmp/pdk',
-      pdkId: 'ics55',
-    })
-    expect(importLocalPath).toHaveBeenCalledWith({
-      resourceId: 'pdk:ics55',
-      path: '/tmp/pdk',
-    })
-    expect(importPdkPath).not.toHaveBeenCalled()
-    expect(importedPdks.value).toHaveLength(1)
-    expect(showToast).not.toHaveBeenCalled()
-  })
-
-  it('removes the resource manager PDK reference before deleting a local PDK entry', async () => {
+  it('removes an Installation through the typed Inventory API', async () => {
     const { importedPdks, removePdk } = usePdkManager()
     importedPdks.value = [
       {
@@ -422,12 +519,14 @@ describe('usePdkManager', () => {
         techNode: '55nm',
         pdkId: 'ics55',
         importedAt: '2026-05-14T00:00:00Z',
+        readiness: 'ready',
+        supportsEccDefaults: true,
       },
     ]
 
     await removePdk('local-ics55')
 
-    expect(removePdkReference).toHaveBeenCalledWith('local-ics55')
-    expect(listResources).toHaveBeenCalled()
+    expect(removePdkInstallation).toHaveBeenCalledWith('local-ics55')
+    expect(listPdkInstallations).toHaveBeenCalled()
   })
 })
