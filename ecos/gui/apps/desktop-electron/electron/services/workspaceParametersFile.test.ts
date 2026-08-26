@@ -374,3 +374,17 @@ describe('editWorkspaceParameters', () => {
     ).rejects.toThrow(/not found/i)
   })
 })
+
+describe('hand-authored display keys in TOML', () => {
+  it('canonicalizes them on read and accepts edits against the canonical path', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', '[params]\n"Target density" = 0.45\ndesign = "gcd"\n')
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.target_density).toBe(0.45)
+    expect(parameters && 'Target density' in parameters).toBe(false)
+
+    await editWorkspaceParameters(root, [{ json_path: ['target_density'], value: 0.55 }])
+    const updated = await readWorkspaceParameters(root)
+    expect(updated?.target_density).toBe(0.55)
+  })
+})

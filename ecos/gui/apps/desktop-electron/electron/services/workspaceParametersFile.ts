@@ -76,13 +76,17 @@ export async function locateWorkspaceParametersFile(
  * Mirrors ecc's `_merge_payload`: `[params]` is the base, then non-empty
  * `[design]`/`[pdk]` mirror values override their mapped parameter keys.
  * A workspace-relative `pdk_config` resolves against the workspace root.
+ * Keys are canonicalized on the way out so a hand-authored display key
+ * (e.g. `Target density`) cannot shadow the same parameter elsewhere.
  */
 export function mergeTomlSections(
   document: Record<string, unknown>,
   workspaceRoot: string,
 ): Record<string, unknown> {
   const params: Record<string, unknown> = {
-    ...(isRecord(document.params) ? document.params : {}),
+    ...(normalizeParameterKeys(
+      isRecord(document.params) ? document.params : {},
+    ) as Record<string, unknown>),
   }
   const design = isRecord(document.design) ? document.design : {}
   const pdk = isRecord(document.pdk) ? document.pdk : {}
