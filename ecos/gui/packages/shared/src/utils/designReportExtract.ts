@@ -505,7 +505,7 @@ export function extractDesignReportData(
     input.versionInfo?.gui ||
     (typeof params.ECOS_STUDIO_VERSION === 'string' && params.ECOS_STUDIO_VERSION) ||
     (typeof params.ecos_studio_version === 'string' && params.ecos_studio_version) ||
-    '0.1.0-alpha.8'
+    '0.1.0-alpha.9'
 
   const gitCommit =
     (typeof params.GIT_COMMIT === 'string' && params.GIT_COMMIT) ||
