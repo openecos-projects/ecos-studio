@@ -245,3 +245,19 @@ describe('ECCView project management handoff', () => {
     expect(openRecentSource).not.toContain('requestOpenStepConfigAfterCreate')
   })
 })
+
+describe('branch prefill canonical parameters', () => {
+  it('reads canonical nested die size and core margin from ecc.toml workspaces', () => {
+    const normalizeStart = source.indexOf('function normalizeSourceParameters')
+    const normalizeEnd = source.indexOf(
+      'function normalizeSourcePdkConfig',
+      normalizeStart,
+    )
+    const normalizeSource = source.slice(normalizeStart, normalizeEnd)
+    expect(normalizeSource).toContain('die.size')
+    expect(normalizeSource).toContain('core.margin')
+    expect(normalizeSource).toContain('dieSize[0]')
+    expect(normalizeSource).toContain('dieSize[1]')
+    expect(normalizeSource).toContain('coreMargin[0]')
+  })
+})

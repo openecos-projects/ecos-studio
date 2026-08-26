@@ -472,8 +472,12 @@ function normalizeSourceParameters(
 ): Record<string, unknown> {
   if (!parametersJson) return {}
   const dieAreaRecord = optionalRecord(parametersJson['Die Area']) ?? {}
+  const die =
+    optionalRecord(parametersJson.Die) ?? optionalRecord(parametersJson.die) ?? {}
   const core =
     optionalRecord(parametersJson.Core) ?? optionalRecord(parametersJson.core) ?? {}
+  const dieSize = numberList(die.Size ?? die.size)
+  const coreMargin = numberList(core.Margin ?? core.margin)
 
   return {
     design:
@@ -492,8 +496,14 @@ function normalizeSourceParameters(
     ),
     die_area_mode:
       optionalString(dieAreaRecord.mode) || optionalString(parametersJson.die_area_mode),
-    die_width: optionalNumber(dieAreaRecord.width ?? parametersJson.die_width, 100),
-    die_height: optionalNumber(dieAreaRecord.height ?? parametersJson.die_height, 100),
+    die_width: optionalNumber(
+      dieAreaRecord.width ?? dieSize[0] ?? parametersJson.die_width,
+      100,
+    ),
+    die_height: optionalNumber(
+      dieAreaRecord.height ?? dieSize[1] ?? parametersJson.die_height,
+      100,
+    ),
     utilitization: optionalNumber(
       dieAreaRecord.utilitization ??
         core.Utilitization ??
@@ -501,7 +511,10 @@ function normalizeSourceParameters(
         parametersJson.utilitization,
       0.6,
     ),
-    margin: optionalNumber(dieAreaRecord.margin ?? parametersJson.margin, 0),
+    margin: optionalNumber(
+      dieAreaRecord.margin ?? coreMargin[0] ?? parametersJson.margin,
+      0,
+    ),
   }
 }
 
@@ -554,6 +567,11 @@ function optionalString(value: unknown): string {
 function optionalNumber(value: unknown, fallback: number): number {
   const numberValue = Number(value)
   return Number.isFinite(numberValue) ? numberValue : fallback
+}
+
+function numberList(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  return value.map(Number).filter(Number.isFinite)
 }
 
 function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | undefined {

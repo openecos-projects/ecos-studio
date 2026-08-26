@@ -413,11 +413,11 @@ function baselineBaseDesign(
 function normalizedBaselineParameters(
   parameters: Record<string, unknown>,
 ): Record<string, unknown> {
-  const die = recordValue(parameters.Die) ?? {}
-  const core = recordValue(parameters.Core) ?? {}
+  const die = recordValue(parameters.Die) ?? recordValue(parameters.die) ?? {}
+  const core = recordValue(parameters.Core) ?? recordValue(parameters.core) ?? {}
   const dieArea = recordValue(parameters['Die Area']) ?? {}
-  const dieSize = numberArray(die.Size)
-  const margins = numberArray(core.Margin)
+  const dieSize = numberArray(die.Size ?? die.size)
+  const margins = numberArray(core.Margin ?? core.margin)
   return {
     design: firstString(parameters.Design, parameters.design),
     top_module: firstString(
@@ -437,6 +437,7 @@ function normalizedBaselineParameters(
     utilitization: firstValue(
       dieArea.utilitization,
       core.Utilitization,
+      core.utilitization,
       parameters.utilitization,
     ),
     margin: firstValue(dieArea.margin, margins[0], parameters.margin),
