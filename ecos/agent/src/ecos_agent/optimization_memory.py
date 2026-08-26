@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, m
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
+    KnobApplicationReceipt,
     KnobScalar,
     ObjectiveMetric,
     OptimizationKnob,
@@ -148,6 +149,9 @@ class OptimizationTaskMemoryEntry(_MemoryModel):
     outcome: OptimizationOutcomeKind
     terminal_observation: TerminalObservation
     evidence: OptimizationTaskMemoryEvidence
+    application_receipt: KnobApplicationReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     entry_sha256: str
 
     @field_validator("previous_entry_sha256", "entry_sha256")
@@ -163,6 +167,11 @@ class OptimizationTaskMemoryEntry(_MemoryModel):
             raise ValueError("task memory action and requested knob do not match")
         if self.evidence.source_episode_id != self.scope.episode_id:
             raise ValueError("task memory evidence does not match its scope")
+        if (
+            self.application_receipt is not None
+            and self.application_receipt.requested != self.requested
+        ):
+            raise ValueError("task memory receipt does not match requested value")
         expected = _entry_sha256(
             self.sequence,
             self.previous_entry_sha256,
@@ -205,9 +214,17 @@ class OptimizationTaskMemorySummary(_MemoryModel):
     evidence_refs: tuple[OptimizationTaskMemoryEvidence, ...] = Field(
         min_length=1, max_length=_MAX_RECORDS
     )
+    application_receipts: tuple[KnobApplicationReceipt, ...] = Field(
+        default=(), max_length=_MAX_RECORDS, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def validate_summary_hash(self) -> "OptimizationTaskMemorySummary":
+        if any(
+            receipt.requested.knob_id != self.knob_id
+            for receipt in self.application_receipts
+        ):
+            raise ValueError("task memory summary receipt knob does not match")
         expected = canonical_sha256(
             self.model_dump(mode="json", exclude={"reference"})
         )
@@ -257,6 +274,7 @@ class _Candidate:
     outcome: OptimizationOutcomeKind
     terminal_observation: TerminalObservation
     evidence: OptimizationTaskMemoryEvidence
+    application_receipt: KnobApplicationReceipt | None
 
 
 def build_task_memory_scope(
@@ -466,6 +484,7 @@ def _derive_candidates(episode_root: Path) -> tuple[_Candidate, ...]:
                     receipt_sha256=terminal.receipt_sha256,
                     terminal_observation_sha256=terminal.terminal_observation_sha256,
                 ),
+                application_receipt=terminal.application_receipt,
             )
         )
     return tuple(result)
@@ -539,6 +558,8 @@ def _build_entry(sequence: int, previous: str | None, candidate: _Candidate):
         "terminal_observation": candidate.terminal_observation.model_dump(mode="json"),
         "evidence": candidate.evidence.model_dump(mode="json"),
     }
+    if candidate.application_receipt is not None:
+        payload["application_receipt"] = candidate.application_receipt.model_dump(mode="json")
     return OptimizationTaskMemoryEntry(
         sequence=sequence,
         previous_entry_sha256=previous,
@@ -595,6 +616,13 @@ def _summaries(
             "metric_ranges": [item.model_dump(mode="json") for item in ranges],
             "evidence_refs": [entry.evidence.model_dump(mode="json") for entry in group],
         }
+        receipts = [
+            entry.application_receipt.model_dump(mode="json")
+            for entry in group
+            if entry.application_receipt is not None
+        ]
+        if receipts:
+            payload["application_receipts"] = receipts
         result.append(
             OptimizationTaskMemorySummary(
                 reference=OptimizationTaskMemoryReference(

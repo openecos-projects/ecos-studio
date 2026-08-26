@@ -14,6 +14,7 @@ from ecos_agent.optimization_contracts import (
     EpisodeBudget,
     ExpectedEffectDirection,
     KnowledgeReference,
+    LegalAction,
     ObjectiveMetric,
     ObservationReference,
     OptimizationDecision,
@@ -203,6 +204,8 @@ def _proposal(
     context_ref: dict[str, str] | None = None,
     observation_refs: list[dict[str, str]] | None = None,
     task_memory_refs: list[dict[str, str]] | None = None,
+    knob_id: str = "place.cell_padding_x",
+    direction: StrategyDirection = StrategyDirection.INCREASE,
 ) -> dict[str, object]:
     expected_context = getattr(context, "context_ref")
     expected_observation = getattr(context, "observation_ref")
@@ -221,8 +224,8 @@ def _proposal(
         ),
         "task_memory_refs": task_memory_refs or [],
         "action": {
-            "knob_id": "place.cell_padding_x",
-            "direction": StrategyDirection.INCREASE,
+            "knob_id": knob_id,
+            "direction": direction,
             "expected_effects": [
                 {
                     "metric_id": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
@@ -289,6 +292,28 @@ def _application_receipt() -> KnobApplicationReceipt:
         ),
         effective_final=AppliedKnobValue(knob_id="place.cell_padding_x", value=400),
         evidence_sha256=HASH,
+    )
+
+
+def _density_receipt(requested: RequestedKnobValue) -> KnobApplicationReceipt:
+    assert requested.knob_id.value == "place.target_density"
+    return KnobApplicationReceipt(
+        receipt_id="receipt-density",
+        requested=requested,
+        written=AppliedKnobValue(knob_id=requested.knob_id, value=requested.value),
+        effective_initial=AppliedKnobValue(
+            knob_id=requested.knob_id, value=0.8
+        ),
+        effective_final=AppliedKnobValue(knob_id=requested.knob_id, value=0.8),
+        evidence_sha256=HASH,
+    )
+
+
+def _density_proposal(context: object) -> dict[str, object]:
+    return _proposal(
+        context,
+        knob_id="place.target_density",
+        direction=StrategyDirection.INCREASE,
     )
 
 
@@ -743,6 +768,118 @@ def test_controller_persists_effective_value_receipt_in_terminal_ledger(tmp_path
     outcome = controller.ledger.replay().terminal_outcomes[0]
     assert outcome.application_receipt is not None
     assert outcome.application_receipt.effective_final.value == 400
+
+
+def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_density_proposal),
+        _FakeEcc(_started()),
+    )
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert first.requested is not None
+    controller.execute()
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.DEGRADED,
+            application_receipt=_density_receipt(first.requested),
+        ),
+        incumbent_decision="incumbent_retained",
+    )
+
+    def stop(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal.update(
+            decision=OptimizationDecision.STOP,
+            reason_code=ProposalReason.NO_LEGAL_CANDIDATE,
+        )
+        proposal.pop("action")
+        return proposal
+
+    planner = _FakeCodex(stop, stop)
+    monkeypatch.setattr(
+        "ecos_agent.optimization_controller.legal_actions",
+        lambda **_: (
+            LegalAction(
+                knob_id="place.target_density",
+                direction=StrategyDirection.INCREASE,
+            ),
+        ),
+    )
+    recovered = OptimizationEpisodeController.recover(
+        planner=planner,
+        executor=_FakeEcc(),
+        ledger=controller.ledger,
+        clock=_Clock(),
+    )
+    deferred = recovered.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    planned = recovered.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    context = planner.contexts[0]
+    assert context.history[0].application_receipt is not None
+    assert context.history[0].application_receipt.effective_initial.value == 0.8
+    assert tuple(item.value for item in context.known_ineffective_requests) == tuple(
+        round(0.1 + 0.05 * index, 2) for index in range(14)
+    )
+    assert (
+        "place.target_density",
+        StrategyDirection.DECREASE,
+    ) not in tuple((item.knob_id.value, item.direction) for item in context.legal_actions)
+    assert deferred.state == OptimizationEpisodeState.PLANNING
+    assert planned.rejection_reason == "controlled_coordinate_fallback"
+    assert planned.requested == RequestedKnobValue(
+        knob_id="place.target_density", value=0.85
+    )
+
+
+def test_promoting_another_knob_invalidates_the_density_floor(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_density_proposal, _proposal, _density_proposal),
+        _FakeEcc(_started("execution-1"), _started("execution-2")),
+    )
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert first.requested is not None
+    controller.execute()
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.DEGRADED,
+            application_receipt=_density_receipt(first.requested),
+        ),
+        incumbent_decision="incumbent_retained",
+    )
+    second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert second.requested == RequestedKnobValue(
+        knob_id="place.cell_padding_x", value=3
+    )
+    controller.execute()
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-2",
+            started=True,
+            outcome=OptimizationOutcomeKind.IMPROVED,
+            application_receipt=_application_receipt(),
+        ),
+        incumbent_decision="candidate_better",
+    )
+
+    planned = controller.plan(
+        _observation(),
+        _retrieval(),
+        {**CURRENT_VALUES, "place.cell_padding_x": 3},
+    )
+
+    assert controller.planner.contexts[2].known_ineffective_requests == ()
+    assert planned.requested == RequestedKnobValue(
+        knob_id="place.target_density", value=0.75
+    )
 
 
 def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_path: Path) -> None:

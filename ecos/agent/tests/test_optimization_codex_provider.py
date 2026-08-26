@@ -12,8 +12,11 @@ from ecos_agent.codex_provider import (
 )
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
+    AppliedKnobValue,
     ExpectedEffectDirection,
     HistoryReference,
+    KnobApplicationReceipt,
+    LegalAction,
     KnowledgeReference,
     ObjectiveMetric,
     ObservationReference,
@@ -43,13 +46,23 @@ def _provider(tmp_path: Path) -> CodexAppServerProposalProvider:
 
 
 def _context() -> OptimizationPlanningContext:
+    receipt = KnobApplicationReceipt(
+        receipt_id="receipt-density",
+        requested=RequestedKnobValue(knob_id="place.target_density", value=0.2),
+        written=AppliedKnobValue(knob_id="place.target_density", value=0.2),
+        effective_initial=AppliedKnobValue(
+            knob_id="place.target_density", value=0.8
+        ),
+        effective_final=AppliedKnobValue(knob_id="place.target_density", value=0.8),
+        evidence_sha256=HASH,
+    )
     history = OptimizationHistory(
         reference=HistoryReference(
             intervention_id="intervention-1", outcome_sha256=HASH
         ),
         outcome=OptimizationOutcomeKind.DEGRADED,
         action=ProposalAction(
-            knob_id="place.cell_padding_x",
+            knob_id="place.target_density",
             direction=StrategyDirection.INCREASE,
             expected_effects=(
                 {
@@ -58,7 +71,8 @@ def _context() -> OptimizationPlanningContext:
                 },
             ),
         ),
-        requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=2),
+        requested=RequestedKnobValue(knob_id="place.target_density", value=0.2),
+        application_receipt=receipt,
     )
     return OptimizationPlanningContext(
         context_ref=ProposalContextRef(
@@ -75,6 +89,31 @@ def _context() -> OptimizationPlanningContext:
             KnowledgeReference(entity_id="strategy-1", chunk_sha256=CHUNK_HASH),
         ),
         knowledge_chunks=("Use the bounded audited congestion strategy.",),
+        legal_actions=(
+            LegalAction(
+                knob_id="place.target_density",
+                direction=StrategyDirection.INCREASE,
+            ),
+        ),
+        known_ineffective_requests=tuple(
+            RequestedKnobValue(knob_id="place.target_density", value=value)
+            for value in (
+                0.1,
+                0.15,
+                0.2,
+                0.25,
+                0.3,
+                0.35,
+                0.4,
+                0.45,
+                0.5,
+                0.55,
+                0.6,
+                0.65,
+                0.7,
+                0.75,
+            )
+        ),
     )
 
 
@@ -126,11 +165,17 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
         "knowledge_refs",
         "knowledge_chunks",
         "legal_actions",
+        "known_ineffective_requests",
         "objective",
     }
     assert "workspace" not in captured["user"]
     assert "specific parameter values" in captured["system"]
     assert "exactly the supplied observation_ref" in captured["system"]
+    assert "effective values" in captured["system"]
+    assert "known_ineffective_requests" in captured["system"]
+    assert captured["user"]["history"][0]["application_receipt"][
+        "effective_initial"
+    ]["value"] == 0.8
     schema = captured["output_schema"]
     assert schema["required"] == [
         "schema_version",

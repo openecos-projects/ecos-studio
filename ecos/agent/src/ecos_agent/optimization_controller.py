@@ -31,6 +31,7 @@ from ecos_agent.optimization_contracts import (
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
+    OptimizationKnob,
     OptimizationObjectiveContract,
     OptimizationProposal,
     PlanningProviderEvidence,
@@ -61,7 +62,11 @@ from ecos_agent.optimization_ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
-from ecos_agent.optimization_rules import legal_actions, select_requested_value
+from ecos_agent.optimization_rules import (
+    known_ineffective_requests,
+    legal_actions,
+    select_requested_value,
+)
 from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -145,6 +150,7 @@ class OptimizationPlanningContext:
     legal_actions: tuple[LegalAction, ...] = ()
     objective: OptimizationObjectiveContract | None = None
     task_memory: OptimizationTaskMemorySnapshot | None = None
+    known_ineffective_requests: tuple[RequestedKnobValue, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -156,6 +162,24 @@ class OptimizationHistory:
     action: ProposalAction
     requested: RequestedKnobValue
     terminal_observation: TerminalObservation | None = None
+    application_receipt: KnobApplicationReceipt | None = None
+
+
+def _history_payload(item: OptimizationHistory) -> dict[str, object]:
+    payload = {
+        "reference": item.reference.model_dump(mode="json"),
+        "outcome": item.outcome.value,
+        "action": item.action.model_dump(mode="json"),
+        "requested": item.requested.model_dump(mode="json"),
+        "terminal_observation": (
+            item.terminal_observation.model_dump(mode="json")
+            if item.terminal_observation is not None
+            else None
+        ),
+    }
+    if item.application_receipt is not None:
+        payload["application_receipt"] = item.application_receipt.model_dump(mode="json")
+    return payload
 
 
 def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, object]:
@@ -166,20 +190,7 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         "incumbent": (
             context.incumbent.model_dump(mode="json") if context.incumbent is not None else None
         ),
-        "history": [
-            {
-                "reference": item.reference.model_dump(mode="json"),
-                "outcome": item.outcome.value,
-                "action": item.action.model_dump(mode="json"),
-                "requested": item.requested.model_dump(mode="json"),
-                "terminal_observation": (
-                    item.terminal_observation.model_dump(mode="json")
-                    if item.terminal_observation is not None
-                    else None
-                ),
-            }
-            for item in context.history
-        ],
+        "history": [_history_payload(item) for item in context.history],
         "knowledge_refs": [item.model_dump(mode="json") for item in context.knowledge_refs],
         "knowledge_chunks": list(context.knowledge_chunks),
         "objective": (
@@ -193,6 +204,9 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
     if context.current_values is not None:
         payload["current_values"] = dict(sorted(context.current_values.items()))
     payload["legal_actions"] = [item.model_dump(mode="json") for item in context.legal_actions]
+    payload["known_ineffective_requests"] = [
+        item.model_dump(mode="json") for item in context.known_ineffective_requests
+    ]
     if context.task_memory is not None:
         payload["task_memory"] = context.task_memory.model_dump(mode="json")
     return payload
@@ -480,6 +494,7 @@ class OptimizationEpisodeController:
             proposal.action,
             current_values=current_values,
             attempted=self._attempted_requests(),
+            known_aliases=context.known_ineffective_requests,
         )
         if requested is None:
             return self._defer_or_fallback(
@@ -685,6 +700,7 @@ class OptimizationEpisodeController:
         current_values: Mapping[str, bool | int | float],
     ) -> OptimizationPlanningContext:
         history = self._history()
+        ineffective_requests = known_ineffective_requests(self._receipt_lineage())
         task_memory = (
             self._task_memory_supplier()
             if self._task_memory_supplier is not None
@@ -707,6 +723,7 @@ class OptimizationEpisodeController:
         available_actions = legal_actions(
             current_values=current_values,
             attempted=self._attempted_requests(),
+            known_aliases=ineffective_requests,
         )
         observation_ref = ObservationReference(
             observation_id=observation.observation_id,
@@ -745,19 +762,9 @@ class OptimizationEpisodeController:
                         item.model_dump(mode="json") for item in available_actions
                     ],
                     "ledger_head": self.ledger.replay().chain_head_sha256,
-                    "history": [
-                        {
-                            "reference": item.reference.model_dump(mode="json"),
-                            "outcome": item.outcome.value,
-                            "action": item.action.model_dump(mode="json"),
-                            "requested": item.requested.model_dump(mode="json"),
-                            "terminal_observation": (
-                                item.terminal_observation.model_dump(mode="json")
-                                if item.terminal_observation is not None
-                                else None
-                            ),
-                        }
-                        for item in history
+                    "history": [_history_payload(item) for item in history],
+                    "known_ineffective_requests": [
+                        item.model_dump(mode="json") for item in ineffective_requests
                     ],
                     "task_memory": (
                         task_memory.model_dump(mode="json")
@@ -780,6 +787,7 @@ class OptimizationEpisodeController:
             available_actions,
             self._objective,
             task_memory,
+            ineffective_requests,
         )
 
     def _parse_proposal(self, payload: object) -> OptimizationProposal:
@@ -857,9 +865,35 @@ class OptimizationEpisodeController:
                     action=start.proposal_action,
                     requested=start.requested,
                     terminal_observation=outcome.terminal_observation,
+                    application_receipt=outcome.application_receipt,
                 )
             )
         return tuple(history[-6:])
+
+    def _receipt_lineage(self) -> tuple[KnobApplicationReceipt, ...]:
+        replay = self.ledger.replay()
+        starts = {
+            entry.payload.intervention_id: entry.payload
+            for entry in replay.entries
+            if isinstance(entry.payload, OptimizationInterventionStart)
+        }
+        receipts = []
+        for outcome in replay.terminal_outcomes:
+            start = starts[outcome.intervention_id]
+            decision = (
+                outcome.incumbent_decision.value
+                if outcome.incumbent_decision is not None
+                else None
+            )
+            if (
+                decision in {"initialized", "candidate_better"}
+                and start.requested is not None
+                and start.requested.knob_id != OptimizationKnob.TARGET_DENSITY
+            ):
+                receipts.clear()
+            if outcome.application_receipt is not None:
+                receipts.append(outcome.application_receipt)
+        return tuple(receipts)
 
     def _start_once_with_retry(
         self,
@@ -1064,6 +1098,7 @@ class OptimizationEpisodeController:
             fallback.action,
             current_values=context.current_values or {},
             attempted=self._attempted_requests(),
+            known_aliases=context.known_ineffective_requests,
         )
         if requested is None:
             raise OptimizationEpisodeControllerError("local fallback has no legal value")

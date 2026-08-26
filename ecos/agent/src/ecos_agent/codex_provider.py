@@ -285,7 +285,9 @@ class CodexAppServerProposalProvider:
             "workspaces, RPC methods, or execution instructions. observation_refs must contain exactly the "
             "supplied observation_ref, not the incumbent observation. Reference only supplied history and "
             "knowledge identifiers and task-memory summary hashes. Task memory is evidence only; "
-            "local validation selects values and owns execution."
+            "use application receipts and effective values in history, and treat "
+            "known_ineffective_requests as excluded surface values for this context. Local validation "
+            "selects exact values and owns execution."
         )
         output_schema = _optimization_proposal_output_schema()
         envelope_payload = {

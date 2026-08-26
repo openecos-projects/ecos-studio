@@ -12,6 +12,7 @@ from ecos_agent.optimization_contracts import (
     OptimizationObjectiveContract,
     OptimizationObjectiveProposal,
     OptimizationProposal,
+    ProposalAction,
     ProposalContextRef,
     ProposalReason,
     RequestedKnobValue,
@@ -30,8 +31,10 @@ from ecos_agent.optimization_rules import (
     coordinate_value_from_receipt,
     freeze_optimization_objective,
     freeze_routability_objective,
+    known_ineffective_requests,
     legal_actions,
     next_coordinate_selection,
+    select_requested_value,
 )
 from pydantic import ValidationError
 
@@ -367,6 +370,102 @@ def test_density_weight_receipt_keeps_the_requested_search_coordinate() -> None:
     )
 
     assert coordinate_value_from_receipt(receipt, site_width_dbu=200) == 0.001
+
+
+def _target_density_receipt(
+    *,
+    effective_initial: float,
+    effective_final: float,
+    written: float = 0.2,
+) -> KnobApplicationReceipt:
+    adjustments = (
+        (
+            RuntimeAdjustment(
+                effective_value=AppliedKnobValue(
+                    knob_id="place.target_density", value=effective_final
+                ),
+                reason="adaptive_update",
+                evidence_sha256=HASH,
+            ),
+        )
+        if effective_final != effective_initial
+        else ()
+    )
+    return KnobApplicationReceipt(
+        receipt_id="receipt-density",
+        requested=RequestedKnobValue(knob_id="place.target_density", value=0.2),
+        written=AppliedKnobValue(knob_id="place.target_density", value=written),
+        effective_initial=AppliedKnobValue(
+            knob_id="place.target_density", value=effective_initial
+        ),
+        runtime_adjustments=adjustments,
+        effective_final=AppliedKnobValue(
+            knob_id="place.target_density", value=effective_final
+        ),
+        evidence_sha256=HASH,
+    )
+
+
+def test_effective_density_floor_excludes_unreachable_surface_values() -> None:
+    aliases = known_ineffective_requests(
+        (_target_density_receipt(effective_initial=0.8, effective_final=0.85),)
+    )
+
+    assert tuple(item.value for item in aliases) == tuple(
+        round(0.1 + 0.05 * index, 2) for index in range(14)
+    )
+    action = ProposalAction(
+        knob_id="place.target_density",
+        direction=StrategyDirection.INCREASE,
+        expected_effects=(
+            {
+                "metric_id": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+                "direction": "decrease",
+            },
+        ),
+    )
+    assert select_requested_value(
+        action,
+        current_values=_expanded_current(**{"place.target_density": 0.2}),
+        attempted=(RequestedKnobValue(knob_id="place.target_density", value=0.2),),
+        known_aliases=aliases,
+    ) == RequestedKnobValue(knob_id="place.target_density", value=0.85)
+
+
+def test_runtime_density_adjustment_is_not_an_admission_floor() -> None:
+    aliases = known_ineffective_requests(
+        (_target_density_receipt(effective_initial=0.2, effective_final=0.8),)
+    )
+
+    assert aliases == ()
+
+
+def test_density_floor_requires_an_identity_write_mapping() -> None:
+    aliases = known_ineffective_requests(
+        (
+            _target_density_receipt(
+                effective_initial=0.8,
+                effective_final=0.8,
+                written=0.25,
+            ),
+        )
+    )
+
+    assert aliases == ()
+
+
+def test_non_density_receipt_does_not_define_a_density_floor() -> None:
+    applied = AppliedKnobValue(knob_id="place.cell_padding_x", value=400)
+    receipt = KnobApplicationReceipt(
+        receipt_id="receipt-padding",
+        requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=2),
+        written=applied,
+        effective_initial=applied,
+        effective_final=applied,
+        evidence_sha256=HASH,
+    )
+
+    assert known_ineffective_requests((receipt,)) == ()
 
 
 def test_knob_receipt_rejects_a_mismatched_runtime_knob() -> None:

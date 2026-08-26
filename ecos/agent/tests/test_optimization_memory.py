@@ -7,10 +7,12 @@ import pytest
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
+    AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
     GateResult,
+    KnobApplicationReceipt,
     ObjectiveMetric,
     ObservationReference,
     OptimizationDecision,
@@ -118,6 +120,7 @@ def _append_intervention(
     index: int,
     outcome: OptimizationOutcomeKind = OptimizationOutcomeKind.IMPROVED,
     terminal: bool = True,
+    application_receipt: KnobApplicationReceipt | None = None,
 ) -> None:
     context_ref = ProposalContextRef(
         episode_id=scope.episode_id,
@@ -194,6 +197,7 @@ def _append_intervention(
                     observation.model_dump(mode="json")
                 ),
                 terminal_observation=observation,
+                application_receipt=application_receipt,
                 outcome_details_sha256=HASH,
             )
         )
@@ -205,6 +209,18 @@ def _episode(store: OptimizationTaskMemoryStore, scope, *, terminal: bool = True
     store.ensure_episode_scope(root, scope)
     _append_intervention(root, scope, index=1, terminal=terminal)
     return root
+
+
+def _application_receipt(value: int) -> KnobApplicationReceipt:
+    applied = AppliedKnobValue(knob_id="place.cell_padding_x", value=value * 200)
+    return KnobApplicationReceipt(
+        receipt_id=f"receipt-padding-{value}",
+        requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=value),
+        written=applied,
+        effective_initial=applied,
+        effective_final=applied,
+        evidence_sha256=HASH,
+    )
 
 
 def test_memory_promotes_only_terminal_closed_evidence_and_sync_is_idempotent(
@@ -307,6 +323,54 @@ def test_snapshot_is_bounded_compressed_deterministic_and_updates(tmp_path: Path
     updated = store.snapshot()
     assert updated.snapshot_sha256 != first.snapshot_sha256
     assert sum(len(item.evidence_refs) for item in updated.summaries) == 6
+
+
+def test_task_memory_preserves_application_receipts_in_entries_and_summaries(
+    tmp_path: Path,
+) -> None:
+    store = OptimizationTaskMemoryStore(
+        tmp_path / "optimization", _scope("episode-current")
+    )
+    source_scope = _scope("episode-source")
+    root = store.root / source_scope.episode_id
+    store.ensure_episode_scope(root, source_scope)
+    receipt = _application_receipt(1)
+    _append_intervention(root, source_scope, index=1, application_receipt=receipt)
+
+    replay = store.synchronize()
+    snapshot = store.snapshot()
+
+    assert replay.entries[0].application_receipt == receipt
+    assert snapshot.summaries[0].application_receipts == (receipt,)
+    assert store.replay() == replay
+
+
+def test_legacy_task_memory_v1_without_receipt_keeps_its_hash_shape(
+    tmp_path: Path,
+) -> None:
+    store = OptimizationTaskMemoryStore(
+        tmp_path / "optimization", _scope("episode-current")
+    )
+    _episode(store, _scope("episode-source"))
+
+    replay = store.synchronize()
+    record = json.loads(store.store_path.read_text(encoding="utf-8"))
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key not in {"sequence", "previous_entry_sha256", "entry_sha256"}
+    }
+
+    assert "application_receipt" not in payload
+    assert record["entry_sha256"] == canonical_sha256(
+        {
+            "schema_version": "ecos.optimization_task_memory_entry.v1",
+            "sequence": 1,
+            "previous_entry_sha256": None,
+            "payload": payload,
+        }
+    )
+    assert store.replay() == replay
 
 
 def test_memory_store_rejects_hash_tampering(tmp_path: Path) -> None:
