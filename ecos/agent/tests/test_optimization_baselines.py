@@ -52,8 +52,13 @@ def _terminal(violations: float, overflow: float, wirelength: float) -> Terminal
 def _values() -> dict[str, bool | int | float]:
     return {
         "place.target_density": 0.2,
+        "place.target_overflow": 0.1,
         "place.cell_padding_x": 2,
         "place.routability_opt": True,
+        "place.density_weight": 0.00085,
+        "floorplan.core_util": 0.6,
+        "floorplan.aspect_ratio": 1.0,
+        "synth.max_fanout": 32,
     }
 
 
@@ -172,11 +177,11 @@ def test_controlled_coordinate_reuses_fixed_direction_order_without_duplicates()
         values[selection.requested.knob_id.value] = selection.requested.value
 
     assert [item.action.knob_id.value for item in selections[:5]] == [
-        "place.target_density",
-        "place.target_density",
-        "place.cell_padding_x",
-        "place.cell_padding_x",
-        "place.routability_opt",
+        "floorplan.core_util",
+        "floorplan.core_util",
+        "floorplan.aspect_ratio",
+        "floorplan.aspect_ratio",
+        "synth.max_fanout",
     ]
     assert len({(item.requested.knob_id, item.requested.value) for item in selections}) == 20
 

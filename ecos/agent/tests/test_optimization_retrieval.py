@@ -19,12 +19,13 @@ HASH = "sha256:" + "a" * 64
 
 
 class _FakeRetriever:
-    def __init__(self, entity_id: str) -> None:
+    def __init__(self, entity_id: str, stages: tuple[str, ...]) -> None:
         self.entity_id = entity_id
+        self.stages = stages
         self.queries: list[str] = []
 
     def reply_for_stages(self, query: str, stages: tuple[str, ...]) -> object:
-        assert stages == ("place",)
+        assert stages == self.stages
         self.queries.append(query)
         return SimpleNamespace(
             text=f"answer for {self.entity_id}",
@@ -60,8 +61,10 @@ def test_retrieval_request_carries_frozen_objective_metrics() -> None:
 
 
 def test_fixed_objective_query_reaches_tool_and_general_channels() -> None:
-    tool = _FakeRetriever("tool.place.objective.v1")
-    general = _FakeRetriever("general.objective.v1")
+    tool = _FakeRetriever(
+        "tool.place.objective.v1", ("floorplan", "fixfanout", "place")
+    )
+    general = _FakeRetriever("general.objective.v1", ("floorplan", "place"))
     retriever = OptimizationKnowledgeRetriever(tool_retriever=tool, general_retriever=general)
     request = build_optimization_retrieval_request(
         task_id="task-1",

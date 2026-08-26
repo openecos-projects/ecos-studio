@@ -35,8 +35,13 @@ KnobScalar = StrictBool | StrictInt | StrictFloat
 
 class OptimizationKnob(StrEnum):
     TARGET_DENSITY = "place.target_density"
+    TARGET_OVERFLOW = "place.target_overflow"
     CELL_PADDING_X = "place.cell_padding_x"
     ROUTABILITY_OPT = "place.routability_opt"
+    DENSITY_WEIGHT = "place.density_weight"
+    FLOORPLAN_CORE_UTIL = "floorplan.core_util"
+    FLOORPLAN_ASPECT_RATIO = "floorplan.aspect_ratio"
+    SYNTH_MAX_FANOUT = "synth.max_fanout"
 
 
 class ObjectiveMetric(StrEnum):
@@ -206,8 +211,7 @@ class LegalAction(_ContractModel):
 
     @model_validator(mode="after")
     def validate_direction(self) -> "LegalAction":
-        numeric = {OptimizationKnob.TARGET_DENSITY, OptimizationKnob.CELL_PADDING_X}
-        if self.knob_id in numeric and self.direction not in {
+        if self.knob_id != OptimizationKnob.ROUTABILITY_OPT and self.direction not in {
             StrategyDirection.INCREASE,
             StrategyDirection.DECREASE,
         }:
@@ -399,10 +403,12 @@ class ProposalAction(_ContractModel):
 
     @model_validator(mode="after")
     def validate_direction(self) -> "ProposalAction":
-        numeric_knobs = {OptimizationKnob.TARGET_DENSITY, OptimizationKnob.CELL_PADDING_X}
         numeric_directions = {StrategyDirection.INCREASE, StrategyDirection.DECREASE}
         boolean_directions = {StrategyDirection.ENABLE, StrategyDirection.DISABLE}
-        if self.knob_id in numeric_knobs and self.direction not in numeric_directions:
+        if (
+            self.knob_id != OptimizationKnob.ROUTABILITY_OPT
+            and self.direction not in numeric_directions
+        ):
             raise ValueError("numeric knobs require increase or decrease")
         if (
             self.knob_id == OptimizationKnob.ROUTABILITY_OPT
@@ -461,15 +467,29 @@ class RequestedKnobValue(_ContractModel):
 
     @model_validator(mode="after")
     def validate_lattice_value(self) -> "RequestedKnobValue":
-        if self.knob_id == OptimizationKnob.TARGET_DENSITY:
+        if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
+            if type(self.value) is not bool:
+                raise ValueError("routability optimization must be a boolean")
+        elif self.knob_id in {
+            OptimizationKnob.CELL_PADDING_X,
+            OptimizationKnob.SYNTH_MAX_FANOUT,
+        }:
+            lattice = (0, 1, 2, 3) if self.knob_id == OptimizationKnob.CELL_PADDING_X else (
+                8,
+                16,
+                20,
+                24,
+                32,
+                48,
+                64,
+            )
+            label = "cell padding" if self.knob_id == OptimizationKnob.CELL_PADDING_X else "max fanout"
+            if type(self.value) is not int or self.value not in lattice:
+                raise ValueError(f"{label} is outside the frozen lattice")
+        else:
             valid = type(self.value) in {int, float} and not isinstance(self.value, bool)
-            if not valid or not _is_density_lattice_value(float(self.value)):
-                raise ValueError("target density is outside the frozen lattice")
-        elif self.knob_id == OptimizationKnob.CELL_PADDING_X:
-            if type(self.value) is not int or not 0 <= self.value <= 3:
-                raise ValueError("cell padding must be a logical site count from 0 to 3")
-        elif type(self.value) is not bool:
-            raise ValueError("routability optimization must be a boolean")
+            if not valid or not _is_requested_lattice_value(self.knob_id, float(self.value)):
+                raise ValueError(f"{self.knob_id.value} is outside the frozen lattice")
         return self
 
 
@@ -479,15 +499,36 @@ class AppliedKnobValue(_ContractModel):
 
     @model_validator(mode="after")
     def validate_effective_value(self) -> "AppliedKnobValue":
-        if self.knob_id == OptimizationKnob.TARGET_DENSITY:
-            valid = type(self.value) in {int, float} and not isinstance(self.value, bool)
-            if not valid or not 0 < float(self.value) <= 1 or not math.isfinite(float(self.value)):
-                raise ValueError("effective target density is invalid")
-        elif self.knob_id == OptimizationKnob.CELL_PADDING_X:
+        if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
+            if type(self.value) is not bool:
+                raise ValueError("effective routability optimization must be a boolean")
+            return self
+        if self.knob_id in {
+            OptimizationKnob.CELL_PADDING_X,
+            OptimizationKnob.SYNTH_MAX_FANOUT,
+        }:
+            minimum = 0 if self.knob_id == OptimizationKnob.CELL_PADDING_X else 1
             if type(self.value) is not int or self.value < 0:
-                raise ValueError("effective cell padding must be a non-negative DBU value")
-        elif type(self.value) is not bool:
-            raise ValueError("effective routability optimization must be a boolean")
+                raise ValueError("effective integer knob value is invalid")
+            if self.value < minimum:
+                raise ValueError("effective integer knob value is invalid")
+            return self
+        valid = type(self.value) in {int, float} and not isinstance(self.value, bool)
+        if not valid or not math.isfinite(float(self.value)):
+            raise ValueError("effective numeric knob value is invalid")
+        value = float(self.value)
+        if self.knob_id in {
+            OptimizationKnob.TARGET_DENSITY,
+            OptimizationKnob.FLOORPLAN_CORE_UTIL,
+        } and not 0 < value <= 1:
+            raise ValueError("effective bounded ratio is invalid")
+        if self.knob_id == OptimizationKnob.TARGET_OVERFLOW and not 0 <= value <= 1:
+            raise ValueError("effective target overflow is invalid")
+        if self.knob_id in {
+            OptimizationKnob.DENSITY_WEIGHT,
+            OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+        } and value <= 0:
+            raise ValueError("effective positive knob value is invalid")
         return self
 
 
@@ -913,6 +954,14 @@ class TimingGuardrailContract(_ContractModel):
         return next(item.reference_value for item in self.references if item.metric_id == metric_id)
 
 
-def _is_density_lattice_value(value: float) -> bool:
-    lattice_index = (value - 0.1) / 0.05
-    return 0.1 <= value <= 0.95 and math.isclose(lattice_index, round(lattice_index), abs_tol=1e-9)
+_REQUESTED_LATTICES = {
+    OptimizationKnob.TARGET_DENSITY: tuple(round(0.1 + 0.05 * index, 2) for index in range(18)),
+    OptimizationKnob.TARGET_OVERFLOW: (0.06, 0.07, 0.08, 0.09, 0.1),
+    OptimizationKnob.DENSITY_WEIGHT: (0.0001, 0.00025, 0.0005, 0.00085, 0.001, 0.0025, 0.005),
+    OptimizationKnob.FLOORPLAN_CORE_UTIL: (0.4, 0.5, 0.6, 0.7, 0.8),
+    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: (0.5, 0.75, 1.0, 1.33, 2.0),
+}
+
+
+def _is_requested_lattice_value(knob_id: OptimizationKnob, value: float) -> bool:
+    return any(math.isclose(value, item, abs_tol=1e-12) for item in _REQUESTED_LATTICES[knob_id])

@@ -9,6 +9,7 @@ from typing import Iterable, Mapping
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
+    KnobApplicationReceipt,
     MetricReference,
     ObjectiveMetric,
     LegalAction,
@@ -25,13 +26,21 @@ from ecos_agent.optimization_contracts import (
     StrategyDirection,
     TerminalObservation,
     TimingGuardrailContract,
-    TimingMetric,
     TimingReference,
 )
 
 
 _DENSITY_VALUES = tuple(round(0.1 + 0.05 * index, 2) for index in range(18))
 _PADDING_VALUES = (0, 1, 2, 3)
+_LATTICE_VALUES = {
+    OptimizationKnob.TARGET_DENSITY: _DENSITY_VALUES,
+    OptimizationKnob.TARGET_OVERFLOW: (0.06, 0.07, 0.08, 0.09, 0.1),
+    OptimizationKnob.CELL_PADDING_X: _PADDING_VALUES,
+    OptimizationKnob.DENSITY_WEIGHT: (0.0001, 0.00025, 0.0005, 0.00085, 0.001, 0.0025, 0.005),
+    OptimizationKnob.FLOORPLAN_CORE_UTIL: (0.4, 0.5, 0.6, 0.7, 0.8),
+    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: (0.5, 0.75, 1.0, 1.33, 2.0),
+    OptimizationKnob.SYNTH_MAX_FANOUT: (8, 16, 20, 24, 32, 48, 64),
+}
 _DRC_GOAL_MARKERS = (
     "drc",
     "design rule",
@@ -77,12 +86,33 @@ class CoordinateSelection:
 
 
 CONTROLLED_COORDINATE_ORDER = (
+    CoordinateAction(OptimizationKnob.FLOORPLAN_CORE_UTIL, CoordinateDirection.DECREASE),
+    CoordinateAction(OptimizationKnob.FLOORPLAN_CORE_UTIL, CoordinateDirection.INCREASE),
+    CoordinateAction(OptimizationKnob.FLOORPLAN_ASPECT_RATIO, CoordinateDirection.DECREASE),
+    CoordinateAction(OptimizationKnob.FLOORPLAN_ASPECT_RATIO, CoordinateDirection.INCREASE),
+    CoordinateAction(OptimizationKnob.SYNTH_MAX_FANOUT, CoordinateDirection.DECREASE),
+    CoordinateAction(OptimizationKnob.SYNTH_MAX_FANOUT, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.TARGET_DENSITY, CoordinateDirection.DECREASE),
     CoordinateAction(OptimizationKnob.TARGET_DENSITY, CoordinateDirection.INCREASE),
+    CoordinateAction(OptimizationKnob.TARGET_OVERFLOW, CoordinateDirection.DECREASE),
+    CoordinateAction(OptimizationKnob.TARGET_OVERFLOW, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.CELL_PADDING_X, CoordinateDirection.DECREASE),
     CoordinateAction(OptimizationKnob.CELL_PADDING_X, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.ROUTABILITY_OPT, CoordinateDirection.TOGGLE),
+    CoordinateAction(OptimizationKnob.DENSITY_WEIGHT, CoordinateDirection.DECREASE),
+    CoordinateAction(OptimizationKnob.DENSITY_WEIGHT, CoordinateDirection.INCREASE),
 )
+
+
+def coordinate_value_from_receipt(
+    receipt: KnobApplicationReceipt, *, site_width_dbu: int
+) -> bool | int | float:
+    if type(site_width_dbu) is not int or site_width_dbu <= 0:
+        raise ValueError("site width is invalid")
+    if receipt.requested.knob_id == OptimizationKnob.DENSITY_WEIGHT:
+        return receipt.requested.value
+    value = receipt.effective_final.value
+    return value / site_width_dbu if receipt.requested.knob_id == OptimizationKnob.CELL_PADDING_X else value
 
 
 def legal_actions(
@@ -305,13 +335,9 @@ def _current_value(
     if knob_id.value not in current_values:
         raise ValueError(f"current value is missing: {knob_id.value}")
     value = current_values[knob_id.value]
-    if knob_id == OptimizationKnob.TARGET_DENSITY:
-        if (
-            type(value) not in {int, float}
-            or isinstance(value, bool)
-            or not 0.1 <= float(value) <= 0.95
-        ):
-            raise ValueError("current target density is invalid")
+    if knob_id == OptimizationKnob.ROUTABILITY_OPT:
+        if type(value) is not bool:
+            raise ValueError("current routability optimization value is invalid")
     elif knob_id == OptimizationKnob.CELL_PADDING_X:
         if (
             type(value) not in {int, float}
@@ -320,8 +346,17 @@ def _current_value(
             or not 0 <= float(value) <= 3
         ):
             raise ValueError("current cell padding site count is invalid")
-    elif type(value) is not bool:
-        raise ValueError("current routability optimization value is invalid")
+    elif knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:
+        if type(value) is not int or value < 1:
+            raise ValueError("current max fanout is invalid")
+    elif type(value) not in {int, float} or isinstance(value, bool) or not math.isfinite(float(value)):
+        raise ValueError(f"current numeric value is invalid: {knob_id.value}")
+    elif knob_id in {OptimizationKnob.TARGET_DENSITY, OptimizationKnob.FLOORPLAN_CORE_UTIL} and not 0 < float(value) <= 1:
+        raise ValueError(f"current bounded ratio is invalid: {knob_id.value}")
+    elif knob_id == OptimizationKnob.TARGET_OVERFLOW and not 0 <= float(value) <= 1:
+        raise ValueError("current target overflow is invalid")
+    elif knob_id in {OptimizationKnob.DENSITY_WEIGHT, OptimizationKnob.FLOORPLAN_ASPECT_RATIO} and float(value) <= 0:
+        raise ValueError(f"current positive value is invalid: {knob_id.value}")
     return value
 
 
@@ -330,11 +365,7 @@ def _directional_lattice_values(
     current: bool | int | float,
     known: tuple[RequestedKnobValue, ...] = (),
 ) -> tuple[float | int, ...]:
-    values = (
-        _DENSITY_VALUES
-        if action.knob_id == OptimizationKnob.TARGET_DENSITY
-        else _PADDING_VALUES
-    )
+    values = _LATTICE_VALUES[action.knob_id]
     candidates = (
         tuple(value for value in reversed(values) if value < current)
         if action.direction == CoordinateDirection.DECREASE

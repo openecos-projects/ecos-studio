@@ -146,8 +146,13 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
     ]
     assert schema["$defs"]["OptimizationKnob"]["enum"] == [
         "place.target_density",
+        "place.target_overflow",
         "place.cell_padding_x",
         "place.routability_opt",
+        "place.density_weight",
+        "floorplan.core_util",
+        "floorplan.aspect_ratio",
+        "synth.max_fanout",
     ]
 
 

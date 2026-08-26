@@ -23,6 +23,7 @@ from ecos_agent.optimization_baselines import (
 )
 from ecos_agent.optimization_contracts import (
     CANDIDATE_EXECUTION_LIMIT,
+    KnobScalar,
     ObjectiveMetric,
     OptimizationKnob,
     RequestedKnobValue,
@@ -42,6 +43,8 @@ from ecos_agent.optimization_gate0 import (
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_observations import build_terminal_observation
+from ecos_agent.optimization_rules import coordinate_value_from_receipt
+from ecos_agent.optimization_runtime import _current_values
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _PILOT_DESIGNS = frozenset({"gcd", "i2c"})
@@ -59,6 +62,7 @@ class BaselineRunnerError(RuntimeError):
 class BaselineCandidateExecution:
     observation: TerminalObservation
     candidate_root_ref: str
+    effective_value: KnobScalar | None = None
 
 
 @dataclass(frozen=True)
@@ -135,7 +139,11 @@ def evaluate_online_method(
                 first_improvement = first_improvement or turn_index + 1
                 incumbent = execution.observation
                 parent_candidate_root_ref = execution.candidate_root_ref
-                values[selection.requested.knob_id.value] = selection.requested.value
+                values[selection.requested.knob_id.value] = (
+                    execution.effective_value
+                    if execution.effective_value is not None
+                    else selection.requested.value
+                )
         row["success_by_candidate"] = success
         rows.append(row)
     return {
@@ -451,15 +459,26 @@ def _run_online_method(
         evidence = result.receipt.evidence
         if evidence is None:
             raise BaselineRunnerError("successful candidate evidence is missing")
+        application = result.receipt.application_receipt
+        if application is None:
+            raise BaselineRunnerError("successful candidate application receipt is missing")
+        effective_value = coordinate_value_from_receipt(
+            application,
+            site_width_dbu=readiness["pdk"]["site_width_dbu"],
+        )
         return BaselineCandidateExecution(
-            result.observation, evidence.candidate_root_ref
+            result.observation,
+            evidence.candidate_root_ref,
+            effective_value,
         )
 
     summary = evaluate_online_method(
         method,
         design_id=design_id,
         baseline=baseline,
-        current_values=_baseline_values(config),
+        current_values=_current_values(
+            workspace, readiness["pdk"]["site_width_dbu"]
+        ),
         epsilon=epsilon,
         random_seed=random_seed,
         execute=execute,
@@ -505,14 +524,6 @@ def _terminal_metrics(observation: TerminalObservation) -> dict[str, float]:
     return {
         **{metric.value: float(observation.metrics[metric]) for metric in ObjectiveMetric},
         **{metric.value: float(observation.timing_guardrail[metric]) for metric in TimingMetric},
-    }
-
-
-def _baseline_values(config: Gate0Config) -> dict[str, bool | int | float]:
-    return {
-        OptimizationKnob.TARGET_DENSITY.value: config.baseline.target_density,
-        OptimizationKnob.CELL_PADDING_X.value: config.baseline.cell_padding_sites,
-        OptimizationKnob.ROUTABILITY_OPT.value: config.baseline.routability_opt,
     }
 
 

@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.optimization_contracts import (
+    AppliedKnobValue,
     ExpectedEffectDirection,
+    KnobApplicationReceipt,
     KnowledgeReference,
     ObjectiveMetric,
     ObservationReference,
@@ -162,6 +164,34 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
             },
         )
     ]
+
+
+@pytest.mark.parametrize(
+    "knob_id,value,direction,target_step",
+    [
+        ("floorplan.core_util", 0.6, StrategyDirection.INCREASE, "Floorplan"),
+        ("floorplan.aspect_ratio", 1.33, StrategyDirection.INCREASE, "Floorplan"),
+        ("synth.max_fanout", 24, StrategyDirection.DECREASE, "fixFanout"),
+        ("place.target_overflow", 0.08, StrategyDirection.DECREASE, "place"),
+        ("place.density_weight", 0.001, StrategyDirection.INCREASE, "place"),
+    ],
+)
+def test_adapter_routes_each_knob_from_its_own_stage(
+    knob_id: str,
+    value: int | float,
+    direction: StrategyDirection,
+    target_step: str,
+) -> None:
+    rpc = _FakeEccRpc(_running_operation())
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    adapter.start(_request(knob_id, value, direction))
+
+    assert rpc.calls[0][1]["targetStep"] == target_step
+    assert rpc.calls[0][1]["endStep"] == "Harden"
+    assert rpc.calls[0][1]["patch"] == [{"knob_id": knob_id, "value": value}]
 
 
 def test_adapter_reruns_from_the_incumbent_candidate_workspace() -> None:
@@ -319,6 +349,49 @@ def test_adapter_binds_and_returns_effective_value_receipt() -> None:
 
     assert receipt.application_receipt is not None
     assert receipt.application_receipt.effective_final.value == 0.65
+
+
+def test_adapter_builds_a_missing_success_receipt_from_candidate_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    terminal = {
+        "operationId": "operation-1",
+        "workspaceId": "workspace-1",
+        "state": "succeeded",
+        "result": {
+            "candidateRootRef": ".agent/candidates/candidate-1",
+            "candidateManifestRef": (
+                ".agent/candidates/candidate-1/analysis/candidate_workspace.v1.json"
+            ),
+            "candidateManifestSha256": HASH,
+        },
+    }
+    rpc = _FakeEccRpc(_running_operation(), terminal_response=terminal)
+    requested = RequestedKnobValue(knob_id="place.target_density", value=0.65)
+    applied = AppliedKnobValue(knob_id=requested.knob_id, value=0.65)
+    expected = KnobApplicationReceipt(
+        receipt_id="receipt-1",
+        requested=requested,
+        written=applied,
+        effective_initial=applied,
+        effective_final=applied,
+        evidence_sha256=HASH,
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization_gate0_receipts.build_materialization_application_receipt",
+        lambda *_args, **_kwargs: expected,
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc,
+        workspace_id="workspace-1",
+        site_width_dbu=200,
+        workspace_root=tmp_path,
+    )
+
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+    receipt = adapter.wait_for_terminal("operation-1")
+
+    assert receipt.application_receipt == expected
 
 
 def test_adapter_rejects_an_application_receipt_with_wrong_request_or_written_value() -> None:

@@ -3,7 +3,6 @@ from ecos_agent.optimization_contracts import (
     AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
-    ExpectedEffect,
     GateResult,
     KnobApplicationReceipt,
     KnowledgeReference,
@@ -13,7 +12,6 @@ from ecos_agent.optimization_contracts import (
     OptimizationObjectiveContract,
     OptimizationObjectiveProposal,
     OptimizationProposal,
-    ProposalAction,
     ProposalContextRef,
     ProposalReason,
     RequestedKnobValue,
@@ -28,6 +26,7 @@ from ecos_agent.optimization_contracts import (
 from ecos_agent.optimization_rules import (
     IncumbentDecision,
     compare_incumbent,
+    coordinate_value_from_receipt,
     freeze_optimization_objective,
     freeze_routability_objective,
     legal_actions,
@@ -37,6 +36,38 @@ from pydantic import ValidationError
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
+
+
+def _expanded_current(**overrides: object) -> dict[str, object]:
+    return {
+        "place.target_density": 0.5,
+        "place.target_overflow": 0.1,
+        "place.cell_padding_x": 2,
+        "place.routability_opt": True,
+        "place.density_weight": 0.00085,
+        "floorplan.core_util": 0.6,
+        "floorplan.aspect_ratio": 1.0,
+        "synth.max_fanout": 32,
+        **overrides,
+    }
+
+
+def _all_requested_values() -> tuple[RequestedKnobValue, ...]:
+    lattices = {
+        "place.target_density": tuple(round(0.1 + 0.05 * index, 2) for index in range(18)),
+        "place.target_overflow": (0.06, 0.07, 0.08, 0.09, 0.1),
+        "place.cell_padding_x": (0, 1, 2, 3),
+        "place.routability_opt": (False, True),
+        "place.density_weight": (0.0001, 0.00025, 0.0005, 0.00085, 0.001, 0.0025, 0.005),
+        "floorplan.core_util": (0.4, 0.5, 0.6, 0.7, 0.8),
+        "floorplan.aspect_ratio": (0.5, 0.75, 1.0, 1.33, 2.0),
+        "synth.max_fanout": (8, 16, 20, 24, 32, 48, 64),
+    }
+    return tuple(
+        RequestedKnobValue(knob_id=knob_id, value=value)
+        for knob_id, values in lattices.items()
+        for value in values
+    )
 
 
 def _budget() -> EpisodeBudget:
@@ -256,8 +287,13 @@ def test_natural_language_objective_rejects_primary_preserve_overlap() -> None:
 
 def test_requested_lattice_uses_logical_padding_sites() -> None:
     assert RequestedKnobValue(knob_id="place.target_density", value=0.15).value == 0.15
+    assert RequestedKnobValue(knob_id="place.target_overflow", value=0.08).value == 0.08
     assert RequestedKnobValue(knob_id="place.cell_padding_x", value=3).value == 3
     assert RequestedKnobValue(knob_id="place.routability_opt", value=True).value is True
+    assert RequestedKnobValue(knob_id="place.density_weight", value=0.00085).value == 0.00085
+    assert RequestedKnobValue(knob_id="floorplan.core_util", value=0.6).value == 0.6
+    assert RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.33).value == 1.33
+    assert RequestedKnobValue(knob_id="synth.max_fanout", value=32).value == 32
 
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="place.target_density", value=0.12)
@@ -265,6 +301,16 @@ def test_requested_lattice_uses_logical_padding_sites() -> None:
         RequestedKnobValue(knob_id="place.cell_padding_x", value=4)
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="place.routability_opt", value="true")
+    with pytest.raises(ValidationError):
+        RequestedKnobValue(knob_id="place.target_overflow", value=0.11)
+    with pytest.raises(ValidationError):
+        RequestedKnobValue(knob_id="place.density_weight", value=0.0008)
+    with pytest.raises(ValidationError):
+        RequestedKnobValue(knob_id="floorplan.core_util", value=0.45)
+    with pytest.raises(ValidationError):
+        RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.5)
+    with pytest.raises(ValidationError):
+        RequestedKnobValue(knob_id="synth.max_fanout", value=30)
 
 
 def test_knob_receipt_binds_requested_written_and_runtime_effective_values() -> None:
@@ -285,6 +331,7 @@ def test_knob_receipt_binds_requested_written_and_runtime_effective_values() -> 
     )
 
     assert receipt.effective_final.value == 200
+    assert coordinate_value_from_receipt(receipt, site_width_dbu=200) == 1
 
     with pytest.raises(ValidationError, match="final value"):
         invalid_receipt = receipt.model_dump()
@@ -292,6 +339,32 @@ def test_knob_receipt_binds_requested_written_and_runtime_effective_values() -> 
             knob_id="place.cell_padding_x", value=400
         )
         KnobApplicationReceipt.model_validate(invalid_receipt)
+
+
+def test_density_weight_receipt_keeps_the_requested_search_coordinate() -> None:
+    receipt = KnobApplicationReceipt(
+        receipt_id="receipt-1",
+        requested=RequestedKnobValue(knob_id="place.density_weight", value=0.001),
+        written=AppliedKnobValue(knob_id="place.density_weight", value=0.001),
+        effective_initial=AppliedKnobValue(
+            knob_id="place.density_weight", value=4.884961e-07
+        ),
+        runtime_adjustments=(
+            RuntimeAdjustment(
+                effective_value=AppliedKnobValue(
+                    knob_id="place.density_weight", value=0.0817526
+                ),
+                reason="adaptive update",
+                evidence_sha256=HASH,
+            ),
+        ),
+        effective_final=AppliedKnobValue(
+            knob_id="place.density_weight", value=0.0817526
+        ),
+        evidence_sha256=HASH,
+    )
+
+    assert coordinate_value_from_receipt(receipt, site_width_dbu=200) == 0.001
 
 
 def test_knob_receipt_rejects_a_mismatched_runtime_knob() -> None:
@@ -315,77 +388,59 @@ def test_knob_receipt_rejects_a_mismatched_runtime_knob() -> None:
 
 def test_coordinate_search_bisects_the_largest_unexplored_density_interval() -> None:
     selection = next_coordinate_selection(
-        current_values={
-            "place.target_density": 0.47,
-            "place.cell_padding_x": 2,
-            "place.routability_opt": True,
-        },
+        current_values=_expanded_current(**{"place.target_density": 0.47}),
         attempted=(),
+        start_action_index=6,
     )
 
     assert selection is not None
     assert selection.requested == RequestedKnobValue(knob_id="place.target_density", value=0.3)
-    assert selection.next_action_index == 1
+    assert selection.next_action_index == 7
 
 
 def test_coordinate_search_uses_attempted_and_alias_values_to_refine_the_interval() -> None:
     selection = next_coordinate_selection(
-        current_values={
-            "place.target_density": 0.5,
-            "place.cell_padding_x": 1,
-            "place.routability_opt": False,
-        },
+        current_values=_expanded_current(
+            **{"place.cell_padding_x": 1, "place.routability_opt": False}
+        ),
         attempted=(RequestedKnobValue(knob_id="place.target_density", value=0.45),),
         known_aliases=(RequestedKnobValue(knob_id="place.target_density", value=0.4),),
+        start_action_index=6,
     )
 
     assert selection is not None
     assert selection.requested == RequestedKnobValue(knob_id="place.target_density", value=0.25)
-    assert selection.next_action_index == 1
+    assert selection.next_action_index == 7
 
 
 def test_coordinate_search_toggles_a_boolean_only_once() -> None:
-    current = {
-        "place.target_density": 0.1,
-        "place.cell_padding_x": 0,
-        "place.routability_opt": False,
-    }
-    selection = next_coordinate_selection(current_values=current, attempted=(), start_action_index=4)
+    current = _expanded_current(
+        **{
+            "place.target_density": 0.1,
+            "place.target_overflow": 0.06,
+            "place.cell_padding_x": 0,
+            "place.routability_opt": False,
+        }
+    )
+    selection = next_coordinate_selection(current_values=current, attempted=(), start_action_index=12)
 
     assert selection is not None
     assert selection.requested == RequestedKnobValue(knob_id="place.routability_opt", value=True)
-    all_numeric_values = tuple(
-        RequestedKnobValue(knob_id="place.target_density", value=value)
-        for value in (0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95)
-    ) + tuple(
-        RequestedKnobValue(knob_id="place.cell_padding_x", value=value) for value in range(4)
-    )
     assert (
         next_coordinate_selection(
             current_values=current,
-            attempted=(*all_numeric_values, selection.requested),
-            start_action_index=4,
+            attempted=_all_requested_values(),
+            start_action_index=6,
         )
         is None
     )
 
 
 def test_coordinate_search_returns_none_when_the_lattice_is_exhausted() -> None:
-    requests = tuple(
-        RequestedKnobValue(knob_id="place.target_density", value=value)
-        for value in (0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95)
-    ) + tuple(
-        RequestedKnobValue(knob_id="place.cell_padding_x", value=value) for value in range(4)
-    ) + (RequestedKnobValue(knob_id="place.routability_opt", value=False),)
-
     assert (
         next_coordinate_selection(
-            current_values={
-                "place.target_density": 0.5,
-                "place.cell_padding_x": 2,
-                "place.routability_opt": True,
-            },
-            attempted=requests,
+            current_values=_expanded_current(),
+            attempted=_all_requested_values(),
         )
         is None
     )
@@ -401,29 +456,32 @@ def test_coordinate_search_rejects_missing_or_invalid_current_values() -> None:
 
 def test_legal_actions_exclude_only_noop_directions() -> None:
     actions = legal_actions(
-        current_values={
-            "place.target_density": 0.2,
-            "place.cell_padding_x": 1.5,
-            "place.routability_opt": True,
-        },
+        current_values=_expanded_current(
+            **{"place.target_density": 0.2, "place.cell_padding_x": 1.5}
+        ),
         attempted=(),
     )
 
     assert [(item.knob_id.value, item.direction.value) for item in actions] == [
+        ("floorplan.core_util", "decrease"),
+        ("floorplan.core_util", "increase"),
+        ("floorplan.aspect_ratio", "decrease"),
+        ("floorplan.aspect_ratio", "increase"),
+        ("synth.max_fanout", "decrease"),
+        ("synth.max_fanout", "increase"),
         ("place.target_density", "decrease"),
         ("place.target_density", "increase"),
+        ("place.target_overflow", "decrease"),
         ("place.cell_padding_x", "decrease"),
         ("place.cell_padding_x", "increase"),
         ("place.routability_opt", "disable"),
+        ("place.density_weight", "decrease"),
+        ("place.density_weight", "increase"),
     ]
 
     with pytest.raises(ValueError, match="site count"):
         next_coordinate_selection(
-            current_values={
-                "place.target_density": 0.5,
-                "place.cell_padding_x": 400,
-                "place.routability_opt": True,
-            },
+            current_values=_expanded_current(**{"place.cell_padding_x": 400}),
             attempted=(),
         )
 

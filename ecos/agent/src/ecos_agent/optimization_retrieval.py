@@ -48,12 +48,16 @@ class OptimizationRetrievalRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["ecos.optimization_retrieval_request.v1"] = (
-        "ecos.optimization_retrieval_request.v1"
+    schema_version: Literal["ecos.optimization_retrieval_request.v2"] = (
+        "ecos.optimization_retrieval_request.v2"
     )
     task_id: str
     current_stage: ECCStepName
-    action_stage: Literal["place"] = "place"
+    action_stages: tuple[ECCStepName, ...] = (
+        ECCStepName.FLOORPLAN,
+        ECCStepName.NETLIST_OPT,
+        ECCStepName.PLACEMENT,
+    )
     observed_metric_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
     observation_status: Literal["success"] = "success"
     previous_intervention_outcome: OptimizationOutcomeKind | None = None
@@ -79,6 +83,12 @@ class OptimizationRetrievalRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_knobs(self) -> "OptimizationRetrievalRequest":
+        if self.action_stages != (
+            ECCStepName.FLOORPLAN,
+            ECCStepName.NETLIST_OPT,
+            ECCStepName.PLACEMENT,
+        ):
+            raise ValueError("retrieval action stages are not frozen")
         if self.allowed_knobs != tuple(OptimizationKnob):
             raise ValueError("retrieval allowed knobs are not frozen")
         if self.primary_metric is not None and self.primary_metric in self.preserve_metrics:
@@ -173,7 +183,12 @@ class OptimizationKnowledgeRetriever:
                 )
                 continue
             query = _fixed_query(request, channel)
-            answer = retriever.reply_for_stages(query, (request.action_stage,))
+            stages = tuple(
+                stage.value.casefold()
+                for stage in request.action_stages
+                if channel == KnowledgeChannel.TOOL or stage != ECCStepName.NETLIST_OPT
+            )
+            answer = retriever.reply_for_stages(query, stages)
             channel_results.append(_channel_result(channel, query, answer, seen_entity_ids))
         references = tuple(ref for item in channel_results for ref in item.knowledge_refs)
         return OptimizationRetrievalResult(request, tuple(channel_results), references)
@@ -220,10 +235,11 @@ def _fixed_query(request: OptimizationRetrievalRequest, channel: KnowledgeChanne
         if request.primary_metric is not None
         else "primary metric default preserve metrics none"
     )
-    knobs = "target density cell padding routability optimization"
-    prefix = "DreamPlace placement" if channel == KnowledgeChannel.TOOL else "congestion strategy"
+    knobs = " ".join(knob.value for knob in request.allowed_knobs)
+    stages = " ".join(stage.value for stage in request.action_stages)
+    prefix = "ECC physical design" if channel == KnowledgeChannel.TOOL else "congestion strategy"
     return (
-        f"{prefix} current stage {request.current_stage.value} action stage {request.action_stage} "
+        f"{prefix} current stage {request.current_stage.value} action stages {stages} "
         f"observation {request.observation_status} metrics {metrics} previous outcome {outcome} "
         f"{objective} legal knobs {knobs}"
     )

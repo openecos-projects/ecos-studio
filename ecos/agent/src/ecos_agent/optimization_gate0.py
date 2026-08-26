@@ -612,7 +612,12 @@ def run_pilot_candidate(
         "requested": request.requested.model_dump(mode="json"),
     })
     recording = _RecordingRpc(client)
-    adapter = EccCandidateRerunAdapter(recording, workspace_id=workspace_id, site_width_dbu=site_width)
+    adapter = EccCandidateRerunAdapter(
+        recording,
+        workspace_id=workspace_id,
+        site_width_dbu=site_width,
+        workspace_root=workspace,
+    )
     started = time.monotonic()
     receipt = adapter.start(request)
     if receipt.outcome is None:

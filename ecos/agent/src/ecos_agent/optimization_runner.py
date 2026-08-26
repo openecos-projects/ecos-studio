@@ -26,6 +26,7 @@ from ecos_agent.optimization_rules import (
     IncumbentComparison,
     IncumbentDecision,
     compare_incumbent,
+    coordinate_value_from_receipt,
 )
 
 
@@ -62,7 +63,10 @@ class OptimizationEpisodeRunner:
         | None = None,
         objective: RoutabilityObjectiveContract | None = None,
         stop_event: threading.Event | None = None,
+        site_width_dbu: int = 1,
     ) -> None:
+        if type(site_width_dbu) is not int or site_width_dbu <= 0:
+            raise OptimizationEpisodeRunnerError("site width is invalid")
         self._controller = controller
         self._observation_supplier = observation_supplier
         self._retrieval_supplier = retrieval_supplier
@@ -71,6 +75,7 @@ class OptimizationEpisodeRunner:
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
         self._stop_event = stop_event or threading.Event()
+        self._site_width_dbu = site_width_dbu
 
     @property
     def state(self) -> OptimizationEpisodeState:
@@ -215,7 +220,13 @@ class OptimizationEpisodeRunner:
         ):
             self._controller.promote_incumbent(candidate, receipt.evidence)
             if requested is not None:
-                self._current_values[requested.knob_id.value] = requested.value
+                value = requested.value
+                if receipt.application_receipt is not None:
+                    value = coordinate_value_from_receipt(
+                        receipt.application_receipt,
+                        site_width_dbu=self._site_width_dbu,
+                    )
+                self._current_values[requested.knob_id.value] = value
 
     def _indeterminate_turn(
         self,

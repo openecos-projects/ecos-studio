@@ -28,6 +28,7 @@ from ecos_agent.optimization_ecc_adapter import (
     EccCandidateRerunAdapter,
     EccContentLengthRpcClient,
 )
+from ecos_agent.optimization_gate0_receipts import place_runtime_coordinate_values
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
@@ -46,7 +47,10 @@ from ecos_agent.optimization_retrieval import (
     OptimizationKnowledgeRetriever,
     build_optimization_retrieval_request,
 )
-from ecos_agent.optimization_rules import freeze_routability_objective
+from ecos_agent.optimization_rules import (
+    coordinate_value_from_receipt,
+    freeze_routability_objective,
+)
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 
 
@@ -54,7 +58,9 @@ class OptimizationRuntimeError(ValueError):
     """The workspace cannot be assembled into a trusted production episode."""
 
 
-_PLACE_TO_HARDEN_STAGES = (
+_OPTIMIZATION_RERUN_STAGES = (
+    "Floorplan",
+    "fixFanout",
     "place",
     "CTS",
     "legalization",
@@ -83,7 +89,7 @@ def create_optimization_runner(
     routability_objective = freeze_routability_objective(terminal_observation)
     budget = BudgetSnapshot(
         budget=EpisodeBudget.from_reference_rerun(
-            _place_to_harden_runtime_seconds(workspace)
+            _optimization_rerun_runtime_seconds(workspace)
         )
     )
     ledger_root = workspace / ".agent" / "optimization" / episode_id
@@ -103,6 +109,7 @@ def create_optimization_runner(
             rpc,
             workspace_id=workspace_id,
             site_width_dbu=site_width_dbu,
+            workspace_root=workspace,
         )
         state_path = ledger_root / "optimization-episode-state.v6.json"
         legacy_state_paths = (
@@ -162,6 +169,7 @@ def create_optimization_runner(
         _incumbent_workspace(workspace, controller.incumbent_candidate_root_ref),
         site_width_dbu,
     )
+    _restore_effective_current_values(current_values, ledger, site_width_dbu)
 
     def observation_supplier(current_budget: BudgetSnapshot):
         return build_stage_observation(workspace, checkpoint_id, budget=current_budget)
@@ -199,6 +207,7 @@ def create_optimization_runner(
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
         stop_event=stop_event,
+        site_width_dbu=site_width_dbu,
     )
 
 
@@ -303,32 +312,32 @@ def _design_id(workspace: Path) -> str:
     return value
 
 
-def _place_to_harden_runtime_seconds(workspace: Path) -> float:
+def _optimization_rerun_runtime_seconds(workspace: Path) -> float:
     try:
         payload = json.loads((workspace / "home" / "flow.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise OptimizationRuntimeError("place-to-Harden flow evidence is unavailable") from exc
+        raise OptimizationRuntimeError("optimization rerun flow evidence is unavailable") from exc
     steps = payload.get("steps")
     if not isinstance(steps, list):
-        raise OptimizationRuntimeError("place-to-Harden flow completion evidence is invalid")
+        raise OptimizationRuntimeError("optimization rerun flow completion evidence is invalid")
     total = 0.0
-    for stage in _PLACE_TO_HARDEN_STAGES:
+    for stage in _OPTIMIZATION_RERUN_STAGES:
         total += _successful_flow_stage_runtime_seconds(steps, stage)
     if total <= 0:
-        raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
+        raise OptimizationRuntimeError("optimization rerun runtime evidence is invalid")
     return total
 
 
 def _successful_flow_stage_runtime_seconds(steps: list[object], stage: str) -> float:
     matches = [item for item in steps if isinstance(item, dict) and item.get("name") == stage]
     if len(matches) != 1 or matches[0].get("state") != "Success":
-        raise OptimizationRuntimeError("place-to-Harden flow completion evidence is invalid")
+        raise OptimizationRuntimeError("optimization rerun flow completion evidence is invalid")
     runtime = matches[0].get("runtime")
     if not isinstance(runtime, str):
-        raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
+        raise OptimizationRuntimeError("optimization rerun runtime evidence is invalid")
     match = re.fullmatch(r"(\d+):(\d+):(\d+)", runtime.strip())
     if match is None:
-        raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
+        raise OptimizationRuntimeError("optimization rerun runtime evidence is invalid")
     hours, minutes, seconds = (int(part) for part in match.groups())
     if minutes >= 60 or seconds >= 60:
         raise OptimizationRuntimeError("place-to-Harden runtime evidence is invalid")
@@ -337,14 +346,35 @@ def _successful_flow_stage_runtime_seconds(steps: list[object], stage: str) -> f
 
 def _current_values(workspace: Path, site_width_dbu: int) -> dict[str, bool | int | float]:
     try:
-        payload = json.loads((workspace / "home" / "parameters.json").read_text(encoding="utf-8"))
+        parameters = json.loads(
+            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
+        )
+        dreamplace = json.loads(
+            (workspace / "config" / "dreamplace_ecc.json").read_text(encoding="utf-8")
+        )
+        fixfanout = json.loads(
+            (workspace / "config" / "fixfanout_ecc.json").read_text(encoding="utf-8")
+        )
         values = {
-            "place.target_density": payload["Target density"],
-            "place.cell_padding_x": payload["Cell padding x"] / site_width_dbu,
-            "place.routability_opt": bool(payload["Routability opt flag"]),
+            "place.target_density": dreamplace["target_density"],
+            "place.target_overflow": dreamplace["stop_overflow"],
+            "place.cell_padding_x": dreamplace["cell_padding_x"] / site_width_dbu,
+            "place.routability_opt": bool(dreamplace["routability_opt_flag"]),
+            "place.density_weight": dreamplace["density_weight"],
+            "floorplan.core_util": parameters["Core"]["Utilitization"],
+            "floorplan.aspect_ratio": parameters["Core"]["Aspect ratio"],
+            "synth.max_fanout": fixfanout["max_fanout"],
         }
+        values.update(
+            place_runtime_coordinate_values(
+                workspace,
+                configured_target_density=dreamplace["target_density"],
+                configured_cell_padding_dbu=dreamplace["cell_padding_x"],
+                site_width_dbu=site_width_dbu,
+            )
+        )
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise OptimizationRuntimeError("placement parameters are invalid") from exc
+        raise OptimizationRuntimeError("optimization parameters are invalid") from exc
     if not isinstance(values["place.target_density"], (int, float)) or isinstance(
         values["place.target_density"], bool
     ):
@@ -352,6 +382,19 @@ def _current_values(workspace: Path, site_width_dbu: int) -> dict[str, bool | in
     if type(values["place.cell_padding_x"]) not in {int, float} or values["place.cell_padding_x"] < 0:
         raise OptimizationRuntimeError("cell padding parameter is invalid")
     return values
+
+
+def _restore_effective_current_values(values, ledger, site_width_dbu: int) -> None:
+    for outcome in ledger.replay().terminal_outcomes:
+        receipt = outcome.application_receipt
+        if (
+            outcome.incumbent_decision not in {"initialized", "candidate_better"}
+            or receipt is None
+        ):
+            continue
+        values[receipt.requested.knob_id.value] = coordinate_value_from_receipt(
+            receipt, site_width_dbu=site_width_dbu
+        )
 
 
 def _ledger(root: Path):

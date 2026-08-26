@@ -19,10 +19,11 @@ from ecos_agent.optimization_runtime import (
     OptimizationRuntimeError,
     _design_id,
     _incumbent_workspace,
+    _current_values,
     _wait_for_terminal_receipt,
     _optimization_objective,
     _parent_manifest_sha256,
-    _place_to_harden_runtime_seconds,
+    _optimization_rerun_runtime_seconds,
     create_optimization_runner,
 )
 from ecos_agent.optimization_controller import CandidateExecutionReceipt
@@ -31,6 +32,8 @@ from ecos_agent.optimization_rules import freeze_optimization_objective
 
 
 _STAGES = (
+    "Floorplan",
+    "fixFanout",
     "place",
     "CTS",
     "legalization",
@@ -94,17 +97,17 @@ def _semantic_objective() -> dict[str, object]:
     ).model_dump(mode="json")
 
 
-def test_place_to_harden_runtime_uses_successful_flow_records(tmp_path: Path) -> None:
+def test_optimization_runtime_uses_the_earliest_rerun_stage(tmp_path: Path) -> None:
     _write_flow(tmp_path)
 
-    assert _place_to_harden_runtime_seconds(tmp_path) == sum(range(10))
+    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(12))
 
 
-def test_place_to_harden_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -> None:
+def test_optimization_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -> None:
     _write_flow(tmp_path, states={"place": "Ongoing"})
 
     with pytest.raises(OptimizationRuntimeError, match="flow completion evidence"):
-        _place_to_harden_runtime_seconds(tmp_path)
+        _optimization_rerun_runtime_seconds(tmp_path)
 
 
 def test_design_id_comes_from_workspace_parameters_and_fails_closed(tmp_path: Path) -> None:
@@ -116,6 +119,54 @@ def test_design_id_comes_from_workspace_parameters_and_fails_closed(tmp_path: Pa
     parameters.write_text(json.dumps({"Design": "../other"}), encoding="utf-8")
     with pytest.raises(OptimizationRuntimeError, match="identifier is invalid"):
         _design_id(tmp_path)
+
+
+def test_current_values_read_the_eight_runtime_knob_surfaces(tmp_path: Path) -> None:
+    (tmp_path / "home").mkdir()
+    (tmp_path / "config").mkdir()
+    (tmp_path / "home" / "parameters.json").write_text(
+        json.dumps(
+            {
+                "Core": {"Utilitization": 0.6, "Aspect ratio": 1.33},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "config" / "dreamplace_ecc.json").write_text(
+        json.dumps(
+            {
+                "target_density": 0.65,
+                "stop_overflow": 0.08,
+                "cell_padding_x": 400,
+                "routability_opt_flag": 1,
+                "density_weight": 0.001,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "config" / "fixfanout_ecc.json").write_text(
+        json.dumps({"max_fanout": 24}), encoding="utf-8"
+    )
+    place_log = tmp_path / "place_dreamplace/log/place.log"
+    place_log.parent.mkdir(parents=True)
+    place_log.write_text(
+        "[INFO] parameters = {'target_density': 0.65, 'cell_padding_x': 400}\n"
+        "utilization = 0.67, target_density = 0.68\n"
+        "[INFO] new target_density 0.72\n"
+        "[WARNING] cell_padding_x 2 would increase movable area; reducing it to 1\n",
+        encoding="utf-8",
+    )
+
+    assert _current_values(tmp_path, 200) == {
+        "place.target_density": 0.72,
+        "place.target_overflow": 0.08,
+        "place.cell_padding_x": 1,
+        "place.routability_opt": True,
+        "place.density_weight": 0.001,
+        "floorplan.core_util": 0.6,
+        "floorplan.aspect_ratio": 1.33,
+        "synth.max_fanout": 24,
+    }
 
 
 def test_incumbent_workspace_resolves_only_registered_candidate_roots(tmp_path: Path) -> None:
@@ -258,7 +309,8 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
         "ecos_agent.optimization_runtime._parent_manifest_sha256", lambda _path, _terminal: _HASH
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime._place_to_harden_runtime_seconds", lambda _path: 10.0
+        "ecos_agent.optimization_runtime._optimization_rerun_runtime_seconds",
+        lambda _path: 10.0,
     )
 
     runner = create_optimization_runner(

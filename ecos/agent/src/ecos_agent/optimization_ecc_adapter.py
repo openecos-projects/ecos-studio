@@ -39,6 +39,11 @@ _ALLOWED_METHODS = frozenset(
     }
 )
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+_TARGET_STEPS = {
+    OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
+    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
+    OptimizationKnob.SYNTH_MAX_FANOUT: "fixFanout",
+}
 
 
 class OptimizationEccAdapterError(RuntimeError):
@@ -62,6 +67,7 @@ class EccCandidateRerunAdapter:
         *,
         workspace_id: str,
         site_width_dbu: int,
+        workspace_root: Path | None = None,
     ) -> None:
         if not _ID.fullmatch(workspace_id):
             raise OptimizationEccAdapterError("workspace id is invalid")
@@ -70,6 +76,9 @@ class EccCandidateRerunAdapter:
         self._rpc = rpc
         self._workspace_id = workspace_id
         self._site_width_dbu = site_width_dbu
+        self._workspace_root = Path(workspace_root).resolve() if workspace_root else None
+        if self._workspace_root is not None and not self._workspace_root.is_dir():
+            raise OptimizationEccAdapterError("workspace root is unavailable")
         self._requested_by_execution_id: dict[str, RequestedKnobValue] = {}
 
     def close(self) -> None:
@@ -102,7 +111,7 @@ class EccCandidateRerunAdapter:
     ) -> CandidateExecutionReceipt:
         params = {
             "workspaceId": self._workspace_id,
-            "targetStep": "place",
+            "targetStep": _TARGET_STEPS.get(requested.knob_id, "place"),
             "endStep": "Harden",
             "candidateId": candidate_id,
             "patch": [patch],
@@ -245,6 +254,31 @@ class EccCandidateRerunAdapter:
     ) -> KnobApplicationReceipt | None:
         result = self._result(response)
         if result is None or "knobApplicationReceipt" not in result:
+            if (
+                state == "succeeded"
+                and requested is not None
+                and self._workspace_root is not None
+            ):
+                evidence = self._evidence(response)
+                if evidence is None:
+                    raise OptimizationEccAdapterError(
+                        "application receipt candidate evidence is missing"
+                    )
+                from ecos_agent.optimization_gate0_receipts import (
+                    build_materialization_application_receipt,
+                )
+
+                try:
+                    return build_materialization_application_receipt(
+                        self._workspace_root,
+                        evidence,
+                        requested,
+                        site_width_dbu=self._site_width_dbu,
+                    )
+                except ValueError as exc:
+                    raise OptimizationEccAdapterError(
+                        "application receipt runtime evidence is invalid"
+                    ) from exc
             return None
         if requested is None:
             raise OptimizationEccAdapterError("application receipt cannot be bound")
@@ -279,9 +313,12 @@ class EccCandidateRerunAdapter:
             if type(value) is not int:
                 raise OptimizationEccAdapterError("cell padding value is invalid")
             value *= self._site_width_dbu
-        elif request.requested.knob_id == OptimizationKnob.TARGET_DENSITY:
+        elif request.requested.knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:
+            if type(value) is not int:
+                raise OptimizationEccAdapterError("max fanout value is invalid")
+        elif request.requested.knob_id != OptimizationKnob.ROUTABILITY_OPT:
             if type(value) not in {int, float} or isinstance(value, bool):
-                raise OptimizationEccAdapterError("target density value is invalid")
+                raise OptimizationEccAdapterError("numeric knob value is invalid")
             value = float(value)
         elif type(value) is not bool:
             raise OptimizationEccAdapterError("routability value is invalid")

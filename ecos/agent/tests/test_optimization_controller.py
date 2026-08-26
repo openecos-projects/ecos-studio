@@ -63,8 +63,13 @@ HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
 CURRENT_VALUES = {
     "place.target_density": 0.2,
+    "place.target_overflow": 0.1,
     "place.cell_padding_x": 2,
     "place.routability_opt": True,
+    "place.density_weight": 0.00085,
+    "floorplan.core_util": 0.6,
+    "floorplan.aspect_ratio": 1.0,
+    "synth.max_fanout": 32,
 }
 
 
