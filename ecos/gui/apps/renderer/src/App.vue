@@ -158,7 +158,7 @@
       modal
       maximizable
       header="Step Configuration"
-      :style="{ width: 'min(1120px, calc(100vw - 32px))' }"
+      :style="{ width: 'min(1440px, calc(100vw - 32px))' }"
       :draggable="false"
       @update:visible="updateStepConfigDialogVisibility"
     >
@@ -1410,6 +1410,12 @@ body.window-maximized .app-container {
 .step-config-dialog {
   height: min(72vh, 720px);
   min-height: 420px;
+}
+
+/* Maximized dialog: the config area fills the window (above the footer)
+   instead of stopping at the normal-mode height. */
+.p-dialog-maximized .step-config-dialog {
+  height: 100%;
 }
 
 .workspace-update-backup-overlay {

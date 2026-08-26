@@ -1353,6 +1353,207 @@ describe('ResourceManagerService', () => {
     })
   })
 
+  it('marks installed tools as invalid when an executable marker is unusable', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const eccFeRoot = join(toolsDir, 'ecc-fe', 'latest')
+    await mkdir(join(eccFeRoot, 'bin', 'ecc-fe'), { recursive: true })
+    await mkdir(join(eccFeRoot, 'fecompiler'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(
+      registryPath,
+      JSON.stringify({ schema_version: 2, tools: [], pdks: [] }),
+      'utf8',
+    )
+    await writeFile(
+      join(resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 1,
+        installed: {
+          'tool:ecc-fe': {
+            type: 'tool',
+            name: 'ecc-fe',
+            version: 'latest',
+            path: eccFeRoot,
+            executable: 'bin/ecc-fe',
+            detected_executables: ['bin/ecc-fe'],
+            active: true,
+            managed: true,
+          },
+        },
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      id: 'tool:ecc-fe',
+      status: 'invalid',
+      active: false,
+      error: 'Installed resource is missing required files: bin/ecc-fe',
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['bin/ecc-fe'],
+      }),
+    })
+
+    if (process.platform !== 'win32') {
+      await rm(join(eccFeRoot, 'bin', 'ecc-fe'), { recursive: true })
+      await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+      await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o644)
+
+      await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+        status: 'invalid',
+        active: false,
+        health: expect.objectContaining({
+          status: 'invalid',
+          missing_markers: ['bin/ecc-fe'],
+        }),
+      })
+    }
+  })
+
+  it('marks installed tools as invalid when marker filesystem types are wrong', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    const eccFeRoot = join(dirs.toolsDir, 'ecc-fe', 'latest')
+    const verilatorRoot = join(dirs.toolsDir, 'verilator', '5.050')
+    const customCpuRoot = join(dirs.toolsDir, 'ecc-fe-cpu-custom', 'latest')
+    const difftestRoot = join(dirs.toolsDir, 'ecc-fe-difftest-ref', 'latest')
+    const smokeTestRoot = join(dirs.toolsDir, 'ecc-fe-test-smoke', 'latest')
+
+    await mkdir(join(eccFeRoot, 'bin'), { recursive: true })
+    await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o755)
+    await writeFile(join(eccFeRoot, 'fecompiler'), 'not a directory\n', 'utf8')
+
+    await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
+    await mkdir(join(verilatorRoot, 'share', 'verilator', 'include', 'verilated.cpp'), {
+      recursive: true,
+    })
+    for (const executable of ['verilator', 'verilator_bin']) {
+      await writeFile(join(verilatorRoot, 'bin', executable), '#!/bin/sh\n', 'utf8')
+      await chmod(join(verilatorRoot, 'bin', executable), 0o755)
+    }
+
+    await mkdir(customCpuRoot, { recursive: true })
+    await writeFile(join(customCpuRoot, 'thirdparty'), 'not a directory\n', 'utf8')
+    await mkdir(join(difftestRoot, 'tools', 'riscv32-spike-so'), { recursive: true })
+    await mkdir(smokeTestRoot, { recursive: true })
+    await writeFile(join(smokeTestRoot, 'tests'), 'not a directory\n', 'utf8')
+
+    await writeFile(
+      registryPath,
+      JSON.stringify({ schema_version: 2, tools: [], pdks: [] }),
+      'utf8',
+    )
+    await writeTestManifest(root, {
+      'tool:ecc-fe': {
+        type: 'tool',
+        name: 'ecc-fe',
+        version: 'latest',
+        path: eccFeRoot,
+        executable: 'bin/ecc-fe',
+        detected_executables: ['bin/ecc-fe'],
+        active: true,
+        managed: true,
+      },
+      'tool:verilator': {
+        type: 'tool',
+        name: 'verilator',
+        version: '5.050',
+        path: verilatorRoot,
+        executable: 'bin/verilator',
+        detected_executables: ['bin/verilator', 'bin/verilator_bin'],
+        active: true,
+        managed: true,
+      },
+      'tool:ecc-fe-cpu-custom': {
+        type: 'tool',
+        name: 'ecc-fe-cpu-custom',
+        version: 'latest',
+        path: customCpuRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
+      'tool:ecc-fe-difftest-ref': {
+        type: 'tool',
+        name: 'ecc-fe-difftest-ref',
+        version: 'latest',
+        path: difftestRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
+      'tool:ecc-fe-test-smoke': {
+        type: 'tool',
+        name: 'ecc-fe-test-smoke',
+        version: 'latest',
+        path: smokeTestRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['fecompiler'],
+      }),
+    })
+    await expect(service.getResource('tool:verilator')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['share/verilator/include/verilated.cpp'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-cpu-custom')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['thirdparty'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-difftest-ref')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['tools/riscv32-spike-so'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-test-smoke')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['tests'],
+      }),
+    })
+  })
+
   it('marks the RISC-V toolchain invalid when objdump is missing', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
@@ -2552,6 +2753,7 @@ describe('ResourceManagerService', () => {
     await mkdir(join(sourceDir, 'bin'), { recursive: true })
     await writeFile(join(sourceDir, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
     await chmod(join(sourceDir, 'bin', 'ecc-fe'), 0o755)
+    await writeFile(join(sourceDir, 'fecompiler'), 'not a directory\n', 'utf8')
     await runFixtureCommand('tar', [
       '-cf',
       archivePath,

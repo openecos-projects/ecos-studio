@@ -70,6 +70,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       clearProjectRoot: async () => undefined,
       requestProjectPathAccess: async (path: string) => path,
       authorizeWaveform: async (path: string) => path,
+      openWaveformExternal: async (_path: string) => undefined,
       readProjectTextFile: async () => '',
       readOptionalProjectTextFile: async () => null,
       readProjectTextFileTail: async () => null,

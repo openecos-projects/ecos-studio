@@ -143,6 +143,7 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('Cannot select steps before the source output')
     expect(source).toContain('sourceContext.startStep')
     expect(source).toContain(':disabled="isFlowStepLocked(step.name)"')
+    expect(source).toContain('v-for="step in hardenFlowSteps"')
   })
 
   it('reuses source workspace design, PDK, SDC, and spec defaults', () => {
@@ -291,15 +292,21 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(stepCardSource).not.toContain('v-else>{{ index + 1 }}</span>')
   })
 
-  it('keeps the first selected flow step fixed and deselects from the end', () => {
+  it('allows fresh workspaces to start the flow from any step', () => {
+    expect(source).toContain('canChooseFlowStartStep')
+    expect(source).toContain('!sourceContext.value && !lockWorkspaceDirectory.value')
+    expect(source).toContain('v-if="canChooseFlowStartStep"')
+    expect(source).toContain('@change="selectFlowStartStep"')
+    expect(source).toContain(':value="flowStartStep"')
+
     const boundaryStart = source.indexOf('function setFlowBoundary')
     const boundaryEnd = source.indexOf('async function ensurePdksLoaded', boundaryStart)
     const boundarySource = source.slice(boundaryStart, boundaryEnd)
 
-    expect(boundarySource).not.toContain('flowStartStep.value = stepName')
-    expect(boundarySource).not.toContain(
-      'flowStartStep.value = hardenFlowSteps[start + 1].name',
+    expect(boundarySource).toContain(
+      'if (canChooseFlowStartStep.value && index < start) {',
     )
+    expect(boundarySource).toContain('applyFlowStartStep(stepName)')
     expect(boundarySource).toContain(
       'const nextEndIndex = index === end && end > start ? end - 1 : index',
     )
@@ -309,6 +316,31 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(boundarySource).toContain(
       'flowEndStep.value = hardenFlowSteps[boundedEndIndex].name',
     )
+  })
+
+  it('clamps the end step when the start step moves past it', () => {
+    const applyStart = source.indexOf('function applyFlowStartStep')
+    const applyEnd = source.indexOf('async function ensurePdksLoaded', applyStart)
+    const applySource = source.slice(applyStart, applyEnd)
+
+    expect(applySource).toContain('flowStartStep.value = stepName')
+    expect(applySource).toContain('if (flowEndIndex.value < index) {')
+    expect(applySource).toContain('flowEndStep.value = stepName')
+    expect(applySource).toContain(
+      'activeDesignInputType.value = initialDesignInputType(stepName)',
+    )
+  })
+
+  it('keeps the source output start step pinned for derived workspaces', () => {
+    const selectStart = source.indexOf('function selectFlowStartStep')
+    const selectEnd = source.indexOf('function applyFlowStartStep', selectStart)
+    const selectSource = source.slice(selectStart, selectEnd)
+
+    expect(selectSource).toContain(
+      'if (!canChooseFlowStartStep.value || isFlowStepLocked(stepName)) {',
+    )
+    expect(selectSource).toContain('target.value = flowStartStep.value')
+    expect(selectSource).toContain('return')
   })
 
   it('keeps SDC in Design Files and removes it from PDK Config', () => {
@@ -416,6 +448,8 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'Top Module Name',
       'Clock Signal Name',
       'Die Area',
+      'Origin Core Utilization',
+      'Core Margin',
       'Frequency max [MHz]',
       'Max Fanout',
     ]) {

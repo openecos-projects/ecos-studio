@@ -8,17 +8,43 @@ import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Textarea from 'primevue/textarea'
 import StepConfigValueBlock from './StepConfigValueBlock.vue'
+import { useStepConfigDiff } from './stepConfigDiff'
 
 const model = defineModel<unknown>({ required: true })
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     depth?: number
     maxDepth?: number
     accent?: 'indigo' | 'violet' | 'emerald' | 'amber' | 'cyan'
+    readonly?: boolean
+    /** Baseline-comparison leaf path ('' at the root; keys append '.k', array items '[i]'). */
+    path?: string
   }>(),
-  { depth: 0, maxDepth: 5, accent: 'indigo' },
+  { depth: 0, maxDepth: 5, accent: 'indigo', readonly: false, path: '' },
 )
+
+const diff = useStepConfigDiff()
+
+function childPath(key: string): string {
+  return props.path ? `${props.path}.${key}` : key
+}
+
+function itemPath(index: number): string {
+  return `${props.path}[${index}]`
+}
+
+function cellPath(rowIndex: number, key: string): string {
+  return `${itemPath(rowIndex)}.${key}`
+}
+
+function isChanged(path: string): boolean {
+  return diff?.isChanged(path) ?? false
+}
+
+function changedUnder(prefix: string): number {
+  return diff?.changedCountUnder(prefix) ?? 0
+}
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -42,29 +68,34 @@ const objectKeys = computed(() => {
 })
 
 function setKey(k: string, val: unknown): void {
+  if (props.readonly) return
   if (!isObj(model.value)) return
   ;(model.value as Record<string, unknown>)[k] = val
 }
 
 function setCell(ri: number, k: string, val: unknown): void {
+  if (props.readonly) return
   const m = model.value
   if (!Array.isArray(m) || !isObj(m[ri])) return
   ;(m[ri] as Record<string, unknown>)[k] = val
 }
 
 function removeAt(i: number): void {
+  if (props.readonly) return
   const m = model.value
   if (!Array.isArray(m)) return
   m.splice(i, 1)
 }
 
 function addPrimitive(): void {
+  if (props.readonly) return
   const m = model.value
   if (!Array.isArray(m)) return
   m.push('')
 }
 
 function addRow(keys: string[]): void {
+  if (props.readonly) return
   const m = model.value
   if (!Array.isArray(m)) return
   const row: Record<string, unknown> = {}
@@ -73,6 +104,7 @@ function addRow(keys: string[]): void {
 }
 
 function setScalar(v: unknown): void {
+  if (props.readonly) return
   model.value = v
 }
 
@@ -95,6 +127,7 @@ watch(
 )
 
 function applyJsonEdit(): void {
+  if (props.readonly) return
   try {
     model.value = JSON.parse(jsonEdit.value)
   } catch {
@@ -103,6 +136,7 @@ function applyJsonEdit(): void {
 }
 
 function setPrim(i: number, v: unknown): void {
+  if (props.readonly) return
   const m = model.value
   if (!Array.isArray(m)) return
   m[i] = v
@@ -112,7 +146,11 @@ function setPrim(i: number, v: unknown): void {
 <template>
   <div class="sc-pro-value" :data-depth="depth">
     <!-- Scalar -->
-    <template v-if="model === null || model === undefined || typeof model !== 'object'">
+    <div
+      v-if="model === null || model === undefined || typeof model !== 'object'"
+      class="sc-field w-full min-w-0"
+      :class="{ 'sc-diff': isChanged(path) }"
+    >
       <InputText
         v-if="typeof model === 'string'"
         :model-value="model"
@@ -144,10 +182,14 @@ function setPrim(i: number, v: unknown): void {
         class="w-full min-w-0"
         readonly
       />
-    </template>
+    </div>
 
     <!-- Max depth exceeded: JSON -->
-    <div v-else-if="depth >= maxDepth" class="field">
+    <div
+      v-else-if="depth >= maxDepth"
+      class="field"
+      :class="{ 'sc-diff': changedUnder(path) > 0 }"
+    >
       <label>JSON</label>
       <Textarea
         v-model="jsonEdit"
@@ -155,6 +197,7 @@ function setPrim(i: number, v: unknown): void {
         rows="6"
         fluid
         class="w-full min-w-0 font-mono text-[11px]"
+        :readonly="readonly"
         @blur="applyJsonEdit"
       />
     </div>
@@ -165,18 +208,25 @@ function setPrim(i: number, v: unknown): void {
         <thead>
           <tr>
             <th v-for="k in uniformTable.keys" :key="k">{{ k }}</th>
-            <th class="w-10"></th>
+            <th v-if="!readonly" class="w-10"></th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="(row, ri) in uniformTable.rows" :key="ri">
-            <td v-for="k in uniformTable.keys" :key="k" class="align-top">
+            <td
+              v-for="k in uniformTable.keys"
+              :key="k"
+              class="align-top"
+              :class="{ 'sc-diff': isChanged(cellPath(ri, k)) }"
+            >
               <StepConfigValueBlock
                 v-if="isObj(row[k]) || Array.isArray(row[k])"
                 :model-value="row[k]"
                 :depth="depth + 1"
                 :max-depth="maxDepth"
                 :accent="accent"
+                :readonly="readonly"
+                :path="cellPath(ri, k)"
                 @update:model-value="setCell(ri, k, $event)"
               />
               <InputText
@@ -211,7 +261,7 @@ function setPrim(i: number, v: unknown): void {
                 readonly
               />
             </td>
-            <td>
+            <td v-if="!readonly">
               <button
                 type="button"
                 class="sc-pro-btn sc-pro-btn--danger"
@@ -224,7 +274,10 @@ function setPrim(i: number, v: unknown): void {
           </tr>
         </tbody>
       </table>
-      <div class="border-t border-(--border-color) bg-(--bg-secondary)/40 px-2 py-2">
+      <div
+        v-if="!readonly"
+        class="border-t border-(--border-color) bg-(--bg-secondary)/40 px-2 py-2"
+      >
         <button type="button" class="sc-pro-btn" @click="addRow(uniformTable.keys)">
           <i class="ri-add-line"></i>
           Add row
@@ -238,6 +291,7 @@ function setPrim(i: number, v: unknown): void {
         v-for="(_x, i) in model as unknown[]"
         :key="i"
         class="flex w-full min-w-0 items-center gap-2"
+        :class="{ 'sc-diff': isChanged(itemPath(i)) }"
       >
         <InputText
           v-if="typeof (model as unknown[])[i] === 'string'"
@@ -267,6 +321,8 @@ function setPrim(i: number, v: unknown): void {
             :depth="depth + 1"
             :max-depth="maxDepth"
             :accent="accent"
+            :readonly="readonly"
+            :path="itemPath(i)"
             @update:model-value="setPrim(i, $event)"
           />
         </div>
@@ -279,6 +335,7 @@ function setPrim(i: number, v: unknown): void {
           readonly
         />
         <button
+          v-if="!readonly"
           type="button"
           class="sc-pro-btn sc-pro-btn--danger shrink-0"
           title="Remove"
@@ -287,7 +344,7 @@ function setPrim(i: number, v: unknown): void {
           <i class="ri-close-line"></i>
         </button>
       </div>
-      <button type="button" class="sc-pro-btn" @click="addPrimitive">
+      <button v-if="!readonly" type="button" class="sc-pro-btn" @click="addPrimitive">
         <i class="ri-add-line"></i>
         Add item
       </button>
@@ -295,13 +352,28 @@ function setPrim(i: number, v: unknown): void {
 
     <!-- Object → sub-panels -->
     <div v-else class="space-y-2">
-      <div v-for="k in objectKeys" :key="k" class="sc-pro-subpanel">
-        <div class="sc-pro-subpanel__title">{{ k }}</div>
+      <div
+        v-for="k in objectKeys"
+        :key="k"
+        class="sc-pro-subpanel"
+        :class="{ 'sc-diff-panel': changedUnder(childPath(k)) > 0 }"
+      >
+        <div class="sc-pro-subpanel__title">
+          {{ k }}
+          <span
+            v-if="changedUnder(childPath(k)) > 0"
+            class="sc-diff-badge"
+            title="Changed vs baseline"
+            >{{ changedUnder(childPath(k)) }}</span
+          >
+        </div>
         <StepConfigValueBlock
           :model-value="(model as Record<string, unknown>)[k]"
           :depth="depth + 1"
           :max-depth="maxDepth"
           :accent="accent"
+          :readonly="readonly"
+          :path="childPath(k)"
           @update:model-value="setKey(k, $event)"
         />
       </div>

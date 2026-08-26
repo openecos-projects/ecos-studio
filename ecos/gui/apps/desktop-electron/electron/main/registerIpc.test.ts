@@ -18,6 +18,8 @@ const {
   fromWebContents,
   getAllWindows,
   openExternal,
+  openPath,
+  showMessageBox,
   showOpenDialog,
   showSaveDialog,
   mkdirMock,
@@ -27,6 +29,8 @@ const {
   getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
   mkdirMock: vi.fn(),
   openExternal: vi.fn(),
+  openPath: vi.fn(),
+  showMessageBox: vi.fn(),
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
   statMock: vi.fn(),
@@ -47,6 +51,7 @@ vi.mock('electron', () => ({
     getAllWindows,
   },
   dialog: {
+    showMessageBox,
     showOpenDialog,
     showSaveDialog,
   },
@@ -55,6 +60,7 @@ vi.mock('electron', () => ({
   },
   shell: {
     openExternal,
+    openPath,
   },
 }))
 
@@ -107,8 +113,10 @@ function registerHandlers(
       readWorkspaceTexts: vi.fn(),
     },
     workspaceService: {
+      approvePendingExternalReadRoots: vi.fn(),
       clearProjectRoot: vi.fn(),
       isProjectDirectory: vi.fn(),
+      listPendingExternalReadRoots: vi.fn(),
       readProjectBinaryFile: vi.fn(),
       readOptionalProjectTextFile: vi.fn(),
       readOptionalProjectTextFileChunk: vi.fn(),
@@ -171,6 +179,7 @@ function registerHandlers(
     },
     surferProtocolService: {
       authorizeWaveform: vi.fn(),
+      resolveWaveformPath: vi.fn(),
     },
     appInfoService: {
       getVersions: vi.fn(),
@@ -271,9 +280,11 @@ describe('registerIpc', () => {
     getAllWindows.mockReturnValue([])
     electronLogger.warn.mockReset()
     openExternal.mockReset()
+    openPath.mockReset()
     executeWorkspaceRerunMock.mockReset()
     prepareWorkspaceRerunMock.mockReset()
     showOpenDialog.mockReset()
+    showMessageBox.mockReset()
     showSaveDialog.mockReset()
     mkdirMock.mockReset()
     setMenuActionEnabled.mockReset()
@@ -301,6 +312,59 @@ describe('registerIpc', () => {
     expect(Array.from(handlers.keys()).sort()).toEqual(
       Object.values(desktopApiIpcChannels).sort(),
     )
+  })
+
+  it('requires native confirmation before approving external frontend roots', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 7 } }
+    const windowDouble = createWindowDouble(false)
+    fromWebContents.mockReturnValue(windowDouble)
+    services.workspaceService.registerProjectRoot.mockResolvedValue('/tmp/project')
+    services.workspaceService.listPendingExternalReadRoots.mockResolvedValue([
+      '/tmp/external-rtl',
+    ])
+    showMessageBox.mockResolvedValue({ response: 1 })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceRegisterProjectRoot)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toBe('/tmp/project')
+
+    expect(showMessageBox).toHaveBeenCalledWith(
+      windowDouble,
+      expect.objectContaining({
+        buttons: ['Not Now', 'Allow Access'],
+        cancelId: 0,
+        defaultId: 0,
+        detail: expect.stringContaining('/tmp/external-rtl'),
+        type: 'warning',
+      }),
+    )
+    expect(
+      services.workspaceService.approvePendingExternalReadRoots,
+    ).toHaveBeenCalledWith('/tmp/project', ['/tmp/external-rtl'])
+  })
+
+  it('keeps external frontend roots blocked when native confirmation is denied', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 7 } }
+    fromWebContents.mockReturnValue(createWindowDouble(false))
+    services.workspaceService.registerProjectRoot.mockResolvedValue('/tmp/project')
+    services.workspaceService.listPendingExternalReadRoots.mockResolvedValue([
+      '/tmp/external-rtl',
+    ])
+    showMessageBox.mockResolvedValue({ response: 0 })
+
+    await handlers.get(desktopApiIpcChannels.workspaceRegisterProjectRoot)?.(
+      event,
+      '/tmp/project',
+    )
+
+    expect(
+      services.workspaceService.approvePendingExternalReadRoots,
+    ).not.toHaveBeenCalled()
   })
 
   it('rejects a renderer-supplied rerun contract without a main-process token', async () => {
@@ -1208,6 +1272,47 @@ describe('registerIpc', () => {
     )
 
     expect(openExternal).toHaveBeenCalledWith('https://openecos.org')
+  })
+
+  it('opens validated waveform paths without converting Windows paths to URLs', async () => {
+    const { handlers, services } = registerHandlers()
+    const requestedPath = String.raw`C:\work\cpu\trace.vcd`
+    const canonicalPath = String.raw`C:\work\cpu\trace.vcd`
+    services.surferProtocolService.resolveWaveformPath.mockResolvedValue(canonicalPath)
+    openPath.mockResolvedValue('')
+
+    await handlers.get(desktopApiIpcChannels.workspaceOpenWaveformExternal)?.(
+      { sender: { id: 'web-contents' } },
+      requestedPath,
+    )
+
+    expect(services.surferProtocolService.resolveWaveformPath).toHaveBeenCalledWith(
+      requestedPath,
+    )
+    expect(openPath).toHaveBeenCalledWith(canonicalPath)
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('rejects waveform opens when the operating system reports an error', async () => {
+    const { handlers, services } = registerHandlers()
+    services.surferProtocolService.resolveWaveformPath.mockResolvedValue(
+      '/work/trace.vcd',
+    )
+    openPath.mockResolvedValue('No application is associated with this file type')
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceOpenWaveformExternal)?.(
+        { sender: { id: 'web-contents' } },
+        '/work/trace.vcd',
+      ),
+    ).resolves.toEqual({
+      error: {
+        message:
+          'Unable to open waveform: No application is associated with this file type',
+        name: 'Error',
+      },
+      ok: false,
+    })
   })
 
   it('shows a Save As dialog for the requesting window and returns its path', async () => {

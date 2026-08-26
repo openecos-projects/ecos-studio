@@ -240,3 +240,33 @@ body.window-resizing * {
   user-select: none !important;
   -webkit-user-select: none !important;
 }
+
+/*
+ * Data-snapshot composition slots — fixed identity colors shared by the step
+ * snapshot tiles, proportion bars, and the data summary dialog. Color follows
+ * the entity (Logic leads in accent, Macros in warn, residual Others in the
+ * de-emphasis gray), never its row or value.
+ */
+.snapshot-slot.is-logic,
+.snapshot-slot.is-slot-0 {
+  background: var(--accent-color);
+}
+.snapshot-slot.is-macros,
+.snapshot-slot.is-slot-1 {
+  background: var(--warn-color);
+}
+.snapshot-slot.is-others {
+  background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
+}
+.snapshot-slot.is-slot-2 {
+  background: var(--success-color);
+}
+.snapshot-slot.is-slot-3 {
+  background: var(--info-color);
+}
+.snapshot-slot.is-slot-4 {
+  background: var(--danger-color);
+}
+.snapshot-slot.is-slot-5 {
+  background: #8b5cf6;
+}
