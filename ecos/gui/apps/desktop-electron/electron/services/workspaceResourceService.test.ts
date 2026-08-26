@@ -118,6 +118,65 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
+  it('builds the resource index from home/ecc.toml workspaces', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await mkdir(join(root, 'place_ecc', 'output'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'ecc.toml'),
+      [
+        '[design]',
+        'name = "gcd"',
+        'top = "gcd"',
+        '',
+        '[pdk]',
+        'name = "ics55"',
+        'root = "/pdk/ics55"',
+        '',
+        '[params]',
+        'design = "gcd"',
+        'top_module = "gcd"',
+        'pdk = "ics55"',
+        'frequency_max = 100.0',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    await writeJson(join(root, 'home', 'flow.json'), {
+      steps: [
+        { name: 'place', tool: 'ecc', state: 'Success', runtime: '00:00:01', info: {} },
+      ],
+    })
+    await writeJson(join(root, 'home', 'home.json'), {
+      flow: join(root, 'home', 'flow.json'),
+    })
+    await writeFile(join(root, 'place_ecc', 'output', 'gcd_place.json'), '{}', 'utf8')
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.status).toBe('available')
+    expect(index.design).toBe('gcd')
+    expect(index.topModule).toBe('gcd')
+    expect(index.pdk).toBe('ics55')
+    expect(index.parameters).toMatchObject({
+      design: 'gcd',
+      top_module: 'gcd',
+      pdk: 'ics55',
+      frequency_max: 100.0,
+    })
+    expect(index.home.parametersJson).toMatchObject({
+      path: join(root, 'home', 'ecc.toml'),
+      exists: true,
+      kind: 'parameters',
+    })
+    expect(index.flow.steps).toHaveLength(1)
+    expect(index.flow.steps[0].directory).toBe(join(root, 'place_ecc'))
+
+    const parameters = await service.readParameters()
+    expect(parameters).toMatchObject({ design: 'gcd', top_module: 'gcd', pdk: 'ics55' })
+  })
+
   it('discovers every file below a step report directory', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'sta', tool: 'ecc' }])
@@ -787,7 +846,7 @@ describe('WorkspaceResourceService', () => {
     expect(result.message).toEqual(
       expect.arrayContaining([
         `Workspace step not found: place`,
-        `Missing workspace parameters: ${join(root, 'home', 'parameters.json')}`,
+        `Missing workspace parameters: ${join(root, 'home', 'ecc.toml')} or ${join(root, 'home', 'parameters.json')}`,
         `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
       ]),
     )
@@ -896,7 +955,7 @@ describe('WorkspaceResourceService', () => {
     expect(index.flow.steps).toEqual([])
     expect(index.messages).toEqual(
       expect.arrayContaining([
-        `Missing workspace parameters: ${join(root, 'home', 'parameters.json')}`,
+        `Missing workspace parameters: ${join(root, 'home', 'ecc.toml')} or ${join(root, 'home', 'parameters.json')}`,
         `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
       ]),
     )

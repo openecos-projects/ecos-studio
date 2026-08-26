@@ -11,6 +11,13 @@ import type {
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
 import { migrateWorkspaceConfigFilenames } from './eccRpc/workspaceConfigMigration'
+import {
+  locateWorkspaceParametersFile,
+  LEGACY_PARAMETERS_BASENAME,
+  parseWorkspaceParametersText,
+  WORKSPACE_CONFIG_BASENAME,
+  type WorkspaceParametersFileLocation,
+} from './workspaceParametersFile'
 
 type WorkspaceResourceFileKind = WorkspaceResourceFile['kind']
 type ResourceBucketName = keyof WorkspaceStepResource['resources']
@@ -68,7 +75,20 @@ export class WorkspaceResourceService {
   async readParameters(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
     await migrateWorkspaceConfigFilenames(root)
-    return await this.readJsonOrNull(join(root, 'home', 'parameters.json'))
+    const location = await locateWorkspaceParametersFile(root)
+    if (!location) return null
+    try {
+      const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
+        location.path,
+      )
+      const raw = await readFile(canonicalPath, 'utf8')
+      return parseWorkspaceParametersText(raw, location.format, root)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return null
+      }
+      throw error
+    }
   }
 
   async resolveStepInfo(
@@ -138,7 +158,9 @@ export class WorkspaceResourceService {
     const statErrors: string[] = []
     const homePath = join(root, 'home', 'home.json')
     const flowPath = join(root, 'home', 'flow.json')
-    const parametersPath = join(root, 'home', 'parameters.json')
+    const parametersLocation = await locateWorkspaceParametersFile(root)
+    const parametersPath =
+      parametersLocation?.path ?? join(root, 'home', LEGACY_PARAMETERS_BASENAME)
     const checklistPath = join(root, 'home', 'checklist.json')
 
     const [homeJson, flowJson, parametersJson, checklistJson] = await Promise.all([
@@ -149,16 +171,23 @@ export class WorkspaceResourceService {
     ])
 
     const homeData = await this.readJsonForIndex(homePath, messages)
-    const parameters = await this.readJsonForIndex(parametersPath, messages)
+    const parameters = await this.readParametersForIndex(
+      root,
+      parametersLocation,
+      messages,
+    )
     const flowData = await this.readJsonForIndex(flowPath, messages)
 
-    if (!parametersJson.exists)
-      messages.push(`Missing workspace parameters: ${parametersPath}`)
+    if (!parametersLocation)
+      messages.push(
+        `Missing workspace parameters: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${parametersPath}`,
+      )
     if (!flowJson.exists) messages.push(`Missing workspace flow: ${flowPath}`)
 
-    const design = stringValue(parameters, 'Design')
-    const topModule = stringValue(parameters, 'Top module')
-    const pdk = stringValue(parameters, 'PDK')
+    const design = stringValue(parameters, 'Design') || stringValue(parameters, 'design')
+    const topModule =
+      stringValue(parameters, 'Top module') || stringValue(parameters, 'top_module')
+    const pdk = stringValue(parameters, 'PDK') || stringValue(parameters, 'pdk')
     const steps =
       isRecord(flowData) && Array.isArray(flowData.steps)
         ? flowData.steps
@@ -446,6 +475,32 @@ export class WorkspaceResourceService {
       return await this.readJsonOrNull(path)
     } catch (error) {
       messages.push(formatErrorMessage(`Failed to parse workspace JSON: ${path}`, error))
+      return null
+    }
+  }
+
+  private async readParametersForIndex(
+    root: string,
+    location: WorkspaceParametersFileLocation | null,
+    messages: string[],
+  ): Promise<Record<string, unknown> | null> {
+    if (!location) return null
+    try {
+      const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
+        location.path,
+      )
+      const raw = await readFile(canonicalPath, 'utf8')
+      return parseWorkspaceParametersText(raw, location.format, root)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return null
+      }
+      messages.push(
+        formatErrorMessage(
+          `Failed to parse workspace parameters: ${location.path}`,
+          error,
+        ),
+      )
       return null
     }
   }

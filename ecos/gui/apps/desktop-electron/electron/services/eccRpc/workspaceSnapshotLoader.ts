@@ -6,6 +6,10 @@ import type {
 } from '@ecos-studio/shared'
 
 import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
+import {
+  locateWorkspaceParametersFile,
+  parseWorkspaceParametersText,
+} from '../workspaceParametersFile'
 
 const MAX_SNAPSHOT_FILE_BYTES = 512 * 1024
 
@@ -29,6 +33,31 @@ async function readJsonObject(path: string): Promise<Record<string, unknown>> {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : {}
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw error
+  }
+}
+
+/**
+ * Parameters companion of readJsonObject: same size cap and ENOENT-tolerance,
+ * but format-aware (home/ecc.toml preferred, legacy parameters.json fallback).
+ */
+async function readParametersObject(directory: string): Promise<Record<string, unknown>> {
+  const location = await locateWorkspaceParametersFile(directory)
+  if (!location) return {}
+  try {
+    const metadata = await stat(location.path)
+    if (metadata.size > MAX_SNAPSHOT_FILE_BYTES) {
+      throw new Error(
+        `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${location.path}`,
+      )
+    }
+    return parseWorkspaceParametersText(
+      await readFile(location.path, 'utf8'),
+      location.format,
+      directory,
+    )
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
     throw error
@@ -66,7 +95,7 @@ export class WorkspaceSnapshotLoader {
     const [home, flow, parameters] = await Promise.all([
       readJsonObject(join(homeDirectory, 'home.json')),
       readJsonObject(join(homeDirectory, 'flow.json')),
-      readJsonObject(join(homeDirectory, 'parameters.json')),
+      readParametersObject(directory),
     ])
     return {
       directory,
@@ -85,7 +114,7 @@ export class WorkspaceSnapshotLoader {
   async loadBaselineSnapshot(directory: string): Promise<WorkspaceBaselineSnapshot> {
     await migrateWorkspaceConfigFilenames(directory)
     const [parameters, pdk, db] = await Promise.all([
-      readJsonObject(join(directory, 'home', 'parameters.json')),
+      readParametersObject(directory),
       readJsonObject(join(directory, 'home', 'pdk.json')),
       readJsonObject(join(directory, 'config', 'db_ecc.json')),
     ])
