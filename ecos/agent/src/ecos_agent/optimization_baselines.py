@@ -10,6 +10,7 @@ from functools import lru_cache
 from typing import Iterable, Mapping
 
 from ecos_agent.optimization_contracts import (
+    CANDIDATE_EXECUTION_LIMIT,
     KnowledgeReference,
     LegalAction,
     ObjectiveMetric,
@@ -66,7 +67,7 @@ def select_baseline_candidate(
     method = BaselineMethod(method)
     if not _DESIGN_ID.fullmatch(design_id):
         raise ValueError("baseline design id is invalid")
-    if type(turn_index) is not int or not 0 <= turn_index < 6:
+    if type(turn_index) is not int or not 0 <= turn_index < CANDIDATE_EXECUTION_LIMIT:
         raise ValueError("baseline turn index is invalid")
     if type(random_seed) is not int:
         raise ValueError("baseline random seed is invalid")
@@ -148,7 +149,7 @@ def _rule_selection(
                 coordinate_index,
                 _rule_references()[entity_id],
             )
-    return None
+    return _coordinate_selection(current_values, attempted, coordinate_index)
 
 
 _ENABLE_ROUTABILITY = "strategy.congestion.enable_congestion_guided_area_adjust.v1"
@@ -185,8 +186,9 @@ def rule_guided_policy_manifest() -> dict[str, object]:
         )
 
     return {
-        "schema_version": "ecos.optimization_rule_guided_policy.v1",
+        "schema_version": "ecos.optimization_rule_guided_policy.v2",
         "condition_metric": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW.value,
+        "exhaustion_policy": "controlled_coordinate_order",
         "congested_when": "> 0",
         "congested_rules": rows(_CONGESTED_RULES),
         "clean_when": "<= 0",

@@ -22,6 +22,7 @@ from pydantic import field_validator, model_validator
 from ecos_agent.contracts import GUI_WORKSPACE_FLOW_STEPS
 from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_contracts import (
+    CANDIDATE_EXECUTION_LIMIT,
     ROUTABILITY_OBJECTIVE_ORDER,
     TIMING_GUARDRAIL_ORDER,
     EpisodeBudget,
@@ -315,8 +316,8 @@ def readiness_report(config_path: Path) -> dict[str, object]:
         [str(executable), "--version"], check=True, capture_output=True, text=True, timeout=30
     ).stdout.strip()
     budget = EpisodeBudget.from_reference_rerun(1)
-    if budget.minimum_candidate_executions != 6:
-        raise Gate0Error("pilot minimum candidate budget is not six")
+    if budget.minimum_candidate_executions != CANDIDATE_EXECUTION_LIMIT:
+        raise Gate0Error("pilot minimum candidate budget is inconsistent")
     values = _baseline_values(config.baseline)
     for probe in config.probes:
         _probe_request(probe, values)

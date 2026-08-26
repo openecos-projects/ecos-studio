@@ -472,7 +472,7 @@ def test_no_knowledge_mode_hides_chunks_and_rejects_knowledge_references(tmp_pat
 
 def test_budget_exhaustion_stops_without_calling_fake_codex(tmp_path: Path) -> None:
     codex = _FakeCodex(_proposal)
-    controller = _controller(tmp_path, codex, _FakeEcc(), budget=_budget(candidates=6))
+    controller = _controller(tmp_path, codex, _FakeEcc(), budget=_budget(candidates=20))
 
     stopped = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 

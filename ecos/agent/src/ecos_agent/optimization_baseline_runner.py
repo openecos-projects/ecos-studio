@@ -22,6 +22,7 @@ from ecos_agent.optimization_baselines import (
     select_baseline_candidate,
 )
 from ecos_agent.optimization_contracts import (
+    CANDIDATE_EXECUTION_LIMIT,
     ObjectiveMetric,
     OptimizationKnob,
     RequestedKnobValue,
@@ -44,7 +45,7 @@ from ecos_agent.optimization_observations import build_terminal_observation
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _PILOT_DESIGNS = frozenset({"gcd", "i2c"})
-_CANDIDATE_LIMIT = 6
+_CANDIDATE_LIMIT = CANDIDATE_EXECUTION_LIMIT
 _DEFAULT_SEED = 20260824
 _DEFAULT_MAX_WORKERS = 3
 _T = TypeVar("_T")
@@ -82,7 +83,7 @@ def evaluate_online_method(
     random_seed: int,
     execute: CandidateExecutor,
 ) -> dict[str, object]:
-    """Evaluate six side-effect-accounted actions with incumbent-only promotion."""
+    """Evaluate the fixed side-effect budget with incumbent-only promotion."""
     method = BaselineMethod(method)
     if method not in ONLINE_BASELINE_METHODS:
         raise BaselineRunnerError("baseline method is not online")
@@ -108,7 +109,7 @@ def evaluate_online_method(
             incumbent=incumbent,
         )
         if selection is None:
-            raise BaselineRunnerError("baseline exhausted legal candidates before six attempts")
+            raise BaselineRunnerError("baseline exhausted legal candidates before the limit")
         coordinate_index = selection.next_coordinate_index
         attempted.append(selection.requested)
         row = _selection_row(turn_index + 1, selection, parent_candidate_root_ref)
@@ -138,13 +139,13 @@ def evaluate_online_method(
         row["success_by_candidate"] = success
         rows.append(row)
     return {
-        "schema_version": "ecos.optimization_baseline_method.v1",
+        "schema_version": "ecos.optimization_baseline_method.v2",
         "method": method.value,
         "design_id": design_id,
         "candidate_count": len(rows),
         "failed_candidate_count": failures,
         "first_improvement_candidate_index": first_improvement,
-        "lex_success_at_6": success,
+        "lex_success_at_20": success,
         "success_at_k": {
             str(row["candidate_index"]): row["success_by_candidate"] for row in rows
         },
@@ -463,7 +464,7 @@ def _run_online_method(
         random_seed=random_seed,
         execute=execute,
     )
-    _write_json(output / "method-summary.v1.json", summary)
+    _write_json(output / "method-summary.v2.json", summary)
     return summary
 
 
@@ -473,7 +474,7 @@ def _default_summary(
     profile: Mapping[str, object],
 ) -> dict[str, object]:
     return {
-        "schema_version": "ecos.optimization_baseline_method.v1",
+        "schema_version": "ecos.optimization_baseline_method.v2",
         "method": BaselineMethod.DEFAULT.value,
         "design_id": design_id,
         "candidate_count": 0,
@@ -685,7 +686,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     print(json.dumps({
         design_id: {
-            method: result.get("lex_success_at_6")
+            method: result.get("lex_success_at_20")
             for method, result in design["methods"].items()
             if method != BaselineMethod.DEFAULT.value
         }

@@ -125,17 +125,19 @@ def _proposal(**overrides: object) -> dict[str, object]:
 def test_budget_is_frozen_from_one_reference_rerun() -> None:
     budget = _budget()
 
-    assert budget.schema_version == "ecos.optimization_budget.v4"
-    assert budget.candidate_execution_limit == 6
+    assert budget.schema_version == "ecos.optimization_budget.v5"
+    assert budget.candidate_execution_limit == 20
     assert budget.minimum_candidate_executions == budget.candidate_execution_limit
-    assert budget.planning_call_limit == 18
+    assert budget.planning_call_limit == 60
     assert budget.reference_place_to_harden_seconds == 11.0
-    assert budget.wall_time_limit_seconds == 88.0
-    assert BudgetSnapshot(budget=budget, consumed_candidates=6, consumed_planning_calls=18).exhausted
+    assert budget.wall_time_limit_seconds == 242.0
+    assert BudgetSnapshot(
+        budget=budget, consumed_candidates=20, consumed_planning_calls=60
+    ).exhausted
 
 
 def test_budget_rejects_a_noncanonical_wall_time_limit() -> None:
-    with pytest.raises(ValidationError, match="8 times"):
+    with pytest.raises(ValidationError, match="22 times"):
         EpisodeBudget(
             reference_place_to_harden_seconds=11.0,
             wall_time_limit_seconds=80.0,
@@ -148,7 +150,7 @@ def test_budget_reports_remaining_wall_time() -> None:
         elapsed_wall_time_seconds=20.0,
     )
 
-    assert snapshot.remaining_wall_time_seconds == 68.0
+    assert snapshot.remaining_wall_time_seconds == 222.0
 
 
 def test_stage_observation_is_typed_and_carries_remaining_budget() -> None:
@@ -161,8 +163,8 @@ def test_stage_observation_is_typed_and_carries_remaining_budget() -> None:
         budget=BudgetSnapshot(budget=_budget(), consumed_candidates=1, consumed_planning_calls=2),
     )
 
-    assert observation.budget.remaining_candidates == 5
-    assert observation.budget.remaining_planning_calls == 16
+    assert observation.budget.remaining_candidates == 19
+    assert observation.budget.remaining_planning_calls == 58
 
 
 def test_proposal_requires_one_action_only_for_propose() -> None:

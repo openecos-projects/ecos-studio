@@ -551,11 +551,15 @@ class KnobApplicationReceipt(_ContractModel):
         return self
 
 
+CANDIDATE_EXECUTION_LIMIT = 20
+WALL_TIME_LIMIT_MULTIPLIER = 22
+
+
 class EpisodeBudget(_ContractModel):
-    schema_version: Literal["ecos.optimization_budget.v4"] = "ecos.optimization_budget.v4"
-    candidate_execution_limit: Literal[6] = 6
-    planning_call_limit: Literal[18] = 18
-    minimum_candidate_executions: Literal[6] = 6
+    schema_version: Literal["ecos.optimization_budget.v5"] = "ecos.optimization_budget.v5"
+    candidate_execution_limit: Literal[20] = CANDIDATE_EXECUTION_LIMIT
+    planning_call_limit: Literal[60] = 60
+    minimum_candidate_executions: Literal[20] = CANDIDATE_EXECUTION_LIMIT
     max_planning_only_turns: Literal[2] = 2
     reference_place_to_harden_seconds: float
     wall_time_limit_seconds: float
@@ -571,18 +575,18 @@ class EpisodeBudget(_ContractModel):
     def validate_wall_time_limit(self) -> "EpisodeBudget":
         if not math.isclose(
             self.wall_time_limit_seconds,
-            8 * self.reference_place_to_harden_seconds,
+            WALL_TIME_LIMIT_MULTIPLIER * self.reference_place_to_harden_seconds,
             rel_tol=0,
             abs_tol=1e-9,
         ):
-            raise ValueError("wall time limit must equal 8 times the reference rerun")
+            raise ValueError("wall time limit must equal 22 times the reference rerun")
         return self
 
     @classmethod
     def from_reference_rerun(cls, duration: float) -> "EpisodeBudget":
         return cls(
             reference_place_to_harden_seconds=duration,
-            wall_time_limit_seconds=8 * duration,
+            wall_time_limit_seconds=WALL_TIME_LIMIT_MULTIPLIER * duration,
         )
 
 

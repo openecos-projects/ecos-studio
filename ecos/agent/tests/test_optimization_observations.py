@@ -153,7 +153,7 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
         "place_total_wirelength": 123.0,
     }
     assert observation.requested_knobs == ()
-    assert observation.budget.remaining_candidates == 5
+    assert observation.budget.remaining_candidates == 19
 
     repeated = build_stage_observation(frozen_workspace, "place", budget=_budget())
     assert repeated.evidence_manifest_sha256 == observation.evidence_manifest_sha256

@@ -154,7 +154,7 @@ def test_controlled_coordinate_reuses_fixed_direction_order_without_duplicates()
     selections = []
     coordinate_index = 0
 
-    for turn_index in range(6):
+    for turn_index in range(20):
         selection = select_baseline_candidate(
             BaselineMethod.CONTROLLED_COORDINATE,
             design_id="gcd",
@@ -178,7 +178,7 @@ def test_controlled_coordinate_reuses_fixed_direction_order_without_duplicates()
         "place.cell_padding_x",
         "place.routability_opt",
     ]
-    assert len({(item.requested.knob_id, item.requested.value) for item in selections}) == 6
+    assert len({(item.requested.knob_id, item.requested.value) for item in selections}) == 20
 
 
 def test_random_action_is_seeded_legal_and_replayable() -> None:
@@ -186,7 +186,7 @@ def test_random_action_is_seeded_legal_and_replayable() -> None:
         values = _values()
         attempted: list[RequestedKnobValue] = []
         result = []
-        for turn_index in range(6):
+        for turn_index in range(20):
             selection = select_baseline_candidate(
                 BaselineMethod.RANDOM_ACTION,
                 design_id="i2c",
@@ -204,7 +204,7 @@ def test_random_action_is_seeded_legal_and_replayable() -> None:
         return result
 
     assert sequence() == sequence()
-    assert len(set(sequence())) == 6
+    assert len(set(sequence())) == 20
 
 
 def test_rule_guided_direction_uses_audited_card_mappings() -> None:
@@ -247,9 +247,34 @@ def test_rule_guided_direction_uses_audited_card_mappings() -> None:
     )
 
 
+def test_rule_guided_direction_fills_the_candidate_budget() -> None:
+    values = _values()
+    attempted: list[RequestedKnobValue] = []
+    coordinate_index = 0
+
+    for turn_index in range(20):
+        selection = select_baseline_candidate(
+            BaselineMethod.RULE_GUIDED_DIRECTION,
+            design_id="gcd",
+            turn_index=turn_index,
+            coordinate_index=coordinate_index,
+            random_seed=0,
+            current_values=values,
+            attempted=attempted,
+            incumbent=_terminal(0, 0, 100),
+        )
+        assert selection is not None
+        attempted.append(selection.requested)
+        coordinate_index = selection.next_coordinate_index
+        values[selection.requested.knob_id.value] = selection.requested.value
+
+    assert len(set(attempted)) == 20
+
+
 def test_rule_guided_policy_manifest_freezes_order_and_knowledge_hashes() -> None:
     manifest = rule_guided_policy_manifest()
 
+    assert manifest["exhaustion_policy"] == "controlled_coordinate_order"
     assert [rule["priority"] for rule in manifest["congested_rules"]] == [1, 2, 3]
     assert [rule["priority"] for rule in manifest["clean_rules"]] == [1, 2, 3]
     for rule in (*manifest["congested_rules"], *manifest["clean_rules"]):
@@ -289,16 +314,12 @@ def test_online_method_counts_failures_and_promotes_only_improvements() -> None:
         execute=execute,
     )
 
-    assert summary["candidate_count"] == 6
+    assert summary["candidate_count"] == 20
     assert summary["failed_candidate_count"] == 1
     assert summary["first_improvement_candidate_index"] == 2
+    assert summary["lex_success_at_20"] is True
     assert summary["success_at_k"] == {
-        "1": False,
-        "2": True,
-        "3": True,
-        "4": True,
-        "5": True,
-        "6": True,
+        str(index): index >= 2 for index in range(1, 21)
     }
     assert parent_refs[:3] == [None, None, ".agent/candidates/candidate-2"]
 
@@ -561,7 +582,7 @@ def test_pilot_runner_writes_a_two_design_non_llm_manifest(monkeypatch, tmp_path
     assert "oracle" not in json.dumps(manifest).lower()
     assert manifest["workspace_bindings"]["gcd"]["design_id"] == "gcd"
     assert manifest["policies"]["rule_guided_direction"]["schema_version"] == (
-        "ecos.optimization_rule_guided_policy.v1"
+        "ecos.optimization_rule_guided_policy.v2"
     )
     assert set(summary["designs"]) == {"gcd", "i2c"}
 
