@@ -55,7 +55,13 @@ export interface EccWorkspaceSyncConfigRequest extends EccWorkspaceHandleRequest
   configPath: string
 }
 
+export interface SignoffAdditionalFile {
+  archivePath: string
+  content: string
+}
+
 export interface EccWorkspaceExportSignoffRequest extends EccWorkspaceHandleRequest {
+  additionalFiles?: SignoffAdditionalFile[]
   outputPath: string
 }
 

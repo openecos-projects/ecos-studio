@@ -6,6 +6,7 @@ import {
   joinLocalPath,
   type DesignReportFormat,
   type EccWorkspaceInspectSignoffResult,
+  type SignoffAdditionalFile,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 
@@ -392,25 +393,23 @@ export function useSignoffPackageExport({
         csv: 'csv',
         text: 'txt',
       }
-      await Promise.all(
-        reportFormats.map(async (fmt) => {
-          const ext = formatExtMap[fmt]
-          const content = generateDesignReport(reportData, fmt, {
-            includeMultiCorner: true,
-            includeStageBreakdown: true,
-            includeVerificationBreakdown: true,
-            latexStandalone: true,
-            typstStandalone: true,
-          })
-          const summaryPath = joinLocalPath(
-            workspace.workspacePath,
-            `${design}_design_summary.${ext}`,
-          )
-          await api.workspace.writeProjectTextFile(summaryPath, content)
-        }),
-      )
+      const additionalFiles: SignoffAdditionalFile[] = reportFormats.map((fmt) => {
+        const ext = formatExtMap[fmt]
+        const content = generateDesignReport(reportData, fmt, {
+          includeMultiCorner: true,
+          includeStageBreakdown: true,
+          includeVerificationBreakdown: true,
+          latexStandalone: true,
+          typstStandalone: true,
+        })
+        return {
+          archivePath: `design_summaries/${design}_design_summary.${ext}`,
+          content,
+        }
+      })
 
       const result = await api.ecc.workspace.exportSignoff({
+        additionalFiles,
         outputPath,
         workspaceHandle: workspace.workspaceHandle,
       })

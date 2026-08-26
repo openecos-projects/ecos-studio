@@ -549,30 +549,35 @@ describe('useSignoffPackageExport export action', () => {
       filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
     })
     expect(api.exportSignoff).toHaveBeenCalledWith({
+      additionalFiles: expect.arrayContaining([
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.tex',
+          content: expect.stringContaining('\\begin{table}'),
+        }),
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.md',
+          content: expect.stringContaining('# Design Summary Report: rocket_core'),
+        }),
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.typ',
+          content: expect.stringContaining('#figure('),
+        }),
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.csv',
+          content: expect.stringContaining('Category,Metric,Value'),
+        }),
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.txt',
+          content: expect.stringContaining('ECOS STUDIO — DESIGN SUMMARY'),
+        }),
+      ]),
       outputPath: '/tmp/rocket package.tar.gz',
       workspaceHandle: 'workspace-handle-1',
     })
-    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspaces/active path/rocket_core_design_summary.tex',
-      expect.stringContaining('\\begin{table}'),
-    )
-    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspaces/active path/rocket_core_design_summary.md',
-      expect.stringContaining('# Design Summary Report: rocket_core'),
-    )
-    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspaces/active path/rocket_core_design_summary.typ',
-      expect.stringContaining('#figure('),
-    )
-    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspaces/active path/rocket_core_design_summary.csv',
-      expect.stringContaining('Category,Metric,Value'),
-    )
-    expect(api.writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspaces/active path/rocket_core_design_summary.txt',
-      expect.stringContaining('ECOS STUDIO — DESIGN SUMMARY'),
-    )
-    expect(api.writeProjectTextFile).toHaveBeenCalledTimes(5)
+    expect(
+      (api.exportSignoff.mock.calls[0]![0] as Record<string, unknown>).additionalFiles,
+    ).toHaveLength(5)
+    expect(api.writeProjectTextFile).not.toHaveBeenCalled()
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'success',
@@ -801,10 +806,10 @@ describe('useSignoffPackageExport export action', () => {
     expect(mounted.showToast).not.toHaveBeenCalled()
   })
 
-  it('propagates summary write failure and shows error toast when writeProjectTextFile rejects', async () => {
+  it('propagates archive append failure and shows error toast when exportSignoff rejects with additionalFiles', async () => {
     const api = createApi()
-    api.writeProjectTextFile.mockRejectedValueOnce(
-      new Error('Refusing to grant access outside current project root'),
+    api.exportSignoff.mockRejectedValueOnce(
+      new Error('Failed to append files to archive: permission denied'),
     )
     const mounted = mountComposable()
     scope = mounted.scope
@@ -812,13 +817,17 @@ describe('useSignoffPackageExport export action', () => {
 
     await openReviewAndConfirm(mounted)
 
-    expect(api.exportSignoff).not.toHaveBeenCalled()
+    expect(api.exportSignoff).toHaveBeenCalledWith(
+      expect.objectContaining({
+        additionalFiles: expect.any(Array),
+      }),
+    )
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'error',
         summary: 'Failed to Export Signoff Package',
         detail: expect.stringContaining(
-          'Refusing to grant access outside current project root',
+          'Failed to append files to archive: permission denied',
         ),
       }),
     )

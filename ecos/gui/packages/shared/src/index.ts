@@ -85,6 +85,7 @@ export type {
   EccWorkspaceCreateResult,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
+  SignoffAdditionalFile,
   EccWorkspaceHandleRequest,
   EccWorkspaceHomeResult,
   EccWorkspaceInspectSignoffResult,
