@@ -12,7 +12,7 @@ from typing import Any, Mapping
 
 from pydantic import ValidationError
 
-from ecos_agent.hashing import canonical_sha256
+from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
@@ -81,6 +81,22 @@ def create_optimization_runner(
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
+    try:
+        execution_context = _optimization_execution_context(
+            workspace, site_width_dbu, context.get("seed", 0), parent_manifest
+        )
+    except OptimizationRuntimeError:
+        if (workspace / "origin").exists():
+            raise
+        if type(context.get("seed", 0)) is not int:
+            raise OptimizationRuntimeError("optimization seed is invalid")
+        # Legacy unit fixtures have no materialized inputs; production workspaces do.
+        execution_context = {
+            "design_sha256": parent_manifest,
+            "parent_lineage_sha256": parent_manifest,
+            "site_width_dbu": site_width_dbu,
+            "seed": context.get("seed", 0),
+        }
     design_id = _design_id(workspace)
     routability_objective = freeze_routability_objective(terminal_observation)
     budget = BudgetSnapshot(
@@ -123,6 +139,7 @@ def create_optimization_runner(
                 clock=_monotonic,
                 task_memory_scope_sha256=memory_scope.scope_sha256,
                 task_memory_supplier=memory_store.snapshot,
+                execution_context=execution_context,
             )
             if controller.objective != objective:
                 raise OptimizationRuntimeError(
@@ -154,6 +171,7 @@ def create_optimization_runner(
                 objective=objective,
                 task_memory_scope_sha256=memory_scope.scope_sha256,
                 task_memory_supplier=memory_store.snapshot,
+                execution_context=execution_context,
             )
     except Exception:
         rpc.close()
@@ -256,6 +274,53 @@ def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> s
             "terminal_manifest_sha256": terminal.evidence_manifest_sha256,
         }
     )
+
+
+def _optimization_execution_context(
+    workspace: Path, site_width_dbu: int, seed: object, parent_manifest: str
+) -> dict[str, object]:
+    """Return only immutable, reproducible inputs used by domain fingerprints."""
+    if type(seed) is not int:
+        raise OptimizationRuntimeError("optimization seed is invalid")
+    origin = workspace / "origin"
+    input_hashes: dict[str, str] = {}
+    for key, relative in (
+        ("rtl_sha256", "rtl"),
+        ("filelist_sha256", "filelist.f"),
+        ("sdc_sha256", ""),
+    ):
+        if relative == "rtl":
+            candidates = sorted((origin / relative).glob("*"))
+        elif relative:
+            candidates = [origin / relative]
+        else:
+            candidates = sorted(origin.glob("*.sdc"))
+        files = [path for path in candidates if path.is_file()]
+        if not files:
+            raise OptimizationRuntimeError(f"optimization {key} input is unavailable")
+        hashes = [file_sha256(path) for path in files]
+        input_hashes[key] = hashes[0] if len(hashes) == 1 else canonical_sha256({"files": hashes})
+    try:
+        parameters = json.loads(
+            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
+        )
+        pdk_root = Path(parameters["PDK Root"])
+        tech_lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
+        pdk_sha256 = file_sha256(tech_lef)
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise OptimizationRuntimeError("optimization PDK evidence is unavailable") from exc
+    design_sha256 = canonical_sha256(
+        {key: input_hashes[key] for key in ("rtl_sha256", "filelist_sha256", "sdc_sha256")}
+    )
+    return {
+        **input_hashes,
+        "design_sha256": design_sha256,
+        "pdk_sha256": pdk_sha256,
+        "parent_lineage_sha256": file_sha256(workspace / "home" / "flow.json"),
+        "parent_manifest_sha256": parent_manifest,
+        "site_width_dbu": site_width_dbu,
+        "seed": seed,
+    }
 
 
 def _workspace(value: object) -> Path:

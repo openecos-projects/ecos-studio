@@ -1248,6 +1248,17 @@ class OptimizationEpisodeController:
                 raise OptimizationEpisodeControllerError(
                     "terminal parameter receipt does not match requested value"
                 )
+        if receipt.evidence is not None and self._requested is not None:
+            expected_contract = (_TARGET_STEPS[self._requested.knob_id], "Harden", "full_flow")
+            observed_contract = (
+                receipt.evidence.target_step,
+                receipt.evidence.end_step,
+                receipt.evidence.execution_scope,
+            )
+            if any(value is not None for value in observed_contract) and observed_contract != expected_contract:
+                raise OptimizationEpisodeControllerError(
+                    "terminal candidate evidence execution contract does not match"
+                )
         details = {
             "execution_id": receipt.execution_id,
             "started": receipt.started,
@@ -1257,6 +1268,9 @@ class OptimizationEpisodeController:
             details["candidate_root_ref"] = receipt.evidence.candidate_root_ref
             details["candidate_manifest_ref"] = receipt.evidence.candidate_manifest_ref
             details["candidate_manifest_sha256"] = receipt.evidence.candidate_manifest_sha256
+            details["target_step"] = receipt.evidence.target_step
+            details["end_step"] = receipt.evidence.end_step
+            details["execution_scope"] = receipt.evidence.execution_scope
         if receipt.application_receipt is not None:
             details["knob_application_receipt"] = receipt.application_receipt.model_dump(
                 mode="json"

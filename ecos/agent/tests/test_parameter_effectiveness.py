@@ -67,6 +67,31 @@ def test_rules_empty_does_not_infer_aliases() -> None:
     assert len(domain.allowed_requested_values) == 13
 
 
+def test_context_fingerprint_ignores_run_id_but_binds_inputs() -> None:
+    context = {
+        "run_id": "candidate-1",
+        "design_sha256": HASH,
+        "rtl_sha256": HASH,
+        "filelist_sha256": HASH,
+        "sdc_sha256": HASH,
+        "pdk_sha256": HASH,
+        "parent_lineage_sha256": HASH,
+        "stage": "place",
+        "backend": "ecc",
+        "tool_revision": "bound",
+        "lattice_version": "ecos.optimization_lattice.v1",
+        "unit": "ratio",
+        "site_width_dbu": 200,
+        "seed": 0,
+    }
+    assert build_context_fingerprint(context) == build_context_fingerprint(
+        {**context, "run_id": "candidate-2"}
+    )
+    assert build_context_fingerprint(context) != build_context_fingerprint(
+        {**context, "site_width_dbu": 400}
+    )
+
+
 def test_v2_validator_rejects_value_outside_hash_bound_domain() -> None:
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     domain = compile_effective_domain(card, context={"design_sha256": HASH}, baseline_surface_value=0.2)

@@ -67,7 +67,17 @@ def build_context_fingerprint(context: Mapping[str, Any]) -> str:
     """Hash the complete execution context; callers must provide all binding fields."""
     if not isinstance(context, Mapping) or not context:
         raise EffectiveDomainError("effective-domain context is empty")
-    return canonical_sha256(dict(sorted(context.items(), key=lambda item: item[0])))
+    # run_id identifies one execution, while the domain is reusable across the
+    # same design/tool/parent context. Keep it in the receipt, out of the key.
+    stable_keys = {
+        "design_sha256", "rtl_sha256", "filelist_sha256", "sdc_sha256", "pdk_sha256",
+        "parent_lineage_sha256", "stage", "backend", "tool_revision", "lattice_version",
+        "unit", "site_width_dbu", "seed", "tool_source_sha256",
+    }
+    stable = {key: value for key, value in context.items() if key in stable_keys}
+    if not stable:
+        raise EffectiveDomainError("effective-domain context has no binding fields")
+    return canonical_sha256(dict(sorted(stable.items(), key=lambda item: item[0])))
 
 
 def application_signature(receipt: ParameterApplicationReceipt) -> str:
@@ -100,7 +110,15 @@ def compile_effective_domain(
     lattice = tuple(item.value for item in requested_lattice(card))
     matching = []
     for receipt in receipts:
-        if receipt.requested.get("knob_id") != card.knob_id.value or receipt.context.get("context_sha256") != context_sha:
+        if receipt.requested.get("knob_id") != card.knob_id.value:
+            continue
+        receipt_context_sha = receipt.context.get("context_sha256")
+        if receipt_context_sha is None:
+            try:
+                receipt_context_sha = build_context_fingerprint(receipt.context)
+            except EffectiveDomainError:
+                continue
+        if receipt_context_sha != context_sha:
             continue
         matching.append(receipt)
     aliases: set[Any] = set()

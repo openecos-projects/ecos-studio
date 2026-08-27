@@ -93,6 +93,10 @@ def validate_application_receipt(
     card = cards.get(knob)
     if card is None or receipt.tool.name != card.tool.name or receipt.tool.revision != card.tool.revision:
         raise ParameterSemanticsError("application receipt tool/card binding is invalid")
+    if receipt.requested.get("unit") != card.surface.unit:
+        raise ParameterSemanticsError("application receipt unit does not match card")
+    if receipt.context.get("stage") not in {None, card.stage}:
+        raise ParameterSemanticsError("application receipt stage does not match card")
     allowed = {item.get("consumer_id") for item in card.consumers}
     for consumer in receipt.activation.consumers:
         if consumer.consumer_id not in allowed:

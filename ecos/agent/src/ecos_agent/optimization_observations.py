@@ -224,6 +224,30 @@ def build_candidate_terminal_observation(
         or payload.get("candidate_root_ref") != evidence.candidate_root_ref
     ):
         raise OptimizationObservationError("candidate workspace manifest is invalid")
+    artifacts = payload.get("artifacts", {})
+    if not isinstance(artifacts, dict):
+        raise OptimizationObservationError("candidate artifact manifest is invalid")
+    for item in artifacts.values():
+        if not isinstance(item, dict) or not isinstance(item.get("ref"), str):
+            raise OptimizationObservationError("candidate artifact manifest is invalid")
+        artifact_path = candidate_root / item["ref"]
+        try:
+            artifact_path.resolve(strict=True).relative_to(candidate_root)
+        except (OSError, ValueError) as exc:
+            raise OptimizationObservationError("candidate artifact path is unsafe") from exc
+        expected_hash = item.get("sha256")
+        if not isinstance(expected_hash, str) or file_sha256(artifact_path) != expected_hash:
+            raise OptimizationObservationError("candidate artifact hash does not match manifest")
+    contract = (evidence.target_step, evidence.end_step, evidence.execution_scope)
+    if any(value is not None for value in contract):
+        if contract != (
+            payload.get("target_step"),
+            payload.get("end_step"),
+            payload.get("execution_scope"),
+        ):
+            raise OptimizationObservationError(
+                "candidate execution contract is not bound to manifest"
+            )
     parent_flow = _candidate_parent_flow(parent, payload.get("parent_candidate_root_ref"))
     if file_sha256(parent_flow) != payload.get("parent_flow_sha256"):
         raise OptimizationObservationError("candidate parent flow does not match its manifest")

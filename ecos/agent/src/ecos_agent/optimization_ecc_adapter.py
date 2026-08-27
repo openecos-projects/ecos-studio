@@ -258,10 +258,24 @@ class EccCandidateRerunAdapter:
             "candidate_root_ref": result.get("candidateRootRef"),
             "candidate_manifest_ref": result.get("candidateManifestRef"),
             "candidate_manifest_sha256": result.get("candidateManifestSha256"),
+            "target_step": result.get("targetStep"),
+            "end_step": result.get("endStep"),
+            "execution_scope": result.get("executionScope"),
         }
         if all(value is None for value in values.values()):
             return None
-        if not all(isinstance(value, str) for value in values.values()):
+        required = tuple(
+            values[key]
+            for key in (
+                "candidate_root_ref",
+                "candidate_manifest_ref",
+                "candidate_manifest_sha256",
+            )
+        )
+        optional = tuple(values[key] for key in ("target_step", "end_step", "execution_scope"))
+        if not all(isinstance(value, str) for value in required) or any(
+            value is not None and not isinstance(value, str) for value in optional
+        ):
             raise OptimizationEccAdapterError("candidate terminal evidence is incomplete")
         try:
             return CandidateExecutionEvidence(**values)
