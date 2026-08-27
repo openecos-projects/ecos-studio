@@ -23,6 +23,17 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+_EXECUTION_CONTEXT_KEYS = {
+    "design_sha256", "rtl_sha256", "filelist_sha256", "sdc_sha256", "pdk_sha256",
+    "parent_lineage_sha256", "stage", "backend", "tool_revision", "lattice_version",
+    "unit", "site_width_dbu", "seed", "tool_source_sha256",
+}
+_DOMAIN_CONTEXT_KEYS = _EXECUTION_CONTEXT_KEYS | {
+    "incumbent_state_sha256", "parameter_card_sha256", "parent_manifest_sha256",
+    "terminal_execution_contract_sha256", "current_values",
+}
+
+
 class DomainThreshold(_Model):
     threshold_id: str
     kind: str
@@ -69,15 +80,22 @@ def build_context_fingerprint(context: Mapping[str, Any]) -> str:
         raise EffectiveDomainError("effective-domain context is empty")
     # run_id identifies one execution, while the domain is reusable across the
     # same design/tool/parent context. Keep it in the receipt, out of the key.
-    stable_keys = {
-        "design_sha256", "rtl_sha256", "filelist_sha256", "sdc_sha256", "pdk_sha256",
-        "parent_lineage_sha256", "stage", "backend", "tool_revision", "lattice_version",
-        "unit", "site_width_dbu", "seed", "tool_source_sha256",
-    }
-    stable = {key: value for key, value in context.items() if key in stable_keys}
+    stable = {key: value for key, value in context.items() if key in _DOMAIN_CONTEXT_KEYS}
     if not stable:
         raise EffectiveDomainError("effective-domain context has no binding fields")
     return canonical_sha256(dict(sorted(stable.items(), key=lambda item: item[0])))
+
+
+def _receipt_matches_context(
+    receipt: ParameterApplicationReceipt,
+    context: Mapping[str, Any],
+    context_sha256: str,
+) -> bool:
+    receipt_sha = receipt.context.get("context_sha256")
+    if receipt_sha is not None:
+        return receipt_sha == context_sha256
+    expected = {key: context[key] for key in _EXECUTION_CONTEXT_KEYS if key in context}
+    return bool(expected) and all(receipt.context.get(key) == value for key, value in expected.items())
 
 
 def application_signature(receipt: ParameterApplicationReceipt) -> str:
@@ -112,13 +130,7 @@ def compile_effective_domain(
     for receipt in receipts:
         if receipt.requested.get("knob_id") != card.knob_id.value:
             continue
-        receipt_context_sha = receipt.context.get("context_sha256")
-        if receipt_context_sha is None:
-            try:
-                receipt_context_sha = build_context_fingerprint(receipt.context)
-            except EffectiveDomainError:
-                continue
-        if receipt_context_sha != context_sha:
+        if not _receipt_matches_context(receipt, context, context_sha):
             continue
         matching.append(receipt)
     aliases: set[Any] = set()
@@ -130,9 +142,27 @@ def compile_effective_domain(
         effective = receipt.effective_initial.value
         matched_rule = False
         for rule in card.resolution_rules:
-            if rule.get("kind") == "admission_floor" and isinstance(effective, (int, float)) and effective > requested:
+            rule_id = rule.get("rule_id")
+            trigger = next(
+                (
+                    transition
+                    for transition in receipt.transitions
+                    if transition.rule_id == rule_id
+                    and transition.to in {"normalized", "clamped", "overridden"}
+                    and transition.evidence_ref is not None
+                    and transition.evidence_sha256 is not None
+                ),
+                None,
+            )
+            if (
+                rule.get("kind") == "admission_floor"
+                and isinstance(rule_id, str)
+                and isinstance(requested, (int, float))
+                and isinstance(effective, (int, float))
+                and effective > requested
+                and trigger is not None
+            ):
                 matched_rule = True
-                rule_id = str(rule.get("rule_id", "unknown"))
                 thresholds.append(DomainThreshold(
                     threshold_id=f"{card.knob_id.value.replace('.', '-')}-{rule_id}",
                     kind="admission_floor", value=float(effective), rule_id=rule_id,

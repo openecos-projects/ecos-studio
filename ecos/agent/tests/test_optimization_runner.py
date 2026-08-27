@@ -129,7 +129,7 @@ class _FakeExecutor:
                     outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
                     evidence=_evidence("execution-2"),
                     parameter_application_receipt=_native_receipt(
-                        "place.target_density", 0.15
+                        "place.target_density", 0.15, effective_value=0.8
                     ),
                 ),
             )
@@ -195,7 +195,10 @@ def _evidence(execution_id: str) -> CandidateExecutionEvidence:
     )
 
 
-def _native_receipt(knob_id: str, value: object) -> ParameterApplicationReceipt:
+def _native_receipt(
+    knob_id: str, value: object, *, effective_value: object | None = None
+) -> ParameterApplicationReceipt:
+    effective_value = value if effective_value is None else effective_value
     unit = "site" if knob_id.endswith("cell_padding_x") else "ratio"
     consumer_id = (
         "dreamplace.cell_size_expansion"
@@ -219,7 +222,7 @@ def _native_receipt(knob_id: str, value: object) -> ParameterApplicationReceipt:
             written_value=value,
             unit=unit,
         ),
-        "effective_initial": EffectiveValue(value=value, unit=unit),
+        "effective_initial": EffectiveValue(value=effective_value, unit=unit),
         "application_status": "applied",
         "activation": ActivationEvidence(
             status="used",
@@ -232,7 +235,7 @@ def _native_receipt(knob_id: str, value: object) -> ParameterApplicationReceipt:
                 },
             ),
         ),
-        "effective_final": EffectiveValue(value=value, unit=unit),
+        "effective_final": EffectiveValue(value=effective_value, unit=unit),
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=_HASH)
     return ParameterApplicationReceipt(
@@ -416,6 +419,7 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert controller.incumbent is not None
     assert controller.incumbent.observation_id == "terminal-execution-2"
     assert controller.incumbent_candidate_root_ref == ".agent/candidates/execution-2"
+    assert runner._current_values["place.target_density"] == 0.8
     assert planner.contexts[0].context_ref.input_sha256 != planner.contexts[1].context_ref.input_sha256
     assert [outcome.outcome for outcome in controller.ledger.replay().terminal_outcomes] == [
         OptimizationOutcomeKind.DEGRADED,

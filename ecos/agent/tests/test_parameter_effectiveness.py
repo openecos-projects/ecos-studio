@@ -21,6 +21,7 @@ from ecos_agent.parameter_evidence_contracts import (
     EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
+    RuntimeTransition,
     NumericProposalActionV2,
     OptimizationProposalV2,
     ToolRef,
@@ -103,7 +104,9 @@ def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def _density_receipt(context_sha: str) -> ParameterApplicationReceipt:
+def _density_receipt(
+    context_sha: str, *, with_runtime_trigger: bool = True
+) -> ParameterApplicationReceipt:
     payload = dict(
         receipt_id="parameter-receipt-1",
         tool=ToolRef(name="DREAMPlace", revision="bound"),
@@ -116,6 +119,20 @@ def _density_receipt(context_sha: str) -> ParameterApplicationReceipt:
             config_after_sha256=HASH, written_value=0.2, unit="ratio",
         ),
         effective_initial=EffectiveValue(value=0.8, unit="ratio"),
+        transitions=(
+            RuntimeTransition(
+                sequence=0,
+                **{"from": "materialized"},
+                to="overridden",
+                value=0.8,
+                reason="utilization lower bound",
+                rule_id="dreamplace.target_density.utilization_floor",
+                evidence_ref="analysis/density.json",
+                evidence_sha256=HASH,
+            ),
+        )
+        if with_runtime_trigger
+        else (),
         application_status="applied",
         activation=ActivationEvidence(status="used", consumers=({"consumer_id": "dreamplace.density_objective", "outcome": "entered", "evidence_ref": "analysis/density.json", "evidence_sha256": HASH},)),
         effective_final=EffectiveValue(value=0.8, unit="ratio"),
@@ -131,6 +148,19 @@ def test_density_floor_excludes_only_values_supported_by_typed_rule() -> None:
     domain = compile_effective_domain(card, context=context, receipts=(_density_receipt(build_context_fingerprint(context)),))
     assert domain.allowed_requested_values == (0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
     assert domain.current_coordinate["effective_anchor"] == 0.8
+
+
+def test_density_floor_without_runtime_trigger_excludes_only_observed_request() -> None:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    context = {"design_sha256": HASH, "stage": "place", "tool_revision": "bound"}
+    receipt = _density_receipt(
+        build_context_fingerprint(context), with_runtime_trigger=False
+    )
+
+    domain = compile_effective_domain(card, context=context, receipts=(receipt,))
+
+    assert domain.excluded_aliases == (0.2,)
+    assert 0.15 in domain.allowed_requested_values
 
 
 def test_rules_empty_does_not_infer_aliases() -> None:
@@ -163,6 +193,11 @@ def test_context_fingerprint_ignores_run_id_but_binds_inputs() -> None:
     )
     assert build_context_fingerprint(context) != build_context_fingerprint(
         {**context, "site_width_dbu": 400}
+    )
+    assert build_context_fingerprint(
+        {**context, "incumbent_state_sha256": HASH}
+    ) != build_context_fingerprint(
+        {**context, "incumbent_state_sha256": "sha256:" + "b" * 64}
     )
 
 

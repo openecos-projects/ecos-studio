@@ -117,8 +117,6 @@ def evaluate_equal_budget(
     if planning_calls < 0 or planning_calls > config.planning_call_limit:
         raise ValueError("planning calls exceed the frozen budget")
     selected = list(traces)
-    if len(selected) > config.candidate_limit:
-        raise ValueError("candidate traces exceed the frozen budget")
     for item in selected:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,127}", item.design_id) or not item.candidate_id:
             raise ValueError("candidate trace identifiers are invalid")
@@ -138,6 +136,8 @@ def evaluate_equal_budget(
             if metric is not None and not math.isfinite(metric):
                 raise ValueError("candidate metrics must be finite")
     started = [item for item in selected if item.started]
+    if len(started) > config.candidate_limit:
+        raise ValueError("started candidate traces exceed the frozen budget")
     app_signatures = {item.application_signature for item in started if item.application_signature}
     response_signatures = {item.response_signature for item in started if item.response_signature}
     effective = [item for item in started if item.activation_status == "used"]

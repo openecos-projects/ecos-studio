@@ -28,6 +28,7 @@ from ecos_agent.optimization_contracts import (
     TimingGuardrailContract,
     TimingReference,
 )
+from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
 
 _DENSITY_VALUES = tuple(round(0.1 + 0.05 * i, 2) for i in range(14)) + (0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
@@ -113,6 +114,22 @@ def coordinate_value_from_receipt(
         return receipt.requested.value
     value = receipt.effective_final.value
     return value / site_width_dbu if receipt.requested.knob_id == OptimizationKnob.CELL_PADDING_X else value
+
+
+def coordinate_value_from_native_receipt(
+    receipt: ParameterApplicationReceipt, *, site_width_dbu: int
+) -> bool | int | float:
+    if type(site_width_dbu) is not int or site_width_dbu <= 0:
+        raise ValueError("site width is invalid")
+    knob_id = OptimizationKnob(receipt.requested["knob_id"])
+    value = (
+        receipt.requested["value"]
+        if knob_id == OptimizationKnob.DENSITY_WEIGHT
+        else receipt.effective_final.value
+    )
+    if type(value) not in {bool, int, float}:
+        raise ValueError("native receipt effective value is unavailable")
+    return value / site_width_dbu if knob_id == OptimizationKnob.CELL_PADDING_X else value
 
 
 def legal_actions(

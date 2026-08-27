@@ -26,6 +26,7 @@ from ecos_agent.optimization_rules import (
     IncumbentComparison,
     IncumbentDecision,
     compare_incumbent,
+    coordinate_value_from_native_receipt,
     coordinate_value_from_receipt,
 )
 
@@ -234,12 +235,18 @@ class OptimizationEpisodeRunner:
         ):
             self._controller.promote_incumbent(candidate, receipt.evidence)
             if requested is not None:
-                value = requested.value
-                if receipt.application_receipt is not None:
+                if receipt.parameter_application_receipt is not None:
+                    value = coordinate_value_from_native_receipt(
+                        receipt.parameter_application_receipt,
+                        site_width_dbu=self._site_width_dbu,
+                    )
+                elif receipt.application_receipt is not None:
                     value = coordinate_value_from_receipt(
                         receipt.application_receipt,
                         site_width_dbu=self._site_width_dbu,
                     )
+                else:
+                    value = requested.value
                 self._current_values[requested.knob_id.value] = value
 
     def _indeterminate_turn(

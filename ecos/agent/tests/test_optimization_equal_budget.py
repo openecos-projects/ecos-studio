@@ -122,7 +122,14 @@ def test_harness_keeps_preexecution_only_trace_not_run(tmp_path) -> None:
         + "\n"
     )
 
-    result = harness.run(manifest, tmp_path / "out", traces, planning_calls=1)
+    result = harness.run(
+        manifest,
+        tmp_path / "out",
+        traces,
+        traces,
+        requested_only_planning_calls=1,
+        receipt_aware_planning_calls=1,
+    )
 
     assert result["status"] == "not_run"
 
@@ -133,9 +140,145 @@ def test_harness_requires_reproducibility_metadata_for_started_trace(tmp_path) -
     manifest.write_text(json.dumps({"design_ids": [f"d{i}" for i in range(10)]}))
     traces = tmp_path / "traces.jsonl"
     traces.write_text(
-        json.dumps({"design_id": "d0", "candidate_id": "c1", "started": True, "terminal_success": False})
+        json.dumps(
+            {
+                "design_id": "d0",
+                "candidate_id": "c1",
+                "started": True,
+                "terminal_success": False,
+                "receipt_status": "ok",
+            }
+        )
         + "\n"
     )
 
     with pytest.raises(ValueError, match="reproducibility metadata"):
-        harness.run(manifest, tmp_path / "out", traces, planning_calls=1)
+        harness.run(
+            manifest,
+            tmp_path / "out",
+            None,
+            traces,
+            requested_only_planning_calls=1,
+            receipt_aware_planning_calls=1,
+        )
+
+
+def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> None:
+    harness = _load_harness()
+    design_ids = [f"d{i}" for i in range(10)]
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"design_ids": design_ids}))
+    requested = tmp_path / "requested.jsonl"
+    receipt = tmp_path / "receipt.jsonl"
+    full = "".join(
+        json.dumps(
+            {
+                "design_id": design_ids[index % 10],
+                "candidate_id": f"c{index}",
+                "started": True,
+                "terminal_success": False,
+            }
+        )
+        + "\n"
+        for index in range(20)
+    )
+    requested.write_text(full)
+    receipt.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "design_id": design_ids[index % 10],
+                    "candidate_id": f"r{index}",
+                    "started": True,
+                    "terminal_success": False,
+                    "activation_status": "used",
+                    "application_signature": f"app-{index}",
+                    "response_signature": f"resp-{index}",
+                    "receipt_status": "ok",
+                }
+            )
+            + "\n"
+            for index in range(20)
+        )
+    )
+    metadata = {
+        "reference_runtime_seconds": 1.0,
+        "seed": 0,
+        "tool_revision": "ecc-test",
+        "input_manifest_sha256": "sha256:" + "a" * 64,
+    }
+
+    completed = harness.run(
+        manifest,
+        tmp_path / "complete",
+        requested,
+        receipt,
+        requested_only_planning_calls=20,
+        receipt_aware_planning_calls=20,
+        **metadata,
+    )
+    incomplete = harness.run(
+        manifest,
+        tmp_path / "incomplete",
+        requested,
+        None,
+        requested_only_planning_calls=20,
+        receipt_aware_planning_calls=0,
+        **metadata,
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["requested_only_raw_trace_sha256"] != ""
+    assert completed["receipt_aware_raw_trace_sha256"] != ""
+    assert incomplete["status"] == "incomplete"
+
+    with pytest.raises(ValueError, match="independent candidate executions"):
+        overlapping_receipt = tmp_path / "overlap.jsonl"
+        overlapping_receipt.write_text(
+            full.replace(
+                '"terminal_success": false}',
+                '"terminal_success": false, "receipt_status": "ok"}',
+            )
+        )
+        harness.run(
+            manifest,
+            tmp_path / "reused",
+            requested,
+            overlapping_receipt,
+            requested_only_planning_calls=20,
+            receipt_aware_planning_calls=20,
+            **metadata,
+        )
+
+
+def test_receipt_aware_started_trace_requires_receipt_fields(tmp_path) -> None:
+    harness = _load_harness()
+    design_ids = [f"d{i}" for i in range(10)]
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"design_ids": design_ids}))
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        json.dumps(
+            {
+                "design_id": "d0",
+                "candidate_id": "c0",
+                "started": True,
+                "terminal_success": False,
+            }
+        )
+        + "\n"
+    )
+
+    with pytest.raises(ValueError, match="receipt-aware started trace lacks"):
+        harness.run(
+            manifest,
+            tmp_path / "out",
+            None,
+            trace,
+            requested_only_planning_calls=0,
+            receipt_aware_planning_calls=1,
+            reference_runtime_seconds=1.0,
+            seed=0,
+            tool_revision="ecc-test",
+            input_manifest_sha256="sha256:" + "a" * 64,
+        )

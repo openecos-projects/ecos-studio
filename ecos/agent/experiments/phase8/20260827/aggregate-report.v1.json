@@ -22,8 +22,10 @@
     "timing",
     "congestion"
   ],
-  "planning_calls": 0,
-  "raw_trace_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "planning_calls": {
+    "receipt_aware": 0,
+    "requested_only": 0
+  },
   "receipt_aware": {
     "aliases_saved": 0,
     "application_signature_count": 0,
@@ -61,6 +63,7 @@
     "wall_time_limit_seconds": 22.0,
     "wrong_prunes": 0
   },
+  "receipt_aware_raw_trace_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "reference_runtime_seconds": 1.0,
   "requested_only": {
     "aliases_saved": 0,
@@ -99,10 +102,14 @@
     "wall_time_limit_seconds": 22.0,
     "wrong_prunes": 0
   },
+  "requested_only_raw_trace_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "schema_version": "ecos.optimization_equal_budget_harness.v1",
   "seed": null,
   "status": "not_run",
   "tool_revision": null,
-  "trace_count": 0,
+  "trace_count": {
+    "receipt_aware": 0,
+    "requested_only": 0
+  },
   "wall_time_limit_seconds": 22.0
 }
