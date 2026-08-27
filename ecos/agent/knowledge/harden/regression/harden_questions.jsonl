@@ -1,9 +1,0 @@
-{"entity_id": "algorithm.harden.execution", "id": "harden-execution", "question": "How does the Harden stage execute?", "required_text": "Execution path:"}
-{"entity_id": "algorithm.harden.delivery_input_selection", "id": "harden-delivery_input_selection", "question": "harden delivery input selection", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.harden.abstract_lef_generation", "id": "harden-abstract_lef_generation", "question": "harden abstract lef generation", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.harden.timing_model_characterization", "id": "harden-timing_model_characterization", "question": "ista extract lib timing characterizer", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.harden.hardened_gds_export", "id": "harden-hardened_gds_export", "question": "harden hardened gds export", "required_text": "Source evidence:"}
-{"entity_id": "parameter.harden.liberty", "id": "harden-parameter", "question": "harden liberty", "required_text": "**Role:**"}
-{"entity_id": "metric.harden_artifact_missing_count", "id": "harden-metric", "question": "harden artifact missing count", "required_text": "**Calculation:**"}
-{"entity_id": "artifact.harden.outputs", "id": "harden-artifact", "question": "harden artifacts", "required_text": "**Meaning:**"}
-{"entity_id": "failure.harden.preconditions", "id": "harden-failure", "question": "harden failed", "required_text": "**Failure mode:**"}

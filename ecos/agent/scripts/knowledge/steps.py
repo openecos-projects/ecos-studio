@@ -246,6 +246,9 @@ PARAMETER_DETAILS = {
     "fixfanout": {
         "insert_buffer": ("The buffer cell selection for fanout repair.", "It supplies the buffer implementation used when net optimization inserts drivers."),
         "max_fanout": ("The maximum allowed fanout constraint.", "It is the threshold that directs fanout optimization and validates the resulting fanout metric."),
+        "file_path.sdc_file": ("The timing-constraint input path.", "It supplies constraints used by the net-optimization tool."),
+        "file_path.lib_files": ("The Liberty input collection.", "It supplies cell timing and drive models to net optimization."),
+        "file_path.lef_files": ("The LEF input collection.", "It supplies physical cell and routing data to net optimization."),
     },
     "cts": {
         "skew_bound": ("The target upper bound for clock skew.", "It directs CTS optimization and is compared against derived clock-quality facts."),
@@ -410,6 +413,8 @@ def _parameter_detail(stage: Stage, key: str) -> tuple[str, str]:
         return ("The boundary endcap-cell setting.", "It selects cells that protect rows and block edges during physical-cell insertion.")
     if key.startswith("phy_placer.boundary_tap"):
         return ("The boundary-tap setting.", "It selects boundary tap cells and their placement rule along the core edge.")
+    if key.startswith("file_path."):
+        return (f"The net-optimization `{key.rsplit('.', 1)[-1]}` path.", "It identifies an input or output consumed by the fanout-optimization tool.")
     return (f"The `{key}` configuration field for {stage.step_name}.", "It is parsed by the underlying stage tool and has effect only when that tool consumes the field.")
 
 
