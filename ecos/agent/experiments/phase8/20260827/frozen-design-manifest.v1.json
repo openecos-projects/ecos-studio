@@ -1,6 +1,4 @@
 {
-  "schema_version": "ecos.frozen_design_manifest.v1",
-  "source": "/home/yhqiu1/iagent-survey/flow_agent/benchmarks/designs/designs.yml",
   "design_ids": [
     "gcd",
     "i2c",
@@ -13,5 +11,8 @@
     "prince",
     "asram16_axi4"
   ],
-  "execution_status": "manifest_only_pending_default_flow_evidence"
+  "execution_status": "manifest_only_pending_default_flow_evidence",
+  "manifest_sha256": "sha256:15c66fec460cf4718c462f78f296ff9cf72eddfa40555a8396b503cf8d6ba64b",
+  "schema_version": "ecos.frozen_design_manifest.v1",
+  "source": "/home/yhqiu1/iagent-survey/flow_agent/benchmarks/designs/designs.yml"
 }

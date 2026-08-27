@@ -168,7 +168,7 @@ def validate_application_receipt(
 def _validate_source_spans(card: ParameterSemanticsCard, card_root: Path) -> None:
     if not card.source_spans:
         raise ParameterSemanticsError("parameter card source spans are missing")
-    repository_root = Path(__file__).resolve().parents[4]
+    source_checkout = _source_checkout_root()
     for span in card.source_spans:
         if not isinstance(span, dict):
             raise ParameterSemanticsError("parameter card source span is invalid")
@@ -188,14 +188,26 @@ def _validate_source_spans(card: ParameterSemanticsCard, card_root: Path) -> Non
             raise ParameterSemanticsError("parameter card source span is invalid")
         if card.tool.source_sha256 and source_hash != card.tool.source_sha256:
             raise ParameterSemanticsError("parameter card source hash does not match tool")
-        path = (repository_root / source_file).resolve()
+        if source_checkout is None:
+            if card_root != _PACKAGE_CARD_ROOT:
+                raise ParameterSemanticsError("parameter card source checkout is unavailable")
+            continue
+        path = (source_checkout / source_file).resolve()
         try:
-            path.relative_to(repository_root)
+            path.relative_to(source_checkout)
             lines = path.read_text(encoding="utf-8").splitlines()
         except (OSError, ValueError, UnicodeError) as exc:
             raise ParameterSemanticsError("parameter card source span is unavailable") from exc
         if end > len(lines) or file_sha256(path) != source_hash:
             raise ParameterSemanticsError("parameter card source span hash does not match")
+
+
+def _source_checkout_root() -> Path | None:
+    path = Path(__file__).resolve()
+    if len(path.parents) <= 4:
+        return None
+    root = path.parents[4]
+    return root if (root / "ecc").is_dir() else None
 
 
 def card_hash(card: ParameterSemanticsCard) -> str:

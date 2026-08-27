@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 
 import pytest
 
@@ -69,6 +72,35 @@ def test_loader_rejects_unregistered_runtime_probe(tmp_path) -> None:
 
     with pytest.raises(ParameterSemanticsError, match="runtime probe"):
         load_parameter_cards(root)
+
+
+def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
+    wheel_dir = tmp_path / "wheel"
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(wheel_dir)],
+        cwd=CARD_ROOT.parents[2],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel = next(wheel_dir.glob("*.whl"))
+    site_dir = tmp_path / "site"
+    subprocess.run(
+        ["uv", "pip", "install", "--quiet", "--target", str(site_dir), str(wheel)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    env = dict(os.environ, PYTHONPATH=str(site_dir))
+    result = subprocess.run(
+        [sys.executable, "-c", "from ecos_agent.parameter_semantics import load_parameter_cards; assert len(load_parameter_cards()) == 8"],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def _density_receipt(context_sha: str) -> ParameterApplicationReceipt:

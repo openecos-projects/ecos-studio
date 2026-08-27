@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 from ecos_agent.optimization_equal_budget import (
     CandidateTrace,
     EqualBudgetConfig,
@@ -123,3 +125,17 @@ def test_harness_keeps_preexecution_only_trace_not_run(tmp_path) -> None:
     result = harness.run(manifest, tmp_path / "out", traces, planning_calls=1)
 
     assert result["status"] == "not_run"
+
+
+def test_harness_requires_reproducibility_metadata_for_started_trace(tmp_path) -> None:
+    harness = _load_harness()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"design_ids": [f"d{i}" for i in range(10)]}))
+    traces = tmp_path / "traces.jsonl"
+    traces.write_text(
+        json.dumps({"design_id": "d0", "candidate_id": "c1", "started": True, "terminal_success": False})
+        + "\n"
+    )
+
+    with pytest.raises(ValueError, match="reproducibility metadata"):
+        harness.run(manifest, tmp_path / "out", traces, planning_calls=1)

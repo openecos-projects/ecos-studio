@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Mapping, Protocol
 
+from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     AppliedKnobValue,
     KnobApplicationReceipt,
@@ -130,7 +131,7 @@ class EccCandidateRerunAdapter:
         operation_id, state = self._validate_operation(response)
         self._validate_execution_contract(response, requested)
         evidence = self._evidence(response)
-        application_receipt = self._application_receipt(response, requested, state)
+        application_receipt = self._application_receipt(response, requested, state, evidence)
         legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id[operation_id] = requested
         if state == "failed":
@@ -183,8 +184,9 @@ class EccCandidateRerunAdapter:
             if state in {"cancelled", "failed"}
             else None
         )
+        evidence = self._evidence(terminal)
         application_receipt = self._application_receipt(
-            terminal, self._requested_by_execution_id.get(intervention_id), state
+            terminal, self._requested_by_execution_id.get(intervention_id), state, evidence
         )
         legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id.pop(intervention_id, None)
@@ -222,8 +224,9 @@ class EccCandidateRerunAdapter:
             "failed": OptimizationOutcomeKind.EXECUTION_FAILED,
             "cancelled": OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
         }.get(state)
+        evidence = self._evidence(terminal)
         application_receipt = self._application_receipt(
-            terminal, self._requested_by_execution_id.get(execution_id), state
+            terminal, self._requested_by_execution_id.get(execution_id), state, evidence
         )
         legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id.pop(execution_id, None)
@@ -296,6 +299,7 @@ class EccCandidateRerunAdapter:
         response: Mapping[str, object],
         requested: RequestedKnobValue | None,
         state: str,
+        evidence: CandidateExecutionEvidence | None = None,
     ) -> KnobApplicationReceipt | ParameterApplicationReceipt | None:
         result = self._result(response)
         if result is None:
@@ -309,18 +313,72 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("application receipt is non-terminal")
         normalized = _normalize_receipt_payload(raw)
         try:
-            if not isinstance(normalized, Mapping) or normalized.get("schema_version") != "tool.parameter_application_receipt.v1":
+            if (
+                not isinstance(normalized, Mapping)
+                or normalized.get("schema_version") != "tool.parameter_application_receipt.v1"
+            ):
                 raise ValueError("legacy application receipt is read-only")
             receipt = ParameterApplicationReceipt.model_validate(normalized)
         except (TypeError, ValueError) as exc:
             raise OptimizationEccAdapterError("application receipt is invalid") from exc
-        if receipt.requested.get("knob_id") != requested.knob_id.value or receipt.requested.get("value") != requested.value:
+        if (
+            receipt.requested.get("knob_id") != requested.knob_id.value
+            or receipt.requested.get("value") != requested.value
+        ):
             raise OptimizationEccAdapterError("application receipt written value does not match")
         try:
             validate_application_receipt(receipt, load_parameter_cards())
         except (ParameterSemanticsError, ValueError) as exc:
             raise OptimizationEccAdapterError("application receipt card binding is invalid") from exc
+        self._validate_materialization_binding(receipt, requested, evidence)
         return receipt
+
+    def _validate_materialization_binding(
+        self,
+        receipt: ParameterApplicationReceipt,
+        requested: RequestedKnobValue,
+        evidence: CandidateExecutionEvidence | None,
+    ) -> None:
+        if self._workspace_root is None:
+            return
+        if evidence is None:
+            raise OptimizationEccAdapterError("application receipt has no candidate evidence")
+        materialization = receipt.materialization
+        if materialization.candidate_ref != evidence.candidate_root_ref:
+            raise OptimizationEccAdapterError("application receipt candidate reference does not match")
+        if materialization.workspace_ref != evidence.candidate_root_ref:
+            raise OptimizationEccAdapterError("application receipt workspace reference does not match")
+        try:
+            candidate = (self._workspace_root / evidence.candidate_root_ref).resolve(strict=True)
+            candidate.relative_to(self._workspace_root)
+            manifest = (self._workspace_root / evidence.candidate_manifest_ref).resolve(strict=True)
+            manifest.relative_to(candidate)
+            path = (candidate / materialization.receipt_ref).resolve(strict=True)
+            path.relative_to(candidate)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise OptimizationEccAdapterError("application receipt materialization is unavailable") from exc
+        if file_sha256(manifest) != evidence.candidate_manifest_sha256:
+            raise OptimizationEccAdapterError("application receipt candidate manifest hash does not match")
+        if receipt.context.get("run_id") not in {None, candidate.name}:
+            raise OptimizationEccAdapterError("application receipt context does not match candidate")
+        if not isinstance(payload, Mapping):
+            raise OptimizationEccAdapterError("application receipt materialization is invalid")
+        digest_payload = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        if (
+            payload.get("receipt_sha256") != materialization.receipt_sha256
+            or canonical_sha256(digest_payload) != materialization.receipt_sha256
+        ):
+            raise OptimizationEccAdapterError("application receipt materialization hash does not match")
+        expected_value: object = requested.value
+        if requested.knob_id == OptimizationKnob.CELL_PADDING_X:
+            expected_value = requested.value * self._site_width_dbu
+        if payload.get("patch") != [{"knob_id": requested.knob_id.value, "value": expected_value}]:
+            raise OptimizationEccAdapterError("application receipt materialization patch does not match")
+        if payload.get("registry_sha256") != materialization.registry_sha256:
+            raise OptimizationEccAdapterError("application receipt materialization registry hash does not match")
+        if payload.get("patch_sha256") != materialization.patch_sha256:
+            raise OptimizationEccAdapterError("application receipt materialization patch hash does not match")
 
     def _materialize_patch(
         self, request: CandidateExecutionRequest
