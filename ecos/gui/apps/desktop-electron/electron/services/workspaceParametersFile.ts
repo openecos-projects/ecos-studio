@@ -164,6 +164,21 @@ export function mergeTomlSections(
 }
 
 /**
+ * Parse a TOML document that must hold a plain table at its root: a scalar
+ * document (e.g. a bare TOML date) is a configuration error, not an empty
+ * parameter set to overwrite on the next save.
+ */
+function parseTomlDocument(text: string, label: string): Record<string, unknown> {
+  const document: unknown = parse(text, { integersAsBigInt: 'asNeeded' })
+  if (!isPlainRecord(document)) {
+    throw new Error(
+      `Invalid workspace configuration: ${label} must contain a TOML table at the root`,
+    )
+  }
+  return document
+}
+
+/**
  * Parse workspace parameters from file content of the given format. Pure:
  * no filesystem access, so callers can run it behind their own path-scope
  * authorization. Parse failures throw.
@@ -185,10 +200,10 @@ export function parseWorkspaceParametersText(
     }
     return parsed
   }
-  const document = parse(text, { integersAsBigInt: 'asNeeded' }) as Record<
-    string,
-    unknown
-  >
+  const document = parseTomlDocument(
+    text,
+    join(workspaceRoot, 'home', WORKSPACE_CONFIG_BASENAME),
+  )
   return mergeTomlSections(document, workspaceRoot)
 }
 
@@ -444,12 +459,10 @@ export async function writeWorkspaceParameters(
       })
       return location
     }
-    const document = parse(
+    const document = parseTomlDocument(
       await readWorkspaceConfigContained(spelledPath, canonicalPath),
-      {
-        integersAsBigInt: 'asNeeded',
-      },
-    ) as Record<string, unknown>
+      location.path,
+    )
     const merged = mergePayloadIntoTomlDocument(document, payload, root)
     await writeTextAtomically(spelledPath, stringify(merged), {
       authorizedParent: dirname(canonicalPath),
@@ -612,10 +625,7 @@ export async function editWorkspaceParameters(
       )
       return location
     }
-    const document = parse(raw, { integersAsBigInt: 'asNeeded' }) as Record<
-      string,
-      unknown
-    >
+    const document = parseTomlDocument(raw, location.path)
     const parameters = mergeTomlSections(document, root)
     for (const edit of edits) {
       const normalizedPath = edit.json_path.map((segment) =>

@@ -210,6 +210,19 @@ describe('useParameters helpers', () => {
     ).toThrow(/safe integer range/)
   })
 
+  it('rejects non-finite parameter values instead of propagating them', () => {
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', target_density: Infinity }),
+    ).toThrow(/not a finite number/)
+    expect(() =>
+      parseParametersRecord({
+        pdk: 'ics55',
+        design: 'demo',
+        core: { utilitization: NaN },
+      }),
+    ).toThrow(/not a finite number/)
+  })
+
   it('treats empty snapshots as missing chip identity', () => {
     expect(parametersHaveChipIdentity({})).toBe(false)
     expect(parametersHaveChipIdentity({ Die: { Size: [], Area: 0 } })).toBe(false)

@@ -377,6 +377,16 @@ describe('writeWorkspaceParameters', () => {
     )
   })
 
+  it('rejects a malformed TOML document on save instead of replacing it', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', '2026-08-27\n')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/toml/i)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /toml/i,
+    )
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe('2026-08-27\n')
+  })
+
   it('re-runs the writable guard inside the serialized operation', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'ecc.toml', ECC_TOML)
