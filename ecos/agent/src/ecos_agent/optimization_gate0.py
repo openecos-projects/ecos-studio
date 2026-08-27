@@ -48,7 +48,7 @@ from ecos_agent.optimization_ecc_adapter import (
     EccCandidateRerunAdapter,
     EccContentLengthRpcClient,
 )
-from ecos_agent.optimization_gate0_receipts import (
+from ecos_agent.optimization_legacy_receipts import (
     Gate0ReceiptError,
     build_materialization_application_receipt as _build_materialization_application_receipt,
 )

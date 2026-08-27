@@ -378,7 +378,7 @@ def test_adapter_builds_a_missing_success_receipt_from_candidate_artifacts(
         evidence_sha256=HASH,
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_gate0_receipts.build_materialization_application_receipt",
+        "ecos_agent.optimization_legacy_receipts.build_materialization_application_receipt",
         lambda *_args, **_kwargs: expected,
     )
     adapter = EccCandidateRerunAdapter(
