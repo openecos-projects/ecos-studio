@@ -406,6 +406,9 @@ def test_materialization_receipt_binds_requested_and_written_value(tmp_path: Pat
     snapshot = candidate / "analysis/snapshots/dreamplace.after.json"
     snapshot.parent.mkdir(parents=True)
     snapshot.write_text(config.read_text(encoding="utf-8"), encoding="utf-8")
+    before_snapshot = candidate / "analysis/snapshots/dreamplace.before.json"
+    before_snapshot.write_text("{}", encoding="utf-8")
+    before_sha256 = file_sha256(before_snapshot)
     place_log = candidate / "place_dreamplace/log/place.log"
     place_log.parent.mkdir(parents=True)
     place_log.write_text(
@@ -428,13 +431,13 @@ def test_materialization_receipt_binds_requested_and_written_value(tmp_path: Pat
         "configs": [{
             "config_key": "dreamplace",
             "ref": "config/dreamplace_ecc.json",
-            "before_sha256": HASH,
+            "before_sha256": before_sha256,
             "after_sha256": file_sha256(config),
         }],
         "snapshots": [{
             "config_key": "dreamplace",
             "before_ref": "analysis/snapshots/dreamplace.before.json",
-            "before_sha256": HASH,
+            "before_sha256": before_sha256,
             "after_ref": "analysis/snapshots/dreamplace.after.json",
             "after_sha256": file_sha256(snapshot),
         }],
@@ -480,6 +483,46 @@ def test_materialization_receipt_binds_requested_and_written_value(tmp_path: Pat
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("registry_sha256", "registry-drift", "registry hash"),
+        ("config_ref", "config/other.json", "config evidence"),
+    ],
+)
+def test_materialization_receipt_rejects_l1_binding_drift(
+    tmp_path: Path, field: str, value: str, message: str
+) -> None:
+    evidence = _runtime_receipt_fixture(
+        tmp_path,
+        knob_id="place.target_density",
+        written=0.2,
+        target_step="place",
+        config_key="dreamplace",
+        config_ref="config/dreamplace_ecc.json",
+        config_payload={"target_density": 0.2},
+    )
+    candidate = tmp_path / evidence.candidate_root_ref
+    path = candidate / "analysis/candidate_materialization.v1.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if field == "config_ref":
+        payload["configs"][0]["ref"] = value
+    else:
+        payload[field] = value
+    payload["receipt_sha256"] = canonical_sha256(
+        {key: item for key, item in payload.items() if key != "receipt_sha256"}
+    )
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(Gate0Error, match=message):
+        build_materialization_application_receipt(
+            tmp_path,
+            evidence,
+            RequestedKnobValue(knob_id=OptimizationKnob.TARGET_DENSITY, value=0.2),
+            site_width_dbu=200,
+        )
+
+
 def _runtime_receipt_fixture(
     tmp_path: Path,
     *,
@@ -498,6 +541,9 @@ def _runtime_receipt_fixture(
     snapshot = candidate / f"analysis/snapshots/{config_key}.after.json"
     snapshot.parent.mkdir(parents=True)
     snapshot.write_text(config.read_text(encoding="utf-8"), encoding="utf-8")
+    before_snapshot = candidate / f"analysis/snapshots/{config_key}.before.json"
+    before_snapshot.write_text("{}", encoding="utf-8")
+    before_sha256 = file_sha256(before_snapshot)
     patch = [{"knob_id": knob_id, "value": written}]
     materialization = {
         "schema": "ecc.workspace.candidate_materialization.v1",
@@ -511,13 +557,13 @@ def _runtime_receipt_fixture(
         "configs": [{
             "config_key": config_key,
             "ref": config_ref,
-            "before_sha256": HASH,
+            "before_sha256": before_sha256,
             "after_sha256": file_sha256(config),
         }],
         "snapshots": [{
             "config_key": config_key,
             "before_ref": f"analysis/snapshots/{config_key}.before.json",
-            "before_sha256": HASH,
+            "before_sha256": before_sha256,
             "after_ref": f"analysis/snapshots/{config_key}.after.json",
             "after_sha256": file_sha256(snapshot),
         }],

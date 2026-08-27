@@ -49,6 +49,7 @@ _TARGET_STEPS = {
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
     OptimizationKnob.SYNTH_MAX_FANOUT: "fixFanout",
 }
+_SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _PLACE_KNOBS = frozenset(
     {
         OptimizationKnob.TARGET_DENSITY,
@@ -163,6 +164,9 @@ def _validate_materialization(
     requested: RequestedKnobValue,
     written_value: bool | int | float,
 ) -> None:
+    registry_sha256 = payload.get("registry_sha256")
+    if not isinstance(registry_sha256, str) or not _SHA256.fullmatch(registry_sha256):
+        raise Gate0ReceiptError("candidate materialization registry hash is invalid")
     patch = [{"knob_id": requested.knob_id.value, "value": written_value}]
     if payload.get("patch") != patch or payload.get("patch_sha256") != canonical_sha256(patch):
         raise Gate0ReceiptError("candidate materialization patch does not match")
@@ -170,27 +174,57 @@ def _validate_materialization(
     if payload.get("receipt_sha256") != canonical_sha256(digest_payload):
         raise Gate0ReceiptError("candidate materialization receipt hash does not match")
     configs = payload.get("configs")
-    matches = [
+    config_matches = [
         item for item in configs if isinstance(item, dict) and item.get("ref") == target.file
     ] if isinstance(configs, list) else []
-    if len(matches) != 1:
+    if len(config_matches) != 1:
         raise Gate0ReceiptError("candidate materialization config evidence is invalid")
+    config_entry = config_matches[0]
+    _validate_hash_fields(config_entry, ("before_sha256", "after_sha256"), "config")
+    if config_entry["before_sha256"] == config_entry["after_sha256"]:
+        raise Gate0ReceiptError("candidate materialization config was not changed")
+    config_path = _candidate_artifact(candidate, config_entry["ref"])
+    if file_sha256(config_path) != config_entry["after_sha256"]:
+        raise Gate0ReceiptError("candidate materialization config hash does not match")
     snapshots = payload.get("snapshots")
-    matches = [
+    snapshot_matches = [
         item
         for item in snapshots
         if isinstance(item, dict)
-        and item.get("config_key") == matches[0].get("config_key")
-        and item.get("after_sha256") == matches[0].get("after_sha256")
+        and item.get("config_key") == config_entry.get("config_key")
+        and item.get("before_sha256") == config_entry.get("before_sha256")
+        and item.get("after_sha256") == config_entry.get("after_sha256")
     ] if isinstance(snapshots, list) else []
-    if len(matches) != 1 or not isinstance(matches[0].get("after_ref"), str):
+    if len(snapshot_matches) != 1:
         raise Gate0ReceiptError("candidate materialization config snapshot is invalid")
-    snapshot = _candidate_artifact(candidate, matches[0]["after_ref"])
-    if file_sha256(snapshot) != matches[0].get("after_sha256"):
-        raise Gate0ReceiptError("candidate materialization config hash does not match")
+    snapshot_entry = snapshot_matches[0]
+    _validate_hash_fields(snapshot_entry, ("before_sha256", "after_sha256"), "snapshot")
+    if snapshot_entry["before_sha256"] == snapshot_entry["after_sha256"]:
+        raise Gate0ReceiptError("candidate materialization snapshot was not changed")
+    before_snapshot = _candidate_artifact(candidate, snapshot_entry.get("before_ref"))
+    after_snapshot = _candidate_artifact(candidate, snapshot_entry.get("after_ref"))
+    if file_sha256(before_snapshot) != snapshot_entry["before_sha256"]:
+        raise Gate0ReceiptError("candidate materialization before hash does not match")
+    if file_sha256(after_snapshot) != snapshot_entry["after_sha256"]:
+        raise Gate0ReceiptError("candidate materialization after hash does not match")
+    if snapshot_entry["before_sha256"] != config_entry["before_sha256"]:
+        raise Gate0ReceiptError("candidate materialization before hash is not bound")
+    if snapshot_entry["after_sha256"] != config_entry["after_sha256"]:
+        raise Gate0ReceiptError("candidate materialization after hash is not bound")
     stored_value = int(written_value) if requested.knob_id == OptimizationKnob.ROUTABILITY_OPT else written_value
-    if _target_value(snapshot, target) != stored_value:
+    if _target_value(after_snapshot, target) != stored_value:
         raise Gate0ReceiptError("candidate materialization config value does not match")
+
+
+def _validate_hash_fields(
+    payload: dict[str, object], fields: tuple[str, ...], label: str
+) -> None:
+    if any(
+        not isinstance(payload.get(field), str)
+        or not _SHA256.fullmatch(payload[field])
+        for field in fields
+    ):
+        raise Gate0ReceiptError(f"candidate materialization {label} hash is invalid")
 
 
 def _runtime_values(
