@@ -22,12 +22,15 @@ from ecos_agent.optimization_contracts import (
     OptimizationKnob,
     StageObservation,
 )
+from ecos_agent.optimization_knowledge_compiler import (
+    KnowledgeSupportCatalog,
+    knowledge_support_catalog_from_bundles,
+)
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.step_knowledge import (
     load_default_general_knowledge_bundles,
     load_default_step_knowledge,
 )
-
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _METRIC_ID = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -118,6 +121,7 @@ class OptimizationRetrievalResult:
     request: OptimizationRetrievalRequest
     channels: tuple[KnowledgeChannelResult, ...]
     knowledge_refs: tuple[KnowledgeReference, ...]
+    support_catalog: KnowledgeSupportCatalog
 
     @property
     def request_sha256(self) -> str:
@@ -141,6 +145,7 @@ class OptimizationRetrievalResult:
                 for item in self.channels
             ],
             "knowledge_refs": [ref.model_dump() for ref in self.knowledge_refs],
+            "support_catalog_sha256": self.support_catalog.catalog_sha256,
         }
 
 
@@ -152,17 +157,20 @@ class OptimizationKnowledgeRetriever:
         *,
         tool_retriever: GlobalKnowledgeRetriever | None = None,
         general_retriever: GlobalKnowledgeRetriever | None = None,
+        support_catalog: KnowledgeSupportCatalog | None = None,
     ) -> None:
         if (tool_retriever is None) != (general_retriever is None):
             raise ValueError("tool and general retrievers must be configured together")
+        general_bundles = load_default_general_knowledge_bundles()
         if tool_retriever is None:
             config = _frozen_top_k_config()
             tool_retriever = GlobalKnowledgeRetriever(load_default_step_knowledge(), config=config)
-            general_retriever = GlobalKnowledgeRetriever(
-                load_default_general_knowledge_bundles(), config=config
-            )
+            general_retriever = GlobalKnowledgeRetriever(general_bundles, config=config)
         self._tool_retriever = tool_retriever
         self._general_retriever = general_retriever
+        self._support_catalog = support_catalog or knowledge_support_catalog_from_bundles(
+            general_bundles
+        )
 
     def retrieve(
         self,
@@ -191,7 +199,9 @@ class OptimizationKnowledgeRetriever:
             answer = retriever.reply_for_stages(query, stages)
             channel_results.append(_channel_result(channel, query, answer, seen_entity_ids))
         references = tuple(ref for item in channel_results for ref in item.knowledge_refs)
-        return OptimizationRetrievalResult(request, tuple(channel_results), references)
+        return OptimizationRetrievalResult(
+            request, tuple(channel_results), references, self._support_catalog
+        )
 
 
 def build_optimization_retrieval_request(

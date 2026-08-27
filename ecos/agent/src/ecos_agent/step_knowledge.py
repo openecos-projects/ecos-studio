@@ -6,8 +6,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ecos_agent.knowledge_bundle import KnowledgeBundle, KnowledgeBundleError, KnowledgeBundleSpec
-
+from ecos_agent.knowledge_bundle import (
+    KnowledgeBundle,
+    KnowledgeBundleError,
+    KnowledgeBundleSpec,
+)
 
 StepKnowledgeError = KnowledgeBundleError
 
@@ -53,7 +56,7 @@ class StepKnowledge(KnowledgeBundle):
 
 
 GENERAL_KNOWLEDGE_SPEC = KnowledgeBundleSpec(
-    "general", "ecos-general-manifest.v1", "ecos-general-catalog.v1"
+    "general", "ecos-general-manifest.v1", "ecos-general-catalog.v2"
 )
 GENERAL_KNOWLEDGE_METRICS = ("congestion", "wirelength")
 

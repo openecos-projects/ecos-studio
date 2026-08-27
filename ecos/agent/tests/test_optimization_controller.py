@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
 import pytest
+from optimization_test_support import support_catalog
 
 from ecos_agent.codex_rpc import CodexProviderError
 from ecos_agent.hashing import canonical_sha256
@@ -13,6 +15,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
+    KnobApplicationReceipt,
     KnowledgeReference,
     LegalAction,
     ObjectiveMetric,
@@ -24,7 +27,6 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
     ProposalReason,
-    KnobApplicationReceipt,
     RequestedKnobValue,
     RuntimeAdjustment,
     StageObservation,
@@ -37,15 +39,20 @@ from ecos_agent.optimization_controller import (
     OptimizationEpisodeControllerError,
     planning_context_payload,
 )
+from ecos_agent.optimization_decision_audit import (
+    OptimizationDecisionAudit,
+    OptimizationDecisionAuditIntegrityError,
+)
+from ecos_agent.optimization_knowledge_compiler import BoundKnowledgeAction
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationPlanningProviderEvidenceAudit,
 )
-from ecos_agent.optimization_decision_audit import (
-    OptimizationDecisionAudit,
-    OptimizationDecisionAuditIntegrityError,
+from ecos_agent.optimization_memory import (
+    OptimizationTaskMemoryStore,
+    build_task_memory_scope,
 )
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
@@ -54,11 +61,6 @@ from ecos_agent.optimization_retrieval import (
     OptimizationRetrievalResult,
 )
 from ecos_agent.optimization_rules import freeze_optimization_objective
-from ecos_agent.optimization_memory import (
-    OptimizationTaskMemoryStore,
-    build_task_memory_scope,
-)
-
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -194,6 +196,7 @@ def _retrieval() -> OptimizationRetrievalResult:
         request=request,
         channels=(channel,),
         knowledge_refs=(reference,),
+        support_catalog=support_catalog(reference),
     )
 
 
@@ -340,13 +343,52 @@ def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(tmp_pat
     assert planned.proposal is not None
     assert planned.requested is not None
     assert planned.requested.value == 3
-    assert codex.contexts[0].knowledge_chunks == ("Audited congestion strategy.",)
+    assert codex.contexts[0].knowledge_chunks == ()
+    assert codex.contexts[0].supported_action_view is not None
     completed = controller.execute()
     assert completed.state == OptimizationEpisodeState.PLANNING
     assert controller.budget.consumed_planning_calls == 1
     assert controller.budget.consumed_candidates == 1
     assert len(ecc.start_calls) == 1
     assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
+
+
+def test_full_agent_rejects_retrieved_claim_that_does_not_support_action(
+    tmp_path: Path,
+) -> None:
+    retrieval = _retrieval()
+    binding = retrieval.support_catalog.bindings[0].model_copy(
+        update={
+            "actions": (
+                BoundKnowledgeAction(
+                    knob_id="place.cell_padding_x",
+                    direction=StrategyDirection.INCREASE,
+                ),
+            )
+        }
+    )
+    retrieval = replace(
+        retrieval,
+        support_catalog=retrieval.support_catalog.model_copy(
+            update={"bindings": (binding,)}
+        ),
+    )
+    codex = _FakeCodex(
+        lambda context: _proposal(
+            context,
+            knob_id="place.cell_padding_x",
+            direction=StrategyDirection.DECREASE,
+        )
+    )
+    ecc = _FakeEcc()
+
+    rejected = _controller(tmp_path, codex, ecc).plan(
+        _observation(), retrieval, CURRENT_VALUES
+    )
+
+    assert rejected.rejection_reason == "knowledge_action_support"
+    assert rejected.proposal is None
+    assert ecc.start_calls == []
 
 
 def test_controller_binds_codex_turn_evidence_to_the_planning_audit(tmp_path: Path) -> None:
@@ -435,7 +477,7 @@ def test_controller_persists_attempted_requested_values(tmp_path: Path) -> None:
     planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert planned.requested is None
-    assert planned.rejection_reason == "no_legal_candidate"
+    assert planned.rejection_reason == "knowledge_action_support"
 
 
 @pytest.mark.parametrize(

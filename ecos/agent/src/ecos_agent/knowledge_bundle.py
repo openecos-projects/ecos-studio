@@ -40,6 +40,7 @@ class KnowledgeEntity:
     chunk_sha256: str
     source_ids: tuple[str, ...]
     stages: tuple[str, ...] = ()
+    support: dict[str, Any] | None = None
 
 
 class KnowledgeBundle:
@@ -154,6 +155,9 @@ def _load_entity(
         ):
             raise KnowledgeBundleError(f"knowledge bundle entity has invalid stages: {entity_id}")
         stages = tuple(raw_stages)
+    support = raw.get("support")
+    if support is not None and not isinstance(support, dict):
+        raise KnowledgeBundleError(f"knowledge bundle entity has invalid support: {entity_id}")
     return KnowledgeEntity(
         entity_id,
         document,
@@ -161,6 +165,7 @@ def _load_entity(
         str(raw["chunk_sha256"]),
         source_ids,
         stages,
+        support,
     ), chunk
 
 

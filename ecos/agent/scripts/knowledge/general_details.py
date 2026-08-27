@@ -30,6 +30,12 @@ _DIRECTION = {
     "set_true": "set true",
     "set_false": "set false",
 }
+_CONTRACT_DIRECTION = {
+    "increase": "increase",
+    "decrease": "decrease",
+    "set_true": "enable",
+    "set_false": "disable",
+}
 
 
 def _load_jsonl(metric: str, name: str) -> list[dict[str, object]]:
@@ -102,7 +108,82 @@ def _strategy_entries(metric: str) -> tuple[list[dict[str, object]], dict[str, l
             stages=stages,
         )
         entries[-1]["metric"] = statement_metric
+        entries[-1]["support"] = _support_contract(statement, bindings.get(intent), entries[-1])
     return entries, documents
+
+
+def _support_contract(
+    statement: dict[str, object],
+    binding: dict[str, object] | None,
+    entry: dict[str, object],
+) -> dict[str, object]:
+    diagnosis = statement["diagnosis"]
+    if not isinstance(diagnosis, dict):
+        raise ValueError(f"invalid diagnosis: {statement['id']}")
+    claim_sha256 = "sha256:" + _sha256(_json(statement).encode("utf-8"))
+    claim = {
+        "schema_version": "ecos.general_domain_claim.v1",
+        "claim_ref": {
+            "entity_id": statement["id"],
+            "chunk_sha256": entry["chunk_sha256"],
+        },
+        "claim_sha256": claim_sha256,
+        "stages": statement["scope"]["stages"],
+        "state_predicates": statement.get("state_predicates")
+        or [
+            {
+                "feature_id": feature_id,
+                "op": "present",
+                "rule_ref": "rules.evidence.present.v1",
+            }
+            for feature_id in diagnosis["required_evidence"]
+        ],
+        "anti_predicates": statement.get("anti_predicates")
+        or [
+            {
+                "feature_id": feature_id,
+                "op": "true",
+                "rule_ref": "rules.anti_condition.absent.v1",
+            }
+            for feature_id in statement["anti_conditions"]
+        ],
+        "expected_effects": [
+            f"{effect['metric']}:{effect['direction']}" for effect in statement["effects"]
+        ],
+        "guardrails": [
+            effect["metric"]
+            for effect in statement["effects"]
+            if effect["direction"] in {"may_increase", "unchanged"}
+        ],
+    }
+    if binding is None or not binding.get("knobs"):
+        return {"claim": claim, "binding": None}
+    binding_sha256 = "sha256:" + _sha256(_json(binding).encode("utf-8"))
+    toolchain_ref = "sha256:" + _sha256(
+        _json({"binding_sha256": binding_sha256, "source_paths": GENERAL_SOURCE_PATHS}).encode(
+            "utf-8"
+        )
+    )
+    return {
+        "claim": claim,
+        "binding": {
+            "schema_version": "ecos.version_bound_tool_binding.v1",
+            "binding_id": binding["id"],
+            "binding_sha256": binding_sha256,
+            "claim_id": statement["id"],
+            "claim_sha256": claim_sha256,
+            "toolchain_ref": toolchain_ref,
+            "actions": [
+                {
+                    "knob_id": knob["knob_id"],
+                    "direction": _CONTRACT_DIRECTION[knob["direction"]],
+                }
+                for knob in binding["knobs"]
+            ],
+            "consumer_ids": binding.get("consumer_ids", []),
+            "activation_predicate_id": binding.get("activation_predicate_id"),
+        },
+    }
 
 
 CONGESTION_REGRESSION_CASES = (
@@ -187,7 +268,7 @@ def build_general_bundle(output: Path, metric: str) -> None:
     for name, chunks in documents.items():
         (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
     catalog = {
-        "schema_version": "ecos-general-catalog.v1",
+        "schema_version": "ecos-general-catalog.v2",
         "domain": "ecos_general_knowledge",
         "publication": {
             "status": "source-audited",
