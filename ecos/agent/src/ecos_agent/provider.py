@@ -8,6 +8,7 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -240,6 +241,11 @@ def _objective_primary_metric(contract: Mapping[str, Any]) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _activity_identifier(value: object, fallback: str | None = None) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value or "")).strip("-_")
+    return (normalized or fallback or uuid.uuid4().hex)[:128]
+
+
 def _objective_string_tuple(contract: Mapping[str, Any], key: str) -> tuple[str, ...]:
     value = contract.get(key)
     if isinstance(value, list):
@@ -403,6 +409,8 @@ class _Session:
     active_interrupt: Callable[[], None] | None = None
     active_tool_message_id: str | None = None
     active_turn_id: str | None = None
+    active_turn_started_at: int | None = None
+    active_local_activities: dict[str, dict[str, Any]] = field(default_factory=dict)
     interrupt_requested: bool = False
     running: bool = False
     optimization_phase: str = "idle"
@@ -540,6 +548,8 @@ class EcosAgentProvider:
             session.language_locked = True
         turn_id = uuid.uuid4().hex
         session.active_turn_id = turn_id
+        session.active_turn_started_at = round(time.time() * 1000)
+        session.active_local_activities.clear()
         session.active_tool_message_id = f"{turn_id}-tool"
         session.interrupt_requested = False
         session.running = True
@@ -566,6 +576,8 @@ class EcosAgentProvider:
                 session.codex_provider.clear_interrupted()
             session.active_tool_message_id = None
             session.active_turn_id = None
+            session.active_turn_started_at = None
+            session.active_local_activities.clear()
             session.running = False
         if not interrupted:
             self._emit_status(session, self._resting_status(session))
@@ -927,7 +939,13 @@ class EcosAgentProvider:
     def _knowledge_answer(self, session: _Session, message: str) -> KnowledgeAnswer | None:
         if _is_greeting(message):
             return None
-        baseline = self.knowledge_retriever.reply_global(message)
+        self._local_activity(
+            session,
+            "stage-identification",
+            "Identify design stage",
+            "running",
+            progress="Matching the question to the ECOS stage catalog",
+        )
         deterministic_scope = self.knowledge_retriever.stage_scope(message)
         stages: tuple[str, ...] = ()
         routing: dict[str, object] = {
@@ -940,13 +958,60 @@ class EcosAgentProvider:
             stages, routing = self._propose_knowledge_stages(session, message)
         elif not deterministic_scope.candidate_stages:
             routing = {"status": "not_requested", "reason": "provider_not_started"}
-        answer = self.knowledge_retriever.reply_hybrid(
-            message,
-            candidate_stages=stages,
-            deterministic_scope=deterministic_scope,
-            routing=routing,
+        candidate_stages = list(
+            dict.fromkeys((*deterministic_scope.candidate_stages, *stages))
         )
-        return answer or baseline
+        stage_label = (
+            f"Identified {', '.join(candidate_stages)} stage"
+            if candidate_stages
+            else "Checked design stage"
+        )
+        self._local_activity(
+            session,
+            "stage-identification",
+            stage_label,
+            "completed",
+            result={
+                "candidate_stages": candidate_stages,
+                "reason": deterministic_scope.reason,
+                "routing_status": routing.get("status"),
+            },
+        )
+        self._local_activity(
+            session,
+            "knowledge-search",
+            "Search ECOS knowledge",
+            "running",
+            arguments={"candidate_stages": candidate_stages},
+            progress="Searching the verified ECOS knowledge index",
+        )
+        try:
+            baseline = self.knowledge_retriever.reply_global(message)
+            answer = self.knowledge_retriever.reply_hybrid(
+                message,
+                candidate_stages=stages,
+                deterministic_scope=deterministic_scope,
+                routing=routing,
+            )
+        except Exception as exc:
+            self._local_activity(
+                session,
+                "knowledge-search",
+                "Search ECOS knowledge",
+                "failed",
+                error=str(exc),
+            )
+            raise
+        selected = answer or baseline
+        entity_ids = list(selected.entity_ids) if selected is not None else []
+        self._local_activity(
+            session,
+            "knowledge-search",
+            "Searched ECOS knowledge",
+            "completed",
+            result={"match_count": len(entity_ids), "entity_ids": entity_ids},
+        )
+        return selected
 
     def _propose_knowledge_stages(
         self, session: _Session, message: str
@@ -998,8 +1063,40 @@ class EcosAgentProvider:
             }
         try:
             proposal = SourceSearchProposal.model_validate(self.source_retrieval_parser(context))
-            return self.source_retriever.retrieve(proposal)
-        except (CodexProviderError, ValueError):
+            queries = [query.model_dump(mode="json") for query in proposal.queries]
+            self._local_activity(
+                session,
+                "source-search",
+                "Search workspace sources",
+                "running",
+                arguments={
+                    "roots": list(self.source_retriever.available_root_ids),
+                    "queries": queries,
+                },
+                progress="Searching approved source roots",
+            )
+            result = self.source_retriever.retrieve(proposal)
+            self._local_activity(
+                session,
+                "source-search",
+                "Searched workspace sources",
+                "completed",
+                result={
+                    "evidence_count": len(result.evidence),
+                    "paths": list(dict.fromkeys(item.path for item in result.evidence)),
+                    "result_limit_reached": result.result_limit_reached,
+                },
+            )
+            return result
+        except (CodexProviderError, ValueError) as exc:
+            if "local-source-search" in session.active_local_activities:
+                self._local_activity(
+                    session,
+                    "source-search",
+                    "Search workspace sources",
+                    "failed",
+                    error=str(exc),
+                )
             return None
 
     def _select_home_ready(self, session: _Session, message: str, choice: str) -> None:
@@ -1408,6 +1505,7 @@ class EcosAgentProvider:
                 )
             return
         if response.clarification is not None:
+            self._complete_answer_validation(session, "clarification", 0)
             self._emit_clarification(session, response.clarification, message)
             return
         if response.operation is None:
@@ -1422,10 +1520,20 @@ class EcosAgentProvider:
             if source_result is not None:
                 evidence_ids = {item.evidence_id for item in source_result.evidence}
                 if not set(response.evidence_ids).issubset(evidence_ids):
+                    self._local_activity(
+                        session,
+                        "answer-validation",
+                        "Validate answer evidence",
+                        "failed",
+                        error="The answer cited unavailable source evidence.",
+                    )
                     self._emit(session, "error", "The answer cited unavailable source evidence.")
                     return
                 contract["source_retrieval"] = source_result.contract()
                 contract["source_evidence_ids"] = list(response.evidence_ids)
+            self._complete_answer_validation(
+                session, "answer", len(response.evidence_ids)
+            )
             self._emit(
                 session,
                 "message",
@@ -1435,8 +1543,16 @@ class EcosAgentProvider:
             return
         allowed_ids = {option["id"] for option in allowed_options}
         if response.operation not in allowed_ids:
+            self._local_activity(
+                session,
+                "answer-validation",
+                "Validate answer evidence",
+                "failed",
+                error="The interpreted operation is not available in the current session.",
+            )
             self._emit(session, "error", "The interpreted operation is not available in the current session.")
             return
+        self._complete_answer_validation(session, "operation", 0)
         if session.phase == "home_ready":
             self._select_home_ready(session, message, response.operation)
         else:
@@ -1493,15 +1609,46 @@ class EcosAgentProvider:
                 self._register_interrupt(session, None)
             else:
                 response_payload = self.chat_response_parser(context)
+            self._local_activity(
+                session,
+                "answer-validation",
+                "Validate answer evidence",
+                "running",
+                arguments={"schema": "flow-agent.gui_chat_response.v1"},
+                progress="Checking the response schema and evidence references",
+            )
             response = GuiChatResponseProposal.model_validate(response_payload)
             self._check_interrupted(session)
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
             self._raise_if_interrupted(exc)
+            if "local-answer-validation" in session.active_local_activities:
+                self._local_activity(
+                    session,
+                    "answer-validation",
+                    "Validate answer evidence",
+                    "failed",
+                    error=str(exc),
+                )
             if report_error:
                 self._emit(session, "error", f"Unable to answer the request: {exc}")
             return None
         return response
+
+    def _complete_answer_validation(
+        self, session: _Session, route: str, evidence_reference_count: int
+    ) -> None:
+        self._local_activity(
+            session,
+            "answer-validation",
+            "Validated answer evidence",
+            "completed",
+            result={
+                "schema": "flow-agent.gui_chat_response.v1",
+                "route": route,
+                "evidence_reference_count": evidence_reference_count,
+            },
+        )
 
     def _chat_provider(self, session: _Session) -> CodexAppServerProposalProvider:
         if session.codex_provider is None:
@@ -3012,6 +3159,7 @@ class EcosAgentProvider:
         workspace_parameter_update: dict[str, Any] | None = None,
         workspace_signoff: dict[str, Any] | None = None,
         interaction: dict[str, Any] | None = None,
+        activity: dict[str, Any] | None = None,
         delta: str | None = None,
         message_id: str | None = None,
     ) -> None:
@@ -3021,8 +3169,10 @@ class EcosAgentProvider:
             "text": text,
             "type": event_type,
         }
-        if event_type in {"message", "tool", "error", "interaction", "optimization"}:
+        if event_type in {"message", "tool", "activity", "error", "interaction", "optimization"}:
             event["messageId"] = message_id or uuid.uuid4().hex
+        if activity is not None:
+            event["activity"] = activity
         if interaction is not None:
             event["interaction"] = interaction
         if delta is not None:
@@ -3388,15 +3538,83 @@ class EcosAgentProvider:
         if len(payload.encode("utf-8")) > 64 * 1024:
             raise ValueError("Interaction payload exceeds the protocol budget.")
 
-    def _progress(self, session: _Session, text: str) -> None:
+    def _progress(self, session: _Session, activity: str | Mapping[str, Any]) -> None:
         self._check_interrupted(session)
+        if isinstance(activity, Mapping):
+            payload = dict(activity)
+            raw_source_turn_id = str(payload.get("turnId") or "")
+            source_turn_id = (
+                _activity_identifier(raw_source_turn_id) if raw_source_turn_id else ""
+            )
+            item_id = _activity_identifier(payload.get("itemId"))
+            payload["itemId"] = item_id
+            if payload.get("turnId") is not None:
+                payload["turnId"] = _activity_identifier(payload["turnId"])
+            if session.active_turn_id:
+                payload["turnId"] = session.active_turn_id
+                if session.active_turn_started_at is not None:
+                    payload["turnStartedAt"] = session.active_turn_started_at
+                if source_turn_id:
+                    payload["itemId"] = _activity_identifier(
+                        f"{source_turn_id[:64]}-{item_id[:63]}"
+                    )
+            self._emit(
+                session,
+                "activity",
+                "",
+                activity=payload,
+                message_id=str(payload["itemId"]),
+            )
+            return
         self._emit(
             session,
             "tool",
-            text,
-            delta=f"{text}\n",
+            activity,
+            delta=f"{activity}\n",
             message_id=session.active_tool_message_id,
         )
+
+    def _local_activity(
+        self,
+        session: _Session,
+        item_id: str,
+        tool: str,
+        status: str,
+        *,
+        arguments: object | None = None,
+        progress: str | None = None,
+        result: object | None = None,
+        error: str | None = None,
+    ) -> None:
+        key = _activity_identifier(f"local-{item_id}")
+        now = round(time.time() * 1000)
+        activity = session.active_local_activities.setdefault(
+            key,
+            {
+                "schema_version": "flow-agent.activity.v1",
+                "itemId": key,
+                "kind": "tool_call",
+                "startedAt": now,
+                "status": "running",
+                "tool": tool,
+            },
+        )
+        activity.update(status=status, tool=tool)
+        if arguments is not None:
+            activity["arguments"] = json.dumps(
+                arguments, ensure_ascii=False, sort_keys=True, indent=2
+            )
+        if progress is not None:
+            activity["progress"] = progress
+        if result is not None:
+            activity["result"] = json.dumps(
+                result, ensure_ascii=False, sort_keys=True, indent=2
+            )
+        if error is not None:
+            activity["error"] = error[:4096]
+        if status != "running":
+            activity["durationMs"] = max(0, now - int(activity["startedAt"]))
+        self._progress(session, activity)
 
     @staticmethod
     def _register_interrupt(session: _Session, callback: Callable[[], None] | None) -> None:

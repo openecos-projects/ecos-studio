@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from ecos_agent.codex_activity import CodexActivityProjector
+
 
 class CodexProviderError(RuntimeError):
     def __init__(self, message: str, failure_class: str = "tool_error") -> None:
@@ -171,9 +173,10 @@ class _JsonLineRpcProcessClient:
         *,
         thread_id: str | None = None,
         progress_callback: Callable[[str], None] | None = None,
-        activity_callback: Callable[[str], None] | None = None,
+        activity_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[str, dict[str, int] | None]:
         self._record("turn_wait_started")
+        activity_projector = CodexActivityProjector(turn_id, activity_callback)
         idle_deadline = time.monotonic() + self.timeout_seconds
         deltas: list[str] = []
         completed_items: list[str] = []
@@ -187,6 +190,7 @@ class _JsonLineRpcProcessClient:
                 if time.monotonic() < idle_deadline:
                     continue
                 self._record("turn_wait_timeout")
+                activity_projector.finish("failed")
                 raise CodexProviderError(
                     f"Timed out waiting for Codex turn {turn_id} completion",
                     failure_class="timeout",
@@ -210,13 +214,7 @@ class _JsonLineRpcProcessClient:
             if not matches_turn:
                 continue
             idle_deadline = time.monotonic() + self.timeout_seconds
-            activity = self._readonly_activity(method, params)
-            if activity:
-                self._report_progress(activity_callback, activity)
-            if method == "item/reasoning/summaryTextDelta":
-                reasoning_delta = self._agent_delta_text(params)
-                if reasoning_delta:
-                    self._report_progress(activity_callback, reasoning_delta)
+            activity_projector.handle(method, params)
             if method == "error":
                 will_retry = params.get("willRetry") is True
                 self._record(
@@ -225,11 +223,9 @@ class _JsonLineRpcProcessClient:
                     will_retry=will_retry,
                 )
                 if will_retry:
-                    self._report_progress(
-                        activity_callback, "Retrying…"
-                    )
                     continue
                 error_message = self._error_message(params)
+                activity_projector.finish("failed")
                 raise CodexProviderError(
                     f"Codex app-server turn error: {error_message}"
                     if error_message
@@ -255,6 +251,7 @@ class _JsonLineRpcProcessClient:
                     or self._completed_turn_text(completed_turn).strip()
                 )
                 if not text:
+                    activity_projector.finish("failed")
                     raise CodexProviderError(
                         "Codex turn completed without assistant text",
                         failure_class="parse_error",
@@ -380,34 +377,6 @@ class _JsonLineRpcProcessClient:
     @staticmethod
     def _completed_item_text(params: Mapping[str, Any]) -> str:
         return _first_text(params.get("item"))
-
-    @staticmethod
-    def _readonly_activity(method: object, params: Mapping[str, Any]) -> str | None:
-        """Turn Codex item events into user-visible progress.
-
-        Every externally observable action must surface here. A silent web
-        search is the same transparency failure as a silent file read: the user
-        cannot audit what they never saw.
-        """
-        if method not in {"item/started", "item/completed"}:
-            return None
-        item = params.get("item")
-        if not isinstance(item, Mapping):
-            return None
-        item_type = str(item.get("type", "")).replace("_", "").casefold()
-        if item_type == "websearch":
-            if method == "item/started":
-                query = str(item.get("query", "")).strip()
-                return f"Searching the web for “{query}”…" if query else "Searching the web…"
-            return "Finished web search."
-        if item_type != "commandexecution":
-            return None
-        command = str(item.get("command", "")).casefold()
-        if method == "item/started":
-            if any(token in command for token in ("rg", "find", "fd ", "ls ")):
-                return "Searching workspace…"
-            return "Reading workspace files…"
-        return "Finished workspace inspection."
 
     @staticmethod
     def _error_code(params: Mapping[str, Any]) -> str | None:

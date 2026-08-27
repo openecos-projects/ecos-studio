@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 from pathlib import Path
 
@@ -2583,6 +2584,137 @@ def test_tool_streaming_reuses_one_message_id_for_all_turn_deltas(tmp_path: Path
         "Validating the structured proposal.\n",
     ]
     assert len({event["messageId"] for event in tool_events}) == 1
+
+
+def test_structured_codex_activity_uses_the_activity_event() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({})["sessionId"]
+    session = provider.sessions[session_id]
+
+    provider._progress(
+        session,
+        {
+            "itemId": "reasoning-1",
+            "kind": "reasoning_summary",
+            "schema_version": "flow-agent.activity.v1",
+            "startedAt": 1000,
+            "status": "running",
+            "summary": ["Inspecting the flow."],
+            "turnId": "turn-1",
+            "turnStartedAt": 900,
+        },
+    )
+
+    assert events[-1]["type"] == "activity"
+    assert events[-1]["activity"] == {
+        "itemId": "reasoning-1",
+        "kind": "reasoning_summary",
+        "schema_version": "flow-agent.activity.v1",
+        "startedAt": 1000,
+        "status": "running",
+        "summary": ["Inspecting the flow."],
+        "turnId": "turn-1",
+        "turnStartedAt": 900,
+    }
+
+
+def test_structured_codex_activity_groups_provider_subturns_into_one_agent_turn() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({})["sessionId"]
+    session = provider.sessions[session_id]
+    session.active_turn_id = "agent-turn"
+    session.active_turn_started_at = 800
+
+    for turn_id in ("routing-turn", "answer-turn"):
+        provider._progress(
+            session,
+            {
+                "itemId": "reasoning-1",
+                "kind": "reasoning_summary",
+                "schema_version": "flow-agent.activity.v1",
+                "startedAt": 1000,
+                "status": "completed",
+                "summary": [turn_id],
+                "turnId": turn_id,
+                "turnStartedAt": 900,
+            },
+        )
+
+    activities = [event["activity"] for event in events if event["type"] == "activity"]
+    assert [activity["turnId"] for activity in activities] == [
+        "agent-turn",
+        "agent-turn",
+    ]
+    assert [activity["itemId"] for activity in activities] == [
+        "routing-turn-reasoning-1",
+        "answer-turn-reasoning-1",
+    ]
+    assert [activity["turnStartedAt"] for activity in activities] == [800, 800]
+
+
+def test_knowledge_question_reports_local_observable_work_in_one_turn(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "ecos-studio"
+    source = repository / "ecc" / "cts.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class ClockTreeSynthesis:\n    pass  # CTS implementation\n",
+        encoding="utf-8",
+    )
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=lambda _context: _chat_response(
+            answer="CTS builds the clock distribution network.",
+            evidence_ids=["source-1"],
+        ),
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [{"root_id": "ecc", "query": "ClockTreeSynthesis"}],
+            "rationale": "Check the CTS implementation.",
+        },
+        source_retriever=SourceCodeRetriever(repository),
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "什么是 CTS")
+
+    activities = [event["activity"] for event in events if event["type"] == "activity"]
+    first_seen = list(dict.fromkeys(activity["itemId"] for activity in activities))
+    assert first_seen == [
+        "local-stage-identification",
+        "local-knowledge-search",
+        "local-source-search",
+        "local-answer-validation",
+    ]
+    assert all(
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", item_id)
+        for item_id in first_seen
+    )
+    assert len({activity["turnId"] for activity in activities}) == 1
+    terminal = {activity["itemId"]: activity for activity in activities}
+    assert all(item["status"] == "completed" for item in terminal.values())
+    assert json.loads(terminal["local-stage-identification"]["result"])[
+        "candidate_stages"
+    ] == ["cts"]
+    knowledge = json.loads(terminal["local-knowledge-search"]["result"])
+    assert knowledge["match_count"] == 3
+    assert "parameter.cts.cap_steps" in knowledge["entity_ids"]
+    source_result = json.loads(terminal["local-source-search"]["result"])
+    assert source_result == {
+        "evidence_count": 1,
+        "paths": ["ecc/cts.py"],
+        "result_limit_reached": False,
+    }
+    validation = json.loads(terminal["local-answer-validation"]["result"])
+    assert validation == {
+        "evidence_reference_count": 1,
+        "route": "answer",
+        "schema": "flow-agent.gui_chat_response.v1",
+    }
 
 
 def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> None:

@@ -63,7 +63,7 @@ class CodexAppServerProposalProvider:
         env: Mapping[str, str] | None = None,
         timeout_seconds: int | None = None,
         runtime_workspace_roots: Iterable[str | Path] | None = None,
-        progress_callback: Callable[[str], None] | None = None,
+        progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
         web_search_enabled: bool | None = None,
         diagnostics_path: Path | None = None,
         ephemeral: bool = True,
@@ -550,9 +550,6 @@ class CodexAppServerProposalProvider:
                 raise CodexProviderError(
                     "Codex turn interrupted", failure_class="interrupted"
                 )
-        # One lifecycle line only; observable Codex actions still stream via
-        # activity_callback (web search, workspace reads, retries).
-        self._report_progress("Thinking…")
         client = self._ensure_client()
         thread_id = self._ensure_thread(client)
         response = client.request(
@@ -725,9 +722,9 @@ class CodexAppServerProposalProvider:
                 )
         return self._thread_id
 
-    def _report_progress(self, text: str) -> None:
+    def _report_progress(self, activity: str | dict[str, Any]) -> None:
         if self.progress_callback is not None:
-            self.progress_callback(text)
+            self.progress_callback(activity)
 
 
 def _allowed_operation_ids(value: object) -> list[str]:
@@ -825,7 +822,7 @@ def create_required_codex_provider(
     *,
     cwd: Path | None = None,
     runtime_workspace_roots: Iterable[str | Path] | None = None,
-    progress_callback: Callable[[str], None] | None = None,
+    progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
     web_search_enabled: bool | None = None,
     diagnostics_path: Path | None = None,
     ephemeral: bool = True,
