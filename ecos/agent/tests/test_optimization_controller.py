@@ -628,6 +628,108 @@ def test_controller_uses_local_fallback_after_codex_parse_error(tmp_path: Path) 
     assert second.rejection_reason == "controlled_coordinate_fallback"
 
 
+class _V2FakeCodex(_FakeCodex):
+    def __init__(self, *responses: object) -> None:
+        super().__init__()
+        self.v2_responses = list(responses)
+        self.v2_calls = []
+
+    def propose(self, context: object) -> object:
+        raise AssertionError("v1 planner must not be used when v2 is enabled")
+
+    def propose_v2(self, context: object, domain: object) -> object:
+        self.v2_calls.append((context, domain))
+        response = self.v2_responses.pop(0)
+        return response(context, domain) if callable(response) else response
+
+
+def _v2_proposal(context: object, domain: object, *, value: object = None) -> dict[str, object]:
+    action = context.legal_actions[0]
+    current = context.current_values[action.knob_id.value]
+    if value is None:
+        candidates = (
+            item for item in domain.allowed_requested_values
+            if item > current
+            if action.direction == StrategyDirection.INCREASE
+        )
+        value = next(candidates, None)
+        if value is None:
+            value = next(
+                item for item in domain.allowed_requested_values if item < current
+            )
+    return {
+        "schema_version": "ecos.optimization_proposal.v2",
+        "context_ref": context.context_ref.model_dump(mode="json"),
+        "decision": "propose",
+        "reason_code": "observation",
+        "rationale_summary": "Use one exact bounded value.",
+        "observation_refs": [context.observation_ref.model_dump(mode="json")],
+        "knowledge_refs": [
+            item.model_dump(mode="json") for item in context.knowledge_refs
+        ],
+        "action": {
+            "knob_id": action.knob_id.value,
+            "direction": action.direction.value,
+            "requested_value": value,
+            "effective_domain_sha256": domain.snapshot_sha256,
+            "expected_effects": [
+                {"metric_id": "route_wirelength", "direction": "decrease"}
+            ],
+        },
+    }
+
+
+def test_controller_uses_exact_v2_value_only_when_feature_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+    planner = _V2FakeCodex(_v2_proposal)
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    context, domain = planner.v2_calls[0]
+    assert result.requested is not None
+    assert result.requested.value in domain.allowed_requested_values
+    assert result.requested.knob_id == context.legal_actions[0].knob_id
+    assert result.planner_source == "llm"
+
+
+def test_controller_repairs_one_invalid_v2_response_before_accepting_exact_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+
+    def invalid(context: object, domain: object) -> dict[str, object]:
+        return _v2_proposal(context, domain, value=999)
+
+    planner = _V2FakeCodex(invalid, _v2_proposal)
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert len(planner.v2_calls) == 2
+    assert result.requested is not None
+    assert result.planner_source == "repair"
+
+
+def test_controller_falls_back_immediately_after_v2_repair_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+    planner = _V2FakeCodex(
+        lambda context, domain: _v2_proposal(context, domain, value=999),
+        lambda context, domain: _v2_proposal(context, domain, value=999),
+    )
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
+    assert result.rejection_reason == "v2_repair_failed"
+    assert result.planner_source == "local_fallback"
+
+
 def test_stop_is_deferred_until_fixed_candidate_budget_is_exhausted(tmp_path: Path) -> None:
     def stop(context: object) -> dict[str, object]:
         proposal = _proposal(context)

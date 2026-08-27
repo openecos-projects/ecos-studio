@@ -64,8 +64,16 @@ from ecos_agent.optimization_ledger import (
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization_rules import legal_actions, select_requested_value
 from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
-from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
-from ecos_agent.effective_domain import EffectiveDomainSnapshot, compile_effective_domain
+from ecos_agent.parameter_evidence_contracts import (
+    OptimizationProposalV2,
+    ParameterApplicationReceipt,
+)
+from ecos_agent.effective_domain import (
+    EffectiveDomainError,
+    EffectiveDomainSnapshot,
+    compile_effective_domain,
+    validate_optimization_proposal_v2,
+)
 from ecos_agent.parameter_semantics import LATTICE_VERSION, card_hash, load_parameter_cards
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -103,6 +111,9 @@ class CandidateExecutionEvidence:
     candidate_root_ref: str
     candidate_manifest_ref: str
     candidate_manifest_sha256: str
+    target_step: str | None = None
+    end_step: str | None = None
+    execution_scope: str | None = None
 
     def __post_init__(self) -> None:
         for value in (self.candidate_root_ref, self.candidate_manifest_ref):
@@ -255,6 +266,13 @@ class OptimizationControlResult:
     planner_source: Literal["llm", "local_fallback", "repair"] = "llm"
 
 
+@dataclass(frozen=True)
+class _PlannerTurn:
+    proposal: OptimizationProposal
+    requested: RequestedKnobValue | None = None
+    provider_payload_sha256: str | None = None
+
+
 class OptimizationProposalPlanner(Protocol):
     def propose(self, context: OptimizationPlanningContext) -> object: ...
 
@@ -337,6 +355,7 @@ class OptimizationEpisodeController:
         objective: OptimizationObjectiveContract | None = None,
         task_memory_scope_sha256: str | None = None,
         task_memory_supplier: Callable[[], OptimizationTaskMemorySnapshot] | None = None,
+        execution_context: Mapping[str, object] | None = None,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -366,6 +385,7 @@ class OptimizationEpisodeController:
             raise OptimizationEpisodeControllerError("task memory scope hash is invalid")
         self._task_memory_scope_sha256 = task_memory_scope_sha256
         self._task_memory_supplier = task_memory_supplier
+        self._execution_context = dict(execution_context or {})
         self._state = OptimizationEpisodeState.CREATED
         self._proposal: OptimizationProposal | None = None
         self._requested: RequestedKnobValue | None = None
@@ -468,19 +488,66 @@ class OptimizationEpisodeController:
             ),
         )
         self._persist()
+        planner_source: Literal["llm", "local_fallback", "repair"] = "llm"
+        planner_turn: _PlannerTurn | None = None
+        provider_payload_sha256 = None
+        if self._v2_enabled():
+            try:
+                provider_payload_sha256 = self._v2_provider_payload_sha256(context)
+            except EffectiveDomainError:
+                return self._defer_or_fallback(
+                    planning_entry,
+                    context,
+                    proposal=None,
+                    reason="v2_domain_unavailable",
+                    immediate_fallback=True,
+                )
         try:
-            proposal = self._parse_proposal(self.planner.propose(context))
+            planner_turn = self._invoke_planner(context)
         except (CodexProviderError, TypeError, ValidationError, ValueError) as exc:
             if isinstance(exc, CodexProviderError) and exc.failure_class != "parse_error":
                 raise
-            self._record_planning_provider_evidence(planning_entry)
-            return self._defer_or_fallback(
+            self._record_planning_provider_evidence(
                 planning_entry,
-                context,
-                proposal=None,
-                reason="proposal_schema",
+                expected_payload_sha256=provider_payload_sha256,
             )
-        self._record_planning_provider_evidence(planning_entry)
+            if not self._v2_enabled():
+                return self._defer_or_fallback(
+                    planning_entry,
+                    context,
+                    proposal=None,
+                    reason="proposal_schema",
+                )
+            try:
+                planner_turn = self._invoke_planner(context)
+            except (CodexProviderError, TypeError, ValidationError, ValueError) as repair_exc:
+                if isinstance(repair_exc, CodexProviderError) and repair_exc.failure_class != "parse_error":
+                    raise
+                self._record_planning_provider_evidence(
+                    planning_entry,
+                    expected_payload_sha256=provider_payload_sha256,
+                )
+                return self._defer_or_fallback(
+                    planning_entry,
+                    context,
+                    proposal=None,
+                    reason="v2_repair_failed",
+                    immediate_fallback=True,
+                )
+            planner_source = "repair"
+            self._record_planning_provider_evidence(
+                planning_entry,
+                expected_payload_sha256=planner_turn.provider_payload_sha256,
+            )
+        else:
+            assert planner_turn is not None
+            self._record_planning_provider_evidence(
+                planning_entry,
+                expected_payload_sha256=planner_turn.provider_payload_sha256,
+            )
+
+        assert planner_turn is not None
+        proposal = planner_turn.proposal
 
         rejection_reason = self._validate_proposal(proposal, context)
         if rejection_reason is not None:
@@ -489,18 +556,23 @@ class OptimizationEpisodeController:
                 context,
                 proposal=proposal,
                 reason=rejection_reason,
+                planner_source=planner_source,
             )
         if proposal.decision != OptimizationDecision.PROPOSE:
             if proposal.decision == OptimizationDecision.ESCALATE:
                 self._state = OptimizationEpisodeState.ESCALATED
-                return self._finish_planning(planning_entry, proposal, "accepted", None)
+                return self._finish_planning(
+                    planning_entry, proposal, "accepted", None, planner_source=planner_source
+                )
             if proposal.decision == OptimizationDecision.STOP and (
                 self._budget.consumed_candidates
                 >= self._budget.budget.minimum_candidate_executions
                 or not context.legal_actions
             ):
                 self._state = OptimizationEpisodeState.STOPPED
-                return self._finish_planning(planning_entry, proposal, "accepted", None)
+                return self._finish_planning(
+                    planning_entry, proposal, "accepted", None, planner_source=planner_source
+                )
             reason = (
                 "minimum_candidates_not_met"
                 if proposal.decision == OptimizationDecision.STOP
@@ -511,9 +583,10 @@ class OptimizationEpisodeController:
                 context,
                 proposal=proposal,
                 reason=reason,
+                planner_source=planner_source,
             )
         assert proposal.action is not None
-        requested = select_requested_value(
+        requested = planner_turn.requested or select_requested_value(
             proposal.action,
             current_values=current_values,
             attempted=self._attempted_requests(),
@@ -525,12 +598,19 @@ class OptimizationEpisodeController:
                 context,
                 proposal=proposal,
                 reason="no_legal_candidate",
+                planner_source=planner_source,
             )
         self._proposal = proposal
         self._requested = requested
         self._planning_only_turns = 0
         self._state = OptimizationEpisodeState.AWAITING_EXECUTION
-        return self._finish_planning(planning_entry, proposal, "accepted", None)
+        return self._finish_planning(
+            planning_entry,
+            proposal,
+            "accepted",
+            None,
+            planner_source=planner_source,
+        )
 
     def execute(self) -> OptimizationControlResult:
         self._refresh_budget()
@@ -646,6 +726,7 @@ class OptimizationEpisodeController:
         clock: Callable[[], float],
         task_memory_scope_sha256: str | None = None,
         task_memory_supplier: Callable[[], OptimizationTaskMemorySnapshot] | None = None,
+        execution_context: Mapping[str, object] | None = None,
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
         if not path.is_file() and any(
@@ -692,6 +773,7 @@ class OptimizationEpisodeController:
         controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
         controller._task_memory_scope_sha256 = snapshot.task_memory_scope_sha256
         controller._task_memory_supplier = task_memory_supplier
+        controller._execution_context = dict(execution_context or {})
         controller._planning_audit = planning_audit
         controller._planning_provider_audit = planning_provider_audit
         controller._decision_audit = decision_audit
@@ -851,24 +933,31 @@ class OptimizationEpisodeController:
         parameter_card_sha256: str,
     ) -> dict[str, object]:
         """Build the stable, per-knob context used to bind domain evidence."""
-        parent_lineage = self._parent_manifest_sha256 or canonical_sha256(
-            {"episode_id": self.episode_id, "checkpoint_id": self.checkpoint_id}
+        parent_lineage = (
+            self._execution_context.get("parent_lineage_sha256")
+            or self._parent_manifest_sha256
+            or canonical_sha256(
+                {"episode_id": self.episode_id, "checkpoint_id": self.checkpoint_id}
+            )
         )
         incumbent_state = (
             self._incumbent.model_dump(mode="json") if self._incumbent is not None else None
         )
-        return {
-            "design_sha256": observation.evidence_manifest_sha256,
+        context = {
+            **self._execution_context,
+            "design_sha256": self._execution_context.get(
+                "design_sha256", observation.evidence_manifest_sha256
+            ),
             "parent_lineage_sha256": parent_lineage,
             "incumbent_state_sha256": canonical_sha256(incumbent_state),
             "stage": _stage_name(knob_id),
-            "backend": "ecos",
+            "backend": self._execution_context.get("backend", "ecc"),
             "tool_revision": tool_revision,
             "parameter_card_sha256": parameter_card_sha256,
             "lattice_version": LATTICE_VERSION,
             "unit": unit,
-            "site_width_dbu": 1,
-            "seed": None,
+            "site_width_dbu": self._execution_context.get("site_width_dbu", 1),
+            "seed": self._execution_context.get("seed", 0),
             "current_values": dict(sorted(current_values.items())),
             "terminal_execution_contract_sha256": canonical_sha256(
                 {
@@ -880,6 +969,10 @@ class OptimizationEpisodeController:
                 }
             ),
         }
+        context["tool_revision"] = tool_revision
+        context["parameter_card_sha256"] = parameter_card_sha256
+        context["unit"] = unit
+        return context
 
     def _native_receipts(self) -> tuple[ParameterApplicationReceipt, ...]:
         return tuple(
@@ -891,6 +984,74 @@ class OptimizationEpisodeController:
     def _parse_proposal(self, payload: object) -> OptimizationProposal:
         if isinstance(payload, OptimizationProposal):
             return payload
+        return OptimizationProposal.model_validate(payload)
+
+    def _v2_enabled(self) -> bool:
+        return os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") == "1" and callable(
+            getattr(self.planner, "propose_v2", None)
+        )
+
+    def _v2_domain(self, context: OptimizationPlanningContext) -> EffectiveDomainSnapshot:
+        if not context.effective_domains or not context.legal_actions:
+            raise EffectiveDomainError("v2 planning domain is unavailable")
+        for action in context.legal_actions:
+            for domain in context.effective_domains:
+                if domain.knob_id == action.knob_id and domain.allowed_requested_values:
+                    return domain
+        raise EffectiveDomainError("v2 planning domain has no legal action")
+
+    def _v2_provider_payload_sha256(self, context: OptimizationPlanningContext) -> str:
+        domain = self._v2_domain(context)
+        payload = planning_context_payload(context)
+        payload["effective_domain"] = domain.model_dump(mode="json")
+        return canonical_sha256(payload)
+
+    def _invoke_planner(self, context: OptimizationPlanningContext) -> _PlannerTurn:
+        if not self._v2_enabled():
+            return _PlannerTurn(self._parse_proposal(self.planner.propose(context)))
+        domain = self._v2_domain(context)
+        raw = self.planner.propose_v2(context, domain)
+        proposal = validate_optimization_proposal_v2(
+            raw,
+            domain,
+            context_ref=context.context_ref.model_dump(mode="json"),
+            attempted=self._attempted_requests(),
+        )
+        if proposal.action is not None and not any(
+            item.knob_id == proposal.action.knob_id
+            and item.direction == proposal.action.direction
+            for item in context.legal_actions
+        ):
+            raise EffectiveDomainError("v2 proposal action is not legal")
+        return _PlannerTurn(
+            self._v2_to_v1(proposal),
+            (
+                RequestedKnobValue(
+                    knob_id=proposal.action.knob_id,
+                    value=proposal.action.requested_value,
+                )
+                if proposal.action is not None
+                else None
+            ),
+            self._v2_provider_payload_sha256(context),
+        )
+
+    @staticmethod
+    def _v2_to_v1(proposal: OptimizationProposalV2) -> OptimizationProposal:
+        payload = proposal.model_dump(mode="json")
+        payload["schema_version"] = "ecos.optimization_proposal.v1"
+        try:
+            payload["reason_code"] = ProposalReason(proposal.reason_code).value
+        except ValueError as exc:
+            raise EffectiveDomainError("v2 proposal reason code is invalid") from exc
+        if proposal.action is not None:
+            payload["action"] = {
+                "knob_id": proposal.action.knob_id.value,
+                "direction": proposal.action.direction.value,
+                "expected_effects": [
+                    item.model_dump(mode="json") for item in proposal.action.expected_effects
+                ],
+            }
         return OptimizationProposal.model_validate(payload)
 
     def _validate_proposal(
@@ -1192,7 +1353,10 @@ class OptimizationEpisodeController:
         return f"intervention-{len(self.ledger.replay().entries) + 1}"
 
     def _record_planning_provider_evidence(
-        self, planning_entry: OptimizationPlanningAuditEntry
+        self,
+        planning_entry: OptimizationPlanningAuditEntry,
+        *,
+        expected_payload_sha256: str | None = None,
     ) -> None:
         consume = getattr(self.planner, "consume_planning_evidence", None)
         if consume is None:
@@ -1206,7 +1370,8 @@ class OptimizationEpisodeController:
             parsed = PlanningProviderEvidence.model_validate(evidence)
         except (TypeError, ValidationError, ValueError) as exc:
             raise OptimizationEpisodeControllerError("planner evidence is invalid") from exc
-        if parsed.envelope.planner_payload_sha256 != planning_entry.planner_payload_sha256:
+        expected_hash = expected_payload_sha256 or planning_entry.planner_payload_sha256
+        if parsed.envelope.planner_payload_sha256 != expected_hash:
             raise OptimizationEpisodeControllerError(
                 "planner evidence does not match the planning payload"
             )
@@ -1223,6 +1388,8 @@ class OptimizationEpisodeController:
         *,
         proposal: OptimizationProposal | None,
         reason: str,
+        planner_source: Literal["llm", "local_fallback", "repair"] = "llm",
+        immediate_fallback: bool = False,
     ) -> OptimizationControlResult:
         self._planning_only_turns += 1
         self._proposal = None
@@ -1232,9 +1399,18 @@ class OptimizationEpisodeController:
             return self._finish_planning(
                 planning_entry, proposal, "rejected", "no_legal_candidate"
             )
-        if self._planning_only_turns < self._budget.budget.max_planning_only_turns:
+        if (
+            not immediate_fallback
+            and self._planning_only_turns < self._budget.budget.max_planning_only_turns
+        ):
             self._state = OptimizationEpisodeState.PLANNING
-            return self._finish_planning(planning_entry, proposal, "rejected", reason)
+            return self._finish_planning(
+                planning_entry,
+                proposal,
+                "rejected",
+                reason,
+                planner_source=planner_source,
+            )
 
         action = context.legal_actions[0]
         fallback = self._fallback_proposal(context, action)
@@ -1255,7 +1431,8 @@ class OptimizationEpisodeController:
             planning_entry,
             fallback,
             "fallback",
-            "controlled_coordinate_fallback",
+            reason if immediate_fallback else "controlled_coordinate_fallback",
+            planner_source="local_fallback",
         )
 
     @staticmethod
@@ -1289,6 +1466,8 @@ class OptimizationEpisodeController:
         proposal: OptimizationProposal | None,
         validation_result: DecisionValidationResult,
         rejection_reason: str | None,
+        *,
+        planner_source: Literal["llm", "local_fallback", "repair"] = "llm",
     ) -> OptimizationControlResult:
         self._decision_audit.append(
             planning_entry_sha256=planning_entry.entry_sha256,
@@ -1319,7 +1498,7 @@ class OptimizationEpisodeController:
             ),
             self._requested,
             rejection_reason,
-            "local_fallback" if validation_result == "fallback" else "llm",
+            planner_source,
         )
 
     def _result(self, rejection_reason: str | None = None) -> OptimizationControlResult:
@@ -1328,6 +1507,7 @@ class OptimizationEpisodeController:
             self._proposal,
             self._requested,
             rejection_reason,
+            "llm",
         )
 
     def _attempted_requests(self) -> tuple[RequestedKnobValue, ...]:
