@@ -420,6 +420,16 @@ describe('mergePayloadIntoTomlDocument regressions', () => {
     expect(merged.params.target_density).toBe(0.55)
     expect('Target density' in merged.params).toBe(false)
   })
+
+  it('keeps a section-only [pdk] config through a save', () => {
+    const document = {
+      pdk: { name: 'ics55', root: '/pdk/ics55', config: 'home/pdk.json' },
+      params: { pdk: 'ics55', design: 'gcd' },
+    }
+    const merged = mergePayloadIntoTomlDocument(document, { 'Max fanout': 32 }, '/ws')
+    expect(merged.pdk.config).toBe('home/pdk.json')
+    expect(merged.params.pdk_config).toBe('home/pdk.json')
+  })
 })
 
 describe('editWorkspaceParameters', () => {
@@ -484,6 +494,33 @@ describe('editWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain(
       '9007199254740993',
     )
+  })
+
+  it('rejects unsafe numbers in decimal and exponent forms', async () => {
+    for (const literal of ['9007199254740993.0', '9.007199254740993e15']) {
+      const root = createWorkspace()
+      writeHomeFile(root, 'parameters.json', `{ "Design": "gcd", "Area": ${literal} }\n`)
+      await expect(
+        editWorkspaceParameters(root, [{ json_path: ['Design'], value: 'aes' }]),
+      ).rejects.toThrow(/MAX_SAFE_INTEGER/)
+      expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain(
+        literal,
+      )
+    }
+  })
+
+  it('rejects unsafe numbers and non-object roots on reads', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd", "Area": 9007199254740993 }\n',
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/MAX_SAFE_INTEGER/)
+
+    const arrayRoot = createWorkspace()
+    writeHomeFile(arrayRoot, 'parameters.json', '[1, 2, 3]\n')
+    await expect(readWorkspaceParameters(arrayRoot)).rejects.toThrow(/JSON object/i)
   })
 
   it('accepts integers up to Number.MAX_SAFE_INTEGER and digit runs inside strings', async () => {

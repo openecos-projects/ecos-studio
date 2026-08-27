@@ -78,6 +78,20 @@ describe('WorkspaceSnapshotLoader', () => {
     )
   })
 
+  it('rejects reads redirected by a symlinked home directory', async () => {
+    const directory = createWorkspace()
+    const external = mkdtempSync(join(tmpdir(), 'ecos-snapshot-external-'))
+    temporaryDirectories.push(external)
+    mkdirSync(join(external, 'home'))
+    writeFileSync(join(external, 'home', 'ecc.toml'), '[params]\ndesign = "external"\n')
+    rmSync(join(directory, 'home'), { recursive: true, force: true })
+    symlinkSync(join(external, 'home'), join(directory, 'home'))
+
+    await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
+      /outside the workspace/i,
+    )
+  })
+
   it('loads the bounded configuration snapshot used for project baseline sync', async () => {
     const directory = createWorkspace()
     mkdirSync(join(directory, 'config'))

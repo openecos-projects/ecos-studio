@@ -1,5 +1,5 @@
-import { lstat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { lstat, realpath } from 'node:fs/promises'
+import { join, sep } from 'node:path'
 import type {
   EccWorkspaceRuntimeSnapshot,
   EccRuntimeStepSnapshot,
@@ -24,11 +24,14 @@ export interface WorkspaceBaselineSnapshot {
 
 /**
  * Bounded, symlink-refusing file read for snapshot resources: lstat rejects
- * a symlinked final component and the no-follow open refuses it again on
- * the kernel side, so a crafted workspace cannot point a snapshot read at
- * an external file.
+ * a symlinked final component, the resolved path must stay inside the
+ * workspace (a symlinked ancestor like `home -> /outside` is rejected), and
+ * the no-follow open refuses a symlink again on the kernel side.
  */
-async function readSnapshotText(path: string): Promise<string> {
+async function readSnapshotText(
+  path: string,
+  workspaceDirectory: string,
+): Promise<string> {
   const metadata = await lstat(path)
   if (metadata.isSymbolicLink()) {
     throw new Error(
@@ -40,12 +43,24 @@ async function readSnapshotText(path: string): Promise<string> {
       `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${path}`,
     )
   }
+  const [resolvedPath, resolvedRoot] = await Promise.all([
+    realpath(path),
+    realpath(workspaceDirectory),
+  ])
+  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(resolvedRoot + sep)) {
+    throw new Error(
+      `Refusing to read workspace snapshot resource outside the workspace: ${path}`,
+    )
+  }
   return readFileNoFollow(path)
 }
 
-async function readJsonObject(path: string): Promise<Record<string, unknown>> {
+async function readJsonObject(
+  path: string,
+  workspaceDirectory: string,
+): Promise<Record<string, unknown>> {
   try {
-    const parsed: unknown = JSON.parse(await readSnapshotText(path))
+    const parsed: unknown = JSON.parse(await readSnapshotText(path, workspaceDirectory))
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : {}
@@ -64,7 +79,7 @@ async function readParametersObject(directory: string): Promise<Record<string, u
   if (!location) return {}
   try {
     return parseWorkspaceParametersText(
-      await readSnapshotText(location.path),
+      await readSnapshotText(location.path, directory),
       location.format,
       directory,
     )
@@ -103,8 +118,8 @@ export class WorkspaceSnapshotLoader {
     await migrateWorkspaceConfigFilenames(directory)
     const homeDirectory = join(directory, 'home')
     const [home, flow, parameters] = await Promise.all([
-      readJsonObject(join(homeDirectory, 'home.json')),
-      readJsonObject(join(homeDirectory, 'flow.json')),
+      readJsonObject(join(homeDirectory, 'home.json'), directory),
+      readJsonObject(join(homeDirectory, 'flow.json'), directory),
       readParametersObject(directory),
     ])
     return {
@@ -125,8 +140,8 @@ export class WorkspaceSnapshotLoader {
     await migrateWorkspaceConfigFilenames(directory)
     const [parameters, pdk, db] = await Promise.all([
       readParametersObject(directory),
-      readJsonObject(join(directory, 'home', 'pdk.json')),
-      readJsonObject(join(directory, 'config', 'db_ecc.json')),
+      readJsonObject(join(directory, 'home', 'pdk.json'), directory),
+      readJsonObject(join(directory, 'config', 'db_ecc.json'), directory),
     ])
     return { db, parameters, pdk }
   }

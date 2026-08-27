@@ -173,8 +173,16 @@ export function parseWorkspaceParametersText(
   workspaceRoot: string,
 ): Record<string, unknown> {
   if (format === 'json') {
-    const parsed: unknown = JSON.parse(text)
-    return isRecord(parsed) ? parsed : {}
+    const parsed: unknown = parseJsonPreservingIntegers(
+      text,
+      join(workspaceRoot, 'home', LEGACY_PARAMETERS_BASENAME),
+    )
+    if (!isRecord(parsed)) {
+      throw new Error(
+        'Invalid workspace configuration: parameters JSON must contain a JSON object',
+      )
+    }
+    return parsed
   }
   const document = parse(text, { integersAsBigInt: 'asNeeded' }) as Record<
     string,
@@ -202,18 +210,27 @@ export async function readWorkspaceParameters(
  * resolve to the authorized (canonical) directory, and the leaf is opened
  * no-follow. An alias swapped in after authorization therefore fails the
  * open (ELOOP) instead of silently reading the alias target, and a parent
- * directory swapped for a symlink fails the containment check.
+ * directory swapped for a symlink fails the containment check — verified
+ * before AND after the read, so a mid-read swap discards the data instead
+ * of returning it.
  */
 export async function readWorkspaceConfigContained(
   spelledPath: string,
   canonicalPath: string,
 ): Promise<string> {
-  if ((await realpath(dirname(spelledPath))) !== dirname(canonicalPath)) {
+  const authorizedParent = dirname(canonicalPath)
+  if ((await realpath(dirname(spelledPath))) !== authorizedParent) {
     throw new Error(
       `Refusing to read ${spelledPath}: it no longer resolves to the authorized config`,
     )
   }
-  return readFileNoFollow(spelledPath)
+  const text = await readFileNoFollow(spelledPath)
+  if ((await realpath(dirname(spelledPath))) !== authorizedParent) {
+    throw new Error(
+      `Refusing to read ${spelledPath}: parent directory changed during the read`,
+    )
+  }
+  return text
 }
 
 /**
@@ -237,19 +254,33 @@ export async function readFileNoFollow(path: string): Promise<string> {
   }
 }
 
-export async function writeTextAtomically(path: string, content: string): Promise<void> {
+export async function writeTextAtomically(
+  path: string,
+  content: string,
+  options?: { authorizedParent?: string },
+): Promise<void> {
   // Random suffix + exclusive create: a predictable name could be reused by a
   // concurrent writer, and a pre-planted symlink could redirect the write.
   const parent = dirname(path)
-  const canonicalParent = await realpath(parent)
+  // The anchor is the parent the caller AUTHORIZED, never a freshly derived
+  // one: deriving it here could adopt a directory swapped in after
+  // authorization as the accepted target.
+  const canonicalParent = options?.authorizedParent ?? (await realpath(parent))
   const temporaryPath = `${path}.${process.pid}.${Date.now()}.${randomInt(0, 1_000_000)}.tmp`
   try {
+    if ((await realpath(parent)) !== canonicalParent) {
+      throw new Error(
+        `Refusing to write ${path}: parent directory changed before the write`,
+      )
+    }
     await writeFile(temporaryPath, content, { encoding: 'utf8', flag: 'wx' })
     // Write and rename both address the parent by pathname: revalidate that
-    // it still resolves to the same directory, so a symlink swapped in after
-    // authorization cannot redirect the rename outside the workspace. Node
-    // has no dirfd-relative rename, so the rename itself is followed by a
-    // final verification that removes a misplaced file and fails loud.
+    // it still resolves to the authorized directory, so a symlink swapped in
+    // after authorization cannot redirect the rename outside the workspace.
+    // Node has no dirfd-relative rename, so the rename itself is followed by
+    // a final verification that fails loud (a misplaced file is reported,
+    // never silently removed — another swap could make the cleanup delete
+    // an unrelated file).
     if ((await realpath(parent)) !== canonicalParent) {
       throw new Error(
         `Refusing to write ${path}: parent directory changed during the write`,
@@ -257,9 +288,9 @@ export async function writeTextAtomically(path: string, content: string): Promis
     }
     await rename(temporaryPath, path)
     if ((await realpath(parent)) !== canonicalParent) {
-      await rm(path, { force: true }).catch(() => undefined)
       throw new Error(
-        `Refusing to write ${path}: parent directory changed during the rename`,
+        `Refusing to write ${path}: parent directory changed during the rename; ` +
+          'the new content may have landed outside the workspace — inspect the directory',
       )
     }
   } catch (error) {
@@ -320,9 +351,11 @@ export function mergePayloadIntoTomlDocument(
 } {
   assertTomlSectionShapes(document)
   const flatPayload = normalizeParameterKeys(payload) as Record<string, unknown>
-  const existingParams = normalizeParameterKeys(
-    isRecord(document.params) ? document.params : {},
-  ) as Record<string, unknown>
+  // Seed from the FLATTENED document (ecc's _merge_payload semantics:
+  // non-empty section mirrors override [params]), not from [params] alone —
+  // a section-only value like [pdk] config is a live parameter that must
+  // survive the mirror re-sync instead of being deleted as a stale mirror.
+  const existingParams = mergeTomlSections(document, workspaceRoot)
   // Leaf-wise merge: unknown nested members (e.g. a future ecc knob under
   // [params.core]) survive a save that only rewrites known fields; arrays,
   // scalars, and date values replace wholesale.
@@ -401,7 +434,9 @@ export async function writeWorkspaceParameters(
         )
       }
       const merged = mergeRecordsPreservingUnknown(existing, payload)
-      await writeTextAtomically(spelledPath, `${JSON.stringify(merged, null, 4)}\n`)
+      await writeTextAtomically(spelledPath, `${JSON.stringify(merged, null, 4)}\n`, {
+        authorizedParent: dirname(canonicalPath),
+      })
       return location
     }
     const document = parse(
@@ -411,7 +446,9 @@ export async function writeWorkspaceParameters(
       },
     ) as Record<string, unknown>
     const merged = mergePayloadIntoTomlDocument(document, payload, root)
-    await writeTextAtomically(spelledPath, stringify(merged))
+    await writeTextAtomically(spelledPath, stringify(merged), {
+      authorizedParent: dirname(canonicalPath),
+    })
     return location
   })
 }
@@ -426,9 +463,11 @@ function detectJsonIndent(raw: string): number {
 }
 
 /**
- * JSON.parse silently rounds integers beyond Number.MAX_SAFE_INTEGER, so a
- * read-modify-write would corrupt values the operation never touched. Scan
- * integer literals outside strings and refuse the rewrite instead.
+ * JSON.parse silently rounds numbers beyond Number.MAX_SAFE_INTEGER, so
+ * reading or rewriting a config would corrupt values the operation never
+ * touched. Scan number literals outside strings — every form (integer,
+ * decimal, exponent) — and refuse when the parsed value is an integer past
+ * the safe range, i.e. the literal cannot round-trip exactly.
  */
 function assertJsonIntegersSafe(text: string, label: string): void {
   let index = 0
@@ -443,20 +482,14 @@ function assertJsonIntegersSafe(text: string, label: string): void {
       continue
     }
     if (char === '-' || (char >= '0' && char <= '9')) {
-      const token = /^-?\d+/.exec(text.slice(index))?.[0]
+      const token = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(index))?.[0]
       if (token) {
-        const rest = text[index + token.length]
-        if (rest !== '.' && rest !== 'e' && rest !== 'E') {
-          const digits = token.replace('-', '').replace(/^0+(?=\d)/, '')
-          if (
-            digits.length > 16 ||
-            (digits.length === 16 && digits > '9007199254740991')
-          ) {
-            throw new Error(
-              `Refusing to rewrite ${label}: integer ${token} exceeds ` +
-                'Number.MAX_SAFE_INTEGER and would lose precision',
-            )
-          }
+        const parsed = Number(token)
+        if (Number.isInteger(parsed) && Math.abs(parsed) > Number.MAX_SAFE_INTEGER) {
+          throw new Error(
+            `Unsafe number ${token} in ${label}: exceeds ` +
+              'Number.MAX_SAFE_INTEGER and would lose precision',
+          )
         }
         index += token.length
         continue
@@ -560,6 +593,7 @@ export async function editWorkspaceParameters(
       await writeTextAtomically(
         spelledPath,
         raw.endsWith('\n') ? `${serialized}\n` : serialized,
+        { authorizedParent: dirname(canonicalPath) },
       )
       return location
     }
@@ -575,7 +609,9 @@ export async function editWorkspaceParameters(
       setJsonPathValue(parameters, normalizedPath, edit.value, location.path)
     }
     const merged = mergePayloadIntoTomlDocument(document, parameters, root)
-    await writeTextAtomically(spelledPath, stringify(merged))
+    await writeTextAtomically(spelledPath, stringify(merged), {
+      authorizedParent: dirname(canonicalPath),
+    })
     return location
   })
 }
