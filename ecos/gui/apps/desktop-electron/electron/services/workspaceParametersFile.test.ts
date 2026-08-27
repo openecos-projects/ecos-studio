@@ -379,6 +379,29 @@ describe('writeWorkspaceParameters', () => {
     )
   })
 
+  it('rejects sub-millisecond datetimes instead of truncating them on save', async () => {
+    const root = createWorkspace()
+    const content = `${ECC_TOML}\n[params.flow_meta]\ncheckpoint = 07:32:00.999999\n`
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /millisecond precision/i,
+    )
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['design'], value: 'aes' }]),
+    ).rejects.toThrow(/millisecond precision/i)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+  })
+
+  it('accepts millisecond-precision datetimes and time-looking comments', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'ecc.toml',
+      `${ECC_TOML}\n# checkpoint was 07:32:00.999999 here\nmeta_note = "see 07:32:00.999999 in the log"\n`,
+    )
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
+  })
+
   it('rejects non-finite numbers in the incoming payload and edit values', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'ecc.toml', ECC_TOML)

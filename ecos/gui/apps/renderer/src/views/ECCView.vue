@@ -335,11 +335,10 @@ const prefillWorkspaceDirectory = async () => {
   let sourceWorkspaceConfig: ProjectWorkspaceInitialConfig | undefined
 
   await registerProjectRootForProjectManagement(projectRoot)
-  try {
-    sourceWorkspaceConfig = await loadSourceWorkspaceInitialConfig(sourceWorkspacePath)
-  } catch (error) {
-    console.warn('Failed to load source workspace defaults.', error)
-  }
+  // Guard and parse failures (an unrepresentable value, a malformed config)
+  // must abort the prefill instead of silently becoming wizard defaults;
+  // genuinely missing files already read as null and are tolerated above.
+  sourceWorkspaceConfig = await loadSourceWorkspaceInitialConfig(sourceWorkspacePath)
 
   initialWizardConfig.value = mergeBranchInitialConfig(
     {
@@ -401,37 +400,32 @@ async function loadSourceWorkspaceInitialConfig(
 ): Promise<ProjectWorkspaceInitialConfig | undefined> {
   if (!sourceWorkspacePath) return undefined
 
-  try {
-    const [parametersJson, pdkText, dbConfigText] = await Promise.all([
-      readWorkspaceParametersFile(sourceWorkspacePath),
-      readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
-      readOptionalProjectTextFile('config/db_ecc.json', {
-        projectPath: sourceWorkspacePath,
-      }),
-    ])
+  const [parametersJson, pdkText, dbConfigText] = await Promise.all([
+    readWorkspaceParametersFile(sourceWorkspacePath),
+    readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
+    readOptionalProjectTextFile('config/db_ecc.json', {
+      projectPath: sourceWorkspacePath,
+    }),
+  ])
 
-    const pdkJson = parseOptionalJson(pdkText)
-    const dbConfigJson = parseOptionalJson(dbConfigText)
-    const dbInput = optionalRecord(dbConfigJson?.INPUT)
-    const pdkConfig = normalizeSourcePdkConfig(pdkJson, dbConfigJson)
+  const pdkJson = parseOptionalJson(pdkText)
+  const dbConfigJson = parseOptionalJson(dbConfigText)
+  const dbInput = optionalRecord(dbConfigJson?.INPUT)
+  const pdkConfig = normalizeSourcePdkConfig(pdkJson, dbConfigJson)
 
-    return {
-      pdk: optionalString(parametersJson?.PDK) || optionalString(parametersJson?.pdk),
-      pdk_root:
-        optionalString(parametersJson?.['PDK Root']) ||
-        optionalString(parametersJson?.pdk_root),
-      sdc:
-        sourceWorkspaceSdcPath(sourceWorkspacePath, parametersJson) ||
-        optionalString(pdkJson?.sdc) ||
-        optionalString(dbInput?.sdc_path),
-      pdk_config_mode: pdkConfig.mode,
-      pdk_config: pdkConfig,
-      pdk_json: pdkText ? `${normalizePath(sourceWorkspacePath)}/home/pdk.json` : '',
-      parameters: normalizeSourceParameters(parametersJson),
-    }
-  } catch (error) {
-    console.warn('Failed to load source workspace config for wizard prefill.', error)
-    return undefined
+  return {
+    pdk: optionalString(parametersJson?.PDK) || optionalString(parametersJson?.pdk),
+    pdk_root:
+      optionalString(parametersJson?.['PDK Root']) ||
+      optionalString(parametersJson?.pdk_root),
+    sdc:
+      sourceWorkspaceSdcPath(sourceWorkspacePath, parametersJson) ||
+      optionalString(pdkJson?.sdc) ||
+      optionalString(dbInput?.sdc_path),
+    pdk_config_mode: pdkConfig.mode,
+    pdk_config: pdkConfig,
+    pdk_json: pdkText ? `${normalizePath(sourceWorkspacePath)}/home/pdk.json` : '',
+    parameters: normalizeSourceParameters(parametersJson),
   }
 }
 

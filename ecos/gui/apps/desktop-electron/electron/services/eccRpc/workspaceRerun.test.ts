@@ -611,6 +611,7 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
         'design = "gcd"',
         'target_density = 0.45',
         `source_output_path = "${source}/place_dreamplace/output"`,
+        `note = "compare ${source}-old against this run"`,
         '',
       ].join('\n'),
     )
@@ -621,5 +622,7 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     const written = await readFile(`${contract.target_workspace}/home/ecc.toml`, 'utf8')
     expect(written).toContain(`${contract.target_workspace}/place_dreamplace/output`)
     expect(written).not.toContain(`${source}/place_dreamplace/output`)
+    // Prose that merely shares the prefix is never rewritten.
+    expect(written).toContain(`compare ${source}-old against this run`)
   })
 })

@@ -859,8 +859,14 @@ async function rewriteHomeJsonSourcePaths(
     const original = await readFileNoFollow(filePath)
     let next = original
     for (const prefix of prefixes) {
-      if (!prefix || prefix === options.targetWorkspace) continue
-      next = next.split(prefix).join(options.targetWorkspace)
+      const trimmedPrefix = prefix.replace(/\/+$/, '')
+      if (!trimmedPrefix || trimmedPrefix === options.targetWorkspace) continue
+      // Path-boundary-aware replacement: a value is workspace-rooted only
+      // when the prefix is followed by a separator or ends the string, so
+      // prose like "compare /work/chip-old" is never rewritten.
+      next = next.split(`${trimmedPrefix}/`).join(`${options.targetWorkspace}/`)
+      next = next.split(`"${trimmedPrefix}"`).join(`"${options.targetWorkspace}"`)
+      next = next.split(`'${trimmedPrefix}'`).join(`'${options.targetWorkspace}'`)
     }
     if (next !== original) {
       await writeTextAtomically(filePath, next)

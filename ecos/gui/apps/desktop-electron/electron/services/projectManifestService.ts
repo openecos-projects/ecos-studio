@@ -530,16 +530,22 @@ function assertBaselineScalarsSafe(value: unknown): void {
     for (const item of value) assertBaselineScalarsSafe(item)
     return
   }
-  const record = recordValue(value)
-  if (record) {
-    for (const item of Object.values(record)) assertBaselineScalarsSafe(item)
+  if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+    for (const item of Object.values(value)) assertBaselineScalarsSafe(item)
   }
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
+  if (value === null || value === undefined) return null
+  if (value instanceof Date || Array.isArray(value) || typeof value !== 'object') {
+    // A scalar where a table is expected (e.g. die = 1979-05-27) must not
+    // degrade into an empty table and silently lose the baseline geometry.
+    throw new Error(
+      'Baseline workspace snapshot holds a scalar where a parameter table was ' +
+        'expected; edit the workspace configuration manually',
+    )
+  }
+  return value as Record<string, unknown>
 }
 
 function validateProjectManifestMpc(value: unknown): void {

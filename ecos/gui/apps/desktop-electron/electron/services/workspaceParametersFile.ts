@@ -164,6 +164,42 @@ export function mergeTomlSections(
 }
 
 /**
+ * smol-toml parses datetimes at millisecond resolution, so a date scalar
+ * with finer precision (e.g. 07:32:00.999999) silently truncates on every
+ * save — including untouched values in [flow] and unknown sections. Refuse
+ * the write instead of corrupting the document. Strings and comments are
+ * skipped; a time-looking token inside a multiline string may fail closed,
+ * which is still safer than a silent truncation.
+ */
+function assertNoSubMillisecondDatetimes(text: string, label: string): void {
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]
+    if (char === '#') {
+      while (index < text.length && text[index] !== '\n') index += 1
+      continue
+    }
+    if (char === '"' || char === "'") {
+      const quote = char
+      index += 1
+      while (index < text.length && text[index] !== quote) {
+        index += quote === '"' && text[index] === '\\' ? 2 : 1
+      }
+      index += 1
+      continue
+    }
+    const timeMatch = /^\d{2}:\d{2}:\d{2}\.(\d+)/.exec(text.slice(index))
+    if (timeMatch && timeMatch[1].length > 3) {
+      throw new Error(
+        `Refusing to rewrite ${label}: datetime ${timeMatch[0]} exceeds ` +
+          'millisecond precision and would be truncated',
+      )
+    }
+    index += 1
+  }
+}
+
+/**
  * Parse a TOML document that must hold a plain table at its root: a scalar
  * document (e.g. a bare TOML date) is a configuration error, not an empty
  * parameter set to overwrite on the next save.
@@ -506,10 +542,9 @@ export async function writeWorkspaceParameters(
       })
       return onDisk
     }
-    const document = parseTomlDocument(
-      await readWorkspaceConfigContained(spelledPath, canonicalPath),
-      onDisk.path,
-    )
+    const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
+    assertNoSubMillisecondDatetimes(raw, onDisk.path)
+    const document = parseTomlDocument(raw, onDisk.path)
     const merged = mergePayloadIntoTomlDocument(document, payload, root)
     await assertWritable?.()
     await writeTextAtomically(spelledPath, stringify(merged), {
@@ -690,6 +725,7 @@ export async function editWorkspaceParameters(
       )
       return onDisk
     }
+    assertNoSubMillisecondDatetimes(raw, onDisk.path)
     const document = parseTomlDocument(raw, onDisk.path)
     const parameters = mergeTomlSections(document, root)
     for (const edit of edits) {
