@@ -21,7 +21,9 @@ import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 import {
   editWorkspaceParameters,
   locateWorkspaceParametersFile,
+  readFileNoFollow,
   WORKSPACE_CONFIG_BASENAME,
+  writeTextAtomically,
 } from '../workspaceParametersFile'
 
 interface WorkspaceRerunRuntime {
@@ -849,14 +851,19 @@ async function rewriteHomeJsonSourcePaths(
     if (entry !== WORKSPACE_CONFIG_BASENAME && !entry.endsWith('.json')) continue
     if (entry === 'flow_agent_workspace_rerun_contract.v1.json') continue
     const filePath = join(homeDirectory, entry)
-    const original = await readFile(filePath, 'utf8')
+    // Skip anything that is not a regular file: a symlinked config (the
+    // clone preserves it) would otherwise redirect the rewrite outside the
+    // workspace, and the read must not follow it either.
+    const entryStats = await lstat(filePath)
+    if (!entryStats.isFile() || entryStats.isSymbolicLink()) continue
+    const original = await readFileNoFollow(filePath)
     let next = original
     for (const prefix of prefixes) {
       if (!prefix || prefix === options.targetWorkspace) continue
       next = next.split(prefix).join(options.targetWorkspace)
     }
     if (next !== original) {
-      await writeFile(filePath, next, 'utf8')
+      await writeTextAtomically(filePath, next)
     }
   }
 }

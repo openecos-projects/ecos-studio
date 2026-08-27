@@ -8,6 +8,24 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
 }
 
 /**
+ * optionalRecord for GUI-known table fields: a TOML date where a table is
+ * expected would otherwise flatten into defaults that a save then persists
+ * over the original value, so fail loud instead.
+ */
+export function losslessOptionalRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> | null {
+  if (value instanceof Date) {
+    throw new Error(
+      `Parameter ${label} holds a TOML date where a table was expected; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  return isPlainRecord(value) ? value : null
+}
+
+/**
  * optionalString for GUI-known fields: a TOML date or bigint would fall
  * through to a default and be written back over the original value on the
  * next save, so fail loud instead of falling back.
@@ -16,6 +34,12 @@ export function losslessOptionalString(value: unknown, label: string): string {
   if (value instanceof Date || typeof value === 'bigint') {
     throw new Error(
       `Parameter ${label} holds a value the wizard cannot edit losslessly; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(
+      `Parameter ${label} value ${value} is not a finite number; ` +
         'edit the workspace configuration manually',
     )
   }

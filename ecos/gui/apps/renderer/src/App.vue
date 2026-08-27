@@ -225,7 +225,11 @@ import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import { losslessNumber, losslessOptionalString } from '@/utils/numbers'
+import {
+  losslessNumber,
+  losslessOptionalString,
+  losslessOptionalRecord,
+} from '@/utils/numbers'
 import {
   getOptionalDesktopApi,
   hasDesktopApi,
@@ -956,8 +960,7 @@ async function workspaceTextFileExists(path: string): Promise<boolean> {
 }
 
 function optionalRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
+  return losslessOptionalRecord(value, 'workspace parameter')
 }
 
 function optionalString(value: unknown): string {

@@ -210,7 +210,11 @@ import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
 import { waitForDesktopApi } from '@/platform/desktop'
-import { losslessNumber, losslessOptionalString } from '@/utils/numbers'
+import {
+  losslessNumber,
+  losslessOptionalString,
+  losslessOptionalRecord,
+} from '@/utils/numbers'
 import {
   readOptionalProjectTextFile,
   readWorkspaceParametersFile,
@@ -548,8 +552,7 @@ function normalizeSourcePdkConfig(
 }
 
 function optionalRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
+  return losslessOptionalRecord(value, 'workspace parameter')
 }
 
 function stringList(value: unknown): string[] {
