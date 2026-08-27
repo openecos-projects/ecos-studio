@@ -742,6 +742,65 @@ def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch)
     assert start["origin"] == "gui"
 
 
+def test_phase8_runner_resumes_created_unstarted_workspace(
+    tmp_path, monkeypatch
+) -> None:
+    runner = _load_experiment_runner()
+    workspace = tmp_path / "workspace"
+    (workspace / "home").mkdir(parents=True)
+    (workspace / "home/flow.json").write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {"name": name, "state": "Unstart"}
+                    for name in runner.GUI_WORKSPACE_FLOW_STEPS
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+    started = False
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def open_workspace(self, directory):
+            calls.append(("workspace.open", directory, None))
+            return "workspace"
+
+        def _request(self, method, params, *, timeout_seconds):
+            nonlocal started
+            calls.append((method, params, timeout_seconds))
+            started = True
+            return {"operationId": "flow", "state": "succeeded"}
+
+        def close(self) -> None:
+            pass
+
+    manifest = object()
+    design = runner.DesignSpec(
+        "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
+    )
+    observation = _terminal_observation()
+    monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
+    monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
+    monkeypatch.setattr(
+        runner,
+        "build_terminal_observation",
+        lambda _workspace: observation
+        if started
+        else pytest.fail("flow was not resumed"),
+    )
+
+    assert runner._ensure_workspace(manifest, design, workspace, 1.0) == observation
+    assert calls[0] == ("workspace.open", workspace, None)
+    assert calls[1][0] == "operation.start_flow"
+    assert calls[1][1]["rerun"] is False
+
+
 def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:
     runner = _load_experiment_runner()
     workspace = tmp_path / "workspace"

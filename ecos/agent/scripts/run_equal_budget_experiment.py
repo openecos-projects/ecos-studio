@@ -300,10 +300,18 @@ def _ensure_workspace(
 ) -> TerminalObservation:
     if (workspace / "home/flow.json").is_file():
         _verify_workspace_binding(manifest, design, workspace)
-        terminal = build_terminal_observation(workspace)
-        if terminal.schema_version != "ecos.terminal_observation.v3":
-            raise ValueError("Phase 8 workspace terminal evidence is not v3")
-        return terminal
+        if _workspace_flow_succeeded(workspace):
+            return _terminal_observation(workspace)
+        client = EccContentLengthRpcClient(
+            _ecc_executable(), response_timeout_seconds=30
+        )
+        try:
+            workspace_id = client.open_workspace(workspace)
+            _run_canonical_flow(client, workspace_id, design.design_id, timeout)
+        finally:
+            client.close()
+        _verify_workspace_binding(manifest, design, workspace)
+        return _terminal_observation(workspace)
     if workspace.exists():
         raise ValueError("incomplete Phase 8 workspace already exists")
     client = EccContentLengthRpcClient(_ecc_executable(), response_timeout_seconds=30)
@@ -313,24 +321,50 @@ def _ensure_workspace(
         workspace_id = created.get("workspaceId")
         if not isinstance(workspace_id, str) or not _ID.fullmatch(workspace_id):
             raise ValueError("Phase 8 workspace id is invalid")
-        operation = _setup_request(
-            client,
-            "operation.start_flow",
-            {
-                "workspaceId": workspace_id,
-                "rerun": False,
-                "origin": "gui",
-                "idempotencyKey": f"phase8.{design.design_id}.canonical",
-            },
-            30.0,
-        )
-        terminal = _wait_operation(client, operation, timeout)
-        if terminal.get("state") != "succeeded":
-            raise ValueError("Phase 8 canonical flow failed")
+        _run_canonical_flow(client, workspace_id, design.design_id, timeout)
     finally:
         client.close()
     _verify_workspace_binding(manifest, design, workspace)
-    return build_terminal_observation(workspace)
+    return _terminal_observation(workspace)
+
+
+def _workspace_flow_succeeded(workspace: Path) -> bool:
+    flow = _workspace_json(workspace, "home/flow.json")
+    steps = flow.get("steps")
+    if not isinstance(steps, list) or [
+        item.get("name") for item in steps if isinstance(item, dict)
+    ] != list(GUI_WORKSPACE_FLOW_STEPS):
+        raise ValueError("Phase 8 workspace flow is invalid")
+    return all(item.get("state") == "Success" for item in steps)
+
+
+def _run_canonical_flow(
+    client: EccContentLengthRpcClient,
+    workspace_id: str,
+    design_id: str,
+    timeout: float,
+) -> None:
+    operation = _setup_request(
+        client,
+        "operation.start_flow",
+        {
+            "workspaceId": workspace_id,
+            "rerun": False,
+            "origin": "gui",
+            "idempotencyKey": f"phase8.{design_id}.canonical",
+        },
+        30.0,
+    )
+    terminal = _wait_operation(client, operation, timeout)
+    if terminal.get("state") != "succeeded":
+        raise ValueError("Phase 8 canonical flow failed")
+
+
+def _terminal_observation(workspace: Path) -> TerminalObservation:
+    terminal = build_terminal_observation(workspace)
+    if terminal.schema_version != "ecos.terminal_observation.v3":
+        raise ValueError("Phase 8 workspace terminal evidence is not v3")
+    return terminal
 
 
 def _verify_workspace_binding(
