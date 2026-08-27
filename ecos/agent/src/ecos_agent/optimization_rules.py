@@ -99,9 +99,11 @@ CONTROLLED_COORDINATE_ORDER = (
     CoordinateAction(OptimizationKnob.TARGET_OVERFLOW, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.CELL_PADDING_X, CoordinateDirection.DECREASE),
     CoordinateAction(OptimizationKnob.CELL_PADDING_X, CoordinateDirection.INCREASE),
-    CoordinateAction(OptimizationKnob.ROUTABILITY_OPT, CoordinateDirection.TOGGLE),
     CoordinateAction(OptimizationKnob.DENSITY_WEIGHT, CoordinateDirection.DECREASE),
     CoordinateAction(OptimizationKnob.DENSITY_WEIGHT, CoordinateDirection.INCREASE),
+)
+ACTIVE_OPTIMIZATION_KNOBS = tuple(
+    knob for knob in OptimizationKnob if knob != OptimizationKnob.ROUTABILITY_OPT
 )
 
 
@@ -279,7 +281,7 @@ def next_coordinate_selection(
 ) -> CoordinateSelection | None:
     if not 0 <= start_action_index < len(CONTROLLED_COORDINATE_ORDER):
         raise ValueError("coordinate action index is invalid")
-    for knob_id in OptimizationKnob:
+    for knob_id in ACTIVE_OPTIMIZATION_KNOBS:
         _current_value(knob_id, current_values)
     attempted_values = tuple(attempted)
     aliases = tuple(known_aliases)
@@ -304,6 +306,8 @@ def select_requested_value(
     known_aliases: Iterable[RequestedKnobValue] = (),
 ) -> RequestedKnobValue | None:
     """Select the next frozen value for one validated strategy direction."""
+    if action.knob_id not in ACTIVE_OPTIMIZATION_KNOBS:
+        return None
     current = _current_value(action.knob_id, current_values)
     attempted_values = tuple(attempted)
     aliases = tuple(known_aliases)

@@ -69,7 +69,11 @@ from ecos_agent.optimization_ledger import (
 )
 from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
-from ecos_agent.optimization_rules import legal_actions, select_requested_value
+from ecos_agent.optimization_rules import (
+    ACTIVE_OPTIMIZATION_KNOBS,
+    legal_actions,
+    select_requested_value,
+)
 from ecos_agent.parameter_evidence_contracts import (
     OptimizationProposalV2,
     ParameterApplicationReceipt,
@@ -843,7 +847,7 @@ class OptimizationEpisodeController:
                 attempted=attempted,
                 baseline_surface_value=current_values.get(knob_id.value),
             )
-            for knob_id in OptimizationKnob
+            for knob_id in ACTIVE_OPTIMIZATION_KNOBS
         )
         ineffective_requests = tuple(
             RequestedKnobValue(knob_id=domain.knob_id, value=value)

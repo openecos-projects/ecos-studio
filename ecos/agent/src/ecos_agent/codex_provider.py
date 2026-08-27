@@ -39,6 +39,7 @@ from ecos_agent.optimization_controller import (
     OptimizationPlanningContext,
     planning_context_payload,
 )
+from ecos_agent.optimization_rules import ACTIVE_OPTIMIZATION_KNOBS
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal
 
 
@@ -1018,6 +1019,9 @@ def _optimization_planning_payload(
 
 def _optimization_proposal_output_schema() -> dict[str, Any]:
     schema = OptimizationProposal.model_json_schema()
+    schema["$defs"]["OptimizationKnob"]["enum"] = [
+        knob.value for knob in ACTIVE_OPTIMIZATION_KNOBS
+    ]
     _require_all_schema_properties(schema)
     return schema
 
@@ -1025,6 +1029,9 @@ def _optimization_proposal_output_schema() -> dict[str, Any]:
 def _optimization_proposal_output_schema_v2() -> dict[str, Any]:
     """Schema for the opt-in exact-value proposal contract."""
     schema = OptimizationProposalV2.model_json_schema()
+    schema["$defs"]["OptimizationKnob"]["enum"] = [
+        knob.value for knob in ACTIVE_OPTIMIZATION_KNOBS
+    ]
     _require_all_schema_properties(schema)
     return schema
 

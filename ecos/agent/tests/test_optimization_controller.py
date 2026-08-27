@@ -441,7 +441,7 @@ def test_controller_persists_attempted_requested_values(tmp_path: Path) -> None:
     assert planned.rejection_reason is None
 
 
-def test_planning_context_compiles_hash_bound_domain_for_all_frozen_knobs(
+def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
     tmp_path: Path,
 ) -> None:
     codex = _FakeCodex(_proposal)
@@ -451,11 +451,13 @@ def test_planning_context_compiles_hash_bound_domain_for_all_frozen_knobs(
 
     assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
     context = codex.contexts[0]
-    assert len(context.effective_domains) == 8
-    assert {item.knob_id.value for item in context.effective_domains} == set(CURRENT_VALUES)
+    assert len(context.effective_domains) == 7
+    assert {item.knob_id.value for item in context.effective_domains} == set(
+        CURRENT_VALUES
+    ) - {"place.routability_opt"}
     assert all(item.snapshot_sha256.startswith("sha256:") for item in context.effective_domains)
     payload = planning_context_payload(context)
-    assert len(payload["effective_domains"]) == 8
+    assert len(payload["effective_domains"]) == 7
     assert payload["effective_domains"][0]["snapshot_sha256"] == context.effective_domains[0].snapshot_sha256
     audit = OptimizationPlanningAudit(tmp_path / "episode").replay()
     assert tuple(

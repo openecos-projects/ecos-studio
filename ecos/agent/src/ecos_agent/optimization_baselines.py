@@ -152,18 +152,15 @@ def _rule_selection(
     return _coordinate_selection(current_values, attempted, coordinate_index)
 
 
-_ENABLE_ROUTABILITY = "strategy.congestion.enable_congestion_guided_area_adjust.v1"
 _INCREASE_PADDING = "strategy.congestion.padding_spreads_hotspot_cells.v1"
 _DECREASE_DENSITY = "strategy.congestion.lower_packing_when_overflow_persists.v1"
 _REDUCE_SPREADING = "strategy.wirelength.reduce_excessive_place_spreading.v1"
 
 _CONGESTED_RULES = (
-    (OptimizationKnob.ROUTABILITY_OPT, StrategyDirection.ENABLE, _ENABLE_ROUTABILITY),
     (OptimizationKnob.CELL_PADDING_X, StrategyDirection.INCREASE, _INCREASE_PADDING),
     (OptimizationKnob.TARGET_DENSITY, StrategyDirection.DECREASE, _DECREASE_DENSITY),
 )
 _CLEAN_RULES = (
-    (OptimizationKnob.ROUTABILITY_OPT, StrategyDirection.DISABLE, _REDUCE_SPREADING),
     (OptimizationKnob.CELL_PADDING_X, StrategyDirection.DECREASE, _REDUCE_SPREADING),
     (OptimizationKnob.TARGET_DENSITY, StrategyDirection.INCREASE, _REDUCE_SPREADING),
 )
@@ -204,7 +201,7 @@ def _rule_references() -> dict[str, KnowledgeReference]:
         for entity in load_default_general_knowledge(metric).entities
     }
     result = {}
-    for entity_id in {_ENABLE_ROUTABILITY, _INCREASE_PADDING, _DECREASE_DENSITY, _REDUCE_SPREADING}:
+    for entity_id in {_INCREASE_PADDING, _DECREASE_DENSITY, _REDUCE_SPREADING}:
         entity = entities.get(entity_id)
         if entity is None:
             raise ValueError(f"rule-guided knowledge is unavailable: {entity_id}")

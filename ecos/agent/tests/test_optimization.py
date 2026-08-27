@@ -441,7 +441,7 @@ def test_coordinate_search_uses_attempted_and_alias_values_to_refine_the_interva
     assert selection.next_action_index == 7
 
 
-def test_coordinate_search_toggles_a_boolean_only_once() -> None:
+def test_coordinate_search_ignores_routability_optimization() -> None:
     current = _expanded_current(
         **{
             "place.target_density": 0.1,
@@ -450,18 +450,17 @@ def test_coordinate_search_toggles_a_boolean_only_once() -> None:
             "place.routability_opt": False,
         }
     )
-    selection = next_coordinate_selection(current_values=current, attempted=(), start_action_index=12)
-
-    assert selection is not None
-    assert selection.requested == RequestedKnobValue(knob_id="place.routability_opt", value=True)
-    assert (
-        next_coordinate_selection(
-            current_values=current,
-            attempted=_all_requested_values(),
-            start_action_index=6,
-        )
-        is None
+    attempted = tuple(
+        item
+        for item in _all_requested_values()
+        if item.knob_id.value != "place.routability_opt"
     )
+
+    assert next_coordinate_selection(
+        current_values=current,
+        attempted=attempted,
+        start_action_index=12,
+    ) is None
 
 
 def test_coordinate_search_returns_none_when_the_lattice_is_exhausted() -> None:
@@ -503,7 +502,6 @@ def test_legal_actions_exclude_only_noop_directions() -> None:
         ("place.target_overflow", "increase"),
         ("place.cell_padding_x", "decrease"),
         ("place.cell_padding_x", "increase"),
-        ("place.routability_opt", "disable"),
         ("place.density_weight", "decrease"),
         ("place.density_weight", "increase"),
     ]

@@ -237,15 +237,15 @@ def test_rule_guided_direction_uses_audited_card_mappings() -> None:
 
     assert congested is not None
     assert congested.requested == RequestedKnobValue(
-        knob_id="place.routability_opt", value=True
+        knob_id="place.cell_padding_x", value=3
     )
     assert congested.knowledge_ref is not None
     assert congested.knowledge_ref.entity_id == (
-        "strategy.congestion.enable_congestion_guided_area_adjust.v1"
+        "strategy.congestion.padding_spreads_hotspot_cells.v1"
     )
     assert clean is not None
     assert clean.requested == RequestedKnobValue(
-        knob_id="place.routability_opt", value=False
+        knob_id="place.cell_padding_x", value=1
     )
     assert clean.knowledge_ref is not None
     assert clean.knowledge_ref.entity_id == (
@@ -281,8 +281,8 @@ def test_rule_guided_policy_manifest_freezes_order_and_knowledge_hashes() -> Non
     manifest = rule_guided_policy_manifest()
 
     assert manifest["exhaustion_policy"] == "controlled_coordinate_order"
-    assert [rule["priority"] for rule in manifest["congested_rules"]] == [1, 2, 3]
-    assert [rule["priority"] for rule in manifest["clean_rules"]] == [1, 2, 3]
+    assert [rule["priority"] for rule in manifest["congested_rules"]] == [1, 2]
+    assert [rule["priority"] for rule in manifest["clean_rules"]] == [1, 2]
     for rule in (*manifest["congested_rules"], *manifest["clean_rules"]):
         assert len(rule["knowledge_ref"]["chunk_sha256"]) == 64
 

@@ -242,7 +242,6 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
         "place.target_density",
         "place.target_overflow",
         "place.cell_padding_x",
-        "place.routability_opt",
         "place.density_weight",
         "floorplan.core_util",
         "floorplan.aspect_ratio",
