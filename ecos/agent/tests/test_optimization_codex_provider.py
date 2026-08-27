@@ -10,6 +10,7 @@ from ecos_agent.codex_provider import (
     _build_prompt,
     create_required_codex_provider,
 )
+from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     AppliedKnobValue,
@@ -139,6 +140,54 @@ def _proposal(context: OptimizationPlanningContext) -> dict[str, object]:
     ).model_dump(mode="json")
 
 
+def _domain() -> EffectiveDomainSnapshot:
+    payload = {
+        "schema_version": "ecos.effective_domain.v1",
+        "knob_id": "place.target_density",
+        "context_sha256": HASH,
+        "current_coordinate": {"surface_value": 0.2, "effective_anchor": None},
+        "surface_values": (0.2, 0.25, 0.3, 0.85),
+        "excluded_aliases": (0.2,),
+        "allowed_requested_values": (0.25, 0.3, 0.85),
+        "thresholds": (),
+        "observed_application_signatures": (),
+        "observed_response_signatures": (),
+    }
+    return EffectiveDomainSnapshot(
+        **payload,
+        snapshot_sha256=canonical_sha256(payload),
+    )
+
+
+def _proposal_v2(
+    context: OptimizationPlanningContext, domain: EffectiveDomainSnapshot
+) -> dict[str, object]:
+    return {
+        "schema_version": "ecos.optimization_proposal.v2",
+        "context_ref": context.context_ref.model_dump(mode="json"),
+        "decision": "propose",
+        "reason_code": "observation",
+        "rationale_summary": "Use the next bounded exact value.",
+        "observation_refs": [context.observation_ref.model_dump(mode="json")],
+        "history_refs": [],
+        "knowledge_refs": [item.model_dump(mode="json") for item in context.knowledge_refs],
+        "task_memory_refs": [],
+        "action": {
+            "knob_id": "place.target_density",
+            "direction": "increase",
+            "requested_value": 0.85,
+            "effective_domain_sha256": domain.snapshot_sha256,
+            "threshold_refs": [],
+            "expected_effects": [
+                {
+                    "metric_id": "route_la_total_overflow",
+                    "direction": "decrease",
+                }
+            ],
+        },
+    }
+
+
 def test_optimization_planner_sends_only_bounded_context_and_validates_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -249,6 +298,68 @@ def test_optimization_planner_exposes_one_consumable_turn_evidence(
         evidence.envelope.model_dump(mode="json", exclude={"envelope_sha256"})
     )
     assert provider.consume_planning_evidence() is None
+
+
+def test_optimization_planner_v2_is_fail_closed_until_explicitly_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    context = _context()
+    called = False
+
+    def request(**_kwargs: object) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return _proposal_v2(context, _domain())
+
+    monkeypatch.setattr(provider, "_request_json", request)
+
+    with pytest.raises(CodexProviderError, match="not enabled") as error:
+        provider.propose_v2(context, _domain())
+
+    assert error.value.failure_class == "unsupported"
+    assert called is False
+
+
+def test_optimization_planner_v2_binds_domain_and_planning_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "1"
+    context = _context()
+    domain = _domain()
+    captured: dict[str, object] = {}
+
+    def request(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        provider._completed_turn = ("thread-v2", "turn-v2", HASH)
+        return _proposal_v2(context, domain)
+
+    monkeypatch.setattr(provider, "_request_json", request)
+
+    result = provider.propose_v2(context, domain)
+
+    assert result["schema_version"] == "ecos.optimization_proposal.v2"
+    assert captured["user"]["effective_domain"] == domain.model_dump(mode="json")
+    evidence = provider.consume_planning_evidence()
+    assert evidence is not None
+    assert evidence.thread_id == "thread-v2"
+    assert evidence.turn_id == "turn-v2"
+    assert evidence.envelope.planner_payload_sha256 == canonical_sha256(
+        captured["user"]
+    )
+    assert evidence.envelope.output_schema == captured["output_schema"]
+    assert provider.consume_planning_evidence() is None
+
+
+def test_optimization_planner_v2_rejects_untrusted_domain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "1"
+    with pytest.raises(CodexProviderError, match="domain is invalid") as error:
+        provider.propose_v2(_context(), {"knob_id": "place.target_density"})
+    assert error.value.failure_class == "missing_input"
 
 
 def test_required_codex_provider_forwards_episode_diagnostics_path(

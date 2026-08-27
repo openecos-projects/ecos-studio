@@ -33,6 +33,7 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
 )
+from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.parameter_evidence_contracts import OptimizationProposalV2
 from ecos_agent.optimization_controller import (
     OptimizationPlanningContext,
@@ -279,6 +280,8 @@ class CodexAppServerProposalProvider:
 
     def propose(self, context: OptimizationPlanningContext) -> dict[str, Any]:
         payload = _optimization_planning_payload(context)
+        # v1 remains direction-only; exact domains are exposed only by propose_v2.
+        payload.pop("effective_domains", None)
         system = (
             "Return one JSON object matching ecos.optimization_proposal.v1. "
             "Choose only continue, propose, stop, or escalate. A propose decision may name exactly one "
@@ -316,17 +319,50 @@ class CodexAppServerProposalProvider:
         finally:
             self._capture_planning_evidence()
 
-    def propose_v2(self, context: OptimizationPlanningContext, domain: Mapping[str, Any]) -> dict[str, Any]:
+    def propose_v2(
+        self,
+        context: OptimizationPlanningContext,
+        domain: Mapping[str, Any] | EffectiveDomainSnapshot,
+    ) -> dict[str, Any]:
         """Opt-in exact-value proposal lane; production v1 remains the default."""
         if self.env.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") != "1":
             raise CodexProviderError("optimization proposal v2 is not enabled", failure_class="unsupported")
+        try:
+            domain_snapshot = (
+                domain
+                if isinstance(domain, EffectiveDomainSnapshot)
+                else EffectiveDomainSnapshot.model_validate(domain)
+            )
+        except (TypeError, ValueError) as exc:
+            raise CodexProviderError(
+                "optimization proposal v2 domain is invalid", failure_class="missing_input"
+            ) from exc
         payload = _optimization_planning_payload(context)
-        payload["effective_domain"] = dict(domain)
+        payload["effective_domain"] = domain_snapshot.model_dump(mode="json")
         system = (
             "Return one JSON object matching ecos.optimization_proposal.v2. "
             "Use only the supplied exact allowlist and domain hash; never emit commands, paths, workspaces, RPCs, or execution authority."
         )
-        return self._proposal(payload, system, _optimization_proposal_output_schema_v2(), OptimizationProposalV2)
+        output_schema = _optimization_proposal_output_schema_v2()
+        envelope_payload = {
+            "schema_version": "ecos.optimization_planning_provider_envelope.v1",
+            "provider_id": "codex_app_server",
+            "requested_model": self._model,
+            "prompt": _build_prompt(system, payload),
+            "output_schema": output_schema,
+            "planner_payload_sha256": canonical_sha256(payload),
+        }
+        with self._state_lock:
+            self._completed_turn = None
+            self._planning_evidence = None
+            self._planning_envelope = PlanningProviderEnvelope(
+                **envelope_payload,
+                envelope_sha256=canonical_sha256(envelope_payload),
+            )
+        try:
+            return self._proposal(payload, system, output_schema, OptimizationProposalV2)
+        finally:
+            self._capture_planning_evidence()
 
     def propose_optimization_objective(self, natural_language_goal: str) -> dict[str, Any]:
         goal = natural_language_goal.strip()
