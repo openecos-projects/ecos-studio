@@ -49,11 +49,21 @@
     <!-- 全局新建工程向导 -->
     <NewProjectWizard
       v-if="showNewProjectWizard"
+      ref="quickStartWizardRef"
       :title="workspaceWizardTitle"
       :initial-config="workspaceWizardInitialConfig"
       @close="handleWizardClose"
       @create="handleWizardCreate"
     />
+
+    <div
+      v-if="quickStartCursor.visible"
+      class="quick-start-cursor"
+      :style="{ left: `${quickStartCursor.left}px`, top: `${quickStartCursor.top}px` }"
+      aria-hidden="true"
+    >
+      <i class="ri-cursor-line"></i>
+    </div>
 
     <Teleport to="body">
       <div
@@ -210,7 +220,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick, provide, watch } from 'vue'
+import {
+  ref,
+  onMounted,
+  onUnmounted,
+  computed,
+  nextTick,
+  provide,
+  reactive,
+  watch,
+} from 'vue'
 import {
   appMenuActionIds,
   type AppMenuAction,
@@ -370,6 +389,10 @@ const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
+const quickStartWizardRef = ref<{ focus?: () => void } | null>(null)
+const quickStartCursor = reactive({ visible: false, left: 0, top: 0 })
+let quickStartWizardResolve: ((config: WorkspaceConfig) => void) | null = null
+let quickStartWizardReject: ((error: Error) => void) | null = null
 const showStepConfigDialog = ref(false)
 const pendingOpenStepConfigAfterCreate = usePendingOpenStepConfigAfterCreate()
 watch(
@@ -475,8 +498,33 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
       listResources: async () => resources,
       navigate: async (surface: string) => {
         if (surface === 'project-management') {
-          await router.push('/projects')
+          const homeProjectButton = document.querySelector<HTMLButtonElement>(
+            '.project-management-entry',
+          )
+          if (homeProjectButton) {
+            await moveQuickStartCursor(homeProjectButton)
+            homeProjectButton.click()
+          } else {
+            await router.push('/projects')
+          }
           await delay(450)
+          let newProjectButton: HTMLButtonElement | undefined
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            newProjectButton = [
+              ...document.querySelectorAll<HTMLButtonElement>('.project-toolbar-action'),
+            ].find(
+              (button) =>
+                button.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() ===
+                'new project',
+            )
+            if (newProjectButton) break
+            await delay(100)
+          }
+          if (newProjectButton) {
+            await moveQuickStartCursor(newProjectButton)
+            newProjectButton.click()
+            await delay(350)
+          }
         }
       },
       createProject: async (input: {
@@ -489,7 +537,14 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
         }
         const root = normalizeLocalPath(await api.app.getQuickStartRoot())
         const projectName = await nextQuickStartProjectName(api, root)
-        const projectRoot = joinLocalPath(root, projectName)
+        if (!api.app.prepareQuickStartProject) {
+          throw new Error(
+            'Quick Start project storage is unavailable in this desktop runtime.',
+          )
+        }
+        const projectRoot = normalizeLocalPath(
+          await api.app.prepareQuickStartProject(projectName),
+        )
         const mpc = input.mpc ? await quickStartMpcSnapshot(api, input.mpc) : null
         const result = await api.projectManifest.mutate({
           mutation: { type: 'create', name: projectName, designName: 'gcd', mpc },
@@ -594,23 +649,18 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
             quickStart: '1',
           },
         })
-        await delay(450)
-        const success = await newProject(config)
-        if (!success)
-          throw new Error(
-            lastWorkspaceCreationError.value || 'Workspace creation failed.',
-          )
-        await syncProjectManagedWorkspace(config, workspacePath)
-        await writeQuickStartRunRecord(api, project.root, {
+        const createdConfig = await driveQuickStartWorkspaceWizard(config)
+        await writeQuickStartRunRecord(api, workspacePath, {
+          project: { name: project.name, root: project.root },
           snapshot: {
-            flow: config.flow_config,
+            flow: createdConfig.flow_config,
             resources: input.resources,
-            workspace: config,
+            workspace: createdConfig,
           },
           status: 'workspace_created',
           workspace: { id: workspaceId, path: workspacePath },
         })
-        return { id: workspaceId, path: workspacePath, config }
+        return { id: workspaceId, path: workspacePath, config: createdConfig }
       },
       handoff: async (input: { project: any; workspace: any }) => {
         await router.push({
@@ -633,7 +683,7 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
       startFlow: async (input: { project: any; workspace: any }) => {
         const flowResult = await runAllFlow({ rerun: false })
         if (!flowResult) throw new Error('Run All Flow did not start.')
-        await writeQuickStartRunRecord(api, input.project.root, {
+        await writeQuickStartRunRecord(api, input.workspace.path, {
           flow: {
             operation_id: flowResult.operationId,
             plan: (input.workspace as { config?: WorkspaceConfig }).config?.flow_config,
@@ -644,13 +694,13 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
         if (typeof flowResult.operationId === 'string') {
           void waitForRuntimeOperation(flowResult.operationId)
             .then(() =>
-              writeQuickStartRunRecord(api, input.project.root, {
+              writeQuickStartRunRecord(api, input.workspace.path, {
                 completed_at: new Date().toISOString(),
                 status: 'flow_completed',
               }),
             )
             .catch((error: unknown) =>
-              writeQuickStartRunRecord(api, input.project.root, {
+              writeQuickStartRunRecord(api, input.workspace.path, {
                 error: error instanceof Error ? error.message : String(error),
                 failed_at: new Date().toISOString(),
                 status: 'flow_failed',
@@ -667,6 +717,8 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
 }
 
 provide(quickStartRunnerKey, runQuickStart)
+
+const LOCAL_QUICK_START_GCD_PATH = '/home/ekko/Desktop/ECOS/gcd.v'
 
 async function resolveQuickStartResources(
   api: DesktopApi,
@@ -687,19 +739,58 @@ async function resolveQuickStartResources(
       ready(resource)
     )
   })
-  const pdk = listed.find(
+  const localDesign =
+    !design && (await api.workspace.pathExists(LOCAL_QUICK_START_GCD_PATH))
+      ? {
+          id: 'local:gcd',
+          path: LOCAL_QUICK_START_GCD_PATH,
+          version: 'local',
+        }
+      : null
+  const pdkCandidates = listed.filter(
     (resource) =>
-      resource.type === 'pdk' && resource.id === 'pdk:ics55' && ready(resource),
+      resource.type === 'pdk' && resource.id.startsWith('pdk:ics55') && ready(resource),
   )
-  const mpc = listed.find(
+  const pdk = pdkCandidates.find((resource) => resource.active) ?? pdkCandidates[0]
+  const mpcCandidates = listed.filter(
     (resource) =>
       resource.type === 'mpc' &&
-      resource.id === 'mpc:mpc-frame' &&
+      resource.id.startsWith('mpc:mpc-frame') &&
       resource.display_name === 'MPC Frame' &&
       resource.installed_version === '0.1.0' &&
       resource.health.managed === true &&
       ready(resource),
   )
+  const mpc = mpcCandidates.find((resource) => resource.active) ?? mpcCandidates[0]
+  const diagnostics: string[] = []
+  if (!design && !localDesign) {
+    const candidate = listed.find((resource) => resource.id === 'example:gcd')
+    diagnostics.push(
+      candidate
+        ? `GCD design example:gcd is not Ready (status=${candidate.status}, path=${candidate.path ?? 'none'}, health=${resourceHealth(candidate)}); local fallback ${LOCAL_QUICK_START_GCD_PATH} was not found.`
+        : `GCD design example:gcd is not installed; local fallback ${LOCAL_QUICK_START_GCD_PATH} was not found.`,
+    )
+  }
+  if (!pdk) {
+    const candidate = listed.find(
+      (resource) => resource.type === 'pdk' && resource.id.startsWith('pdk:ics55'),
+    )
+    diagnostics.push(
+      candidate
+        ? `PDK pdk:ics55 is not Ready (status=${candidate.status}, version=${candidate.installed_version ?? 'none'}, path=${candidate.path ?? 'none'}, health=${resourceHealth(candidate)}).`
+        : 'PDK pdk:ics55 is not installed (no matching Resource Management identity).',
+    )
+  }
+  if (!mpc) {
+    const candidate = listed.find(
+      (resource) => resource.type === 'mpc' && resource.id.startsWith('mpc:mpc-frame'),
+    )
+    diagnostics.push(
+      candidate
+        ? `MPC mpc:mpc-frame is not Ready at version 0.1.0 (status=${candidate.status}, version=${candidate.installed_version ?? 'none'}, managed=${String(candidate.health.managed ?? false)}, health=${resourceHealth(candidate)}).`
+        : 'MPC mpc:mpc-frame is not installed (no matching Resource Management identity).',
+    )
+  }
   return {
     design: design
       ? {
@@ -707,7 +798,8 @@ async function resolveQuickStartResources(
           path: design.path!,
           version: (design as ResourceInfo & { version?: string }).version ?? '1.0.0',
         }
-      : null,
+      : localDesign,
+    diagnostics,
     pdk: pdk
       ? { id: pdk.id, path: pdk.path!, version: pdk.installed_version ?? '' }
       : null,
@@ -720,6 +812,10 @@ async function resolveQuickStartResources(
         }
       : null,
   }
+}
+
+function resourceHealth(resource: ResourceInfo): string {
+  return String(resource.health.status ?? 'unknown')
 }
 
 async function writeQuickStartRunRecord(
@@ -797,6 +893,86 @@ async function nextQuickStartWorkspaceId(
   throw new Error('Unable to allocate a Quick Start Workspace ID.')
 }
 
+async function driveQuickStartWorkspaceWizard(
+  config: WorkspaceConfig,
+): Promise<WorkspaceConfig> {
+  const created = new Promise<WorkspaceConfig>((resolve, reject) => {
+    quickStartWizardResolve = resolve
+    quickStartWizardReject = reject
+  })
+  workspaceWizardInitialConfig.value = {
+    ...config,
+    suggestedWorkspaceName: getPathLeafName(config.directory),
+  }
+  showNewProjectWizard.value = true
+  try {
+    for (let step = 1; step < 6; step += 1) {
+      await clickQuickStartWizardButton('Continue', step)
+      if (step === 1) {
+        await showQuickStartInput('density_065_from_floorplan')
+      }
+    }
+    await showQuickStartInput('top')
+    await showQuickStartInput('clk')
+    await clickQuickStartWizardButton('Create Workspace', 6)
+    return await created
+  } finally {
+    quickStartCursor.visible = false
+    quickStartWizardResolve = null
+    quickStartWizardReject = null
+  }
+}
+
+async function clickQuickStartWizardButton(
+  label: string,
+  expectedStep: number,
+): Promise<void> {
+  let button: HTMLButtonElement | undefined
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await nextTick()
+    const wizard = document.querySelector<HTMLElement>('.new-workspace-wizard-panel')
+    if (wizard?.dataset.currentStep !== String(expectedStep)) {
+      await delay(100)
+      continue
+    }
+    button = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '.new-workspace-wizard-panel button',
+      ),
+    ].find(
+      (candidate) =>
+        candidate.textContent?.replace(/\s+/g, ' ').trim() === label &&
+        !candidate.disabled,
+    )
+    if (button) break
+    await delay(100)
+  }
+  if (!button)
+    throw new Error(
+      `Quick Start could not find an enabled ${label} button on wizard step ${expectedStep}.`,
+    )
+  await moveQuickStartCursor(button)
+  button.click()
+  await delay(850)
+}
+
+async function showQuickStartInput(placeholder: string): Promise<void> {
+  await nextTick()
+  const input = document.querySelector<HTMLInputElement>(
+    `.new-workspace-wizard-panel input[placeholder="${placeholder}"]`,
+  )
+  if (input) await moveQuickStartCursor(input)
+}
+
+async function moveQuickStartCursor(target: HTMLElement): Promise<void> {
+  const rect = target.getBoundingClientRect()
+  quickStartCursor.visible = true
+  quickStartCursor.left = rect.left + Math.min(rect.width - 10, rect.width * 0.72)
+  quickStartCursor.top = rect.top + Math.min(rect.height - 8, rect.height * 0.72)
+  await nextTick()
+  await delay(1500)
+}
+
 function joinLocalPath(root: string, child: string): string {
   return `${normalizeLocalPath(root).replace(/\/$/, '')}/${child.replace(/^\/+/, '')}`
 }
@@ -833,6 +1009,9 @@ function resetWorkspaceWizard() {
 }
 
 function handleWizardClose() {
+  quickStartWizardReject?.(new Error('Quick Start workspace setup was cancelled.'))
+  quickStartWizardResolve = null
+  quickStartWizardReject = null
   resetWorkspaceWizard()
 }
 
@@ -843,6 +1022,23 @@ function showCreateWorkspaceWizard() {
 }
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
+  if (quickStartWizardResolve) {
+    const resolve = quickStartWizardResolve
+    const reject = quickStartWizardReject
+    quickStartWizardResolve = null
+    quickStartWizardReject = null
+    resetWorkspaceWizard()
+    const success = await newProject(config)
+    if (!success) {
+      reject?.(
+        new Error(lastWorkspaceCreationError.value || 'Workspace creation failed.'),
+      )
+      return
+    }
+    await syncProjectManagedWorkspace(config, config.directory)
+    resolve(config)
+    return
+  }
   const targetReconfigurePath = reconfigureWorkspacePath.value
 
   if (targetReconfigurePath) {
@@ -1753,6 +1949,32 @@ onUnmounted(() => {
   height: 100%;
   min-height: 0;
   position: relative;
+}
+
+.quick-start-cursor {
+  position: fixed;
+  z-index: 10001;
+  pointer-events: none;
+  display: grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  border: 2px solid white;
+  border-radius: 999px;
+  background: var(--accent-color);
+  color: white;
+  font-size: 1.65rem;
+  filter: drop-shadow(0 3px 5px rgb(0 0 0 / 42%));
+  transform: translate(-50%, -50%);
+  transition:
+    left 1s cubic-bezier(0.22, 1, 0.36, 1),
+    top 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quick-start-cursor {
+    transition-duration: 100ms;
+  }
 }
 
 .app-container {

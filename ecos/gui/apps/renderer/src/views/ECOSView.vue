@@ -132,7 +132,7 @@
       <!-- Project Management entry -->
       <button
         @click="navigateToProjects"
-        class="group flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-(--border-color) px-6 py-3 text-(--text-secondary) transition-all duration-200 hover:border-(--accent-color) hover:text-(--accent-color)"
+        class="project-management-entry group flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-(--border-color) px-6 py-3 text-(--text-secondary) transition-all duration-200 hover:border-(--accent-color) hover:text-(--accent-color)"
       >
         <i
           class="ri-folder-settings-line text-lg transition-colors group-hover:text-(--accent-color)"

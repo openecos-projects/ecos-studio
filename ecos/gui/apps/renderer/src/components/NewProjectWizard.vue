@@ -5,6 +5,7 @@
   >
     <div
       class="new-workspace-wizard-panel relative flex h-[88vh] max-h-[900px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-(--border-color) bg-(--bg-primary) shadow-[0_28px_70px_-24px_rgba(0,0,0,0.55)]"
+      :data-current-step="currentStep"
     >
       <button
         @click="closeWizard"

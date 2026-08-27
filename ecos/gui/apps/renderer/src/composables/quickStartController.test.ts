@@ -86,12 +86,15 @@ describe('quick start controller', () => {
     const controller = host({
       listResources: vi.fn(async () => ({
         design: null,
+        diagnostics: ['GCD local fallback was not found.'],
         mpc: { id: 'mpc:mpc-frame', version: '0.1.0' },
         pdk: { id: 'pdk:ics55', path: '/resources/ics55', version: '1.0.0' },
       })),
     })
 
-    await expect(runQuickStartWorkflow(controller)).rejects.toThrow(/resource preflight/i)
+    await expect(runQuickStartWorkflow(controller)).rejects.toThrow(
+      /GCD local fallback was not found/,
+    )
     expect(controller.createProject).not.toHaveBeenCalled()
   })
 
