@@ -603,6 +603,77 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
     )
 
 
+def test_candidate_terminal_observation_rejects_tampered_candidate_flow_hash(
+    frozen_workspace: Path, tmp_path: Path
+) -> None:
+    source_copy = tmp_path / "candidate-source"
+    shutil.copytree(frozen_workspace, source_copy)
+    candidate_root = frozen_workspace / ".agent/candidates/candidate-1"
+    shutil.copytree(source_copy, candidate_root)
+    manifest_ref = ".agent/candidates/candidate-1/analysis/candidate_workspace.v1.json"
+    manifest_path = frozen_workspace / manifest_ref
+    _write_json(
+        manifest_path,
+        {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": "candidate-1",
+            "candidate_root_ref": ".agent/candidates/candidate-1",
+            "parent_candidate_root_ref": None,
+            "parent_flow_sha256": file_sha256(frozen_workspace / "home/flow.json"),
+            "candidate_flow_sha256": "sha256:" + "0" * 64,
+        },
+    )
+    evidence = CandidateExecutionEvidence(
+        candidate_root_ref=".agent/candidates/candidate-1",
+        candidate_manifest_ref=manifest_ref,
+        candidate_manifest_sha256=file_sha256(manifest_path),
+    )
+
+    with pytest.raises(OptimizationObservationError, match="candidate flow"):
+        build_candidate_terminal_observation(frozen_workspace, evidence)
+
+
+def test_candidate_terminal_observation_rejects_tampered_artifact_hash(
+    frozen_workspace: Path, tmp_path: Path
+) -> None:
+    source_copy = tmp_path / "candidate-source"
+    shutil.copytree(frozen_workspace, source_copy)
+    candidate_root = frozen_workspace / ".agent/candidates/candidate-1"
+    shutil.copytree(source_copy, candidate_root)
+    manifest_ref = ".agent/candidates/candidate-1/analysis/candidate_workspace.v1.json"
+    manifest_path = frozen_workspace / manifest_ref
+    runtime_report = candidate_root / "analysis/parameter_runtime_report.v1.json"
+    runtime_report.parent.mkdir(parents=True, exist_ok=True)
+    runtime_report.write_text("{}\n", encoding="utf-8")
+    _write_json(
+        manifest_path,
+        {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": "candidate-1",
+            "candidate_root_ref": ".agent/candidates/candidate-1",
+            "parent_candidate_root_ref": None,
+            "parent_flow_sha256": file_sha256(frozen_workspace / "home/flow.json"),
+            "candidate_flow_sha256": file_sha256(candidate_root / "home/flow.json"),
+            "artifacts": {
+                "parameter_runtime_report": {
+                    "ref": "analysis/parameter_runtime_report.v1.json",
+                    "sha256": "sha256:" + "0" * 64,
+                }
+            },
+        },
+    )
+    evidence = CandidateExecutionEvidence(
+        candidate_root_ref=".agent/candidates/candidate-1",
+        candidate_manifest_ref=manifest_ref,
+        candidate_manifest_sha256=file_sha256(manifest_path),
+    )
+
+    with pytest.raises(OptimizationObservationError, match="artifact hash"):
+        build_candidate_terminal_observation(frozen_workspace, evidence)
+
+
 class _RecordingRetriever:
     def __init__(self, prefix: str) -> None:
         self.prefix = prefix

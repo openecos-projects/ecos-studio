@@ -224,6 +224,8 @@ def build_candidate_terminal_observation(
         or payload.get("candidate_root_ref") != evidence.candidate_root_ref
     ):
         raise OptimizationObservationError("candidate workspace manifest is invalid")
+    if file_sha256(candidate_root / "home/flow.json") != payload.get("candidate_flow_sha256"):
+        raise OptimizationObservationError("candidate flow does not match its manifest")
     artifacts = payload.get("artifacts", {})
     if not isinstance(artifacts, dict):
         raise OptimizationObservationError("candidate artifact manifest is invalid")
