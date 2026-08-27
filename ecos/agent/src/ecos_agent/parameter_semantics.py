@@ -10,6 +10,7 @@ from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.knob_registry import knob_spec
 from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue
 from ecos_agent.parameter_evidence_contracts import CardManifest, ParameterSemanticsCard
+from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
 _PACKAGE_CARD_ROOT = Path(__file__).resolve().parent / "knowledge" / "optimization" / "parameter-effectiveness"
 _SOURCE_CARD_ROOT = Path(__file__).resolve().parents[2] / "knowledge" / "optimization" / "parameter-effectiveness"
@@ -79,6 +80,23 @@ def load_parameter_cards(root: Path | None = None, *, tool_revisions: dict[str, 
 
 def validate_parameter_cards(root: Path | None = None, *, tool_revisions: dict[str, str] | None = None) -> None:
     load_parameter_cards(root, tool_revisions=tool_revisions)
+
+
+def validate_application_receipt(
+    receipt: ParameterApplicationReceipt,
+    cards: dict[OptimizationKnob, ParameterSemanticsCard],
+) -> None:
+    """Validate L2 producer facts against the reviewed card allowlist."""
+    if not isinstance(receipt, ParameterApplicationReceipt):
+        raise ParameterSemanticsError("application receipt type is invalid")
+    knob = OptimizationKnob(receipt.requested["knob_id"])
+    card = cards.get(knob)
+    if card is None or receipt.tool.name != card.tool.name or receipt.tool.revision != card.tool.revision:
+        raise ParameterSemanticsError("application receipt tool/card binding is invalid")
+    allowed = {item.get("consumer_id") for item in card.consumers}
+    for consumer in receipt.activation.consumers:
+        if consumer.consumer_id not in allowed:
+            raise ParameterSemanticsError("application receipt consumer is not registered")
 
 
 def card_hash(card: ParameterSemanticsCard) -> str:
