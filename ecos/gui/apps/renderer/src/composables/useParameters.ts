@@ -187,10 +187,12 @@ function normalizeDie(d: unknown): ParametersData['Die'] {
   const o = d as Record<string, unknown>
   const size = o.Size ?? o.size
   const area = o.Area ?? o.area
-  const arr = Array.isArray(size) ? size.map(Number) : []
+  const arr = Array.isArray(size)
+    ? size.map((item) => losslessNumber(item, 'Die.Size'))
+    : []
   return {
     Size: arr,
-    Area: area != null ? Number(area) : 0,
+    Area: area != null ? losslessNumber(area, 'Die.Area') : 0,
   }
 }
 
@@ -208,19 +210,30 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
   const o = c as Record<string, unknown>
   const size = o.Size ?? o.size
   const area = o.Area ?? o.area
-  const arr = Array.isArray(size) ? size.map(Number) : []
+  const arr = Array.isArray(size)
+    ? size.map((item) => losslessNumber(item, 'Core.Size'))
+    : []
   const margin = o.Margin ?? o.margin
   let m: [number, number] = [2, 2]
   if (Array.isArray(margin) && margin.length >= 2) {
-    m = [Number(margin[0]), Number(margin[1])]
+    m = [
+      losslessNumber(margin[0], 'Core.Margin'),
+      losslessNumber(margin[1], 'Core.Margin'),
+    ]
   }
   return {
     Size: arr,
-    Area: area != null ? Number(area) : 0,
+    Area: area != null ? losslessNumber(area, 'Core.Area') : 0,
     'Bounding box': String(o['Bounding box'] ?? o.bounding_box ?? ''),
-    Utilitization: Number(o.Utilitization ?? o.utilitization ?? 0.4),
+    Utilitization: losslessNumber(
+      o.Utilitization ?? o.utilitization ?? 0.4,
+      'Core.Utilitization',
+    ),
     Margin: m,
-    'Aspect ratio': Number(o['Aspect ratio'] ?? o.aspect_ratio ?? 1),
+    'Aspect ratio': losslessNumber(
+      o['Aspect ratio'] ?? o.aspect_ratio ?? 1,
+      'Core.Aspect ratio',
+    ),
   }
 }
 
@@ -228,6 +241,22 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((item) => String(item)).filter((item) => item.length > 0)
     : []
+}
+
+/**
+ * TOML parsing yields a bigint exactly when an integer exceeds the safe
+ * range, so a bigint here always means Number() would round. Fail loud
+ * instead of letting a rounded value silently overwrite the workspace on
+ * the next save.
+ */
+function losslessNumber(value: unknown, label: string): number {
+  if (typeof value === 'bigint') {
+    throw new Error(
+      `Parameter ${label} value ${value} exceeds the safe integer range; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  return Number(value)
 }
 
 export function parametersHaveChipIdentity(
@@ -278,20 +307,37 @@ export function parseParametersRecord(raw: Record<string, unknown>): ParametersD
     top_module: raw.top_module != null ? String(raw.top_module) : undefined,
     Die: normalizeDie(raw.Die ?? raw.die),
     Core: normalizeCore(raw.Core ?? raw.core),
-    'Max fanout': Number(raw['Max fanout'] ?? raw.max_fanout ?? 20),
-    'Target density': Number(raw['Target density'] ?? raw.target_density ?? 0.3),
-    'Target overflow': Number(raw['Target overflow'] ?? raw.target_overflow ?? 0.1),
-    'Global right padding': Number(
-      raw['Global right padding'] ?? raw.global_right_padding ?? 0,
+    'Max fanout': losslessNumber(raw['Max fanout'] ?? raw.max_fanout ?? 20, 'Max fanout'),
+    'Target density': losslessNumber(
+      raw['Target density'] ?? raw.target_density ?? 0.3,
+      'Target density',
     ),
-    'Cell padding x': Number(raw['Cell padding x'] ?? raw.cell_padding_x ?? 600),
-    'Routability opt flag': Number(
+    'Target overflow': losslessNumber(
+      raw['Target overflow'] ?? raw.target_overflow ?? 0.1,
+      'Target overflow',
+    ),
+    'Global right padding': losslessNumber(
+      raw['Global right padding'] ?? raw.global_right_padding ?? 0,
+      'Global right padding',
+    ),
+    'Cell padding x': losslessNumber(
+      raw['Cell padding x'] ?? raw.cell_padding_x ?? 600,
+      'Cell padding x',
+    ),
+    'Routability opt flag': losslessNumber(
       raw['Routability opt flag'] ?? raw.routability_opt_flag ?? 1,
+      'Routability opt flag',
     ),
     Clock: String(raw.Clock ?? raw.clock ?? ''),
     clock: raw.clock != null ? String(raw.clock) : undefined,
-    'Frequency max [MHz]': Number(raw['Frequency max [MHz]'] ?? raw.frequency_max ?? 100),
-    frequency_max: raw.frequency_max != null ? Number(raw.frequency_max) : undefined,
+    'Frequency max [MHz]': losslessNumber(
+      raw['Frequency max [MHz]'] ?? raw.frequency_max ?? 100,
+      'Frequency max [MHz]',
+    ),
+    frequency_max:
+      raw.frequency_max != null
+        ? losslessNumber(raw.frequency_max, 'frequency_max')
+        : undefined,
     'Bottom layer': String(raw['Bottom layer'] ?? raw.bottom_layer ?? FIXED_BOTTOM_LAYER),
     'Top layer': String(raw['Top layer'] ?? raw.top_layer ?? FIXED_TOP_LAYER),
     'PDK Root':
@@ -739,11 +785,6 @@ export function useParameters() {
       if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
         return
       console.log('Loading parameters from:', resolvedPath ?? parametersPath)
-      if (!resolvedPath) {
-        if (keepLastParametersDuringFlowReload() || originalConfig) return
-        resetParametersState()
-        return
-      }
 
       const parametersRecord = await workspaceLifecycle.runForSession(sessionId, () =>
         readWorkspaceParametersFile(projectPath),
@@ -756,7 +797,10 @@ export function useParameters() {
       if (parametersRecord === undefined) return
 
       if (loadResourceToken !== parametersResourceToken) return
-      resolvedParametersPath = resolvedPath
+      // The main-process helper locates the actual config (home/ecc.toml
+      // preferred, legacy parameters.json fallback), so a TOML-only
+      // workspace loads even when the legacy fallback path did not resolve.
+      resolvedParametersPath = resolvedPath ?? (parametersRecord ? parametersPath : '')
 
       if (parametersRecord) {
         applyParametersData(parseParametersRecord(parametersRecord))

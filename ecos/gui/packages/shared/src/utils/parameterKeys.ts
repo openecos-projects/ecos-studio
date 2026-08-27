@@ -40,12 +40,21 @@ export function normalizeParameterKeys(value: unknown): unknown {
   const result: Record<string, unknown> = {}
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     const canonical = normalizeParameterKey(key)
-    if (canonical in result && key === canonical) {
+    if (Object.prototype.hasOwnProperty.call(result, canonical) && key === canonical) {
       // Inert flat duplicate of a long key already seen: the long-key value
-      // wins, the flat one is dropped.
+      // wins, the flat one is dropped. Own-property check: `in` would also
+      // match inherited names like `constructor`, silently dropping a real
+      // document key.
       continue
     }
-    result[canonical] = normalizeParameterKeys(item)
+    // defineProperty, not assignment: a `__proto__` canonical key must become
+    // an own data property, not a prototype mutation.
+    Object.defineProperty(result, canonical, {
+      value: normalizeParameterKeys(item),
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    })
   }
   return result
 }

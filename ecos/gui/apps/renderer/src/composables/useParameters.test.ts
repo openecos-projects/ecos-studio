@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   parametersHaveChipIdentity,
   parseParametersData,
+  parseParametersRecord,
   transformConfigToParameters,
   transformParametersToConfig,
   type ConfigData,
@@ -196,6 +197,19 @@ describe('useParameters helpers', () => {
     expect(parameters['Bottom layer']).toBe('MET2')
     expect(parameters['Top layer']).toBe('MET5')
   })
+  it('rejects bigint parameters instead of rounding them silently', () => {
+    expect(() =>
+      parseParametersRecord({
+        pdk: 'ics55',
+        design: 'demo',
+        max_fanout: 9007199254740993n,
+      }),
+    ).toThrow(/safe integer range/)
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', die: { size: [100n, 200] } }),
+    ).toThrow(/safe integer range/)
+  })
+
   it('treats empty snapshots as missing chip identity', () => {
     expect(parametersHaveChipIdentity({})).toBe(false)
     expect(parametersHaveChipIdentity({ Die: { Size: [], Area: 0 } })).toBe(false)

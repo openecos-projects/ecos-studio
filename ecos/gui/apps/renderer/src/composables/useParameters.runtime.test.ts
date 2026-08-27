@@ -477,6 +477,22 @@ describe('useParameters desktop bridge integration', () => {
     expect(readWorkspaceParametersFile).toHaveBeenCalledWith('/workspace/demo')
   })
 
+  it('loads a TOML-only workspace when the legacy parameters.json fallback does not resolve', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '',
+    })
+    resolveProjectPathAccess.mockResolvedValueOnce(null as unknown as string)
+    readWorkspaceParametersFile.mockResolvedValue(asParametersRecord(parametersJson()))
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.design).toBe('demo')
+    })
+    expect(parameters.config.topModule).toBe('chip_top')
+    expect(readWorkspaceParametersFile).toHaveBeenCalledWith('/workspace/demo')
+  })
+
   it('ignores an empty runtime snapshot after harden and reloads parameters.json', async () => {
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     fetchSharedHomeData.mockResolvedValue({

@@ -72,6 +72,26 @@ describe('normalizeParameterKeys', () => {
     expect(normalizeParameterKeys(42)).toBe(42)
     expect(normalizeParameterKeys(null)).toBe(null)
   })
+
+  it('keeps own keys named like inherited Object members', () => {
+    const normalized = normalizeParameterKeys({
+      constructor: 'x',
+      prototype: 'y',
+    }) as Record<string, unknown>
+    expect(Object.prototype.hasOwnProperty.call(normalized, 'constructor')).toBe(true)
+    expect(normalized.constructor).toBe('x')
+    expect(Object.prototype.hasOwnProperty.call(normalized, 'prototype')).toBe(true)
+    expect(normalized.prototype).toBe('y')
+  })
+
+  it('folds __proto__ to a safe own key instead of mutating the prototype', () => {
+    const input = JSON.parse('{"__proto__": "x"}') as Record<string, unknown>
+    const normalized = normalizeParameterKeys(input) as Record<string, unknown>
+    // The mechanical rule trims edge underscores, so __proto__ can never
+    // survive as a key — and the result's prototype stays untouched.
+    expect(normalized.proto).toBe('x')
+    expect(Object.getPrototypeOf(normalized)).toBe(Object.prototype)
+  })
 })
 
 describe('scalar-like objects', () => {
