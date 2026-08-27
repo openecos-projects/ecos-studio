@@ -1,0 +1,2087 @@
+{
+  "evaluation_metrics": [
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "drc_count",
+      "role": "gate",
+      "source_refs": [
+        "drc_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "lvs_count",
+      "role": "gate",
+      "source_refs": [
+        "lvs_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "rcx_expected_corner_count",
+      "role": "gate",
+      "source_refs": [
+        "RCX_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 9.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "rcx_spef_file_count",
+      "role": "gate",
+      "source_refs": [
+        "RCX_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 9.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "rcx_missing_corner_count",
+      "role": "gate",
+      "source_refs": [
+        "RCX_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "rcx_spef_parse_failure_count",
+      "role": "gate",
+      "source_refs": [
+        "RCX_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "sta_corner_count",
+      "role": "gate",
+      "source_refs": [
+        "sta_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 13.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "sta_expected_corner_count",
+      "role": "gate",
+      "source_refs": [
+        "sta_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 13.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "sta_missing_corner_count",
+      "role": "gate",
+      "source_refs": [
+        "sta_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "sta_setup_violation_count",
+      "role": "gate",
+      "source_refs": [
+        "sta_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "sta_hold_violation_count",
+      "role": "gate",
+      "source_refs": [
+        "sta_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "eligibility",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "harden_artifact_missing_count",
+      "role": "gate",
+      "source_refs": [
+        "Harden_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "routing_diagnostic",
+      "corner": null,
+      "direction": "lower_is_better",
+      "metric_id": "route_via_count",
+      "role": "report",
+      "source_refs": [
+        "route_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 1725.0
+    },
+    {
+      "category": "routing_diagnostic",
+      "corner": null,
+      "direction": "lower_is_better",
+      "metric_id": "route_dr_total_patch_count",
+      "role": "report",
+      "source_refs": [
+        "route_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 155.0
+    },
+    {
+      "category": "cost",
+      "corner": null,
+      "direction": "exact",
+      "metric_id": "flow_stage_count",
+      "role": "report",
+      "source_refs": [
+        "home/flow.json"
+      ],
+      "unit": "count",
+      "value": 10.0
+    },
+    {
+      "category": "cost",
+      "corner": null,
+      "direction": "higher_is_better",
+      "metric_id": "flow_cost_covered_stage_count",
+      "role": "report",
+      "source_refs": [
+        "place_dreamplace/analysis/qor_metrics.json",
+        "CTS_ecc/analysis/qor_metrics.json",
+        "legalization_dreamplace/analysis/qor_metrics.json",
+        "route_ecc/analysis/qor_metrics.json",
+        "drc_ecc/analysis/qor_metrics.json",
+        "lvs_ecc/analysis/qor_metrics.json",
+        "filler_ecc/analysis/qor_metrics.json",
+        "RCX_ecc/analysis/qor_metrics.json",
+        "sta_ecc/analysis/qor_metrics.json",
+        "Harden_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 10.0
+    },
+    {
+      "category": "cost",
+      "corner": null,
+      "direction": "lower_is_better",
+      "metric_id": "flow_tool_runtime",
+      "role": "report",
+      "source_refs": [
+        "place_dreamplace/analysis/qor_metrics.json",
+        "CTS_ecc/analysis/qor_metrics.json",
+        "legalization_dreamplace/analysis/qor_metrics.json",
+        "route_ecc/analysis/qor_metrics.json",
+        "drc_ecc/analysis/qor_metrics.json",
+        "lvs_ecc/analysis/qor_metrics.json",
+        "filler_ecc/analysis/qor_metrics.json",
+        "RCX_ecc/analysis/qor_metrics.json",
+        "sta_ecc/analysis/qor_metrics.json",
+        "Harden_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "s",
+      "value": 368.12999999999994
+    },
+    {
+      "category": "cost",
+      "corner": null,
+      "direction": "lower_is_better",
+      "metric_id": "flow_peak_memory",
+      "role": "report",
+      "source_refs": [
+        "place_dreamplace/analysis/qor_metrics.json",
+        "CTS_ecc/analysis/qor_metrics.json",
+        "legalization_dreamplace/analysis/qor_metrics.json",
+        "route_ecc/analysis/qor_metrics.json",
+        "drc_ecc/analysis/qor_metrics.json",
+        "lvs_ecc/analysis/qor_metrics.json",
+        "filler_ecc/analysis/qor_metrics.json",
+        "RCX_ecc/analysis/qor_metrics.json",
+        "sta_ecc/analysis/qor_metrics.json",
+        "Harden_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "MB",
+      "value": 1500.328
+    },
+    {
+      "category": "cost",
+      "corner": null,
+      "direction": "higher_is_better",
+      "metric_id": "flow_nonzero_peak_memory_stage_count",
+      "role": "report",
+      "source_refs": [
+        "place_dreamplace/analysis/qor_metrics.json",
+        "CTS_ecc/analysis/qor_metrics.json",
+        "legalization_dreamplace/analysis/qor_metrics.json",
+        "route_ecc/analysis/qor_metrics.json",
+        "drc_ecc/analysis/qor_metrics.json",
+        "lvs_ecc/analysis/qor_metrics.json",
+        "filler_ecc/analysis/qor_metrics.json",
+        "RCX_ecc/analysis/qor_metrics.json",
+        "sta_ecc/analysis/qor_metrics.json",
+        "Harden_ecc/analysis/qor_metrics.json"
+      ],
+      "unit": "count",
+      "value": 9.0
+    },
+    {
+      "category": "ppa",
+      "corner": null,
+      "direction": "lower_is_better",
+      "metric_id": "sta_standard_cell_area",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+      ],
+      "unit": "um^2",
+      "value": 1162.0
+    },
+    {
+      "category": "ppa",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "lower_is_better",
+      "metric_id": "sta_typical_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 66.6724
+    },
+    {
+      "category": "ppa",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "lower_is_better",
+      "metric_id": "sta_typical_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 0.2691984
+    },
+    {
+      "category": "ppa",
+      "corner": "ML_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_worst_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 105.0683
+    },
+    {
+      "category": "ppa",
+      "corner": "ML_125/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_worst_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 89.1647
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 6.919
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 325.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.272
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 36.4027
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 14.445
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 50.8477
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 1.285
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 7.137
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 349.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.264
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 36.3907
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 13.3814
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 49.7721
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MAX_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MAX_125/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 1.285
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 9.141
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 1164.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.096
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 67.6654
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 22.3864
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 90.0518
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 1.2354
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 9.065
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 1070.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.098
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 67.864
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 24.4498
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 92.3139
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 1.2354
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 9.109
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 1122.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.098
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 67.7584
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 23.3443
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 91.1027
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 1.2354
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 9.122
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 1139.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.097
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 67.7118
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 22.861
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 90.5728
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "MIN_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/MIN_m40/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 1.2354
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 9.015
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 1016.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.105
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 81.8703
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 20.787
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 102.6573
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 89.1647
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 8.922
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 928.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.108
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 82.2179
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 22.8504
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 105.0683
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 89.1647
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 8.975
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 976.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.107
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 82.0293
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 21.7448
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 103.7742
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCbest",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCbest/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 89.1647
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 8.992
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 992.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.106
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 81.9496
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 21.2615
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 103.2111
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "ML_125/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/ML_125/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 89.1647
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 8.55
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 690.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.148
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 48.8525
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 17.8199
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 66.6724
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "TYP_25/TYPICAL",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 0.2691984
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 6.966
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 330.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.263
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 41.7815
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 15.4745
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 57.256
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/Cworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/Cworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 0.0092594
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 7.166
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_setup_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_setup_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_frequency",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "MHz",
+      "value": 353.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_wns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.256
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "higher_is_better",
+      "metric_id": "sta_hold_tns",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "ns",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_hold_violation_count",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/qor_summary.json"
+      ],
+      "unit": "count",
+      "value": 0.0
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_internal_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 41.7801
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_switching_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 14.4109
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_dynamic_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 56.191
+    },
+    {
+      "category": "corner_robustness",
+      "corner": "WCL_m40/RCworst",
+      "direction": "lower_is_better",
+      "metric_id": "sta_leakage_power",
+      "role": "report",
+      "source_refs": [
+        "sta_ecc/feature/WCL_m40/RCworst/power_summary.json"
+      ],
+      "unit": "uW",
+      "value": 0.0092594
+    }
+  ],
+  "evaluation_metrics_complete": true,
+  "evidence_manifest_sha256": "sha256:490803477fbeeb71ed39c5392d9a9e6e6b24cda0506c4369ec88f8a64b33deb8",
+  "evidence_valid": true,
+  "harden_artifacts_complete": true,
+  "metrics": {
+    "route_dr_total_violation_count": 0.0,
+    "route_la_total_overflow": 0.0,
+    "route_wirelength": 5318.829
+  },
+  "observation_id": "terminal-Harden",
+  "schema_version": "ecos.terminal_observation.v3",
+  "signoff_gates": {
+    "drc_clean": "pass",
+    "lvs_clean": "pass",
+    "mpc_maximum_area": "not_applicable",
+    "mpc_minimum_area": "not_applicable",
+    "rcx_corner_coverage": "pass",
+    "rcx_spef_parse_health": "pass",
+    "sta_hold_closed": "pass",
+    "sta_setup_closed": "pass"
+  },
+  "sta_corner_ids": [
+    "MAX_125/Cworst",
+    "MAX_125/RCworst",
+    "MIN_m40/Cbest",
+    "MIN_m40/Cworst",
+    "MIN_m40/RCbest",
+    "MIN_m40/RCworst",
+    "ML_125/Cbest",
+    "ML_125/Cworst",
+    "ML_125/RCbest",
+    "ML_125/RCworst",
+    "TYP_25/TYPICAL",
+    "WCL_m40/Cworst",
+    "WCL_m40/RCworst"
+  ],
+  "sta_corner_set_sha256": "sha256:b472610c3361a62250883ee2d28c5298aa2cfe0716ed56931bdf395f1d48daa6",
+  "timing_guardrail": {
+    "sta_hold_tns": 0.0,
+    "sta_hold_wns": 0.096,
+    "sta_setup_tns": 0.0,
+    "sta_setup_wns": 6.919
+  }
+}
