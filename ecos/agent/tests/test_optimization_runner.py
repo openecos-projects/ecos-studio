@@ -445,6 +445,30 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         entry.planner_payload_sha256.startswith("sha256:")
         for entry in planning_audit.entries
     )
+    for execution_id in ("execution-1", "execution-2"):
+        flow_path = (
+            tmp_path / ".agent" / "candidates" / execution_id / "home" / "flow.json"
+        )
+        flow_path.parent.mkdir(parents=True)
+        flow_path.write_text(
+            json.dumps(
+                {
+                    "steps": [
+                        {
+                            "name": "place",
+                            "runtime": "0:0:2",
+                            "peak memory (mb)": 64.0,
+                        },
+                        {
+                            "name": "Harden",
+                            "runtime": "0:0:1",
+                            "peak memory (mb)": 32.0,
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
     traces, planning_calls, planning_mode = export_episode_traces(
         workspace=tmp_path,
         episode_root=tmp_path / "episode",

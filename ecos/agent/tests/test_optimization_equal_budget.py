@@ -15,6 +15,7 @@ from ecos_agent.optimization_contracts import (
 from ecos_agent.optimization_equal_budget import (
     CandidateTrace,
     EqualBudgetConfig,
+    _candidate_resources,
     build_candidate_trace,
     evaluate_equal_budget,
 )
@@ -34,6 +35,18 @@ from ecos_agent.parameter_evidence_contracts import (
 )
 
 HASH = "sha256:" + "a" * 64
+
+
+def test_candidate_resources_fail_closed_without_flow_evidence(tmp_path: Path) -> None:
+    candidate = tmp_path / ".agent/candidates/candidate-1"
+    candidate.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="candidate resource evidence"):
+        _candidate_resources(
+            tmp_path,
+            ".agent/candidates/candidate-1",
+            "place",
+        )
 
 
 def _load_harness():

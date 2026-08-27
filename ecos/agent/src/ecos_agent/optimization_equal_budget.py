@@ -381,7 +381,7 @@ def _candidate_resources(
     workspace: Path, candidate_root_ref: str | None, target_step: str
 ) -> tuple[float, float]:
     if not candidate_root_ref:
-        return 0.0, 0.0
+        raise ValueError("candidate resource evidence is unavailable")
     workspace = workspace.resolve()
     candidate = (workspace / candidate_root_ref).resolve()
     try:
@@ -390,31 +390,34 @@ def _candidate_resources(
             (candidate / "home" / "flow.json").read_text(encoding="utf-8")
         )
         steps = payload["steps"]
-    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return 0.0, 0.0
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("candidate resource evidence is unavailable") from exc
+    if not isinstance(steps, list) or any(not isinstance(item, dict) for item in steps):
+        raise ValueError("candidate resource evidence is invalid")
     start = next(
         (index for index, item in enumerate(steps) if item.get("name") == target_step),
         None,
     )
     if start is None:
-        return 0.0, 0.0
+        raise ValueError("candidate resource evidence lacks the target step")
     selected = steps[start:]
     runtime = sum(_runtime_seconds(item.get("runtime")) for item in selected)
-    memory = max(
-        (
-            float(item["peak memory (mb)"])
-            for item in selected
-            if isinstance(item.get("peak memory (mb)"), (int, float))
-        ),
-        default=0.0,
-    )
+    memory_values = [item.get("peak memory (mb)") for item in selected]
+    if runtime <= 0 or any(
+        type(value) not in {int, float}
+        or not math.isfinite(float(value))
+        or float(value) < 0
+        for value in memory_values
+    ):
+        raise ValueError("candidate resource evidence is invalid")
+    memory = max(float(value) for value in memory_values)
     return runtime, memory
 
 
 def _runtime_seconds(value: object) -> float:
     match = re.fullmatch(r"(\d+):(\d+):(\d+)", value) if isinstance(value, str) else None
     if match is None:
-        return 0.0
+        raise ValueError("candidate step runtime is invalid")
     hours, minutes, seconds = (int(item) for item in match.groups())
     return float(hours * 3600 + minutes * 60 + seconds)
 
