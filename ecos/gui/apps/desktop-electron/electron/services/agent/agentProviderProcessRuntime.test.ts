@@ -360,6 +360,155 @@ describe('AgentProviderProcessRuntime', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
+  it('validates structured Agent activity before forwarding it', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          activity: {
+            itemId: 'reasoning-1',
+            kind: 'reasoning_summary',
+            schema_version: 'flow-agent.activity.v1',
+            startedAt: 1000,
+            status: 'running',
+            summary: ['Inspecting the flow inputs.'],
+            turnId: 'turn-1',
+            turnStartedAt: 900,
+          },
+          sessionId: 'session-1',
+          type: 'activity',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      activity: expect.objectContaining({
+        itemId: 'reasoning-1',
+        kind: 'reasoning_summary',
+        summary: ['Inspecting the flow inputs.'],
+        turnId: 'turn-1',
+      }),
+      providerId: 'local',
+      sessionId: 'session-1',
+      type: 'activity',
+    })
+  })
+
+  it('accepts ECOS local activity identifiers at the process boundary', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          activity: {
+            arguments: '{"candidate_stages":["cts"]}',
+            itemId: 'local-knowledge-search',
+            kind: 'tool_call',
+            result: '{"match_count":3}',
+            schema_version: 'flow-agent.activity.v1',
+            startedAt: 1000,
+            status: 'completed',
+            tool: 'Searched ECOS knowledge',
+            turnId: 'turn-1',
+            turnStartedAt: 900,
+          },
+          sessionId: 'session-1',
+          type: 'activity',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      activity: expect.objectContaining({
+        itemId: 'local-knowledge-search',
+        kind: 'tool_call',
+        tool: 'Searched ECOS knowledge',
+        turnId: 'turn-1',
+      }),
+      providerId: 'local',
+      sessionId: 'session-1',
+      type: 'activity',
+    })
+  })
+
+  it('replaces malformed activity with a non-blocking notice', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          activity: {
+            itemId: 'reasoning-1',
+            kind: 'reasoning_summary',
+            schema_version: 'flow-agent.activity.v1',
+            status: 'running',
+            summary: [],
+            turnId: 'turn-1',
+          },
+          sessionId: 'session-1',
+          type: 'activity',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      activityNotice: {
+        message: 'Some activity details are unavailable.',
+        schema_version: 'flow-agent.activity_notice.v1',
+        turnId: 'turn-1',
+      },
+      providerId: 'local',
+      sessionId: 'session-1',
+      type: 'activity',
+    })
+  })
+
   it('preserves select defaults and required state in interaction forms', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

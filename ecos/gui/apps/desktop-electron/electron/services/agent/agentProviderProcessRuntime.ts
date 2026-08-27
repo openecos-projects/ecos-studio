@@ -400,6 +400,7 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'session',
   'message',
   'tool',
+  'activity',
   'interaction',
   'unsupported_interaction',
   'contract',
@@ -422,6 +423,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   const contract = readExecutionContract(record.contract)
   const optimization = readOptimizationPayload(record.optimization)
   const interaction = readAgentInteraction(record.interaction)
+  const activity = readAgentActivity(record.activity)
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
   const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
   const workspaceRerun = readWorkspaceRerunContract(record.workspaceRerun)
@@ -444,6 +446,21 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
       type: 'unsupported_interaction',
     }
   }
+  if (type === 'activity' && !activity) {
+    const providerId = readEventText(record.providerId)
+    const sessionId = readEventText(record.sessionId)
+    const turnId = readOptionalIdentifier(readRecord(record.activity).turnId)
+    return {
+      activityNotice: {
+        message: 'Some activity details are unavailable.',
+        schema_version: 'flow-agent.activity_notice.v1',
+        ...(turnId ? { turnId } : {}),
+      },
+      ...(providerId ? { providerId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      type: 'activity',
+    }
+  }
   if (type === 'status' && !status) return null
   if (type === 'contract' && !contract) return null
   if (type === 'workspace_setup' && !workspaceSetup) return null
@@ -458,6 +475,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   const text = readEventText(record.text)
 
   return {
+    ...(activity ? { activity } : {}),
     ...(interaction ? { interaction } : {}),
     ...(contract ? { contract } : {}),
     ...(delta ? { delta } : {}),
@@ -474,6 +492,191 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(workspaceParameterUpdate ? { workspaceParameterUpdate } : {}),
     ...(workspaceSignoff ? { workspaceSignoff } : {}),
     type: type as DesktopAgentEventType,
+  }
+}
+
+function readAgentActivity(value: unknown): DesktopAgentEvent['activity'] | null {
+  const serialized = JSON.stringify(value)
+  if (!serialized || Buffer.byteLength(serialized, 'utf8') > 64 * 1024) return null
+  const record = readRecord(value)
+  const itemId = readOptionalIdentifier(record.itemId)
+  const turnId = readOptionalIdentifier(record.turnId)
+  const status = readAgentActivityStatus(record.status)
+  const startedAt = readActivityNumber(record.startedAt)
+  const turnStartedAt = readActivityNumber(record.turnStartedAt)
+  const durationMs =
+    record.durationMs === undefined ? undefined : readActivityNumber(record.durationMs)
+  if (
+    record.schema_version !== 'flow-agent.activity.v1' ||
+    !itemId ||
+    !turnId ||
+    !status ||
+    startedAt === null ||
+    turnStartedAt === null ||
+    durationMs === null
+  )
+    return null
+  const base = {
+    itemId,
+    schema_version: 'flow-agent.activity.v1' as const,
+    startedAt,
+    status,
+    turnId,
+    turnStartedAt,
+    ...(durationMs === undefined ? {} : { durationMs }),
+  }
+
+  if (record.kind === 'reasoning_summary') {
+    if (
+      !Array.isArray(record.summary) ||
+      record.summary.length < 1 ||
+      record.summary.length > 32 ||
+      !record.summary.every(
+        (part) => typeof part === 'string' && part.length > 0 && part.length <= 8192,
+      )
+    )
+      return null
+    return { ...base, kind: record.kind, summary: record.summary }
+  }
+
+  if (record.kind === 'web_search') {
+    const query = readActivityText(record.query, 1024)
+    if (record.query !== undefined && query === null) return null
+    if (!Array.isArray(record.actions) || record.actions.length > 32) return null
+    const actions = record.actions.map(readWebSearchAction)
+    if (actions.some((action) => action === null)) return null
+    return {
+      ...base,
+      actions: actions as NonNullable<
+        Extract<DesktopAgentEvent['activity'], { kind: 'web_search' }>
+      >['actions'],
+      kind: record.kind,
+      ...(query ? { query } : {}),
+    }
+  }
+
+  if (record.kind === 'command_execution') {
+    const command = readActivityText(record.command, 8192)
+    const label = readActivityText(record.label, 512)
+    const cwd = readActivityText(record.cwd, 4096)
+    const output = readActivityText(record.output, 32 * 1024)
+    const exitCode =
+      record.exitCode === undefined ||
+      (typeof record.exitCode === 'number' && Number.isInteger(record.exitCode))
+        ? (record.exitCode as number | undefined)
+        : null
+    if (
+      command === null ||
+      label === null ||
+      (record.cwd !== undefined && cwd === null) ||
+      (record.output !== undefined && output === null) ||
+      exitCode === null ||
+      (record.truncated !== undefined && typeof record.truncated !== 'boolean')
+    )
+      return null
+    return {
+      ...base,
+      command,
+      kind: record.kind,
+      label,
+      ...(cwd ? { cwd } : {}),
+      ...(output ? { output } : {}),
+      ...(exitCode === undefined ? {} : { exitCode }),
+      ...(record.truncated === true ? { truncated: true } : {}),
+    }
+  }
+
+  if (record.kind !== 'tool_call') return null
+  const tool = readActivityText(record.tool, 256)
+  const server = readActivityText(record.server, 256)
+  const argumentsText = readActivityText(record.arguments, 8192)
+  const progress = readActivityText(record.progress, 4096)
+  const result = readActivityText(record.result, 32 * 1024)
+  const error = readActivityText(record.error, 4096)
+  if (
+    tool === null ||
+    (record.server !== undefined && server === null) ||
+    (record.arguments !== undefined && argumentsText === null) ||
+    (record.progress !== undefined && progress === null) ||
+    (record.result !== undefined && result === null) ||
+    (record.error !== undefined && error === null) ||
+    (record.truncated !== undefined && typeof record.truncated !== 'boolean')
+  )
+    return null
+  return {
+    ...base,
+    kind: record.kind,
+    tool,
+    ...(server ? { server } : {}),
+    ...(argumentsText ? { arguments: argumentsText } : {}),
+    ...(progress ? { progress } : {}),
+    ...(result ? { result } : {}),
+    ...(error ? { error } : {}),
+    ...(record.truncated === true ? { truncated: true } : {}),
+  }
+}
+
+function readAgentActivityStatus(
+  value: unknown,
+): NonNullable<DesktopAgentEvent['activity']>['status'] | null {
+  return value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'declined' ||
+    value === 'interrupted'
+    ? value
+    : null
+}
+
+function readActivityNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function readActivityText(value: unknown, maxLength: number): string | null {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength
+    ? value
+    : null
+}
+
+function readWebSearchAction(
+  value: unknown,
+):
+  | Extract<
+      NonNullable<DesktopAgentEvent['activity']>,
+      { kind: 'web_search' }
+    >['actions'][number]
+  | null {
+  const record = readRecord(value)
+  if (
+    record.kind !== 'search' &&
+    record.kind !== 'open_page' &&
+    record.kind !== 'find_in_page'
+  )
+    return null
+  const query = readActivityText(record.query, 1024)
+  const title = readActivityText(record.title, 512)
+  const url = readHttpUrl(record.url)
+  if (
+    (record.query !== undefined && query === null) ||
+    (record.title !== undefined && title === null) ||
+    (record.url !== undefined && url === null)
+  )
+    return null
+  return {
+    kind: record.kind,
+    ...(query ? { query } : {}),
+    ...(title ? { title } : {}),
+    ...(url ? { url } : {}),
+  }
+}
+
+function readHttpUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 4096) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
   }
 }
 
