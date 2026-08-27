@@ -16,11 +16,15 @@ import type {
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
+  DesktopAgentModelSettings,
+  DesktopAgentModelSettingsRequest,
+  DesktopAgentReasoningEffort,
   DesktopAgentProviderRequest,
   DesktopAgentResumeSessionRequest,
   DesktopAgentResumeSessionResponse,
   DesktopAgentSendMessageRequest,
   DesktopAgentSendMessageResponse,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentSetModeRequest,
   DesktopAgentStartRequest,
   DesktopAgentStartSessionRequest,
@@ -39,6 +43,8 @@ type AgentProviderMethod =
   | 'listSessions'
   | 'resumeSession'
   | 'sendMessage'
+  | 'getModelSettings'
+  | 'setModelSettings'
   | 'answerInteraction'
   | 'setMode'
   | 'start'
@@ -137,6 +143,18 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       'sendMessage',
       request,
     )) as DesktopAgentSendMessageResponse
+  }
+
+  async getModelSettings(
+    request: DesktopAgentModelSettingsRequest,
+  ): Promise<DesktopAgentModelSettings> {
+    return readAgentModelSettings(await this.sendRequest('getModelSettings', request))
+  }
+
+  async setModelSettings(
+    request: DesktopAgentSetModelSettingsRequest,
+  ): Promise<DesktopAgentModelSettings> {
+    return readAgentModelSettings(await this.sendRequest('setModelSettings', request))
   }
 
   async answerInteraction(
@@ -493,6 +511,61 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(workspaceSignoff ? { workspaceSignoff } : {}),
     type: type as DesktopAgentEventType,
   }
+}
+
+const agentReasoningEfforts = new Set<DesktopAgentReasoningEffort>([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+])
+
+function readAgentModelSettings(value: unknown): DesktopAgentModelSettings {
+  const record = readRecord(value)
+  const model = readActivityText(record.model, 128)
+  const displayName = readActivityText(record.displayName, 128)
+  const reasoningEffort = record.reasoningEffort as DesktopAgentReasoningEffort
+  if (
+    !model ||
+    !displayName ||
+    !agentReasoningEfforts.has(reasoningEffort) ||
+    !Array.isArray(record.models) ||
+    record.models.length < 1 ||
+    record.models.length > 32
+  ) {
+    throw new Error('Agent provider returned invalid model settings.')
+  }
+  const models = record.models.map((value) => {
+    const option = readRecord(value)
+    const optionModel = readActivityText(option.model, 128)
+    const optionName = readActivityText(option.displayName, 128)
+    const defaultEffort = option.defaultReasoningEffort as DesktopAgentReasoningEffort
+    const efforts = option.supportedReasoningEfforts
+    if (
+      !optionModel ||
+      !optionName ||
+      !agentReasoningEfforts.has(defaultEffort) ||
+      !Array.isArray(efforts) ||
+      efforts.length < 1 ||
+      efforts.length > agentReasoningEfforts.size ||
+      !efforts.every((effort) =>
+        agentReasoningEfforts.has(effort as DesktopAgentReasoningEffort),
+      )
+    ) {
+      throw new Error('Agent provider returned invalid model settings.')
+    }
+    return {
+      defaultReasoningEffort: defaultEffort,
+      displayName: optionName,
+      model: optionModel,
+      supportedReasoningEfforts: efforts as DesktopAgentReasoningEffort[],
+    }
+  })
+  if (!models.some((option) => option.model === model)) {
+    throw new Error('Agent provider returned an unavailable selected model.')
+  }
+  return { displayName, model, models, reasoningEffort }
 }
 
 function readAgentActivity(value: unknown): DesktopAgentEvent['activity'] | null {

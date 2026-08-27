@@ -1,6 +1,7 @@
 export const desktopApiIpcChannels = {
   appGetVersions: 'app:get-versions',
   appGetQuickStartRoot: 'app:get-quick-start-root',
+  appPrepareQuickStartProject: 'app:prepare-quick-start-project',
   windowMinimize: 'window:minimize',
   windowToggleMaximize: 'window:toggle-maximize',
   windowClose: 'window:close',
@@ -131,6 +132,8 @@ export const desktopApiIpcChannels = {
   agentStart: 'agent:start',
   agentStartSession: 'agent:start-session',
   agentSendMessage: 'agent:send-message',
+  agentGetModelSettings: 'agent:get-model-settings',
+  agentSetModelSettings: 'agent:set-model-settings',
   agentAnswerInteraction: 'agent:answer-interaction',
   agentInterrupt: 'agent:interrupt',
   agentCodexGetStatus: 'agent:codex-get-status',

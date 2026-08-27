@@ -11,11 +11,15 @@ describe('AIChatPanel flow contracts', () => {
   })
 
   it('keeps Quick Start on Home and exposes setup cancellation in the activity view', () => {
-    expect(source).toContain("props.shell === 'home' && quickStartRunner")
+    expect(source).toContain("props.shell !== 'home'")
     expect(source).toContain('class="quick-start-stop"')
     expect(source).toContain('stopQuickStart()')
     expect(source).toContain('quickStartRunner((event) =>')
     expect(source).toContain("schema_version: 'flow-agent.activity.v1'")
+    expect(source).toContain('interaction.interaction.options[2]?.id === answer.optionId')
+    expect(source).not.toContain('class="quick-start-suggestion"')
+    expect(source).toContain('await startQuickStart()')
+    expect(source).toContain("interaction.title !== 'Get started'")
   })
 
   it('renders centered turns with visually distinct user messages', () => {

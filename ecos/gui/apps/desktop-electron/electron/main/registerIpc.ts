@@ -58,6 +58,9 @@ import {
   type DesktopAgentEvent,
   type DesktopAgentInteractionAnswerRequest,
   type DesktopAgentInterruptRequest,
+  type DesktopAgentModelSettingsRequest,
+  type DesktopAgentReasoningEffort,
+  type DesktopAgentSetModelSettingsRequest,
   type DesktopAgentWorkspaceRerunContract,
   type DesktopAgentSendMessageRequest,
   type DesktopAgentStartRequest,
@@ -1098,6 +1101,19 @@ export function registerIpc(
       throw new Error('Quick Start storage is unavailable.')
     await mkdir(services.agentQuickRunRoot, { recursive: true })
     return services.agentQuickRunRoot
+  })
+
+  handle(desktopApiIpcChannels.appPrepareQuickStartProject, async (_event, name) => {
+    if (
+      !services.agentQuickRunRoot ||
+      typeof name !== 'string' ||
+      !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name)
+    ) {
+      throw new Error('Invalid Quick Start project name.')
+    }
+    const projectRoot = join(services.agentQuickRunRoot, name)
+    await mkdir(projectRoot, { recursive: true })
+    return projectRoot
   })
 
   handle(desktopApiIpcChannels.windowMinimize, (event) => {
@@ -2270,14 +2286,6 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
     const agentRequest = readAgentStartSessionRequest(request)
-    if (agentRequest.mode === 'home' && services.agentQuickRunRoot) {
-      // ponytail: home sessions reserve an empty root; clean stale roots if churn matters.
-      agentRequest.quickRunProjectRoot = join(
-        services.agentQuickRunRoot,
-        `run_${randomUUID().replaceAll('-', '')}`,
-      )
-      await mkdir(agentRequest.quickRunProjectRoot, { recursive: true })
-    }
     const window = BrowserWindow.fromWebContents(event.sender)
     const windowDirectory = window
       ? workspaceWindowRegistry.getPathForWindow(window)
@@ -2294,6 +2302,18 @@ export function registerIpc(
     const agentRequest = readAgentSendMessageRequest(request)
     requireAgentSessionOwner(event.sender, agentRequest)
     return await requireAgentRuntime(services).sendMessage(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentGetModelSettings, async (event, request) => {
+    const agentRequest = readAgentModelSettingsRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    return await requireAgentRuntime(services).getModelSettings(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentSetModelSettings, async (event, request) => {
+    const agentRequest = readAgentSetModelSettingsRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    return await requireAgentRuntime(services).setModelSettings(agentRequest)
   })
 
   handle(desktopApiIpcChannels.agentAnswerInteraction, async (event, request) => {
@@ -2468,6 +2488,51 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
     message,
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+const agentReasoningEfforts = new Set<DesktopAgentReasoningEffort>([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+])
+
+function readAgentModelSettingsRequest(value: unknown): DesktopAgentModelSettingsRequest {
+  const record = readAgentRecord(value)
+  return {
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readAgentSetModelSettingsRequest(
+  value: unknown,
+): DesktopAgentSetModelSettingsRequest {
+  const record = readAgentRecord(value)
+  const request = readAgentModelSettingsRequest(record)
+  const model =
+    typeof record.model === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(record.model)
+      ? record.model
+      : undefined
+  const reasoningEffort = agentReasoningEfforts.has(
+    record.reasoningEffort as DesktopAgentReasoningEffort,
+  )
+    ? (record.reasoningEffort as DesktopAgentReasoningEffort)
+    : undefined
+  if (
+    (record.model !== undefined && model === undefined) ||
+    (record.reasoningEffort !== undefined && reasoningEffort === undefined) ||
+    (!model && !reasoningEffort)
+  ) {
+    throw new Error('Invalid Agent model settings request.')
+  }
+  return {
+    ...request,
+    ...(model ? { model } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   }
 }
 

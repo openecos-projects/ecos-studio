@@ -4,11 +4,14 @@ import type {
   DesktopAgentInteractionAnswerResponse,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
+  DesktopAgentModelSettings,
+  DesktopAgentModelSettingsRequest,
   DesktopAgentProviderRequest,
   DesktopAgentResumeSessionRequest,
   DesktopAgentResumeSessionResponse,
   DesktopAgentSendMessageRequest,
   DesktopAgentSendMessageResponse,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentSetModeRequest,
   DesktopAgentStartRequest,
   DesktopAgentStartSessionRequest,
@@ -24,6 +27,12 @@ export interface AgentProviderRuntime {
   sendMessage(
     request: DesktopAgentSendMessageRequest,
   ): Promise<DesktopAgentSendMessageResponse>
+  getModelSettings(
+    request: DesktopAgentModelSettingsRequest,
+  ): Promise<DesktopAgentModelSettings>
+  setModelSettings(
+    request: DesktopAgentSetModelSettingsRequest,
+  ): Promise<DesktopAgentModelSettings>
   answerInteraction(
     request: DesktopAgentInteractionAnswerRequest,
   ): Promise<DesktopAgentInteractionAnswerResponse>

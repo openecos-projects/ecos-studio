@@ -49,9 +49,11 @@ async function loadDesktopBridge() {
       }
     }
     agent: {
+      getModelSettings(request: unknown): Promise<unknown>
       interrupt(request: unknown): Promise<void>
       onEvent(listener: (event: unknown) => void): () => void
       sendMessage(request: unknown): Promise<unknown>
+      setModelSettings(request: unknown): Promise<unknown>
       start(request: unknown): Promise<void>
       startSession(request: unknown): Promise<unknown>
       codex: {
@@ -257,6 +259,11 @@ describe('preload desktop bridge contract', () => {
       messageId: 'message-1',
       sessionId: session.sessionId,
     })
+    ipcRenderer.invoke.mockResolvedValueOnce({ model: 'gpt-test' })
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      model: 'gpt-test',
+      reasoningEffort: 'high',
+    })
     ipcRenderer.invoke.mockResolvedValueOnce(undefined)
 
     await expect(
@@ -269,6 +276,12 @@ describe('preload desktop bridge contract', () => {
         sessionId: session.sessionId,
       },
     )
+    await expect(bridge.agent.getModelSettings(session)).resolves.toEqual({
+      model: 'gpt-test',
+    })
+    await expect(
+      bridge.agent.setModelSettings({ ...session, reasoningEffort: 'high' }),
+    ).resolves.toMatchObject({ reasoningEffort: 'high' })
     await expect(bridge.agent.interrupt(session)).resolves.toBeUndefined()
     const unsubscribe = bridge.agent.onEvent(listener)
     const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
@@ -292,6 +305,16 @@ describe('preload desktop bridge contract', () => {
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       4,
+      desktopApiIpcChannels.agentGetModelSettings,
+      session,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      5,
+      desktopApiIpcChannels.agentSetModelSettings,
+      { ...session, reasoningEffort: 'high' },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      6,
       desktopApiIpcChannels.agentInterrupt,
       session,
     )

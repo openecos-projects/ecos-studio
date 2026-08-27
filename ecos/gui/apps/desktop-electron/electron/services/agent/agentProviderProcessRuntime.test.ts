@@ -94,6 +94,56 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('round-trips validated session model settings', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const response = runtime.setModelSettings({
+      providerId: 'codex',
+      reasoningEffort: 'high',
+      sessionId: 'session-1',
+    })
+    const child = harness.children[0]
+    const request = readProtocolRequest(child)
+    expect(request).toMatchObject({
+      method: 'setModelSettings',
+      params: { reasoningEffort: 'high', sessionId: 'session-1' },
+    })
+
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: request.id,
+        result: {
+          displayName: 'GPT Test',
+          model: 'gpt-test',
+          models: [
+            {
+              defaultReasoningEffort: 'medium',
+              displayName: 'GPT Test',
+              model: 'gpt-test',
+              supportedReasoningEfforts: ['low', 'medium', 'high'],
+            },
+          ],
+          reasoningEffort: 'high',
+        },
+      })}\n`,
+    )
+
+    await expect(response).resolves.toMatchObject({
+      model: 'gpt-test',
+      reasoningEffort: 'high',
+    })
+  })
+
   it('passes trusted manifest environment to the provider process', () => {
     const harness = createSpawnHarness()
     const env = { HOME: '/home/tester', PATH: '/tools/bin' }

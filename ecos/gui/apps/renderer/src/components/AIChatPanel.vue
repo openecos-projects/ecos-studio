@@ -40,24 +40,6 @@
           <i class="ri-sparkling-2-line text-xl text-(--accent-color)"></i>
         </div>
         <h2 class="text-sm font-semibold text-(--text-primary)">ECOS Agent</h2>
-        <button
-          v-if="props.shell === 'home' && quickStartRunner"
-          type="button"
-          class="quick-start-suggestion"
-          :disabled="quickStartRunning || isAgentConnecting"
-          @click="handleQuickStartClick"
-        >
-          <i class="ri-rocket-2-line" aria-hidden="true"></i>
-          <span>{{
-            quickStartRunning ? 'Quick Start running...' : 'Quick Start GCD backend flow'
-          }}</span>
-          <i v-if="!quickStartRunning" class="ri-arrow-right-line" aria-hidden="true"></i>
-          <i
-            v-else
-            class="ri-loader-4-line quick-start-suggestion__spinner"
-            aria-hidden="true"
-          ></i>
-        </button>
         <div class="mt-4 grid w-full max-w-sm gap-2">
           <button
             v-for="suggestion in emptyStateSuggestions"
@@ -222,6 +204,13 @@
         ></textarea>
 
         <div class="composer-actions">
+          <AgentModelSettingsMenu
+            :settings="activeUi.modelSettings"
+            :busy="activeUi.modelSettingsBusy"
+            :disabled="isRunning || isAgentConnecting"
+            :error="activeUi.modelSettingsError"
+            @update="updateAgentModelSettings"
+          />
           <button
             v-if="isRunning"
             type="button"
@@ -267,12 +256,14 @@ import { storeToRefs } from 'pinia'
 import type {
   DesktopAgentEvent,
   DesktopAgentInteractionRequest,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import AgentModelSettingsMenu from './AgentModelSettingsMenu.vue'
 import AgentActivityStream from './AgentActivityStream.vue'
 import AgentInteractionCard from './AgentInteractionCard.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
@@ -328,6 +319,7 @@ const props = withDefaults(
 )
 
 const AGENT_PROVIDER_ID = 'ecos_agent'
+const QUICK_START_OPTION_ID = 'quick_start'
 const messageStore = useMessageStore()
 const agentShell = useAgentShellStore()
 const { messages } = storeToRefs(messageStore)
@@ -605,7 +597,41 @@ const isRunning = computed(
     isWorkspaceSignoffPending.value ||
     agentRunStatus.value === 'running',
 )
-const pendingInteraction = computed(() => interactionPresentation.value.interaction)
+const pendingInteraction = computed(() => {
+  const interaction = interactionPresentation.value.interaction
+  if (
+    props.shell !== 'home' ||
+    !quickStartRunner ||
+    interaction?.interaction.kind !== 'choice' ||
+    interaction.title !== 'Get started'
+  ) {
+    return interaction
+  }
+  return {
+    ...interaction,
+    interaction: {
+      ...interaction.interaction,
+      options:
+        interaction.interaction.options.length >= 3
+          ? interaction.interaction.options.map((option, index) =>
+              index === 2
+                ? {
+                    ...option,
+                    label:
+                      'Quick Start: create a Workspace and run a full RTL-to-GDS flow',
+                  }
+                : option,
+            )
+          : [
+              ...interaction.interaction.options,
+              {
+                id: QUICK_START_OPTION_ID,
+                label: 'Quick Start: create a Workspace and run a full RTL-to-GDS flow',
+              },
+            ],
+    },
+  }
+})
 const undoInteraction = computed(() => activeUi.value.undoInteraction)
 const interactionCardRef = ref<{
   setFieldValue(fieldId: string, value: string): void
@@ -787,6 +813,8 @@ async function connectAgent(): Promise<void> {
   const active = agentShell.activeTab
   if (active && !active.started) {
     await startProviderSession(active.id)
+  } else if (active) {
+    await loadAgentModelSettings(active.id)
   }
 }
 
@@ -800,6 +828,7 @@ async function createChatTab(): Promise<void> {
 function selectChatTab(id: string): void {
   if (!agentShell.activateTab(id)) return
   messageStore.setActiveSessionId(id)
+  void loadAgentModelSettings(id)
 }
 
 async function closeChatTab(id: string): Promise<void> {
@@ -890,6 +919,7 @@ async function startProviderSession(sessionId: string): Promise<void> {
       messageStore.addInteraction(response.pendingInteraction, undefined, sessionId)
     }
     agentShell.markTabStarted(sessionId)
+    await loadAgentModelSettings(sessionId)
     codexSetupStatus.value = null
   } catch (error) {
     ui.runStatus = 'error'
@@ -902,6 +932,46 @@ async function startProviderSession(sessionId: string): Promise<void> {
     messageStore.addAssistantMessage(reason, 'error', sessionId)
   } finally {
     ui.isConnecting = false
+  }
+}
+
+async function loadAgentModelSettings(sessionId: string): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const ui = sessionUi(sessionId)
+  if (!agent || ui.modelSettingsBusy) return
+  ui.modelSettingsBusy = true
+  ui.modelSettingsError = ''
+  try {
+    ui.modelSettings = await agent.getModelSettings({
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+    })
+  } catch (error) {
+    ui.modelSettingsError = agentErrorMessage(error)
+  } finally {
+    ui.modelSettingsBusy = false
+  }
+}
+
+async function updateAgentModelSettings(
+  patch: Pick<DesktopAgentSetModelSettingsRequest, 'model' | 'reasoningEffort'>,
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const sessionId = agentSessionId.value
+  if (!agent || !sessionId || isRunning.value || activeUi.value.modelSettingsBusy) return
+  const ui = sessionUi(sessionId)
+  ui.modelSettingsBusy = true
+  ui.modelSettingsError = ''
+  try {
+    ui.modelSettings = await agent.setModelSettings({
+      ...patch,
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+    })
+  } catch (error) {
+    ui.modelSettingsError = agentErrorMessage(error)
+  } finally {
+    ui.modelSettingsBusy = false
   }
 }
 
@@ -1525,6 +1595,18 @@ async function handleInteraction(
     )
   )
     return
+  if (
+    props.shell === 'home' &&
+    quickStartRunner &&
+    kind === 'choice' &&
+    'optionId' in answer &&
+    interaction.interaction.kind === 'choice' &&
+    (interaction.interaction.options[2]?.id === answer.optionId ||
+      answer.optionId === QUICK_START_OPTION_ID)
+  ) {
+    await startQuickStart()
+    return
+  }
   if (textMessage) messageStore.addMessage(textMessage)
   isAgentRequestPending.value = true
   try {
@@ -1629,14 +1711,14 @@ function sendSuggestion(suggestion: { label: string; value: string }): void {
 async function startQuickStart(): Promise<void> {
   if (!quickStartRunner || quickStartRunning.value) return
   const sessionId = agentSessionId.value
-  if (!sessionId) return
   quickStartRunning.value = true
   quickStartAbortController = new AbortController()
-  messageStore.addMessage('Quick Start · GCD backend flow')
+  if (sessionId) messageStore.addMessage('Quick Start · GCD backend flow')
   const startedAtByStep = new Map<string, number>()
   const turnId = `quick-start-${Date.now()}`
   try {
     await quickStartRunner((event) => {
+      if (!sessionId) return
       const now = Date.now()
       const startedAt = startedAtByStep.get(event.stepId) ?? now
       if (event.status === 'running') startedAtByStep.set(event.stepId, startedAt)
@@ -1665,12 +1747,15 @@ async function startQuickStart(): Promise<void> {
         type: 'activity',
       })
     }, quickStartAbortController.signal)
-    messageStore.addAssistantMessage(
-      'Quick Start completed. Run All Flow is running.',
-      'done',
-      sessionId,
-    )
+    if (sessionId) {
+      messageStore.addAssistantMessage(
+        'Quick Start completed. Run All Flow is running.',
+        'done',
+        sessionId,
+      )
+    }
   } catch (error) {
+    if (!sessionId) return
     if (isQuickStartAbort(error)) {
       messageStore.addAssistantMessage('Quick Start stopped.', 'done', sessionId)
     } else {
@@ -1680,14 +1765,6 @@ async function startQuickStart(): Promise<void> {
     quickStartRunning.value = false
     quickStartAbortController = null
   }
-}
-
-function handleQuickStartClick(): void {
-  if (quickStartRunning.value) {
-    stopQuickStart()
-    return
-  }
-  void startQuickStart()
 }
 
 function stopQuickStart(): void {
@@ -2581,48 +2658,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
   opacity: 0.55;
 }
 
-.quick-start-suggestion {
-  display: flex;
-  width: 100%;
-  max-width: 24rem;
-  min-height: 2.75rem;
-  align-items: center;
-  gap: 0.65rem;
-  margin-top: 1rem;
-  padding: 0.65rem 0.85rem;
-  border: 1px solid color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
-  border-radius: 0.625rem;
-  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
-  color: var(--text-primary);
-  font-size: 0.8rem;
-  font-weight: 650;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 160ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.quick-start-suggestion span {
-  min-width: 0;
-  flex: 1;
-}
-
-.quick-start-suggestion:hover,
-.quick-start-suggestion:focus-visible {
-  border-color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 20%, var(--bg-primary));
-}
-
-.quick-start-suggestion:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.quick-start-suggestion__spinner {
-  animation: quick-start-spin 900ms linear infinite;
-}
-
 .quick-start-stop {
   display: inline-flex;
   align-items: center;
@@ -2641,12 +2676,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
 .quick-start-stop:focus-visible {
   border-color: var(--accent-color);
   color: var(--text-primary);
-}
-
-@keyframes quick-start-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .empty-suggestion:focus-visible,
@@ -2872,6 +2901,8 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 .composer-actions {
   display: flex;
+  align-items: center;
+  gap: 0.25rem;
   justify-content: flex-end;
   padding: 0 0.625rem 0.625rem;
 }
@@ -2989,7 +3020,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
 @media (prefers-reduced-motion: reduce) {
   .composer-shell,
   .empty-suggestion,
-  .quick-start-suggestion,
   .quick-start-stop,
   .stop-btn,
   .send-btn {
@@ -2998,10 +3028,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
   .send-btn-active:active {
     transform: none;
-  }
-
-  .quick-start-suggestion__spinner {
-    animation: none;
   }
 }
 </style>

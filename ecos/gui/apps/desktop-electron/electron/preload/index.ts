@@ -79,6 +79,8 @@ const desktopApi: DesktopApi = {
   app: {
     getVersions: () => invokeDesktop(desktopApiIpcChannels.appGetVersions),
     getQuickStartRoot: () => invokeDesktop(desktopApiIpcChannels.appGetQuickStartRoot),
+    prepareQuickStartProject: (name) =>
+      invokeDesktop(desktopApiIpcChannels.appPrepareQuickStartProject, name),
   },
   window: {
     minimize: () => invokeDesktop(desktopApiIpcChannels.windowMinimize),
@@ -459,6 +461,10 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.agentStartSession, request),
     sendMessage: (request) =>
       invokeDesktop(desktopApiIpcChannels.agentSendMessage, request),
+    getModelSettings: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentGetModelSettings, request),
+    setModelSettings: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentSetModelSettings, request),
     answerInteraction: (request) =>
       invokeDesktop(desktopApiIpcChannels.agentAnswerInteraction, request),
     onEvent: (listener) =>

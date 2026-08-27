@@ -29,7 +29,6 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
   knownProjects?: DesktopAgentKnownProject[]
   mode?: DesktopAgentSessionMode
   projectRoot?: string
-  quickRunProjectRoot?: string
   sessionId?: string
   workspaceId?: string
 }
@@ -49,6 +48,31 @@ export interface DesktopAgentSendMessageResponse {
   sessionId: string
   text?: string
   turnId?: string
+}
+
+export type DesktopAgentReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+export interface DesktopAgentModelOption {
+  defaultReasoningEffort: DesktopAgentReasoningEffort
+  displayName: string
+  model: string
+  supportedReasoningEfforts: DesktopAgentReasoningEffort[]
+}
+
+export interface DesktopAgentModelSettingsRequest extends DesktopAgentProviderRequest {
+  sessionId: string
+}
+
+export interface DesktopAgentSetModelSettingsRequest extends DesktopAgentModelSettingsRequest {
+  model?: string
+  reasoningEffort?: DesktopAgentReasoningEffort
+}
+
+export interface DesktopAgentModelSettings {
+  displayName: string
+  model: string
+  models: DesktopAgentModelOption[]
+  reasoningEffort: DesktopAgentReasoningEffort
 }
 
 export type DesktopAgentInteractionPurpose = 'execution' | 'clarification'

@@ -309,7 +309,6 @@ _INTERACTION_UNDO_FIELDS = (
     "language",
     "language_locked",
     "project_root",
-    "quick_setup",
     "creating_project",
     "design_id",
     "inherited_design_name",
@@ -385,8 +384,6 @@ class _Session:
     language_locked: bool = False
     project_root: str | None = None
     known_projects: list[tuple[str, str]] = field(default_factory=list)
-    quick_run_project_root: str | None = None
-    quick_setup: bool = False
     creating_project: bool = False
     design_id: str | None = None
     inherited_design_name: str | None = None
@@ -497,7 +494,6 @@ class EcosAgentProvider:
         if mode in {"home", "workspace"}:
             session.mode = mode
         session.known_projects = _known_projects(request.get("knownProjects"))
-        session.quick_run_project_root = _optional_text(request.get("quickRunProjectRoot"))
         if directory:
             session.inherited_design_name = _design_id_for_workspace(directory)
         # Directory alone is only a rerun default; GUI must pass mode explicitly.
@@ -536,6 +532,22 @@ class EcosAgentProvider:
         if session.running:
             raise ValueError("An ECOS Agent turn is already running for this session.")
         return self._run_turn(session, message)
+
+    def get_model_settings(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        session = self._session(request)
+        return self._chat_provider(session).get_model_settings()
+
+    def set_model_settings(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        session = self._session(request)
+        if session.running:
+            raise ValueError("Model settings cannot change while the Agent is running.")
+        model = _optional_text(request.get("model"))
+        reasoning_effort = _optional_text(request.get("reasoningEffort"))
+        if model is None and reasoning_effort is None:
+            raise ValueError("A model or reasoning effort is required.")
+        return self._chat_provider(session).set_model_settings(
+            model=model, reasoning_effort=reasoning_effort
+        )
 
     def _run_turn(
         self,
@@ -1106,9 +1118,6 @@ class EcosAgentProvider:
         if choice == "2":
             session.phase = "optimization_workspace"
             self._emit(session, "message", optimization_workspace_prompt(session.language))
-            return
-        if choice == "3":
-            self._begin_quick_workspace_create(session)
             return
 
     def _select_operation(self, session: _Session, message: str, choice: str) -> None:
@@ -1886,28 +1895,6 @@ class EcosAgentProvider:
             flow_end_explicit=flow_end_explicit,
         )
 
-    def _begin_quick_workspace_create(self, session: _Session) -> None:
-        self._reset_workspace_setup(session)
-        root = session.quick_run_project_root
-        if not root or not Path(root).is_dir():
-            self._emit(session, "error", "Quick setup storage is unavailable.")
-            self._emit_phase_choice(session)
-            return
-        session.quick_setup = True
-        session.creating_project = True
-        session.workspace_inputs.project_root = root
-        session.workspace_inputs.project_name = derive_project_name(root)
-        self._update_workspace_setup(
-            session,
-            workspace_name=recommended_workspace_name(root),
-        )
-        pdk_root = _optional_text(os.environ.get("ICS55_PDK_ROOT"))
-        if pdk_root and Path(pdk_root).is_dir():
-            session.path_recommendations = {"pdk": pdk_root}
-        session.phase = "workspace_rtl"
-        self._emit(session, "message", rtl_prompt(session.language))
-        self._emit_phase_choice(session)
-
     def _enter_create_flow_phase(
         self,
         session: _Session,
@@ -2410,17 +2397,6 @@ class EcosAgentProvider:
             self._emit_phase_choice(session)
             return
         self._update_workspace_setup(session, flow_start="Synthesis", flow_end=end_step)
-        if session.quick_setup and session.workspace_inputs.rtl_path:
-            pdk_root = _recommended_path(session, "pdk")
-            if pdk_root:
-                session.workspace_inputs.pdk_root = pdk_root
-                session.mpc_selection = True
-                self._show_workspace_contract(session)
-                return
-            session.phase = "workspace_pdk"
-            self._emit(session, "message", pdk_prompt(session.language, ""))
-            self._emit_phase_choice(session)
-            return
         session.phase = "workspace_rtl"
         self._emit(session, "message", rtl_prompt(session.language, _recommended_path(session, "rtl")))
         self._emit_phase_choice(session)
@@ -2439,15 +2415,6 @@ class EcosAgentProvider:
             )
             return
         self._apply_detected_defaults(session)
-        if session.quick_setup:
-            self._update_workspace_setup(
-                session,
-                design_name=session.workspace_setup.top_module,
-            )
-            session.phase = "workspace_flow_end"
-            self._emit(session, "message", flow_end_prompt(session.language))
-            self._emit_phase_choice(session)
-            return
         session.phase = "workspace_filelist"
         self._emit(
             session,
@@ -2515,10 +2482,6 @@ class EcosAgentProvider:
                 str(exc),
                 lambda language: pdk_prompt(language, _recommended_path(session, "pdk")),
             )
-            return
-        if session.quick_setup:
-            session.mpc_selection = True
-            self._show_workspace_contract(session)
             return
         session.phase = "workspace_mpc"
         self._emit(
@@ -3132,7 +3095,6 @@ class EcosAgentProvider:
         session.workspace_setup = GuiWorkspaceSetupProposal.model_validate(payload)
 
     def _reset_workspace_setup(self, session: _Session) -> None:
-        session.quick_setup = False
         session.workspace_setup = recommended_workspace_setup()
         session.workspace_inputs = WorkspaceInputs()
         session.path_recommendations = {}
@@ -3701,7 +3663,6 @@ class EcosAgentProvider:
         session.known_projects = known_projects
         session.inherited_design_name = inherited_design_name
         session.creating_project = False
-        session.quick_setup = False
         session.design_id = None
         session.rerun_stage = None
         session.rerun_resolver = None
