@@ -402,6 +402,16 @@ describe('writeWorkspaceParameters', () => {
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
   })
 
+  it('still rejects sub-millisecond datetimes after multiline strings with embedded quotes', async () => {
+    const root = createWorkspace()
+    const content = `${ECC_TOML}\nnote = """one " quote"""\ncheckpoint = 07:32:00.999999\n`
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /millisecond precision/i,
+    )
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+  })
+
   it('rejects non-finite numbers in the incoming payload and edit values', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'ecc.toml', ECC_TOML)

@@ -181,6 +181,23 @@ export function assertNoSubMillisecondDatetimes(text: string, label: string): vo
     }
     if (char === '"' || char === "'") {
       const quote = char
+      if (text[index + 1] === quote && text[index + 2] === quote) {
+        // Multiline string: embedded quotes are content; only a run of
+        // three terminates it (escapes apply in basic multiline strings).
+        index += 3
+        while (
+          index < text.length &&
+          !(
+            text[index] === quote &&
+            text[index + 1] === quote &&
+            text[index + 2] === quote
+          )
+        ) {
+          index += quote === '"' && text[index] === '\\' ? 2 : 1
+        }
+        index += 3
+        continue
+      }
       index += 1
       while (index < text.length && text[index] !== quote) {
         index += quote === '"' && text[index] === '\\' ? 2 : 1
