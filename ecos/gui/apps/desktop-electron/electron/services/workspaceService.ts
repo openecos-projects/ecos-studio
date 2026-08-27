@@ -509,11 +509,18 @@ export class WorkspaceService {
     const canonicalPath =
       await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
     await this.assertCanWriteProjectTextFile(canonicalPath)
-    return await editWorkspaceParametersFile(workspacePath, edits, {
-      format: location.format,
-      path: canonicalPath,
-      spelledPath: location.path,
-    })
+    return await editWorkspaceParametersFile(
+      workspacePath,
+      edits,
+      {
+        format: location.format,
+        path: canonicalPath,
+        spelledPath: location.path,
+      },
+      // Re-checked inside the serialized operation: a flow starting while
+      // the edit queued behind another writer must still block it.
+      () => this.assertCanWriteProjectTextFile(canonicalPath),
+    )
   }
 
   async readProjectTextFileTail(path: string, maxChars: number): Promise<string | null> {

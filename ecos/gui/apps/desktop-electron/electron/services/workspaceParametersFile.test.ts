@@ -365,6 +365,32 @@ describe('writeWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe('params = [1]\n')
   })
 
+  it('rejects a TOML date scalar as a section instead of flattening it away', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', 'params = 2026-08-27\n')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /must be a table/i,
+    )
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(
+      'params = 2026-08-27\n',
+    )
+  })
+
+  it('re-runs the writable guard inside the serialized operation', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    let calls = 0
+    await expect(
+      writeWorkspaceParameters(root, { design: 'gcd' }, undefined, async () => {
+        calls += 1
+        throw new Error('blocked')
+      }),
+    ).rejects.toThrow('blocked')
+    expect(calls).toBe(1)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
   it('refuses a symlinked config inside the serialized write', async () => {
     const root = createWorkspace()
     const alias = join(root, 'home', 'other.toml')
@@ -507,6 +533,15 @@ describe('editWorkspaceParameters', () => {
         literal,
       )
     }
+  })
+
+  it('rejects numbers that overflow to a non-finite value', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', '{ "Design": "gcd", "Area": 1e400 }\n')
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['Design'], value: 'aes' }]),
+    ).rejects.toThrow(/not representable/)
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain('1e400')
   })
 
   it('rejects unsafe numbers and non-object roots on reads', async () => {

@@ -107,13 +107,14 @@ export async function locateWorkspaceParametersFile(
 }
 
 /**
- * The writable sections must be tables: a scalar/array section is a
- * configuration error, never a silently-empty section to overwrite.
- * Shared by the read flatten and every write merge.
+ * The writable sections must be plain tables: a scalar/array section (or a
+ * scalar-like object such as a TOML date) is a configuration error, never a
+ * silently-empty section to overwrite. Shared by the read flatten and every
+ * write merge.
  */
 function assertTomlSectionShapes(document: Record<string, unknown>): void {
   for (const section of ['params', 'design', 'pdk'] as const) {
-    if (section in document && !isRecord(document[section])) {
+    if (section in document && !isPlainRecord(document[section])) {
       throw new Error(
         `Invalid workspace configuration: [${section}] must be a table, got ${
           Array.isArray(document[section]) ? 'array' : typeof document[section]
@@ -410,6 +411,7 @@ export async function writeWorkspaceParameters(
   root: string,
   payload: Record<string, unknown>,
   authorizedLocation?: WorkspaceParametersFileLocation,
+  assertWritable?: () => Promise<void>,
 ): Promise<WorkspaceParametersFileLocation> {
   const location = authorizedLocation ?? (await locateWorkspaceParametersFile(root))
   if (!location) {
@@ -418,6 +420,9 @@ export async function writeWorkspaceParameters(
     )
   }
   return await enqueueParameterWrite(location.path, async () => {
+    // Runtime-activity guards re-run INSIDE the queue: a flow starting while
+    // this operation waited behind another writer must still block it.
+    await assertWritable?.()
     const spelledPath = location.spelledPath ?? location.path
     const canonicalPath = location.spelledPath
       ? location.path
@@ -485,6 +490,12 @@ function assertJsonIntegersSafe(text: string, label: string): void {
       const token = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(index))?.[0]
       if (token) {
         const parsed = Number(token)
+        if (!Number.isFinite(parsed)) {
+          // 1e400 overflows to Infinity and would be rewritten as null.
+          throw new Error(
+            `Unsafe number ${token} in ${label}: not representable as a finite number`,
+          )
+        }
         if (Number.isInteger(parsed) && Math.abs(parsed) > Number.MAX_SAFE_INTEGER) {
           throw new Error(
             `Unsafe number ${token} in ${label}: exceeds ` +
@@ -565,6 +576,7 @@ export async function editWorkspaceParameters(
   root: string,
   edits: readonly WorkspaceParameterEdit[],
   authorizedLocation?: WorkspaceParametersFileLocation,
+  assertWritable?: () => Promise<void>,
 ): Promise<WorkspaceParametersFileLocation> {
   const location = authorizedLocation ?? (await locateWorkspaceParametersFile(root))
   if (!location) {
@@ -573,6 +585,9 @@ export async function editWorkspaceParameters(
     )
   }
   return await enqueueParameterWrite(location.path, async () => {
+    // Runtime-activity guards re-run INSIDE the queue: a flow starting while
+    // this operation waited behind another writer must still block it.
+    await assertWritable?.()
     const spelledPath = location.spelledPath ?? location.path
     const canonicalPath = location.spelledPath
       ? location.path

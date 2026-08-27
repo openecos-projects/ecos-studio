@@ -470,9 +470,16 @@ function stringArray(...values: unknown[]): string[] {
 }
 
 function numberArray(value: unknown): number[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is number => typeof entry === 'number')
-    : []
+  if (!Array.isArray(value)) return []
+  if (value.some((entry) => typeof entry === 'bigint')) {
+    // Filtering a bigint out would silently shift the remaining elements
+    // into the wrong positions (die.size[0] -> die_width).
+    throw new Error(
+      'Baseline workspace snapshot holds an integer beyond the safe integer range; ' +
+        'edit the workspace configuration manually',
+    )
+  }
+  return value.filter((entry): entry is number => typeof entry === 'number')
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {

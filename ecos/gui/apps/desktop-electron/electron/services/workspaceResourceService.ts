@@ -133,11 +133,25 @@ export class WorkspaceResourceService {
     ) {
       throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
     }
-    const written = await writeWorkspaceParameters(root, request.parameters, {
-      format: location.format,
-      path: canonicalPath,
-      spelledPath: location.path,
-    })
+    const written = await writeWorkspaceParameters(
+      root,
+      request.parameters,
+      {
+        format: location.format,
+        path: canonicalPath,
+        spelledPath: location.path,
+      },
+      // Re-checked inside the serialized operation: a flow starting while
+      // the save queued behind another writer must still block it.
+      async () => {
+        if (
+          this.runtimeMutationGuard &&
+          (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(root))
+        ) {
+          throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
+        }
+      },
+    )
     return { format: written.format, path: written.path }
   }
 

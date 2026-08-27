@@ -1,4 +1,5 @@
-import { lstat, realpath } from 'node:fs/promises'
+import { lstat, open, realpath } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { join, sep } from 'node:path'
 import type {
   EccWorkspaceRuntimeSnapshot,
@@ -9,7 +10,6 @@ import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
 import {
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
-  readFileNoFollow,
 } from '../workspaceParametersFile'
 
 const MAX_SNAPSHOT_FILE_BYTES = 512 * 1024
@@ -23,36 +23,57 @@ export interface WorkspaceBaselineSnapshot {
 }
 
 /**
- * Bounded, symlink-refusing file read for snapshot resources: lstat rejects
- * a symlinked final component, the resolved path must stay inside the
- * workspace (a symlinked ancestor like `home -> /outside` is rejected), and
- * the no-follow open refuses a symlink again on the kernel side.
+ * Bounded, symlink-refusing file read for snapshot resources: the resolved
+ * path must stay inside the workspace (a symlinked ancestor like
+ * `home -> /outside` is rejected), the leaf is opened once with O_NOFOLLOW,
+ * and the size cap is enforced on the opened handle — so a replacement
+ * planted between checks and open cannot smuggle in a symlink or an
+ * oversized file. The parent containment is revalidated after the read, so
+ * a mid-read swap discards the data instead of returning it.
  */
 async function readSnapshotText(
   path: string,
   workspaceDirectory: string,
 ): Promise<string> {
+  const resolvedRoot = await realpath(workspaceDirectory)
+  const assertContained = async (): Promise<void> => {
+    const resolvedPath = await realpath(path)
+    if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(resolvedRoot + sep)) {
+      throw new Error(
+        `Refusing to read workspace snapshot resource outside the workspace: ${path}`,
+      )
+    }
+  }
+
   const metadata = await lstat(path)
   if (metadata.isSymbolicLink()) {
     throw new Error(
       `Refusing to read workspace snapshot resource through a symlink: ${path}`,
     )
   }
-  if (metadata.size > MAX_SNAPSHOT_FILE_BYTES) {
-    throw new Error(
-      `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${path}`,
-    )
+  await assertContained()
+  let handle: Awaited<ReturnType<typeof open>> | null = null
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const opened = await handle.stat()
+    if (opened.size > MAX_SNAPSHOT_FILE_BYTES) {
+      throw new Error(
+        `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${path}`,
+      )
+    }
+    const text = await handle.readFile('utf8')
+    await assertContained()
+    return text
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
+      throw new Error(
+        `Refusing to read workspace snapshot resource through a symlink: ${path}`,
+      )
+    }
+    throw error
+  } finally {
+    await handle?.close()
   }
-  const [resolvedPath, resolvedRoot] = await Promise.all([
-    realpath(path),
-    realpath(workspaceDirectory),
-  ])
-  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(resolvedRoot + sep)) {
-    throw new Error(
-      `Refusing to read workspace snapshot resource outside the workspace: ${path}`,
-    )
-  }
-  return readFileNoFollow(path)
 }
 
 async function readJsonObject(
