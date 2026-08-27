@@ -158,9 +158,9 @@ def test_current_values_read_the_eight_runtime_knob_surfaces(tmp_path: Path) -> 
     )
 
     assert _current_values(tmp_path, 200) == {
-        "place.target_density": 0.72,
+        "place.target_density": 0.65,
         "place.target_overflow": 0.08,
-        "place.cell_padding_x": 1,
+        "place.cell_padding_x": 2,
         "place.routability_opt": True,
         "place.density_weight": 0.001,
         "floorplan.core_util": 0.6,

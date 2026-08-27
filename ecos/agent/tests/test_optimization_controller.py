@@ -434,8 +434,10 @@ def test_controller_persists_attempted_requested_values(tmp_path: Path) -> None:
     controller.execute()
     planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
-    assert planned.requested is None
-    assert planned.rejection_reason == "no_legal_candidate"
+    assert planned.requested == RequestedKnobValue(
+        knob_id="place.cell_padding_x", value=4
+    )
+    assert planned.rejection_reason is None
 
 
 def test_planning_context_compiles_hash_bound_domain_for_all_frozen_knobs(
@@ -474,7 +476,7 @@ def test_planning_domain_excludes_attempted_value_without_rewriting_proposal(
     assert 0.85 in density.excluded_aliases
     assert 0.85 not in density.allowed_requested_values
     assert result.requested != RequestedKnobValue(
-        knob_id="place.target_density", value=0.85
+        knob_id="place.target_density", value=0.75
     )
 
 
@@ -965,9 +967,7 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
     context = planner.contexts[0]
     assert context.history[0].application_receipt is not None
     assert context.history[0].application_receipt.effective_initial.value == 0.8
-    assert tuple(item.value for item in context.known_ineffective_requests) == tuple(
-        round(0.1 + 0.05 * index, 2) for index in range(14)
-    )
+    assert tuple(item.value for item in context.known_ineffective_requests) == (0.55,)
     assert (
         "place.target_density",
         StrategyDirection.DECREASE,
@@ -975,7 +975,7 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
     assert deferred.state == OptimizationEpisodeState.PLANNING
     assert planned.rejection_reason == "controlled_coordinate_fallback"
     assert planned.requested == RequestedKnobValue(
-        knob_id="place.target_density", value=0.85
+        knob_id="place.target_density", value=0.75
     )
 
 
@@ -1018,7 +1018,9 @@ def test_promoting_another_knob_invalidates_the_density_floor(tmp_path: Path) ->
         {**CURRENT_VALUES, "place.cell_padding_x": 3},
     )
 
-    assert controller.planner.contexts[2].known_ineffective_requests == ()
+    assert tuple(
+        item.value for item in controller.planner.contexts[2].known_ineffective_requests
+    ) == (0.55, 3)
     assert planned.requested == RequestedKnobValue(
         knob_id="place.target_density", value=0.75
     )

@@ -103,6 +103,10 @@ class CodexAppServerProposalProvider:
             self._client = None
             self._thread_id = None
 
+    @property
+    def optimization_proposal_v2_enabled(self) -> bool:
+        return self.env.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") == "1"
+
     def interrupt(self) -> None:
         with self._state_lock:
             self._interrupted = True

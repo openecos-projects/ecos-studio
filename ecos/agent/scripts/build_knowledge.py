@@ -29,7 +29,13 @@ def _json_bytes(value: object) -> bytes:
 
 
 def _normalised_tree(root: Path) -> dict[Path, bytes]:
-    tree = _tree(root)
+    # Parameter-effectiveness cards are maintained by their own manifest and
+    # are not emitted by the stage-bundle generator.
+    tree = {
+        path: value
+        for path, value in _tree(root).items()
+        if path.parts[:1] != ("optimization",)
+    }
     for sources_path in (path for path in tree if path.name == "sources.json"):
         sources = json.loads(tree[sources_path])
         for repository in sources["repositories"]:

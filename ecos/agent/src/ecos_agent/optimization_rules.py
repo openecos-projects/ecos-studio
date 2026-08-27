@@ -115,27 +115,6 @@ def coordinate_value_from_receipt(
     return value / site_width_dbu if receipt.requested.knob_id == OptimizationKnob.CELL_PADDING_X else value
 
 
-def known_ineffective_requests(
-    receipts: Iterable[KnobApplicationReceipt],
-) -> tuple[RequestedKnobValue, ...]:
-    """Compile observed DREAMPlace density floors into surface aliases."""
-    floors = (
-        float(receipt.effective_initial.value)
-        for receipt in receipts
-        if receipt.requested.knob_id == OptimizationKnob.TARGET_DENSITY
-        and receipt.requested.value == receipt.written.value
-        and float(receipt.effective_initial.value) > float(receipt.written.value)
-    )
-    floor = max(floors, default=None)
-    if floor is None:
-        return ()
-    return tuple(
-        RequestedKnobValue(knob_id=OptimizationKnob.TARGET_DENSITY, value=value)
-        for value in _DENSITY_VALUES
-        if value < floor
-    )
-
-
 def legal_actions(
     *,
     current_values: Mapping[str, bool | int | float],
@@ -364,7 +343,7 @@ def _current_value(
             type(value) not in {int, float}
             or isinstance(value, bool)
             or not math.isfinite(float(value))
-            or not 0 <= float(value) <= 3
+                or not 0 <= float(value) <= max(_PADDING_VALUES)
         ):
             raise ValueError("current cell padding site count is invalid")
     elif knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:

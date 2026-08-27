@@ -31,7 +31,6 @@ from ecos_agent.optimization_rules import (
     coordinate_value_from_receipt,
     freeze_optimization_objective,
     freeze_routability_objective,
-    known_ineffective_requests,
     legal_actions,
     next_coordinate_selection,
     select_requested_value,
@@ -58,14 +57,14 @@ def _expanded_current(**overrides: object) -> dict[str, object]:
 
 def _all_requested_values() -> tuple[RequestedKnobValue, ...]:
     lattices = {
-        "place.target_density": tuple(round(0.1 + 0.05 * index, 2) for index in range(18)),
-        "place.target_overflow": (0.06, 0.07, 0.08, 0.09, 0.1),
-        "place.cell_padding_x": (0, 1, 2, 3),
+        "place.target_density": tuple(round(0.1 + 0.05 * index, 2) for index in range(14)) + (0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95),
+        "place.target_overflow": (0.0, 0.02, 0.04, 0.06, 0.07, 0.08, 0.085, 0.09, 0.095, 0.1, 0.105, 0.11, 0.115, 0.12, 0.13, 0.14, 0.16, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0),
+        "place.cell_padding_x": (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16),
         "place.routability_opt": (False, True),
-        "place.density_weight": (0.0001, 0.00025, 0.0005, 0.00085, 0.001, 0.0025, 0.005),
-        "floorplan.core_util": (0.4, 0.5, 0.6, 0.7, 0.8),
-        "floorplan.aspect_ratio": (0.5, 0.75, 1.0, 1.33, 2.0),
-        "synth.max_fanout": (8, 16, 20, 24, 32, 48, 64),
+        "place.density_weight": (0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.00065, 0.00075, 0.00085, 0.001, 0.00125, 0.0015, 0.002, 0.0025, 0.0035, 0.005, 0.0075, 0.01),
+        "floorplan.core_util": tuple(round(0.2 + 0.05 * index, 2) for index in range(16)),
+        "floorplan.aspect_ratio": (0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.33, 1.5, 2.0, 3.0, 4.0, 5.0),
+        "synth.max_fanout": (8, 12, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 48, 56, 64),
     }
     return tuple(
         RequestedKnobValue(knob_id=knob_id, value=value)
@@ -302,19 +301,19 @@ def test_requested_lattice_uses_logical_padding_sites() -> None:
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="place.target_density", value=0.12)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="place.cell_padding_x", value=4)
+        RequestedKnobValue(knob_id="place.cell_padding_x", value=9)
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="place.routability_opt", value="true")
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="place.target_overflow", value=0.11)
+        RequestedKnobValue(knob_id="place.target_overflow", value=0.111)
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="place.density_weight", value=0.0008)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="floorplan.core_util", value=0.45)
+        RequestedKnobValue(knob_id="floorplan.core_util", value=0.475)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.5)
+        RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.25)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="synth.max_fanout", value=30)
+        RequestedKnobValue(knob_id="synth.max_fanout", value=34)
 
 
 def test_knob_receipt_binds_requested_written_and_runtime_effective_values() -> None:
@@ -370,102 +369,6 @@ def test_density_weight_receipt_keeps_the_requested_search_coordinate() -> None:
     )
 
     assert coordinate_value_from_receipt(receipt, site_width_dbu=200) == 0.001
-
-
-def _target_density_receipt(
-    *,
-    effective_initial: float,
-    effective_final: float,
-    written: float = 0.2,
-) -> KnobApplicationReceipt:
-    adjustments = (
-        (
-            RuntimeAdjustment(
-                effective_value=AppliedKnobValue(
-                    knob_id="place.target_density", value=effective_final
-                ),
-                reason="adaptive_update",
-                evidence_sha256=HASH,
-            ),
-        )
-        if effective_final != effective_initial
-        else ()
-    )
-    return KnobApplicationReceipt(
-        receipt_id="receipt-density",
-        requested=RequestedKnobValue(knob_id="place.target_density", value=0.2),
-        written=AppliedKnobValue(knob_id="place.target_density", value=written),
-        effective_initial=AppliedKnobValue(
-            knob_id="place.target_density", value=effective_initial
-        ),
-        runtime_adjustments=adjustments,
-        effective_final=AppliedKnobValue(
-            knob_id="place.target_density", value=effective_final
-        ),
-        evidence_sha256=HASH,
-    )
-
-
-def test_effective_density_floor_excludes_unreachable_surface_values() -> None:
-    aliases = known_ineffective_requests(
-        (_target_density_receipt(effective_initial=0.8, effective_final=0.85),)
-    )
-
-    assert tuple(item.value for item in aliases) == tuple(
-        round(0.1 + 0.05 * index, 2) for index in range(14)
-    )
-    action = ProposalAction(
-        knob_id="place.target_density",
-        direction=StrategyDirection.INCREASE,
-        expected_effects=(
-            {
-                "metric_id": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
-                "direction": "decrease",
-            },
-        ),
-    )
-    assert select_requested_value(
-        action,
-        current_values=_expanded_current(**{"place.target_density": 0.2}),
-        attempted=(RequestedKnobValue(knob_id="place.target_density", value=0.2),),
-        known_aliases=aliases,
-    ) == RequestedKnobValue(knob_id="place.target_density", value=0.85)
-
-
-def test_runtime_density_adjustment_is_not_an_admission_floor() -> None:
-    aliases = known_ineffective_requests(
-        (_target_density_receipt(effective_initial=0.2, effective_final=0.8),)
-    )
-
-    assert aliases == ()
-
-
-def test_density_floor_requires_an_identity_write_mapping() -> None:
-    aliases = known_ineffective_requests(
-        (
-            _target_density_receipt(
-                effective_initial=0.8,
-                effective_final=0.8,
-                written=0.25,
-            ),
-        )
-    )
-
-    assert aliases == ()
-
-
-def test_non_density_receipt_does_not_define_a_density_floor() -> None:
-    applied = AppliedKnobValue(knob_id="place.cell_padding_x", value=400)
-    receipt = KnobApplicationReceipt(
-        receipt_id="receipt-padding",
-        requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=2),
-        written=applied,
-        effective_initial=applied,
-        effective_final=applied,
-        evidence_sha256=HASH,
-    )
-
-    assert known_ineffective_requests((receipt,)) == ()
 
 
 def test_knob_receipt_rejects_a_mismatched_runtime_knob() -> None:
@@ -597,6 +500,7 @@ def test_legal_actions_exclude_only_noop_directions() -> None:
         ("place.target_density", "decrease"),
         ("place.target_density", "increase"),
         ("place.target_overflow", "decrease"),
+        ("place.target_overflow", "increase"),
         ("place.cell_padding_x", "decrease"),
         ("place.cell_padding_x", "increase"),
         ("place.routability_opt", "disable"),

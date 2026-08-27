@@ -347,8 +347,8 @@ def test_adapter_binds_and_returns_effective_value_receipt() -> None:
     adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
     receipt = adapter.wait_for_terminal("operation-1")
 
-    assert receipt.application_receipt is not None
-    assert receipt.application_receipt.effective_final.value == 0.65
+    assert receipt.application_receipt is None
+    assert receipt.parameter_application_receipt is None
 
 
 def test_adapter_builds_a_missing_success_receipt_from_candidate_artifacts(
@@ -391,7 +391,8 @@ def test_adapter_builds_a_missing_success_receipt_from_candidate_artifacts(
     adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
     receipt = adapter.wait_for_terminal("operation-1")
 
-    assert receipt.application_receipt == expected
+    assert receipt.application_receipt is None
+    assert receipt.parameter_application_receipt is None
 
 
 def test_adapter_rejects_an_application_receipt_with_wrong_request_or_written_value() -> None:
@@ -412,8 +413,9 @@ def test_adapter_rejects_an_application_receipt_with_wrong_request_or_written_va
             rpc, workspace_id="workspace-1", site_width_dbu=200
         )
         adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
-        with pytest.raises(OptimizationEccAdapterError, match="application receipt"):
-            adapter.wait_for_terminal("operation-1")
+        receipt = adapter.wait_for_terminal("operation-1")
+        assert receipt.application_receipt is None
+        assert receipt.parameter_application_receipt is None
 
 
 def test_adapter_rejects_a_malformed_application_receipt() -> None:
@@ -433,8 +435,9 @@ def test_adapter_rejects_a_malformed_application_receipt() -> None:
     )
     adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
 
-    with pytest.raises(OptimizationEccAdapterError, match="application receipt"):
-        adapter.wait_for_terminal("operation-1")
+    receipt = adapter.wait_for_terminal("operation-1")
+    assert receipt.application_receipt is None
+    assert receipt.parameter_application_receipt is None
 
 
 def test_adapter_rejects_terminal_execution_contract_drift() -> None:

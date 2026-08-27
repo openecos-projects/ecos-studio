@@ -987,9 +987,13 @@ class OptimizationEpisodeController:
         return OptimizationProposal.model_validate(payload)
 
     def _v2_enabled(self) -> bool:
-        return os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") == "1" and callable(
-            getattr(self.planner, "propose_v2", None)
+        configured = getattr(self.planner, "optimization_proposal_v2_enabled", None)
+        enabled = (
+            configured
+            if isinstance(configured, bool)
+            else os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") == "1"
         )
+        return enabled and callable(getattr(self.planner, "propose_v2", None))
 
     def _v2_domain(self, context: OptimizationPlanningContext) -> EffectiveDomainSnapshot:
         if not context.effective_domains or not context.legal_actions:
@@ -1129,31 +1133,6 @@ class OptimizationEpisodeController:
                 )
             )
         return tuple(history[-6:])
-
-    def _receipt_lineage(self) -> tuple[KnobApplicationReceipt, ...]:
-        replay = self.ledger.replay()
-        starts = {
-            entry.payload.intervention_id: entry.payload
-            for entry in replay.entries
-            if isinstance(entry.payload, OptimizationInterventionStart)
-        }
-        receipts = []
-        for outcome in replay.terminal_outcomes:
-            start = starts[outcome.intervention_id]
-            decision = (
-                outcome.incumbent_decision.value
-                if outcome.incumbent_decision is not None
-                else None
-            )
-            if (
-                decision in {"initialized", "candidate_better"}
-                and start.requested is not None
-                and start.requested.knob_id != OptimizationKnob.TARGET_DENSITY
-            ):
-                receipts.clear()
-            if outcome.application_receipt is not None:
-                receipts.append(outcome.application_receipt)
-        return tuple(receipts)
 
     def _start_once_with_retry(
         self,

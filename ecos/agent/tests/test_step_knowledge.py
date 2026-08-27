@@ -200,7 +200,7 @@ def test_step_bundle_rejects_changed_markdown(tmp_path: Path) -> None:
         StepKnowledge.from_directory(copied_bundle, spec)
 
 
-def test_provider_answers_cts_question_without_changing_operation_state() -> None:
+def test_provider_clarifies_ambiguous_cts_request_without_changing_operation_state() -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
@@ -208,9 +208,9 @@ def test_provider_answers_cts_question_without_changing_operation_state() -> Non
 
     provider.send_message({"sessionId": session_id, "message": "CTS stage execution"})
 
-    answer = next(event for event in reversed(events) if event["type"] == "message")
-    assert answer["contract"]["knowledge"]["schema_version"] == "ecos-knowledge-answer.v2"
-    assert answer["contract"]["knowledge"]["matches"][0]["stage"] == "cts"
+    interaction = next(event for event in reversed(events) if event["type"] == "interaction")
+    assert interaction["interaction"]["purpose"] == "clarification"
+    assert interaction["interaction"]["kind"] == "choice"
     assert provider.sessions[session_id].phase == "home_ready"
 
 

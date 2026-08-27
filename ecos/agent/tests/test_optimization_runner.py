@@ -22,12 +22,26 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
+from ecos_agent.optimization_metric_contracts import (
+    EvaluationMetricCategory,
+    EvaluationMetricDirection,
+    EvaluationMetricRole,
+    TerminalEvaluationMetric,
+)
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     OptimizationAgentMode,
     OptimizationEpisodeController,
     OptimizationPlanningContext,
+)
+from ecos_agent.hashing import canonical_sha256
+from ecos_agent.parameter_evidence_contracts import (
+    ActivationEvidence,
+    EffectiveValue,
+    MaterializationRef,
+    ParameterApplicationReceipt,
+    ToolRef,
 )
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
@@ -105,12 +119,18 @@ class _FakeExecutor:
                     started=True,
                     outcome=OptimizationOutcomeKind.DEGRADED,
                     evidence=_evidence("execution-1"),
+                    parameter_application_receipt=_native_receipt(
+                        "place.cell_padding_x", 3
+                    ),
                 ),
                 CandidateExecutionReceipt(
                     execution_id="execution-2",
                     started=True,
-                    outcome=OptimizationOutcomeKind.IMPROVED,
+                    outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
                     evidence=_evidence("execution-2"),
+                    parameter_application_receipt=_native_receipt(
+                        "place.target_density", 0.15
+                    ),
                 ),
             )
         )
@@ -157,6 +177,9 @@ class _SuccessfulExecutor(_FakeExecutor):
                     started=True,
                     outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
                     evidence=_evidence("execution-1"),
+                    parameter_application_receipt=_native_receipt(
+                        "place.cell_padding_x", 3
+                    ),
                 ),
             )
         )
@@ -169,6 +192,54 @@ def _evidence(execution_id: str) -> CandidateExecutionEvidence:
             f".agent/candidates/{execution_id}/analysis/candidate_workspace.v1.json"
         ),
         candidate_manifest_sha256=_HASH,
+    )
+
+
+def _native_receipt(knob_id: str, value: object) -> ParameterApplicationReceipt:
+    unit = "site" if knob_id.endswith("cell_padding_x") else "ratio"
+    consumer_id = (
+        "dreamplace.cell_size_expansion"
+        if knob_id.endswith("cell_padding_x")
+        else "dreamplace.density_objective"
+    )
+    payload = {
+        "receipt_id": f"parameter-receipt-{knob_id.replace('.', '-')}-{value}",
+        "tool": ToolRef(name="DREAMPlace", revision="bound"),
+        "context": {"stage": "place"},
+        "requested": {"knob_id": knob_id, "value": value, "unit": unit},
+        "materialization": MaterializationRef(
+            receipt_ref="analysis/candidate_materialization.v1.json",
+            receipt_sha256=_HASH,
+            registry_sha256=_HASH,
+            patch_sha256=_HASH,
+            candidate_ref="candidate-1",
+            workspace_ref="candidate-1",
+            config_before_sha256=_HASH,
+            config_after_sha256=_HASH,
+            written_value=value,
+            unit=unit,
+        ),
+        "effective_initial": EffectiveValue(value=value, unit=unit),
+        "application_status": "applied",
+        "activation": ActivationEvidence(
+            status="used",
+            consumers=(
+                {
+                    "consumer_id": consumer_id,
+                    "outcome": "entered",
+                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+                    "evidence_sha256": _HASH,
+                },
+            ),
+        ),
+        "effective_final": EffectiveValue(value=value, unit=unit),
+    }
+    draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=_HASH)
+    return ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(
+            draft.model_dump(mode="json", exclude={"evidence_sha256"})
+        ),
     )
 
 
@@ -241,7 +312,25 @@ def _terminal_observation(
     observation: StageObservation, receipt: CandidateExecutionReceipt
 ) -> TerminalObservation:
     assert observation.stage == "place"
+    eligibility = tuple(
+        TerminalEvaluationMetric(
+            metric_id=metric_id,
+            value=0.0 if metric_id not in {"rcx_expected_corner_count", "rcx_spef_file_count", "sta_expected_corner_count", "sta_corner_count"} else 1.0,
+            unit="count",
+            category=EvaluationMetricCategory.ELIGIBILITY,
+            role=EvaluationMetricRole.GATE,
+            direction=EvaluationMetricDirection.EXACT,
+            source_refs=("analysis/terminal.json",),
+        )
+        for metric_id in (
+            "drc_count", "lvs_count", "rcx_expected_corner_count", "rcx_spef_file_count",
+            "rcx_missing_corner_count", "rcx_spef_parse_failure_count", "sta_corner_count",
+            "sta_expected_corner_count", "sta_missing_corner_count", "sta_setup_violation_count",
+            "sta_hold_violation_count", "harden_artifact_missing_count",
+        )
+    )
     return TerminalObservation(
+        schema_version="ecos.terminal_observation.v3",
         observation_id=f"terminal-{receipt.execution_id}",
         evidence_manifest_sha256="sha256:" + receipt.execution_id[-1] * 64,
         evidence_valid=True,
@@ -253,6 +342,10 @@ def _terminal_observation(
             ObjectiveMetric.ROUTE_WIRELENGTH: 4.0,
         },
         timing_guardrail=_TIMING_GUARDRAIL,
+        evaluation_metrics=eligibility,
+        evaluation_metrics_complete=True,
+        sta_corner_ids=("analysis/sta/typical",),
+        sta_corner_set_sha256=canonical_sha256({"corners": ["analysis/sta/typical"]}),
     )
 
 
@@ -309,20 +402,20 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert planner.contexts[0].history == ()
     assert planner.contexts[1].history[0].requested.value == 3
     assert planner.contexts[1].current_values is not None
-    assert planner.contexts[1].current_values["place.cell_padding_x"] == 3
+    assert planner.contexts[1].current_values["place.cell_padding_x"] == 2
     assert executor.requests[0].parent_candidate_root_ref is None
-    assert executor.requests[1].parent_candidate_root_ref == ".agent/candidates/execution-1"
+    assert executor.requests[1].parent_candidate_root_ref is None
     assert planner.contexts[1].history[0].terminal_observation is not None
     assert planner.contexts[1].history[0].terminal_observation.metrics[
         ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
     ] == 3.0
     assert first.incumbent_comparison is not None
-    assert first.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert first.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
     assert second.incumbent_comparison is not None
-    assert second.incumbent_comparison.decision == IncumbentDecision.NOISE_TIE
+    assert second.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_BETTER
     assert controller.incumbent is not None
-    assert controller.incumbent.observation_id == "terminal-execution-1"
-    assert controller.incumbent_candidate_root_ref == ".agent/candidates/execution-1"
+    assert controller.incumbent.observation_id == "terminal-execution-2"
+    assert controller.incumbent_candidate_root_ref == ".agent/candidates/execution-2"
     assert planner.contexts[0].context_ref.input_sha256 != planner.contexts[1].context_ref.input_sha256
     assert [outcome.outcome for outcome in controller.ledger.replay().terminal_outcomes] == [
         OptimizationOutcomeKind.DEGRADED,
@@ -337,11 +430,9 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         for outcome in controller.ledger.replay().terminal_outcomes
     )
     assert controller.ledger.replay().terminal_outcomes[0].incumbent_decision == (
-        IncumbentDecision.CANDIDATE_BETTER.value
+        IncumbentDecision.CANDIDATE_INELIGIBLE.value
     )
-    assert controller.ledger.replay().terminal_outcomes[0].decisive_metric == (
-        ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
-    )
+    assert controller.ledger.replay().terminal_outcomes[0].decisive_metric is None
     planning_audit = OptimizationPlanningAudit(tmp_path / "episode").replay()
     assert [entry.history_count for entry in planning_audit.entries] == [0, 1]
     assert planning_audit.entries[1].history_refs[0].intervention_id == "intervention-1"

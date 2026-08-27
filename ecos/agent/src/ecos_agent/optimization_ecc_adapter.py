@@ -300,7 +300,7 @@ class EccCandidateRerunAdapter:
         result = self._result(response)
         if result is None:
             return None
-        raw = result.get("parameterApplicationReceipt", result.get("knobApplicationReceipt"))
+        raw = result.get("parameterApplicationReceipt")
         if raw is None:
             return None
         if requested is None:
@@ -309,29 +309,17 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("application receipt is non-terminal")
         normalized = _normalize_receipt_payload(raw)
         try:
-            if isinstance(normalized, Mapping) and normalized.get("schema_version") == "tool.parameter_application_receipt.v1":
-                receipt = ParameterApplicationReceipt.model_validate(normalized)
-            else:
-                receipt = KnobApplicationReceipt.model_validate(normalized)
+            if not isinstance(normalized, Mapping) or normalized.get("schema_version") != "tool.parameter_application_receipt.v1":
+                raise ValueError("legacy application receipt is read-only")
+            receipt = ParameterApplicationReceipt.model_validate(normalized)
         except (TypeError, ValueError) as exc:
             raise OptimizationEccAdapterError("application receipt is invalid") from exc
-        if isinstance(receipt, ParameterApplicationReceipt):
-            if receipt.requested.get("knob_id") != requested.knob_id.value or receipt.requested.get("value") != requested.value:
-                raise OptimizationEccAdapterError("application receipt request does not match")
-            try:
-                validate_application_receipt(receipt, load_parameter_cards())
-            except (ParameterSemanticsError, ValueError) as exc:
-                raise OptimizationEccAdapterError("application receipt card binding is invalid") from exc
-            return receipt
-        if receipt.requested != requested:
-            raise OptimizationEccAdapterError("application receipt request does not match")
-        expected_written = requested.value
-        if requested.knob_id == OptimizationKnob.CELL_PADDING_X:
-            expected_written *= self._site_width_dbu
-        if receipt.written != AppliedKnobValue(
-            knob_id=requested.knob_id, value=expected_written
-        ):
+        if receipt.requested.get("knob_id") != requested.knob_id.value or receipt.requested.get("value") != requested.value:
             raise OptimizationEccAdapterError("application receipt written value does not match")
+        try:
+            validate_application_receipt(receipt, load_parameter_cards())
+        except (ParameterSemanticsError, ValueError) as exc:
+            raise OptimizationEccAdapterError("application receipt card binding is invalid") from exc
         return receipt
 
     def _materialize_patch(
