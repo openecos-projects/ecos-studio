@@ -1145,8 +1145,8 @@ class OptimizationEpisodeController:
                 application_receipt=receipt.application_receipt,
                 parameter_application_receipt=receipt.parameter_application_receipt,
                 parameter_card_sha256=(
-                    receipt.parameter_application_receipt.context.get("parameter_card_sha256")
-                    if receipt.parameter_application_receipt is not None
+                    card_hash(load_parameter_cards()[self._requested.knob_id])
+                    if receipt.parameter_application_receipt is not None and self._requested is not None
                     else None
                 ),
                 materialization_receipt_sha256=(
