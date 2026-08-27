@@ -295,7 +295,7 @@ class CodexAppServerProposalProvider:
             "supplied observation_ref, not the incumbent observation. Reference only supplied history and "
             "knowledge identifiers and task-memory summary hashes. Task memory is evidence only; "
             "use application receipts and effective values in history, and treat "
-            "known_ineffective_requests as excluded surface values for this context. Local validation "
+            "excluded_surface_values as surface values excluded for this context. Local validation "
             "selects exact values and owns execution."
         )
         output_schema = _optimization_proposal_output_schema()
@@ -348,7 +348,14 @@ class CodexAppServerProposalProvider:
             "Return one JSON object matching ecos.optimization_proposal.v2. "
             "Use only the supplied exact allowlist and domain hash; never emit commands, paths, workspaces, RPCs, or execution authority."
         )
-        output_schema = _optimization_proposal_output_schema_v2()
+        output_schema = _optimization_proposal_output_schema_v2(
+            domain_snapshot,
+            tuple(
+                action.direction.value
+                for action in context.legal_actions
+                if action.knob_id == domain_snapshot.knob_id
+            ),
+        )
         envelope_payload = {
             "schema_version": "ecos.optimization_planning_provider_envelope.v1",
             "provider_id": "codex_app_server",
@@ -1026,12 +1033,39 @@ def _optimization_proposal_output_schema() -> dict[str, Any]:
     return schema
 
 
-def _optimization_proposal_output_schema_v2() -> dict[str, Any]:
+def _optimization_proposal_output_schema_v2(
+    domain: EffectiveDomainSnapshot,
+    legal_directions: tuple[str, ...],
+) -> dict[str, Any]:
     """Schema for the opt-in exact-value proposal contract."""
-    schema = OptimizationProposalV2.model_json_schema()
-    schema["$defs"]["OptimizationKnob"]["enum"] = [
-        knob.value for knob in ACTIVE_OPTIMIZATION_KNOBS
+    current_value = (
+        domain.current_coordinate.get("surface_value")
+        if isinstance(domain.current_coordinate, dict)
+        else None
+    )
+    allowed_values = [
+        value
+        for value in domain.allowed_requested_values
+        if value != current_value
     ]
+    if not allowed_values or not legal_directions:
+        raise CodexProviderError(
+            "optimization proposal v2 domain has no legal output",
+            failure_class="missing_input",
+        )
+    schema = OptimizationProposalV2.model_json_schema()
+    schema["$defs"]["OptimizationKnob"]["enum"] = [domain.knob_id.value]
+    schema["$defs"]["StrategyDirection"]["enum"] = list(legal_directions)
+    schema["$defs"]["NumericProposalActionV2"]["properties"]["requested_value"] = {
+        "enum": allowed_values,
+        "type": (
+            "boolean"
+            if all(type(value) is bool for value in allowed_values)
+            else "integer"
+            if all(type(value) is int for value in allowed_values)
+            else "number"
+        ),
+    }
     _require_all_schema_properties(schema)
     return schema
 

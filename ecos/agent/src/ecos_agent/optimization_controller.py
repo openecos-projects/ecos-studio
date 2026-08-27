@@ -183,7 +183,7 @@ class OptimizationPlanningContext:
     legal_actions: tuple[LegalAction, ...] = ()
     objective: OptimizationObjectiveContract | None = None
     task_memory: OptimizationTaskMemorySnapshot | None = None
-    known_ineffective_requests: tuple[RequestedKnobValue, ...] = ()
+    excluded_surface_values: tuple[RequestedKnobValue, ...] = ()
     effective_domains: tuple[EffectiveDomainSnapshot, ...] = ()
 
 
@@ -241,8 +241,8 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
     if context.current_values is not None:
         payload["current_values"] = dict(sorted(context.current_values.items()))
     payload["legal_actions"] = [item.model_dump(mode="json") for item in context.legal_actions]
-    payload["known_ineffective_requests"] = [
-        item.model_dump(mode="json") for item in context.known_ineffective_requests
+    payload["excluded_surface_values"] = [
+        item.model_dump(mode="json") for item in context.excluded_surface_values
     ]
     if context.effective_domains:
         payload["effective_domains"] = [
@@ -608,7 +608,7 @@ class OptimizationEpisodeController:
             proposal.action,
             current_values=current_values,
             attempted=self._attempted_requests(),
-            known_aliases=context.known_ineffective_requests,
+            known_aliases=context.excluded_surface_values,
         )
         if requested is None:
             return self._defer_or_fallback(
@@ -920,7 +920,7 @@ class OptimizationEpisodeController:
                     ],
                     "ledger_head": self.ledger.replay().chain_head_sha256,
                     "history": [_history_payload(item) for item in history],
-                    "known_ineffective_requests": [
+                    "excluded_surface_values": [
                         item.model_dump(mode="json") for item in ineffective_requests
                     ],
                     "task_memory": (
@@ -1453,7 +1453,7 @@ class OptimizationEpisodeController:
             fallback.action,
             current_values=context.current_values or {},
             attempted=self._attempted_requests(),
-            known_aliases=context.known_ineffective_requests,
+            known_aliases=context.excluded_surface_values,
         )
         if requested is None:
             raise OptimizationEpisodeControllerError("local fallback has no legal value")

@@ -1040,7 +1040,7 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
     context = planner.contexts[0]
     assert context.history[0].application_receipt is not None
     assert context.history[0].application_receipt.effective_initial.value == 0.8
-    assert tuple(item.value for item in context.known_ineffective_requests) == (0.55,)
+    assert tuple(item.value for item in context.excluded_surface_values) == (0.55,)
     assert (
         "place.target_density",
         StrategyDirection.DECREASE,
@@ -1092,7 +1092,7 @@ def test_promoting_another_knob_invalidates_the_density_floor(tmp_path: Path) ->
     )
 
     assert tuple(
-        item.value for item in controller.planner.contexts[2].known_ineffective_requests
+        item.value for item in controller.planner.contexts[2].excluded_surface_values
     ) == (0.55, 3)
     assert planned.requested == RequestedKnobValue(
         knob_id="place.target_density", value=0.75

@@ -8,6 +8,7 @@ from ecos_agent.codex_provider import (
     CodexAppServerProposalProvider,
     CodexProviderError,
     _build_prompt,
+    _optimization_proposal_output_schema_v2,
     create_required_codex_provider,
 )
 from ecos_agent.effective_domain import EffectiveDomainSnapshot
@@ -96,7 +97,7 @@ def _context() -> OptimizationPlanningContext:
                 direction=StrategyDirection.INCREASE,
             ),
         ),
-        known_ineffective_requests=tuple(
+        excluded_surface_values=tuple(
             RequestedKnobValue(knob_id="place.target_density", value=value)
             for value in (
                 0.1,
@@ -214,14 +215,14 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
         "knowledge_refs",
         "knowledge_chunks",
         "legal_actions",
-        "known_ineffective_requests",
+        "excluded_surface_values",
         "objective",
     }
     assert "workspace" not in captured["user"]
     assert "specific parameter values" in captured["system"]
     assert "exactly the supplied observation_ref" in captured["system"]
     assert "effective values" in captured["system"]
-    assert "known_ineffective_requests" in captured["system"]
+    assert "excluded_surface_values" in captured["system"]
     assert captured["user"]["history"][0]["application_receipt"][
         "effective_initial"
     ]["value"] == 0.8
@@ -340,6 +341,14 @@ def test_optimization_planner_v2_binds_domain_and_planning_evidence(
 
     assert result["schema_version"] == "ecos.optimization_proposal.v2"
     assert captured["user"]["effective_domain"] == domain.model_dump(mode="json")
+    schema = captured["output_schema"]
+    assert schema["$defs"]["OptimizationKnob"]["enum"] == [
+        "place.target_density"
+    ]
+    assert schema["$defs"]["StrategyDirection"]["enum"] == ["increase"]
+    assert schema["$defs"]["NumericProposalActionV2"]["properties"][
+        "requested_value"
+    ]["enum"] == [0.25, 0.3, 0.85]
     evidence = provider.consume_planning_evidence()
     assert evidence is not None
     assert evidence.thread_id == "thread-v2"
@@ -376,6 +385,22 @@ def test_optimization_planner_v2_uses_closed_object_schema(
             pending.extend(value.values())
         elif isinstance(value, list):
             pending.extend(value)
+
+
+def test_optimization_planner_v2_schema_excludes_the_current_coordinate() -> None:
+    payload = _domain().model_dump(mode="json", exclude={"snapshot_sha256"})
+    payload["excluded_aliases"] = []
+    payload["allowed_requested_values"] = [0.2, 0.25]
+    domain = EffectiveDomainSnapshot(
+        **payload,
+        snapshot_sha256=canonical_sha256(payload),
+    )
+
+    schema = _optimization_proposal_output_schema_v2(domain, ("increase",))
+
+    assert schema["$defs"]["NumericProposalActionV2"]["properties"][
+        "requested_value"
+    ]["enum"] == [0.25]
 
 
 def test_optimization_planner_v2_rejects_untrusted_domain(

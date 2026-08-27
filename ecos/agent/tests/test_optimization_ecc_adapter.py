@@ -10,9 +10,7 @@ import pytest
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
-    AppliedKnobValue,
     ExpectedEffectDirection,
-    KnobApplicationReceipt,
     KnowledgeReference,
     ObjectiveMetric,
     ObservationReference,
@@ -481,8 +479,8 @@ def test_adapter_binds_native_receipt_to_candidate_materialization(
         bad_adapter.wait_for_terminal("operation-1")
 
 
-def test_adapter_builds_a_missing_success_receipt_from_candidate_artifacts(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_adapter_does_not_build_a_missing_success_receipt_from_candidate_artifacts(
+    tmp_path: Path,
 ) -> None:
     terminal = {
         "operationId": "operation-1",
@@ -497,20 +495,6 @@ def test_adapter_builds_a_missing_success_receipt_from_candidate_artifacts(
         },
     }
     rpc = _FakeEccRpc(_running_operation(), terminal_response=terminal)
-    requested = RequestedKnobValue(knob_id="place.target_density", value=0.65)
-    applied = AppliedKnobValue(knob_id=requested.knob_id, value=0.65)
-    expected = KnobApplicationReceipt(
-        receipt_id="receipt-1",
-        requested=requested,
-        written=applied,
-        effective_initial=applied,
-        effective_final=applied,
-        evidence_sha256=HASH,
-    )
-    monkeypatch.setattr(
-        "ecos_agent.optimization_legacy_receipts.build_materialization_application_receipt",
-        lambda *_args, **_kwargs: expected,
-    )
     adapter = EccCandidateRerunAdapter(
         rpc,
         workspace_id="workspace-1",

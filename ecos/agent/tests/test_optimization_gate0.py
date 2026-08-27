@@ -9,9 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 import ecos_agent.optimization_gate0 as gate0
-import ecos_agent.optimization_legacy_receipts as legacy_receipts
 from ecos_agent.optimization_contracts import (
+    AppliedKnobValue,
     GateResult,
+    KnobApplicationReceipt,
     ObjectiveMetric,
     OptimizationKnob,
     RequestedKnobValue,
@@ -27,7 +28,6 @@ from ecos_agent.optimization_controller import (
 from ecos_agent.optimization_gate0 import (
     Gate0Error,
     PilotCandidateExecutionError,
-    build_materialization_application_receipt,
     compare_observations,
     load_gate0_config,
     noise_profile,
@@ -36,22 +36,10 @@ from ecos_agent.optimization_gate0 import (
     require_terminal_receipt,
     run_pilot_candidate,
 )
-from ecos_agent.optimization_legacy_receipts import Gate0ReceiptError
-from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 
 HASH = "sha256:" + "a" * 64
-
-
-def test_legacy_receipt_parser_rejects_unknown_knob() -> None:
-    with pytest.raises(Gate0ReceiptError, match="does not support this knob"):
-        legacy_receipts._runtime_values(  # type: ignore[attr-defined]
-            Path("/tmp"),
-            None,  # type: ignore[arg-type]
-            SimpleNamespace(knob_id="future.knob"),  # type: ignore[arg-type]
-            0,
-            1,
-        )
 
 
 def _terminal(
@@ -334,6 +322,11 @@ def test_design_fails_without_two_distinct_probes_and_one_improvement() -> None:
 
 
 def test_candidate_receipt_fails_closed_without_bound_terminal_evidence() -> None:
+    requested = RequestedKnobValue(
+        knob_id=OptimizationKnob.TARGET_DENSITY,
+        value=0.2,
+    )
+    applied = AppliedKnobValue(knob_id=requested.knob_id, value=requested.value)
     receipt = CandidateExecutionReceipt(
         execution_id="operation-1",
         started=True,
@@ -343,10 +336,57 @@ def test_candidate_receipt_fails_closed_without_bound_terminal_evidence() -> Non
             candidate_manifest_ref=".agent/candidates/candidate-1/candidate-manifest.json",
             candidate_manifest_sha256=HASH,
         ),
+        application_receipt=KnobApplicationReceipt(
+            receipt_id="receipt-legacy",
+            requested=requested,
+            written=applied,
+            effective_initial=applied,
+            effective_final=applied,
+            evidence_sha256=HASH,
+        ),
     )
 
-    with pytest.raises(Gate0Error, match="application receipt"):
+    with pytest.raises(Gate0Error, match="native parameter application receipt"):
         require_terminal_receipt(receipt)
+
+
+def test_success_candidate_rejects_missing_native_parameter_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class SuccessfulAdapter:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self, _request):
+            return CandidateExecutionReceipt(
+                execution_id="execution-1",
+                started=True,
+                outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+                evidence=CandidateExecutionEvidence(
+                    candidate_root_ref=".agent/candidates/candidate-1",
+                    candidate_manifest_ref=(
+                        ".agent/candidates/candidate-1/analysis/candidate_workspace.v1.json"
+                    ),
+                    candidate_manifest_sha256=HASH,
+                ),
+            )
+
+    monkeypatch.setattr(gate0, "EccCandidateRerunAdapter", SuccessfulAdapter)
+
+    with pytest.raises(Gate0Error, match="native parameter application receipt"):
+        run_pilot_candidate(
+            SimpleNamespace(),
+            "workspace-1",
+            tmp_path,
+            200,
+            _terminal(0, 0, 100),
+            RequestedKnobValue(knob_id="place.target_density", value=0.2),
+            StrategyDirection.INCREASE,
+            "candidate-1",
+            tmp_path / "candidate",
+            HASH,
+            1,
+        )
 
 
 def test_failed_candidate_records_parent_and_chargeable_receipt(
@@ -394,460 +434,4 @@ def test_failed_candidate_records_parent_and_chargeable_receipt(
         "execution_id": "execution-1",
         "outcome": "execution_failed",
         "started": True,
-    }
-
-
-def test_materialization_receipt_binds_requested_and_written_value(tmp_path: Path) -> None:
-    candidate_ref = ".agent/candidates/candidate-gate0-default"
-    candidate = tmp_path / candidate_ref
-    config = candidate / "config/dreamplace_ecc.json"
-    config.parent.mkdir(parents=True)
-    config.write_text(json.dumps({"target_density": 0.2}), encoding="utf-8")
-    snapshot = candidate / "analysis/snapshots/dreamplace.after.json"
-    snapshot.parent.mkdir(parents=True)
-    snapshot.write_text(config.read_text(encoding="utf-8"), encoding="utf-8")
-    before_snapshot = candidate / "analysis/snapshots/dreamplace.before.json"
-    before_snapshot.write_text("{}", encoding="utf-8")
-    before_sha256 = file_sha256(before_snapshot)
-    place_log = candidate / "place_dreamplace/log/place.log"
-    place_log.parent.mkdir(parents=True)
-    place_log.write_text(
-        "[INFO] parameters = {'target_density': 0.2}\n"
-        "[WARNING] target_density 0.2 is smaller than utilization 0.726439, ignored\n"
-        "utilization = 0.676439, target_density = 0.726439\n"
-        "[INFO] new target_density 0.758653\n",
-        encoding="utf-8",
-    )
-    patch = [{"knob_id": "place.target_density", "value": 0.2}]
-    materialization = {
-        "schema": "ecc.workspace.candidate_materialization.v1",
-        "schema_version": 1,
-        "candidate_id": candidate.name,
-        "target_step": "place",
-        "target": {"step": "place"},
-        "registry_sha256": HASH,
-        "patch": patch,
-        "patch_sha256": canonical_sha256(patch),
-        "configs": [{
-            "config_key": "dreamplace",
-            "ref": "config/dreamplace_ecc.json",
-            "before_sha256": before_sha256,
-            "after_sha256": file_sha256(config),
-        }],
-        "snapshots": [{
-            "config_key": "dreamplace",
-            "before_ref": "analysis/snapshots/dreamplace.before.json",
-            "before_sha256": before_sha256,
-            "after_ref": "analysis/snapshots/dreamplace.after.json",
-            "after_sha256": file_sha256(snapshot),
-        }],
-    }
-    materialization["receipt_sha256"] = canonical_sha256(materialization)
-    receipt_path = candidate / "analysis/candidate_materialization.v1.json"
-    receipt_path.parent.mkdir(exist_ok=True)
-    receipt_path.write_text(json.dumps(materialization), encoding="utf-8")
-    evidence = CandidateExecutionEvidence(
-        candidate_root_ref=candidate_ref,
-        candidate_manifest_ref=f"{candidate_ref}/analysis/candidate_workspace.v1.json",
-        candidate_manifest_sha256=HASH,
-    )
-
-    receipt = build_materialization_application_receipt(
-        tmp_path,
-        evidence,
-        RequestedKnobValue(knob_id=OptimizationKnob.TARGET_DENSITY, value=0.2),
-        site_width_dbu=200,
-    )
-
-    assert receipt.requested.value == 0.2
-    assert receipt.written.value == 0.2
-    assert receipt.effective_initial.value == 0.726439
-    assert receipt.effective_final.value == 0.758653
-    assert len(receipt.runtime_adjustments) == 1
-    assert {item.metric: item.value for item in receipt.runtime_observations} == {
-        "effective_target_density": 0.758653,
-        "target_density_adjustment_count": 1,
-    }
-    assert receipt.evidence_sha256 == canonical_sha256({
-        "materialization": file_sha256(receipt_path),
-        "place_log": file_sha256(place_log),
-    })
-
-    place_log.write_text("[INFO] parameters = {'target_density': 0.25}\n", encoding="utf-8")
-    with pytest.raises(Gate0Error, match="config value"):
-        build_materialization_application_receipt(
-            tmp_path,
-            evidence,
-            RequestedKnobValue(knob_id=OptimizationKnob.TARGET_DENSITY, value=0.2),
-            site_width_dbu=200,
-        )
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("registry_sha256", "registry-drift", "registry hash"),
-        ("config_ref", "config/other.json", "config evidence"),
-    ],
-)
-def test_materialization_receipt_rejects_l1_binding_drift(
-    tmp_path: Path, field: str, value: str, message: str
-) -> None:
-    evidence = _runtime_receipt_fixture(
-        tmp_path,
-        knob_id="place.target_density",
-        written=0.2,
-        target_step="place",
-        config_key="dreamplace",
-        config_ref="config/dreamplace_ecc.json",
-        config_payload={"target_density": 0.2},
-    )
-    candidate = tmp_path / evidence.candidate_root_ref
-    path = candidate / "analysis/candidate_materialization.v1.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if field == "config_ref":
-        payload["configs"][0]["ref"] = value
-    else:
-        payload[field] = value
-    payload["receipt_sha256"] = canonical_sha256(
-        {key: item for key, item in payload.items() if key != "receipt_sha256"}
-    )
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(Gate0Error, match=message):
-        build_materialization_application_receipt(
-            tmp_path,
-            evidence,
-            RequestedKnobValue(knob_id=OptimizationKnob.TARGET_DENSITY, value=0.2),
-            site_width_dbu=200,
-        )
-
-
-def _runtime_receipt_fixture(
-    tmp_path: Path,
-    *,
-    knob_id: str,
-    written: object,
-    target_step: str,
-    config_key: str,
-    config_ref: str,
-    config_payload: dict[str, object],
-) -> CandidateExecutionEvidence:
-    candidate_ref = f".agent/candidates/candidate-{knob_id.replace('.', '-')}"
-    candidate = tmp_path / candidate_ref
-    config = candidate / config_ref
-    config.parent.mkdir(parents=True)
-    config.write_text(json.dumps(config_payload), encoding="utf-8")
-    snapshot = candidate / f"analysis/snapshots/{config_key}.after.json"
-    snapshot.parent.mkdir(parents=True)
-    snapshot.write_text(config.read_text(encoding="utf-8"), encoding="utf-8")
-    before_snapshot = candidate / f"analysis/snapshots/{config_key}.before.json"
-    before_snapshot.write_text("{}", encoding="utf-8")
-    before_sha256 = file_sha256(before_snapshot)
-    patch = [{"knob_id": knob_id, "value": written}]
-    materialization = {
-        "schema": "ecc.workspace.candidate_materialization.v1",
-        "schema_version": 1,
-        "candidate_id": candidate.name,
-        "target_step": target_step,
-        "target": {"step": target_step},
-        "registry_sha256": HASH,
-        "patch": patch,
-        "patch_sha256": canonical_sha256(patch),
-        "configs": [{
-            "config_key": config_key,
-            "ref": config_ref,
-            "before_sha256": before_sha256,
-            "after_sha256": file_sha256(config),
-        }],
-        "snapshots": [{
-            "config_key": config_key,
-            "before_ref": f"analysis/snapshots/{config_key}.before.json",
-            "before_sha256": before_sha256,
-            "after_ref": f"analysis/snapshots/{config_key}.after.json",
-            "after_sha256": file_sha256(snapshot),
-        }],
-    }
-    materialization["receipt_sha256"] = canonical_sha256(materialization)
-    (candidate / "analysis/candidate_materialization.v1.json").write_text(
-        json.dumps(materialization), encoding="utf-8"
-    )
-    return CandidateExecutionEvidence(
-        candidate_root_ref=candidate_ref,
-        candidate_manifest_ref=f"{candidate_ref}/analysis/candidate_workspace.v1.json",
-        candidate_manifest_sha256=HASH,
-    )
-
-
-def test_target_overflow_receipt_records_runtime_threshold_result(tmp_path: Path) -> None:
-    requested = 0.08
-    evidence = _runtime_receipt_fixture(
-        tmp_path,
-        knob_id="place.target_overflow",
-        written=requested,
-        target_step="place",
-        config_key="dreamplace",
-        config_ref="config/dreamplace_ecc.json",
-        config_payload={"stop_overflow": requested},
-    )
-    log = tmp_path / evidence.candidate_root_ref / "place_dreamplace/log/place.log"
-    log.parent.mkdir(parents=True)
-    log.write_text(
-        "[INFO] parameters = {'stop_overflow': 0.08}\n"
-        "[INFO] iteration 1, DensityWeight 1E-03, Overflow 1.2E-01\n"
-        "[INFO] iteration 2, DensityWeight 2E-03, Overflow 7.5E-02\n"
-        "[INFO] iteration 3, DensityWeight 3E-03, Overflow 9.0E-02\n",
-        encoding="utf-8",
-    )
-
-    receipt = build_materialization_application_receipt(
-        tmp_path,
-        evidence,
-        RequestedKnobValue(knob_id="place.target_overflow", value=requested),
-        site_width_dbu=200,
-    )
-
-    assert receipt.effective_initial.value == requested
-    assert receipt.effective_final.value == requested
-    assert receipt.runtime_adjustments == ()
-    assert {item.metric: item.value for item in receipt.runtime_observations} == {
-        "final_overflow": 0.09,
-        "minimum_overflow": 0.075,
-        "target_overflow_reached": True,
-    }
-
-
-def test_routability_receipt_records_runtime_area_adjustments(tmp_path: Path) -> None:
-    evidence = _runtime_receipt_fixture(
-        tmp_path,
-        knob_id="place.routability_opt",
-        written=True,
-        target_step="place",
-        config_key="dreamplace",
-        config_ref="config/dreamplace_ecc.json",
-        config_payload={"routability_opt_flag": 1},
-    )
-    log = tmp_path / evidence.candidate_root_ref / "place_dreamplace/log/place.log"
-    log.parent.mkdir(parents=True)
-    log.write_text(
-        "[INFO] parameters = {'routability_opt_flag': 1}\n"
-        "[INFO] old total movable nodes area 1.000E+02, filler area 1\n"
-        "[INFO] new total movable nodes area 1.100E+02, filler area 1\n"
-        "[INFO] routability optimization round 0: adjust area flags = "
-        "(1, 1, 0) -> (1, 1, 0)\n",
-        encoding="utf-8",
-    )
-
-    receipt = build_materialization_application_receipt(
-        tmp_path,
-        evidence,
-        RequestedKnobValue(knob_id="place.routability_opt", value=True),
-        site_width_dbu=200,
-    )
-
-    assert receipt.effective_initial.value is True
-    assert receipt.effective_final.value is True
-    assert {item.metric: item.value for item in receipt.runtime_observations} == {
-        "area_adjustment_applied": True,
-        "area_adjustment_count": 1,
-        "final_movable_area": 110.0,
-        "initial_movable_area": 100.0,
-        "routability_round_count": 1,
-    }
-
-
-def test_enabled_routability_receipt_records_when_no_action_occurs(tmp_path: Path) -> None:
-    evidence = _runtime_receipt_fixture(
-        tmp_path,
-        knob_id="place.routability_opt",
-        written=True,
-        target_step="place",
-        config_key="dreamplace",
-        config_ref="config/dreamplace_ecc.json",
-        config_payload={"routability_opt_flag": 1},
-    )
-    log = tmp_path / evidence.candidate_root_ref / "place_dreamplace/log/place.log"
-    log.parent.mkdir(parents=True)
-    log.write_text(
-        "[INFO] parameters = {'routability_opt_flag': 1}\n",
-        encoding="utf-8",
-    )
-
-    receipt = build_materialization_application_receipt(
-        tmp_path,
-        evidence,
-        RequestedKnobValue(knob_id="place.routability_opt", value=True),
-        site_width_dbu=200,
-    )
-
-    assert {item.metric: item.value for item in receipt.runtime_observations} == {
-        "area_adjustment_applied": False,
-        "area_adjustment_count": 0,
-        "routability_round_count": 0,
-    }
-
-
-def test_density_weight_receipt_records_runtime_derived_values(tmp_path: Path) -> None:
-    evidence = _runtime_receipt_fixture(
-        tmp_path,
-        knob_id="place.density_weight",
-        written=0.001,
-        target_step="place",
-        config_key="dreamplace",
-        config_ref="config/dreamplace_ecc.json",
-        config_payload={"density_weight": 0.001},
-    )
-    log = tmp_path / evidence.candidate_root_ref / "place_dreamplace/log/place.log"
-    log.parent.mkdir(parents=True)
-    log.write_text(
-        "[INFO] parameters = {'density_weight': 0.001}\n"
-        "[INFO] density_weight = 4.302304E-07\n"
-        "[INFO] iteration 1, DensityWeight 4.302304E-07, HPWL 10\n"
-        "[INFO] iteration 2, DensityWeight 2.717005E-03, HPWL 9\n",
-        encoding="utf-8",
-    )
-
-    receipt = build_materialization_application_receipt(
-        tmp_path,
-        evidence,
-        RequestedKnobValue(knob_id="place.density_weight", value=0.001),
-        site_width_dbu=200,
-    )
-
-    assert receipt.written.value == 0.001
-    assert receipt.effective_initial.value == 4.302304e-07
-    assert receipt.effective_final.value == 0.002717005
-    assert len(receipt.runtime_adjustments) == 1
-    assert {item.metric: item.value for item in receipt.runtime_observations} == {
-        "final_density_weight": 0.002717005,
-        "initial_density_weight": 4.302304e-07,
-    }
-
-
-def test_cell_padding_receipt_records_the_runtime_capacity_cap(tmp_path: Path) -> None:
-    evidence = _runtime_receipt_fixture(
-        tmp_path,
-        knob_id="place.cell_padding_x",
-        written=400,
-        target_step="place",
-        config_key="dreamplace",
-        config_ref="config/dreamplace_ecc.json",
-        config_payload={"cell_padding_x": 400},
-    )
-    log = tmp_path / evidence.candidate_root_ref / "place_dreamplace/log/place.log"
-    log.parent.mkdir(parents=True)
-    log.write_text(
-        "[INFO] parameters = {'cell_padding_x': 400}\n"
-        "[WARNING] cell_padding_x 2 would increase movable area; reducing it to 1\n",
-        encoding="utf-8",
-    )
-
-    receipt = build_materialization_application_receipt(
-        tmp_path,
-        evidence,
-        RequestedKnobValue(knob_id="place.cell_padding_x", value=2),
-        site_width_dbu=200,
-    )
-
-    assert receipt.written.value == 400
-    assert receipt.effective_initial.value == 400
-    assert receipt.effective_final.value == 200
-    assert receipt.runtime_adjustments[0].reason == "DreamPlace cell-padding capacity cap"
-    assert {item.metric: item.value for item in receipt.runtime_observations} == {
-        "applied_cell_padding_dbu": 200,
-        "cell_padding_capacity_cap_count": 1,
-    }
-
-
-@pytest.mark.parametrize(
-    "knob_id,requested,achieved_value",
-    [
-        ("floorplan.core_util", 0.6, 0.58),
-        ("floorplan.aspect_ratio", 1.33, 1.28),
-    ],
-)
-def test_floorplan_receipt_uses_ifp_runtime_and_layout_result(
-    tmp_path: Path, knob_id: str, requested: float, achieved_value: float
-) -> None:
-    core_key = "Utilitization" if knob_id.endswith("core_util") else "Aspect ratio"
-    evidence = _runtime_receipt_fixture(
-        tmp_path,
-        knob_id=knob_id,
-        written=requested,
-        target_step="Floorplan",
-        config_key="parameters",
-        config_ref="home/parameters.json",
-        config_payload={"Core": {core_key: requested}},
-    )
-    candidate = tmp_path / evidence.candidate_root_ref
-    (candidate / "Floorplan_ecc/log").mkdir(parents=True)
-    (candidate / "Floorplan_ecc/log/Floorplan.log").write_text(
-        "aspect_ratio: 1.33, utilization: 0.6\n", encoding="utf-8"
-    )
-    feature = candidate / "Floorplan_ecc/feature/Floorplan.db.json"
-    feature.parent.mkdir(parents=True)
-    feature.write_text(
-        json.dumps({
-            "Design Layout": {
-                "core_usage": 0.58,
-                "core_bounding_width": 64.0,
-                "core_bounding_height": 50.0,
-            }
-        }),
-        encoding="utf-8",
-    )
-
-    receipt = build_materialization_application_receipt(
-        tmp_path,
-        evidence,
-        RequestedKnobValue(knob_id=knob_id, value=requested),
-        site_width_dbu=200,
-    )
-
-    assert receipt.effective_initial.value == requested
-    assert receipt.effective_final.value == requested
-    assert receipt.runtime_adjustments == ()
-    expected_metric = (
-        "achieved_core_utilization"
-        if knob_id == "floorplan.core_util"
-        else "achieved_core_aspect_ratio"
-    )
-    assert {item.metric: item.value for item in receipt.runtime_observations} == {
-        expected_metric: achieved_value
-    }
-
-
-def test_fixfanout_receipt_uses_the_native_runtime_limit(tmp_path: Path) -> None:
-    evidence = _runtime_receipt_fixture(
-        tmp_path,
-        knob_id="synth.max_fanout",
-        written=24,
-        target_step="fixFanout",
-        config_key="fixFanout",
-        config_ref="config/fixfanout_ecc.json",
-        config_payload={"max_fanout": 24},
-    )
-    log = tmp_path / evidence.candidate_root_ref / "fixFanout_ecc/log/fixFanout.log"
-    log.parent.mkdir(parents=True)
-    log.write_text(
-        "ZH fixFanout\n"
-        "  max_fanout: 24\n"
-        "Total fixed 2 nets, inserted 4 nets and 4 buffers\n",
-        encoding="utf-8",
-    )
-
-    receipt = build_materialization_application_receipt(
-        tmp_path,
-        evidence,
-        RequestedKnobValue(knob_id="synth.max_fanout", value=24),
-        site_width_dbu=200,
-    )
-
-    assert receipt.effective_initial.value == 24
-    assert receipt.effective_final.value == 24
-    assert {item.metric: item.value for item in receipt.runtime_observations} == {
-        "fanout_fix_completed": True,
-        "fixed_net_count": 2,
-        "inserted_buffer_count": 4,
-        "inserted_net_count": 4,
     }

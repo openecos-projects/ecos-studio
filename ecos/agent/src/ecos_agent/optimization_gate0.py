@@ -12,7 +12,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Mapping, Sequence
 
@@ -27,7 +27,6 @@ from ecos_agent.optimization_contracts import (
     TIMING_GUARDRAIL_ORDER,
     EpisodeBudget,
     ExpectedEffectDirection,
-    KnobApplicationReceipt,
     KnowledgeReference,
     ObjectiveMetric,
     ObservationReference,
@@ -47,10 +46,6 @@ from ecos_agent.optimization_controller import (
 from ecos_agent.optimization_ecc_adapter import (
     EccCandidateRerunAdapter,
     EccContentLengthRpcClient,
-)
-from ecos_agent.optimization_legacy_receipts import (
-    Gate0ReceiptError,
-    build_materialization_application_receipt as _build_materialization_application_receipt,
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_observations import (
@@ -280,24 +275,9 @@ def require_terminal_receipt(receipt: CandidateExecutionReceipt) -> CandidateExe
         raise Gate0Error("candidate execution did not succeed")
     if receipt.evidence is None:
         raise Gate0Error("candidate terminal evidence is missing")
-    if receipt.application_receipt is None:
-        raise Gate0Error("candidate application receipt is missing")
+    if receipt.parameter_application_receipt is None:
+        raise Gate0Error("candidate native parameter application receipt is missing")
     return receipt.evidence
-
-
-def build_materialization_application_receipt(
-    workspace_root: Path,
-    evidence: CandidateExecutionEvidence,
-    requested: RequestedKnobValue,
-    *,
-    site_width_dbu: int,
-) -> KnobApplicationReceipt:
-    try:
-        return _build_materialization_application_receipt(
-            workspace_root, evidence, requested, site_width_dbu=site_width_dbu
-        )
-    except Gate0ReceiptError as exc:
-        raise Gate0Error(str(exc)) from exc
 
 
 def readiness_report(config_path: Path) -> dict[str, object]:
@@ -630,21 +610,10 @@ def run_pilot_candidate(
             "candidate_manifest_ref": receipt.evidence.candidate_manifest_ref,
             "candidate_manifest_sha256": receipt.evidence.candidate_manifest_sha256,
         })
-    if (
-        receipt.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
-        and receipt.evidence is not None
-        and receipt.application_receipt is None
-    ):
-        receipt = replace(
-            receipt,
-            application_receipt=build_materialization_application_receipt(
-                workspace, receipt.evidence, requested, site_width_dbu=site_width
-            ),
-        )
-    if receipt.application_receipt is not None:
+    if receipt.parameter_application_receipt is not None:
         _write_json(
-            output / "application-receipt.v1.json",
-            receipt.application_receipt.model_dump(mode="json"),
+            output / "parameter-application-receipt.v1.json",
+            receipt.parameter_application_receipt.model_dump(mode="json"),
         )
     _write_json(output / "execution-receipt.v1.json", {
         "execution_id": receipt.execution_id,
