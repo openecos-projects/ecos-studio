@@ -65,6 +65,8 @@ from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization_rules import legal_actions, select_requested_value
 from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
+from ecos_agent.effective_domain import EffectiveDomainSnapshot, compile_effective_domain
+from ecos_agent.parameter_semantics import LATTICE_VERSION, card_hash, load_parameter_cards
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -153,6 +155,7 @@ class OptimizationPlanningContext:
     objective: OptimizationObjectiveContract | None = None
     task_memory: OptimizationTaskMemorySnapshot | None = None
     known_ineffective_requests: tuple[RequestedKnobValue, ...] = ()
+    effective_domains: tuple[EffectiveDomainSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -212,6 +215,10 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
     payload["known_ineffective_requests"] = [
         item.model_dump(mode="json") for item in context.known_ineffective_requests
     ]
+    if context.effective_domains:
+        payload["effective_domains"] = [
+            item.model_dump(mode="json") for item in context.effective_domains
+        ]
     if context.task_memory is not None:
         payload["task_memory"] = context.task_memory.model_dump(mode="json")
     return payload
@@ -706,10 +713,31 @@ class OptimizationEpisodeController:
         current_values: Mapping[str, bool | int | float],
     ) -> OptimizationPlanningContext:
         history = self._history()
-        # Effective aliases are compiled from version-bound native receipts by
-        # ``effective_domain``; legacy receipts are read-only and cannot alter
-        # a new planning turn.
-        ineffective_requests: tuple[RequestedKnobValue, ...] = ()
+        attempted = self._attempted_requests()
+        cards = load_parameter_cards()
+        native_receipts = self._native_receipts()
+        effective_domains = tuple(
+            compile_effective_domain(
+                cards[knob_id],
+                context=self._effective_domain_context(
+                    observation,
+                    current_values,
+                    knob_id,
+                    cards[knob_id].tool.revision,
+                    cards[knob_id].surface.unit,
+                    card_hash(cards[knob_id]),
+                ),
+                receipts=native_receipts,
+                attempted=attempted,
+                baseline_surface_value=current_values.get(knob_id.value),
+            )
+            for knob_id in OptimizationKnob
+        )
+        ineffective_requests = tuple(
+            RequestedKnobValue(knob_id=domain.knob_id, value=value)
+            for domain in effective_domains
+            for value in domain.excluded_aliases
+        )
         task_memory = (
             self._task_memory_supplier()
             if self._task_memory_supplier is not None
@@ -780,6 +808,9 @@ class OptimizationEpisodeController:
                         if task_memory is not None
                         else None
                     ),
+                    "effective_domains": [
+                        item.model_dump(mode="json") for item in effective_domains
+                    ],
                 }
             ),
         )
@@ -797,6 +828,54 @@ class OptimizationEpisodeController:
             self._objective,
             task_memory,
             ineffective_requests,
+            effective_domains,
+        )
+
+    def _effective_domain_context(
+        self,
+        observation: StageObservation,
+        current_values: Mapping[str, bool | int | float],
+        knob_id: OptimizationKnob,
+        tool_revision: str,
+        unit: str,
+        parameter_card_sha256: str,
+    ) -> dict[str, object]:
+        """Build the stable, per-knob context used to bind domain evidence."""
+        parent_lineage = self._parent_manifest_sha256 or canonical_sha256(
+            {"episode_id": self.episode_id, "checkpoint_id": self.checkpoint_id}
+        )
+        incumbent_state = (
+            self._incumbent.model_dump(mode="json") if self._incumbent is not None else None
+        )
+        return {
+            "design_sha256": observation.evidence_manifest_sha256,
+            "parent_lineage_sha256": parent_lineage,
+            "incumbent_state_sha256": canonical_sha256(incumbent_state),
+            "stage": _stage_name(knob_id),
+            "backend": "ecos",
+            "tool_revision": tool_revision,
+            "parameter_card_sha256": parameter_card_sha256,
+            "lattice_version": LATTICE_VERSION,
+            "unit": unit,
+            "site_width_dbu": 1,
+            "seed": None,
+            "current_values": dict(sorted(current_values.items())),
+            "terminal_execution_contract_sha256": canonical_sha256(
+                {
+                    "episode_id": self.episode_id,
+                    "checkpoint_id": self.checkpoint_id,
+                    "target_step": _stage_name(knob_id),
+                    "end_step": "Harden",
+                    "execution_scope": "full_flow",
+                }
+            ),
+        }
+
+    def _native_receipts(self) -> tuple[ParameterApplicationReceipt, ...]:
+        return tuple(
+            outcome.parameter_application_receipt
+            for outcome in self.ledger.replay().terminal_outcomes
+            if outcome.parameter_application_receipt is not None
         )
 
     def _parse_proposal(self, payload: object) -> OptimizationProposal:
@@ -1374,6 +1453,17 @@ class OptimizationEpisodeController:
 
 def _knowledge_keys(references: tuple[KnowledgeReference, ...]) -> set[tuple[str, str]]:
     return {(reference.entity_id, reference.chunk_sha256) for reference in references}
+
+
+def _stage_name(knob_id: OptimizationKnob) -> str:
+    if knob_id in {
+        OptimizationKnob.FLOORPLAN_CORE_UTIL,
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+    }:
+        return "Floorplan"
+    if knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:
+        return "fixFanout"
+    return "place"
 
 
 def _pending_tuple(intervention_id: str | None) -> tuple[str, ...]:

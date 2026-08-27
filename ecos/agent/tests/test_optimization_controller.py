@@ -438,6 +438,46 @@ def test_controller_persists_attempted_requested_values(tmp_path: Path) -> None:
     assert planned.rejection_reason == "no_legal_candidate"
 
 
+def test_planning_context_compiles_hash_bound_domain_for_all_frozen_knobs(
+    tmp_path: Path,
+) -> None:
+    codex = _FakeCodex(_proposal)
+    controller = _controller(tmp_path, codex, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
+    context = codex.contexts[0]
+    assert len(context.effective_domains) == 8
+    assert {item.knob_id.value for item in context.effective_domains} == set(CURRENT_VALUES)
+    assert all(item.snapshot_sha256.startswith("sha256:") for item in context.effective_domains)
+    payload = planning_context_payload(context)
+    assert len(payload["effective_domains"]) == 8
+    assert payload["effective_domains"][0]["snapshot_sha256"] == context.effective_domains[0].snapshot_sha256
+
+
+def test_planning_domain_excludes_attempted_value_without_rewriting_proposal(
+    tmp_path: Path,
+) -> None:
+    codex = _FakeCodex(_proposal)
+    controller = _controller(tmp_path, codex, _FakeEcc())
+    controller._attempted_request_values = (
+        RequestedKnobValue(knob_id="place.target_density", value=0.85),
+    )
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    context = codex.contexts[0]
+    density = next(
+        item for item in context.effective_domains if item.knob_id.value == "place.target_density"
+    )
+    assert 0.85 in density.excluded_aliases
+    assert 0.85 not in density.allowed_requested_values
+    assert result.requested != RequestedKnobValue(
+        knob_id="place.target_density", value=0.85
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
