@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
+import shutil
+
+import pytest
+
 from ecos_agent.effective_domain import (
     EffectiveDomainError,
     build_context_fingerprint,
     compile_effective_domain,
     validate_numeric_proposal,
 )
-from ecos_agent.hashing import canonical_sha256
+from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import OptimizationKnob
 from ecos_agent.parameter_evidence_contracts import (
     ActivationEvidence,
@@ -17,7 +22,7 @@ from ecos_agent.parameter_evidence_contracts import (
     OptimizationProposalV2,
     ToolRef,
 )
-from ecos_agent.parameter_semantics import load_parameter_cards
+from ecos_agent.parameter_semantics import CARD_ROOT, ParameterSemanticsError, load_parameter_cards
 
 
 HASH = "sha256:" + "a" * 64
@@ -27,6 +32,43 @@ def test_cards_are_exactly_the_frozen_eight() -> None:
     cards = load_parameter_cards()
     assert {knob.value for knob in cards} == {item.value for item in OptimizationKnob}
     assert [len(card.requested_domain.values) for card in cards.values()] == [13, 16, 12, 18, 2, 21, 23, 16]
+
+
+def _refresh_card_manifest(root) -> None:
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for item in manifest["cards"]:
+        item["sha256"] = file_sha256(root / item["path"])
+    manifest["manifest_sha256"] = canonical_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    manifest_path.write_text(json.dumps(manifest, separators=(",", ":")), encoding="utf-8")
+
+
+def test_loader_rejects_changed_frozen_lattice(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "cards/place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["requested_domain"]["values"][0] = 0.11
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="lattice"):
+        load_parameter_cards(root)
+
+
+def test_loader_rejects_unregistered_runtime_probe(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "cards/place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["runtime_probe_ids"] = ["unknown.probe"]
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="runtime probe"):
+        load_parameter_cards(root)
 
 
 def _density_receipt(context_sha: str) -> ParameterApplicationReceipt:
