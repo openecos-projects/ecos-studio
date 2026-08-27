@@ -1,76 +1,78 @@
 import { ref } from 'vue'
-import type { DesktopApi, ResourceInfo } from '@ecos-studio/shared'
-import {
-  importLocalResourcePathApi,
-  importPdkPathApi,
-  listResourcesApi,
-  removePdkReferenceApi,
-  validatePdkApi,
-} from '@/api/plugin'
-import { hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
+import type { PdkInstallationSnapshot } from '@ecos-studio/shared'
+import { waitForDesktopApi } from '@/platform/desktop'
 import { useWorkspace } from './useWorkspace'
 import type { ImportedPdk } from '../types'
 
-const LEGACY_IMPORTED_PDKS_KEY = 'imported_pdks'
-const LEGACY_MIGRATION_KEY = 'pdk_inventory_migrated_v1'
-
 const importedPdks = ref<ImportedPdk[]>([])
 const isLoaded = ref(false)
+const pdkNameDialogVisible = ref(false)
+const pdkNameDraft = ref('')
+let resolvePdkName: ((name: string | null) => void) | null = null
+const pdkImportCancelled = new Error('PDK import was cancelled')
 
-function healthValue(resource: ResourceInfo, key: string): unknown {
-  return resource.health[key]
-}
-
-function resourceToPdk(resource: ResourceInfo): ImportedPdk {
-  const detectedFiles = healthValue(resource, 'detected_file_groups')
-  const healthStatus = healthValue(resource, 'status')
-  const status =
-    healthStatus === 'invalid' || healthStatus === 'missing'
-      ? healthStatus
-      : resource.status
-  return {
-    id: resource.id,
-    name: resource.display_name,
-    path: resource.path ?? '',
-    description: resource.description,
-    techNode: resource.name === 'ics55' ? '55nm' : '',
-    pdkId: resource.name,
-    importedAt: String(healthValue(resource, 'imported_at') ?? ''),
-    detectedFiles:
-      detectedFiles && typeof detectedFiles === 'object'
-        ? (detectedFiles as ImportedPdk['detectedFiles'])
-        : undefined,
-    source: resource.source,
-    version: resource.installed_version ?? '',
-    active: resource.active,
-    status,
-    valid: status === 'installed' || status === 'update_available',
-    knownLayout: healthValue(resource, 'known_layout') === true,
-  }
-}
-
-function legacyPaths(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object') return []
-    const path = (entry as { path?: unknown }).path
-    return typeof path === 'string' && path.trim() ? [path] : []
+function requestPdkName(suggestedName: string): Promise<string | null> {
+  resolvePdkName?.(null)
+  pdkNameDraft.value = suggestedName
+  pdkNameDialogVisible.value = true
+  return new Promise((resolve) => {
+    resolvePdkName = resolve
   })
 }
 
-async function migrateLegacyPdks(desktopApi: DesktopApi): Promise<void> {
-  const migrated = await desktopApi.settings.get(LEGACY_MIGRATION_KEY)
-  if (migrated === true) return
+function finishPdkNameRequest(name: string | null): void {
+  const resolve = resolvePdkName
+  resolvePdkName = null
+  pdkNameDialogVisible.value = false
+  resolve?.(name)
+}
 
-  const legacy = await desktopApi.settings.get(LEGACY_IMPORTED_PDKS_KEY)
-  for (const path of legacyPaths(legacy)) {
-    try {
-      await importPdkPathApi(path)
-    } catch {
-      // Keep legacy settings untouched; missing and invalid paths are represented only when imported.
-    }
+function confirmPdkName(): void {
+  const name = pdkNameDraft.value.trim()
+  if (name) finishPdkNameRequest(name)
+}
+
+function cancelPdkName(): void {
+  finishPdkNameRequest(null)
+}
+
+function installationToPdk(installation: PdkInstallationSnapshot): ImportedPdk {
+  return {
+    id: installation.id,
+    name: installation.displayName,
+    path: installation.root,
+    description: installation.reason ?? '',
+    techNode: installation.familyId === 'ics55' ? '55nm' : '',
+    pdkId: installation.familyId,
+    importedAt: '',
+    source: installation.ownership,
+    version: installation.version ?? '',
+    readiness: installation.readiness,
+    supportsEccDefaults: installation.supportsEccDefaults,
   }
-  await desktopApi.settings.set(LEGACY_MIGRATION_KEY, true)
+}
+
+async function importPath(path: string): Promise<ImportedPdk> {
+  const desktopApi = await waitForDesktopApi()
+  const scanned = await desktopApi.workspace.scanPdkDirectory(path)
+  let familyId = scanned.pdkId
+  let displayName = scanned.name || familyId
+  if (familyId !== 'ics55') {
+    const confirmed = await requestPdkName(displayName)
+    if (confirmed === null) throw pdkImportCancelled
+    displayName = confirmed
+    familyId =
+      confirmed
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '') || familyId
+  }
+  const installation = await desktopApi.pdkInventory.import({
+    root: path,
+    familyId,
+    displayName,
+  })
+  return installationToPdk(installation)
 }
 
 export function usePdkManager() {
@@ -79,27 +81,13 @@ export function usePdkManager() {
   const loadPdks = async (force = false): Promise<void> => {
     if (isLoaded.value && !force) return
     try {
-      if (hasDesktopApi()) {
-        const desktopApi = await waitForDesktopApi()
-        await migrateLegacyPdks(desktopApi)
-      }
-      const resources = await listResourcesApi()
-      importedPdks.value = resources
-        .filter(
-          (resource) =>
-            resource.type === 'pdk' &&
-            resource.path !== null &&
-            resource.status !== 'installing',
-        )
-        .map(resourceToPdk)
-        .sort(
-          (left, right) =>
-            Number(right.active) - Number(left.active) ||
-            left.name.localeCompare(right.name),
-        )
+      const desktopApi = await waitForDesktopApi()
+      importedPdks.value = (await desktopApi.pdkInventory.list())
+        .map(installationToPdk)
+        .sort((left, right) => left.name.localeCompare(right.name))
       isLoaded.value = true
     } catch (error) {
-      console.error('[usePdkManager] Failed to load Resource Manager PDKs:', error)
+      console.error('[usePdkManager] Failed to load PDK Inventory:', error)
     }
   }
 
@@ -110,13 +98,17 @@ export function usePdkManager() {
         title: 'Select PDK Root Directory',
       })
       if (!path) return null
-      const resource = await importPdkPathApi(path)
+      const imported = await importPath(path)
       await loadPdks(true)
-      return (
-        importedPdks.value.find((pdk) => pdk.id === resource.id) ??
-        resourceToPdk(resource)
-      )
+      const linked = importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
+      showToast({
+        severity: 'success',
+        summary: 'PDK Linked',
+        detail: `${linked.name} is ready at ${linked.path}. Files remain in the source directory.`,
+      })
+      return linked
     } catch (error) {
+      if (error === pdkImportCancelled) return null
       showToast({
         severity: 'error',
         summary: 'Failed to Import PDK',
@@ -131,13 +123,11 @@ export function usePdkManager() {
 
   const importPdkByPath = async (path: string): Promise<ImportedPdk | null> => {
     try {
-      const resource = await importPdkPathApi(path)
+      const imported = await importPath(path)
       await loadPdks(true)
-      return (
-        importedPdks.value.find((pdk) => pdk.id === resource.id) ??
-        resourceToPdk(resource)
-      )
+      return importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
     } catch (error) {
+      if (error === pdkImportCancelled) return null
       showToast({
         severity: 'error',
         summary: 'Failed to Import PDK',
@@ -150,24 +140,21 @@ export function usePdkManager() {
     }
   }
 
-  const importPdkForResource = async (
-    resourceId: string,
-    path: string,
-  ): Promise<ImportedPdk> => {
-    const resource = await importLocalResourcePathApi(resourceId, path)
-    await loadPdks(true)
-    return (
-      importedPdks.value.find((pdk) => pdk.id === resource.id) ?? resourceToPdk(resource)
-    )
-  }
-
-  const removePdk = async (resourceId: string): Promise<void> => {
-    await removePdkReferenceApi(resourceId)
+  const removePdk = async (installationId: string): Promise<void> => {
+    const desktopApi = await waitForDesktopApi()
+    await desktopApi.pdkInventory.remove(installationId)
     await loadPdks(true)
   }
 
-  const validatePdk = async (resourceId: string): Promise<void> => {
-    await validatePdkApi(resourceId)
+  const locatePdk = async (installationId: string): Promise<void> => {
+    const desktopApi = await waitForDesktopApi()
+    const path = await desktopApi.dialog.pickDirectory({ title: 'Locate PDK Root' })
+    if (!path) return
+    await desktopApi.pdkInventory.locate({ installationId, root: path })
+    await loadPdks(true)
+  }
+
+  const validatePdk = async (_installationId?: string): Promise<void> => {
     await loadPdks(true)
   }
 
@@ -176,9 +163,13 @@ export function usePdkManager() {
     loadPdks,
     importPdk,
     importPdkByPath,
-    importPdkForResource,
     removePdk,
+    locatePdk,
     validatePdk,
+    pdkNameDialogVisible,
+    pdkNameDraft,
+    confirmPdkName,
+    cancelPdkName,
     getPdkById: (id: string) => importedPdks.value.find((pdk) => pdk.id === id),
   }
 }

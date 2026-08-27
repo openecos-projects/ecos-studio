@@ -1,9 +1,0 @@
-{"entity_id": "algorithm.legalization.execution", "id": "legalization-execution", "question": "Explain algorithm.legalization.execution", "required_text": "Execution path:"}
-{"entity_id": "algorithm.legalization.legalize_only_setup", "id": "legalization-legalize_only_setup", "question": "Explain legalization algorithm legalize only setup.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.legalization.legalization_pipeline", "id": "legalization-legalization_pipeline", "question": "Explain legalization algorithm legalization pipeline.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.legalization.macro_legalization", "id": "legalization-macro_legalization", "question": "Explain legalization algorithm macro legalization.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.legalization.greedy_and_abacus_cells", "id": "legalization-greedy_and_abacus_cells", "question": "Explain legalization algorithm greedy and abacus cells.", "required_text": "Source evidence:"}
-{"entity_id": "parameter.legalization.replace_lower_pcof", "id": "legalization-parameter", "question": "Explain parameter.legalization.replace_lower_pcof", "required_text": "**Role:**"}
-{"entity_id": "metric.legalization.database_summary", "id": "legalization-metric", "question": "Explain metric.legalization.database_summary", "required_text": "**Calculation:**"}
-{"entity_id": "artifact.legalization.outputs", "id": "legalization-artifact", "question": "Explain artifact.legalization.outputs", "required_text": "**Meaning:**"}
-{"entity_id": "failure.legalization.preconditions", "id": "legalization-failure", "question": "Explain failure.legalization.preconditions", "required_text": "**Failure mode:**"}

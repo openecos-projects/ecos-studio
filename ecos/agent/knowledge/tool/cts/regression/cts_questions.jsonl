@@ -1,9 +1,0 @@
-{"entity_id": "algorithm.cts.execution", "id": "cts-execution", "question": "Explain algorithm.cts.execution", "required_text": "Execution path:"}
-{"entity_id": "algorithm.cts.flow_pipeline", "id": "cts-flow_pipeline", "question": "Explain cts algorithm flow pipeline.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.cts.clock_domain_synthesis", "id": "cts-clock_domain_synthesis", "question": "Explain cts algorithm clock domain synthesis.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.cts.htree_topology_search", "id": "cts-htree_topology_search", "question": "Explain cts algorithm htree topology search.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.cts.rc_tree_sizing_optimization", "id": "cts-rc_tree_sizing_optimization", "question": "Explain cts algorithm rc tree sizing optimization.", "required_text": "Source evidence:"}
-{"entity_id": "parameter.cts.buffer_type", "id": "cts-parameter", "question": "Explain parameter.cts.buffer_type", "required_text": "**Role:**"}
-{"entity_id": "metric.clock_path_max_buffer", "id": "cts-metric", "question": "Explain metric.clock_path_max_buffer", "required_text": "**Calculation:**"}
-{"entity_id": "artifact.cts.outputs", "id": "cts-artifact", "question": "Explain artifact.cts.outputs", "required_text": "**Meaning:**"}
-{"entity_id": "failure.cts.preconditions", "id": "cts-failure", "question": "Explain failure.cts.preconditions", "required_text": "**Failure mode:**"}

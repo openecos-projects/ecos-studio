@@ -1,9 +1,0 @@
-{"entity_id": "algorithm.sta.execution", "id": "sta-execution", "question": "Explain algorithm.sta.execution", "required_text": "Execution path:"}
-{"entity_id": "algorithm.sta.signoff_matrix_expansion", "id": "sta-signoff_matrix_expansion", "question": "Explain sta algorithm signoff matrix expansion.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.sta.native_setup_and_graph_build", "id": "sta-native_setup_and_graph_build", "question": "Explain sta algorithm native setup and graph build.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.sta.timing_propagation", "id": "sta-timing_propagation", "question": "Explain sta algorithm timing propagation.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.sta.required_time_and_qor_analysis", "id": "sta-required_time_and_qor_analysis", "question": "Explain sta algorithm required time and qor analysis.", "required_text": "Source evidence:"}
-{"entity_id": "parameter.sta.liberty", "id": "sta-parameter", "question": "Explain parameter.sta.liberty", "required_text": "**Role:**"}
-{"entity_id": "metric.sta_setup_wns", "id": "sta-metric", "question": "Explain metric.sta_setup_wns", "required_text": "**Calculation:**"}
-{"entity_id": "artifact.sta.outputs", "id": "sta-artifact", "question": "Explain artifact.sta.outputs", "required_text": "**Meaning:**"}
-{"entity_id": "failure.sta.preconditions", "id": "sta-failure", "question": "Explain failure.sta.preconditions", "required_text": "**Failure mode:**"}

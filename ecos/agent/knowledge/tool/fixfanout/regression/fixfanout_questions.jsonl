@@ -1,9 +1,0 @@
-{"entity_id": "algorithm.fixfanout.execution", "id": "fixfanout-execution", "question": "Explain algorithm.fixfanout.execution", "required_text": "Execution path:"}
-{"entity_id": "algorithm.fixfanout.model_initialization", "id": "fixfanout-model_initialization", "question": "Explain fixfanout algorithm model initialization.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.fixfanout.violating_net_scan", "id": "fixfanout-violating_net_scan", "question": "Explain fixfanout algorithm violating net scan.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.fixfanout.buffer_tree_construction", "id": "fixfanout-buffer_tree_construction", "question": "Explain fixfanout algorithm buffer tree construction.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.fixfanout.hierarchical_convergence", "id": "fixfanout-hierarchical_convergence", "question": "Explain fixfanout algorithm hierarchical convergence.", "required_text": "Source evidence:"}
-{"entity_id": "parameter.fixfanout.file_path_def_file", "id": "fixfanout-parameter", "question": "Explain parameter.fixfanout.file_path_def_file", "required_text": "**Role:**"}
-{"entity_id": "metric.fanout_max", "id": "fixfanout-metric", "question": "Explain metric.fanout_max", "required_text": "**Calculation:**"}
-{"entity_id": "artifact.fixfanout.outputs", "id": "fixfanout-artifact", "question": "Explain artifact.fixfanout.outputs", "required_text": "**Meaning:**"}
-{"entity_id": "failure.fixfanout.preconditions", "id": "fixfanout-failure", "question": "Explain failure.fixfanout.preconditions", "required_text": "**Failure mode:**"}

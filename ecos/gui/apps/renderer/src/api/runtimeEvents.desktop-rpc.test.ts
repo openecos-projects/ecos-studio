@@ -560,11 +560,27 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     client.connect()
     bridge.emit(
       asDesignEvent({
+        code: 'command_failed',
+        details: { step: 'synth' },
+        logFile: '/tmp/ecc-runtime.log',
         message: 'flow failed',
         method: 'flow.run',
         operationId: 'operation-failed',
         type: 'operation.failed',
         workspaceHandle: 'workspace-handle-1',
+      }),
+    )
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'rtl2gds',
+          errorCode: 'command_failed',
+          errorDetails: { step: 'synth' },
+          logFile: '/tmp/ecc-runtime.log',
+          type: 'error',
+        }),
+        message: ['flow failed'],
+        response: 'error',
       }),
     )
     bridge.emit(
@@ -601,7 +617,9 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     bridge.emit(
       asDesignEvent({
         code: 1,
-        message: 'ECC RPC sidecar exited unexpectedly',
+        interruptedOperationId: 'operation-interrupted',
+        message:
+          'ECC RPC sidecar exited unexpectedly\nLast output:\nfatal: missing liberty file',
         reason: 'unexpected',
         signal: null,
         type: 'runtime.exited',
@@ -611,6 +629,13 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
     expect(allHandler).toHaveBeenCalledTimes(1)
     expect(errorHandler).toHaveBeenCalledOnce()
-    expect(errorHandler).toHaveBeenCalledWith('ECC RPC sidecar exited unexpectedly')
+    expect(errorHandler).toHaveBeenCalledWith(
+      'ECC RPC sidecar exited unexpectedly\nLast output:\nfatal: missing liberty file',
+    )
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ jobId: 'operation-interrupted' }),
+      }),
+    )
   })
 })

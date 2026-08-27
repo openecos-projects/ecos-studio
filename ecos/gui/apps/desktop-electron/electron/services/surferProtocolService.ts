@@ -93,7 +93,7 @@ export class SurferProtocolService {
   }
 
   async authorizeWaveform(path: string): Promise<string> {
-    const canonicalPath = await this.resolveWaveformFile(path)
+    const canonicalPath = await this.resolveWaveformPath(path)
     this.pruneWaveformGrants()
     const token = randomUUID()
     this.waveformGrants.set(token, {
@@ -101,6 +101,10 @@ export class SurferProtocolService {
       expiresAt: Date.now() + WAVEFORM_GRANT_TTL_MS,
     })
     return surferWaveformUrl(canonicalPath, token)
+  }
+
+  async resolveWaveformPath(path: string): Promise<string> {
+    return await this.resolveWaveformFile(path)
   }
 
   private async handleRequest(request: Request): Promise<Response> {

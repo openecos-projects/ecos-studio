@@ -24,6 +24,7 @@ import {
 import { finishRuntimeStepRender } from './runtimeStepRenderSync'
 import { setDesktopWindowTitle } from './windowTitle'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { useNotificationStore } from '@/stores/notificationStore'
 import {
   useWorkspaceLifecycle,
   type WorkspaceSession,
@@ -31,7 +32,6 @@ import {
 } from './useWorkspaceLifecycle'
 import {
   readWorkspaceFlowResourceApi,
-  readWorkspaceHomeResourceApi,
   readWorkspaceParametersResourceApi,
 } from '@/api/workspaceResources'
 import {
@@ -45,6 +45,7 @@ import {
   rewriteWorkspaceConfigPathsForReplacement,
   workspaceParentPath,
 } from './workspaceReplacement'
+import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
 
 interface SerializedProject {
   id: string
@@ -61,8 +62,6 @@ interface SerializedProject {
   completedSteps?: number
   currentStep?: string
   totalRuntime?: string
-  cellCount?: number
-  frequency?: number
 }
 
 const currentProject = ref<Project | null>()
@@ -183,6 +182,7 @@ function scheduleStepRenderedAck(options: {
 // Runtime event connection（workspace 级别，跟随 workspace 生命周期）
 const runtimeEventClient = ref<RuntimeEventClient | null>(null)
 const runtimeEvents = ref<RuntimeEventResponse[]>([])
+const notificationStore = useNotificationStore()
 const handledRefreshRuntimeEvents = new Set<string>()
 const handledRuntimeProtocolEvents = new Set<string>()
 const pendingStepRenderedAcks = new Map<string, Promise<void>>()
@@ -254,6 +254,13 @@ export function useWorkspace() {
     detail?: string
     life?: number
   }) {
+    if (options.severity === 'error' || options.severity === 'warn') {
+      notificationStore.addNotification({
+        severity: options.severity,
+        title: options.summary,
+        message: options.detail || options.summary,
+      })
+    }
     if (_toast) {
       _toast.add({
         severity: options.severity ?? 'info',
@@ -426,6 +433,19 @@ export function useWorkspace() {
       }
     })
 
+  const registerProjectManagedReadScope = (workspacePath: string): Promise<void> =>
+    enqueueProjectRootMutation(async () => {
+      try {
+        const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
+        if (!projectContext) return
+
+        const desktopApi = await waitForDesktopApi()
+        await desktopApi.workspace.registerProjectReadRoot(projectContext.projectRoot)
+      } catch (error) {
+        console.warn('Failed to register managed project read scope:', error)
+      }
+    })
+
   const clearProjectRoot = (): Promise<void> =>
     enqueueProjectRootMutation(async () => {
       try {
@@ -588,6 +608,8 @@ export function useWorkspace() {
             await router.replace('/')
             return
           }
+          await registerProjectManagedReadScope(canonicalProjectRoot)
+          if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
           currentProject.value = {
             ...restored,
             path: canonicalProjectRoot,
@@ -811,6 +833,10 @@ export function useWorkspace() {
           }
           return false
         }
+        await registerProjectManagedReadScope(canonicalProjectRoot)
+        if (!isLatestOpenProjectRequest()) return false
+        if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
+          return false
 
         const existingProject = recentProjects.value.find(
           (p) => normalizePath(p.path) === resolvedPath,
@@ -1242,6 +1268,8 @@ export function useWorkspace() {
           designTool: 'backend',
           pdk: pdkName,
           pdk_root: resolvedPdkRoot,
+          pdk_installation_id: creationConfig?.pdk_installation_id,
+          pdk_requirement: creationConfig?.pdk_requirement,
           parameters: backendParameters,
           origin_def: creationConfig?.origin_def,
           origin_verilog: creationConfig?.origin_verilog,
@@ -1291,7 +1319,6 @@ export function useWorkspace() {
             'The project directory could not be registered for local file access.'
           return false
         }
-
         if (replacement && config?.keepReplacementBackup) {
           await recordWorkspaceReplacementBackup(replacement, config, showToast)
           committedReplacement = true
@@ -1500,24 +1527,6 @@ export function useWorkspace() {
       console.warn('Failed to read parameters.json for snapshot')
     }
 
-    try {
-      const homeData = await readWorkspaceHomeResourceApi()
-      if (!isCurrent()) return
-      const monitor = isRecord(homeData) ? homeData.monitor : null
-      if (isRecord(monitor)) {
-        if (Array.isArray(monitor.instance) && monitor.instance.length > 0) {
-          const cellCount = asNumber(monitor.instance[monitor.instance.length - 1])
-          if (cellCount !== undefined) snapshot.cellCount = cellCount
-        }
-        if (Array.isArray(monitor.frequency) && monitor.frequency.length > 0) {
-          const lastFreq = asNumber(monitor.frequency[monitor.frequency.length - 1])
-          if (lastFreq !== undefined && lastFreq > 0) snapshot.frequency = lastFreq
-        }
-      }
-    } catch {
-      console.warn('Failed to read home.json for snapshot')
-    }
-
     const currentIdx = recentProjects.value.findIndex(
       (p) => normalizePath(p.path) === projectPath,
     )
@@ -1613,6 +1622,41 @@ export function useWorkspace() {
     // 注册通用处理器，收集所有通知到 runtimeEvents
     client.onAll((response) => {
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return
+      if (response.response === 'error' || response.data?.type === 'error') {
+        const rawMessage = response.message?.[0] || 'ECC runtime operation failed.'
+        const [message, ...detailLines] = rawMessage.split('\n')
+        const operationId = asString(response.data?.jobId)
+        const step = asString(response.data?.step)
+        const interrupted = response.data?.errorCode === 'interrupted'
+        const errorDetails = response.data?.errorDetails
+        const previousRun =
+          typeof errorDetails === 'object' &&
+          errorDetails !== null &&
+          'previousRun' in errorDetails &&
+          errorDetails.previousRun === true
+        const stepTitle = step
+          ? `${step.charAt(0).toUpperCase()}${step.slice(1)}`
+          : 'Flow'
+        notificationStore.addNotification({
+          key: operationId,
+          severity: 'error',
+          title:
+            response.data?.method === 'runtime.exited'
+              ? 'ECC sidecar stopped'
+              : previousRun
+                ? `Previous ${stepTitle} run was interrupted`
+                : interrupted
+                  ? `${stepTitle} interrupted`
+                  : `${stepTitle} failed`,
+          message: message?.trim() || 'ECC runtime operation failed.',
+          detail:
+            detailLines.join('\n').trim() ||
+            (interrupted
+              ? 'The step was marked Incomplete and was not rerun automatically.'
+              : 'Review the step log before rerunning.'),
+          logFile: asString(response.data?.logFile),
+        })
+      }
       // 过滤心跳消息，不记录到 messages
       if (response.data?.type !== 'heartbeat') {
         const runtimeEventId = asString(response.data?.runtimeEventId)

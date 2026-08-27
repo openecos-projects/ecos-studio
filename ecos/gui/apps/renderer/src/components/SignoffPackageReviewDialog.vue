@@ -109,18 +109,6 @@
             </ul>
           </section>
         </div>
-
-        <label for="signoff-review-output-path" class="signoff-package-review-path-label">
-          Signoff package path
-        </label>
-        <input
-          id="signoff-review-output-path"
-          v-model="outputPath"
-          class="signoff-package-review-path-input"
-          type="text"
-          placeholder="/path/to/signoff_package.tar.gz"
-          autocomplete="off"
-        />
       </template>
 
       <div v-else class="signoff-package-review-loading" role="status">
@@ -149,14 +137,8 @@
         <button
           type="button"
           class="signoff-package-review-primary"
-          :disabled="
-            loading ||
-            Boolean(error) ||
-            !result ||
-            result.status === 'blocked' ||
-            !outputPath.trim()
-          "
-          @click="emit('export', outputPath.trim())"
+          :disabled="loading || Boolean(error) || !result || result.status === 'blocked'"
+          @click="emit('export')"
         >
           Export Package
         </button>
@@ -166,7 +148,6 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
 import type {
   EccSignoffReviewDetail,
   EccSignoffReviewStatus,
@@ -174,24 +155,17 @@ import type {
 } from '@ecos-studio/shared'
 import Dialog from 'primevue/dialog'
 
-const props = defineProps<{
+defineProps<{
   error: string
   loading: boolean
   result: EccWorkspaceInspectSignoffResult | null
   visible: boolean
 }>()
-const outputPath = ref('')
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) outputPath.value = ''
-  },
-)
 
 const emit = defineEmits<{
   close: []
-  export: [outputPath: string]
+  export: []
+  exportReport: []
   refresh: []
 }>()
 
@@ -511,28 +485,6 @@ function detailKey(detail: EccSignoffReviewDetail): string {
   overflow-wrap: anywhere;
   padding: 2px 5px;
   white-space: normal;
-}
-
-.signoff-package-review-path-label {
-  display: block;
-  margin-top: 18px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.signoff-package-review-path-input {
-  box-sizing: border-box;
-  margin-top: 7px;
-  min-height: 34px;
-  padding: 0 10px;
-  width: 100%;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 13px;
 }
 
 .signoff-package-review-actions {

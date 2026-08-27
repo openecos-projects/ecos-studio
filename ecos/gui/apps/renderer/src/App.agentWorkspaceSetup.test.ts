@@ -32,7 +32,8 @@ describe('agent workspace creation', () => {
     expect(source).toContain(':visible="showStepConfigDialog"')
     expect(source).toContain('@update:visible="updateStepConfigDialogVisibility"')
     expect(source).toContain('<WorkspaceStepConfigDialog')
-    expect(source).toContain('>\n          Cancel\n        </button>')
+    // No footer: the dialog closes via the header X / ESC through the same guard.
+    expect(source).not.toContain('<template #footer>')
   })
 
   it('does not auto-open Edit/Config after agent workspace creation', () => {

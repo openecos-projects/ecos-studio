@@ -96,6 +96,10 @@
         </aside>
 
         <main class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-transparent">
+          <div class="shrink-0 px-8 pt-6 md:px-12">
+            <FrontendExperimentalBanner />
+          </div>
+
           <div
             ref="wizardScrollRef"
             class="custom-scrollbar flex-1 overflow-y-auto p-8 md:p-12"
@@ -842,6 +846,7 @@ import {
   type FrontendValidationResult,
 } from '@/api/frontendCatalog'
 import { waitForDesktopApi } from '@/platform/desktop'
+import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 import type { WorkspaceConfig } from '../types'
 import {
   formatCpuTopModule,
@@ -1434,7 +1439,10 @@ function sortedCatalogEntries(entries: FrontendCatalogEntry[]): FrontendCatalogE
   })
 }
 
-function stringField(entry: FrontendCatalogEntry | null, field: string): string {
+function stringField(
+  entry: FrontendCatalogEntry | null,
+  field: keyof FrontendCatalogEntry,
+): string {
   const value = entry?.[field]
   return typeof value === 'string' ? value : ''
 }

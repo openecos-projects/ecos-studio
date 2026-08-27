@@ -1,7 +1,12 @@
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import {
   appMenuActionIds,
+  extractDesignReportData,
+  generateDesignReport,
+  joinLocalPath,
+  type DesignReportFormat,
   type EccWorkspaceInspectSignoffResult,
+  type SignoffAdditionalFile,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 
@@ -55,6 +60,30 @@ export function canExportSignoffPackage(flow: unknown): boolean {
     typeof finalStep.name === 'string' &&
     finalStep.name.trim().toLowerCase() === 'harden' &&
     finalStep.state === 'Success'
+  )
+}
+
+function workspaceLeaf(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/g, '')
+  const parts = normalized.split('/').filter(Boolean)
+  return parts[parts.length - 1] || normalized
+}
+
+function projectPathForWorkspace(workspacePath: string): string {
+  const normalized = workspacePath.replace(/[\\/]+$/g, '')
+  const separatorIndex = Math.max(
+    normalized.lastIndexOf('/'),
+    normalized.lastIndexOf('\\'),
+  )
+
+  if (separatorIndex <= 0) return normalized
+  return normalized.slice(0, separatorIndex)
+}
+
+function signoffPackageDefaultPath(workspacePath: string, design: string): string {
+  return joinLocalPath(
+    joinLocalPath(projectPathForWorkspace(workspacePath), 'signoff'),
+    `${design}_signoff_package.tar.gz`,
   )
 }
 
@@ -292,10 +321,8 @@ export function useSignoffPackageExport({
     }
   }
 
-  async function confirmSignoffPackageExport(outputPath: string): Promise<void> {
+  async function confirmSignoffPackageExport(): Promise<void> {
     if (!canConfirmSignoffPackageExport.value) return
-    const normalizedOutputPath = outputPath.trim()
-    if (!normalizedOutputPath) return
 
     const workspace = activeWorkspaceSnapshot()
     if (
@@ -310,10 +337,80 @@ export function useSignoffPackageExport({
     closeSignoffPackageReview()
     try {
       const api = getDesktopApi()
+      const parameters = await api.workspaceResources.readParameters()
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
 
+      const design =
+        isRecord(parameters) &&
+        typeof parameters.Design === 'string' &&
+        parameters.Design.trim()
+          ? parameters.Design.trim()
+          : workspaceLeaf(workspace.workspacePath)
+      const outputPath = await api.dialog.saveFile({
+        title: 'Export Signoff Package',
+        defaultPath: signoffPackageDefaultPath(workspace.workspacePath, design),
+        ensureDirectory: true,
+        filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
+      })
+      if (
+        !outputPath ||
+        !isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)
+      ) {
+        return
+      }
+
+      const flow = await api.workspaceResources.readFlow().catch(() => null)
+      const home = await api.workspaceResources.readHome().catch(() => null)
+      const versions = await api.app
+        .getVersions()
+        .catch(() => ({ gui: '', ecc: '', eccTools: '' }))
+      const reportData = extractDesignReportData({
+        workspacePath: workspace.workspacePath,
+        parameters: isRecord(parameters) ? parameters : undefined,
+        flow,
+        homeData: isRecord(home) ? home : undefined,
+        versionInfo: isRecord(versions)
+          ? {
+              gui: typeof versions.gui === 'string' ? versions.gui : undefined,
+              ecc: typeof versions.ecc === 'string' ? versions.ecc : undefined,
+              eccTools:
+                typeof versions.eccTools === 'string' ? versions.eccTools : undefined,
+            }
+          : undefined,
+      })
+
+      const reportFormats: DesignReportFormat[] = [
+        'latex',
+        'markdown',
+        'typst',
+        'csv',
+        'text',
+      ]
+      const formatExtMap: Record<DesignReportFormat, string> = {
+        latex: 'tex',
+        markdown: 'md',
+        typst: 'typ',
+        csv: 'csv',
+        text: 'txt',
+      }
+      const additionalFiles: SignoffAdditionalFile[] = reportFormats.map((fmt) => {
+        const ext = formatExtMap[fmt]
+        const content = generateDesignReport(reportData, fmt, {
+          includeMultiCorner: true,
+          includeStageBreakdown: true,
+          includeVerificationBreakdown: true,
+          latexStandalone: true,
+          typstStandalone: true,
+        })
+        return {
+          archivePath: `design_summaries/${design}_design_summary.${ext}`,
+          content,
+        }
+      })
+
       const result = await api.ecc.workspace.exportSignoff({
-        outputPath: normalizedOutputPath,
+        additionalFiles,
+        outputPath,
         workspaceHandle: workspace.workspaceHandle,
       })
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
@@ -321,7 +418,7 @@ export function useSignoffPackageExport({
       showToast({
         severity: 'success',
         summary: 'Signoff Package Exported',
-        detail: `Saved to ${result.outputPath}`,
+        detail: `Saved package and design summaries to ${result.outputPath}`,
       })
     } catch (error) {
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return

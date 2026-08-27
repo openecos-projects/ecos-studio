@@ -134,9 +134,10 @@ export async function registerProjectManagedWorkspace(
   if (!projectRoot || !workspacePath) return
 
   const warn = input.onWarning ?? (() => {})
+  let registeredProjectRoot: string | null = null
 
   try {
-    const registeredProjectRoot = await registerLocalProjectRoot(projectRoot)
+    registeredProjectRoot = await registerLocalProjectRoot(projectRoot)
     if (!registeredProjectRoot) {
       warn(
         'Project manifest not updated',
@@ -190,7 +191,15 @@ export async function registerProjectManagedWorkspace(
       'Workspace was created, but project.json could not be updated.',
     )
   } finally {
-    await registerLocalProjectRoot(workspacePath)
+    const registeredWorkspaceRoot = await registerLocalProjectRoot(workspacePath)
+    if (registeredProjectRoot && registeredWorkspaceRoot) {
+      try {
+        const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+        await desktopApi.workspace.registerProjectReadRoot(registeredProjectRoot)
+      } catch (error) {
+        console.warn('Failed to register managed project read scope:', error)
+      }
+    }
   }
 }
 

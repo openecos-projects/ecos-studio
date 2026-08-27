@@ -17,7 +17,7 @@ import type { EccRuntimeEvent } from '@ecos-studio/shared'
 import { electronLogger } from '../logger'
 import { EccJsonRpcClient, type JsonRpcNotificationPayload } from './jsonRpcClient'
 
-const STDERR_TAIL_CHARS = 8000
+const OUTPUT_TAIL_CHARS = 8000
 
 export interface SpawnedEccRpcSidecar extends EventEmitter {
   kill(signal?: NodeJS.Signals): boolean
@@ -91,6 +91,11 @@ function tailText(text: string, maxChars: number): string {
   return newline === -1 ? sliced : sliced.slice(newline + 1)
 }
 
+function stripAnsi(text: string): string {
+  // oxlint-disable-next-line no-control-regex -- ANSI escape sequences contain ESC.
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+}
+
 function environmentsEqual(
   left: NodeJS.ProcessEnv | null,
   right: NodeJS.ProcessEnv,
@@ -129,8 +134,9 @@ export class EccRpcSidecarProcess {
   private forceKillTimer: ReturnType<typeof setTimeout> | null = null
   private shuttingDown = false
   private spawnEnv: NodeJS.ProcessEnv | null = null
-  private stderrTail = ''
   private spawnLaunchKey: string | null = null
+  private outputTail = ''
+  private launchError: string | null = null
   logFile: string | null = null
 
   constructor(private readonly options: EccRpcSidecarProcessOptions = {}) {
@@ -172,8 +178,9 @@ export class EccRpcSidecarProcess {
     }
 
     this.logFile = this.createLogFile()
-    this.stderrTail = ''
     this.shuttingDown = false
+    this.outputTail = ''
+    this.launchError = null
     this.appendLog(
       `[sidecar] spawning ${this.command} rpc serve --stdio --persistent-db\n`,
     )
@@ -204,7 +211,7 @@ export class EccRpcSidecarProcess {
         const recovered = client.recoverStdout()
         if (recovered) {
           const text = `[protocol] discarded malformed stdout before the next RPC frame:\n${recovered}\n`
-          this.appendLog(text)
+          this.captureOutput(text)
           this.options.onEvent?.({
             logFile: this.logFile ?? undefined,
             text,
@@ -239,6 +246,8 @@ export class EccRpcSidecarProcess {
     child.once('error', (error) => {
       const sidecarError =
         error instanceof Error ? error : new Error(`ECC RPC sidecar error: ${error}`)
+      this.launchError = sidecarError.message
+      this.captureOutput(`[sidecar] ${sidecarError.message}\n`)
       client.rejectPending(sidecarError)
     })
 
@@ -249,9 +258,7 @@ export class EccRpcSidecarProcess {
         reason === 'unexpected'
           ? this.formatUnexpectedExitMessage(code, signal)
           : undefined
-      if (message) {
-        this.logUnexpectedExit(message)
-      }
+      if (message) electronLogger.error('[runtime] %s', message)
       const exitError = new Error(message ?? 'ECC RPC sidecar exited.')
       client.rejectPending(exitError)
       if (this.child === child) {
@@ -424,34 +431,29 @@ export class EccRpcSidecarProcess {
     return path
   }
 
-  private formatUnexpectedExitMessage(
-    code: number | null,
-    signal: NodeJS.Signals | null,
-  ): string {
-    const cause = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`
-    return this.logFile
-      ? `ECC RPC sidecar exited with ${cause}. See ${this.logFile}`
-      : `ECC RPC sidecar exited with ${cause}.`
-  }
-
-  private logUnexpectedExit(message: string): void {
-    const tail = tailText(this.stderrTail, STDERR_TAIL_CHARS)
-    if (tail) {
-      electronLogger.error('[runtime] %s\n%s', message, tail)
-      return
-    }
-    electronLogger.error('[runtime] %s', message)
-  }
-
-  private captureOutput(text: string): void {
-    this.stderrTail = `${this.stderrTail}${text}`.slice(-STDERR_TAIL_CHARS)
-    this.appendLog(text)
-  }
-
   private appendLog(text: string): void {
     if (!this.logFile) {
       return
     }
     appendFileSync(this.logFile, text, 'utf8')
+  }
+
+  private captureOutput(text: string): void {
+    this.outputTail = `${this.outputTail}${text}`.slice(-OUTPUT_TAIL_CHARS)
+    this.appendLog(text)
+  }
+
+  private formatUnexpectedExitMessage(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ): string {
+    const cause =
+      this.launchError ??
+      `ECC RPC sidecar exited with ${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`}.`
+    const location = this.logFile ? ` See ${this.logFile}.` : ''
+    const diagnostic = stripAnsi(tailText(this.outputTail, 2400))
+    return diagnostic
+      ? `${cause}${location}\nLast output:\n${diagnostic}`
+      : `${cause}${location}`
   }
 }

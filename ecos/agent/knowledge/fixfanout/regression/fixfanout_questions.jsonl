@@ -1,0 +1,9 @@
+{"entity_id": "algorithm.fixfanout.execution", "id": "fixfanout-execution", "question": "How does the fixFanout stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.fixfanout.model_initialization", "id": "fixfanout-model_initialization", "question": "fixfanout model initialization", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.fixfanout.violating_net_scan", "id": "fixfanout-violating_net_scan", "question": "fixfanout violating net scan", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.fixfanout.buffer_tree_construction", "id": "fixfanout-buffer_tree_construction", "question": "fixfanout buffer tree construction", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.fixfanout.hierarchical_convergence", "id": "fixfanout-hierarchical_convergence", "question": "fixfanout hierarchical convergence", "required_text": "Source evidence:"}
+{"entity_id": "parameter.fixfanout.insert_buffer", "id": "fixfanout-parameter", "question": "fixfanout insert_buffer", "required_text": "**Role:**"}
+{"entity_id": "metric.fanout_max", "id": "fixfanout-metric", "question": "fanout max", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.fixfanout.outputs", "id": "fixfanout-artifact", "question": "fixfanout artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.fixfanout.preconditions", "id": "fixfanout-failure", "question": "fixfanout failed", "required_text": "**Failure mode:**"}

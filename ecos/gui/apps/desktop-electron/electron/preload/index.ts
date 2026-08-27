@@ -169,6 +169,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceRequestProjectPathAccess, path),
     authorizeWaveform: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceAuthorizeWaveform, path),
+    openWaveformExternal: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceOpenWaveformExternal, path),
     readProjectTextFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectTextFile, path),
     readOptionalProjectTextFile: (path) =>
@@ -317,8 +319,6 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.resourcesCancel, resourceId),
     uninstall: (resourceId) =>
       invokeDesktop(desktopApiIpcChannels.resourcesUninstall, resourceId),
-    activatePdk: (resourceId) =>
-      invokeDesktop(desktopApiIpcChannels.resourcesActivatePdk, resourceId),
     validatePdk: (resourceId) =>
       invokeDesktop(desktopApiIpcChannels.resourcesValidatePdk, resourceId),
     removePdkReference: (resourceId) =>
@@ -337,6 +337,15 @@ const desktopApi: DesktopApi = {
           listener(payload as ResourceJob)
         },
       ),
+  },
+  pdkInventory: {
+    list: () => invokeDesktop(desktopApiIpcChannels.pdkInventoryList),
+    import: (request) => invokeDesktop(desktopApiIpcChannels.pdkInventoryImport, request),
+    locate: (request) => invokeDesktop(desktopApiIpcChannels.pdkInventoryLocate, request),
+    remove: (installationId) =>
+      invokeDesktop(desktopApiIpcChannels.pdkInventoryRemove, installationId),
+    resolveBinding: (request) =>
+      invokeDesktop(desktopApiIpcChannels.pdkInventoryResolveBinding, request),
   },
   runtime: {
     cancel: (request) =>

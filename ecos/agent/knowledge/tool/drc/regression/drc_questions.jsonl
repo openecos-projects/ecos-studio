@@ -1,9 +1,0 @@
-{"entity_id": "algorithm.drc.execution", "id": "drc-execution", "question": "Explain algorithm.drc.execution", "required_text": "Execution path:"}
-{"entity_id": "algorithm.drc.shape_collection", "id": "drc-shape_collection", "question": "Explain drc algorithm shape collection.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.drc.cluster_partitioning", "id": "drc-cluster_partitioning", "question": "Explain drc algorithm cluster partitioning.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.drc.geometric_rule_dispatch", "id": "drc-geometric_rule_dispatch", "question": "Explain drc algorithm geometric rule dispatch.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.drc.violation_generation_and_merge", "id": "drc-violation_generation_and_merge", "question": "Explain drc algorithm violation generation and merge.", "required_text": "Source evidence:"}
-{"entity_id": "parameter.drc.workspace_config", "id": "drc-parameter", "question": "Explain parameter.drc.workspace_config", "required_text": "**Role:**"}
-{"entity_id": "metric.drc_count", "id": "drc-metric", "question": "Explain metric.drc_count", "required_text": "**Calculation:**"}
-{"entity_id": "artifact.drc.outputs", "id": "drc-artifact", "question": "Explain artifact.drc.outputs", "required_text": "**Meaning:**"}
-{"entity_id": "failure.drc.preconditions", "id": "drc-failure", "question": "Explain failure.drc.preconditions", "required_text": "**Failure mode:**"}

@@ -254,6 +254,15 @@ function selectNode(id: string): void {
   color: var(--danger-color);
 }
 
+.flow-status-node.is-failed .flow-status-node-mark {
+  border-color: var(--danger-color);
+  color: var(--danger-color);
+}
+
+.flow-status-node.is-failed .flow-status-node-label {
+  color: var(--danger-color);
+}
+
 .is-queued,
 .is-skipped {
   color: var(--text-secondary);

@@ -26,6 +26,11 @@
           aria-label="Completed"
         />
         <i
+          v-else-if="stage.state === 'Skipped'"
+          class="ri-skip-forward-fill absolute -top-0.5 right-0 rounded-full bg-(--bg-sidebar) text-[10px] text-(--text-secondary)"
+          aria-label="Skipped"
+        />
+        <i
           v-else-if="stage.state === 'Ongoing'"
           class="ri-loader-4-line absolute -top-0.5 right-0 animate-spin rounded-full bg-(--bg-sidebar) text-[10px] text-blue-400"
           aria-label="Running"

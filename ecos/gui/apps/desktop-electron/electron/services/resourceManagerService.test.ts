@@ -12,6 +12,7 @@ import {
   readFile,
   readlink,
   rm,
+  stat,
   symlink,
   writeFile,
 } from 'node:fs/promises'
@@ -1042,7 +1043,7 @@ describe('ResourceManagerService', () => {
     )
   })
 
-  it('lists registry resources and imported PDKs from the desktop manifest', async () => {
+  it('keeps imported PDKs out of the generic Resource listing', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
     const pdkPath = join(root, 'pdks', 'ics55')
@@ -1104,7 +1105,6 @@ describe('ResourceManagerService', () => {
       pdksDir: join(root, 'data', 'pdks'),
     })
     const imported = await service.importPdkPath(pdkPath)
-    await service.activatePdk(imported.id)
 
     const result = await service.listResources()
 
@@ -1119,14 +1119,6 @@ describe('ResourceManagerService', () => {
           actions: ['install'],
         }),
         expect.objectContaining({
-          id: expect.stringMatching(/^pdk:ics55:local:/),
-          type: 'pdk',
-          status: 'invalid',
-          active: true,
-          path: pdkPath,
-          actions: ['validate', 'remove_reference'],
-        }),
-        expect.objectContaining({
           id: 'pdk:ics55',
           type: 'pdk',
           status: 'available',
@@ -1134,6 +1126,14 @@ describe('ResourceManagerService', () => {
         }),
       ]),
     )
+    expect(result.resources).not.toContainEqual(
+      expect.objectContaining({ id: imported.id, path: pdkPath }),
+    )
+    await expect(service.getResource(imported.id)).resolves.toMatchObject({
+      id: imported.id,
+      path: pdkPath,
+      status: 'invalid',
+    })
   })
 
   it('recursively detects PDK LEF and Liberty files with relative directory paths', async () => {
@@ -1174,42 +1174,24 @@ describe('ResourceManagerService', () => {
       ...dirs,
     })
 
-    await service.importPdkPath(pdkRoot)
+    const imported = await service.importPdkPath(pdkRoot)
 
-    const manifest = JSON.parse(
-      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
-    ) as {
-      installed: Record<
-        string,
-        {
-          detected_file_groups?: { directories: string[]; files: string[] }
-          detected_files?: string[]
-        }
-      >
-    }
-    const pdkEntry = Object.values(manifest.installed).find(
-      (entry) => (entry as { type?: string }).type === 'pdk',
-    ) as
-      | {
-          detected_file_groups?: { directories: string[]; files: string[] }
-          detected_files?: string[]
-        }
-      | undefined
-    expect(pdkEntry?.detected_file_groups?.files).toEqual([
-      'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
-      'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
-      'prtech/techLEF/N551P6M.lef',
-    ])
-    expect(pdkEntry?.detected_file_groups?.directories).toEqual([
-      'IP',
-      'IP/STD_cell',
-      'IP/STD_cell/ics55_LLSC_H7CH',
-      'IP/STD_cell/ics55_LLSC_H7CH/lef',
-      'IP/STD_cell/ics55_LLSC_H7CH/liberty',
-      'prtech',
-      'prtech/techLEF',
-    ])
-    expect(pdkEntry?.detected_files).toContain('prtech/techLEF/N551P6M.lef')
+    expect(imported.health.detected_file_groups).toMatchObject({
+      files: [
+        'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
+        'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
+        'prtech/techLEF/N551P6M.lef',
+      ],
+      directories: [
+        'IP',
+        'IP/STD_cell',
+        'IP/STD_cell/ics55_LLSC_H7CH',
+        'IP/STD_cell/ics55_LLSC_H7CH/lef',
+        'IP/STD_cell/ics55_LLSC_H7CH/liberty',
+        'prtech',
+        'prtech/techLEF',
+      ],
+    })
   })
 
   it('marks installed registry tools as missing when their install directory is gone', async () => {
@@ -1367,6 +1349,207 @@ describe('ResourceManagerService', () => {
         status: 'invalid',
         path_exists: true,
         missing_markers: ['fecompiler'],
+      }),
+    })
+  })
+
+  it('marks installed tools as invalid when an executable marker is unusable', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const eccFeRoot = join(toolsDir, 'ecc-fe', 'latest')
+    await mkdir(join(eccFeRoot, 'bin', 'ecc-fe'), { recursive: true })
+    await mkdir(join(eccFeRoot, 'fecompiler'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(
+      registryPath,
+      JSON.stringify({ schema_version: 2, tools: [], pdks: [] }),
+      'utf8',
+    )
+    await writeFile(
+      join(resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 1,
+        installed: {
+          'tool:ecc-fe': {
+            type: 'tool',
+            name: 'ecc-fe',
+            version: 'latest',
+            path: eccFeRoot,
+            executable: 'bin/ecc-fe',
+            detected_executables: ['bin/ecc-fe'],
+            active: true,
+            managed: true,
+          },
+        },
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      id: 'tool:ecc-fe',
+      status: 'invalid',
+      active: false,
+      error: 'Installed resource is missing required files: bin/ecc-fe',
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['bin/ecc-fe'],
+      }),
+    })
+
+    if (process.platform !== 'win32') {
+      await rm(join(eccFeRoot, 'bin', 'ecc-fe'), { recursive: true })
+      await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+      await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o644)
+
+      await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+        status: 'invalid',
+        active: false,
+        health: expect.objectContaining({
+          status: 'invalid',
+          missing_markers: ['bin/ecc-fe'],
+        }),
+      })
+    }
+  })
+
+  it('marks installed tools as invalid when marker filesystem types are wrong', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const dirs = testResourceDirs(root)
+    const eccFeRoot = join(dirs.toolsDir, 'ecc-fe', 'latest')
+    const verilatorRoot = join(dirs.toolsDir, 'verilator', '5.050')
+    const customCpuRoot = join(dirs.toolsDir, 'ecc-fe-cpu-custom', 'latest')
+    const difftestRoot = join(dirs.toolsDir, 'ecc-fe-difftest-ref', 'latest')
+    const smokeTestRoot = join(dirs.toolsDir, 'ecc-fe-test-smoke', 'latest')
+
+    await mkdir(join(eccFeRoot, 'bin'), { recursive: true })
+    await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o755)
+    await writeFile(join(eccFeRoot, 'fecompiler'), 'not a directory\n', 'utf8')
+
+    await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
+    await mkdir(join(verilatorRoot, 'share', 'verilator', 'include', 'verilated.cpp'), {
+      recursive: true,
+    })
+    for (const executable of ['verilator', 'verilator_bin']) {
+      await writeFile(join(verilatorRoot, 'bin', executable), '#!/bin/sh\n', 'utf8')
+      await chmod(join(verilatorRoot, 'bin', executable), 0o755)
+    }
+
+    await mkdir(customCpuRoot, { recursive: true })
+    await writeFile(join(customCpuRoot, 'thirdparty'), 'not a directory\n', 'utf8')
+    await mkdir(join(difftestRoot, 'tools', 'riscv32-spike-so'), { recursive: true })
+    await mkdir(smokeTestRoot, { recursive: true })
+    await writeFile(join(smokeTestRoot, 'tests'), 'not a directory\n', 'utf8')
+
+    await writeFile(
+      registryPath,
+      JSON.stringify({ schema_version: 2, tools: [], pdks: [] }),
+      'utf8',
+    )
+    await writeTestManifest(root, {
+      'tool:ecc-fe': {
+        type: 'tool',
+        name: 'ecc-fe',
+        version: 'latest',
+        path: eccFeRoot,
+        executable: 'bin/ecc-fe',
+        detected_executables: ['bin/ecc-fe'],
+        active: true,
+        managed: true,
+      },
+      'tool:verilator': {
+        type: 'tool',
+        name: 'verilator',
+        version: '5.050',
+        path: verilatorRoot,
+        executable: 'bin/verilator',
+        detected_executables: ['bin/verilator', 'bin/verilator_bin'],
+        active: true,
+        managed: true,
+      },
+      'tool:ecc-fe-cpu-custom': {
+        type: 'tool',
+        name: 'ecc-fe-cpu-custom',
+        version: 'latest',
+        path: customCpuRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
+      'tool:ecc-fe-difftest-ref': {
+        type: 'tool',
+        name: 'ecc-fe-difftest-ref',
+        version: 'latest',
+        path: difftestRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
+      'tool:ecc-fe-test-smoke': {
+        type: 'tool',
+        name: 'ecc-fe-test-smoke',
+        version: 'latest',
+        path: smokeTestRoot,
+        executable: '',
+        detected_executables: [],
+        active: true,
+        managed: true,
+      },
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['fecompiler'],
+      }),
+    })
+    await expect(service.getResource('tool:verilator')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['share/verilator/include/verilated.cpp'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-cpu-custom')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['thirdparty'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-difftest-ref')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['tools/riscv32-spike-so'],
+      }),
+    })
+    await expect(service.getResource('tool:ecc-fe-test-smoke')).resolves.toMatchObject({
+      status: 'invalid',
+      active: false,
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['tests'],
       }),
     })
   })
@@ -1758,8 +1941,8 @@ describe('ResourceManagerService', () => {
     expect(env.RISCV).toBe(riscvRoot)
     expect(env.RISCV_TOOLCHAIN).toBe(riscvRoot)
     expect(env.ECOS_SURFER_ASSETS_PATH).toBe(surferRoot)
-    expect(env.CHIPCOMPILER_ICS55_PDK_ROOT).toBe(ics55Root)
-    expect(env.ICS55_PDK_ROOT).toBe(ics55Root)
+    expect(env.CHIPCOMPILER_ICS55_PDK_ROOT).toBeUndefined()
+    expect(env.ICS55_PDK_ROOT).toBeUndefined()
     expect(env.KEEP_ME).toBe('yes')
     expect(env.PATH).not.toContain(join(inactiveRoot, 'bin'))
     expect(env.PATH).not.toContain(join(missingRoot, 'bin'))
@@ -2391,22 +2574,16 @@ describe('ResourceManagerService', () => {
       }),
     })
 
-    const manifest = JSON.parse(
-      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
-    ) as { installed: Record<string, unknown> }
-    const localEntry = Object.entries(manifest.installed).find(([id]) =>
-      id.startsWith('pdk:ics55:local:'),
-    )?.[1]
-    expect(localEntry).toMatchObject({
-      type: 'pdk',
-      id: 'ics55',
-      pdk_id: 'ics55',
-      canonical_path: pdkRoot,
-      path: pdkRoot,
-      active: true,
-      managed: false,
-      health: 'invalid',
-    })
+    const inventory = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'pdk-inventory.json'), 'utf8'),
+    ) as { installations: unknown[] }
+    expect(inventory.installations).toEqual([
+      expect.objectContaining({
+        familyId: 'ics55',
+        root: pdkRoot,
+        ownership: 'imported',
+      }),
+    ])
   })
 
   it('rejects row-bound local PDK import when the scanned PDK id differs', async () => {
@@ -2576,6 +2753,7 @@ describe('ResourceManagerService', () => {
     await mkdir(join(sourceDir, 'bin'), { recursive: true })
     await writeFile(join(sourceDir, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
     await chmod(join(sourceDir, 'bin', 'ecc-fe'), 0o755)
+    await writeFile(join(sourceDir, 'fecompiler'), 'not a directory\n', 'utf8')
     await runFixtureCommand('tar', [
       '-cf',
       archivePath,
@@ -2962,6 +3140,106 @@ describe('ResourceManagerService', () => {
         }),
       ]),
     )
+  })
+
+  it('satisfies registry dependencies from a Ready managed PDK Installation', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const registryPath = join(root, 'registry.json')
+    const pdkRoot = join(dirs.pdksDir, 'ics55', '1.10.100')
+    const stdCell = join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7C_V1p10C100')
+    const markers = [
+      join(pdkRoot, 'prtech', 'techLEF', 'N551P6M_ecos.lef'),
+      join(stdCell, 'ics55_LLSC_H7CR', 'lef', 'ics55_LLSC_H7CR_ecos.lef'),
+      join(stdCell, 'ics55_LLSC_H7CL', 'lef', 'ics55_LLSC_H7CL_ecos.lef'),
+      join(
+        stdCell,
+        'ics55_LLSC_H7CR',
+        'liberty',
+        'ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+      ),
+      join(
+        stdCell,
+        'ics55_LLSC_H7CL',
+        'liberty',
+        'ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib',
+      ),
+    ]
+    for (const marker of markers) {
+      await mkdir(join(marker, '..'), { recursive: true })
+      await writeFile(marker, '')
+    }
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [
+          {
+            name: 'yosys',
+            display_name: 'Yosys',
+            description: '',
+            category: 'synthesis',
+            homepage: '',
+            versions: [
+              {
+                version: '1',
+                platforms: {
+                  'all-platform': { url: 'file:///yosys.tar', sha256: 'tool-sha' },
+                },
+                requires: ['pdk:ics55'],
+              },
+            ],
+          },
+        ],
+        pdks: [
+          {
+            id: 'ics55',
+            versions: [
+              {
+                version: '1.10.100',
+                platforms: {
+                  'all-platform': { url: 'file:///ics55.tar', sha256: 'pdk-sha' },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    const service = new ResourceManagerService({
+      ...dirs,
+      registryUrl: `file://${registryPath}`,
+    })
+    const imported = await service.getPdkInventoryService().importInstallation({
+      displayName: 'Local ICS55',
+      familyId: 'ics55',
+      root: pdkRoot,
+      version: '1.10.100',
+    })
+    let yosys = (await service.listResources()).resources.find(
+      (resource) => resource.id === 'tool:yosys',
+    )
+    expect(yosys).toMatchObject({
+      installed_requires: [],
+      missing_requires: ['pdk:ics55'],
+    })
+    await service.getPdkInventoryService().removeInstallation(imported.id)
+    await service.getPdkInventoryService().registerManagedInstallation({
+      id: 'pdk:ics55:managed:1.10.100',
+      displayName: 'ICS55',
+      familyId: 'ics55',
+      root: pdkRoot,
+      version: '1.10.100',
+      registrySha256: 'pdk-sha',
+    })
+
+    yosys = (await service.listResources()).resources.find(
+      (resource) => resource.id === 'tool:yosys',
+    )
+    expect(yosys).toMatchObject({
+      installed_requires: ['pdk:ics55'],
+      missing_requires: [],
+    })
   })
 
   it('updates healthy managed dependencies whose registry lock has changed', async () => {
@@ -4416,18 +4694,16 @@ describe('ResourceManagerService', () => {
       type: 'pdk',
       status: 'installed',
       installed_version: '1.10.100',
-      active: true,
-      active_version: '1.10.100',
+      active: false,
+      active_version: null,
       path: destination,
-      managed_root: join(root, 'data', 'pdks'),
-      size: archive.size,
+      managed_root: destination,
+      size: null,
       source: 'registry',
       actions: ['validate', 'uninstall'],
       health: expect.objectContaining({
         managed: true,
-        source: 'registry',
-        source_url: `file://${archive.path}`,
-        sha256: archive.sha256,
+        status: 'ok',
       }),
     })
     await expect(
@@ -4455,29 +4731,18 @@ describe('ResourceManagerService', () => {
       }),
     )
 
-    const manifest = JSON.parse(
-      await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
-    ) as { installed: Record<string, unknown> }
-    expect(manifest.installed['pdk:ics55:managed:1.10.100']).toMatchObject({
-      type: 'pdk',
-      id: 'ics55',
-      name: 'ics55',
-      pdk_id: 'ics55',
-      version: '1.10.100',
-      sha256: archive.sha256,
-      size: archive.size,
-      source: 'registry',
-      source_url: `file://${archive.path}`,
-      canonical_path: destination,
-      path: destination,
-      active: true,
-      managed: true,
-      health: 'ok',
-      detected_file_groups: {
-        directories: expect.arrayContaining(['IP', 'prtech']),
-        files: expect.arrayContaining(['prtech/techLEF/N551P6M_ecos.lef']),
-      },
-    })
+    const inventory = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
+    ) as { installations: unknown[] }
+    expect(inventory.installations).toEqual([
+      expect.objectContaining({
+        id: 'pdk:ics55:managed:1.10.100',
+        familyId: 'ics55',
+        version: '1.10.100',
+        root: destination,
+        ownership: 'managed',
+      }),
+    ])
   })
 
   it('fails closed instead of installing a PDK without a checksum', async () => {
@@ -5147,32 +5412,50 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
-      status: 'update_available',
+      status: 'installed',
       installed_version: '1.10.100',
-      available_versions: ['1.10.101', '1.10.100'],
-      active: true,
-      size: archive.size,
-      actions: ['validate', 'update', 'uninstall'],
+      available_versions: [],
+      active: false,
+      size: null,
+      actions: ['validate', 'uninstall'],
     })
     await expect(service.updateResource('pdk:ics55')).resolves.toEqual({
       status: 'started',
       resource_id: 'pdk:ics55',
       version: '1.10.101',
     })
+    const inventory = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
+    ) as { installations: Array<{ id: string; version: string }> }
+    expect(inventory.installations).toContainEqual(
+      expect.objectContaining({ id: 'pdk:ics55', version: '1.10.101' }),
+    )
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       status: 'installed',
       installed_version: '1.10.101',
-      active: true,
-      active_version: '1.10.101',
-      size: archive.size,
+      active: false,
+      active_version: null,
+      size: null,
       actions: ['validate', 'uninstall'],
+    })
+    await service.getPdkInventoryService().registerManagedInstallation({
+      id: 'pdk:ics55',
+      familyId: 'ics55',
+      displayName: 'ICsprout 55nm PDK',
+      root: join(root, 'data', 'pdks', 'ics55', '1.10.101'),
+      version: '1.10.101',
+      registrySha256: 'stale-sha',
     })
     await expect(service.updateResource('pdk:ics55:managed:1.10.100')).resolves.toEqual({
       status: 'started',
       resource_id: 'pdk:ics55',
       version: '1.10.101',
     })
-    expect(verifySha256).toHaveBeenCalledTimes(1)
+    expect(verifySha256).toHaveBeenCalledTimes(2)
+    const updatedInventory = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'pdk-inventory.json'), 'utf8'),
+    ) as { installations: Array<{ registrySha256: string }> }
+    expect(updatedInventory.installations[0]?.registrySha256).toBe(archive.sha256)
   })
 
   it('downloads only locked PDK supplemental assets before post-install', async () => {
@@ -5673,12 +5956,15 @@ describe('ResourceManagerService', () => {
     await expect(
       readFile(join(destination, 'previous-version.txt'), 'utf8'),
     ).resolves.toBe('keep me\n')
-    const manifest = JSON.parse(
-      await readFile(join(resourcesDir, 'manifest.json'), 'utf8'),
-    ) as {
-      installed: Record<string, { sha256: string }>
-    }
-    expect(manifest.installed['pdk:ics55:managed:1.10.100'].sha256).toBe('old-sha')
+    const inventory = JSON.parse(
+      await readFile(join(resourcesDir, 'pdk-inventory.json'), 'utf8'),
+    ) as { installations: Array<{ id: string; version: string }> }
+    expect(inventory.installations).toContainEqual(
+      expect.objectContaining({
+        id: 'pdk:ics55:managed:1.10.100',
+        version: '1.10.100',
+      }),
+    )
   })
 
   it('fails closed without overwriting an invalid resource manifest', async () => {
@@ -5701,7 +5987,7 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.listResources()).rejects.toThrow(
-      'Resource manifest is invalid and was left unchanged',
+      'Legacy resource manifest is invalid and was left unchanged',
     )
     await expect(readFile(manifestPath, 'utf8')).resolves.toBe('{not-json\n')
   })
@@ -5722,12 +6008,11 @@ describe('ResourceManagerService', () => {
 
     expect(duplicate.id).toBe(firstResource.id)
     expect(secondResource.id).not.toBe(firstResource.id)
-    await service.activatePdk(secondResource.id)
     await expect(service.getResource(firstResource.id)).resolves.toMatchObject({
       active: false,
     })
     await expect(service.getResource(secondResource.id)).resolves.toMatchObject({
-      active: true,
+      active: false,
     })
     await expect(service.validatePdkRootForWorkspace(first)).rejects.toThrow(
       'PDK validation failed for ics55',
@@ -5749,6 +6034,190 @@ describe('ResourceManagerService', () => {
     expect(second.health).toMatchObject({
       detected_file_groups: { directories: expect.arrayContaining(['IP', 'prtech']) },
     })
+  })
+
+  it('deduplicates PDK records by real path without rescanning on listing', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const pdkRoot = join(root, 'local', 'ics55')
+    const pdkLink = join(root, 'local', 'ics55-link')
+    await mkdir(join(pdkRoot, 'IP'), { recursive: true })
+    await mkdir(join(pdkRoot, 'prtech'), { recursive: true })
+    await symlink(pdkRoot, pdkLink)
+    await mkdir(dirs.resourcesDir, { recursive: true })
+
+    const entry = {
+      type: 'pdk',
+      id: 'ics55',
+      name: 'ics55',
+      pdk_id: 'ics55',
+      version: '',
+      sha256: '',
+      source: 'local',
+      source_url: '',
+      canonical_path: pdkLink,
+      path: pdkLink,
+      detected_files: [],
+      detected_file_groups: { directories: [], files: [] },
+      imported_at: '2026-08-21T00:00:00.000Z',
+      active: true,
+      managed: false,
+      health: 'ok',
+    }
+    await writeFile(
+      join(dirs.resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 3,
+        resources_dir: dirs.resourcesDir,
+        tools_dir: dirs.toolsDir,
+        pdks_dir: dirs.pdksDir,
+        installed: {
+          'pdk:ics55': entry,
+          'pdk:ics55:local:duplicate': {
+            ...entry,
+            canonical_path: pdkLink,
+            path: pdkLink,
+            active: false,
+            managed: true,
+          },
+        },
+        pdk_references: [
+          {
+            project_path: '/tmp/project',
+            pdk_root: pdkRoot,
+            resource_id: 'pdk:ics55',
+          },
+        ],
+      }),
+      'utf8',
+    )
+
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ schema_version: 2, tools: [], pdks: [] })),
+      ),
+    })
+
+    const result = await service.listResources()
+    const pdks = result.resources.filter(
+      (resource) => resource.type === 'pdk' && resource.path !== null,
+    )
+
+    expect(pdks).toHaveLength(0)
+    await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
+      id: 'pdk:ics55',
+      path: pdkRoot,
+      status: 'invalid',
+    })
+    const inventory = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'pdk-inventory.json'), 'utf8'),
+    ) as { bindings: Array<{ installationId: string }>; installations: unknown[] }
+    expect(inventory.installations).toHaveLength(1)
+    expect(inventory.bindings[0]?.installationId).toBe('pdk:ics55')
+  })
+
+  it('serializes listing normalization with concurrent PDK imports', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const existingRoot = join(root, 'local', 'existing')
+    const existingLink = join(root, 'local', 'existing-link')
+    const importedRoot = join(root, 'local', 'imported')
+    await mkdir(join(existingRoot, 'IP'), { recursive: true })
+    await mkdir(join(existingRoot, 'prtech'), { recursive: true })
+    await symlink(existingRoot, existingLink)
+    await mkdir(join(importedRoot, 'IP'), { recursive: true })
+    await mkdir(join(importedRoot, 'prtech'), { recursive: true })
+    await mkdir(dirs.resourcesDir, { recursive: true })
+
+    await writeFile(
+      join(dirs.resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 3,
+        resources_dir: dirs.resourcesDir,
+        tools_dir: dirs.toolsDir,
+        pdks_dir: dirs.pdksDir,
+        mpcs_dir: join(root, 'data', 'mpcs'),
+        installed: {
+          'pdk:ics55:local:existing': {
+            type: 'pdk',
+            id: 'ics55',
+            name: 'ics55',
+            pdk_id: 'ics55',
+            version: '',
+            sha256: '',
+            source: 'local',
+            source_url: '',
+            canonical_path: existingLink,
+            path: existingLink,
+            detected_files: [],
+            detected_file_groups: { directories: [], files: [] },
+            imported_at: '2026-08-21T00:00:00.000Z',
+            active: true,
+            managed: false,
+            health: 'ok',
+          },
+        },
+        pdk_references: [],
+      }),
+      'utf8',
+    )
+
+    const service = new ResourceManagerService({
+      ...dirs,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ schema_version: 2, tools: [], pdks: [] })),
+      ),
+    })
+
+    await Promise.all([service.listResources(), service.importPdkPath(importedRoot)])
+
+    const inventory = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'pdk-inventory.json'), 'utf8'),
+    ) as { installations: Array<{ root: string }> }
+    expect(inventory.installations.map((entry) => entry.root)).toEqual(
+      expect.arrayContaining([existingRoot, importedRoot]),
+    )
+  })
+
+  it('preserves concurrent tool imports while removing legacy PDK data', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const dirs = testResourceDirs(root)
+    const registryPath = join(root, 'registry.json')
+    const localYosys = join(root, 'local', 'yosys')
+    const pdkRoot = join(root, 'local', 'ics55')
+    await createLocalYosysRoot(localYosys)
+    await mkdir(pdkRoot, { recursive: true })
+    await writeYosysRegistry(registryPath)
+    await writeTestManifest(root, {
+      'pdk:ics55': {
+        type: 'pdk',
+        id: 'ics55',
+        pdk_id: 'ics55',
+        version: '',
+        canonical_path: pdkRoot,
+        path: pdkRoot,
+        active: true,
+        managed: false,
+      },
+    })
+    const service = new ResourceManagerService({
+      ...dirs,
+      registryUrl: `file://${registryPath}`,
+    })
+
+    await Promise.all([
+      service.listResources(),
+      service.importLocalPath('tool:yosys', localYosys),
+    ])
+
+    const manifest = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, unknown> }
+    expect(manifest.installed['tool:yosys']).toBeDefined()
+    expect(manifest.installed['pdk:ics55']).toBeUndefined()
   })
 
   it('migrates a legacy managed PDK parent path to its installed version directory', async () => {
@@ -5775,7 +6244,7 @@ describe('ResourceManagerService', () => {
     const service = new ResourceManagerService(dirs)
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
-      id: 'pdk:ics55:managed:1.10.100',
+      id: 'pdk:ics55',
       path: versionRoot,
     })
   })
@@ -5801,7 +6270,7 @@ describe('ResourceManagerService', () => {
     const service = new ResourceManagerService(dirs)
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
-      id: 'pdk:ics55:managed:1.10.100',
+      id: 'pdk:ics55',
       path: join(dirs.pdksDir, 'ics55', '1.10.100'),
       status: 'missing',
     })
@@ -5832,11 +6301,11 @@ describe('ResourceManagerService', () => {
 
     await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
       status: 'invalid',
-      active: true,
+      active: false,
     })
   })
 
-  it('does not uninstall a managed PDK referenced by a project', async () => {
+  it('uninstalls a managed PDK and leaves its project available for rebinding', async () => {
     const root = await createTempDir('ecos-resources-')
     const dirs = testResourceDirs(root)
     const pdkRoot = join(dirs.pdksDir, 'ics55', '1.10.100')
@@ -5859,14 +6328,9 @@ describe('ResourceManagerService', () => {
       },
     })
     const service = new ResourceManagerService(dirs)
-    await service.recordPdkReference(projectRoot, pdkRoot)
-
-    await expect(service.uninstallResource('pdk:ics55:managed:1.10.100')).rejects.toThrow(
-      `PDK is used by projects: ${projectRoot}`,
-    )
-    await rm(projectRoot, { force: true, recursive: true })
     await expect(
       service.uninstallResource('pdk:ics55:managed:1.10.100'),
     ).resolves.toMatchObject({ status: 'uninstalled' })
+    await expect(stat(projectRoot)).resolves.toMatchObject({})
   })
 })

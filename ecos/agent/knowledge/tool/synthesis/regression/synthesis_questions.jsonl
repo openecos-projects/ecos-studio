@@ -1,9 +1,0 @@
-{"entity_id": "algorithm.synthesis.execution", "id": "synthesis-execution", "question": "Explain algorithm.synthesis.execution", "required_text": "Execution path:"}
-{"entity_id": "algorithm.synthesis.frontend_lowering", "id": "synthesis-frontend_lowering", "question": "Explain synthesis algorithm frontend lowering.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.synthesis.technology_mapping", "id": "synthesis-technology_mapping", "question": "Explain synthesis algorithm technology mapping.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.synthesis.constraint_materialization", "id": "synthesis-constraint_materialization", "question": "Explain synthesis algorithm constraint materialization.", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.synthesis.mapped_netlist_gate", "id": "synthesis-mapped_netlist_gate", "question": "Explain synthesis algorithm mapped netlist gate.", "required_text": "Source evidence:"}
-{"entity_id": "parameter.synthesis.input", "id": "synthesis-parameter", "question": "Explain parameter.synthesis.input", "required_text": "**Role:**"}
-{"entity_id": "metric.synthesis_cell_area", "id": "synthesis-metric", "question": "Explain metric.synthesis_cell_area", "required_text": "**Calculation:**"}
-{"entity_id": "artifact.synthesis.outputs", "id": "synthesis-artifact", "question": "Explain artifact.synthesis.outputs", "required_text": "**Meaning:**"}
-{"entity_id": "failure.synthesis.preconditions", "id": "synthesis-failure", "question": "Explain failure.synthesis.preconditions", "required_text": "**Failure mode:**"}

@@ -1,0 +1,9 @@
+{"entity_id": "algorithm.legalization.execution", "id": "legalization-execution", "question": "How does the legalization stage execute?", "required_text": "Execution path:"}
+{"entity_id": "algorithm.legalization.legalize_only_setup", "id": "legalization-legalize_only_setup", "question": "dreamplace legalization parameters", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.legalization.legalization_pipeline", "id": "legalization-legalization_pipeline", "question": "dreamplace legalization pipeline", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.legalization.macro_legalization", "id": "legalization-macro_legalization", "question": "dreamplace macro legalization", "required_text": "Source evidence:"}
+{"entity_id": "algorithm.legalization.greedy_and_abacus_cells", "id": "legalization-greedy_and_abacus_cells", "question": "dreamplace greedy abacus legalization", "required_text": "Source evidence:"}
+{"entity_id": "parameter.legalization.replace_lower_pcof", "id": "legalization-parameter", "question": "legalization replace_lower_pcof", "required_text": "**Role:**"}
+{"entity_id": "metric.legalization.database_summary", "id": "legalization-metric", "question": "legalization.database summary", "required_text": "**Calculation:**"}
+{"entity_id": "artifact.legalization.outputs", "id": "legalization-artifact", "question": "legalization artifacts", "required_text": "**Meaning:**"}
+{"entity_id": "failure.legalization.preconditions", "id": "legalization-failure", "question": "legalization failed", "required_text": "**Failure mode:**"}
