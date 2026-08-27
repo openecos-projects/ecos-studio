@@ -413,6 +413,20 @@ describe('writeWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
   })
 
+  it('re-checks the writable guard before the rename', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    let calls = 0
+    await expect(
+      writeWorkspaceParameters(root, { design: 'gcd' }, undefined, async () => {
+        calls += 1
+        if (calls === 2) throw new Error('blocked')
+      }),
+    ).rejects.toThrow('blocked')
+    expect(calls).toBe(2)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
   it('refuses a symlinked config inside the serialized write', async () => {
     const root = createWorkspace()
     const alias = join(root, 'home', 'other.toml')

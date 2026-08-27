@@ -473,6 +473,11 @@ export async function writeWorkspaceParameters(
         )
       }
       const merged = mergeRecordsPreservingUnknown(existing, payload)
+      // One more guard pass between the merge and the rename: a flow that
+      // started while this operation read and merged must still block the
+      // commit (the remaining window is the rename itself; closing it needs
+      // the runtime's own cross-process lock).
+      await assertWritable?.()
       await writeTextAtomically(spelledPath, `${JSON.stringify(merged, null, 4)}\n`, {
         authorizedParent: dirname(canonicalPath),
       })
@@ -483,6 +488,7 @@ export async function writeWorkspaceParameters(
       location.path,
     )
     const merged = mergePayloadIntoTomlDocument(document, payload, root)
+    await assertWritable?.()
     await writeTextAtomically(spelledPath, stringify(merged), {
       authorizedParent: dirname(canonicalPath),
     })
@@ -640,6 +646,11 @@ export async function editWorkspaceParameters(
         setJsonPathValue(document, edit.json_path, edit.value, location.path)
       }
       const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
+      // One more guard pass between the edits and the rename: a flow that
+      // started while this operation read and merged must still block the
+      // commit (the remaining window is the rename itself; closing it needs
+      // the runtime's own cross-process lock).
+      await assertWritable?.()
       await writeTextAtomically(
         spelledPath,
         raw.endsWith('\n') ? `${serialized}\n` : serialized,
@@ -656,6 +667,7 @@ export async function editWorkspaceParameters(
       setJsonPathValue(parameters, normalizedPath, edit.value, location.path)
     }
     const merged = mergePayloadIntoTomlDocument(document, parameters, root)
+    await assertWritable?.()
     await writeTextAtomically(spelledPath, stringify(merged), {
       authorizedParent: dirname(canonicalPath),
     })

@@ -12,7 +12,7 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { refreshConfigApi } from '@/api/flow'
 import { CMDEnum, ResponseEnum } from '@/api/type'
-import { losslessNumber } from '@/utils/numbers'
+import { losslessNumber, isPlainRecord } from '@/utils/numbers'
 
 // ============ 类型定义 ============
 // 与 ecc/chipcompiler/data/parameter.py 中 ICS55_PARAMETERS_TEMPLATE 及 workspace 写入的 PDK Root 对齐
@@ -184,10 +184,14 @@ function firstResponseMessage(
 }
 
 function normalizeDie(d: unknown): ParametersData['Die'] {
-  if (!d || typeof d !== 'object') return { Size: [], Area: 0 }
-  const o = d as Record<string, unknown>
-  const size = o.Size ?? o.size
-  const area = o.Area ?? o.area
+  if (d == null) return { Size: [], Area: 0 }
+  if (!isPlainRecord(d)) {
+    throw new Error(
+      'Parameter die must be a table, not a scalar; edit the workspace configuration manually',
+    )
+  }
+  const size = d.Size ?? d.size
+  const area = d.Area ?? d.area
   const arr = Array.isArray(size)
     ? size.map((item) => losslessNumber(item, 'Die.Size'))
     : []
@@ -198,7 +202,7 @@ function normalizeDie(d: unknown): ParametersData['Die'] {
 }
 
 function normalizeCore(c: unknown): ParametersData['Core'] {
-  if (!c || typeof c !== 'object') {
+  if (c == null) {
     return {
       Size: [],
       Area: 0,
@@ -208,13 +212,17 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
       'Aspect ratio': 1,
     }
   }
-  const o = c as Record<string, unknown>
-  const size = o.Size ?? o.size
-  const area = o.Area ?? o.area
+  if (!isPlainRecord(c)) {
+    throw new Error(
+      'Parameter core must be a table, not a scalar; edit the workspace configuration manually',
+    )
+  }
+  const size = c.Size ?? c.size
+  const area = c.Area ?? c.area
   const arr = Array.isArray(size)
     ? size.map((item) => losslessNumber(item, 'Core.Size'))
     : []
-  const margin = o.Margin ?? o.margin
+  const margin = c.Margin ?? c.margin
   let m: [number, number] = [2, 2]
   if (Array.isArray(margin) && margin.length >= 2) {
     m = [
@@ -225,14 +233,14 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
   return {
     Size: arr,
     Area: area != null ? losslessNumber(area, 'Core.Area') : 0,
-    'Bounding box': String(o['Bounding box'] ?? o.bounding_box ?? ''),
+    'Bounding box': String(c['Bounding box'] ?? c.bounding_box ?? ''),
     Utilitization: losslessNumber(
-      o.Utilitization ?? o.utilitization ?? 0.4,
+      c.Utilitization ?? c.utilitization ?? 0.4,
       'Core.Utilitization',
     ),
     Margin: m,
     'Aspect ratio': losslessNumber(
-      o['Aspect ratio'] ?? o.aspect_ratio ?? 1,
+      c['Aspect ratio'] ?? c.aspect_ratio ?? 1,
       'Core.Aspect ratio',
     ),
   }
@@ -295,7 +303,10 @@ export function parseParametersRecord(raw: Record<string, unknown>): ParametersD
     PDK: losslessString(raw.PDK ?? raw.pdk ?? '', 'PDK'),
     Design: losslessString(raw.Design ?? raw.design ?? '', 'Design'),
     design: raw.design != null ? losslessString(raw.design, 'design') : undefined,
-    description: raw.description != null ? String(raw.description) : undefined,
+    description:
+      raw.description != null
+        ? losslessString(raw.description, 'description')
+        : undefined,
     'Design Tool':
       raw['Design Tool'] != null
         ? losslessString(raw['Design Tool'], 'Design Tool')
@@ -352,26 +363,63 @@ export function parseParametersRecord(raw: Record<string, unknown>): ParametersD
         : raw.pdk_root != null
           ? losslessString(raw.pdk_root, 'pdk_root')
           : undefined,
-    cpu_filelist: raw.cpu_filelist != null ? String(raw.cpu_filelist) : undefined,
-    soc_filelist: raw.soc_filelist != null ? String(raw.soc_filelist) : undefined,
-    soc_variant: raw.soc_variant != null ? String(raw.soc_variant) : undefined,
-    soc_harness_id: raw.soc_harness_id != null ? String(raw.soc_harness_id) : undefined,
-    soc_wrapper_id: raw.soc_wrapper_id != null ? String(raw.soc_wrapper_id) : undefined,
+    cpu_filelist:
+      raw.cpu_filelist != null
+        ? losslessString(raw.cpu_filelist, 'cpu_filelist')
+        : undefined,
+    soc_filelist:
+      raw.soc_filelist != null
+        ? losslessString(raw.soc_filelist, 'soc_filelist')
+        : undefined,
+    soc_variant:
+      raw.soc_variant != null
+        ? losslessString(raw.soc_variant, 'soc_variant')
+        : undefined,
+    soc_harness_id:
+      raw.soc_harness_id != null
+        ? losslessString(raw.soc_harness_id, 'soc_harness_id')
+        : undefined,
+    soc_wrapper_id:
+      raw.soc_wrapper_id != null
+        ? losslessString(raw.soc_wrapper_id, 'soc_wrapper_id')
+        : undefined,
     soc_wrapper_contract:
-      raw.soc_wrapper_contract != null ? String(raw.soc_wrapper_contract) : undefined,
+      raw.soc_wrapper_contract != null
+        ? losslessString(raw.soc_wrapper_contract, 'soc_wrapper_contract')
+        : undefined,
     frontend_core_id:
-      raw.frontend_core_id != null ? String(raw.frontend_core_id) : undefined,
-    core_id: raw.core_id != null ? String(raw.core_id) : undefined,
-    cpu_wrapper_id: raw.cpu_wrapper_id != null ? String(raw.cpu_wrapper_id) : undefined,
+      raw.frontend_core_id != null
+        ? losslessString(raw.frontend_core_id, 'frontend_core_id')
+        : undefined,
+    core_id: raw.core_id != null ? losslessString(raw.core_id, 'core_id') : undefined,
+    cpu_wrapper_id:
+      raw.cpu_wrapper_id != null
+        ? losslessString(raw.cpu_wrapper_id, 'cpu_wrapper_id')
+        : undefined,
     cpu_wrapper_contract:
-      raw.cpu_wrapper_contract != null ? String(raw.cpu_wrapper_contract) : undefined,
+      raw.cpu_wrapper_contract != null
+        ? losslessString(raw.cpu_wrapper_contract, 'cpu_wrapper_contract')
+        : undefined,
     cpu_socket_contract:
-      raw.cpu_socket_contract != null ? String(raw.cpu_socket_contract) : undefined,
+      raw.cpu_socket_contract != null
+        ? losslessString(raw.cpu_socket_contract, 'cpu_socket_contract')
+        : undefined,
     cpu_wrapper_top:
-      raw.cpu_wrapper_top != null ? String(raw.cpu_wrapper_top) : undefined,
-    toolchain_id: raw.toolchain_id != null ? String(raw.toolchain_id) : undefined,
-    test_suite_id: raw.test_suite_id != null ? String(raw.test_suite_id) : undefined,
-    input_filelist: raw.input_filelist != null ? String(raw.input_filelist) : undefined,
+      raw.cpu_wrapper_top != null
+        ? losslessString(raw.cpu_wrapper_top, 'cpu_wrapper_top')
+        : undefined,
+    toolchain_id:
+      raw.toolchain_id != null
+        ? losslessString(raw.toolchain_id, 'toolchain_id')
+        : undefined,
+    test_suite_id:
+      raw.test_suite_id != null
+        ? losslessString(raw.test_suite_id, 'test_suite_id')
+        : undefined,
+    input_filelist:
+      raw.input_filelist != null
+        ? losslessString(raw.input_filelist, 'input_filelist')
+        : undefined,
     sim_program_names: normalizeStringArray(raw.sim_program_names),
     sim_all_tests: Boolean(raw.sim_all_tests),
   }

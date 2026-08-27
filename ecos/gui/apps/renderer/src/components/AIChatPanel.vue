@@ -1777,6 +1777,10 @@ async function applyWorkspaceParameterWrites(
     else byFile.set(write.file, [write])
   }
   const parameterSurfaceWrites: DesktopAgentWorkspaceParameterWrite[] = []
+  // Phase 1: prepare and validate every edit in memory — a missing path or
+  // malformed document fails loudly before anything is written, instead of
+  // leaving earlier step-config changes behind on a later failure.
+  const preparedStepConfigWrites: Array<{ path: string; content: string }> = []
   for (const [file, fileWrites] of byFile) {
     if (file === 'home/ecc.toml' || file === 'home/parameters.json') {
       // The on-disk configuration format (ecc.toml vs parameters.json) is
@@ -1793,11 +1797,13 @@ async function applyWorkspaceParameterWrites(
       setJsonPathValue(document, write)
     }
     const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
-    await desktopApi.workspace.writeProjectTextFile(
+    preparedStepConfigWrites.push({
       path,
-      raw.endsWith('\n') ? `${serialized}\n` : serialized,
-    )
+      content: raw.endsWith('\n') ? `${serialized}\n` : serialized,
+    })
   }
+  // Phase 2: commit. The authoritative config edit goes first (atomic in
+  // the main process), then the prepared step-config files.
   if (parameterSurfaceWrites.length > 0) {
     await desktopApi.workspace.editWorkspaceParameters(
       workspaceRoot,
@@ -1806,6 +1812,9 @@ async function applyWorkspaceParameterWrites(
         value: write.value,
       })),
     )
+  }
+  for (const { path, content } of preparedStepConfigWrites) {
+    await desktopApi.workspace.writeProjectTextFile(path, content)
   }
 }
 

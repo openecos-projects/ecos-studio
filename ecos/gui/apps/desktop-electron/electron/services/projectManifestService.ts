@@ -418,7 +418,7 @@ function normalizedBaselineParameters(
   const dieArea = recordValue(parameters['Die Area']) ?? {}
   const dieSize = numberArray(die.Size ?? die.size)
   const margins = numberArray(core.Margin ?? core.margin)
-  return {
+  const normalized = {
     design: firstString(parameters.Design, parameters.design),
     top_module: firstString(
       parameters['Top module'],
@@ -442,6 +442,8 @@ function normalizedBaselineParameters(
     ),
     margin: firstValue(dieArea.margin, margins[0], parameters.margin),
   }
+  assertBaselineScalarsSafe(normalized)
+  return normalized
 }
 
 function firstString(...values: unknown[]): string {
@@ -480,6 +482,35 @@ function numberArray(value: unknown): number[] {
     )
   }
   return value.filter((entry): entry is number => typeof entry === 'number')
+}
+
+/**
+ * The manifest serializes to JSON: non-finite numbers would become null,
+ * bigints would throw inside JSON.stringify, and TOML dates would persist
+ * as lossy strings. Reject every unsupported scalar before constructing the
+ * baseline, never after serializing it.
+ */
+function assertBaselineScalarsSafe(value: unknown): void {
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(
+      'Baseline workspace snapshot holds a non-finite parameter value; ' +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'bigint' || value instanceof Date) {
+    throw new Error(
+      'Baseline workspace snapshot holds a parameter value the manifest cannot ' +
+        'represent losslessly; edit the workspace configuration manually',
+    )
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertBaselineScalarsSafe(item)
+    return
+  }
+  const record = recordValue(value)
+  if (record) {
+    for (const item of Object.values(record)) assertBaselineScalarsSafe(item)
+  }
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
