@@ -1046,6 +1046,21 @@ class OptimizationEpisodeController:
                 terminal_observation=terminal_observation,
                 application_receipt=receipt.application_receipt,
                 parameter_application_receipt=receipt.parameter_application_receipt,
+                parameter_card_sha256=(
+                    receipt.parameter_application_receipt.context.get("parameter_card_sha256")
+                    if receipt.parameter_application_receipt is not None
+                    else None
+                ),
+                materialization_receipt_sha256=(
+                    receipt.parameter_application_receipt.materialization.receipt_sha256
+                    if receipt.parameter_application_receipt is not None
+                    else None
+                ),
+                parameter_application_receipt_id=(
+                    receipt.parameter_application_receipt.receipt_id
+                    if receipt.parameter_application_receipt is not None
+                    else None
+                ),
                 incumbent_decision=incumbent_decision,
                 decisive_metric=decisive_metric,
                 outcome_details_sha256=canonical_sha256(details),

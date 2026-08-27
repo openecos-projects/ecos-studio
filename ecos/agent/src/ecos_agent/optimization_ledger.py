@@ -189,6 +189,9 @@ class OptimizationTerminalOutcome(_LedgerModel):
     terminal_observation: TerminalObservation | None = None
     application_receipt: KnobApplicationReceipt | None = None
     parameter_application_receipt: ParameterApplicationReceipt | None = None
+    parameter_card_sha256: str | None = None
+    materialization_receipt_sha256: str | None = None
+    parameter_application_receipt_id: str | None = None
     incumbent_decision: IncumbentDecision | None = None
     decisive_metric: SelectionMetric | None = None
     outcome_details_sha256: str
@@ -205,6 +208,10 @@ class OptimizationTerminalOutcome(_LedgerModel):
             requested = self.parameter_application_receipt.requested.get("knob_id")
             if self.application_receipt is not None or requested is None:
                 raise ValueError("terminal receipt fields are ambiguous")
+            if self.parameter_application_receipt_id != self.parameter_application_receipt.receipt_id:
+                raise ValueError("terminal parameter receipt id does not match")
+            if self.materialization_receipt_sha256 != self.parameter_application_receipt.materialization.receipt_sha256:
+                raise ValueError("terminal materialization receipt hash does not match")
         return self
 
     @field_validator("intervention_id")
@@ -226,6 +233,8 @@ class OptimizationTerminalOutcome(_LedgerModel):
         "receipt_sha256",
         "terminal_observation_sha256",
         "outcome_details_sha256",
+        "parameter_card_sha256",
+        "materialization_receipt_sha256",
     )
     @classmethod
     def validate_hash(cls, value: str | None) -> str | None:
