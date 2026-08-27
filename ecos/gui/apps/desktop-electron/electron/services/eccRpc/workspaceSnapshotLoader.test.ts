@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -62,6 +62,19 @@ describe('WorkspaceSnapshotLoader', () => {
 
     await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
       'Workspace snapshot resource exceeds',
+    )
+  })
+
+  it('rejects a symlinked parameters file instead of reading its target', async () => {
+    const directory = createWorkspace()
+    const external = join(directory, 'external.toml')
+    writeFileSync(external, '[params]\ndesign = "external"\n')
+    symlinkSync(external, join(directory, 'home', 'ecc.toml'))
+    writeFileSync(join(directory, 'home', 'home.json'), '{}')
+    writeFileSync(join(directory, 'home', 'flow.json'), JSON.stringify({ steps: [] }))
+
+    await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
+      /symlink/i,
     )
   })
 

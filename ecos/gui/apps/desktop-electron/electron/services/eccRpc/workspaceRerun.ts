@@ -629,6 +629,14 @@ async function materializeParameterSurfaceWrites(
       `Workspace rerun parameter file is invalid: neither home/ecc.toml nor home/parameters.json exists`,
     )
   }
+  const locationStats = await lstat(location.path)
+  if (locationStats.isSymbolicLink()) {
+    // A symlinked config path makes the materialization target ambiguous —
+    // refuse it, matching the save/edit paths and ECC's own symlink refusal.
+    throw new Error(
+      `Refusing to materialize rerun parameters through a symlink: ${location.path}`,
+    )
+  }
   const validatedPath = await resolvePathWithinWorkspace(
     workspace,
     location.path,

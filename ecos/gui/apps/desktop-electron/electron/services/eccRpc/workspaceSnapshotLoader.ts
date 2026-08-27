@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises'
+import { lstat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
   EccWorkspaceRuntimeSnapshot,
@@ -9,6 +9,7 @@ import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
 import {
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
+  readFileNoFollow,
 } from '../workspaceParametersFile'
 
 const MAX_SNAPSHOT_FILE_BYTES = 512 * 1024
@@ -21,15 +22,30 @@ export interface WorkspaceBaselineSnapshot {
   pdk: Record<string, unknown>
 }
 
+/**
+ * Bounded, symlink-refusing file read for snapshot resources: lstat rejects
+ * a symlinked final component and the no-follow open refuses it again on
+ * the kernel side, so a crafted workspace cannot point a snapshot read at
+ * an external file.
+ */
+async function readSnapshotText(path: string): Promise<string> {
+  const metadata = await lstat(path)
+  if (metadata.isSymbolicLink()) {
+    throw new Error(
+      `Refusing to read workspace snapshot resource through a symlink: ${path}`,
+    )
+  }
+  if (metadata.size > MAX_SNAPSHOT_FILE_BYTES) {
+    throw new Error(
+      `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${path}`,
+    )
+  }
+  return readFileNoFollow(path)
+}
+
 async function readJsonObject(path: string): Promise<Record<string, unknown>> {
   try {
-    const metadata = await stat(path)
-    if (metadata.size > MAX_SNAPSHOT_FILE_BYTES) {
-      throw new Error(
-        `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${path}`,
-      )
-    }
-    const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
+    const parsed: unknown = JSON.parse(await readSnapshotText(path))
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : {}
@@ -47,14 +63,8 @@ async function readParametersObject(directory: string): Promise<Record<string, u
   const location = await locateWorkspaceParametersFile(directory)
   if (!location) return {}
   try {
-    const metadata = await stat(location.path)
-    if (metadata.size > MAX_SNAPSHOT_FILE_BYTES) {
-      throw new Error(
-        `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${location.path}`,
-      )
-    }
     return parseWorkspaceParametersText(
-      await readFile(location.path, 'utf8'),
+      await readSnapshotText(location.path),
       location.format,
       directory,
     )

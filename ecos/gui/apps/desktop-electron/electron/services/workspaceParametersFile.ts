@@ -1,4 +1,5 @@
-import { readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { randomInt } from 'node:crypto'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
@@ -47,6 +48,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+/**
+ * Merge an overlay into a base document leaf-wise: plain records merge
+ * recursively (unknown nested keys survive a save the GUI did not touch),
+ * while arrays, scalars, and class instances (e.g. TOML dates) replace.
+ */
+function mergeRecordsPreservingUnknown(
+  base: Record<string, unknown>,
+  overlay: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base }
+  for (const [key, value] of Object.entries(overlay)) {
+    const existing = merged[key]
+    merged[key] =
+      isPlainRecord(existing) && isPlainRecord(value)
+        ? mergeRecordsPreservingUnknown(existing, value)
+        : value
+  }
+  return merged
+}
+
 function hasValue(value: unknown): boolean {
   if (value === null || value === undefined) return false
   if (typeof value === 'string') return value.trim() !== ''
@@ -73,6 +100,23 @@ export async function locateWorkspaceParametersFile(
 }
 
 /**
+ * The writable sections must be tables: a scalar/array section is a
+ * configuration error, never a silently-empty section to overwrite.
+ * Shared by the read flatten and every write merge.
+ */
+function assertTomlSectionShapes(document: Record<string, unknown>): void {
+  for (const section of ['params', 'design', 'pdk'] as const) {
+    if (section in document && !isRecord(document[section])) {
+      throw new Error(
+        `Invalid workspace configuration: [${section}] must be a table, got ${
+          Array.isArray(document[section]) ? 'array' : typeof document[section]
+        }`,
+      )
+    }
+  }
+}
+
+/**
  * Flatten an ecc.toml document into the canonical flat parameter payload.
  * Mirrors ecc's `_merge_payload`: `[params]` is the base, then non-empty
  * `[design]`/`[pdk]` mirror values override their mapped parameter keys.
@@ -86,15 +130,7 @@ export function mergeTomlSections(
   document: Record<string, unknown>,
   workspaceRoot: string,
 ): Record<string, unknown> {
-  for (const section of ['params', 'design', 'pdk'] as const) {
-    if (section in document && !isRecord(document[section])) {
-      throw new Error(
-        `Invalid workspace configuration: [${section}] must be a table, got ${
-          Array.isArray(document[section]) ? 'array' : typeof document[section]
-        }`,
-      )
-    }
-  }
+  assertTomlSectionShapes(document)
   const params: Record<string, unknown> = {
     ...(normalizeParameterKeys(
       isRecord(document.params) ? document.params : {},
@@ -152,6 +188,27 @@ export async function readWorkspaceParameters(
   if (!location) return null
   const text = await readFile(location.path, 'utf8')
   return parseWorkspaceParametersText(text, location.format, root)
+}
+
+/**
+ * Read a config file without following a symlinked final component: when
+ * the file is swapped to a symlink after authorization, the open fails with
+ * ELOOP instead of leaking the link target into a merged document.
+ */
+export async function readFileNoFollow(path: string): Promise<string> {
+  try {
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      return await handle.readFile('utf8')
+    } finally {
+      await handle.close()
+    }
+  } catch (error) {
+    if (isErrno(error, 'ELOOP')) {
+      throw new Error(`Refusing to read through a symlink: ${path}`)
+    }
+    throw error
+  }
 }
 
 export async function writeTextAtomically(path: string, content: string): Promise<void> {
@@ -227,14 +284,15 @@ export function mergePayloadIntoTomlDocument(
   pdk: Record<string, unknown>
   params: Record<string, unknown>
 } {
+  assertTomlSectionShapes(document)
   const flatPayload = normalizeParameterKeys(payload) as Record<string, unknown>
   const existingParams = normalizeParameterKeys(
     isRecord(document.params) ? document.params : {},
   ) as Record<string, unknown>
-  const params: Record<string, unknown> = {
-    ...existingParams,
-    ...flatPayload,
-  }
+  // Leaf-wise merge: unknown nested members (e.g. a future ecc knob under
+  // [params.core]) survive a save that only rewrites known fields; arrays,
+  // scalars, and date values replace wholesale.
+  const params = mergeRecordsPreservingUnknown(existingParams, flatPayload)
 
   const pdkConfig = params.pdk_config
   if (typeof pdkConfig === 'string' && pdkConfig && isAbsolute(pdkConfig)) {
@@ -297,13 +355,18 @@ export async function writeWorkspaceParameters(
       // Merge into the existing document: the payload is the GUI's known
       // parameter set, not the whole file — keys the GUI does not display
       // (frontend extras, unrelated agent edits) must survive a save.
-      const raw = await readFile(location.path, 'utf8')
+      const raw = await readFileNoFollow(location.path)
       const existing = parseJsonPreservingIntegers(raw, location.path)
-      const merged = { ...(isRecord(existing) ? existing : {}), ...payload }
+      if (!isRecord(existing)) {
+        throw new Error(
+          `Invalid workspace configuration: ${location.path} must contain a JSON object`,
+        )
+      }
+      const merged = mergeRecordsPreservingUnknown(existing, payload)
       await writeTextAtomically(location.path, `${JSON.stringify(merged, null, 4)}\n`)
       return location
     }
-    const document = parse(await readFile(location.path, 'utf8'), {
+    const document = parse(await readFileNoFollow(location.path), {
       integersAsBigInt: 'asNeeded',
     }) as Record<string, unknown>
     const merged = mergePayloadIntoTomlDocument(document, payload, root)
@@ -436,10 +499,15 @@ export async function editWorkspaceParameters(
     )
   }
   return await enqueueParameterWrite(location.path, async () => {
-    const raw = await readFile(location.path, 'utf8')
+    const raw = await readFileNoFollow(location.path)
     if (location.format === 'json') {
       const parsed: unknown = parseJsonPreservingIntegers(raw, location.path)
-      const document = isRecord(parsed) ? parsed : {}
+      if (!isRecord(parsed)) {
+        throw new Error(
+          `Invalid workspace configuration: ${location.path} must contain a JSON object`,
+        )
+      }
+      const document = parsed
       for (const edit of edits) {
         setJsonPathValue(document, edit.json_path, edit.value, location.path)
       }

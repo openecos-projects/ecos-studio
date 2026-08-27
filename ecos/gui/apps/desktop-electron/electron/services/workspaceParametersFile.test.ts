@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -218,9 +225,12 @@ describe('mergePayloadIntoTomlDocument', () => {
     expect(merged.flow).toEqual({ preset: 'rtl2gds' })
   })
 
-  it('replaces die/core subtrees wholesale and keeps [flow] untouched', () => {
+  it('merges die/core subtrees leaf-wise and keeps [flow] untouched', () => {
     const document = {
-      params: { core: { utilitization: 0.2, margin: [2, 2] }, design: 'gcd' },
+      params: {
+        core: { utilitization: 0.2, margin: [2, 2], future_knob: 'keep' },
+        design: 'gcd',
+      },
       flow: { preset: 'syn_sta' },
     }
     const merged = mergePayloadIntoTomlDocument(
@@ -228,7 +238,13 @@ describe('mergePayloadIntoTomlDocument', () => {
       { Core: { Utilitization: 0.45, Margin: [3, 3] } },
       '/ws',
     )
-    expect(merged.params.core).toEqual({ utilitization: 0.45, margin: [3, 3] })
+    // Known members update and unknown nested members survive the save;
+    // arrays replace wholesale.
+    expect(merged.params.core).toEqual({
+      utilitization: 0.45,
+      margin: [3, 3],
+      future_knob: 'keep',
+    })
     expect(merged.flow).toEqual({ preset: 'syn_sta' })
   })
 
@@ -313,6 +329,51 @@ describe('writeWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain(
       '17912481922736482372',
     )
+  })
+
+  it('preserves unknown nested keys in legacy parameters.json saves', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd", "Core": { "Utilitization": 0.2, "Extra": "keep" } }\n',
+    )
+    await writeWorkspaceParameters(root, { Core: { Utilitization: 0.45 } })
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, Record<string, unknown>>
+    expect(written.Core).toEqual({ Utilitization: 0.45, Extra: 'keep' })
+  })
+
+  it('rejects a non-object JSON root on save instead of overwriting it', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', '[1, 2, 3]\n')
+    await expect(writeWorkspaceParameters(root, { Design: 'gcd' })).rejects.toThrow(
+      /JSON object/i,
+    )
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toBe(
+      '[1, 2, 3]\n',
+    )
+  })
+
+  it('rejects a non-table TOML section on save instead of replacing it', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', 'params = [1]\n')
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /must be a table/i,
+    )
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe('params = [1]\n')
+  })
+
+  it('refuses a symlinked config inside the serialized write', async () => {
+    const root = createWorkspace()
+    const outside = join(root, 'outside.toml')
+    writeFileSync(outside, '[params]\ndesign = "gcd"\n')
+    symlinkSync(outside, join(root, 'home', 'ecc.toml'))
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /symlink/i,
+    )
+    expect(readFileSync(outside, 'utf8')).toBe('[params]\ndesign = "gcd"\n')
   })
 
   it('throws when no parameters file exists', async () => {

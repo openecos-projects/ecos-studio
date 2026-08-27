@@ -577,4 +577,27 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
       readFile(`${contract.target_workspace}/home/parameters.json`, 'utf8'),
     ).rejects.toThrow(/ENOENT/)
   })
+
+  it('refuses to materialize parameters through a symlinked config', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    const outside = join(source, 'outside.toml')
+    await writeFile(outside, '[params]\ntarget_density = 0.45\n')
+    await symlink(outside, join(source, 'home', 'ecc.toml'))
+    const contract = contractFor(source, flow, artifact)
+    contract.writes = [
+      {
+        file: 'home/ecc.toml',
+        json_path: ['target_density'],
+        knob_id: 'place.target_density',
+        surface: 'parameters',
+        value: 0.55,
+      },
+    ]
+
+    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(/symlink/i)
+    await expect(readFile(outside, 'utf8')).resolves.toBe(
+      '[params]\ntarget_density = 0.45\n',
+    )
+  })
 })
