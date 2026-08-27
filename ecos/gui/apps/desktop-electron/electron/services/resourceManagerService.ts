@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { constants, createReadStream, type Dirent } from 'node:fs'
+import { constants, createReadStream } from 'node:fs'
 import {
   access,
   lstat,
@@ -34,6 +34,10 @@ import {
   type ResourceInstallSubscriber,
 } from './resourceInstallCoordinator'
 import { ResourceMetadataRestoreError } from './resourceInstallErrors'
+import {
+  prepareResourceArchive,
+  removeCompletedResourceArchive,
+} from './resourceArchiveRecovery'
 import {
   PdkInventoryService,
   type PdkInventoryServiceOptions,
@@ -80,12 +84,6 @@ type Sha256Verifier = (
   signal?: AbortSignal,
 ) => Promise<boolean>
 type ManifestWriter = (filePath: string, content: string) => Promise<void>
-
-interface ArchiveRecoveryFileOperations {
-  readDirectory: (path: string) => Promise<Dirent[]>
-  remove: (path: string) => Promise<void>
-  rename: (sourcePath: string, destinationPath: string) => Promise<void>
-}
 
 interface CommandRunnerOptions {
   cwd?: string
@@ -356,7 +354,6 @@ interface RegistryCacheResult {
 }
 
 export interface ResourceManagerServiceOptions {
-  archiveRecoveryFileOperations?: Partial<ArchiveRecoveryFileOperations>
   archiveExtractor?: ArchiveExtractor
   cacheDir?: string
   commandRunner?: CommandRunner
@@ -376,7 +373,6 @@ export interface RuntimeEnvOptions {
 }
 
 export class ResourceManagerService {
-  private readonly archiveRecoveryFileOperations: ArchiveRecoveryFileOperations
   private readonly archiveExtractor: ArchiveExtractor
   private readonly cacheDir: string
   private readonly commandRunner: CommandRunner
@@ -402,12 +398,6 @@ export class ResourceManagerService {
   private manifestOperationPromise: Promise<void> = Promise.resolve()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
-    this.archiveRecoveryFileOperations = {
-      readDirectory: async (path) => await readdir(path, { withFileTypes: true }),
-      remove: async (path) => await rm(path, { force: true }),
-      rename,
-      ...options.archiveRecoveryFileOperations,
-    }
     this.resourcesDir =
       options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
     this.toolsDir = options.toolsDir ?? join(xdgDataHome(), 'ecos-studio', 'tools')
@@ -1275,43 +1265,14 @@ export class ResourceManagerService {
       }
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
-      const legacyArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        resolvedAsset.url,
-      )
-      const resumableArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        resolvedAsset.url,
-        { sha256: resolvedAsset.sha256 },
-      )
-      tempArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        resolvedAsset.url,
-        { operationId: randomUUID(), sha256: resolvedAsset.sha256 },
-      )
-      partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
-      await mkdir(dirname(tempArchive), { recursive: true })
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
         resourceId,
         version,
         platform,
-      )
-      electronLogger.debug(
-        '[resources] Download source for %s: %s -> %s (%d bytes)',
-        resourceId,
-        resolvedAsset.url,
-        tempArchive,
-        resolvedAsset.size,
       )
       this.publish(listener, {
         resource_id: resourceId,
@@ -1320,16 +1281,24 @@ export class ResourceManagerService {
         progress: 0,
         message: `Downloading ${name} v${version}...`,
       })
-      await recoverPartialArchive({
-        archivePath: resumableArchive,
+      const preparedArchive = await prepareResourceArchive({
         expectedSha256: resolvedAsset.sha256,
-        fileOperations: this.archiveRecoveryFileOperations,
-        legacyArchivePath: legacyArchive,
-        partialArchivePath: partialArchive,
+        resourceId,
+        resourcesDir: this.resourcesDir,
         sha256Verifier: this.sha256Verifier,
         signal,
         sourceUrl: resolvedAsset.url,
+        version,
       })
+      tempArchive = preparedArchive.completedArchivePath
+      partialArchive = preparedArchive.partialArchivePath
+      electronLogger.debug(
+        '[resources] Download source for %s: %s -> %s (%d bytes)',
+        resourceId,
+        resolvedAsset.url,
+        tempArchive,
+        resolvedAsset.size,
+      )
       await downloadAsset(
         resolvedAsset.url,
         partialArchive,
@@ -1430,7 +1399,7 @@ export class ResourceManagerService {
       tempExtract = ''
       const installedArchive = tempArchive
       tempArchive = ''
-      removeCompletedArchive(installedArchive, resourceId)
+      removeCompletedResourceArchive(installedArchive, resourceId)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1538,43 +1507,14 @@ export class ResourceManagerService {
         })
         return { status: 'started', resource_id: resourceId, version }
       }
-      const legacyArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        resolvedAsset.url,
-      )
-      const resumableArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        resolvedAsset.url,
-        { sha256: resolvedAsset.sha256 },
-      )
-      tempArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        resolvedAsset.url,
-        { operationId: randomUUID(), sha256: resolvedAsset.sha256 },
-      )
-      partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
-      await mkdir(dirname(tempArchive), { recursive: true })
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
         resourceId,
         version,
         platform,
-      )
-      electronLogger.debug(
-        '[resources] Download source for %s: %s -> %s (%d bytes)',
-        resourceId,
-        resolvedAsset.url,
-        tempArchive,
-        resolvedAsset.size,
       )
       this.publish(listener, {
         resource_id: resourceId,
@@ -1583,16 +1523,24 @@ export class ResourceManagerService {
         progress: 0,
         message: `Downloading ${displayName} v${version}...`,
       })
-      await recoverPartialArchive({
-        archivePath: resumableArchive,
+      const preparedArchive = await prepareResourceArchive({
         expectedSha256: resolvedAsset.sha256,
-        fileOperations: this.archiveRecoveryFileOperations,
-        legacyArchivePath: legacyArchive,
-        partialArchivePath: partialArchive,
+        resourceId,
+        resourcesDir: this.resourcesDir,
         sha256Verifier: this.sha256Verifier,
         signal,
         sourceUrl: resolvedAsset.url,
+        version,
       })
+      tempArchive = preparedArchive.completedArchivePath
+      partialArchive = preparedArchive.partialArchivePath
+      electronLogger.debug(
+        '[resources] Download source for %s: %s -> %s (%d bytes)',
+        resourceId,
+        resolvedAsset.url,
+        tempArchive,
+        resolvedAsset.size,
+      )
       await downloadAsset(
         resolvedAsset.url,
         partialArchive,
@@ -1720,7 +1668,7 @@ export class ResourceManagerService {
       tempExtract = ''
       const installedArchive = tempArchive
       tempArchive = ''
-      removeCompletedArchive(installedArchive, resourceId)
+      removeCompletedResourceArchive(installedArchive, resourceId)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1799,30 +1747,8 @@ export class ResourceManagerService {
       const version = versionEntry.version
       const displayName = mpc.display_name || mpcId
       const destination = join(this.mpcsDir, mpcId, version)
-      const legacyArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        asset.url,
-      )
-      const resumableArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        asset.url,
-        { sha256: asset.sha256 },
-      )
-      tempArchive = resourceArchivePath(
-        this.resourcesDir,
-        resourceId,
-        version,
-        asset.url,
-        { operationId: randomUUID(), sha256: asset.sha256 },
-      )
-      partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.mpcsDir, mpcId, `.extract-${version}-${randomUUID()}`)
 
-      await mkdir(dirname(tempArchive), { recursive: true })
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1837,16 +1763,17 @@ export class ResourceManagerService {
         progress: 0,
         message: `Downloading ${displayName} v${version}...`,
       })
-      await recoverPartialArchive({
-        archivePath: resumableArchive,
+      const preparedArchive = await prepareResourceArchive({
         expectedSha256: asset.sha256,
-        fileOperations: this.archiveRecoveryFileOperations,
-        legacyArchivePath: legacyArchive,
-        partialArchivePath: partialArchive,
+        resourceId,
+        resourcesDir: this.resourcesDir,
         sha256Verifier: this.sha256Verifier,
         signal,
         sourceUrl: asset.url,
+        version,
       })
+      tempArchive = preparedArchive.completedArchivePath
+      partialArchive = preparedArchive.partialArchivePath
       await downloadAsset(
         asset.url,
         partialArchive,
@@ -1926,7 +1853,7 @@ export class ResourceManagerService {
       tempExtract = ''
       const installedArchive = tempArchive
       tempArchive = ''
-      removeCompletedArchive(installedArchive, resourceId)
+      removeCompletedResourceArchive(installedArchive, resourceId)
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -4891,233 +4818,6 @@ function resolveSupplementalAssetTarget(root: string, assetPath: string): string
     throw new Error(`Invalid supplemental asset path: ${assetPath || '(empty)'}`)
   }
   return resolveInside(root, normalized)
-}
-
-function archiveExtensionFromUrl(sourceUrl: string): string {
-  let pathname = sourceUrl
-  try {
-    pathname = new URL(sourceUrl).pathname
-  } catch {
-    pathname = sourceUrl.split(/[?#]/, 1)[0]
-  }
-  const lower = pathname.toLowerCase()
-  for (const extension of ['.tar.gz', '.tar.xz', '.tgz', '.txz', '.tar', '.zip']) {
-    if (lower.endsWith(extension)) return extension
-  }
-  return '.archive'
-}
-
-function resourceArchivePath(
-  resourcesDir: string,
-  resourceId: string,
-  version: string,
-  sourceUrl: string,
-  options: { operationId?: string; sha256?: string } = {},
-): string {
-  const safeId = resourceId.replace(/[^A-Za-z0-9._-]+/g, '-')
-  const safeVersion = version.replace(/[^A-Za-z0-9._-]+/g, '-')
-  const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
-  const checksumSuffix = options.sha256
-    ? `-${createHash('sha256').update(options.sha256.trim().toLowerCase()).digest('hex').slice(0, 16)}`
-    : ''
-  const operationSuffix = options.operationId ? `-${options.operationId}` : ''
-  return join(
-    resourcesDir,
-    'downloads',
-    `${safeId}-${safeVersion}-${sourceHash}${checksumSuffix}${operationSuffix}${archiveExtensionFromUrl(sourceUrl)}`,
-  )
-}
-
-interface RecoverPartialArchiveOptions {
-  archivePath: string
-  expectedSha256: string
-  fileOperations: ArchiveRecoveryFileOperations
-  legacyArchivePath: string
-  partialArchivePath: string
-  sha256Verifier: Sha256Verifier
-  signal: AbortSignal
-  sourceUrl: string
-}
-
-async function recoverPartialArchive({
-  archivePath,
-  expectedSha256,
-  fileOperations,
-  legacyArchivePath,
-  partialArchivePath,
-  sha256Verifier,
-  signal,
-  sourceUrl,
-}: RecoverPartialArchiveOptions): Promise<void> {
-  throwIfAborted(signal)
-  const partialExists = await pathExists(partialArchivePath)
-  const {
-    currentOperationCandidates,
-    legacyOperationCandidates,
-    supersededChecksumCandidates,
-  } = await archiveRecoveryCandidates(
-    archivePath,
-    legacyArchivePath,
-    sourceUrl,
-    fileOperations,
-  )
-  await removeArchiveCandidates(
-    supersededChecksumCandidates,
-    fileOperations,
-    signal,
-    'archive from a superseded registry lock',
-  )
-  const candidates = Array.from(
-    new Set([
-      archivePath,
-      ...currentOperationCandidates,
-      `${legacyArchivePath}.part`,
-      legacyArchivePath,
-      ...legacyOperationCandidates,
-    ]),
-  )
-  if (partialExists) {
-    await removeArchiveCandidates(
-      candidates,
-      fileOperations,
-      signal,
-      'unused archive recovery candidate',
-    )
-    return
-  }
-  for (const candidate of candidates) {
-    throwIfAborted(signal)
-    try {
-      if (!(await pathExists(candidate))) continue
-      const verified =
-        Boolean(expectedSha256) &&
-        (await sha256Verifier(candidate, expectedSha256, signal))
-      if (!verified) {
-        electronLogger.warn(
-          '[resources] Removing archive recovery candidate with a stale registry lock: %s',
-          candidate,
-        )
-        await fileOperations.remove(candidate)
-        continue
-      }
-      await fileOperations.rename(candidate, partialArchivePath)
-      await removeArchiveCandidates(
-        candidates.filter((otherCandidate) => otherCandidate !== candidate),
-        fileOperations,
-        signal,
-        'unused archive recovery candidate',
-      )
-      return
-    } catch (error) {
-      if (isAbortError(error) || signal.aborted) throw error
-      if (isFileNotFoundError(error)) continue
-      electronLogger.warn(
-        '[resources] Skipping unusable archive recovery candidate %s: %s',
-        candidate,
-        error instanceof Error ? error.message : String(error),
-      )
-    }
-  }
-}
-
-interface ArchiveRecoveryCandidates {
-  currentOperationCandidates: string[]
-  legacyOperationCandidates: string[]
-  supersededChecksumCandidates: string[]
-}
-
-async function archiveRecoveryCandidates(
-  archivePath: string,
-  legacyArchivePath: string,
-  sourceUrl: string,
-  fileOperations: ArchiveRecoveryFileOperations,
-): Promise<ArchiveRecoveryCandidates> {
-  const extension = archiveExtensionFromUrl(sourceUrl)
-  const archiveDirectory = dirname(archivePath)
-  const entries = await fileOperations
-    .readDirectory(archiveDirectory)
-    .catch((error: unknown) => {
-      if (!isFileNotFoundError(error)) {
-        electronLogger.warn(
-          '[resources] Unable to scan archive recovery candidates in %s: %s',
-          archiveDirectory,
-          error instanceof Error ? error.message : String(error),
-        )
-      }
-      return []
-    })
-  const operationCandidates = (resumableArchivePath: string): string[] => {
-    const archiveName = basename(resumableArchivePath)
-    const stem = archiveName.slice(0, -extension.length)
-    const operationArchivePattern = new RegExp(
-      `^${escapeRegExp(stem)}-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}${escapeRegExp(extension)}$`,
-      'i',
-    )
-    return entries
-      .filter((entry) => entry.isFile() && operationArchivePattern.test(entry.name))
-      .map((entry) => join(archiveDirectory, entry.name))
-      .sort()
-  }
-  const currentArchiveName = basename(archivePath)
-  const currentStem = currentArchiveName.slice(0, -extension.length).toLowerCase()
-  const legacyArchiveName = basename(legacyArchivePath)
-  const legacyStem = legacyArchiveName.slice(0, -extension.length)
-  const checksumScopePattern = new RegExp(
-    `^${escapeRegExp(legacyStem)}-([0-9a-f]{16})(?:-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})?${escapeRegExp(extension)}(?:\\.part)?$`,
-    'i',
-  )
-  const supersededChecksumCandidates = entries
-    .filter((entry) => {
-      if (!entry.isFile()) return false
-      const match = checksumScopePattern.exec(entry.name)
-      if (!match) return false
-      return `${legacyStem}-${match[1]}`.toLowerCase() !== currentStem
-    })
-    .map((entry) => join(archiveDirectory, entry.name))
-    .sort()
-  return {
-    currentOperationCandidates: operationCandidates(archivePath),
-    legacyOperationCandidates: operationCandidates(legacyArchivePath),
-    supersededChecksumCandidates,
-  }
-}
-
-async function removeArchiveCandidates(
-  candidates: string[],
-  fileOperations: ArchiveRecoveryFileOperations,
-  signal: AbortSignal,
-  description: string,
-): Promise<void> {
-  for (const candidate of candidates) {
-    throwIfAborted(signal)
-    try {
-      await fileOperations.remove(candidate)
-    } catch (error) {
-      if (isAbortError(error) || signal.aborted) throw error
-      if (isFileNotFoundError(error)) continue
-      electronLogger.warn(
-        '[resources] Unable to remove %s %s: %s',
-        description,
-        candidate,
-        error instanceof Error ? error.message : String(error),
-      )
-    }
-  }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function removeCompletedArchive(path: string, resourceId: string): void {
-  void rm(path, { force: true }).catch((error) => {
-    electronLogger.warn(
-      '[resources] Installed %s but failed to remove completed archive %s: %s',
-      resourceId,
-      path,
-      error instanceof Error ? error.message : String(error),
-    )
-  })
 }
 
 async function readMpcSpecFromDirectory(
