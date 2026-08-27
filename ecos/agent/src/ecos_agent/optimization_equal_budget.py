@@ -38,6 +38,11 @@ class CandidateTrace:
     started: bool
     terminal_success: bool
     terminal_utility: float | None = None
+    reference_utility: float | None = None
+    ppa: float | None = None
+    drc: float | None = None
+    timing: float | None = None
+    congestion: float | None = None
     requested_value: str | float | int | bool | None = None
     application_status: str | None = None
     activation_status: str | None = None
@@ -63,6 +68,11 @@ class EqualBudgetSummary:
     started_candidates: int
     terminal_successes: int
     terminal_utility: tuple[float, ...]
+    simple_regret: float | None
+    ppa: tuple[float, ...]
+    drc: tuple[float, ...]
+    timing: tuple[float, ...]
+    congestion: tuple[float, ...]
     overridden: int
     ignored: int
     not_activated: int
@@ -113,6 +123,17 @@ def evaluate_equal_budget(
             raise ValueError("candidate runtime must be non-negative and finite")
         if not math.isfinite(item.peak_memory_mb) or item.peak_memory_mb < 0:
             raise ValueError("candidate memory must be non-negative and finite")
+        metrics = (
+            item.terminal_utility,
+            item.reference_utility,
+            item.ppa,
+            item.drc,
+            item.timing,
+            item.congestion,
+        )
+        for metric in metrics:
+            if metric is not None and not math.isfinite(metric):
+                raise ValueError("candidate metrics must be finite")
     started = [item for item in selected if item.started]
     app_signatures = {item.application_signature for item in started if item.application_signature}
     response_signatures = {item.response_signature for item in started if item.response_signature}
@@ -126,6 +147,12 @@ def evaluate_equal_budget(
     utilities = tuple(
         item.terminal_utility for item in started if item.terminal_success and item.terminal_utility is not None
     )
+    references = [item.reference_utility for item in selected if item.reference_utility is not None]
+    simple_regret = (
+        max(0.0, max(references) - max(utilities))
+        if references and utilities
+        else None
+    )
     return EqualBudgetSummary(
         mode=mode,
         candidate_limit=config.candidate_limit,
@@ -134,6 +161,11 @@ def evaluate_equal_budget(
         started_candidates=len(started),
         terminal_successes=sum(item.terminal_success for item in started),
         terminal_utility=utilities,
+        simple_regret=simple_regret,
+        ppa=tuple(item.ppa for item in started if item.ppa is not None),
+        drc=tuple(item.drc for item in started if item.drc is not None),
+        timing=tuple(item.timing for item in started if item.timing is not None),
+        congestion=tuple(item.congestion for item in started if item.congestion is not None),
         overridden=sum(item.transition_status == "overridden" for item in started),
         ignored=sum(
             item.application_status == "ignored" or item.activation_status == "ignored"

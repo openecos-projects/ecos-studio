@@ -1,0 +1,17 @@
+{
+  "schema_version": "ecos.frozen_design_manifest.v1",
+  "source": "/home/yhqiu1/iagent-survey/flow_agent/benchmarks/designs/designs.yml",
+  "design_ids": [
+    "gcd",
+    "i2c",
+    "cia",
+    "zipdiv",
+    "cordic",
+    "xtea",
+    "ov7670",
+    "gpio",
+    "prince",
+    "asram16_axi4"
+  ],
+  "execution_status": "manifest_only_pending_default_flow_evidence"
+}

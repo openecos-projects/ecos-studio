@@ -14,15 +14,32 @@ from ecos_agent.parameter_semantics import load_parameter_cards
 
 
 CANDIDATES = {
-    "floorplan.core_util": "accept-floorplan-core-util-20260827-r2",
-    "floorplan.aspect_ratio": "candidate-0d7bf9efcf635d6d-accept-floorplan-aspect-ratio-20260827",
-    "synth.max_fanout": "candidate-9542e5eff883b209-accept-synth-max-fanout-20260827-r3",
-    "place.target_density": "candidate-0d7bf9efcf635d6d-accept-place-target-density-20260827",
-    "place.target_overflow": "candidate-f4a4e662ebd24ccb-accept-place-target-overflow-20260827-r2",
-    "place.cell_padding_x": "candidate-9542e5eff883b209-accept-place-cell-padding-x-20260827-r2",
-    "place.routability_opt": "candidate-f4a4e662ebd24ccb-accept-place-routability-opt-20260827",
-    "place.density_weight": "candidate-f4a4e662ebd24ccb-accept-place-density-weight-20260827",
+    "floorplan.core_util": "candidate-fb53a8688a8318c2-candidate-accept-core-util-v3-20260827",
+    "floorplan.aspect_ratio": (
+        "candidate-91962560dc60ce20-candidate-accept-aspect-ratio-v3b-20260827"
+    ),
+    "synth.max_fanout": "candidate-91962560dc60ce20-candidate-accept-max-fanout-v3b-20260827",
+    "place.target_density": "candidate-accept-rerun-smoke2-20260827",
+    "place.target_overflow": "candidate-accept-target-overflow-v3-20260827",
+    "place.cell_padding_x": "candidate-accept-cell-padding-v3-20260827",
+    "place.routability_opt": "candidate-accept-routability-v3-20260827",
+    "place.density_weight": "candidate-accept-density-weight-v3-20260827",
 }
+
+
+def _state_sha256(root: Path) -> str:
+    files = (
+        "home/flow.json",
+        "home/parameters.json",
+        "config/floorplan_ecc.json",
+        "config/fixfanout_ecc.json",
+        "config/dreamplace_ecc.json",
+    )
+    missing = [relative for relative in files if not (root / relative).is_file()]
+    if missing:
+        raise FileNotFoundError(f"parent state files missing: {', '.join(missing)}")
+    hashes = {relative: file_sha256(root / relative) for relative in files}
+    return canonical_sha256(hashes)
 
 
 def build_acceptance(workspace: Path, output: Path) -> dict:
@@ -35,7 +52,20 @@ def build_acceptance(workspace: Path, output: Path) -> dict:
         candidate_manifest = candidate_root / "analysis" / "candidate_workspace.v1.json"
         materialization = candidate_root / "analysis" / "candidate_materialization.v1.json"
         receipt = candidate_root / "analysis" / "parameter_application_receipt.v1.json"
+        replay = candidate_root / "analysis" / "candidate_execution_receipt.v1.json"
         payload = json.loads(candidate_manifest.read_text(encoding="utf-8"))
+        artifacts = payload.get("artifacts", {})
+        for key, relative in (
+            ("candidate_materialization", materialization),
+            ("parameter_application_receipt", receipt),
+            ("candidate_execution_receipt", replay),
+        ):
+            declared = artifacts.get(key, {}).get("sha256")
+            if not relative.is_file():
+                continue
+            if declared != file_sha256(relative):
+                # Keep processing so the report contains all independent failures.
+                payload.setdefault("_artifact_issues", []).append(f"{key} hash mismatch")
         evidence = CandidateExecutionEvidence(
             payload["candidate_root_ref"],
             payload["candidate_root_ref"] + "/analysis/candidate_workspace.v1.json",
@@ -52,24 +82,54 @@ def build_acceptance(workspace: Path, output: Path) -> dict:
             encoding="utf-8",
         )
         receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
-        snapshots = json.loads(materialization.read_text(encoding="utf-8")).get("snapshots", [])
-        configs = json.loads(materialization.read_text(encoding="utf-8")).get("configs", [])
+        materialization_payload = json.loads(materialization.read_text(encoding="utf-8"))
+        snapshots = materialization_payload.get("snapshots", [])
+        configs = materialization_payload.get("configs", [])
         issues = []
+        issues.extend(payload.pop("_artifact_issues", []))
         if not configs or not snapshots:
             issues.append("materialization snapshots missing")
-        elif configs[0].get("before_sha256") != snapshots[0].get("before_sha256"):
-            issues.append("materialization before hash mismatch")
-        elif configs[0].get("after_sha256") != snapshots[0].get("after_sha256"):
-            issues.append("materialization after hash mismatch")
-        elif snapshots[0].get("before_sha256") == snapshots[0].get("after_sha256"):
-            issues.append("materialization patch did not change the config")
+        else:
+            config_entry, snapshot = configs[0], snapshots[0]
+            if config_entry.get("after_sha256") != snapshot.get("after_sha256"):
+                issues.append("materialization after hash mismatch")
+            if config_entry.get("before_sha256") == config_entry.get("after_sha256"):
+                issues.append("materialization config did not change")
+            if snapshot.get("before_sha256") == snapshot.get("after_sha256"):
+                issues.append("materialization snapshot did not change")
         if receipt_payload.get("activation", {}).get("status") != "used":
             issues.append("native activation is not used")
-        issues.append("replay artifact not persisted")
+        replay_payload = None
+        if not replay.is_file():
+            issues.append("replay artifact not persisted")
+        else:
+            replay_payload = json.loads(replay.read_text(encoding="utf-8"))
+            if replay_payload.get("candidate_root_ref") != payload.get("candidate_root_ref"):
+                issues.append("replay candidate root mismatch")
+            if replay_payload.get("parent_candidate_root_ref") != payload.get(
+                "parent_candidate_root_ref"
+            ):
+                issues.append("replay parent mismatch")
+            parent_ref = payload.get("parent_candidate_root_ref")
+            parent_root = workspace / parent_ref if isinstance(parent_ref, str) else workspace
+            expected_parent_state = _state_sha256(parent_root)
+            if payload.get("parent_state_sha256") != expected_parent_state:
+                issues.append("candidate parent state hash mismatch")
+            if replay_payload.get("parent_state_sha256") != expected_parent_state:
+                issues.append("replay parent state hash mismatch")
+            if replay_payload.get("target_step") != payload.get("target_step"):
+                issues.append("replay target step mismatch")
+            if replay_payload.get("end_step") != payload.get("end_step"):
+                issues.append("replay end step mismatch")
+            if replay_payload.get("execution_scope") != payload.get("execution_scope"):
+                issues.append("replay execution scope mismatch")
         requested = receipt_payload.get("requested", {})
         effective = receipt_payload.get("effective_initial", {})
-        if requested.get("unit") == "ratio" and knob_id.endswith("density_weight"):
-            issues.append("native receipt unit is stale; expected objective_weight")
+        expected_unit = (
+            "objective_weight" if knob_id.endswith("density_weight") else requested.get("unit")
+        )
+        if requested.get("unit") != expected_unit:
+            issues.append(f"native receipt unit mismatch; expected {expected_unit}")
         if requested.get("value") != effective.get("value") and knob_id != "place.cell_padding_x":
             issues.append("effective initial does not match requested value")
         entries.append(
@@ -92,7 +152,10 @@ def build_acceptance(workspace: Path, output: Path) -> dict:
                     "operation": "candidate.rerun",
                     "target_step": payload["target_step"],
                     "end_step": payload["end_step"],
-                    "available": False,
+                    "available": replay_payload is not None and not any(
+                        issue.startswith(("replay ", "candidate parent state hash"))
+                        for issue in issues
+                    ),
                 },
             }
         )

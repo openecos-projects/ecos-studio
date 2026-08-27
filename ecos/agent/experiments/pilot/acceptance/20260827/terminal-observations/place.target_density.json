@@ -154,7 +154,7 @@
         "route_ecc/analysis/qor_metrics.json"
       ],
       "unit": "count",
-      "value": 1716.0
+      "value": 1717.0
     },
     {
       "category": "routing_diagnostic",
@@ -220,7 +220,7 @@
         "Harden_ecc/analysis/qor_metrics.json"
       ],
       "unit": "s",
-      "value": 249.001
+      "value": 237.29399999999998
     },
     {
       "category": "cost",
@@ -241,7 +241,7 @@
         "Harden_ecc/analysis/qor_metrics.json"
       ],
       "unit": "MB",
-      "value": 1510.105
+      "value": 1433.195
     },
     {
       "category": "cost",
@@ -286,7 +286,7 @@
         "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
       ],
       "unit": "uW",
-      "value": 66.0173
+      "value": 66.013
     },
     {
       "category": "ppa",
@@ -310,7 +310,7 @@
         "sta_ecc/feature/ML_125/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 104.1066
+      "value": 104.1129
     },
     {
       "category": "ppa",
@@ -334,7 +334,7 @@
         "sta_ecc/feature/MAX_125/Cworst/qor_summary.json"
       ],
       "unit": "ns",
-      "value": 6.748
+      "value": 6.749
     },
     {
       "category": "corner_robustness",
@@ -430,7 +430,7 @@
         "sta_ecc/feature/MAX_125/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 13.8739
+      "value": 13.8789
     },
     {
       "category": "corner_robustness",
@@ -442,7 +442,7 @@
         "sta_ecc/feature/MAX_125/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 50.2704
+      "value": 50.2754
     },
     {
       "category": "corner_robustness",
@@ -466,7 +466,7 @@
         "sta_ecc/feature/MAX_125/RCworst/qor_summary.json"
       ],
       "unit": "ns",
-      "value": 7.011
+      "value": 7.012
     },
     {
       "category": "corner_robustness",
@@ -562,7 +562,7 @@
         "sta_ecc/feature/MAX_125/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 12.9022
+      "value": 12.9016
     },
     {
       "category": "corner_robustness",
@@ -574,7 +574,7 @@
         "sta_ecc/feature/MAX_125/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 49.287
+      "value": 49.2864
     },
     {
       "category": "corner_robustness",
@@ -682,7 +682,7 @@
         "sta_ecc/feature/MIN_m40/Cbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 67.5992
+      "value": 67.5986
     },
     {
       "category": "corner_robustness",
@@ -694,7 +694,7 @@
         "sta_ecc/feature/MIN_m40/Cbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 21.6716
+      "value": 21.6626
     },
     {
       "category": "corner_robustness",
@@ -706,7 +706,7 @@
         "sta_ecc/feature/MIN_m40/Cbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 89.2708
+      "value": 89.2612
     },
     {
       "category": "corner_robustness",
@@ -814,7 +814,7 @@
         "sta_ecc/feature/MIN_m40/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 67.7942
+      "value": 67.7935
     },
     {
       "category": "corner_robustness",
@@ -826,7 +826,7 @@
         "sta_ecc/feature/MIN_m40/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 23.5967
+      "value": 23.6042
     },
     {
       "category": "corner_robustness",
@@ -838,7 +838,7 @@
         "sta_ecc/feature/MIN_m40/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 91.3909
+      "value": 91.3978
     },
     {
       "category": "corner_robustness",
@@ -862,7 +862,7 @@
         "sta_ecc/feature/MIN_m40/RCbest/qor_summary.json"
       ],
       "unit": "ns",
-      "value": 9.073
+      "value": 9.074
     },
     {
       "category": "corner_robustness",
@@ -946,7 +946,7 @@
         "sta_ecc/feature/MIN_m40/RCbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 67.686
+      "value": 67.6854
     },
     {
       "category": "corner_robustness",
@@ -958,7 +958,7 @@
         "sta_ecc/feature/MIN_m40/RCbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 22.5266
+      "value": 22.5178
     },
     {
       "category": "corner_robustness",
@@ -970,7 +970,7 @@
         "sta_ecc/feature/MIN_m40/RCbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 90.2127
+      "value": 90.2032
     },
     {
       "category": "corner_robustness",
@@ -1078,7 +1078,7 @@
         "sta_ecc/feature/MIN_m40/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 67.6456
+      "value": 67.645
     },
     {
       "category": "corner_robustness",
@@ -1090,7 +1090,7 @@
         "sta_ecc/feature/MIN_m40/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 22.1451
+      "value": 22.1443
     },
     {
       "category": "corner_robustness",
@@ -1102,7 +1102,7 @@
         "sta_ecc/feature/MIN_m40/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 89.7907
+      "value": 89.7893
     },
     {
       "category": "corner_robustness",
@@ -1210,7 +1210,7 @@
         "sta_ecc/feature/ML_125/Cbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 81.7665
+      "value": 81.7656
     },
     {
       "category": "corner_robustness",
@@ -1222,7 +1222,7 @@
         "sta_ecc/feature/ML_125/Cbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 20.0721
+      "value": 20.0632
     },
     {
       "category": "corner_robustness",
@@ -1234,7 +1234,7 @@
         "sta_ecc/feature/ML_125/Cbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 101.8387
+      "value": 101.8288
     },
     {
       "category": "corner_robustness",
@@ -1342,7 +1342,7 @@
         "sta_ecc/feature/ML_125/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 82.1093
+      "value": 82.1081
     },
     {
       "category": "corner_robustness",
@@ -1354,7 +1354,7 @@
         "sta_ecc/feature/ML_125/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 21.9973
+      "value": 22.0048
     },
     {
       "category": "corner_robustness",
@@ -1366,7 +1366,7 @@
         "sta_ecc/feature/ML_125/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 104.1066
+      "value": 104.1129
     },
     {
       "category": "corner_robustness",
@@ -1474,7 +1474,7 @@
         "sta_ecc/feature/ML_125/RCbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 81.9158
+      "value": 81.9147
     },
     {
       "category": "corner_robustness",
@@ -1486,7 +1486,7 @@
         "sta_ecc/feature/ML_125/RCbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 20.9272
+      "value": 20.9184
     },
     {
       "category": "corner_robustness",
@@ -1498,7 +1498,7 @@
         "sta_ecc/feature/ML_125/RCbest/power_summary.json"
       ],
       "unit": "uW",
-      "value": 102.8429
+      "value": 102.833
     },
     {
       "category": "corner_robustness",
@@ -1606,7 +1606,7 @@
         "sta_ecc/feature/ML_125/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 81.8463
+      "value": 81.8453
     },
     {
       "category": "corner_robustness",
@@ -1618,7 +1618,7 @@
         "sta_ecc/feature/ML_125/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 20.5457
+      "value": 20.5449
     },
     {
       "category": "corner_robustness",
@@ -1630,7 +1630,7 @@
         "sta_ecc/feature/ML_125/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 102.392
+      "value": 102.3902
     },
     {
       "category": "corner_robustness",
@@ -1738,7 +1738,7 @@
         "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
       ],
       "unit": "uW",
-      "value": 48.8311
+      "value": 48.8309
     },
     {
       "category": "corner_robustness",
@@ -1750,7 +1750,7 @@
         "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
       ],
       "unit": "uW",
-      "value": 17.1862
+      "value": 17.1822
     },
     {
       "category": "corner_robustness",
@@ -1762,7 +1762,7 @@
         "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
       ],
       "unit": "uW",
-      "value": 66.0173
+      "value": 66.013
     },
     {
       "category": "corner_robustness",
@@ -1786,7 +1786,7 @@
         "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
       ],
       "unit": "ns",
-      "value": 6.82
+      "value": 6.821
     },
     {
       "category": "corner_robustness",
@@ -1822,7 +1822,7 @@
         "sta_ecc/feature/WCL_m40/Cworst/qor_summary.json"
       ],
       "unit": "MHz",
-      "value": 314.0
+      "value": 315.0
     },
     {
       "category": "corner_robustness",
@@ -1882,7 +1882,7 @@
         "sta_ecc/feature/WCL_m40/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 14.9034
+      "value": 14.9084
     },
     {
       "category": "corner_robustness",
@@ -1894,7 +1894,7 @@
         "sta_ecc/feature/WCL_m40/Cworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 56.6826
+      "value": 56.6877
     },
     {
       "category": "corner_robustness",
@@ -1918,7 +1918,7 @@
         "sta_ecc/feature/WCL_m40/RCworst/qor_summary.json"
       ],
       "unit": "ns",
-      "value": 7.056
+      "value": 7.057
     },
     {
       "category": "corner_robustness",
@@ -2014,7 +2014,7 @@
         "sta_ecc/feature/WCL_m40/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 13.9317
+      "value": 13.9312
     },
     {
       "category": "corner_robustness",
@@ -2026,7 +2026,7 @@
         "sta_ecc/feature/WCL_m40/RCworst/power_summary.json"
       ],
       "unit": "uW",
-      "value": 55.71
+      "value": 55.7095
     },
     {
       "category": "corner_robustness",
@@ -2042,13 +2042,13 @@
     }
   ],
   "evaluation_metrics_complete": true,
-  "evidence_manifest_sha256": "sha256:22de4ae68b76b0877f61f47f9f94a1b382bea7768103757dffc0772d09a4dae8",
+  "evidence_manifest_sha256": "sha256:188ad9e8eb09d31f0add298c19adb6265b18e3e2bfbb05266336ac8bdf1c2080",
   "evidence_valid": true,
   "harden_artifacts_complete": true,
   "metrics": {
     "route_dr_total_violation_count": 0.0,
     "route_la_total_overflow": 1.0,
-    "route_wirelength": 5183.037
+    "route_wirelength": 5183.229
   },
   "observation_id": "terminal-Harden",
   "schema_version": "ecos.terminal_observation.v3",
@@ -2082,6 +2082,6 @@
     "sta_hold_tns": 0.0,
     "sta_hold_wns": 0.091,
     "sta_setup_tns": 0.0,
-    "sta_setup_wns": 6.748
+    "sta_setup_wns": 6.749
   }
 }

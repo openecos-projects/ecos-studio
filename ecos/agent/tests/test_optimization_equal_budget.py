@@ -67,3 +67,28 @@ def test_requested_only_does_not_claim_alias_savings() -> None:
     summary = evaluate_equal_budget([trace], mode="requested-only")
     assert summary.aliases_saved == 0
     assert summary.wrong_prunes == 0
+
+
+def test_equal_budget_reports_terminal_metrics_and_regret() -> None:
+    summary = evaluate_equal_budget(
+        [
+            CandidateTrace(
+                design_id="gcd",
+                candidate_id="c1",
+                started=True,
+                terminal_success=True,
+                terminal_utility=8.0,
+                reference_utility=10.0,
+                ppa=1.2,
+                drc=0.0,
+                timing=-0.1,
+                congestion=0.3,
+            )
+        ],
+        mode="receipt-aware",
+    )
+    assert summary.simple_regret == 2.0
+    assert summary.ppa == (1.2,)
+    assert summary.drc == (0.0,)
+    assert summary.timing == (-0.1,)
+    assert summary.congestion == (0.3,)

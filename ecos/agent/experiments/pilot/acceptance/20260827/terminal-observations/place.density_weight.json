@@ -220,7 +220,7 @@
         "Harden_ecc/analysis/qor_metrics.json"
       ],
       "unit": "s",
-      "value": 308.35299999999995
+      "value": 241.516
     },
     {
       "category": "cost",
@@ -241,7 +241,7 @@
         "Harden_ecc/analysis/qor_metrics.json"
       ],
       "unit": "MB",
-      "value": 1394.953
+      "value": 1413.727
     },
     {
       "category": "cost",
@@ -2042,7 +2042,7 @@
     }
   ],
   "evaluation_metrics_complete": true,
-  "evidence_manifest_sha256": "sha256:94995e006b51c67c48167d961118ad0a892d213c70af66e1b03ad051b052370a",
+  "evidence_manifest_sha256": "sha256:5d685287eba482d3ea6502584257402fed7214d8e65fe98a8962c22727951e2f",
   "evidence_valid": true,
   "harden_artifacts_complete": true,
   "metrics": {

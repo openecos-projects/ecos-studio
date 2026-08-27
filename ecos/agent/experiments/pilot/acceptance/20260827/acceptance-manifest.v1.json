@@ -3,209 +3,186 @@
   "entries": [
     {
       "activation_status": "used",
-      "candidate_id": "accept-floorplan-core-util-20260827-r2",
-      "candidate_manifest_ref": ".agent/candidates/accept-floorplan-core-util-20260827-r2/analysis/candidate_workspace.v1.json",
-      "candidate_manifest_sha256": "sha256:17dd514601b26a73e5130b849206aa7b7e3bf8d3250b2cb8b36d3b8789ee4322",
-      "candidate_root_ref": ".agent/candidates/accept-floorplan-core-util-20260827-r2",
+      "candidate_id": "candidate-fb53a8688a8318c2-candidate-accept-core-util-v3-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-fb53a8688a8318c2-candidate-accept-core-util-v3-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:df2f916331d79e8752215545a28ddd7d5636a37ae3cf8332c38e3eef6e3fcc44",
+      "candidate_root_ref": ".agent/candidates/candidate-fb53a8688a8318c2-candidate-accept-core-util-v3-20260827",
       "card_sha256": "sha256:03b88cd311325d9d4c5f4d470438adee85596abfdd0ab77cc0d2fffd9b41c089",
-      "issues": [
-        "materialization patch did not change the config",
-        "replay artifact not persisted"
-      ],
+      "issues": [],
       "knob_id": "floorplan.core_util",
-      "materialization_ref": ".agent/candidates/accept-floorplan-core-util-20260827-r2/analysis/candidate_materialization.v1.json",
-      "materialization_sha256": "sha256:3ce8a04959b88860cb9638a8fd16fe0303c765f914a92bb35b99b91afc9540bb",
-      "native_receipt_ref": ".agent/candidates/accept-floorplan-core-util-20260827-r2/analysis/parameter_application_receipt.v1.json",
-      "native_receipt_sha256": "sha256:cd6906e2d76c4ac64fc7ee976d4978126ab6cf19e3abcc8a69258be92d33ab27",
+      "materialization_ref": ".agent/candidates/candidate-fb53a8688a8318c2-candidate-accept-core-util-v3-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:184856284913a6c76bac709b9dd2a9665469afb2402655cb94e882178294936e",
+      "native_receipt_ref": ".agent/candidates/candidate-fb53a8688a8318c2-candidate-accept-core-util-v3-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:9739764ba1249d0d30475de10f4972086ebf86e0a6aa0e46c484abe8b1a37e0a",
       "replay": {
-        "available": false,
+        "available": true,
         "end_step": "Harden",
         "operation": "candidate.rerun",
         "target_step": "Floorplan"
       },
       "terminal_observation_ref": "terminal-observations/floorplan.core_util.json",
-      "terminal_observation_sha256": "sha256:3cfe462c8830cef3752d8362977843d97925a199501e91e930090e05bdcbbafd"
+      "terminal_observation_sha256": "sha256:3ebc956651edb06d7f82be9b89980b34feae98dc1cee64ebfaf33ba4ee8cb2fa"
     },
     {
       "activation_status": "used",
-      "candidate_id": "candidate-0d7bf9efcf635d6d-accept-floorplan-aspect-ratio-20260827",
-      "candidate_manifest_ref": ".agent/candidates/candidate-0d7bf9efcf635d6d-accept-floorplan-aspect-ratio-20260827/analysis/candidate_workspace.v1.json",
-      "candidate_manifest_sha256": "sha256:b44d8d035aaae883a52a24dc13b84adec90d22b8b2d75a3745843fc45985922d",
-      "candidate_root_ref": ".agent/candidates/candidate-0d7bf9efcf635d6d-accept-floorplan-aspect-ratio-20260827",
+      "candidate_id": "candidate-91962560dc60ce20-candidate-accept-aspect-ratio-v3b-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-91962560dc60ce20-candidate-accept-aspect-ratio-v3b-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:fc1dcaf158be3efa22082653e0e2d6bda69676c52ee634bb2681c402d6f671da",
+      "candidate_root_ref": ".agent/candidates/candidate-91962560dc60ce20-candidate-accept-aspect-ratio-v3b-20260827",
       "card_sha256": "sha256:6b88f031e1e6fa4d7445aab6d55699569ca28cd212f26856d432d4085433a1d0",
-      "issues": [
-        "materialization patch did not change the config",
-        "replay artifact not persisted"
-      ],
+      "issues": [],
       "knob_id": "floorplan.aspect_ratio",
-      "materialization_ref": ".agent/candidates/candidate-0d7bf9efcf635d6d-accept-floorplan-aspect-ratio-20260827/analysis/candidate_materialization.v1.json",
-      "materialization_sha256": "sha256:951c94289b912bc09681767d6b35bea001fdc0c353c935942c8ed8f1943c3a66",
-      "native_receipt_ref": ".agent/candidates/candidate-0d7bf9efcf635d6d-accept-floorplan-aspect-ratio-20260827/analysis/parameter_application_receipt.v1.json",
-      "native_receipt_sha256": "sha256:b32771340026c3cb488c8f37a2f13ea9068643c098c05ecaf56672e2ed26d65d",
+      "materialization_ref": ".agent/candidates/candidate-91962560dc60ce20-candidate-accept-aspect-ratio-v3b-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:40bddcc9790d804765071e40169a4d7480cce8f4d779a8716a6f72fe32af57b0",
+      "native_receipt_ref": ".agent/candidates/candidate-91962560dc60ce20-candidate-accept-aspect-ratio-v3b-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:aaa23c74a74f350f0dfc6f50c4cfec419a4faf48d4311bf8ec4560a9bc349280",
       "replay": {
-        "available": false,
+        "available": true,
         "end_step": "Harden",
         "operation": "candidate.rerun",
         "target_step": "Floorplan"
       },
       "terminal_observation_ref": "terminal-observations/floorplan.aspect_ratio.json",
-      "terminal_observation_sha256": "sha256:a0628aae80b00765af5c24ccb4437e3d12e580f98c3ee69730f81e35f56635dd"
+      "terminal_observation_sha256": "sha256:46b8595eaabfa3a299ef2e35d218919f591e512e94f5ab1e74156ed28c8c3b4b"
     },
     {
       "activation_status": "used",
-      "candidate_id": "candidate-9542e5eff883b209-accept-synth-max-fanout-20260827-r3",
-      "candidate_manifest_ref": ".agent/candidates/candidate-9542e5eff883b209-accept-synth-max-fanout-20260827-r3/analysis/candidate_workspace.v1.json",
-      "candidate_manifest_sha256": "sha256:f89ffcabc75bf3b615ae945dee8cc515604b29ec73012ae6628ad7b649ba484d",
-      "candidate_root_ref": ".agent/candidates/candidate-9542e5eff883b209-accept-synth-max-fanout-20260827-r3",
+      "candidate_id": "candidate-91962560dc60ce20-candidate-accept-max-fanout-v3b-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-91962560dc60ce20-candidate-accept-max-fanout-v3b-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:dd1dcf20cbd66816d91fc9b64ff8438a85a5cde00ca880e544641043ca9a3886",
+      "candidate_root_ref": ".agent/candidates/candidate-91962560dc60ce20-candidate-accept-max-fanout-v3b-20260827",
       "card_sha256": "sha256:002b340159403410d2535566a98ab63df4e11dc823971f24b67b56d7b4a94b3b",
-      "issues": [
-        "materialization patch did not change the config",
-        "replay artifact not persisted"
-      ],
+      "issues": [],
       "knob_id": "synth.max_fanout",
-      "materialization_ref": ".agent/candidates/candidate-9542e5eff883b209-accept-synth-max-fanout-20260827-r3/analysis/candidate_materialization.v1.json",
-      "materialization_sha256": "sha256:5e27c0a1d4b14c8a4177731063590ce75b96517b83fc92d5fb8b3f3978be7f02",
-      "native_receipt_ref": ".agent/candidates/candidate-9542e5eff883b209-accept-synth-max-fanout-20260827-r3/analysis/parameter_application_receipt.v1.json",
-      "native_receipt_sha256": "sha256:5d74bdd6563e744fa8656cca7fc5777e2f304e41a92e8165420ff683a58d36ce",
+      "materialization_ref": ".agent/candidates/candidate-91962560dc60ce20-candidate-accept-max-fanout-v3b-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:e58a76dd5b6b0aa639df5c506d8691aa23d8a451de5d83478567f3a96a2b0f32",
+      "native_receipt_ref": ".agent/candidates/candidate-91962560dc60ce20-candidate-accept-max-fanout-v3b-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:433c441d7865bae005b5f5377b61562050b3a5b46e298baf138788b8543f51e2",
       "replay": {
-        "available": false,
+        "available": true,
         "end_step": "Harden",
         "operation": "candidate.rerun",
         "target_step": "fixFanout"
       },
       "terminal_observation_ref": "terminal-observations/synth.max_fanout.json",
-      "terminal_observation_sha256": "sha256:b02c5194e9f525236be2a9e6f7b98644fa03d0df801d090ea7c3d0a4e24d1845"
+      "terminal_observation_sha256": "sha256:ceb086bd3a1d31b5de9a1d69324e7f3f1bda18b229c36959451569e84983561f"
     },
     {
       "activation_status": "used",
-      "candidate_id": "candidate-0d7bf9efcf635d6d-accept-place-target-density-20260827",
-      "candidate_manifest_ref": ".agent/candidates/candidate-0d7bf9efcf635d6d-accept-place-target-density-20260827/analysis/candidate_workspace.v1.json",
-      "candidate_manifest_sha256": "sha256:ac0b430e401ec126a213fd9751d3892f414b9723dc645680880250e1b54b04bb",
-      "candidate_root_ref": ".agent/candidates/candidate-0d7bf9efcf635d6d-accept-place-target-density-20260827",
+      "candidate_id": "candidate-accept-rerun-smoke2-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-accept-rerun-smoke2-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:a26d3d77ab3aba1d279004e10e11850a48dae01185a655966c9123652e6c9747",
+      "candidate_root_ref": ".agent/candidates/candidate-accept-rerun-smoke2-20260827",
       "card_sha256": "sha256:1d56aef64ff17775e4e2fd207b1535ae3be2e84a07cae7009343130cf16de610",
-      "issues": [
-        "materialization before hash mismatch",
-        "replay artifact not persisted",
-        "effective initial does not match requested value"
-      ],
+      "issues": [],
       "knob_id": "place.target_density",
-      "materialization_ref": ".agent/candidates/candidate-0d7bf9efcf635d6d-accept-place-target-density-20260827/analysis/candidate_materialization.v1.json",
-      "materialization_sha256": "sha256:7b64e132d9b94dfb79484a41b3d6328eb1e84ee979774d091cabf62425222303",
-      "native_receipt_ref": ".agent/candidates/candidate-0d7bf9efcf635d6d-accept-place-target-density-20260827/analysis/parameter_application_receipt.v1.json",
-      "native_receipt_sha256": "sha256:4d42efba0b34e9c68d13924527588c532f9c9a0f2a02bb3431d2cdc1c5a3a807",
+      "materialization_ref": ".agent/candidates/candidate-accept-rerun-smoke2-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:75eeab6dd77a1cf6aafcce29361631e909e79092733c44a951ad1c2015b34e19",
+      "native_receipt_ref": ".agent/candidates/candidate-accept-rerun-smoke2-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:b5106a1e73e40b3a30967d61187f1c41c2f98afb24a64ef6d6631cd5835d93d5",
       "replay": {
-        "available": false,
+        "available": true,
         "end_step": "Harden",
         "operation": "candidate.rerun",
         "target_step": "place"
       },
       "terminal_observation_ref": "terminal-observations/place.target_density.json",
-      "terminal_observation_sha256": "sha256:f6d4295e5e5a0a6a33e01e0c87f3d48378dbd4ce4d0e8f25a147c7e09ff2b7fd"
+      "terminal_observation_sha256": "sha256:294a84eaadfb4f2b9e1715e6e9142e27fbeaf13cd98bd23b70de006f8570e427"
     },
     {
       "activation_status": "used",
-      "candidate_id": "candidate-f4a4e662ebd24ccb-accept-place-target-overflow-20260827-r2",
-      "candidate_manifest_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-target-overflow-20260827-r2/analysis/candidate_workspace.v1.json",
-      "candidate_manifest_sha256": "sha256:0ab847772d606f128687f0ea5e6d8d06e5c48fb6c89091718e2faa0d1e4e95d8",
-      "candidate_root_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-target-overflow-20260827-r2",
+      "candidate_id": "candidate-accept-target-overflow-v3-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-accept-target-overflow-v3-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:a5704cf411a6516797d7c5b75c93d2540150b617da727b6cad73c36c0911cbea",
+      "candidate_root_ref": ".agent/candidates/candidate-accept-target-overflow-v3-20260827",
       "card_sha256": "sha256:f32ba04aa35bc1a64e5d4adb7f599794fef93c9a1790d90021621e496b8edc1c",
-      "issues": [
-        "materialization before hash mismatch",
-        "replay artifact not persisted",
-        "effective initial does not match requested value"
-      ],
+      "issues": [],
       "knob_id": "place.target_overflow",
-      "materialization_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-target-overflow-20260827-r2/analysis/candidate_materialization.v1.json",
-      "materialization_sha256": "sha256:f891c5e9158db9fcd88cb2d15bc51d10e26808070201cf8626216b88286b8093",
-      "native_receipt_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-target-overflow-20260827-r2/analysis/parameter_application_receipt.v1.json",
-      "native_receipt_sha256": "sha256:292f7aa565a6a9d1d3b0a014fac3997cb11e8a8111379af446e7d90694dc46cf",
+      "materialization_ref": ".agent/candidates/candidate-accept-target-overflow-v3-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:fad1723532cdd12c4a7722a0785d35a7eea0d12155a2f8413b6a9dc55588688f",
+      "native_receipt_ref": ".agent/candidates/candidate-accept-target-overflow-v3-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:21de239804700af1bcb775b5edaa74f59e41ea285b9dabb02a7b491f8b7523f8",
       "replay": {
-        "available": false,
+        "available": true,
         "end_step": "Harden",
         "operation": "candidate.rerun",
         "target_step": "place"
       },
       "terminal_observation_ref": "terminal-observations/place.target_overflow.json",
-      "terminal_observation_sha256": "sha256:e52d336fbcfbb21314b640147493ed6d075c391ac774a7559730be2cd40ae6ee"
+      "terminal_observation_sha256": "sha256:65076e88ad9e2d7245c83b0d8e137b8354d2dfb20d50f51130c5868778484129"
     },
     {
       "activation_status": "used",
-      "candidate_id": "candidate-9542e5eff883b209-accept-place-cell-padding-x-20260827-r2",
-      "candidate_manifest_ref": ".agent/candidates/candidate-9542e5eff883b209-accept-place-cell-padding-x-20260827-r2/analysis/candidate_workspace.v1.json",
-      "candidate_manifest_sha256": "sha256:f0bf5c41d407ac15982281296cc25d7054d8f76c768f8c1813aec9991037c8ad",
-      "candidate_root_ref": ".agent/candidates/candidate-9542e5eff883b209-accept-place-cell-padding-x-20260827-r2",
+      "candidate_id": "candidate-accept-cell-padding-v3-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-accept-cell-padding-v3-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:42ed366e499932b7632925852f658aeb0fb5d5a9bf3ef699f21979e9c037e6c9",
+      "candidate_root_ref": ".agent/candidates/candidate-accept-cell-padding-v3-20260827",
       "card_sha256": "sha256:457aff4c591774d01c7f7e18921c5b779d7de32fbc6224cd3f705ce95673cd83",
-      "issues": [
-        "materialization before hash mismatch",
-        "replay artifact not persisted"
-      ],
+      "issues": [],
       "knob_id": "place.cell_padding_x",
-      "materialization_ref": ".agent/candidates/candidate-9542e5eff883b209-accept-place-cell-padding-x-20260827-r2/analysis/candidate_materialization.v1.json",
-      "materialization_sha256": "sha256:e4098ef129e5b3ac6cdaf5f601427c985d543fd516b690a7e12ef81c24f2b59b",
-      "native_receipt_ref": ".agent/candidates/candidate-9542e5eff883b209-accept-place-cell-padding-x-20260827-r2/analysis/parameter_application_receipt.v1.json",
-      "native_receipt_sha256": "sha256:29e85ec68efcfc6b79dc1ac643f6d3d2321fffc90759c126663fc16f10445f28",
+      "materialization_ref": ".agent/candidates/candidate-accept-cell-padding-v3-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:81f734e5a3eff2f7e8fda7aa833b30e1c1e63528fcccfbfa5d87a83b9fd16627",
+      "native_receipt_ref": ".agent/candidates/candidate-accept-cell-padding-v3-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:5d9e0adfed1cdd7184d9eb76b2ac73bb4ef8cd0e9930b6c32a4f0c77403f1577",
       "replay": {
-        "available": false,
+        "available": true,
         "end_step": "Harden",
         "operation": "candidate.rerun",
         "target_step": "place"
       },
       "terminal_observation_ref": "terminal-observations/place.cell_padding_x.json",
-      "terminal_observation_sha256": "sha256:23771b295136832d26874cf13fb3e60ac739416660e33400f21f9a5a031177ce"
+      "terminal_observation_sha256": "sha256:586b37be8122b671efa98f5eeed65a4862e4f4da2b36d3d29495ee835e8b8086"
     },
     {
-      "activation_status": "used",
-      "candidate_id": "candidate-f4a4e662ebd24ccb-accept-place-routability-opt-20260827",
-      "candidate_manifest_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-routability-opt-20260827/analysis/candidate_workspace.v1.json",
-      "candidate_manifest_sha256": "sha256:c437646d08f0889e862541a6047c659ba616de491ac2e73fccd79754dac37920",
-      "candidate_root_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-routability-opt-20260827",
+      "activation_status": "not_activated",
+      "candidate_id": "candidate-accept-routability-v3-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-routability-false-parent-v3b-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:b571f8f290641ebf8de5a45f4be3a11eb3490539d177de99e9710a841a717eb8",
+      "candidate_root_ref": ".agent/candidates/candidate-routability-false-parent-v3b-20260827",
       "card_sha256": "sha256:e3f185ee862b1fe12a362939fd5594b676a48c537f937bc107e0e617f7e33eb6",
       "issues": [
-        "materialization before hash mismatch",
-        "replay artifact not persisted"
+        "candidate_materialization hash mismatch",
+        "materialization snapshot did not change",
+        "native activation is not used"
       ],
       "knob_id": "place.routability_opt",
-      "materialization_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-routability-opt-20260827/analysis/candidate_materialization.v1.json",
-      "materialization_sha256": "sha256:214bf6752bbf27ff49cf6c3712fa7db6b807d7294525b7dcdb2bfddd9ace949c",
-      "native_receipt_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-routability-opt-20260827/analysis/parameter_application_receipt.v1.json",
-      "native_receipt_sha256": "sha256:654d952f68aec14af3e467466f6586ce209b57dd399303977e3a6612a6f70303",
+      "materialization_ref": ".agent/candidates/candidate-accept-routability-v3-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:137772907e6cc494a02a813da2641f54370a6c274c2fe327dca378a1d8e55a40",
+      "native_receipt_ref": ".agent/candidates/candidate-accept-routability-v3-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:a02f0ee692287be6d5b8aff7a4a3ddfb916b69689d69f3445791ddaf41cf0cd6",
       "replay": {
-        "available": false,
+        "available": true,
         "end_step": "Harden",
         "operation": "candidate.rerun",
         "target_step": "place"
       },
       "terminal_observation_ref": "terminal-observations/place.routability_opt.json",
-      "terminal_observation_sha256": "sha256:26fde23bbfbcc2ff6eb73a5a550f7e88018de216a8bc2c66002d7168735de24e"
+      "terminal_observation_sha256": "sha256:b839a6a86394b0cd1159e10412baea9855a2282aa0cecc0934379b13fb967c2b"
     },
     {
       "activation_status": "used",
-      "candidate_id": "candidate-f4a4e662ebd24ccb-accept-place-density-weight-20260827",
-      "candidate_manifest_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-density-weight-20260827/analysis/candidate_workspace.v1.json",
-      "candidate_manifest_sha256": "sha256:c1eec29d94db623b98f7112e5d19584ca1ee0b2b2a9d7b4488f483cf2c93b1d9",
-      "candidate_root_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-density-weight-20260827",
+      "candidate_id": "candidate-accept-density-weight-v3-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-accept-density-weight-v3-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:83b0b05971fac556d52c1d31fde856f3ab6da1697a1a9094d2dbc17f1bf88836",
+      "candidate_root_ref": ".agent/candidates/candidate-accept-density-weight-v3-20260827",
       "card_sha256": "sha256:b9a0c7bc803f0ff8b3ca9e8f89c146ba7aa5630a7e2028ea811cac10b38ff82e",
-      "issues": [
-        "materialization before hash mismatch",
-        "replay artifact not persisted",
-        "native receipt unit is stale; expected objective_weight"
-      ],
+      "issues": [],
       "knob_id": "place.density_weight",
-      "materialization_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-density-weight-20260827/analysis/candidate_materialization.v1.json",
-      "materialization_sha256": "sha256:c31326d15618838569223056edfa87157e725cda856148e147dc8c1d5a6bba10",
-      "native_receipt_ref": ".agent/candidates/candidate-f4a4e662ebd24ccb-accept-place-density-weight-20260827/analysis/parameter_application_receipt.v1.json",
-      "native_receipt_sha256": "sha256:ef20fdfcea8970bd1b27d50ba6e1fa1bb0b73fe3dda41888a3dd3e4994aeac2b",
+      "materialization_ref": ".agent/candidates/candidate-accept-density-weight-v3-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:5a4c063b47cc362f433ccaf6a13554a42042291203a09a97214b04b8cc1c7339",
+      "native_receipt_ref": ".agent/candidates/candidate-accept-density-weight-v3-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:e96c5a7475ec4071a3c84cc27b04d4fe7643b628c303009ee35ae308a37b8123",
       "replay": {
-        "available": false,
+        "available": true,
         "end_step": "Harden",
         "operation": "candidate.rerun",
         "target_step": "place"
       },
       "terminal_observation_ref": "terminal-observations/place.density_weight.json",
-      "terminal_observation_sha256": "sha256:0b3982db896446ff495d2e6e16d8d10993eff2813a8a17dcced8421b35374ae6"
+      "terminal_observation_sha256": "sha256:0327679e4404fbf430cc415e27aa66ffb7b47f4dbddd46a1c0e1d79cc7519f45"
     }
   ],
-  "manifest_sha256": "sha256:f9cc6619f5345f26f450dc537ae444955b2fb53e6236b7942a6049824e58933d",
+  "manifest_sha256": "sha256:fa49413c67962ce40865b3cba63ae179142a8e94912f6adf4839828fc1dd8328",
   "schema_version": "ecos.parameter_acceptance_manifest.v1",
   "workspace": "experiments/pilot/results/gate0-20260824-d/gcd/workspace"
 }
