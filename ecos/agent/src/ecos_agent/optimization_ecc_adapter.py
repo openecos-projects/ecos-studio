@@ -20,6 +20,11 @@ from ecos_agent.optimization_contracts import (
     RequestedKnobValue,
 )
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
+from ecos_agent.parameter_semantics import (
+    ParameterSemanticsError,
+    load_parameter_cards,
+    validate_application_receipt,
+)
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
@@ -282,6 +287,10 @@ class EccCandidateRerunAdapter:
         if isinstance(receipt, ParameterApplicationReceipt):
             if receipt.requested.get("knob_id") != requested.knob_id.value or receipt.requested.get("value") != requested.value:
                 raise OptimizationEccAdapterError("application receipt request does not match")
+            try:
+                validate_application_receipt(receipt, load_parameter_cards())
+            except (ParameterSemanticsError, ValueError) as exc:
+                raise OptimizationEccAdapterError("application receipt card binding is invalid") from exc
             return receipt
         if receipt.requested != requested:
             raise OptimizationEccAdapterError("application receipt request does not match")
