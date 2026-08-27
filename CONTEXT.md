@@ -150,3 +150,106 @@ Agent content that the GUI may render but that does not wait for user input,
 such as text, tables, or artifacts. It is outside the first interaction
 protocol phase.
 _Avoid_: interaction, input request
+
+**Agent activity stream**:
+The ordered, typed record of observable work performed during an agent turn,
+including reasoning summaries, searches, commands, and tool calls. It excludes
+hidden reasoning, final assistant answers, and ECOS Flow execution progress.
+_Avoid_: tool text, Thinking timeline, raw reasoning
+
+**Agent activity item**:
+One typed unit in an Agent activity stream: a reasoning summary, web search,
+command execution, or generic tool call. A stable identity carries the item
+through its running and terminal states instead of deriving state from display
+text or appending separate start and finish lines.
+_Avoid_: progress line, parsed tool string, Flow Step
+
+**Agent activity digest**:
+The compact completed-turn representation of an Agent activity stream. It
+preserves access to the ordered activity items while yielding visual priority
+to the final answer.
+_Avoid_: deleted progress, final answer, tool result
+
+**Reasoning summary**:
+Codex-provided user-visible text that explains what the Agent is considering
+as it works. It is distinct from hidden raw reasoning and from an observable
+action the Agent performs.
+_Avoid_: Thinking status, chain of thought, tool progress
+
+**Observable action**:
+An auditable operation performed during an Agent turn, such as a search,
+command execution, or tool call. Its identity, lifecycle, and outcome are
+visible independently of any reasoning summary.
+_Avoid_: reasoning, generic working state, Flow execution progress
+
+**Quick Start authorization**:
+The user's click on Quick Start that authorizes one bounded, predefined workflow to create its required Project and Workspace and start the associated Flow. It applies only to the named workflow and does not authorize arbitrary Agent actions.
+_Avoid_: generic confirmation, implicit permission, mouse-click replay
+
+**Quick Start project naming**:
+The collision policy for a Project created by Quick Start: an existing matching name is never overwritten or silently reused; the workflow creates a unique derived name and carries that created Project identity into Workspace creation.
+_Avoid_: overwrite, implicit reuse, display-name lookup
+
+**Quick Start resource preflight**:
+The readiness gate before a Quick Start workflow creates a Project. It requires every named design resource, PDK Installation, and managed MPC resource to be available and usable; a failed gate creates no partial Project.
+_Avoid_: install-on-demand, best-effort lookup, cached install status
+
+**Quick Start configuration snapshot**:
+The immutable Project, Workspace, resource, and parameter values captured at the moment Quick Start is authorized. Every subsequent workflow step uses this snapshot, even if editable defaults or resource listings change while it runs.
+_Avoid_: live defaults, mutable wizard state, late-bound parameters
+
+**Quick Start locale**:
+The language used by Quick Start labels, execution summary, preflight results, and activity items, inherited from the application's active locale rather than inferred independently by the model.
+_Avoid_: mixed-language run, model-selected locale, untranslated activity
+
+**Quick Start run record**:
+The durable record of one authorized Quick Start workflow, including its configuration snapshot, resource identities, derived Project and Workspace identities, and terminal outcome. It supports recovery and audit without persisting the full conversational activity stream.
+_Avoid_: chat transcript as audit, ephemeral-only run, display log as record
+
+**Quick Start retry**:
+A new attempt against the existing failed Workspace, beginning at the failed Flow Step. Before retry, the user may edit Workspace configuration; the retry freezes and records a new snapshot of those explicit edits while retaining the same Project and Workspace identities.
+_Avoid_: whole-workflow duplication, hidden parameter mutation, retry during an active Flow
+
+**Quick Start happy path**:
+The primary MVP scope covering a fully preflighted, tested workflow with the prescribed resources and parameters. Failure handling remains the existing generic runtime/error behavior, but Quick Start does not add a separate retry experience until real failures justify it.
+_Avoid_: failure-free guarantee, deleted error handling, speculative recovery UI
+
+**Quick Start workflow version**:
+The explicit version identity of the predefined workflow plan used for one run. The run record stores it with the configuration snapshot so later changes to the prescribed sequence do not rewrite the meaning of an earlier run.
+_Avoid_: unversioned macro, live workflow lookup, retroactive run changes
+
+**Quick Start YAML workflow**:
+A versioned declarative plan whose steps name approved ECOS capabilities and data bindings for a design-specific Quick Start. YAML selects and orders bounded operations; it does not grant new filesystem, process, or UI privileges.
+_Avoid_: arbitrary script, shell macro, coordinate replay
+
+**Quick Start workflow capability**:
+An allowlisted semantic operation exposed to YAML, such as opening a product surface, creating a Project, resolving a Resource Management identity, creating a Workspace, or starting a Flow. A capability owns validation and execution; the YAML step only supplies declared inputs and presentation metadata.
+_Avoid_: raw click, arbitrary RPC, UI selector, shell command
+
+**Quick Start workflow binding**:
+The named reference that carries a capability result into later steps, such as the created Project ID, Workspace ID, resolved Resource ID, or frozen Flow snapshot. Bindings are typed and workflow-scoped; they are not arbitrary variables or paths.
+_Avoid_: global mutable state, stringly-typed handoff, path-as-identity
+
+**Quick Start capability projection**:
+The UI metadata attached to an approved capability that maps its lifecycle to a real product surface and localized Activity item. It identifies the target surface and display copy, while the capability implementation owns navigation and state changes.
+_Avoid_: selector metadata, hard-coded sentence, animation-only step
+
+**Quick Start schema compatibility**:
+The validation contract between a bundled YAML workflow and the ECOS version loading it. A workflow declares its schema version and supported application range; incompatible workflows are rejected before any mutation.
+_Avoid_: best-effort parsing, silent field ignore, runtime schema drift
+
+**Dashboard Flow Status**:
+The workspace-level view of the configured flow, including every configured step regardless of whether that step has started or produced artifacts.
+_Avoid_: executed-step list, current-step subflow
+
+**Step Subflow**:
+The execution detail for the currently selected flow step, shown independently from the workspace-level flow status.
+_Avoid_: complete flow, dashboard flow
+
+**Flow Topology**:
+The ordered set of steps configured for a Workspace, independent of which steps have started, completed, or produced artifacts.
+_Avoid_: runtime snapshot steps, executed-step prefix
+
+**Current Execution**:
+The latest runtime operation for a Workspace whose events may contribute to recovering the visible execution state.
+_Avoid_: historical operation, mixed execution events
