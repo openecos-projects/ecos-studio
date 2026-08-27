@@ -144,6 +144,24 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('resetWorkspaceWizard()')
   })
 
+  it('routes prefill number conversion through the lossless bigint guard', () => {
+    expect(appSource).toContain("import { losslessNumber } from '@/utils/numbers'")
+    const optionalNumberStart = appSource.indexOf('function optionalNumber')
+    const optionalNumberEnd = appSource.indexOf(
+      'function normalizeDieAreaMode',
+      optionalNumberStart,
+    )
+    expect(appSource.slice(optionalNumberStart, optionalNumberEnd)).toContain(
+      'losslessNumber(',
+    )
+    const numberListStart = appSource.indexOf('function numberList')
+    const numberListEnd = appSource.indexOf(
+      'function normalizeLocalPath',
+      numberListStart,
+    )
+    expect(appSource.slice(numberListStart, numberListEnd)).toContain('losslessNumber(')
+  })
+
   it('falls back to flat die_width/die_height keys when prefilling reconfigure defaults', () => {
     const normalizeStart = appSource.indexOf('function normalizeWorkspaceParameters')
     const normalizeEnd = appSource.indexOf(

@@ -221,13 +221,21 @@ export async function writeTextAtomically(path: string, content: string): Promis
     await writeFile(temporaryPath, content, { encoding: 'utf8', flag: 'wx' })
     // Write and rename both address the parent by pathname: revalidate that
     // it still resolves to the same directory, so a symlink swapped in after
-    // authorization cannot redirect the rename outside the workspace.
+    // authorization cannot redirect the rename outside the workspace. Node
+    // has no dirfd-relative rename, so the rename itself is followed by a
+    // final verification that removes a misplaced file and fails loud.
     if ((await realpath(parent)) !== canonicalParent) {
       throw new Error(
         `Refusing to write ${path}: parent directory changed during the write`,
       )
     }
     await rename(temporaryPath, path)
+    if ((await realpath(parent)) !== canonicalParent) {
+      await rm(path, { force: true }).catch(() => undefined)
+      throw new Error(
+        `Refusing to write ${path}: parent directory changed during the rename`,
+      )
+    }
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => undefined)
     throw error

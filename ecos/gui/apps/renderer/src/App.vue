@@ -225,6 +225,7 @@ import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
+import { losslessNumber } from '@/utils/numbers'
 import {
   getOptionalDesktopApi,
   hasDesktopApi,
@@ -964,7 +965,7 @@ function optionalString(value: unknown): string {
 }
 
 function optionalNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value)
+  const parsed = losslessNumber(value, 'workspace parameter')
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
@@ -987,7 +988,9 @@ function stringList(value: unknown): string[] {
 
 function numberList(value: unknown): number[] {
   if (!Array.isArray(value)) return []
-  return value.map(Number).filter(Number.isFinite)
+  return value
+    .map((item) => losslessNumber(item, 'workspace parameter'))
+    .filter(Number.isFinite)
 }
 
 function normalizeLocalPath(path: string): string {

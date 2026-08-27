@@ -12,6 +12,7 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { refreshConfigApi } from '@/api/flow'
 import { CMDEnum, ResponseEnum } from '@/api/type'
+import { losslessNumber } from '@/utils/numbers'
 
 // ============ 类型定义 ============
 // 与 ecc/chipcompiler/data/parameter.py 中 ICS55_PARAMETERS_TEMPLATE 及 workspace 写入的 PDK Root 对齐
@@ -241,22 +242,6 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((item) => String(item)).filter((item) => item.length > 0)
     : []
-}
-
-/**
- * TOML parsing yields a bigint exactly when an integer exceeds the safe
- * range, so a bigint here always means Number() would round. Fail loud
- * instead of letting a rounded value silently overwrite the workspace on
- * the next save.
- */
-function losslessNumber(value: unknown, label: string): number {
-  if (typeof value === 'bigint') {
-    throw new Error(
-      `Parameter ${label} value ${value} exceeds the safe integer range; ` +
-        'edit the workspace configuration manually',
-    )
-  }
-  return Number(value)
 }
 
 export function parametersHaveChipIdentity(

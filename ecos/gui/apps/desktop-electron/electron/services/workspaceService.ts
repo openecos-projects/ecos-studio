@@ -36,6 +36,7 @@ import {
   editWorkspaceParameters as editWorkspaceParametersFile,
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
+  readFileNoFollow,
 } from './workspaceParametersFile'
 import type {
   WorkspaceDesignFileAddResult,
@@ -472,7 +473,7 @@ export class WorkspaceService {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
         location.path,
       )
-      const raw = await readFile(canonicalPath, 'utf8')
+      const raw = await readFileNoFollow(canonicalPath)
       return parseWorkspaceParametersText(raw, location.format, workspacePath)
     } catch (error) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {

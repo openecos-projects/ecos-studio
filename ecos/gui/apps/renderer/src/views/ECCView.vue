@@ -210,6 +210,7 @@ import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
 import { waitForDesktopApi } from '@/platform/desktop'
+import { losslessNumber } from '@/utils/numbers'
 import {
   readOptionalProjectTextFile,
   readWorkspaceParametersFile,
@@ -565,13 +566,15 @@ function optionalString(value: unknown): string {
 }
 
 function optionalNumber(value: unknown, fallback: number): number {
-  const numberValue = Number(value)
+  const numberValue = losslessNumber(value, 'workspace parameter')
   return Number.isFinite(numberValue) ? numberValue : fallback
 }
 
 function numberList(value: unknown): number[] {
   if (!Array.isArray(value)) return []
-  return value.map(Number).filter(Number.isFinite)
+  return value
+    .map((item) => losslessNumber(item, 'workspace parameter'))
+    .filter(Number.isFinite)
 }
 
 function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | undefined {

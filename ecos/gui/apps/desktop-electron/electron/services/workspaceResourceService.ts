@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile, stat } from 'node:fs/promises'
+import { lstat, readdir, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type {
   WorkspaceResourceFile,
@@ -16,6 +16,7 @@ import {
   locateWorkspaceParametersFile,
   LEGACY_PARAMETERS_BASENAME,
   parseWorkspaceParametersText,
+  readFileNoFollow,
   WORKSPACE_CONFIG_BASENAME,
   writeWorkspaceParameters,
   type WorkspaceParametersFileLocation,
@@ -86,7 +87,7 @@ export class WorkspaceResourceService {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
         location.path,
       )
-      const raw = await readFile(canonicalPath, 'utf8')
+      const raw = await readFileNoFollow(canonicalPath)
       return parseWorkspaceParametersText(raw, location.format, root)
     } catch (error) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
@@ -537,7 +538,7 @@ export class WorkspaceResourceService {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
         location.path,
       )
-      const raw = await readFile(canonicalPath, 'utf8')
+      const raw = await readFileNoFollow(canonicalPath)
       return parseWorkspaceParametersText(raw, location.format, root)
     } catch (error) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
@@ -556,7 +557,7 @@ export class WorkspaceResourceService {
   private async readJsonOrNull(path: string): Promise<Record<string, unknown> | null> {
     try {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-      const raw = await readFile(canonicalPath, 'utf8')
+      const raw = await readFileNoFollow(canonicalPath)
       const parsed: unknown = JSON.parse(raw)
       return isRecord(parsed) ? parsed : {}
     } catch (error) {
