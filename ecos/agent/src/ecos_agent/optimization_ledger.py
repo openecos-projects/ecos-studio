@@ -22,21 +22,22 @@ from pydantic import (
     model_validator,
 )
 
+from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     HistoryReference,
-    PlanningProviderEvidence,
-    ProposalContextRef,
-    ProposalAction,
-    RequestedKnobValue,
     KnobApplicationReceipt,
     OptimizationTaskMemoryReference,
+    PlanningProviderEvidence,
+    ProposalAction,
+    ProposalContextRef,
+    RequestedKnobValue,
     SelectionMetric,
     TerminalObservation,
 )
-from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 from ecos_agent.optimization_rules import IncumbentDecision
+from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -327,6 +328,9 @@ class OptimizationPlanningAuditEntry(_LedgerModel):
     task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = Field(
         default=(), max_length=6, exclude_if=lambda value: not value
     )
+    effective_domains: tuple[EffectiveDomainSnapshot, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     planner_payload_sha256: str
     entry_sha256: str
 
@@ -394,6 +398,7 @@ class OptimizationPlanningAudit:
         planner_payload_sha256: str,
         task_memory_snapshot_sha256: str | None = None,
         task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = (),
+        effective_domains: tuple[EffectiveDomainSnapshot, ...] = (),
     ) -> OptimizationPlanningAuditEntry:
         with self._exclusive_lock():
             replay = self._verify_locked()
@@ -417,6 +422,10 @@ class OptimizationPlanningAudit:
             if task_memory_refs:
                 entry_payload["task_memory_refs"] = [
                     item.model_dump(mode="json") for item in task_memory_refs
+                ]
+            if effective_domains:
+                entry_payload["effective_domains"] = [
+                    item.model_dump(mode="json") for item in effective_domains
                 ]
             entry = OptimizationPlanningAuditEntry(
                 sequence=len(replay.entries) + 1,

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
@@ -22,12 +23,6 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_metric_contracts import (
-    EvaluationMetricCategory,
-    EvaluationMetricDirection,
-    EvaluationMetricRole,
-    TerminalEvaluationMetric,
-)
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
@@ -35,19 +30,18 @@ from ecos_agent.optimization_controller import (
     OptimizationEpisodeController,
     OptimizationPlanningContext,
 )
-from ecos_agent.hashing import canonical_sha256
-from ecos_agent.parameter_evidence_contracts import (
-    ActivationEvidence,
-    EffectiveValue,
-    MaterializationRef,
-    ParameterApplicationReceipt,
-    ToolRef,
-)
+from ecos_agent.optimization_equal_budget import export_episode_traces
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationPlanningAuditIntegrityError,
+)
+from ecos_agent.optimization_metric_contracts import (
+    EvaluationMetricCategory,
+    EvaluationMetricDirection,
+    EvaluationMetricRole,
+    TerminalEvaluationMetric,
 )
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
@@ -60,6 +54,13 @@ from ecos_agent.optimization_rules import (
     freeze_routability_objective,
 )
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
+from ecos_agent.parameter_evidence_contracts import (
+    ActivationEvidence,
+    EffectiveValue,
+    MaterializationRef,
+    ParameterApplicationReceipt,
+    ToolRef,
+)
 
 _HASH = "sha256:" + "a" * 64
 _CHUNK_HASH = "b" * 64
@@ -444,6 +445,18 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         entry.planner_payload_sha256.startswith("sha256:")
         for entry in planning_audit.entries
     )
+    traces, planning_calls, planning_mode = export_episode_traces(
+        workspace=tmp_path,
+        episode_root=tmp_path / "episode",
+        design_id="gcd",
+        reference_observation=_incumbent(),
+        objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+    )
+    started_traces = [item for item in traces if item.started]
+    assert planning_calls == 2
+    assert planning_mode == "receipt-aware"
+    assert len(started_traces) == 2
+    assert all(item.receipt_status == "ok" for item in started_traces)
     audit_path = tmp_path / "episode" / "optimization-planning-audit.v1.jsonl"
     audit_path.write_text(
         audit_path.read_text(encoding="utf-8").replace('"history_count":1', '"history_count":0'),
@@ -453,6 +466,61 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         OptimizationPlanningAudit(tmp_path / "episode").verify()
     runner.close()
     assert (controller.ledger.root / "optimization-ledger-manifest.v1.json").is_file()
+
+
+def test_requested_only_runner_tracks_requested_not_effective_value(tmp_path: Path) -> None:
+    class DensityPlanner(_FakePlanner):
+        def propose(self, context: OptimizationPlanningContext) -> object:
+            self.contexts.append(context)
+            return _proposal(
+                context,
+                "place.target_density",
+                StrategyDirection.DECREASE,
+            )
+
+    planner = DensityPlanner()
+    executor = _FakeExecutor()
+    executor.start_receipts = iter(
+        (CandidateExecutionReceipt(execution_id="execution-2", started=True),)
+    )
+    executor.terminal_receipts = iter(
+        (
+            CandidateExecutionReceipt(
+                execution_id="execution-2",
+                started=True,
+                outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+                evidence=_evidence("execution-2"),
+                parameter_application_receipt=_native_receipt(
+                    "place.target_density", 0.15, effective_value=0.8
+                ),
+            ),
+        )
+    )
+    controller = OptimizationEpisodeController(
+        episode_id="episode-requested-only",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        incumbent=_incumbent(),
+        receipt_aware_planning=False,
+    )
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=_terminal_observation,
+        objective=_objective(),
+    )
+
+    runner.run_turn()
+
+    assert runner._current_values["place.target_density"] == 0.15
 
 
 def test_runner_persists_stopped_when_stop_arrives_before_ecc_start(tmp_path: Path) -> None:

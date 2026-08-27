@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
@@ -36,12 +37,13 @@ from ecos_agent.optimization_replication import (
     verify_replication_package,
 )
 
-
 HASH = "sha256:" + "a" * 64
 MEMORY_HASH = "sha256:" + "b" * 64
 
 
-def _episode(root, *, with_task_memory: bool = False):
+def _episode(
+    root, *, with_task_memory: bool = False, with_planning_provenance: bool = False
+):
     context_ref = ProposalContextRef(
         episode_id="episode-1", checkpoint_id="checkpoint-parent", input_sha256=HASH
     )
@@ -90,6 +92,22 @@ def _episode(root, *, with_task_memory: bool = False):
             outcome_details_sha256=HASH,
         )
     )
+    domain_payload = {
+        "schema_version": "ecos.effective_domain.v1",
+        "knob_id": "place.target_density",
+        "context_sha256": HASH,
+        "current_coordinate": None,
+        "surface_values": (0.2, 0.3),
+        "excluded_aliases": (),
+        "allowed_requested_values": (0.3,),
+        "thresholds": (),
+        "observed_application_signatures": (),
+        "observed_response_signatures": (),
+    }
+    domain = EffectiveDomainSnapshot(
+        **domain_payload,
+        snapshot_sha256=canonical_sha256(domain_payload),
+    )
     planning = OptimizationPlanningAudit(root).append(
         context_ref=context_ref,
         history_refs=(),
@@ -103,6 +121,7 @@ def _episode(root, *, with_task_memory: bool = False):
             if with_task_memory
             else ()
         ),
+        effective_domains=(domain,) if with_planning_provenance else (),
     )
     prompt = "Owner alice inspects /home/alice/private/design on build01.ucas.ac.cn."
     envelope_payload = {
@@ -134,6 +153,7 @@ def _episode(root, *, with_task_memory: bool = False):
         rejection_reason=None,
         requested=None,
         state=OptimizationEpisodeState.AWAITING_EXECUTION,
+        planner_source="repair" if with_planning_provenance else "llm",
     )
 
 
@@ -203,7 +223,23 @@ def test_replication_projection_preserves_task_memory_evidence_refs(tmp_path) ->
     planning = projection["planning"][0]
     assert planning["task_memory_snapshot_sha256"] == MEMORY_HASH
     assert planning["task_memory_refs"] == [{"summary_sha256": MEMORY_HASH}]
+    assert "planner_source" not in planning
     assert "chat" not in json.dumps(planning)
+
+
+def test_replication_projection_preserves_planning_provenance(tmp_path) -> None:
+    episode_root = tmp_path / "episode"
+    package_root = tmp_path / "public"
+    _episode(episode_root, with_planning_provenance=True)
+
+    export_replication_package(episode_root, package_root)
+
+    projection = json.loads(
+        (package_root / "optimization-replay.v1.json").read_text(encoding="utf-8")
+    )
+    planning = projection["planning"][0]
+    assert planning["planner_source"] == "repair"
+    assert planning["effective_domains"][0]["knob_id"] == "place.target_density"
 
 
 def test_verifier_rejects_execution_without_an_accepted_proposal(tmp_path) -> None:

@@ -4,16 +4,50 @@ from pathlib import Path
 
 import pytest
 
+from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization_contracts import (
+    GateResult,
+    ObjectiveMetric,
+    SignoffGates,
+    TerminalObservation,
+    TimingMetric,
+)
 from ecos_agent.optimization_equal_budget import (
     CandidateTrace,
     EqualBudgetConfig,
+    build_candidate_trace,
     evaluate_equal_budget,
 )
+from ecos_agent.optimization_ledger import OptimizationOutcomeKind
+from ecos_agent.optimization_metric_contracts import (
+    EvaluationMetricCategory,
+    EvaluationMetricDirection,
+    EvaluationMetricRole,
+    TerminalEvaluationMetric,
+)
+from ecos_agent.parameter_evidence_contracts import (
+    ActivationEvidence,
+    EffectiveValue,
+    MaterializationRef,
+    ParameterApplicationReceipt,
+    ToolRef,
+)
+
+HASH = "sha256:" + "a" * 64
 
 
 def _load_harness():
     path = Path(__file__).parents[1] / "scripts" / "run_equal_budget_harness.py"
     spec = importlib.util.spec_from_file_location("run_equal_budget_harness", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_experiment_runner():
+    path = Path(__file__).parents[1] / "scripts" / "run_equal_budget_experiment.py"
+    spec = importlib.util.spec_from_file_location("run_equal_budget_experiment", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -26,6 +60,7 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
             design_id="gcd",
             candidate_id="c1",
             started=True,
+            planning_mode="receipt-aware",
             terminal_success=True,
             terminal_utility=10.0,
             activation_status="used",
@@ -41,6 +76,7 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
             design_id="gcd",
             candidate_id="c2",
             started=True,
+            planning_mode="receipt-aware",
             terminal_success=False,
             activation_status="not_activated",
             application_signature="a2",
@@ -54,6 +90,7 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
             design_id="gcd",
             candidate_id="c3",
             started=False,
+            planning_mode="receipt-aware",
             terminal_success=False,
             alias=True,
             alias_valid=False,
@@ -69,6 +106,7 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
     assert summary.terminal_successes == 1
     assert summary.aliases_saved == 1
     assert summary.wrong_prunes == 1
+    assert summary.alias_unassessed == 0
     assert summary.not_activated == 1
     assert summary.overridden_rate == 0.0
     assert summary.ignored_rate == 0.0
@@ -80,11 +118,33 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
 
 def test_requested_only_does_not_claim_alias_savings() -> None:
     trace = CandidateTrace(
-        design_id="gcd", candidate_id="c1", started=False, terminal_success=False, alias=True
+        design_id="gcd",
+        candidate_id="c1",
+        started=False,
+        terminal_success=False,
+        planning_mode="requested-only",
+        alias=True,
     )
     summary = evaluate_equal_budget([trace], mode="requested-only")
     assert summary.aliases_saved == 0
     assert summary.wrong_prunes == 0
+
+
+def test_receipt_aware_does_not_claim_unverified_aliases() -> None:
+    trace = CandidateTrace(
+        design_id="gcd",
+        candidate_id="c1",
+        started=False,
+        terminal_success=False,
+        planning_mode="receipt-aware",
+        alias=True,
+    )
+
+    summary = evaluate_equal_budget([trace], mode="receipt-aware")
+
+    assert summary.aliases_saved == 0
+    assert summary.wrong_prunes == 0
+    assert summary.alias_unassessed == 1
 
 
 def test_equal_budget_reports_terminal_metrics_and_regret() -> None:
@@ -94,10 +154,15 @@ def test_equal_budget_reports_terminal_metrics_and_regret() -> None:
                 design_id="gcd",
                 candidate_id="c1",
                 started=True,
+                planning_mode="receipt-aware",
                 terminal_success=True,
                 terminal_utility=8.0,
                 reference_utility=10.0,
                 ppa=1.2,
+                area=12.0,
+                dynamic_power=2.5,
+                leakage_power=0.4,
+                frequency=100.0,
                 drc=0.0,
                 timing=-0.1,
                 congestion=0.3,
@@ -107,9 +172,197 @@ def test_equal_budget_reports_terminal_metrics_and_regret() -> None:
     )
     assert summary.simple_regret == 2.0
     assert summary.ppa == (1.2,)
+    assert summary.area == (12.0,)
+    assert summary.dynamic_power == (2.5,)
+    assert summary.leakage_power == (0.4,)
+    assert summary.frequency == (100.0,)
     assert summary.drc == (0.0,)
     assert summary.timing == (-0.1,)
     assert summary.congestion == (0.3,)
+
+
+def test_equal_budget_computes_simple_regret_per_design() -> None:
+    traces = [
+        CandidateTrace(
+            design_id="d0",
+            candidate_id="c0",
+            started=True,
+            terminal_success=True,
+            planning_mode="requested-only",
+            terminal_utility=8.0,
+            reference_utility=10.0,
+        ),
+        CandidateTrace(
+            design_id="d1",
+            candidate_id="c1",
+            started=True,
+            terminal_success=True,
+            planning_mode="requested-only",
+            terminal_utility=90.0,
+            reference_utility=100.0,
+        ),
+    ]
+
+    summary = evaluate_equal_budget(traces, mode="requested-only")
+
+    assert summary.simple_regret_by_design == {"d0": 2.0, "d1": 10.0}
+    assert summary.simple_regret == 6.0
+
+
+def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> None:
+    receipt_payload = {
+        "receipt_id": "receipt-1",
+        "tool": ToolRef(name="DREAMPlace", revision="bound"),
+        "context": {"stage": "place"},
+        "requested": {
+            "knob_id": "place.target_density",
+            "value": 0.2,
+            "unit": "ratio",
+        },
+        "materialization": MaterializationRef(
+            receipt_ref="analysis/candidate_materialization.v1.json",
+            receipt_sha256=HASH,
+            registry_sha256=HASH,
+            patch_sha256=HASH,
+            candidate_ref="candidate-1",
+            workspace_ref="candidate-1",
+            config_before_sha256=HASH,
+            config_after_sha256=HASH,
+            written_value=0.2,
+            unit="ratio",
+        ),
+        "effective_initial": EffectiveValue(value=0.8, unit="ratio"),
+        "transitions": (),
+        "application_status": "applied",
+        "activation": ActivationEvidence(
+            status="used",
+            consumers=(
+                {
+                    "consumer_id": "dreamplace.density_objective",
+                    "outcome": "entered",
+                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+                    "evidence_sha256": HASH,
+                },
+            ),
+        ),
+        "effective_final": EffectiveValue(value=0.8, unit="ratio"),
+    }
+    receipt = ParameterApplicationReceipt.model_construct(
+        **receipt_payload,
+        evidence_sha256=HASH,
+    )
+    terminal = _terminal_observation()
+    reference = terminal.model_copy(
+        update={
+            "observation_id": "reference",
+            "metrics": {
+                **terminal.metrics,
+                ObjectiveMetric.ROUTE_WIRELENGTH: 5.0,
+            },
+        }
+    )
+
+    trace = build_candidate_trace(
+        design_id="gcd",
+        candidate_id="episode-1.intervention-1",
+        planning_mode="receipt-aware",
+        outcome=OptimizationOutcomeKind.IMPROVED,
+        receipt=receipt,
+        terminal_observation=terminal,
+        reference_observation=reference,
+        objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+        runtime_seconds=12.0,
+        peak_memory_mb=64.0,
+    )
+
+    assert trace.terminal_success is True
+    assert trace.terminal_utility == -4.0
+    assert trace.reference_utility == -5.0
+    assert trace.area == 12.0
+    assert trace.dynamic_power == 2.5
+    assert trace.leakage_power == 0.4
+    assert trace.frequency == 100.0
+    assert trace.drc == 0.0
+    assert trace.timing == 0.0
+    assert trace.congestion == 3.0
+    assert trace.activation_status == "used"
+    assert trace.application_signature is not None
+    assert trace.response_signature is not None
+    assert trace.receipt_status == "ok"
+
+
+def _terminal_observation() -> TerminalObservation:
+    eligibility_ids = (
+        "drc_count",
+        "lvs_count",
+        "rcx_expected_corner_count",
+        "rcx_spef_file_count",
+        "rcx_missing_corner_count",
+        "rcx_spef_parse_failure_count",
+        "sta_corner_count",
+        "sta_expected_corner_count",
+        "sta_missing_corner_count",
+        "sta_setup_violation_count",
+        "sta_hold_violation_count",
+        "harden_artifact_missing_count",
+    )
+    evaluation = [
+        TerminalEvaluationMetric(
+            metric_id=metric_id,
+            value=(
+                1.0
+                if metric_id
+                in {
+                    "rcx_expected_corner_count",
+                    "rcx_spef_file_count",
+                    "sta_corner_count",
+                    "sta_expected_corner_count",
+                }
+                else 0.0
+            ),
+            unit="count",
+            category=EvaluationMetricCategory.ELIGIBILITY,
+            role=EvaluationMetricRole.GATE,
+            direction=EvaluationMetricDirection.EXACT,
+            source_refs=("analysis/terminal.json",),
+        )
+        for metric_id in eligibility_ids
+    ]
+    for metric_id, value, unit in (
+        ("sta_standard_cell_area", 12.0, "um^2"),
+        ("sta_typical_dynamic_power", 2.5, "uW"),
+        ("sta_typical_leakage_power", 0.4, "uW"),
+        ("sta_frequency", 100.0, "MHz"),
+    ):
+        evaluation.append(
+            TerminalEvaluationMetric(
+                metric_id=metric_id,
+                value=value,
+                unit=unit,
+                category=EvaluationMetricCategory.PPA,
+                role=EvaluationMetricRole.REPORT,
+                direction=EvaluationMetricDirection.LOWER_IS_BETTER,
+                source_refs=("analysis/terminal.json",),
+            )
+        )
+    return TerminalObservation(
+        schema_version="ecos.terminal_observation.v3",
+        observation_id="candidate",
+        evidence_manifest_sha256=HASH,
+        evidence_valid=True,
+        harden_artifacts_complete=True,
+        signoff_gates=SignoffGates.all(GateResult.PASS),
+        metrics={
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 2.0,
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 3.0,
+            ObjectiveMetric.ROUTE_WIRELENGTH: 4.0,
+        },
+        timing_guardrail={metric: 0.0 for metric in TimingMetric},
+        evaluation_metrics=tuple(evaluation),
+        evaluation_metrics_complete=True,
+        sta_corner_ids=("typical",),
+        sta_corner_set_sha256=canonical_sha256({"corners": ["typical"]}),
+    )
 
 
 def test_harness_keeps_preexecution_only_trace_not_run(tmp_path) -> None:
@@ -118,7 +371,15 @@ def test_harness_keeps_preexecution_only_trace_not_run(tmp_path) -> None:
     manifest.write_text(json.dumps({"design_ids": [f"d{i}" for i in range(10)]}))
     traces = tmp_path / "traces.jsonl"
     traces.write_text(
-        json.dumps({"design_id": "d0", "candidate_id": "c1", "started": False, "terminal_success": False})
+        json.dumps(
+            {
+                "design_id": "d0",
+                "candidate_id": "c1",
+                "started": False,
+                "terminal_success": False,
+                "planning_mode": "requested-only",
+            }
+        )
         + "\n"
     )
 
@@ -126,7 +387,7 @@ def test_harness_keeps_preexecution_only_trace_not_run(tmp_path) -> None:
         manifest,
         tmp_path / "out",
         traces,
-        traces,
+        None,
         requested_only_planning_calls=1,
         receipt_aware_planning_calls=1,
     )
@@ -146,6 +407,7 @@ def test_harness_requires_reproducibility_metadata_for_started_trace(tmp_path) -
                 "candidate_id": "c1",
                 "started": True,
                 "terminal_success": False,
+                "planning_mode": "receipt-aware",
                 "receipt_status": "ok",
             }
         )
@@ -177,6 +439,8 @@ def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> 
                 "candidate_id": f"c{index}",
                 "started": True,
                 "terminal_success": False,
+                "planning_mode": "requested-only",
+                "receipt_status": "ok",
             }
         )
         + "\n"
@@ -191,6 +455,7 @@ def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> 
                     "candidate_id": f"r{index}",
                     "started": True,
                     "terminal_success": False,
+                    "planning_mode": "receipt-aware",
                     "activation_status": "used",
                     "application_signature": f"app-{index}",
                     "response_signature": f"resp-{index}",
@@ -202,7 +467,9 @@ def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> 
         )
     )
     metadata = {
-        "reference_runtime_seconds": 1.0,
+        "reference_runtime_seconds_by_design": {
+            design_id: 1.0 for design_id in design_ids
+        },
         "seed": 0,
         "tool_revision": "ecc-test",
         "input_manifest_sha256": "sha256:" + "a" * 64,
@@ -230,14 +497,36 @@ def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> 
     assert completed["status"] == "completed"
     assert completed["requested_only_raw_trace_sha256"] != ""
     assert completed["receipt_aware_raw_trace_sha256"] != ""
+    assert completed["wall_time_limit_seconds_by_design"] == {
+        design_id: 22.0 for design_id in design_ids
+    }
     assert incomplete["status"] == "incomplete"
+
+    over_budget_rows = [json.loads(line) for line in full.splitlines()]
+    over_budget_rows[0]["runtime_seconds"] = 23.0
+    over_budget = tmp_path / "over-budget.jsonl"
+    over_budget.write_text(
+        "".join(json.dumps(row) + "\n" for row in over_budget_rows),
+        encoding="utf-8",
+    )
+    exceeded = harness.run(
+        manifest,
+        tmp_path / "exceeded",
+        over_budget,
+        receipt,
+        requested_only_planning_calls=20,
+        receipt_aware_planning_calls=20,
+        **metadata,
+    )
+    assert exceeded["status"] == "incomplete"
+    assert exceeded["runtime_seconds_by_design"]["requested_only"]["d0"] == 23.0
 
     with pytest.raises(ValueError, match="independent candidate executions"):
         overlapping_receipt = tmp_path / "overlap.jsonl"
         overlapping_receipt.write_text(
             full.replace(
-                '"terminal_success": false}',
-                '"terminal_success": false, "receipt_status": "ok"}',
+                '"planning_mode": "requested-only"',
+                '"planning_mode": "receipt-aware"',
             )
         )
         harness.run(
@@ -251,7 +540,7 @@ def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> 
         )
 
 
-def test_receipt_aware_started_trace_requires_receipt_fields(tmp_path) -> None:
+def test_started_trace_requires_mode_and_receipt_measurement(tmp_path) -> None:
     harness = _load_harness()
     design_ids = [f"d{i}" for i in range(10)]
     manifest = tmp_path / "manifest.json"
@@ -264,12 +553,13 @@ def test_receipt_aware_started_trace_requires_receipt_fields(tmp_path) -> None:
                 "candidate_id": "c0",
                 "started": True,
                 "terminal_success": False,
+                "planning_mode": "receipt-aware",
             }
         )
         + "\n"
     )
 
-    with pytest.raises(ValueError, match="receipt-aware started trace lacks"):
+    with pytest.raises(ValueError, match="started trace lacks receipt measurement"):
         harness.run(
             manifest,
             tmp_path / "out",
@@ -277,8 +567,268 @@ def test_receipt_aware_started_trace_requires_receipt_fields(tmp_path) -> None:
             trace,
             requested_only_planning_calls=0,
             receipt_aware_planning_calls=1,
-            reference_runtime_seconds=1.0,
+            reference_runtime_seconds_by_design={
+                design_id: 1.0 for design_id in design_ids
+            },
             seed=0,
             tool_revision="ecc-test",
             input_manifest_sha256="sha256:" + "a" * 64,
         )
+
+
+def test_requested_only_trace_keeps_posthoc_receipt_measurement(tmp_path) -> None:
+    harness = _load_harness()
+    design_ids = [f"d{i}" for i in range(10)]
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"design_ids": design_ids}))
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        json.dumps(
+            {
+                "design_id": "d0",
+                "candidate_id": "c0",
+                "started": True,
+                "terminal_success": False,
+                "planning_mode": "requested-only",
+                "activation_status": "not_activated",
+                "receipt_status": "ok",
+            }
+        )
+        + "\n"
+    )
+
+    result = harness.run(
+        manifest,
+        tmp_path / "out",
+        trace,
+        None,
+        requested_only_planning_calls=1,
+        receipt_aware_planning_calls=0,
+        reference_runtime_seconds_by_design={
+            design_id: 1.0 for design_id in design_ids
+        },
+        seed=0,
+        tool_revision="ecc-test",
+        input_manifest_sha256="sha256:" + "a" * 64,
+    )
+
+    assert result["requested_only"]["not_activated"] == 1
+
+
+def test_phase8_runner_loads_hash_bound_ten_design_manifest(tmp_path) -> None:
+    runner = _load_experiment_runner()
+    benchmark = tmp_path / "benchmarks"
+    pdk = tmp_path / "pdk"
+    tech = pdk / "prtech/techLEF/N551P6M_ecos.lef"
+    tech.parent.mkdir(parents=True)
+    tech.write_text("VERSION 5.8 ;\n", encoding="utf-8")
+    designs = []
+    design_ids = [f"d{i}" for i in range(10)]
+    for design_id in design_ids:
+        root = benchmark / design_id
+        (root / "rtl").mkdir(parents=True)
+        rtl = root / "rtl/top.v"
+        filelist = root / "filelist.f"
+        sdc = root / f"{design_id}.sdc"
+        rtl.write_text("module top; endmodule\n", encoding="utf-8")
+        filelist.write_text("rtl/top.v\n", encoding="utf-8")
+        sdc.write_text("create_clock -period 10 clk\n", encoding="utf-8")
+        designs.append(
+            {
+                "design_id": design_id,
+                "top_module": "top",
+                "clock_name": "clk",
+                "filelist": f"{design_id}/filelist.f",
+                "filelist_sha256": runner.file_sha256(filelist),
+                "rtl_bundle_sha256": canonical_sha256(
+                    {"rtl/top.v": runner.file_sha256(rtl)}
+                ),
+                "sdc": f"{design_id}/{design_id}.sdc",
+                "sdc_sha256": runner.file_sha256(sdc),
+            }
+        )
+    payload = {
+        "schema_version": "ecos.frozen_design_manifest.v2",
+        "design_ids": design_ids,
+        "designs": designs,
+        "baseline": {
+            "frequency_mhz": 50,
+            "max_fanout": 32,
+            "core_utilization": 0.4,
+            "core_aspect_ratio": 1.0,
+            "target_density": 0.2,
+            "target_overflow": 0.1,
+            "cell_padding_sites": 2,
+            "routability_opt": True,
+            "density_weight": 0.00085,
+        },
+        "pdk": {
+            "name": "ics55",
+            "tech_lef": "prtech/techLEF/N551P6M_ecos.lef",
+            "tech_lef_sha256": runner.file_sha256(tech),
+        },
+    }
+    payload["manifest_sha256"] = canonical_sha256(payload)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = runner.load_experiment_manifest(manifest, benchmark, pdk)
+
+    assert tuple(item.design_id for item in loaded.designs) == tuple(design_ids)
+    assert loaded.manifest_sha256 == payload["manifest_sha256"]
+
+
+def test_phase8_runner_rejects_unsupported_filelist_entry(tmp_path) -> None:
+    runner = _load_experiment_runner()
+    filelist = tmp_path / "filelist.f"
+    filelist.write_text("-f nested.f\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported entry"):
+        runner._filelist_refs(filelist)
+
+
+def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch) -> None:
+    runner = _load_experiment_runner()
+    tech = tmp_path / "pdk/prtech/techLEF/N551P6M_ecos.lef"
+    tech.parent.mkdir(parents=True)
+    tech.write_text(
+        "UNITS\n  DATABASE MICRONS 1 ;\nEND UNITS\n"
+        "SITE core7\n  SIZE 1 BY 1 ;\nEND core7\n",
+        encoding="utf-8",
+    )
+    baseline = {
+        "frequency_mhz": 50,
+        "max_fanout": 32,
+        "core_utilization": 0.4,
+        "core_aspect_ratio": 1.0,
+        "target_density": 0.2,
+        "target_overflow": 0.1,
+        "cell_padding_sites": 2,
+        "routability_opt": True,
+        "density_weight": 0.00085,
+    }
+    design = runner.DesignSpec(
+        "design",
+        "top",
+        "clk",
+        tmp_path / "filelist.f",
+        (tmp_path / "rtl/top.v",),
+        tmp_path / "design.sdc",
+    )
+    manifest = runner.ExperimentManifest(HASH, (design,), baseline, "ics55", tech.parents[2])
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def _request(self, method, params, *, timeout_seconds):
+            calls.append((method, params, timeout_seconds))
+            if method == "workspace.create":
+                return {"workspaceId": "workspace"}
+            return {"operationId": "flow", "state": "succeeded"}
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
+    monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
+    monkeypatch.setattr(runner, "build_terminal_observation", lambda _workspace: _terminal_observation())
+
+    runner._ensure_workspace(manifest, design, tmp_path / "workspace", 1.0)
+
+    start = next(params for method, params, _ in calls if method == "operation.start_flow")
+    assert start["origin"] == "gui"
+
+
+def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:
+    runner = _load_experiment_runner()
+    workspace = tmp_path / "workspace"
+    source = tmp_path / "source"
+    pdk = tmp_path / "pdk"
+    for root in (
+        workspace / "origin/rtl",
+        workspace / "home",
+        workspace / "config",
+        source / "rtl",
+    ):
+        root.mkdir(parents=True)
+    tech = pdk / "prtech/techLEF/N551P6M_ecos.lef"
+    tech.parent.mkdir(parents=True)
+    tech.write_text(
+        "UNITS\n  DATABASE MICRONS 1 ;\nEND UNITS\n"
+        "SITE core7\n  SIZE 1 BY 1 ;\nEND core7\n",
+        encoding="utf-8",
+    )
+    (workspace / "origin/rtl/top.v").write_text(
+        "module top; endmodule\n", encoding="utf-8"
+    )
+    (workspace / "origin/filelist.f").write_text("rtl/top.v\n", encoding="utf-8")
+    (workspace / "origin/design.sdc").write_text("create_clock clk\n", encoding="utf-8")
+    (source / "rtl/top.v").write_text("module top; endmodule\n", encoding="utf-8")
+    (source / "filelist.f").write_text("rtl/top.v\n", encoding="utf-8")
+    (source / "design.sdc").write_text("create_clock clk\n", encoding="utf-8")
+    baseline = {
+        "frequency_mhz": 50,
+        "max_fanout": 32,
+        "core_utilization": 0.4,
+        "core_aspect_ratio": 1.0,
+        "target_density": 0.2,
+        "target_overflow": 0.1,
+        "cell_padding_sites": 2,
+        "routability_opt": True,
+        "density_weight": 0.00085,
+    }
+    (workspace / "home/parameters.json").write_text(
+        json.dumps(
+            {
+                "Design": "design",
+                "Top module": "top",
+                "Clock": "clk",
+                "PDK Root": str(pdk),
+                "Frequency max [MHz]": 50,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "config/dreamplace_ecc.json").write_text(
+        json.dumps(
+            {
+                "target_density": 0.2,
+                "stop_overflow": 0.1,
+                "cell_padding_x": 2,
+                "routability_opt_flag": 1,
+                "density_weight": 0.00085,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "config/fixfanout_ecc.json").write_text(
+        json.dumps({"max_fanout": 32}), encoding="utf-8"
+    )
+    (workspace / "config/floorplan_ecc.json").write_text(
+        json.dumps(
+            {
+                "die_builder": {
+                    "die_util": {"utilization": 0.4, "aspect_ratio": 1.0}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    design = runner.DesignSpec(
+        "design",
+        "top",
+        "clk",
+        source / "filelist.f",
+        (source / "rtl/top.v",),
+        source / "design.sdc",
+    )
+    manifest = runner.ExperimentManifest(HASH, (design,), baseline, "ics55", pdk)
+
+    runner._verify_workspace_binding(manifest, design, workspace)
+    (workspace / "origin/rtl/top.v").write_text("module drift; endmodule\n")
+
+    with pytest.raises(ValueError, match="workspace RTL bundle does not match"):
+        runner._verify_workspace_binding(manifest, design, workspace)

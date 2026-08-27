@@ -13,6 +13,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
+    KnobApplicationReceipt,
     KnowledgeReference,
     LegalAction,
     ObjectiveMetric,
@@ -24,7 +25,6 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
     ProposalReason,
-    KnobApplicationReceipt,
     RequestedKnobValue,
     RuntimeAdjustment,
     StageObservation,
@@ -37,15 +37,19 @@ from ecos_agent.optimization_controller import (
     OptimizationEpisodeControllerError,
     planning_context_payload,
 )
+from ecos_agent.optimization_decision_audit import (
+    OptimizationDecisionAudit,
+    OptimizationDecisionAuditIntegrityError,
+)
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationPlanningProviderEvidenceAudit,
 )
-from ecos_agent.optimization_decision_audit import (
-    OptimizationDecisionAudit,
-    OptimizationDecisionAuditIntegrityError,
+from ecos_agent.optimization_memory import (
+    OptimizationTaskMemoryStore,
+    build_task_memory_scope,
 )
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
@@ -54,11 +58,6 @@ from ecos_agent.optimization_retrieval import (
     OptimizationRetrievalResult,
 )
 from ecos_agent.optimization_rules import freeze_optimization_objective
-from ecos_agent.optimization_memory import (
-    OptimizationTaskMemoryStore,
-    build_task_memory_scope,
-)
-
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -246,6 +245,7 @@ def _controller(
     clock: _Clock | None = None,
     objective: OptimizationObjectiveContract | None = None,
     task_memory=None,
+    receipt_aware_planning: bool = True,
 ) -> OptimizationEpisodeController:
     return OptimizationEpisodeController(
         episode_id="episode-1",
@@ -261,6 +261,7 @@ def _controller(
             task_memory.scope.scope_sha256 if task_memory is not None else None
         ),
         task_memory_supplier=(lambda: task_memory) if task_memory is not None else None,
+        receipt_aware_planning=receipt_aware_planning,
     )
 
 
@@ -456,6 +457,68 @@ def test_planning_context_compiles_hash_bound_domain_for_all_frozen_knobs(
     payload = planning_context_payload(context)
     assert len(payload["effective_domains"]) == 8
     assert payload["effective_domains"][0]["snapshot_sha256"] == context.effective_domains[0].snapshot_sha256
+    audit = OptimizationPlanningAudit(tmp_path / "episode").replay()
+    assert tuple(
+        item.snapshot_sha256 for item in audit.entries[0].effective_domains
+    ) == tuple(item.snapshot_sha256 for item in context.effective_domains)
+
+
+def test_requested_only_planning_does_not_expose_receipts_or_task_memory(
+    tmp_path: Path,
+) -> None:
+    task_memory = _task_memory_snapshot(tmp_path)
+    planner = _FakeCodex(_proposal, _proposal)
+    controller = _controller(
+        tmp_path,
+        planner,
+        _FakeEcc(_started()),
+        objective=_objective(),
+        task_memory=task_memory,
+        receipt_aware_planning=False,
+    )
+
+    first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert first.requested is not None
+    controller.execute()
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.DEGRADED,
+            application_receipt=_application_receipt(),
+        ),
+        incumbent_decision="incumbent_retained",
+    )
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    context = planner.contexts[1]
+    assert context.task_memory is None
+    assert context.history[0].application_receipt is None
+    assert context.history[0].parameter_application_receipt is None
+    assert all(not domain.thresholds for domain in context.effective_domains)
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert state["receipt_aware_planning"] is False
+
+
+def test_recovery_rejects_planning_mode_drift(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(),
+        receipt_aware_planning=False,
+    )
+
+    with pytest.raises(
+        OptimizationEpisodeControllerError,
+        match="planning mode does not match",
+    ):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(),
+            ledger=controller.ledger,
+            clock=_Clock(),
+            receipt_aware_planning=True,
+        )
 
 
 def test_planning_domain_excludes_attempted_value_without_rewriting_proposal(
@@ -713,6 +776,8 @@ def test_controller_repairs_one_invalid_v2_response_before_accepting_exact_value
     assert len(planner.v2_calls) == 2
     assert result.requested is not None
     assert result.planner_source == "repair"
+    decision = OptimizationDecisionAudit(tmp_path / "episode").replay().entries[-1]
+    assert decision.planner_source == "repair"
 
 
 def test_controller_falls_back_immediately_after_v2_repair_failure(
@@ -730,6 +795,8 @@ def test_controller_falls_back_immediately_after_v2_repair_failure(
     assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
     assert result.rejection_reason == "v2_repair_failed"
     assert result.planner_source == "local_fallback"
+    decision = OptimizationDecisionAudit(tmp_path / "episode").replay().entries[-1]
+    assert decision.planner_source == "local_fallback"
 
 
 def test_stop_is_deferred_until_fixed_candidate_budget_is_exhausted(tmp_path: Path) -> None:

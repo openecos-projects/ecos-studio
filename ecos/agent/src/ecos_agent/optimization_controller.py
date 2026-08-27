@@ -19,15 +19,22 @@ from typing import Callable, Literal, Mapping, Protocol
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ecos_agent.codex_rpc import CodexProviderError
+from ecos_agent.effective_domain import (
+    EffectiveDomainError,
+    EffectiveDomainSnapshot,
+    compile_effective_domain,
+    validate_optimization_proposal_v2,
+)
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     ExpectedEffect,
     ExpectedEffectDirection,
     HistoryReference,
-    ObjectiveMetric,
+    KnobApplicationReceipt,
     KnowledgeReference,
     LegalAction,
+    ObjectiveMetric,
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
@@ -39,7 +46,6 @@ from ecos_agent.optimization_contracts import (
     ProposalContextRef,
     ProposalReason,
     RequestedKnobValue,
-    KnobApplicationReceipt,
     SelectionMetric,
     StageObservation,
     TerminalObservation,
@@ -52,29 +58,27 @@ from ecos_agent.optimization_decision_audit import (
 from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
+    OptimizationLedgerReplay,
+    OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationPlanningAuditEntry,
     OptimizationPlanningAuditReplay,
     OptimizationPlanningProviderEvidenceAudit,
     OptimizationPlanningProviderEvidenceReplay,
-    OptimizationLedgerReplay,
-    OptimizationOutcomeKind,
     OptimizationTerminalOutcome,
 )
+from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization_rules import legal_actions, select_requested_value
-from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
 from ecos_agent.parameter_evidence_contracts import (
     OptimizationProposalV2,
     ParameterApplicationReceipt,
 )
-from ecos_agent.effective_domain import (
-    EffectiveDomainError,
-    EffectiveDomainSnapshot,
-    compile_effective_domain,
-    validate_optimization_proposal_v2,
+from ecos_agent.parameter_semantics import (
+    LATTICE_VERSION,
+    card_hash,
+    load_parameter_cards,
 )
-from ecos_agent.parameter_semantics import LATTICE_VERSION, card_hash, load_parameter_cards
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -292,6 +296,9 @@ class _PersistedEpisodeState(BaseModel):
     episode_id: str
     checkpoint_id: str
     mode: OptimizationAgentMode
+    receipt_aware_planning: bool = Field(
+        default=True, exclude_if=lambda value: value is True
+    )
     state: OptimizationEpisodeState
     budget: BudgetSnapshot
     started_at: float
@@ -356,12 +363,18 @@ class OptimizationEpisodeController:
         task_memory_scope_sha256: str | None = None,
         task_memory_supplier: Callable[[], OptimizationTaskMemorySnapshot] | None = None,
         execution_context: Mapping[str, object] | None = None,
+        receipt_aware_planning: bool = True,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
         self.episode_id = episode_id
         self.checkpoint_id = checkpoint_id
         self.mode = OptimizationAgentMode(mode)
+        if type(receipt_aware_planning) is not bool:
+            raise OptimizationEpisodeControllerError(
+                "receipt-aware planning flag is invalid"
+            )
+        self.receipt_aware_planning = receipt_aware_planning
         self.planner = planner
         self.executor = executor
         self.ledger = ledger
@@ -486,6 +499,7 @@ class OptimizationEpisodeController:
                 if context.task_memory is not None
                 else ()
             ),
+            effective_domains=context.effective_domains,
         )
         self._persist()
         planner_source: Literal["llm", "local_fallback", "repair"] = "llm"
@@ -727,6 +741,7 @@ class OptimizationEpisodeController:
         task_memory_scope_sha256: str | None = None,
         task_memory_supplier: Callable[[], OptimizationTaskMemorySnapshot] | None = None,
         execution_context: Mapping[str, object] | None = None,
+        receipt_aware_planning: bool = True,
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
         if not path.is_file() and any(
@@ -762,6 +777,11 @@ class OptimizationEpisodeController:
         controller.episode_id = snapshot.episode_id
         controller.checkpoint_id = snapshot.checkpoint_id
         controller.mode = snapshot.mode
+        if snapshot.receipt_aware_planning != receipt_aware_planning:
+            raise OptimizationEpisodeControllerError(
+                "receipt-aware planning mode does not match the recovered episode"
+            )
+        controller.receipt_aware_planning = snapshot.receipt_aware_planning
         controller.planner = planner
         controller.executor = executor
         controller.ledger = ledger
@@ -804,10 +824,10 @@ class OptimizationEpisodeController:
         retrieval: OptimizationRetrievalResult,
         current_values: Mapping[str, bool | int | float],
     ) -> OptimizationPlanningContext:
-        history = self._history()
+        history = self._history(include_receipts=self.receipt_aware_planning)
         attempted = self._attempted_requests()
         cards = load_parameter_cards()
-        native_receipts = self._native_receipts()
+        native_receipts = self._native_receipts() if self.receipt_aware_planning else ()
         effective_domains = tuple(
             compile_effective_domain(
                 cards[knob_id],
@@ -832,7 +852,7 @@ class OptimizationEpisodeController:
         )
         task_memory = (
             self._task_memory_supplier()
-            if self._task_memory_supplier is not None
+            if self.receipt_aware_planning and self._task_memory_supplier is not None
             else None
         )
         if task_memory is not None and (
@@ -1106,7 +1126,9 @@ class OptimizationEpisodeController:
         }
         return all((item.intervention_id, item.outcome_sha256) in available for item in proposal.history_refs)
 
-    def _history(self) -> tuple[OptimizationHistory, ...]:
+    def _history(
+        self, *, include_receipts: bool = True
+    ) -> tuple[OptimizationHistory, ...]:
         replay = self.ledger.replay()
         starts = {
             entry.payload.intervention_id: entry.payload
@@ -1128,8 +1150,14 @@ class OptimizationEpisodeController:
                     action=start.proposal_action,
                     requested=start.requested,
                     terminal_observation=outcome.terminal_observation,
-                    application_receipt=outcome.application_receipt,
-                    parameter_application_receipt=outcome.parameter_application_receipt,
+                    application_receipt=(
+                        outcome.application_receipt if include_receipts else None
+                    ),
+                    parameter_application_receipt=(
+                        outcome.parameter_application_receipt
+                        if include_receipts
+                        else None
+                    ),
                 )
             )
         return tuple(history[-6:])
@@ -1188,7 +1216,12 @@ class OptimizationEpisodeController:
             )
             if self._parent_manifest_sha256 is None
             else self._parent_manifest_sha256,
-            environment_sha256=canonical_sha256({"mode": self.mode.value}),
+            environment_sha256=canonical_sha256(
+                {
+                    "mode": self.mode.value,
+                    "receipt_aware_planning": self.receipt_aware_planning,
+                }
+            ),
             objective_contract_sha256=(
                 self._objective.contract_sha256 if self._objective is not None else None
             ),
@@ -1472,6 +1505,7 @@ class OptimizationEpisodeController:
             objective_contract_sha256=(
                 self._objective.contract_sha256 if self._objective is not None else None
             ),
+            planner_source=planner_source,
         )
         self._persist()
         return OptimizationControlResult(
@@ -1570,6 +1604,8 @@ class OptimizationEpisodeController:
             "pending_execution_id": self._pending_execution_id,
             "cancel_requested": self._cancel_requested,
         }
+        if not self.receipt_aware_planning:
+            value["receipt_aware_planning"] = False
         if self._task_memory_scope_sha256 is not None:
             value["task_memory_scope_sha256"] = self._task_memory_scope_sha256
         value["state_sha256"] = canonical_sha256(value)

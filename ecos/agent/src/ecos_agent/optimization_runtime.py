@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -78,6 +79,9 @@ def create_optimization_runner(
     episode_id = _text(context.get("episode_id"), "episode_id")
     objective = _optimization_objective(context.get("objective"))
     checkpoint_id = "place"
+    receipt_aware_planning = context.get("receipt_aware_planning", True)
+    if type(receipt_aware_planning) is not bool:
+        raise OptimizationRuntimeError("receipt-aware planning flag is invalid")
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
@@ -99,10 +103,18 @@ def create_optimization_runner(
         }
     design_id = _design_id(workspace)
     routability_objective = freeze_routability_objective(terminal_observation)
+    reference_runtime = context.get("reference_runtime_seconds")
+    if reference_runtime is None:
+        reference_runtime = _optimization_rerun_runtime_seconds(workspace)
+    if (
+        not isinstance(reference_runtime, (int, float))
+        or isinstance(reference_runtime, bool)
+        or not math.isfinite(reference_runtime)
+        or reference_runtime <= 0
+    ):
+        raise OptimizationRuntimeError("reference runtime is invalid")
     budget = BudgetSnapshot(
-        budget=EpisodeBudget.from_reference_rerun(
-            _optimization_rerun_runtime_seconds(workspace)
-        )
+        budget=EpisodeBudget.from_reference_rerun(float(reference_runtime))
     )
     ledger_root = workspace / ".agent" / "optimization" / episode_id
     memory_scope = build_task_memory_scope(
@@ -140,6 +152,7 @@ def create_optimization_runner(
                 task_memory_scope_sha256=memory_scope.scope_sha256,
                 task_memory_supplier=memory_store.snapshot,
                 execution_context=execution_context,
+                receipt_aware_planning=receipt_aware_planning,
             )
             if controller.objective != objective:
                 raise OptimizationRuntimeError(
@@ -172,6 +185,7 @@ def create_optimization_runner(
                 task_memory_scope_sha256=memory_scope.scope_sha256,
                 task_memory_supplier=memory_store.snapshot,
                 execution_context=execution_context,
+                receipt_aware_planning=receipt_aware_planning,
             )
     except Exception:
         rpc.close()

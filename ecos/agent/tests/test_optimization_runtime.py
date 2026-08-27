@@ -15,21 +15,20 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_runtime import (
-    OptimizationRuntimeError,
-    _design_id,
-    _incumbent_workspace,
-    _current_values,
-    _wait_for_terminal_receipt,
-    _optimization_objective,
-    _parent_manifest_sha256,
-    _optimization_rerun_runtime_seconds,
-    create_optimization_runner,
-)
 from ecos_agent.optimization_controller import CandidateExecutionReceipt
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_rules import freeze_optimization_objective
-
+from ecos_agent.optimization_runtime import (
+    OptimizationRuntimeError,
+    _current_values,
+    _design_id,
+    _incumbent_workspace,
+    _optimization_objective,
+    _optimization_rerun_runtime_seconds,
+    _parent_manifest_sha256,
+    _wait_for_terminal_receipt,
+    create_optimization_runner,
+)
 
 _STAGES = (
     "Floorplan",
@@ -318,6 +317,7 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
             "workspace": str(workspace),
             "episode_id": "episode-new",
             "objective": _semantic_objective(),
+            "reference_runtime_seconds": 12.0,
         },
         planner=object(),
     )
@@ -330,5 +330,6 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
         (episode_root / "optimization-episode-state.v6.json").read_text(encoding="utf-8")
     )
     assert state["task_memory_scope_sha256"].startswith("sha256:")
+    assert runner.budget.budget.wall_time_limit_seconds == 264.0
     runner.close()
     assert rpc.closed is True

@@ -12,6 +12,7 @@ from typing import Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     OptimizationEpisodeState,
@@ -19,7 +20,10 @@ from ecos_agent.optimization_contracts import (
     OptimizationTaskMemoryReference,
     ProposalContextRef,
 )
-from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization_decision_audit import (
+    OptimizationDecisionAudit,
+    PlannerSource,
+)
 from ecos_agent.optimization_ledger import (
     OptimizationArtifactManifest,
     OptimizationInterventionStart,
@@ -98,6 +102,9 @@ class PublicPlanningRecord(_ReplicationModel):
     task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = Field(
         default=(), max_length=6, exclude_if=lambda value: not value
     )
+    effective_domains: tuple[EffectiveDomainSnapshot, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     response_sha256: str
     envelope: PublicPlanningEnvelope
     proposal: OptimizationProposal | None
@@ -105,6 +112,9 @@ class PublicPlanningRecord(_ReplicationModel):
     validation_result: Literal["accepted", "rejected", "fallback"]
     rejection_reason: str | None
     state: OptimizationEpisodeState
+    planner_source: PlannerSource = Field(
+        default="llm", exclude_if=lambda value: value == "llm"
+    )
 
     @field_validator(
         "planning_entry_sha256",
@@ -330,6 +340,7 @@ def _public_planning(planning, provider, decision) -> PublicPlanningRecord:
         planner_payload_sha256=planning.planner_payload_sha256,
         task_memory_snapshot_sha256=planning.task_memory_snapshot_sha256,
         task_memory_refs=planning.task_memory_refs,
+        effective_domains=planning.effective_domains,
         response_sha256=provider.evidence.response_sha256,
         envelope=public_envelope,
         proposal=(
@@ -349,6 +360,7 @@ def _public_planning(planning, provider, decision) -> PublicPlanningRecord:
             else None
         ),
         state=decision.state,
+        planner_source=decision.planner_source,
     )
 
 

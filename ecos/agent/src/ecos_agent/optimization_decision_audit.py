@@ -21,6 +21,7 @@ from ecos_agent.optimization_contracts import (
 )
 
 DecisionValidationResult = Literal["accepted", "rejected", "fallback"]
+PlannerSource = Literal["llm", "local_fallback", "repair"]
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -45,6 +46,9 @@ class OptimizationDecisionAuditEntry(BaseModel):
     rejection_reason: str | None = None
     requested: RequestedKnobValue | None = None
     state: OptimizationEpisodeState
+    planner_source: PlannerSource = Field(
+        default="llm", exclude_if=lambda value: value == "llm"
+    )
     entry_sha256: str
 
     @field_validator(
@@ -104,6 +108,7 @@ class OptimizationDecisionAudit:
         requested: RequestedKnobValue | None,
         state: OptimizationEpisodeState,
         objective_contract_sha256: str | None = None,
+        planner_source: PlannerSource = "llm",
     ) -> OptimizationDecisionAuditEntry:
         with self._exclusive_lock():
             replay = self._verify_locked()
@@ -118,6 +123,8 @@ class OptimizationDecisionAudit:
             }
             if objective_contract_sha256 is not None:
                 payload["objective_contract_sha256"] = objective_contract_sha256
+            if planner_source != "llm":
+                payload["planner_source"] = planner_source
             hash_payload = {
                 "schema_version": "ecos.optimization_decision_audit.v1",
                 "sequence": sequence,
