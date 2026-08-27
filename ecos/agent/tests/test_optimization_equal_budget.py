@@ -55,6 +55,9 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
     assert summary.aliases_saved == 1
     assert summary.wrong_prunes == 1
     assert summary.not_activated == 1
+    assert summary.overridden_rate == 0.0
+    assert summary.ignored_rate == 0.0
+    assert summary.not_activated_rate == 0.5
     assert summary.receipt_missing == 1
     assert summary.wall_time_limit_seconds == 44.0
     assert summary.peak_memory_mb == 8.0

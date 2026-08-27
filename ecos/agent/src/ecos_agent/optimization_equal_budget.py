@@ -74,8 +74,11 @@ class EqualBudgetSummary:
     timing: tuple[float, ...]
     congestion: tuple[float, ...]
     overridden: int
+    overridden_rate: float
     ignored: int
+    ignored_rate: float
     not_activated: int
+    not_activated_rate: float
     unknown: int
     effective_unique_rate: float
     application_signature_count: int
@@ -167,11 +170,30 @@ def evaluate_equal_budget(
         timing=tuple(item.timing for item in started if item.timing is not None),
         congestion=tuple(item.congestion for item in started if item.congestion is not None),
         overridden=sum(item.transition_status == "overridden" for item in started),
+        overridden_rate=(
+            sum(item.transition_status == "overridden" for item in started) / len(started)
+            if started
+            else 0.0
+        ),
         ignored=sum(
             item.application_status == "ignored" or item.activation_status == "ignored"
             for item in started
         ),
+        ignored_rate=(
+            sum(
+                item.application_status == "ignored" or item.activation_status == "ignored"
+                for item in started
+            )
+            / len(started)
+            if started
+            else 0.0
+        ),
         not_activated=sum(item.activation_status == "not_activated" for item in started),
+        not_activated_rate=(
+            sum(item.activation_status == "not_activated" for item in started) / len(started)
+            if started
+            else 0.0
+        ),
         unknown=sum(item.activation_status in (None, "unknown") for item in started),
         effective_unique_rate=(
             len(
