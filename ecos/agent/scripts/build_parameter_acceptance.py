@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from hashlib import sha256
 from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
@@ -18,7 +17,7 @@ CANDIDATES = {
     "floorplan.aspect_ratio": (
         "candidate-91962560dc60ce20-candidate-accept-aspect-ratio-v3b-20260827"
     ),
-    "synth.max_fanout": "candidate-91962560dc60ce20-candidate-accept-max-fanout-v3b-20260827",
+    "synth.max_fanout": "candidate-native-max-fanout-v9-20260827",
     "place.target_density": "candidate-accept-rerun-smoke2-20260827",
     "place.target_overflow": "candidate-accept-target-overflow-v3-20260827",
     "place.cell_padding_x": "candidate-accept-cell-padding-v3-20260827",
