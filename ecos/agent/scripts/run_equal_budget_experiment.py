@@ -296,9 +296,10 @@ def _ensure_workspace(
     timeout: float,
 ) -> TerminalObservation:
     if (workspace / "home/flow.json").is_file():
-        _verify_workspace_binding(manifest, design, workspace)
         if _workspace_flow_succeeded(workspace):
+            _verify_workspace_inputs(manifest, design, workspace)
             return _terminal_observation(workspace)
+        _verify_workspace_binding(manifest, design, workspace)
         client = EccContentLengthRpcClient(
             _ecc_executable(), response_timeout_seconds=30
         )
@@ -307,7 +308,7 @@ def _ensure_workspace(
             _run_canonical_flow(client, workspace_id, design.design_id, timeout)
         finally:
             client.close()
-        _verify_workspace_binding(manifest, design, workspace)
+        _verify_workspace_inputs(manifest, design, workspace)
         return _terminal_observation(workspace)
     if workspace.exists():
         raise ValueError("incomplete Phase 8 workspace already exists")
@@ -321,7 +322,7 @@ def _ensure_workspace(
         _run_canonical_flow(client, workspace_id, design.design_id, timeout)
     finally:
         client.close()
-    _verify_workspace_binding(manifest, design, workspace)
+    _verify_workspace_inputs(manifest, design, workspace)
     return _terminal_observation(workspace)
 
 
@@ -367,6 +368,13 @@ def _terminal_observation(workspace: Path) -> TerminalObservation:
 def _verify_workspace_binding(
     manifest: ExperimentManifest, design: DesignSpec, workspace: Path
 ) -> None:
+    _verify_workspace_inputs(manifest, design, workspace)
+    _verify_workspace_parameters(manifest, design, workspace)
+
+
+def _verify_workspace_inputs(
+    manifest: ExperimentManifest, design: DesignSpec, workspace: Path
+) -> None:
     filelist = _workspace_file(workspace, Path("origin/filelist.f"))
     sdc = _workspace_file(workspace, Path("origin") / design.sdc.name)
     refs = _filelist_refs(filelist)
@@ -387,7 +395,6 @@ def _verify_workspace_binding(
     )
     if refs != source_refs or actual_bundle != expected_bundle:
         raise ValueError("Phase 8 workspace RTL bundle does not match")
-    _verify_workspace_parameters(manifest, design, workspace)
 
 
 def _verify_workspace_parameters(
@@ -541,25 +548,34 @@ def _run_default_replay(
             replay_workspace,
             ignore=shutil.ignore_patterns(".agent"),
         )
-    _verify_workspace_binding(manifest, design, replay_workspace)
-    client = EccContentLengthRpcClient(_ecc_executable(), response_timeout_seconds=30)
-    request = {
-        "workspaceId": client.open_workspace(replay_workspace),
-        "rerun": True,
-        "origin": "gui",
-        "idempotencyKey": f"phase8.{design.design_id}.default-replay-{index}",
-    }
-    _write_json(output / "flow-start-request.v1.json", request)
+    _verify_workspace_inputs(manifest, design, replay_workspace)
+    terminal_path = output / "flow-terminal-result.v1.json"
+    terminal = (
+        json.loads(terminal_path.read_text(encoding="utf-8"))
+        if terminal_path.is_file()
+        else None
+    )
     started = time.monotonic()
-    try:
-        operation = _setup_request(client, "operation.start_flow", request, 30.0)
-        terminal = _wait_operation(client, operation, timeout)
-    finally:
-        client.close()
-    _write_json(output / "flow-terminal-result.v1.json", terminal)
+    if not isinstance(terminal, dict) or terminal.get("state") != "succeeded":
+        client = EccContentLengthRpcClient(
+            _ecc_executable(), response_timeout_seconds=30
+        )
+        request = {
+            "workspaceId": client.open_workspace(replay_workspace),
+            "rerun": True,
+            "origin": "gui",
+            "idempotencyKey": f"phase8.{design.design_id}.default-replay-{index}",
+        }
+        _write_json(output / "flow-start-request.v1.json", request)
+        try:
+            operation = _setup_request(client, "operation.start_flow", request, 30.0)
+            terminal = _wait_operation(client, operation, timeout)
+        finally:
+            client.close()
+        _write_json(terminal_path, terminal)
     if terminal.get("state") != "succeeded":
         raise ValueError("Phase 8 default replay failed")
-    _verify_workspace_binding(manifest, design, replay_workspace)
+    _verify_workspace_inputs(manifest, design, replay_workspace)
     observation = _terminal_observation(replay_workspace)
     runtime = _optimization_rerun_runtime_seconds(replay_workspace)
     _write_json(output / "terminal-observation.v1.json", observation.model_dump(mode="json"))

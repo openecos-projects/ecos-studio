@@ -734,6 +734,7 @@ def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch)
     monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
     monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
+    monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(runner, "build_terminal_observation", lambda _workspace: _terminal_observation())
 
     runner._ensure_workspace(manifest, design, tmp_path / "workspace", 1.0)
@@ -787,6 +788,7 @@ def test_phase8_runner_resumes_created_unstarted_workspace(
     monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
     monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
+    monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(
         runner,
         "build_terminal_observation",
@@ -830,6 +832,7 @@ def test_phase8_calibration_uses_three_default_flow_replays(tmp_path, monkeypatc
     monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
     monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
+    monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(runner, "build_terminal_observation", lambda _workspace: observation)
     monkeypatch.setattr(runner, "_optimization_rerun_runtime_seconds", lambda _workspace: 12.0)
 
