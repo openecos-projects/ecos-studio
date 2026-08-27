@@ -352,6 +352,33 @@ def test_optimization_planner_v2_binds_domain_and_planning_evidence(
     assert provider.consume_planning_evidence() is None
 
 
+def test_optimization_planner_v2_uses_closed_object_schema(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "1"
+    context = _context()
+    domain = _domain()
+    captured: dict[str, object] = {}
+
+    def request(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return _proposal_v2(context, domain)
+
+    monkeypatch.setattr(provider, "_request_json", request)
+    provider.propose_v2(context, domain)
+
+    pending = [captured["output_schema"]]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            if value.get("type") == "object":
+                assert value.get("additionalProperties") is False
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+
+
 def test_optimization_planner_v2_rejects_untrusted_domain(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

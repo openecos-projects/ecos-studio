@@ -13,7 +13,15 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, field_validator, model_validator
 
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import OptimizationKnob, StrategyDirection
+from ecos_agent.optimization_contracts import (
+    HistoryReference,
+    KnowledgeReference,
+    ObservationReference,
+    OptimizationKnob,
+    OptimizationTaskMemoryReference,
+    ProposalContextRef,
+    StrategyDirection,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -316,14 +324,14 @@ class NumericProposalActionV2(_Model):
 
 class OptimizationProposalV2(_Model):
     schema_version: Literal["ecos.optimization_proposal.v2"] = "ecos.optimization_proposal.v2"
-    context_ref: dict[str, str]
+    context_ref: ProposalContextRef
     decision: Literal["continue", "propose", "stop", "escalate"]
     reason_code: str
     rationale_summary: str
-    observation_refs: tuple[dict[str, str], ...] = Field(min_length=1, max_length=13)
-    history_refs: tuple[dict[str, str], ...] = ()
-    knowledge_refs: tuple[dict[str, str], ...] = ()
-    task_memory_refs: tuple[dict[str, str], ...] = ()
+    observation_refs: tuple[ObservationReference, ...] = Field(min_length=1, max_length=13)
+    history_refs: tuple[HistoryReference, ...] = ()
+    knowledge_refs: tuple[KnowledgeReference, ...] = ()
+    task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = ()
     action: NumericProposalActionV2 | None = None
 
     @model_validator(mode="after")

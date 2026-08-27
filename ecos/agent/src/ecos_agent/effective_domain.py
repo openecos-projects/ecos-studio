@@ -236,7 +236,7 @@ def validate_optimization_proposal_v2(
         proposal = OptimizationProposalV2.model_validate(payload)
     except (TypeError, ValueError) as exc:
         raise EffectiveDomainError("optimization proposal v2 is invalid") from exc
-    if proposal.context_ref != dict(context_ref):
+    if proposal.context_ref.model_dump(mode="json") != dict(context_ref):
         raise EffectiveDomainError("proposal context does not match planning turn")
     validate_numeric_proposal(proposal, domain, attempted=attempted)
     return proposal
