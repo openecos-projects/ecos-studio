@@ -37,6 +37,7 @@ from ecos_agent.optimization_ledger import (
     _validate_relative_path,
     _write_json_atomic,
 )
+from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
 _STORE_FILE = "task-memory.v1.jsonl"
 _SCOPE_FILE = "optimization-task-memory-scope.v1.json"
@@ -152,6 +153,9 @@ class OptimizationTaskMemoryEntry(_MemoryModel):
     application_receipt: KnobApplicationReceipt | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    parameter_application_receipt: ParameterApplicationReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     entry_sha256: str
 
     @field_validator("previous_entry_sha256", "entry_sha256")
@@ -172,6 +176,12 @@ class OptimizationTaskMemoryEntry(_MemoryModel):
             and self.application_receipt.requested != self.requested
         ):
             raise ValueError("task memory receipt does not match requested value")
+        if self.parameter_application_receipt is not None:
+            requested = self.parameter_application_receipt.requested
+            if self.application_receipt is not None:
+                raise ValueError("task memory receipt fields are ambiguous")
+            if requested.get("knob_id") != self.requested.knob_id.value or requested.get("value") != self.requested.value:
+                raise ValueError("task memory parameter receipt does not match requested value")
         expected = _entry_sha256(
             self.sequence,
             self.previous_entry_sha256,
@@ -215,6 +225,9 @@ class OptimizationTaskMemorySummary(_MemoryModel):
         min_length=1, max_length=_MAX_RECORDS
     )
     application_receipts: tuple[KnobApplicationReceipt, ...] = Field(
+        default=(), max_length=_MAX_RECORDS, exclude_if=lambda value: not value
+    )
+    parameter_application_receipts: tuple[ParameterApplicationReceipt, ...] = Field(
         default=(), max_length=_MAX_RECORDS, exclude_if=lambda value: not value
     )
 
@@ -275,6 +288,7 @@ class _Candidate:
     terminal_observation: TerminalObservation
     evidence: OptimizationTaskMemoryEvidence
     application_receipt: KnobApplicationReceipt | None
+    parameter_application_receipt: ParameterApplicationReceipt | None = None
 
 
 def build_task_memory_scope(
@@ -485,6 +499,7 @@ def _derive_candidates(episode_root: Path) -> tuple[_Candidate, ...]:
                     terminal_observation_sha256=terminal.terminal_observation_sha256,
                 ),
                 application_receipt=terminal.application_receipt,
+                parameter_application_receipt=terminal.parameter_application_receipt,
             )
         )
     return tuple(result)
@@ -560,6 +575,8 @@ def _build_entry(sequence: int, previous: str | None, candidate: _Candidate):
     }
     if candidate.application_receipt is not None:
         payload["application_receipt"] = candidate.application_receipt.model_dump(mode="json")
+    if candidate.parameter_application_receipt is not None:
+        payload["parameter_application_receipt"] = candidate.parameter_application_receipt.model_dump(mode="json")
     return OptimizationTaskMemoryEntry(
         sequence=sequence,
         previous_entry_sha256=previous,
@@ -623,6 +640,13 @@ def _summaries(
         ]
         if receipts:
             payload["application_receipts"] = receipts
+        native_receipts = [
+            entry.parameter_application_receipt.model_dump(mode="json")
+            for entry in group
+            if entry.parameter_application_receipt is not None
+        ]
+        if native_receipts:
+            payload["parameter_application_receipts"] = native_receipts
         result.append(
             OptimizationTaskMemorySummary(
                 reference=OptimizationTaskMemoryReference(

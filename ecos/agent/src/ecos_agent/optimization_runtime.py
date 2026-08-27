@@ -28,7 +28,6 @@ from ecos_agent.optimization_ecc_adapter import (
     EccCandidateRerunAdapter,
     EccContentLengthRpcClient,
 )
-from ecos_agent.optimization_gate0_receipts import place_runtime_coordinate_values
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
@@ -47,10 +46,7 @@ from ecos_agent.optimization_retrieval import (
     OptimizationKnowledgeRetriever,
     build_optimization_retrieval_request,
 )
-from ecos_agent.optimization_rules import (
-    coordinate_value_from_receipt,
-    freeze_routability_objective,
-)
+from ecos_agent.optimization_rules import freeze_routability_objective
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 
 
@@ -169,7 +165,6 @@ def create_optimization_runner(
         _incumbent_workspace(workspace, controller.incumbent_candidate_root_ref),
         site_width_dbu,
     )
-    _restore_effective_current_values(current_values, ledger, site_width_dbu)
 
     def observation_supplier(current_budget: BudgetSnapshot):
         return build_stage_observation(workspace, checkpoint_id, budget=current_budget)
@@ -365,14 +360,6 @@ def _current_values(workspace: Path, site_width_dbu: int) -> dict[str, bool | in
             "floorplan.aspect_ratio": parameters["Core"]["Aspect ratio"],
             "synth.max_fanout": fixfanout["max_fanout"],
         }
-        values.update(
-            place_runtime_coordinate_values(
-                workspace,
-                configured_target_density=dreamplace["target_density"],
-                configured_cell_padding_dbu=dreamplace["cell_padding_x"],
-                site_width_dbu=site_width_dbu,
-            )
-        )
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise OptimizationRuntimeError("optimization parameters are invalid") from exc
     if not isinstance(values["place.target_density"], (int, float)) or isinstance(
@@ -382,19 +369,6 @@ def _current_values(workspace: Path, site_width_dbu: int) -> dict[str, bool | in
     if type(values["place.cell_padding_x"]) not in {int, float} or values["place.cell_padding_x"] < 0:
         raise OptimizationRuntimeError("cell padding parameter is invalid")
     return values
-
-
-def _restore_effective_current_values(values, ledger, site_width_dbu: int) -> None:
-    for outcome in ledger.replay().terminal_outcomes:
-        receipt = outcome.application_receipt
-        if (
-            outcome.incumbent_decision not in {"initialized", "candidate_better"}
-            or receipt is None
-        ):
-            continue
-        values[receipt.requested.knob_id.value] = coordinate_value_from_receipt(
-            receipt, site_width_dbu=site_width_dbu
-        )
 
 
 def _ledger(root: Path):

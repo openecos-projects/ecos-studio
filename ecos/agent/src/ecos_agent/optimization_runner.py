@@ -148,6 +148,11 @@ class OptimizationEpisodeRunner:
         except Exception:
             return self._indeterminate_turn(observation, retrieval, planning, execution)
         comparison = self._compare(terminal_observation)
+        if planning.requested is not None and (
+            receipt.parameter_application_receipt is None
+            or receipt.parameter_application_receipt.activation.status != "used"
+        ):
+            comparison = IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
         completed = self._controller.complete_terminal(
             receipt,
             terminal_observation,
@@ -217,6 +222,8 @@ class OptimizationEpisodeRunner:
             and comparison is not None
             and comparison.decision
             in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
+            and receipt.parameter_application_receipt is not None
+            and receipt.parameter_application_receipt.activation.status == "used"
         ):
             self._controller.promote_incumbent(candidate, receipt.evidence)
             if requested is not None:

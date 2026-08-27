@@ -35,6 +35,7 @@ from ecos_agent.optimization_contracts import (
     SelectionMetric,
     TerminalObservation,
 )
+from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 from ecos_agent.optimization_rules import IncumbentDecision
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -187,6 +188,7 @@ class OptimizationTerminalOutcome(_LedgerModel):
     terminal_observation_sha256: str | None = None
     terminal_observation: TerminalObservation | None = None
     application_receipt: KnobApplicationReceipt | None = None
+    parameter_application_receipt: ParameterApplicationReceipt | None = None
     incumbent_decision: IncumbentDecision | None = None
     decisive_metric: SelectionMetric | None = None
     outcome_details_sha256: str
@@ -199,6 +201,10 @@ class OptimizationTerminalOutcome(_LedgerModel):
                 raise ValueError("terminal observation hash is invalid")
         if self.incumbent_decision is None and self.decisive_metric is not None:
             raise ValueError("decisive metric requires an incumbent decision")
+        if self.parameter_application_receipt is not None:
+            requested = self.parameter_application_receipt.requested.get("knob_id")
+            if self.application_receipt is not None or requested is None:
+                raise ValueError("terminal receipt fields are ambiguous")
         return self
 
     @field_validator("intervention_id")
@@ -785,6 +791,16 @@ def _replay_entries(entries: tuple[OptimizationLedgerEntry, ...]) -> Optimizatio
                 raise OptimizationLedgerIntegrityError(
                     "terminal application receipt does not match intervention request"
                 )
+            if payload.parameter_application_receipt is not None:
+                requested = payload.parameter_application_receipt.requested
+                if (
+                    start.requested is None
+                    or requested.get("knob_id") != start.requested.knob_id.value
+                    or requested.get("value") != start.requested.value
+                ):
+                    raise OptimizationLedgerIntegrityError(
+                        "terminal parameter receipt does not match intervention request"
+                    )
             terminal_by_id[payload.intervention_id] = payload
             outcomes.append(payload)
         previous_hash = entry.entry_sha256

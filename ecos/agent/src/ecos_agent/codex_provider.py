@@ -33,6 +33,7 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
 )
+from ecos_agent.parameter_evidence_contracts import OptimizationProposalV2
 from ecos_agent.optimization_controller import (
     OptimizationPlanningContext,
     planning_context_payload,
@@ -314,6 +315,18 @@ class CodexAppServerProposalProvider:
             )
         finally:
             self._capture_planning_evidence()
+
+    def propose_v2(self, context: OptimizationPlanningContext, domain: Mapping[str, Any]) -> dict[str, Any]:
+        """Opt-in exact-value proposal lane; production v1 remains the default."""
+        if self.env.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") != "1":
+            raise CodexProviderError("optimization proposal v2 is not enabled", failure_class="unsupported")
+        payload = _optimization_planning_payload(context)
+        payload["effective_domain"] = dict(domain)
+        system = (
+            "Return one JSON object matching ecos.optimization_proposal.v2. "
+            "Use only the supplied exact allowlist and domain hash; never emit commands, paths, workspaces, RPCs, or execution authority."
+        )
+        return self._proposal(payload, system, _optimization_proposal_output_schema_v2(), OptimizationProposalV2)
 
     def propose_optimization_objective(self, natural_language_goal: str) -> dict[str, Any]:
         goal = natural_language_goal.strip()
@@ -965,6 +978,13 @@ def _optimization_planning_payload(
 
 def _optimization_proposal_output_schema() -> dict[str, Any]:
     schema = OptimizationProposal.model_json_schema()
+    _require_all_schema_properties(schema)
+    return schema
+
+
+def _optimization_proposal_output_schema_v2() -> dict[str, Any]:
+    """Schema for the opt-in exact-value proposal contract."""
+    schema = OptimizationProposalV2.model_json_schema()
     _require_all_schema_properties(schema)
     return schema
 

@@ -19,6 +19,7 @@ from ecos_agent.optimization_contracts import (
     OptimizationKnob,
     RequestedKnobValue,
 )
+from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
@@ -124,6 +125,7 @@ class EccCandidateRerunAdapter:
         operation_id, state = self._validate_operation(response)
         evidence = self._evidence(response)
         application_receipt = self._application_receipt(response, requested, state)
+        legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id[operation_id] = requested
         if state == "failed":
             self._requested_by_execution_id.pop(operation_id, None)
@@ -132,7 +134,8 @@ class EccCandidateRerunAdapter:
                 started=True,
                 outcome=OptimizationOutcomeKind.EXECUTION_FAILED,
                 evidence=evidence,
-                application_receipt=application_receipt,
+                application_receipt=legacy_receipt,
+                parameter_application_receipt=native_receipt,
             )
         if state == "cancelled":
             self._requested_by_execution_id.pop(operation_id, None)
@@ -141,7 +144,8 @@ class EccCandidateRerunAdapter:
                 started=True,
                 outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
                 evidence=evidence,
-                application_receipt=application_receipt,
+                application_receipt=legacy_receipt,
+                parameter_application_receipt=native_receipt,
             )
         if state == "succeeded":
             self._requested_by_execution_id.pop(operation_id, None)
@@ -150,7 +154,8 @@ class EccCandidateRerunAdapter:
                 started=True,
                 outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
                 evidence=evidence,
-                application_receipt=application_receipt,
+                application_receipt=legacy_receipt,
+                parameter_application_receipt=native_receipt,
             )
         return CandidateExecutionReceipt(execution_id=operation_id, started=True)
 
@@ -175,12 +180,14 @@ class EccCandidateRerunAdapter:
         application_receipt = self._application_receipt(
             terminal, self._requested_by_execution_id.get(intervention_id), state
         )
+        legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id.pop(intervention_id, None)
         return CandidateExecutionReceipt(
             execution_id=intervention_id,
             started=True,
             outcome=outcome,
-            application_receipt=application_receipt,
+            application_receipt=legacy_receipt,
+            parameter_application_receipt=native_receipt,
         )
 
     def wait_for_terminal(
@@ -209,13 +216,15 @@ class EccCandidateRerunAdapter:
         application_receipt = self._application_receipt(
             terminal, self._requested_by_execution_id.get(execution_id), state
         )
+        legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id.pop(execution_id, None)
         return CandidateExecutionReceipt(
             execution_id=execution_id,
             started=True,
             outcome=outcome,
             evidence=self._evidence(terminal),
-            application_receipt=application_receipt,
+            application_receipt=legacy_receipt,
+            parameter_application_receipt=native_receipt,
         )
 
     @staticmethod
@@ -251,46 +260,27 @@ class EccCandidateRerunAdapter:
         response: Mapping[str, object],
         requested: RequestedKnobValue | None,
         state: str,
-    ) -> KnobApplicationReceipt | None:
+    ) -> KnobApplicationReceipt | ParameterApplicationReceipt | None:
         result = self._result(response)
         if result is None or "knobApplicationReceipt" not in result:
-            if (
-                state == "succeeded"
-                and requested is not None
-                and self._workspace_root is not None
-            ):
-                evidence = self._evidence(response)
-                if evidence is None:
-                    raise OptimizationEccAdapterError(
-                        "application receipt candidate evidence is missing"
-                    )
-                from ecos_agent.optimization_gate0_receipts import (
-                    build_materialization_application_receipt,
-                )
-
-                try:
-                    return build_materialization_application_receipt(
-                        self._workspace_root,
-                        evidence,
-                        requested,
-                        site_width_dbu=self._site_width_dbu,
-                    )
-                except ValueError as exc:
-                    raise OptimizationEccAdapterError(
-                        "application receipt runtime evidence is invalid"
-                    ) from exc
             return None
         if requested is None:
             raise OptimizationEccAdapterError("application receipt cannot be bound")
         if state not in _TERMINAL_STATES:
             raise OptimizationEccAdapterError("application receipt is non-terminal")
         raw = result["knobApplicationReceipt"]
+        normalized = _normalize_receipt_payload(raw)
         try:
-            receipt = KnobApplicationReceipt.model_validate(
-                _normalize_receipt_payload(raw)
-            )
+            if isinstance(normalized, Mapping) and normalized.get("schema_version") == "tool.parameter_application_receipt.v1":
+                receipt = ParameterApplicationReceipt.model_validate(normalized)
+            else:
+                receipt = KnobApplicationReceipt.model_validate(normalized)
         except (TypeError, ValueError) as exc:
             raise OptimizationEccAdapterError("application receipt is invalid") from exc
+        if isinstance(receipt, ParameterApplicationReceipt):
+            if receipt.requested.get("knob_id") != requested.knob_id.value or receipt.requested.get("value") != requested.value:
+                raise OptimizationEccAdapterError("application receipt request does not match")
+            return receipt
         if receipt.requested != requested:
             raise OptimizationEccAdapterError("application receipt request does not match")
         expected_written = requested.value
@@ -343,6 +333,14 @@ class EccCandidateRerunAdapter:
         if require_workspace and response.get("workspaceId") != self._workspace_id:
             raise OptimizationEccAdapterError("operation workspace does not match")
         return operation_id, state
+
+
+def _split_application_receipt(
+    receipt: KnobApplicationReceipt | ParameterApplicationReceipt | None,
+) -> tuple[KnobApplicationReceipt | None, ParameterApplicationReceipt | None]:
+    if isinstance(receipt, ParameterApplicationReceipt):
+        return None, receipt
+    return receipt, None
 
 
 def _normalize_receipt_payload(value: object) -> object:

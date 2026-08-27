@@ -62,12 +62,9 @@ from ecos_agent.optimization_ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
-from ecos_agent.optimization_rules import (
-    known_ineffective_requests,
-    legal_actions,
-    select_requested_value,
-)
+from ecos_agent.optimization_rules import legal_actions, select_requested_value
 from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
+from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -118,6 +115,7 @@ class CandidateExecutionReceipt:
     outcome: OptimizationOutcomeKind | None = None
     evidence: CandidateExecutionEvidence | None = None
     application_receipt: KnobApplicationReceipt | None = None
+    parameter_application_receipt: ParameterApplicationReceipt | None = None
 
     def __post_init__(self) -> None:
         if not _ID.fullmatch(self.execution_id):
@@ -132,6 +130,10 @@ class CandidateExecutionReceipt:
             self.application_receipt, KnobApplicationReceipt
         ):
             raise ValueError("execution application receipt is invalid")
+        if self.parameter_application_receipt is not None and not isinstance(
+            self.parameter_application_receipt, ParameterApplicationReceipt
+        ):
+            raise ValueError("execution parameter receipt is invalid")
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,7 @@ class OptimizationHistory:
     requested: RequestedKnobValue
     terminal_observation: TerminalObservation | None = None
     application_receipt: KnobApplicationReceipt | None = None
+    parameter_application_receipt: ParameterApplicationReceipt | None = None
 
 
 def _history_payload(item: OptimizationHistory) -> dict[str, object]:
@@ -179,6 +182,8 @@ def _history_payload(item: OptimizationHistory) -> dict[str, object]:
     }
     if item.application_receipt is not None:
         payload["application_receipt"] = item.application_receipt.model_dump(mode="json")
+    if item.parameter_application_receipt is not None:
+        payload["parameter_application_receipt"] = item.parameter_application_receipt.model_dump(mode="json")
     return payload
 
 
@@ -700,7 +705,10 @@ class OptimizationEpisodeController:
         current_values: Mapping[str, bool | int | float],
     ) -> OptimizationPlanningContext:
         history = self._history()
-        ineffective_requests = known_ineffective_requests(self._receipt_lineage())
+        # Effective aliases are compiled from version-bound native receipts by
+        # ``effective_domain``; legacy receipts are read-only and cannot alter
+        # a new planning turn.
+        ineffective_requests: tuple[RequestedKnobValue, ...] = ()
         task_memory = (
             self._task_memory_supplier()
             if self._task_memory_supplier is not None
@@ -866,6 +874,7 @@ class OptimizationEpisodeController:
                     requested=start.requested,
                     terminal_observation=outcome.terminal_observation,
                     application_receipt=outcome.application_receipt,
+                    parameter_application_receipt=outcome.parameter_application_receipt,
                 )
             )
         return tuple(history[-6:])
@@ -969,6 +978,16 @@ class OptimizationEpisodeController:
             raise OptimizationEpisodeControllerError(
                 "terminal application receipt does not match requested value"
             )
+        if receipt.parameter_application_receipt is not None:
+            native_requested = receipt.parameter_application_receipt.requested
+            if (
+                self._requested is None
+                or native_requested.get("knob_id") != self._requested.knob_id.value
+                or native_requested.get("value") != self._requested.value
+            ):
+                raise OptimizationEpisodeControllerError(
+                    "terminal parameter receipt does not match requested value"
+                )
         details = {
             "execution_id": receipt.execution_id,
             "started": receipt.started,
@@ -980,6 +999,10 @@ class OptimizationEpisodeController:
             details["candidate_manifest_sha256"] = receipt.evidence.candidate_manifest_sha256
         if receipt.application_receipt is not None:
             details["knob_application_receipt"] = receipt.application_receipt.model_dump(
+                mode="json"
+            )
+        if receipt.parameter_application_receipt is not None:
+            details["parameter_application_receipt"] = receipt.parameter_application_receipt.model_dump(
                 mode="json"
             )
         if terminal_observation is not None:
@@ -1009,7 +1032,11 @@ class OptimizationEpisodeController:
                     if receipt.evidence is not None
                     else None
                 ),
-                receipt_sha256=canonical_sha256(details),
+                receipt_sha256=(
+                    receipt.parameter_application_receipt.evidence_sha256
+                    if receipt.parameter_application_receipt is not None
+                    else canonical_sha256(details)
+                ),
                 terminal_observation_sha256=(
                     canonical_sha256(terminal_observation.model_dump(mode="json"))
                     if terminal_observation is not None
@@ -1017,6 +1044,7 @@ class OptimizationEpisodeController:
                 ),
                 terminal_observation=terminal_observation,
                 application_receipt=receipt.application_receipt,
+                parameter_application_receipt=receipt.parameter_application_receipt,
                 incumbent_decision=incumbent_decision,
                 decisive_metric=decisive_metric,
                 outcome_details_sha256=canonical_sha256(details),

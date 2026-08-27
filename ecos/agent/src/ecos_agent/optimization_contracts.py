@@ -474,14 +474,8 @@ class RequestedKnobValue(_ContractModel):
             OptimizationKnob.CELL_PADDING_X,
             OptimizationKnob.SYNTH_MAX_FANOUT,
         }:
-            lattice = (0, 1, 2, 3) if self.knob_id == OptimizationKnob.CELL_PADDING_X else (
-                8,
-                16,
-                20,
-                24,
-                32,
-                48,
-                64,
+            lattice = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16) if self.knob_id == OptimizationKnob.CELL_PADDING_X else (
+                8, 12, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 48, 56, 64,
             )
             label = "cell padding" if self.knob_id == OptimizationKnob.CELL_PADDING_X else "max fanout"
             if type(self.value) is not int or self.value not in lattice:
@@ -988,11 +982,11 @@ class TimingGuardrailContract(_ContractModel):
 
 
 _REQUESTED_LATTICES = {
-    OptimizationKnob.TARGET_DENSITY: tuple(round(0.1 + 0.05 * index, 2) for index in range(18)),
-    OptimizationKnob.TARGET_OVERFLOW: (0.06, 0.07, 0.08, 0.09, 0.1),
-    OptimizationKnob.DENSITY_WEIGHT: (0.0001, 0.00025, 0.0005, 0.00085, 0.001, 0.0025, 0.005),
-    OptimizationKnob.FLOORPLAN_CORE_UTIL: (0.4, 0.5, 0.6, 0.7, 0.8),
-    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: (0.5, 0.75, 1.0, 1.33, 2.0),
+    OptimizationKnob.TARGET_DENSITY: tuple(round(0.1 + 0.05 * i, 2) for i in range(14)) + (0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95),
+    OptimizationKnob.TARGET_OVERFLOW: (0.0, 0.02, 0.04, 0.06, 0.07, 0.08, 0.085, 0.09, 0.095, 0.1, 0.105, 0.11, 0.115, 0.12, 0.13, 0.14, 0.16, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0),
+    OptimizationKnob.DENSITY_WEIGHT: (0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.00065, 0.00075, 0.00085, 0.001, 0.00125, 0.0015, 0.002, 0.0025, 0.0035, 0.005, 0.0075, 0.01),
+    OptimizationKnob.FLOORPLAN_CORE_UTIL: tuple(round(0.2 + 0.05 * i, 2) for i in range(16)),
+    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: (0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.33, 1.5, 2.0, 3.0, 4.0, 5.0),
 }
 
 
