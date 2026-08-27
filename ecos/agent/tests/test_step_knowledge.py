@@ -202,7 +202,15 @@ def test_step_bundle_rejects_changed_markdown(tmp_path: Path) -> None:
 
 def test_provider_clarifies_ambiguous_cts_request_without_changing_operation_state() -> None:
     events: list[dict[str, object]] = []
-    provider = EcosAgentProvider(emit=events.append)
+
+    def choose_operation(_context: dict[str, object]) -> dict[str, object]:
+        return {
+            "schema_version": "flow-agent.gui_chat_response.v1",
+            "operation": "1",
+            "answer": None,
+        }
+
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=choose_operation)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
     provider.sessions[session_id].pending_interaction = None
 

@@ -20,6 +20,8 @@ from ecos_agent.codex_provider import (
     validate_required_codex_cli,
 )
 from ecos_agent.contracts import (
+    GuiClarificationOption,
+    GuiClarificationProposal,
     GuiChatResponseProposal,
     GuiWorkspaceSetupProposal,
     SourceSearchProposal,
@@ -911,6 +913,15 @@ class EcosAgentProvider:
             return
         self._answer_non_state_input(session, message, allow_operations=True)
 
+    @staticmethod
+    def _ambiguous_stage_execution_request(message: str) -> bool:
+        text = message.casefold()
+        if "stage" not in text or not any(
+            term in text for term in ("execution", "execute", "run", "perform")
+        ):
+            return False
+        return not any(term in text for term in ("rerun", "re-run", "re run", "again", "重跑"))
+
     def _answer_non_state_input(
         self, session: _Session, message: str, *, allow_operations: bool
     ) -> None:
@@ -1431,6 +1442,23 @@ class EcosAgentProvider:
                 "message",
                 response.answer or "",
                 contract=contract,
+            )
+            return
+        if self._ambiguous_stage_execution_request(message) and self._resolve_operation_choice(
+            session, message
+        ) is None:
+            options = tuple(
+                GuiClarificationOption(id=option["id"], label=option["label"])
+                for option in allowed_options
+            )
+            self._emit_clarification(
+                session,
+                GuiClarificationProposal(
+                    title="Choose an operation",
+                    description="This stage request does not identify a specific operation.",
+                    options=options,
+                ),
+                message,
             )
             return
         allowed_ids = {option["id"] for option in allowed_options}
