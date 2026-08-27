@@ -342,6 +342,24 @@ async function enqueueParameterWrite<T>(
 }
 
 /**
+ * Incoming payload/edit values face the same rules as the document on disk:
+ * a non-finite number would serialize as null (JSON) or inf/nan (TOML)
+ * instead of failing. Checked recursively before any merge.
+ */
+function assertFiniteNumbers(value: unknown, label: string): void {
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(`Refusing to write ${label}: non-finite number in parameters payload`)
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertFiniteNumbers(item, label)
+    return
+  }
+  if (isPlainRecord(value)) {
+    for (const item of Object.values(value)) assertFiniteNumbers(item, label)
+  }
+}
+
+/**
  * Merge a parameter payload into the existing TOML document. `[params]` is
  * updated wholesale per top-level key (display keys are normalized first,
  * mirroring ecc's `normalize_parameter_dict`), the `[design]`/`[pdk]`
@@ -438,6 +456,7 @@ export async function writeWorkspaceParameters(
     // Runtime-activity guards re-run INSIDE the queue: a flow starting while
     // this operation waited behind another writer must still block it.
     await assertWritable?.()
+    assertFiniteNumbers(payload, location.path)
     const spelledPath = location.spelledPath ?? location.path
     const canonicalPath = location.spelledPath
       ? location.path
@@ -601,6 +620,9 @@ export async function editWorkspaceParameters(
     // Runtime-activity guards re-run INSIDE the queue: a flow starting while
     // this operation waited behind another writer must still block it.
     await assertWritable?.()
+    for (const edit of edits) {
+      assertFiniteNumbers(edit.value, location.path)
+    }
     const spelledPath = location.spelledPath ?? location.path
     const canonicalPath = location.spelledPath
       ? location.path

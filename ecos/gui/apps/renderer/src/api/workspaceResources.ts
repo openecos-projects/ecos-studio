@@ -27,8 +27,9 @@ export function readWorkspaceParametersResourceApi(): Promise<Record<
 
 export function writeWorkspaceParametersResourceApi(
   parameters: Record<string, unknown>,
+  workspace?: string,
 ): Promise<{ format: 'toml' | 'json'; path: string }> {
-  return getDesktopApi().workspaceResources.writeParameters({ parameters })
+  return getDesktopApi().workspaceResources.writeParameters({ parameters, workspace })
 }
 
 export function getWorkspaceRuntimeSnapshotApi(

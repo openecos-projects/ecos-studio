@@ -272,24 +272,39 @@ export function parametersHaveChipIdentity(
 }
 
 /**
+ * String conversion for GUI-known fields: a TOML date under one would
+ * otherwise be written back as a locale-dependent string on the next save.
+ */
+function losslessString(value: unknown, label: string): string {
+  if (value instanceof Date) {
+    throw new Error(
+      `Parameter ${label} holds a TOML date the GUI cannot edit losslessly; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  return String(value)
+}
+
+/**
  * Normalize a raw parameters record into ParametersData. Accepts both the
  * legacy display-key shape (home/parameters.json) and the canonical flat
  * snake_case shape (home/ecc.toml / workspace.snapshot).
  */
 export function parseParametersRecord(raw: Record<string, unknown>): ParametersData {
   return {
-    PDK: String(raw.PDK ?? raw.pdk ?? ''),
-    Design: String(raw.Design ?? raw.design ?? ''),
-    design: raw.design != null ? String(raw.design) : undefined,
+    PDK: losslessString(raw.PDK ?? raw.pdk ?? '', 'PDK'),
+    Design: losslessString(raw.Design ?? raw.design ?? '', 'Design'),
+    design: raw.design != null ? losslessString(raw.design, 'design') : undefined,
     description: raw.description != null ? String(raw.description) : undefined,
     'Design Tool':
       raw['Design Tool'] != null
-        ? String(raw['Design Tool'])
+        ? losslessString(raw['Design Tool'], 'Design Tool')
         : raw.design_tool != null
-          ? String(raw.design_tool)
+          ? losslessString(raw.design_tool, 'design_tool')
           : undefined,
-    'Top module': String(raw['Top module'] ?? raw.top_module ?? ''),
-    top_module: raw.top_module != null ? String(raw.top_module) : undefined,
+    'Top module': losslessString(raw['Top module'] ?? raw.top_module ?? '', 'Top module'),
+    top_module:
+      raw.top_module != null ? losslessString(raw.top_module, 'top_module') : undefined,
     Die: normalizeDie(raw.Die ?? raw.die),
     Core: normalizeCore(raw.Core ?? raw.core),
     'Max fanout': losslessNumber(raw['Max fanout'] ?? raw.max_fanout ?? 20, 'Max fanout'),
@@ -313,8 +328,8 @@ export function parseParametersRecord(raw: Record<string, unknown>): ParametersD
       raw['Routability opt flag'] ?? raw.routability_opt_flag ?? 1,
       'Routability opt flag',
     ),
-    Clock: String(raw.Clock ?? raw.clock ?? ''),
-    clock: raw.clock != null ? String(raw.clock) : undefined,
+    Clock: losslessString(raw.Clock ?? raw.clock ?? '', 'Clock'),
+    clock: raw.clock != null ? losslessString(raw.clock, 'clock') : undefined,
     'Frequency max [MHz]': losslessNumber(
       raw['Frequency max [MHz]'] ?? raw.frequency_max ?? 100,
       'Frequency max [MHz]',
@@ -323,13 +338,19 @@ export function parseParametersRecord(raw: Record<string, unknown>): ParametersD
       raw.frequency_max != null
         ? losslessNumber(raw.frequency_max, 'frequency_max')
         : undefined,
-    'Bottom layer': String(raw['Bottom layer'] ?? raw.bottom_layer ?? FIXED_BOTTOM_LAYER),
-    'Top layer': String(raw['Top layer'] ?? raw.top_layer ?? FIXED_TOP_LAYER),
+    'Bottom layer': losslessString(
+      raw['Bottom layer'] ?? raw.bottom_layer ?? FIXED_BOTTOM_LAYER,
+      'Bottom layer',
+    ),
+    'Top layer': losslessString(
+      raw['Top layer'] ?? raw.top_layer ?? FIXED_TOP_LAYER,
+      'Top layer',
+    ),
     'PDK Root':
       raw['PDK Root'] != null
-        ? String(raw['PDK Root'])
+        ? losslessString(raw['PDK Root'], 'PDK Root')
         : raw.pdk_root != null
-          ? String(raw.pdk_root)
+          ? losslessString(raw.pdk_root, 'pdk_root')
           : undefined,
     cpu_filelist: raw.cpu_filelist != null ? String(raw.cpu_filelist) : undefined,
     soc_filelist: raw.soc_filelist != null ? String(raw.soc_filelist) : undefined,
@@ -593,6 +614,25 @@ export function useParameters() {
     return true
   }
 
+  /**
+   * resolveProjectPathAccess without the failure mode: a stale or
+   * out-of-scope metadata pointer (e.g. home.json still naming a missing
+   * parameters.json) must not gate the format-aware read — the main-process
+   * helper locates and authorizes the actual config itself.
+   */
+  async function resolveParametersPathOrNull(
+    sessionId: string,
+    path: string,
+  ): Promise<string | null | undefined> {
+    try {
+      return await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(path),
+      )
+    } catch {
+      return null
+    }
+  }
+
   async function reloadParametersFromKnownPathIfRunning(): Promise<boolean> {
     const projectPath = currentProject.value?.path
     if (!projectPath || !isFlowExecutionActiveForWorkspace(projectPath)) return false
@@ -630,16 +670,9 @@ export function useParameters() {
       if (keepLastParametersDuringFlowReload()) return true
 
       const knownPath = resolvedParametersPath || fallbackParametersPath(projectPath)
-      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveProjectPathAccess(knownPath),
-      )
+      const resolvedPath = await resolveParametersPathOrNull(sessionId, knownPath)
       if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
         return true
-      if (!resolvedPath) {
-        if (keepLastParametersDuringFlowReload()) return true
-        resetParametersState()
-        return true
-      }
 
       const parametersRecord = await workspaceLifecycle.runForSession(sessionId, () =>
         readWorkspaceParametersFile(projectPath),
@@ -652,7 +685,9 @@ export function useParameters() {
       if (parametersRecord === undefined) return true
       if (loadResourceToken !== parametersResourceToken) return true
 
-      resolvedParametersPath = resolvedPath
+      // The format-aware read locates the actual config (home/ecc.toml
+      // preferred), so a stale legacy pointer never gates the reload.
+      resolvedParametersPath = resolvedPath ?? (parametersRecord ? knownPath : '')
       if (parametersRecord) {
         applyParametersData(parseParametersRecord(parametersRecord))
       } else {
@@ -747,8 +782,9 @@ export function useParameters() {
           isParametersRecord(snapshot.parameters) &&
           parametersHaveChipIdentity(snapshot.parameters)
         ) {
-          const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-            resolveProjectPathAccess(parametersPath),
+          const resolvedPath = await resolveParametersPathOrNull(
+            sessionId,
+            parametersPath,
           )
           if (
             resolvedPath === undefined &&
@@ -764,9 +800,7 @@ export function useParameters() {
           return
         }
       }
-      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveProjectPathAccess(parametersPath),
-      )
+      const resolvedPath = await resolveParametersPathOrNull(sessionId, parametersPath)
       if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
         return
       console.log('Loading parameters from:', resolvedPath ?? parametersPath)
@@ -858,6 +892,7 @@ export function useParameters() {
 
         await writeWorkspaceParametersResourceApi(
           parametersData as unknown as Record<string, unknown>,
+          saveProjectPath,
         )
         writeSucceeded = true
       })

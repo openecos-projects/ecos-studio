@@ -223,6 +223,19 @@ describe('useParameters helpers', () => {
     ).toThrow(/not a finite number/)
   })
 
+  it('rejects TOML date values in GUI-known fields instead of corrupting them', () => {
+    const when = new Date('2026-08-27T00:00:00Z')
+    expect(() => parseParametersRecord({ pdk: 'ics55', design: when })).toThrow(
+      /TOML date/,
+    )
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', top_module: when }),
+    ).toThrow(/TOML date/)
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', max_fanout: when }),
+    ).toThrow(/TOML date/)
+  })
+
   it('treats empty snapshots as missing chip identity', () => {
     expect(parametersHaveChipIdentity({})).toBe(false)
     expect(parametersHaveChipIdentity({ Die: { Size: [], Area: 0 } })).toBe(false)

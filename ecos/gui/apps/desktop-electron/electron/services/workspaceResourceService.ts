@@ -1,4 +1,4 @@
-import { lstat, readdir, stat } from 'node:fs/promises'
+import { lstat, readdir, realpath, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type {
   WorkspaceResourceFile,
@@ -105,11 +105,27 @@ export class WorkspaceResourceService {
    */
   async writeParameters(request: {
     parameters: Record<string, unknown>
+    workspace?: string
   }): Promise<{ format: WorkspaceParametersFileLocation['format']; path: string }> {
     if (!request || typeof request !== 'object' || !isRecord(request.parameters)) {
       throw new Error('Workspace parameters write requires a parameters object')
     }
     const root = await this.projectScopeProvider.getProjectRoot()
+    if (request.workspace !== undefined) {
+      // The save was dispatched for a specific workspace: refuse to land it
+      // in whichever workspace became active since (an openProject that
+      // registered a new root before the renderer committed the switch).
+      const [expected, active] = await Promise.all([
+        realpath(request.workspace),
+        realpath(root),
+      ])
+      if (expected !== active) {
+        throw new Error(
+          `Refusing to write workspace parameters for ${request.workspace}: ` +
+            'the active workspace changed before the save completed',
+        )
+      }
+    }
     const location = await locateWorkspaceParametersFile(root)
     if (!location) {
       throw new Error(

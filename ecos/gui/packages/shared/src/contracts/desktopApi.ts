@@ -341,6 +341,10 @@ export interface DesktopApi {
     readParameters(): Promise<Record<string, unknown> | null>
     writeParameters(request: {
       parameters: Record<string, unknown>
+      /** The workspace the renderer captured at dispatch time; the write is
+       * rejected when the main process's active workspace has since moved
+       * on, so a save can never land in a workspace it was not meant for. */
+      workspace?: string
     }): Promise<{ format: 'toml' | 'json'; path: string }>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
   }

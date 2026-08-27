@@ -1051,4 +1051,27 @@ describe('writeParameters', () => {
       service.writeParameters({} as { parameters: Record<string, unknown> }),
     ).rejects.toThrow(/parameters object/i)
   })
+
+  it('rejects a save dispatched for a different workspace than the active one', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'ecc.toml'),
+      ['[params]', 'design = "gcd"', ''].join('\n'),
+      'utf8',
+    )
+    const other = await tempWorkspace()
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    await expect(
+      service.writeParameters({ parameters: { design: 'gcd' }, workspace: other }),
+    ).rejects.toThrow(/active workspace changed/i)
+
+    // A matching workspace writes through.
+    const result = await service.writeParameters({
+      parameters: { design: 'gcd' },
+      workspace: root,
+    })
+    expect(result.format).toBe('toml')
+  })
 })

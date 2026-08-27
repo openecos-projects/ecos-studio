@@ -1757,7 +1757,7 @@ export function registerIpc(
     desktopApiIpcChannels.workspaceResourcesWriteParameters,
     async (_event, request) => {
       return await services.workspaceResourceService.writeParameters(
-        request as { parameters: Record<string, unknown> },
+        request as { parameters: Record<string, unknown>; workspace?: string },
       )
     },
   )

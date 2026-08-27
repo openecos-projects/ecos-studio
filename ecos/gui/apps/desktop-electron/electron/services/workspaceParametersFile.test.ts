@@ -377,6 +377,18 @@ describe('writeWorkspaceParameters', () => {
     )
   })
 
+  it('rejects non-finite numbers in the incoming payload and edit values', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    await expect(
+      writeWorkspaceParameters(root, { target_density: Number.NaN }),
+    ).rejects.toThrow(/non-finite/)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['target_density'], value: Infinity }]),
+    ).rejects.toThrow(/non-finite/)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
   it('rejects a malformed TOML document on save instead of replacing it', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'ecc.toml', '2026-08-27\n')

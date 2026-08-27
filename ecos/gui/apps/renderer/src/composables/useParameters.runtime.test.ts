@@ -779,6 +779,7 @@ describe('useParameters desktop bridge integration', () => {
 
     expect(writeWorkspaceParametersResourceApi).toHaveBeenCalledWith(
       expect.objectContaining({ 'Max fanout': 64 }),
+      '/workspace/demo',
     )
     expect(refreshConfigApi).toHaveBeenCalledWith({
       cmd: 'refresh_config',
