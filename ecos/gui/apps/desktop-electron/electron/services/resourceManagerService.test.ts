@@ -11,6 +11,7 @@ import {
   readdir,
   readFile,
   readlink,
+  rename,
   rm,
   stat,
   symlink,
@@ -448,7 +449,7 @@ async function writeYosysRegistry(
   options: {
     platforms?: Record<string, unknown>
     sha256?: string
-    size?: number
+    size?: number | null
     url?: string
     version?: string
     stripPrefix?: string
@@ -473,7 +474,7 @@ async function writeYosysRegistry(
                 'all-platform': {
                   url: options.url ?? 'file:///tmp/yosys.tar',
                   sha256: options.sha256 ?? 'managed-sha',
-                  size: options.size ?? 12,
+                  size: options.size === undefined ? 12 : options.size,
                   strip_prefix: options.stripPrefix,
                 },
               },
@@ -5465,6 +5466,364 @@ describe('ResourceManagerService', () => {
 
     expect(completedArchives).toHaveLength(2)
     expect(completedArchives[0]).not.toBe(completedArchives[1])
+  })
+
+  it.each(['checksum-scoped', 'legacy'] as const)(
+    'recovers and cleans completed %s UUID archives after process interruptions',
+    async (archiveFormat) => {
+      const root = await createTempDir('ecos-resources-')
+      const registryPath = join(root, 'registry.json')
+      const sourceUrl = 'https://example.com/yosys.tar'
+      const payload = Buffer.from('completed archive payload')
+      const sha256 = createHash('sha256').update(payload).digest('hex')
+      await writeYosysRegistry(registryPath, {
+        url: sourceUrl,
+        sha256,
+        size: null,
+      })
+      const downloadsDir = join(root, 'state', 'resources', 'downloads')
+      const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
+      const checksumHash = createHash('sha256').update(sha256).digest('hex').slice(0, 16)
+      const checksumSuffix = archiveFormat === 'checksum-scoped' ? `-${checksumHash}` : ''
+      const interruptedArchives = [
+        '11111111-1111-4111-8111-111111111111',
+        '22222222-2222-4222-8222-222222222222',
+      ].map((operationId) =>
+        join(
+          downloadsDir,
+          `tool-yosys-2026-05-13-${sourceHash}${checksumSuffix}-${operationId}.tar`,
+        ),
+      )
+      await mkdir(downloadsDir, { recursive: true })
+      await Promise.all(
+        interruptedArchives.map(
+          async (archivePath) => await writeFile(archivePath, payload),
+        ),
+      )
+
+      const fetchImpl = vi.fn(
+        async (_url: string | URL | Request, init?: RequestInit) => {
+          expect(new Headers(init?.headers).get('range')).toBe(
+            `bytes=${payload.byteLength}-`,
+          )
+          return new Response(null, {
+            status: 416,
+            headers: { 'content-range': `bytes */${payload.byteLength}` },
+          })
+        },
+      ) as typeof fetch
+      const extractedArchives: string[] = []
+      const service = new ResourceManagerService({
+        registryUrl: `file://${registryPath}`,
+        ...testResourceDirs(root),
+        archiveExtractor: async (archivePath, destination) => {
+          extractedArchives.push(archivePath)
+          await expect(readFile(archivePath)).resolves.toEqual(payload)
+          await mkdir(join(destination, 'bin'), { recursive: true })
+          await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+          await chmod(join(destination, 'bin', 'yosys'), 0o755)
+        },
+        fetchImpl,
+      })
+
+      await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+        status: 'started',
+        resource_id: 'tool:yosys',
+      })
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      expect(extractedArchives).toHaveLength(1)
+      expect(interruptedArchives).not.toContain(extractedArchives[0])
+      for (const interruptedArchive of interruptedArchives) {
+        await expect(stat(interruptedArchive)).rejects.toMatchObject({ code: 'ENOENT' })
+      }
+    },
+  )
+
+  it('downloads afresh when a stale UUID archive cannot be recovered', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const sourceUrl = 'https://example.com/yosys.tar'
+    const payload = Buffer.from('fresh archive payload')
+    await writeYosysRegistry(registryPath, {
+      url: sourceUrl,
+      sha256: 'fixture-sha',
+      size: payload.byteLength,
+    })
+    const downloadsDir = join(root, 'state', 'resources', 'downloads')
+    const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
+    const staleArchive = join(
+      downloadsDir,
+      `tool-yosys-2026-05-13-${sourceHash}-11111111-1111-4111-8111-111111111111.tar`,
+    )
+    await mkdir(downloadsDir, { recursive: true })
+    await writeFile(staleArchive, 'stale archive payload')
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('range')).toBeNull()
+      return new Response(payload, {
+        status: 200,
+        headers: { 'content-length': String(payload.byteLength) },
+      })
+    }) as typeof fetch
+    const extractedArchives: string[] = []
+    const service = new ResourceManagerService({
+      archiveRecoveryFileOperations: {
+        remove: async (path) => await rm(path, { force: true }),
+        rename: async (sourcePath, destinationPath) => {
+          if (sourcePath === staleArchive) {
+            throw Object.assign(new Error('archive is locked'), { code: 'EPERM' })
+          }
+          await rename(sourcePath, destinationPath)
+        },
+      },
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (archivePath, destination) => {
+        extractedArchives.push(archivePath)
+        await expect(readFile(archivePath)).resolves.toEqual(payload)
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      fetchImpl,
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+      status: 'started',
+      resource_id: 'tool:yosys',
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(extractedArchives).toHaveLength(1)
+    await expect(readFile(staleArchive, 'utf8')).resolves.toBe('stale archive payload')
+  })
+
+  it.each(['EACCES', 'EPERM', 'EBUSY'])(
+    'downloads afresh when archive candidates cannot be enumerated (%s)',
+    async (code) => {
+      const root = await createTempDir('ecos-resources-')
+      const registryPath = join(root, 'registry.json')
+      const sourceUrl = 'https://example.com/yosys.tar'
+      const payload = Buffer.from('fresh archive payload')
+      await writeYosysRegistry(registryPath, {
+        url: sourceUrl,
+        sha256: 'fixture-sha',
+        size: payload.byteLength,
+      })
+      const readDirectory = vi.fn(async () => {
+        throw Object.assign(new Error(`unable to enumerate: ${code}`), { code })
+      })
+      const fetchImpl = vi.fn(
+        async (_url: string | URL | Request, init?: RequestInit) => {
+          expect(new Headers(init?.headers).get('range')).toBeNull()
+          return new Response(payload, {
+            status: 200,
+            headers: { 'content-length': String(payload.byteLength) },
+          })
+        },
+      ) as typeof fetch
+      const service = new ResourceManagerService({
+        archiveRecoveryFileOperations: { readDirectory },
+        registryUrl: `file://${registryPath}`,
+        ...testResourceDirs(root),
+        archiveExtractor: async (archivePath, destination) => {
+          await expect(readFile(archivePath)).resolves.toEqual(payload)
+          await mkdir(join(destination, 'bin'), { recursive: true })
+          await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+          await chmod(join(destination, 'bin', 'yosys'), 0o755)
+        },
+        fetchImpl,
+        sha256Verifier: vi.fn(async () => true),
+      })
+
+      await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+        status: 'started',
+        resource_id: 'tool:yosys',
+      })
+
+      expect(readDirectory).toHaveBeenCalledTimes(1)
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('does not recover a legacy UUID archive from an obsolete registry lock', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const sourceUrl = 'https://example.com/yosys.tar'
+    const stalePayload = Buffer.from('old archive payload')
+    const payload = Buffer.from('new archive payload')
+    expect(stalePayload.byteLength).toBe(payload.byteLength)
+    const sha256 = createHash('sha256').update(payload).digest('hex')
+    await writeYosysRegistry(registryPath, {
+      url: sourceUrl,
+      sha256,
+      size: payload.byteLength,
+    })
+    const downloadsDir = join(root, 'state', 'resources', 'downloads')
+    const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
+    const staleArchive = join(
+      downloadsDir,
+      `tool-yosys-2026-05-13-${sourceHash}-11111111-1111-4111-8111-111111111111.tar`,
+    )
+    await mkdir(downloadsDir, { recursive: true })
+    await writeFile(staleArchive, stalePayload)
+
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('range')).toBeNull()
+      return new Response(payload, {
+        status: 200,
+        headers: { 'content-length': String(payload.byteLength) },
+      })
+    }) as typeof fetch
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (archivePath, destination) => {
+        await expect(readFile(archivePath)).resolves.toEqual(payload)
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      fetchImpl,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+      status: 'started',
+      resource_id: 'tool:yosys',
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await expect(stat(staleArchive)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('removes superseded checksum archives without discarding the current partial', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const sourceUrl = 'https://example.com/yosys.tar'
+    const payload = Buffer.from('current archive payload')
+    const stalePayload = Buffer.from('superseded archive payload')
+    const sha256 = createHash('sha256').update(payload).digest('hex')
+    const staleSha256 = createHash('sha256').update(stalePayload).digest('hex')
+    await writeYosysRegistry(registryPath, {
+      url: sourceUrl,
+      sha256,
+      size: null,
+    })
+    const downloadsDir = join(root, 'state', 'resources', 'downloads')
+    const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
+    const checksumHash = createHash('sha256').update(sha256).digest('hex').slice(0, 16)
+    const staleChecksumHash = createHash('sha256')
+      .update(staleSha256)
+      .digest('hex')
+      .slice(0, 16)
+    const archiveStem = `tool-yosys-2026-05-13-${sourceHash}`
+    const currentPartial = join(downloadsDir, `${archiveStem}-${checksumHash}.tar.part`)
+    const staleArchives = [
+      join(downloadsDir, `${archiveStem}-${staleChecksumHash}.tar`),
+      join(downloadsDir, `${archiveStem}-${staleChecksumHash}.tar.part`),
+      join(
+        downloadsDir,
+        `${archiveStem}-${staleChecksumHash}-11111111-1111-4111-8111-111111111111.tar`,
+      ),
+    ]
+    await mkdir(downloadsDir, { recursive: true })
+    await writeFile(currentPartial, payload)
+    await Promise.all(
+      staleArchives.map(async (path) => await writeFile(path, stalePayload)),
+    )
+
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('range')).toBe(`bytes=${payload.byteLength}-`)
+      return new Response(null, {
+        status: 416,
+        headers: { 'content-range': `bytes */${payload.byteLength}` },
+      })
+    }) as typeof fetch
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (archivePath, destination) => {
+        await expect(readFile(archivePath)).resolves.toEqual(payload)
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      fetchImpl,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+      status: 'started',
+      resource_id: 'tool:yosys',
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await expect(stat(currentPartial)).rejects.toMatchObject({ code: 'ENOENT' })
+    for (const staleArchive of staleArchives) {
+      await expect(stat(staleArchive)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
+  it('continues installing when a superseded checksum archive cannot be removed', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const sourceUrl = 'https://example.com/yosys.tar'
+    const payload = Buffer.from('current archive payload')
+    const stalePayload = Buffer.from('superseded archive payload')
+    const sha256 = createHash('sha256').update(payload).digest('hex')
+    const staleSha256 = createHash('sha256').update(stalePayload).digest('hex')
+    await writeYosysRegistry(registryPath, {
+      url: sourceUrl,
+      sha256,
+      size: payload.byteLength,
+    })
+    const downloadsDir = join(root, 'state', 'resources', 'downloads')
+    const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
+    const staleChecksumHash = createHash('sha256')
+      .update(staleSha256)
+      .digest('hex')
+      .slice(0, 16)
+    const stalePartial = join(
+      downloadsDir,
+      `tool-yosys-2026-05-13-${sourceHash}-${staleChecksumHash}.tar.part`,
+    )
+    await mkdir(downloadsDir, { recursive: true })
+    await writeFile(stalePartial, stalePayload)
+
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('range')).toBeNull()
+      return new Response(payload, {
+        status: 200,
+        headers: { 'content-length': String(payload.byteLength) },
+      })
+    }) as typeof fetch
+    const service = new ResourceManagerService({
+      archiveRecoveryFileOperations: {
+        remove: async (path) => {
+          if (path === stalePartial) {
+            throw Object.assign(new Error('archive is locked'), { code: 'EPERM' })
+          }
+          await rm(path, { force: true })
+        },
+      },
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (archivePath, destination) => {
+        await expect(readFile(archivePath)).resolves.toEqual(payload)
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      fetchImpl,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+      status: 'started',
+      resource_id: 'tool:yosys',
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await expect(readFile(stalePartial)).resolves.toEqual(stalePayload)
   })
 
   it('aborts extraction and waits for extractor cleanup before reporting cancellation', async () => {

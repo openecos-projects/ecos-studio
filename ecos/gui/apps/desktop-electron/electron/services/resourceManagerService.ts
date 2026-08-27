@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { constants, createReadStream } from 'node:fs'
+import { constants, createReadStream, type Dirent } from 'node:fs'
 import {
   access,
   lstat,
@@ -79,6 +79,12 @@ type Sha256Verifier = (
   signal?: AbortSignal,
 ) => Promise<boolean>
 type ManifestWriter = (filePath: string, content: string) => Promise<void>
+
+interface ArchiveRecoveryFileOperations {
+  readDirectory: (path: string) => Promise<Dirent[]>
+  remove: (path: string) => Promise<void>
+  rename: (sourcePath: string, destinationPath: string) => Promise<void>
+}
 
 interface CommandRunnerOptions {
   cwd?: string
@@ -349,6 +355,7 @@ interface RegistryCacheResult {
 }
 
 export interface ResourceManagerServiceOptions {
+  archiveRecoveryFileOperations?: Partial<ArchiveRecoveryFileOperations>
   archiveExtractor?: ArchiveExtractor
   cacheDir?: string
   commandRunner?: CommandRunner
@@ -368,6 +375,7 @@ export interface RuntimeEnvOptions {
 }
 
 export class ResourceManagerService {
+  private readonly archiveRecoveryFileOperations: ArchiveRecoveryFileOperations
   private readonly archiveExtractor: ArchiveExtractor
   private readonly cacheDir: string
   private readonly commandRunner: CommandRunner
@@ -393,6 +401,12 @@ export class ResourceManagerService {
   private manifestOperationPromise: Promise<void> = Promise.resolve()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
+    this.archiveRecoveryFileOperations = {
+      readDirectory: async (path) => await readdir(path, { withFileTypes: true }),
+      remove: async (path) => await rm(path, { force: true }),
+      rename,
+      ...options.archiveRecoveryFileOperations,
+    }
     this.resourcesDir =
       options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
     this.toolsDir = options.toolsDir ?? join(xdgDataHome(), 'ecos-studio', 'tools')
@@ -1252,26 +1266,35 @@ export class ResourceManagerService {
       const { platform, asset } = selectPlatformAsset(versionEntry)
       if (!asset) throw new Error(`No asset for ${name} on ${platform}`)
       const resolvedAsset = await this.resolvePlatformAsset(asset)
+      if (!resolvedAsset.sha256) {
+        throw new Error(`Missing SHA256 checksum for ${name}`)
+      }
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
+      const legacyArchive = resourceArchivePath(
+        this.resourcesDir,
+        resourceId,
+        version,
+        resolvedAsset.url,
+      )
       const resumableArchive = resourceArchivePath(
         this.resourcesDir,
         resourceId,
         version,
         resolvedAsset.url,
+        { sha256: resolvedAsset.sha256 },
       )
       tempArchive = resourceArchivePath(
         this.resourcesDir,
         resourceId,
         version,
         resolvedAsset.url,
-        randomUUID(),
+        { operationId: randomUUID(), sha256: resolvedAsset.sha256 },
       )
       partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
-      await recoverPartialArchive(resumableArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1292,6 +1315,16 @@ export class ResourceManagerService {
         phase: 'downloading',
         progress: 0,
         message: `Downloading ${name} v${version}...`,
+      })
+      await recoverPartialArchive({
+        archivePath: resumableArchive,
+        expectedSha256: resolvedAsset.sha256,
+        fileOperations: this.archiveRecoveryFileOperations,
+        legacyArchivePath: legacyArchive,
+        partialArchivePath: partialArchive,
+        sha256Verifier: this.sha256Verifier,
+        signal,
+        sourceUrl: resolvedAsset.url,
       })
       await downloadAsset(
         resolvedAsset.url,
@@ -1332,9 +1365,6 @@ export class ResourceManagerService {
         resourceId,
         resolvedAsset.sha256 || '(not provided)',
       )
-      if (!resolvedAsset.sha256) {
-        throw new Error(`Missing SHA256 checksum for ${name}`)
-      }
       const verified = await this.sha256Verifier(
         tempArchive,
         resolvedAsset.sha256,
@@ -1469,6 +1499,9 @@ export class ResourceManagerService {
       const { platform, asset } = selectPlatformAsset(versionEntry)
       if (!asset) throw new Error(`No asset for ${pdkId} on ${platform}`)
       const resolvedAsset = await this.resolvePlatformAsset(asset)
+      if (!resolvedAsset.sha256) {
+        throw new Error(`Missing SHA256 checksum for ${pdkId}`)
+      }
       const version = versionEntry.version
       const displayName = pdk.display_name || pdkId
       const destination = join(this.pdksDir, pdkId, version)
@@ -1498,24 +1531,30 @@ export class ResourceManagerService {
         })
         return { status: 'started', resource_id: resourceId, version }
       }
+      const legacyArchive = resourceArchivePath(
+        this.resourcesDir,
+        resourceId,
+        version,
+        resolvedAsset.url,
+      )
       const resumableArchive = resourceArchivePath(
         this.resourcesDir,
         resourceId,
         version,
         resolvedAsset.url,
+        { sha256: resolvedAsset.sha256 },
       )
       tempArchive = resourceArchivePath(
         this.resourcesDir,
         resourceId,
         version,
         resolvedAsset.url,
-        randomUUID(),
+        { operationId: randomUUID(), sha256: resolvedAsset.sha256 },
       )
       partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
-      await recoverPartialArchive(resumableArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1536,6 +1575,16 @@ export class ResourceManagerService {
         phase: 'downloading',
         progress: 0,
         message: `Downloading ${displayName} v${version}...`,
+      })
+      await recoverPartialArchive({
+        archivePath: resumableArchive,
+        expectedSha256: resolvedAsset.sha256,
+        fileOperations: this.archiveRecoveryFileOperations,
+        legacyArchivePath: legacyArchive,
+        partialArchivePath: partialArchive,
+        sha256Verifier: this.sha256Verifier,
+        signal,
+        sourceUrl: resolvedAsset.url,
       })
       await downloadAsset(
         resolvedAsset.url,
@@ -1576,9 +1625,6 @@ export class ResourceManagerService {
         resourceId,
         resolvedAsset.sha256 || '(not provided)',
       )
-      if (!resolvedAsset.sha256) {
-        throw new Error(`Missing SHA256 checksum for ${pdkId}`)
-      }
       const verified = await this.sha256Verifier(
         tempArchive,
         resolvedAsset.sha256,
@@ -1738,27 +1784,36 @@ export class ResourceManagerService {
       if (!versionEntry) throw new Error(`Version not found for ${mpcId}`)
       const { platform, asset } = selectPlatformAsset(versionEntry)
       if (!asset) throw new Error(`No asset for ${mpcId} on ${platform}`)
+      if (!asset.sha256) {
+        throw new Error(`Missing SHA256 checksum for ${mpcId}`)
+      }
       const version = versionEntry.version
       const displayName = mpc.display_name || mpcId
       const destination = join(this.mpcsDir, mpcId, version)
+      const legacyArchive = resourceArchivePath(
+        this.resourcesDir,
+        resourceId,
+        version,
+        asset.url,
+      )
       const resumableArchive = resourceArchivePath(
         this.resourcesDir,
         resourceId,
         version,
         asset.url,
+        { sha256: asset.sha256 },
       )
       tempArchive = resourceArchivePath(
         this.resourcesDir,
         resourceId,
         version,
         asset.url,
-        randomUUID(),
+        { operationId: randomUUID(), sha256: asset.sha256 },
       )
       partialArchive = `${resumableArchive}.part`
       tempExtract = join(this.mpcsDir, mpcId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
-      await recoverPartialArchive(resumableArchive, partialArchive)
       electronLogger.info(
         '[resources] %s %s v%s on %s',
         action === 'update' ? 'Updating' : 'Installing',
@@ -1772,6 +1827,16 @@ export class ResourceManagerService {
         phase: 'downloading',
         progress: 0,
         message: `Downloading ${displayName} v${version}...`,
+      })
+      await recoverPartialArchive({
+        archivePath: resumableArchive,
+        expectedSha256: asset.sha256,
+        fileOperations: this.archiveRecoveryFileOperations,
+        legacyArchivePath: legacyArchive,
+        partialArchivePath: partialArchive,
+        sha256Verifier: this.sha256Verifier,
+        signal,
+        sourceUrl: asset.url,
       })
       await downloadAsset(
         asset.url,
@@ -4393,7 +4458,9 @@ async function downloadAsset(
 
       if (response.status === 416 && rangeRequested) {
         const totalBytes =
-          parseContentRange(response.headers.get('content-range'))?.total ?? expectedSize
+          parseUnsatisfiedContentRangeTotal(response.headers.get('content-range')) ??
+          parseContentRange(response.headers.get('content-range'))?.total ??
+          expectedSize
         if (totalBytes !== null && totalBytes === existingBytes) {
           onProgress?.({
             downloadedBytes: existingBytes,
@@ -4643,6 +4710,14 @@ function parseContentRange(value: string | null): {
   return { start, end, total }
 }
 
+function parseUnsatisfiedContentRangeTotal(value: string | null): number | null {
+  if (!value) return null
+  const match = /^bytes\s+\*\/(\d+)$/i.exec(value.trim())
+  if (!match) return null
+  const total = Number(match[1])
+  return Number.isSafeInteger(total) && total >= 0 ? total : null
+}
+
 async function fileSize(path: string): Promise<number> {
   return stat(path)
     .then((value) => value.size)
@@ -4826,29 +4901,201 @@ function resourceArchivePath(
   resourceId: string,
   version: string,
   sourceUrl: string,
-  operationId?: string,
+  options: { operationId?: string; sha256?: string } = {},
 ): string {
   const safeId = resourceId.replace(/[^A-Za-z0-9._-]+/g, '-')
   const safeVersion = version.replace(/[^A-Za-z0-9._-]+/g, '-')
   const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
-  const operationSuffix = operationId ? `-${operationId}` : ''
+  const checksumSuffix = options.sha256
+    ? `-${createHash('sha256').update(options.sha256.trim().toLowerCase()).digest('hex').slice(0, 16)}`
+    : ''
+  const operationSuffix = options.operationId ? `-${options.operationId}` : ''
   return join(
     resourcesDir,
     'downloads',
-    `${safeId}-${safeVersion}-${sourceHash}${operationSuffix}${archiveExtensionFromUrl(sourceUrl)}`,
+    `${safeId}-${safeVersion}-${sourceHash}${checksumSuffix}${operationSuffix}${archiveExtensionFromUrl(sourceUrl)}`,
   )
 }
 
-async function recoverPartialArchive(
-  archivePath: string,
-  partialArchivePath: string,
-): Promise<void> {
-  if (!(await pathExists(archivePath))) return
-  if (await pathExists(partialArchivePath)) {
-    await rm(archivePath, { force: true })
+interface RecoverPartialArchiveOptions {
+  archivePath: string
+  expectedSha256: string
+  fileOperations: ArchiveRecoveryFileOperations
+  legacyArchivePath: string
+  partialArchivePath: string
+  sha256Verifier: Sha256Verifier
+  signal: AbortSignal
+  sourceUrl: string
+}
+
+async function recoverPartialArchive({
+  archivePath,
+  expectedSha256,
+  fileOperations,
+  legacyArchivePath,
+  partialArchivePath,
+  sha256Verifier,
+  signal,
+  sourceUrl,
+}: RecoverPartialArchiveOptions): Promise<void> {
+  throwIfAborted(signal)
+  const partialExists = await pathExists(partialArchivePath)
+  const {
+    currentOperationCandidates,
+    legacyOperationCandidates,
+    supersededChecksumCandidates,
+  } = await archiveRecoveryCandidates(
+    archivePath,
+    legacyArchivePath,
+    sourceUrl,
+    fileOperations,
+  )
+  await removeArchiveCandidates(
+    supersededChecksumCandidates,
+    fileOperations,
+    signal,
+    'archive from a superseded registry lock',
+  )
+  const candidates = Array.from(
+    new Set([
+      archivePath,
+      ...currentOperationCandidates,
+      `${legacyArchivePath}.part`,
+      legacyArchivePath,
+      ...legacyOperationCandidates,
+    ]),
+  )
+  if (partialExists) {
+    await removeArchiveCandidates(
+      candidates,
+      fileOperations,
+      signal,
+      'unused archive recovery candidate',
+    )
     return
   }
-  await rename(archivePath, partialArchivePath)
+  for (const candidate of candidates) {
+    throwIfAborted(signal)
+    try {
+      if (!(await pathExists(candidate))) continue
+      const verified =
+        Boolean(expectedSha256) &&
+        (await sha256Verifier(candidate, expectedSha256, signal))
+      if (!verified) {
+        electronLogger.warn(
+          '[resources] Removing archive recovery candidate with a stale registry lock: %s',
+          candidate,
+        )
+        await fileOperations.remove(candidate)
+        continue
+      }
+      await fileOperations.rename(candidate, partialArchivePath)
+      await removeArchiveCandidates(
+        candidates.filter((otherCandidate) => otherCandidate !== candidate),
+        fileOperations,
+        signal,
+        'unused archive recovery candidate',
+      )
+      return
+    } catch (error) {
+      if (isAbortError(error) || signal.aborted) throw error
+      if (isFileNotFoundError(error)) continue
+      electronLogger.warn(
+        '[resources] Skipping unusable archive recovery candidate %s: %s',
+        candidate,
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+}
+
+interface ArchiveRecoveryCandidates {
+  currentOperationCandidates: string[]
+  legacyOperationCandidates: string[]
+  supersededChecksumCandidates: string[]
+}
+
+async function archiveRecoveryCandidates(
+  archivePath: string,
+  legacyArchivePath: string,
+  sourceUrl: string,
+  fileOperations: ArchiveRecoveryFileOperations,
+): Promise<ArchiveRecoveryCandidates> {
+  const extension = archiveExtensionFromUrl(sourceUrl)
+  const archiveDirectory = dirname(archivePath)
+  const entries = await fileOperations
+    .readDirectory(archiveDirectory)
+    .catch((error: unknown) => {
+      if (!isFileNotFoundError(error)) {
+        electronLogger.warn(
+          '[resources] Unable to scan archive recovery candidates in %s: %s',
+          archiveDirectory,
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+      return []
+    })
+  const operationCandidates = (resumableArchivePath: string): string[] => {
+    const archiveName = basename(resumableArchivePath)
+    const stem = archiveName.slice(0, -extension.length)
+    const operationArchivePattern = new RegExp(
+      `^${escapeRegExp(stem)}-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}${escapeRegExp(extension)}$`,
+      'i',
+    )
+    return entries
+      .filter((entry) => entry.isFile() && operationArchivePattern.test(entry.name))
+      .map((entry) => join(archiveDirectory, entry.name))
+      .sort()
+  }
+  const currentArchiveName = basename(archivePath)
+  const currentStem = currentArchiveName.slice(0, -extension.length).toLowerCase()
+  const legacyArchiveName = basename(legacyArchivePath)
+  const legacyStem = legacyArchiveName.slice(0, -extension.length)
+  const checksumScopePattern = new RegExp(
+    `^${escapeRegExp(legacyStem)}-([0-9a-f]{16})(?:-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})?${escapeRegExp(extension)}(?:\\.part)?$`,
+    'i',
+  )
+  const supersededChecksumCandidates = entries
+    .filter((entry) => {
+      if (!entry.isFile()) return false
+      const match = checksumScopePattern.exec(entry.name)
+      if (!match) return false
+      return `${legacyStem}-${match[1]}`.toLowerCase() !== currentStem
+    })
+    .map((entry) => join(archiveDirectory, entry.name))
+    .sort()
+  return {
+    currentOperationCandidates: operationCandidates(archivePath),
+    legacyOperationCandidates: operationCandidates(legacyArchivePath),
+    supersededChecksumCandidates,
+  }
+}
+
+async function removeArchiveCandidates(
+  candidates: string[],
+  fileOperations: ArchiveRecoveryFileOperations,
+  signal: AbortSignal,
+  description: string,
+): Promise<void> {
+  for (const candidate of candidates) {
+    throwIfAborted(signal)
+    try {
+      await fileOperations.remove(candidate)
+    } catch (error) {
+      if (isAbortError(error) || signal.aborted) throw error
+      if (isFileNotFoundError(error)) continue
+      electronLogger.warn(
+        '[resources] Unable to remove %s %s: %s',
+        description,
+        candidate,
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function removeCompletedArchive(path: string, resourceId: string): void {
