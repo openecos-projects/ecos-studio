@@ -49,6 +49,15 @@ _TARGET_STEPS = {
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
     OptimizationKnob.SYNTH_MAX_FANOUT: "fixFanout",
 }
+_PLACE_KNOBS = frozenset(
+    {
+        OptimizationKnob.TARGET_DENSITY,
+        OptimizationKnob.TARGET_OVERFLOW,
+        OptimizationKnob.CELL_PADDING_X,
+        OptimizationKnob.ROUTABILITY_OPT,
+        OptimizationKnob.DENSITY_WEIGHT,
+    }
+)
 
 
 class Gate0ReceiptError(ValueError):
@@ -204,6 +213,8 @@ def _runtime_values(
         return _floorplan_runtime_values(candidate, requested, written_value)
     if requested.knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:
         return _fixfanout_runtime_values(candidate, requested, written_value)
+    if requested.knob_id not in _PLACE_KNOBS:
+        raise Gate0ReceiptError("legacy receipt parser does not support this knob")
     return _place_runtime_values(
         candidate, target, requested, written_value, site_width_dbu
     )

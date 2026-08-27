@@ -4,10 +4,12 @@ import json
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import ecos_agent.optimization_gate0 as gate0
+import ecos_agent.optimization_legacy_receipts as legacy_receipts
 from ecos_agent.optimization_contracts import (
     GateResult,
     ObjectiveMetric,
@@ -34,10 +36,22 @@ from ecos_agent.optimization_gate0 import (
     require_terminal_receipt,
     run_pilot_candidate,
 )
+from ecos_agent.optimization_legacy_receipts import Gate0ReceiptError
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 
 HASH = "sha256:" + "a" * 64
+
+
+def test_legacy_receipt_parser_rejects_unknown_knob() -> None:
+    with pytest.raises(Gate0ReceiptError, match="does not support this knob"):
+        legacy_receipts._runtime_values(  # type: ignore[attr-defined]
+            Path("/tmp"),
+            None,  # type: ignore[arg-type]
+            SimpleNamespace(knob_id="future.knob"),  # type: ignore[arg-type]
+            0,
+            1,
+        )
 
 
 def _terminal(
