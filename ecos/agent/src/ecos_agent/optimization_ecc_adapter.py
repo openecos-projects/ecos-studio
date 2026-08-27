@@ -128,6 +128,7 @@ class EccCandidateRerunAdapter:
             params["parentCandidateRootRef"] = parent_candidate_root_ref
         response = self._rpc.call("candidate.rerun", params)
         operation_id, state = self._validate_operation(response)
+        self._validate_execution_contract(response, requested)
         evidence = self._evidence(response)
         application_receipt = self._application_receipt(response, requested, state)
         legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
@@ -213,6 +214,9 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("terminal operation id does not match")
         if state not in _TERMINAL_STATES:
             raise OptimizationEccAdapterError("terminal operation state is invalid")
+        requested = self._requested_by_execution_id.get(execution_id)
+        if requested is not None:
+            self._validate_execution_contract(terminal, requested)
         outcome = {
             "succeeded": OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
             "failed": OptimizationOutcomeKind.EXECUTION_FAILED,
@@ -231,6 +235,19 @@ class EccCandidateRerunAdapter:
             application_receipt=legacy_receipt,
             parameter_application_receipt=native_receipt,
         )
+
+    @staticmethod
+    def _validate_execution_contract(
+        response: Mapping[str, object], requested: RequestedKnobValue
+    ) -> None:
+        result = EccCandidateRerunAdapter._result(response)
+        if result is None:
+            return
+        fields = (result.get("targetStep"), result.get("endStep"), result.get("executionScope"))
+        if all(value is None for value in fields):
+            return
+        if fields != (_TARGET_STEPS.get(requested.knob_id, "place"), "Harden", "full_flow"):
+            raise OptimizationEccAdapterError("candidate execution contract does not match")
 
     @staticmethod
     def _evidence(response: Mapping[str, object]) -> CandidateExecutionEvidence | None:

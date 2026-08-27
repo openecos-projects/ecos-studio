@@ -437,6 +437,27 @@ def test_adapter_rejects_a_malformed_application_receipt() -> None:
         adapter.wait_for_terminal("operation-1")
 
 
+def test_adapter_rejects_terminal_execution_contract_drift() -> None:
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {
+                "targetStep": "Floorplan",
+                "endStep": "Harden",
+                "executionScope": "full_flow",
+            },
+        },
+    )
+    adapter = EccCandidateRerunAdapter(rpc, workspace_id="workspace-1", site_width_dbu=200)
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    with pytest.raises(OptimizationEccAdapterError, match="execution contract"):
+        adapter.wait_for_terminal("operation-1")
+
+
 def test_adapter_rejects_absolute_candidate_evidence_reference() -> None:
     rpc = _FakeEccRpc(
         _running_operation(),
