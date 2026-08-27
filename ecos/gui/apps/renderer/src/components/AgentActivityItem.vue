@@ -20,7 +20,9 @@
     v-else
     class="activity-item activity-item--disclosure"
     :data-status="item.status"
-    :open="item.status === 'running' || item.status === 'failed'"
+    :open="
+      item.status === 'pending' || item.status === 'running' || item.status === 'failed'
+    "
     role="listitem"
   >
     <summary class="activity-item__summary">

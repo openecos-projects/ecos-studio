@@ -216,6 +216,7 @@ import {
   type AppMenuAction,
   type DesktopAgentWorkspaceSetupContract,
   type DesktopApi,
+  type ResourceInfo,
 } from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
@@ -225,6 +226,7 @@ import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
 import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useFlowRunner } from '@/composables/useFlowRunner'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
 import {
@@ -250,6 +252,12 @@ import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import {
+  runQuickStartWorkflow,
+  type QuickStartResourceSnapshot,
+} from '@/composables/quickStartController'
+import { quickStartRunnerKey, type QuickStartRunner } from '@/composables/quickStartUi'
+import { createProjectManifestMpcSnapshot, parseMpcSpecDesigns } from '@/utils/mpcSpec'
 import {
   requestOpenStepConfigAfterCreate,
   usePendingOpenStepConfigAfterCreate,
@@ -291,7 +299,9 @@ const {
   runtimeBackendConnecting,
   runtimeBackendTitle,
   runtimeBackendSubtitle,
+  waitForRuntimeOperation,
 } = useWorkspace()
+const { runAllFlow } = useFlowRunner()
 const { loadPdks, pdkNameDialogVisible, pdkNameDraft, confirmPdkName, cancelPdkName } =
   usePdkManager()
 const { loadVersions } = useVersion()
@@ -330,6 +340,7 @@ const {
   showToast,
 })
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+let quickStartRunning = false
 
 function updatePdkNameDialogVisibility(visible: boolean): void {
   if (!visible) cancelPdkName()
@@ -450,6 +461,349 @@ async function createWorkspaceFromAgent(
 }
 
 provide(agentWorkspaceSetupKey, createWorkspaceFromAgent)
+
+const runQuickStart: QuickStartRunner = async (onEvent) => {
+  if (quickStartRunning) throw new Error('A Quick Start workflow is already running.')
+  quickStartRunning = true
+  try {
+    const api = desktopApi.value ?? (await waitForDesktopApi())
+    desktopApi.value = api
+    const versions = await api.app.getVersions()
+    const resources = await resolveQuickStartResources(api)
+    const host = {
+      appVersion: versions.gui,
+      listResources: async () => resources,
+      navigate: async (surface: string) => {
+        if (surface === 'project-management') {
+          await router.push('/projects')
+          await delay(450)
+        }
+      },
+      createProject: async (input: {
+        design: QuickStartResourceSnapshot['design']
+        mpc: QuickStartResourceSnapshot['mpc']
+        pdk: QuickStartResourceSnapshot['pdk']
+      }) => {
+        if (!api.app.getQuickStartRoot) {
+          throw new Error('Quick Start storage is unavailable in this desktop runtime.')
+        }
+        const root = normalizeLocalPath(await api.app.getQuickStartRoot())
+        const projectName = await nextQuickStartProjectName(api, root)
+        const projectRoot = joinLocalPath(root, projectName)
+        const mpc = input.mpc ? await quickStartMpcSnapshot(api, input.mpc) : null
+        const result = await api.projectManifest.mutate({
+          mutation: { type: 'create', name: projectName, designName: 'gcd', mpc },
+          projectRoot,
+        })
+        await api.workspace.registerProjectRoot(projectRoot)
+        await writeQuickStartRunRecord(api, projectRoot, {
+          design_resource: input.design,
+          mpc_resource: input.mpc,
+          pdk_resource: input.pdk,
+          project: { name: projectName, root: projectRoot },
+          schema_version: 'ecos.quick_start.run.v1',
+          snapshot: {
+            project: {
+              design_name: 'gcd',
+              managed_mpc: mpc,
+              storage_root: root,
+            },
+            resources: {
+              design: input.design,
+              mpc: input.mpc,
+              pdk: input.pdk,
+            },
+          },
+          status: 'project_created',
+          workflow_id: 'backend-gcd-quick-start',
+          workflow_version: '1.0.0',
+        })
+        return {
+          id: result.content ? JSON.parse(result.content).project_id : projectName,
+          name: projectName,
+          root: projectRoot,
+          mpc,
+        }
+      },
+      createWorkspace: async (input: {
+        project: any
+        resources: QuickStartResourceSnapshot
+      }) => {
+        const project = input.project as { name: string; root: string }
+        const workspaceId = await nextQuickStartWorkspaceId(api, project.root)
+        const workspacePath = joinLocalPath(project.root, workspaceId)
+        const config: WorkspaceConfig = {
+          directory: workspacePath,
+          designTool: 'backend',
+          pdk: 'ics55',
+          pdk_root: input.resources.pdk?.path ?? '',
+          parameters: {
+            design: 'gcd',
+            description: 'Created by Quick Start',
+            top_module: 'gcd',
+            clock: 'clk',
+            frequency_max: 50,
+            max_fanout: 32,
+            die_area_mode: 'utilitization_margin',
+            utilitization: 0.3,
+            margin: 2,
+            target_density: 0.2,
+            target_overflow: 0.1,
+          },
+          origin_def: '',
+          origin_verilog: '',
+          rtl_list: input.resources.design ? [input.resources.design.path] : [],
+          design_input_mode: 'rtl',
+          pdk_config_mode: 'default',
+          pdk_config: { mode: 'default', tech_lef: [], cell_lef: [], liberty: [] },
+          flow_config: {
+            start_step: 'Synthesis',
+            end_step: 'Harden',
+            steps: [
+              'Synthesis',
+              'Floorplan',
+              'fixFanout',
+              'place',
+              'CTS',
+              'legalization',
+              'route',
+              'drc',
+              'lvs',
+              'filler',
+              'RCX',
+              'sta',
+              'Harden',
+            ],
+          },
+          mpc: (input.project as { mpc?: WorkspaceConfig['mpc'] }).mpc ?? null,
+          project_context: {
+            mode: 'select',
+            project_name: project.name,
+            project_root: project.root,
+            project_json_path: joinLocalPath(project.root, 'project.json'),
+          },
+        }
+        await router.push({
+          path: '/ecc',
+          query: {
+            projectRoot: project.root,
+            projectName: project.name,
+            designName: 'gcd',
+            workspacePath,
+            workspaceId,
+            quickStart: '1',
+          },
+        })
+        await delay(450)
+        const success = await newProject(config)
+        if (!success)
+          throw new Error(
+            lastWorkspaceCreationError.value || 'Workspace creation failed.',
+          )
+        await syncProjectManagedWorkspace(config, workspacePath)
+        await writeQuickStartRunRecord(api, project.root, {
+          snapshot: {
+            flow: config.flow_config,
+            resources: input.resources,
+            workspace: config,
+          },
+          status: 'workspace_created',
+          workspace: { id: workspaceId, path: workspacePath },
+        })
+        return { id: workspaceId, path: workspacePath, config }
+      },
+      handoff: async (input: { project: any; workspace: any }) => {
+        await router.push({
+          path: '/workspace/home',
+          query: {
+            projectRoot: input.project.root,
+            projectName: input.project.name,
+            quickStart: '1',
+          },
+        })
+        await nextTick()
+        showStepConfigDialog.value = true
+        const reducedMotion =
+          typeof window !== 'undefined' &&
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        await delay(reducedMotion ? 100 : 800)
+        showStepConfigDialog.value = false
+      },
+      startFlow: async (input: { project: any; workspace: any }) => {
+        const flowResult = await runAllFlow({ rerun: false })
+        if (!flowResult) throw new Error('Run All Flow did not start.')
+        await writeQuickStartRunRecord(api, input.project.root, {
+          flow: {
+            operation_id: flowResult.operationId,
+            plan: (input.workspace as { config?: WorkspaceConfig }).config?.flow_config,
+          },
+          started_at: new Date().toISOString(),
+          status: 'flow_running',
+        })
+        if (typeof flowResult.operationId === 'string') {
+          void waitForRuntimeOperation(flowResult.operationId)
+            .then(() =>
+              writeQuickStartRunRecord(api, input.project.root, {
+                completed_at: new Date().toISOString(),
+                status: 'flow_completed',
+              }),
+            )
+            .catch((error: unknown) =>
+              writeQuickStartRunRecord(api, input.project.root, {
+                error: error instanceof Error ? error.message : String(error),
+                failed_at: new Date().toISOString(),
+                status: 'flow_failed',
+              }),
+            )
+        }
+        return flowResult
+      },
+    }
+    await runQuickStartWorkflow(host, onEvent)
+  } finally {
+    quickStartRunning = false
+  }
+}
+
+provide(quickStartRunnerKey, runQuickStart)
+
+async function resolveQuickStartResources(
+  api: DesktopApi,
+): Promise<QuickStartResourceSnapshot> {
+  const listed = (await api.resources.list()).resources
+  const ready = (resource: ResourceInfo | undefined) =>
+    Boolean(
+      resource &&
+      resource.path &&
+      (resource.status === 'installed' || resource.status === 'update_available') &&
+      resource.health.status === 'ok',
+    )
+  const design = listed.find((resource) => {
+    const candidate = resource as ResourceInfo & { type?: string; version?: string }
+    return (
+      candidate.id === 'example:gcd' &&
+      (candidate.type as string) === 'design' &&
+      ready(resource)
+    )
+  })
+  const pdk = listed.find(
+    (resource) =>
+      resource.type === 'pdk' && resource.id === 'pdk:ics55' && ready(resource),
+  )
+  const mpc = listed.find(
+    (resource) =>
+      resource.type === 'mpc' &&
+      resource.id === 'mpc:mpc-frame' &&
+      resource.display_name === 'MPC Frame' &&
+      resource.installed_version === '0.1.0' &&
+      resource.health.managed === true &&
+      ready(resource),
+  )
+  return {
+    design: design
+      ? {
+          id: design.id,
+          path: design.path!,
+          version: (design as ResourceInfo & { version?: string }).version ?? '1.0.0',
+        }
+      : null,
+    pdk: pdk
+      ? { id: pdk.id, path: pdk.path!, version: pdk.installed_version ?? '' }
+      : null,
+    mpc: mpc
+      ? {
+          displayName: mpc.display_name,
+          id: mpc.id,
+          path: mpc.path ?? undefined,
+          version: mpc.installed_version!,
+        }
+      : null,
+  }
+}
+
+async function writeQuickStartRunRecord(
+  api: DesktopApi,
+  projectRoot: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const path = `${normalizeLocalPath(projectRoot)}/quick_start_run.json`
+  let current: Record<string, unknown> = {}
+  try {
+    const existing = await api.workspace.readOptionalProjectTextFile(path)
+    if (existing) current = JSON.parse(existing) as Record<string, unknown>
+  } catch {
+    // A missing record is expected on the first capability.
+  }
+  const snapshot =
+    patch.snapshot && typeof patch.snapshot === 'object'
+      ? {
+          ...(typeof current.snapshot === 'object' && current.snapshot
+            ? current.snapshot
+            : {}),
+          ...patch.snapshot,
+        }
+      : current.snapshot
+  await api.workspace.writeProjectTextFile(
+    path,
+    `${JSON.stringify(
+      {
+        ...current,
+        ...patch,
+        ...(snapshot ? { snapshot } : {}),
+        updated_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+  )
+}
+
+async function quickStartMpcSnapshot(
+  api: DesktopApi,
+  resource: NonNullable<QuickStartResourceSnapshot['mpc']>,
+) {
+  if (!resource.path) throw new Error('Managed MPC path is unavailable.')
+  const candidate = {
+    resource_id: resource.id,
+    display_name: resource.displayName ?? 'MPC Frame',
+    installed_version: resource.version,
+    path: resource.path,
+    spec_path: joinLocalPath(resource.path, 'spec/spec.json.in'),
+  }
+  const spec = await api.resources.readMpcSpec(resource.id)
+  const design = parseMpcSpecDesigns(spec.spec)[0]
+  if (!design) throw new Error('MPC Frame has no usable design specification.')
+  return createProjectManifestMpcSnapshot(candidate, design)
+}
+
+async function nextQuickStartProjectName(api: DesktopApi, root: string): Promise<string> {
+  for (let index = 0; index < 1000; index += 1) {
+    const suffix = index === 0 ? '' : `_${index + 1}`
+    const name = `gcd${suffix}`
+    if (!(await api.workspace.pathExists(joinLocalPath(root, name)))) return name
+  }
+  throw new Error('Unable to allocate a Quick Start Project name.')
+}
+
+async function nextQuickStartWorkspaceId(
+  api: DesktopApi,
+  projectRoot: string,
+): Promise<string> {
+  for (let index = 1; index < 1000; index += 1) {
+    const id = `ws_${String(index).padStart(4, '0')}`
+    if (!(await api.workspace.pathExists(joinLocalPath(projectRoot, id)))) return id
+  }
+  throw new Error('Unable to allocate a Quick Start Workspace ID.')
+}
+
+function joinLocalPath(root: string, child: string): string {
+  return `${normalizeLocalPath(root).replace(/\/$/, '')}/${child.replace(/^\/+/, '')}`
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
 const showAboutDialog = ref(false)
 const terminalExpanded = ref(false)
 const terminalPanelHeight = ref('min(300px, 42vh)')

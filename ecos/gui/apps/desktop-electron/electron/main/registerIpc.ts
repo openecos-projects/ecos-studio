@@ -1093,6 +1093,13 @@ export function registerIpc(
     return await services.appInfoService.getVersions()
   })
 
+  handle(desktopApiIpcChannels.appGetQuickStartRoot, async () => {
+    if (!services.agentQuickRunRoot)
+      throw new Error('Quick Start storage is unavailable.')
+    await mkdir(services.agentQuickRunRoot, { recursive: true })
+    return services.agentQuickRunRoot
+  })
+
   handle(desktopApiIpcChannels.windowMinimize, (event) => {
     minimizeWindow(getEventWindow(event))
   })

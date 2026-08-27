@@ -20,6 +20,7 @@
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
     "echarts": "^6.0.0",
+    "js-yaml": "4.1.1",
     "markdown-it": "^14.1.0",
     "monaco-editor": "0.55.1",
     "pinia": "^3.0.4",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
+    "@types/js-yaml": "4.0.9",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^25.0.6",
     "@types/rbush": "^4.0.0",

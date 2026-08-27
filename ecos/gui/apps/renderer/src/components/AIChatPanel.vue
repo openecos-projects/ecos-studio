@@ -40,6 +40,24 @@
           <i class="ri-sparkling-2-line text-xl text-(--accent-color)"></i>
         </div>
         <h2 class="text-sm font-semibold text-(--text-primary)">ECOS Agent</h2>
+        <button
+          v-if="props.shell === 'home' && quickStartRunner"
+          type="button"
+          class="quick-start-suggestion"
+          :disabled="quickStartRunning || isAgentConnecting"
+          @click="handleQuickStartClick"
+        >
+          <i class="ri-rocket-2-line" aria-hidden="true"></i>
+          <span>{{
+            quickStartRunning ? 'Quick Start running...' : 'Quick Start GCD backend flow'
+          }}</span>
+          <i v-if="!quickStartRunning" class="ri-arrow-right-line" aria-hidden="true"></i>
+          <i
+            v-else
+            class="ri-loader-4-line quick-start-suggestion__spinner"
+            aria-hidden="true"
+          ></i>
+        </button>
         <div class="mt-4 grid w-full max-w-sm gap-2">
           <button
             v-for="suggestion in emptyStateSuggestions"
@@ -55,6 +73,15 @@
         </div>
       </div>
       <div v-else class="messages-container w-full max-w-full min-w-0 py-2">
+        <button
+          v-if="quickStartRunning"
+          type="button"
+          class="quick-start-stop"
+          @click="stopQuickStart"
+        >
+          <i class="ri-stop-fill" aria-hidden="true"></i>
+          <span>Stop Quick Start</span>
+        </button>
         <section
           v-for="(turn, turnIndex) in conversationTurns"
           :key="turn.id"
@@ -274,6 +301,7 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import { quickStartRunnerKey, type QuickStartRunner } from '@/composables/quickStartUi'
 import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import {
@@ -320,6 +348,9 @@ const interactionCompanionIds = computed(
     ),
 )
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
+const quickStartRunner = inject<QuickStartRunner>(quickStartRunnerKey)
+const quickStartRunning = ref(false)
+let quickStartAbortController: AbortController | null = null
 const router = useRouter()
 const route = useRoute()
 const {
@@ -1595,6 +1626,78 @@ function sendSuggestion(suggestion: { label: string; value: string }): void {
   void sendAgentMessage(suggestion.value, false)
 }
 
+async function startQuickStart(): Promise<void> {
+  if (!quickStartRunner || quickStartRunning.value) return
+  const sessionId = agentSessionId.value
+  if (!sessionId) return
+  quickStartRunning.value = true
+  quickStartAbortController = new AbortController()
+  messageStore.addMessage('Quick Start · GCD backend flow')
+  const startedAtByStep = new Map<string, number>()
+  const turnId = `quick-start-${Date.now()}`
+  try {
+    await quickStartRunner((event) => {
+      const now = Date.now()
+      const startedAt = startedAtByStep.get(event.stepId) ?? now
+      if (event.status === 'running') startedAtByStep.set(event.stepId, startedAt)
+      messageStore.upsertAgentEvent({
+        activity: {
+          arguments: JSON.stringify({
+            capability: event.capability,
+            surface: event.surface,
+          }),
+          durationMs:
+            event.status === 'running' ? undefined : Math.max(0, now - startedAt),
+          itemId: `quick-start-${event.stepId}`,
+          kind: 'tool_call',
+          progress: event.status === 'running' ? event.labelKey : undefined,
+          result: event.status === 'completed' ? event.detailKey : undefined,
+          schema_version: 'flow-agent.activity.v1',
+          startedAt,
+          status: event.status,
+          tool: event.labelKey,
+          turnId,
+          turnStartedAt: startedAt,
+        },
+        messageId: `quick-start-${event.stepId}`,
+        providerId: AGENT_PROVIDER_ID,
+        sessionId,
+        type: 'activity',
+      })
+    }, quickStartAbortController.signal)
+    messageStore.addAssistantMessage(
+      'Quick Start completed. Run All Flow is running.',
+      'done',
+      sessionId,
+    )
+  } catch (error) {
+    if (isQuickStartAbort(error)) {
+      messageStore.addAssistantMessage('Quick Start stopped.', 'done', sessionId)
+    } else {
+      messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+    }
+  } finally {
+    quickStartRunning.value = false
+    quickStartAbortController = null
+  }
+}
+
+function handleQuickStartClick(): void {
+  if (quickStartRunning.value) {
+    stopQuickStart()
+    return
+  }
+  void startQuickStart()
+}
+
+function stopQuickStart(): void {
+  quickStartAbortController?.abort()
+}
+
+function isQuickStartAbort(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 function cancelQueuedMessage(): void {
   queuedMessage.value = ''
 }
@@ -2478,6 +2581,74 @@ const handleKeyDown = (e: KeyboardEvent) => {
   opacity: 0.55;
 }
 
+.quick-start-suggestion {
+  display: flex;
+  width: 100%;
+  max-width: 24rem;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.quick-start-suggestion span {
+  min-width: 0;
+  flex: 1;
+}
+
+.quick-start-suggestion:hover,
+.quick-start-suggestion:focus-visible {
+  border-color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 20%, var(--bg-primary));
+}
+
+.quick-start-suggestion:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.quick-start-suggestion__spinner {
+  animation: quick-start-spin 900ms linear infinite;
+}
+
+.quick-start-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.4rem;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.quick-start-stop:hover,
+.quick-start-stop:focus-visible {
+  border-color: var(--accent-color);
+  color: var(--text-primary);
+}
+
+@keyframes quick-start-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .empty-suggestion:focus-visible,
 .stop-btn:focus-visible,
 .queue-row button:focus-visible,
@@ -2818,6 +2989,8 @@ const handleKeyDown = (e: KeyboardEvent) => {
 @media (prefers-reduced-motion: reduce) {
   .composer-shell,
   .empty-suggestion,
+  .quick-start-suggestion,
+  .quick-start-stop,
   .stop-btn,
   .send-btn {
     transition: none;
@@ -2825,6 +2998,10 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
   .send-btn-active:active {
     transform: none;
+  }
+
+  .quick-start-suggestion__spinner {
+    animation: none;
   }
 }
 </style>

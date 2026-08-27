@@ -427,6 +427,7 @@ export interface DesktopAgentOptimizationPayload {
 }
 
 export type DesktopAgentActivityStatus =
+  | 'pending'
   | 'running'
   | 'completed'
   | 'failed'

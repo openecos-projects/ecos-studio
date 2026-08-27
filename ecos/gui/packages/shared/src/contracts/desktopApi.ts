@@ -216,6 +216,7 @@ export type WorkspaceOpenOrFocusResult =
 export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
+    getQuickStartRoot?(): Promise<string>
   }
   window: {
     minimize(): Promise<void>
