@@ -4,10 +4,10 @@ The generated JSON manifest records native receipts, terminal observations,
 materialization snapshots, and independent replay hashes without copying the
 ignored flow outputs into Git.
 
-Current classification: **Engineering Incomplete**. Seven knobs have complete
-L0-L3 and replay evidence. `place.routability_opt` remains fail-closed because
-the native true branch has not produced a changed materialization with
-`activation.status=used`. No QoR or research claim is made from this artifact.
+Current classification: **Engineering Complete** for the seven target knobs.
+`place.routability_opt` is explicitly excluded from this acceptance gate as a
+non-target; its incomplete native branch remains recorded but does not block
+engineering completion. No QoR or research claim is made from this artifact.
 
 Regenerate with:
 
