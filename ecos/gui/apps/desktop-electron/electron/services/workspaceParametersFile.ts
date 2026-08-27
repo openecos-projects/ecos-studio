@@ -1,6 +1,6 @@
-import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { randomInt } from 'node:crypto'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { parse, stringify } from 'smol-toml'
 import { normalizeParameterKey, normalizeParameterKeys } from '@ecos-studio/shared'
@@ -157,9 +157,19 @@ export async function readWorkspaceParameters(
 export async function writeTextAtomically(path: string, content: string): Promise<void> {
   // Random suffix + exclusive create: a predictable name could be reused by a
   // concurrent writer, and a pre-planted symlink could redirect the write.
+  const parent = dirname(path)
+  const canonicalParent = await realpath(parent)
   const temporaryPath = `${path}.${process.pid}.${Date.now()}.${randomInt(0, 1_000_000)}.tmp`
   try {
     await writeFile(temporaryPath, content, { encoding: 'utf8', flag: 'wx' })
+    // Write and rename both address the parent by pathname: revalidate that
+    // it still resolves to the same directory, so a symlink swapped in after
+    // authorization cannot redirect the rename outside the workspace.
+    if ((await realpath(parent)) !== canonicalParent) {
+      throw new Error(
+        `Refusing to write ${path}: parent directory changed during the write`,
+      )
+    }
     await rename(temporaryPath, path)
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => undefined)
@@ -284,7 +294,13 @@ export async function writeWorkspaceParameters(
   }
   return await enqueueParameterWrite(location.path, async () => {
     if (location.format === 'json') {
-      await writeTextAtomically(location.path, `${JSON.stringify(payload, null, 4)}\n`)
+      // Merge into the existing document: the payload is the GUI's known
+      // parameter set, not the whole file — keys the GUI does not display
+      // (frontend extras, unrelated agent edits) must survive a save.
+      const raw = await readFile(location.path, 'utf8')
+      const existing = parseJsonPreservingIntegers(raw, location.path)
+      const merged = { ...(isRecord(existing) ? existing : {}), ...payload }
+      await writeTextAtomically(location.path, `${JSON.stringify(merged, null, 4)}\n`)
       return location
     }
     const document = parse(await readFile(location.path, 'utf8'), {
@@ -303,6 +319,52 @@ export interface WorkspaceParameterEdit {
 
 function detectJsonIndent(raw: string): number {
   return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 4
+}
+
+/**
+ * JSON.parse silently rounds integers beyond Number.MAX_SAFE_INTEGER, so a
+ * read-modify-write would corrupt values the operation never touched. Scan
+ * integer literals outside strings and refuse the rewrite instead.
+ */
+function assertJsonIntegersSafe(text: string, label: string): void {
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]
+    if (char === '"') {
+      index += 1
+      while (index < text.length && text[index] !== '"') {
+        index += text[index] === '\\' ? 2 : 1
+      }
+      index += 1
+      continue
+    }
+    if (char === '-' || (char >= '0' && char <= '9')) {
+      const token = /^-?\d+/.exec(text.slice(index))?.[0]
+      if (token) {
+        const rest = text[index + token.length]
+        if (rest !== '.' && rest !== 'e' && rest !== 'E') {
+          const digits = token.replace('-', '').replace(/^0+(?=\d)/, '')
+          if (
+            digits.length > 16 ||
+            (digits.length === 16 && digits > '9007199254740991')
+          ) {
+            throw new Error(
+              `Refusing to rewrite ${label}: integer ${token} exceeds ` +
+                'Number.MAX_SAFE_INTEGER and would lose precision',
+            )
+          }
+        }
+        index += token.length
+        continue
+      }
+    }
+    index += 1
+  }
+}
+
+function parseJsonPreservingIntegers(text: string, label: string): unknown {
+  assertJsonIntegersSafe(text, label)
+  return JSON.parse(text)
 }
 
 const FORBIDDEN_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
@@ -376,7 +438,7 @@ export async function editWorkspaceParameters(
   return await enqueueParameterWrite(location.path, async () => {
     const raw = await readFile(location.path, 'utf8')
     if (location.format === 'json') {
-      const parsed: unknown = JSON.parse(raw)
+      const parsed: unknown = parseJsonPreservingIntegers(raw, location.path)
       const document = isRecord(parsed) ? parsed : {}
       for (const edit of edits) {
         setJsonPathValue(document, edit.json_path, edit.value, location.path)

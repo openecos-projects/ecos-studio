@@ -276,7 +276,7 @@ describe('writeWorkspaceParameters', () => {
     expect(text).not.toContain('parameters.json')
   })
 
-  it('writes legacy parameters.json as formatted JSON', async () => {
+  it('writes legacy parameters.json merging the payload into the existing document', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
     const location = await writeWorkspaceParameters(root, {
@@ -288,7 +288,31 @@ describe('writeWorkspaceParameters', () => {
     const written = JSON.parse(
       readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
     )
-    expect(written).toEqual({ PDK: 'ICS55', Design: 'gcd', 'Max fanout': 48 })
+    // The payload overrides its own keys; keys the GUI does not display
+    // (frontend extras, unrelated agent edits) survive the save.
+    expect(written).toEqual({
+      PDK: 'ICS55',
+      Design: 'gcd',
+      'Top module': 'gcd',
+      'Frequency max [MHz]': 100,
+      'Max fanout': 48,
+    })
+  })
+
+  it('rejects a legacy parameters.json holding an unsafe integer instead of rounding it', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd", "Area": 17912481922736482372 }\n',
+    )
+    await expect(
+      writeWorkspaceParameters(root, { Design: 'gcd', 'Max fanout': 48 }),
+    ).rejects.toThrow(/MAX_SAFE_INTEGER/)
+    // The file is left untouched.
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain(
+      '17912481922736482372',
+    )
   })
 
   it('throws when no parameters file exists', async () => {
@@ -372,6 +396,37 @@ describe('editWorkspaceParameters', () => {
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['design'], value: 'x' }]),
     ).rejects.toThrow(/not found/i)
+  })
+
+  it('rejects edits when the legacy file holds an unsafe integer', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd", "Area": 9007199254740993 }\n',
+    )
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['Design'], value: 'aes' }]),
+    ).rejects.toThrow(/MAX_SAFE_INTEGER/)
+    // The file is left untouched.
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain(
+      '9007199254740993',
+    )
+  })
+
+  it('accepts integers up to Number.MAX_SAFE_INTEGER and digit runs inside strings', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd17912481922736482372x", "Area": 9007199254740991, "Ratio": 1.5 }\n',
+    )
+    await editWorkspaceParameters(root, [{ json_path: ['Design'], value: 'aes' }])
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(written.Design).toBe('aes')
+    expect(written.Area).toBe(9007199254740991)
   })
 })
 

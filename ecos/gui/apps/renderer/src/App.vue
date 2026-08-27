@@ -764,8 +764,14 @@ function normalizeWorkspaceParameters(
       dieArea.mode ?? parametersJson?.die_area_mode,
       hasDieSize ? 'width_height' : 'utilitization_margin',
     ),
-    die_width: optionalNumber(dieArea.width ?? dieSize[0], 100),
-    die_height: optionalNumber(dieArea.height ?? dieSize[1], 100),
+    die_width: optionalNumber(
+      dieArea.width ?? dieSize[0] ?? parametersJson?.die_width,
+      100,
+    ),
+    die_height: optionalNumber(
+      dieArea.height ?? dieSize[1] ?? parametersJson?.die_height,
+      100,
+    ),
     utilitization: optionalNumber(
       dieArea.utilitization ??
         core.Utilitization ??

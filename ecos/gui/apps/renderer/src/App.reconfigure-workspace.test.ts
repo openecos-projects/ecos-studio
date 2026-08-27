@@ -144,6 +144,26 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('resetWorkspaceWizard()')
   })
 
+  it('falls back to flat die_width/die_height keys when prefilling reconfigure defaults', () => {
+    const normalizeStart = appSource.indexOf('function normalizeWorkspaceParameters')
+    const normalizeEnd = appSource.indexOf(
+      'function normalizeWorkspaceFlowConfig',
+      normalizeStart,
+    )
+    const normalizeSource = appSource.slice(normalizeStart, normalizeEnd)
+
+    const widthLine = normalizeSource.indexOf('die_width: optionalNumber(')
+    const heightLine = normalizeSource.indexOf('die_height: optionalNumber(')
+    expect(widthLine).toBeGreaterThan(-1)
+    expect(heightLine).toBeGreaterThan(-1)
+    expect(normalizeSource.indexOf('dieSize[0]', widthLine)).toBeLessThan(
+      normalizeSource.indexOf('parametersJson?.die_width', widthLine),
+    )
+    expect(normalizeSource.indexOf('dieSize[1]', heightLine)).toBeLessThan(
+      normalizeSource.indexOf('parametersJson?.die_height', heightLine),
+    )
+  })
+
   it('records project-managed workspaces into project.json after wizard create and reconfigure', () => {
     expect(appSource).toContain('registerProjectManagedWorkspace')
     expect(appSource).toContain('syncProjectManagedWorkspace')
