@@ -5,6 +5,7 @@ import {
   open,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -506,6 +507,7 @@ export class WorkspaceService {
         `Refusing to edit workspace parameters through a symlink: ${location.path}`,
       )
     }
+    const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
     const canonicalPath =
       await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
     await this.assertCanWriteProjectTextFile(canonicalPath)
@@ -517,9 +519,23 @@ export class WorkspaceService {
         path: canonicalPath,
         spelledPath: location.path,
       },
-      // Re-checked inside the serialized operation: a flow starting while
-      // the edit queued behind another writer must still block it.
-      () => this.assertCanWriteProjectTextFile(canonicalPath),
+      // Re-checked inside the serialized operation: the authorization was
+      // issued against THIS root, so an active-root change (or a flow
+      // starting while the edit queued behind another writer) blocks it.
+      async () => {
+        const activeRoot = await this.projectScopeProvider.getProjectRoot()
+        const [expected, active] = await Promise.all([
+          realpath(authorizingRoot),
+          realpath(activeRoot),
+        ])
+        if (expected !== active) {
+          throw new Error(
+            'Refusing to edit workspace parameters: the active workspace ' +
+              'changed before the edit completed',
+          )
+        }
+        await this.assertCanWriteProjectTextFile(canonicalPath)
+      },
     )
   }
 

@@ -171,7 +171,7 @@ export function mergeTomlSections(
  * skipped; a time-looking token inside a multiline string may fail closed,
  * which is still safer than a silent truncation.
  */
-function assertNoSubMillisecondDatetimes(text: string, label: string): void {
+export function assertNoSubMillisecondDatetimes(text: string, label: string): void {
   let index = 0
   while (index < text.length) {
     const char = text[index]
@@ -357,7 +357,13 @@ export async function writeTextAtomically(
       )
     }
   } catch (error) {
-    await rm(temporaryPath, { force: true }).catch(() => undefined)
+    // Only remove the temporary file while the parent still resolves to the
+    // authorized directory: after a swap, rm(temporaryPath) would resolve
+    // through the replacement and could delete an unrelated file planted
+    // under the same basename. An orphaned temp file is reported instead.
+    if ((await realpath(parent).catch(() => '')) === canonicalParent) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined)
+    }
     throw error
   }
 }
@@ -499,10 +505,14 @@ export async function writeWorkspaceParameters(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
     )
   }
-  // Serialize per workspace config slot, not per file: the on-disk format
-  // can change (a legacy JSON migrates to TOML) while an operation queues,
-  // and two operations must never interleave across the two files.
-  return await enqueueParameterWrite(`${root}/home:parameters`, async () => {
+  // Serialize per canonical config slot, not per raw root spelling or file:
+  // equivalent roots ("/ws" vs "/ws/.", native vs slash-normalized) must
+  // share one queue, and two operations must never interleave across the
+  // two formats (a legacy JSON can migrate to TOML mid-queue).
+  const queueKey = authorizedLocation
+    ? dirname(authorizedLocation.path)
+    : await realpath(join(root, 'home'))
+  return await enqueueParameterWrite(`${queueKey}:parameters`, async () => {
     // Runtime-activity guards re-run INSIDE the queue: a flow starting while
     // this operation waited behind another writer must still block it.
     await assertWritable?.()
@@ -680,7 +690,10 @@ export async function editWorkspaceParameters(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
     )
   }
-  return await enqueueParameterWrite(`${root}/home:parameters`, async () => {
+  const queueKey = authorizedLocation
+    ? dirname(authorizedLocation.path)
+    : await realpath(join(root, 'home'))
+  return await enqueueParameterWrite(`${queueKey}:parameters`, async () => {
     // Runtime-activity guards re-run INSIDE the queue: a flow starting while
     // this operation waited behind another writer must still block it.
     await assertWritable?.()

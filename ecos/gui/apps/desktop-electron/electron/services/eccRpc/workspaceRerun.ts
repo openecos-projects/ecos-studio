@@ -19,12 +19,14 @@ import {
 } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 import {
+  assertNoSubMillisecondDatetimes,
   editWorkspaceParameters,
   locateWorkspaceParametersFile,
   readFileNoFollow,
   WORKSPACE_CONFIG_BASENAME,
   writeTextAtomically,
 } from '../workspaceParametersFile'
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
@@ -823,6 +825,65 @@ async function rewriteAndPruneWorkspaceRerunHome(options: {
   await pruneWorkspaceRerunChecklistJson(join(home, 'checklist.json'), wipedStageNames)
 }
 
+/**
+ * Rewrite source-workspace prefixes inside parsed TOML string scalars: a
+ * value is workspace-rooted only when it equals the source prefix or lives
+ * under it, so prose sharing the prefix is untouched and TOML escaping is
+ * always correct (textual replacement would corrupt escaped paths).
+ */
+function rewriteTomlSourcePathLeaves(
+  node: unknown,
+  prefixes: string[],
+  targetWorkspace: string,
+): boolean {
+  const rewriteValue = (value: string): string => {
+    for (const prefix of prefixes) {
+      const trimmed = prefix.replace(/\/+$/, '')
+      if (!trimmed || trimmed === targetWorkspace) continue
+      if (value === trimmed) return targetWorkspace
+      if (value.startsWith(`${trimmed}/`)) {
+        return `${targetWorkspace}/${value.slice(trimmed.length + 1)}`
+      }
+    }
+    return value
+  }
+  const visit = (current: unknown): boolean => {
+    if (Array.isArray(current)) {
+      let changed = false
+      for (let index = 0; index < current.length; index += 1) {
+        const item = current[index]
+        if (typeof item === 'string') {
+          const rewritten = rewriteValue(item)
+          if (rewritten !== item) {
+            current[index] = rewritten
+            changed = true
+          }
+        } else {
+          changed = visit(item) || changed
+        }
+      }
+      return changed
+    }
+    if (current !== null && typeof current === 'object' && !(current instanceof Date)) {
+      let changed = false
+      for (const [key, item] of Object.entries(current)) {
+        if (typeof item === 'string') {
+          const rewritten = rewriteValue(item)
+          if (rewritten !== item) {
+            ;(current as Record<string, unknown>)[key] = rewritten
+            changed = true
+          }
+        } else {
+          changed = visit(item) || changed
+        }
+      }
+      return changed
+    }
+    return false
+  }
+  return visit(node)
+}
+
 async function rewriteHomeJsonSourcePaths(
   homeDirectory: string,
   options: {
@@ -846,8 +907,6 @@ async function rewriteHomeJsonSourcePaths(
   }
 
   for (const entry of entries) {
-    // home/ecc.toml carries source-rooted values (pdk_config, custom paths)
-    // in the same spelling the legacy parameters.json used; rewrite both.
     if (entry !== WORKSPACE_CONFIG_BASENAME && !entry.endsWith('.json')) continue
     if (entry === 'flow_agent_workspace_rerun_contract.v1.json') continue
     const filePath = join(homeDirectory, entry)
@@ -857,6 +916,18 @@ async function rewriteHomeJsonSourcePaths(
     const entryStats = await lstat(filePath)
     if (!entryStats.isFile() || entryStats.isSymbolicLink()) continue
     const original = await readFileNoFollow(filePath)
+    if (entry === WORKSPACE_CONFIG_BASENAME) {
+      // Parse and rewrite only string scalars whose value is the source
+      // prefix or lives under it: prose is untouched and TOML escaping
+      // stays correct (a textual replacement corrupts escaped paths and
+      // misses their unescaped form).
+      assertNoSubMillisecondDatetimes(original, filePath)
+      const document = parseToml(original, { integersAsBigInt: 'asNeeded' })
+      if (rewriteTomlSourcePathLeaves(document, prefixes, options.targetWorkspace)) {
+        await writeTextAtomically(filePath, stringifyToml(document))
+      }
+      continue
+    }
     let next = original
     for (const prefix of prefixes) {
       const trimmedPrefix = prefix.replace(/\/+$/, '')
