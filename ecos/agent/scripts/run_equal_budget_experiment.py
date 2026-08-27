@@ -8,7 +8,9 @@ import json
 import math
 import os
 import re
+import shutil
 import statistics
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NamedTuple
@@ -19,10 +21,7 @@ from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     ObjectiveMetric,
     OptimizationEpisodeState,
-    OptimizationKnob,
     OptimizationObjectiveProposal,
-    RequestedKnobValue,
-    StrategyDirection,
     TerminalObservation,
 )
 from ecos_agent.optimization_ecc_adapter import EccContentLengthRpcClient
@@ -31,13 +30,11 @@ from ecos_agent.optimization_equal_budget import (
     export_episode_traces,
     validate_design_manifest,
 )
-from ecos_agent.optimization_gate0 import run_pilot_candidate
 from ecos_agent.optimization_observations import build_terminal_observation
 from ecos_agent.optimization_rules import freeze_optimization_objective
 from ecos_agent.optimization_runtime import (
-    _current_values,
     _ecc_executable,
-    _site_width_dbu,
+    _optimization_rerun_runtime_seconds,
     create_optimization_runner,
 )
 
@@ -501,10 +498,6 @@ def _calibrate(
     output.mkdir(parents=True, exist_ok=True)
     observations = []
     runtimes = []
-    site_width = _site_width_dbu(workspace)
-    target_density = _current_values(workspace, site_width)[
-        OptimizationKnob.TARGET_DENSITY.value
-    ]
     for index in range(1, _DEFAULT_REPLAYS + 1):
         replay_root = output / f"default-replay-{index}"
         observation_path = replay_root / "terminal-observation.v1.json"
@@ -517,40 +510,67 @@ def _calibrate(
                 "elapsed_seconds"
             ]
         else:
-            client = EccContentLengthRpcClient(
-                _ecc_executable(), response_timeout_seconds=30
+            observation, runtime = _run_default_replay(
+                manifest,
+                design,
+                workspace,
+                replay_root,
+                timeout,
+                index,
             )
-            try:
-                workspace_id = client.open_workspace(workspace)
-                result = run_pilot_candidate(
-                    client,
-                    workspace_id,
-                    workspace,
-                    site_width,
-                    canonical,
-                    RequestedKnobValue(
-                        knob_id=OptimizationKnob.TARGET_DENSITY,
-                        value=target_density,
-                    ),
-                    StrategyDirection.INCREASE,
-                    f"default-replay-{index}",
-                    replay_root,
-                    manifest.manifest_sha256,
-                    timeout,
-                    episode_id=f"phase8-{design.design_id}-calibration",
-                    rationale_summary="Measure one frozen default replay runtime.",
-                )
-            finally:
-                client.close()
-            observation = result.observation
-            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))[
-                "elapsed_seconds"
-            ]
         if not isinstance(runtime, (int, float)) or runtime <= 0:
             raise ValueError("Phase 8 default replay runtime is invalid")
         observations.append(observation)
         runtimes.append(float(runtime))
     return observations[0], statistics.median(runtimes)
+
+
+def _run_default_replay(
+    manifest: ExperimentManifest,
+    design: DesignSpec,
+    workspace: Path,
+    output: Path,
+    timeout: float,
+    index: int,
+) -> tuple[TerminalObservation, float]:
+    output.mkdir(parents=True, exist_ok=True)
+    replay_workspace = output / "workspace"
+    if not replay_workspace.exists():
+        shutil.copytree(
+            workspace,
+            replay_workspace,
+            ignore=shutil.ignore_patterns(".agent"),
+        )
+    _verify_workspace_binding(manifest, design, replay_workspace)
+    client = EccContentLengthRpcClient(_ecc_executable(), response_timeout_seconds=30)
+    request = {
+        "workspaceId": client.open_workspace(replay_workspace),
+        "rerun": True,
+        "origin": "gui",
+        "idempotencyKey": f"phase8.{design.design_id}.default-replay-{index}",
+    }
+    _write_json(output / "flow-start-request.v1.json", request)
+    started = time.monotonic()
+    try:
+        operation = _setup_request(client, "operation.start_flow", request, 30.0)
+        terminal = _wait_operation(client, operation, timeout)
+    finally:
+        client.close()
+    _write_json(output / "flow-terminal-result.v1.json", terminal)
+    if terminal.get("state") != "succeeded":
+        raise ValueError("Phase 8 default replay failed")
+    _verify_workspace_binding(manifest, design, replay_workspace)
+    observation = _terminal_observation(replay_workspace)
+    runtime = _optimization_rerun_runtime_seconds(replay_workspace)
+    _write_json(output / "terminal-observation.v1.json", observation.model_dump(mode="json"))
+    _write_json(
+        output / "runtime.v1.json",
+        {
+            "elapsed_seconds": runtime,
+            "wall_elapsed_seconds": time.monotonic() - started,
+        },
+    )
+    return observation, runtime
 
 
 def _run_mode(

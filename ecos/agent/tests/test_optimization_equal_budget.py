@@ -801,6 +801,55 @@ def test_phase8_runner_resumes_created_unstarted_workspace(
     assert calls[1][1]["rerun"] is False
 
 
+def test_phase8_calibration_uses_three_default_flow_replays(tmp_path, monkeypatch) -> None:
+    runner = _load_experiment_runner()
+    workspace = tmp_path / "canonical"
+    workspace.mkdir()
+    (workspace / "marker.txt").write_text("canonical", encoding="utf-8")
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def open_workspace(self, directory):
+            calls.append(("workspace.open", directory, None))
+            return "workspace"
+
+        def _request(self, method, params, *, timeout_seconds):
+            calls.append((method, params, timeout_seconds))
+            return {"operationId": "flow", "state": "succeeded"}
+
+        def close(self) -> None:
+            pass
+
+    observation = _terminal_observation()
+    design = runner.DesignSpec(
+        "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
+    )
+    monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
+    monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
+    monkeypatch.setattr(runner, "build_terminal_observation", lambda _workspace: observation)
+    monkeypatch.setattr(runner, "_optimization_rerun_runtime_seconds", lambda _workspace: 12.0)
+
+    reference, runtime = runner._calibrate(
+        object(),
+        design,
+        workspace,
+        observation,
+        tmp_path / "calibration",
+        1.0,
+    )
+
+    starts = [params for method, params, _ in calls if method == "operation.start_flow"]
+    assert reference == observation
+    assert runtime == 12.0
+    assert len(starts) == 3
+    assert all(item["rerun"] is True for item in starts)
+    assert all(item["origin"] == "gui" for item in starts)
+
+
 def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:
     runner = _load_experiment_runner()
     workspace = tmp_path / "workspace"
