@@ -645,6 +645,7 @@ async function materializeParameterSurfaceWrites(
   await editWorkspaceParameters(workspace, writes, {
     format: location.format,
     path: validatedPath,
+    spelledPath: location.path,
   })
 }
 

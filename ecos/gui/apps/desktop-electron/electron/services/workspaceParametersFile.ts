@@ -1,4 +1,4 @@
-import { open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { open, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { randomInt } from 'node:crypto'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -14,6 +14,13 @@ export type WorkspaceParametersFormat = 'toml' | 'json'
 export interface WorkspaceParametersFileLocation {
   format: WorkspaceParametersFormat
   path: string
+  /**
+   * The path as spelled before canonicalization (authorizedLocation only):
+   * reads and writes address the spelled leaf with no-follow semantics, so
+   * an alias swapped in after authorization fails instead of redirecting
+   * the operation to the alias target.
+   */
+  spelledPath?: string
 }
 
 // Mirrors of the section mapping in ecc chipcompiler/data/workspace_config.py
@@ -186,8 +193,27 @@ export async function readWorkspaceParameters(
 ): Promise<Record<string, unknown> | null> {
   const location = await locateWorkspaceParametersFile(root)
   if (!location) return null
-  const text = await readFile(location.path, 'utf8')
+  const text = await readFileNoFollow(location.path)
   return parseWorkspaceParametersText(text, location.format, root)
+}
+
+/**
+ * Read a config file through its spelled path: the spelled parent must
+ * resolve to the authorized (canonical) directory, and the leaf is opened
+ * no-follow. An alias swapped in after authorization therefore fails the
+ * open (ELOOP) instead of silently reading the alias target, and a parent
+ * directory swapped for a symlink fails the containment check.
+ */
+export async function readWorkspaceConfigContained(
+  spelledPath: string,
+  canonicalPath: string,
+): Promise<string> {
+  if ((await realpath(dirname(spelledPath))) !== dirname(canonicalPath)) {
+    throw new Error(
+      `Refusing to read ${spelledPath}: it no longer resolves to the authorized config`,
+    )
+  }
+  return readFileNoFollow(spelledPath)
 }
 
 /**
@@ -359,11 +385,15 @@ export async function writeWorkspaceParameters(
     )
   }
   return await enqueueParameterWrite(location.path, async () => {
+    const spelledPath = location.spelledPath ?? location.path
+    const canonicalPath = location.spelledPath
+      ? location.path
+      : await realpath(location.path)
     if (location.format === 'json') {
       // Merge into the existing document: the payload is the GUI's known
       // parameter set, not the whole file — keys the GUI does not display
       // (frontend extras, unrelated agent edits) must survive a save.
-      const raw = await readFileNoFollow(location.path)
+      const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
       const existing = parseJsonPreservingIntegers(raw, location.path)
       if (!isRecord(existing)) {
         throw new Error(
@@ -371,14 +401,17 @@ export async function writeWorkspaceParameters(
         )
       }
       const merged = mergeRecordsPreservingUnknown(existing, payload)
-      await writeTextAtomically(location.path, `${JSON.stringify(merged, null, 4)}\n`)
+      await writeTextAtomically(spelledPath, `${JSON.stringify(merged, null, 4)}\n`)
       return location
     }
-    const document = parse(await readFileNoFollow(location.path), {
-      integersAsBigInt: 'asNeeded',
-    }) as Record<string, unknown>
+    const document = parse(
+      await readWorkspaceConfigContained(spelledPath, canonicalPath),
+      {
+        integersAsBigInt: 'asNeeded',
+      },
+    ) as Record<string, unknown>
     const merged = mergePayloadIntoTomlDocument(document, payload, root)
-    await writeTextAtomically(location.path, stringify(merged))
+    await writeTextAtomically(spelledPath, stringify(merged))
     return location
   })
 }
@@ -507,7 +540,11 @@ export async function editWorkspaceParameters(
     )
   }
   return await enqueueParameterWrite(location.path, async () => {
-    const raw = await readFileNoFollow(location.path)
+    const spelledPath = location.spelledPath ?? location.path
+    const canonicalPath = location.spelledPath
+      ? location.path
+      : await realpath(location.path)
+    const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
     if (location.format === 'json') {
       const parsed: unknown = parseJsonPreservingIntegers(raw, location.path)
       if (!isRecord(parsed)) {
@@ -521,7 +558,7 @@ export async function editWorkspaceParameters(
       }
       const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
       await writeTextAtomically(
-        location.path,
+        spelledPath,
         raw.endsWith('\n') ? `${serialized}\n` : serialized,
       )
       return location
@@ -538,7 +575,7 @@ export async function editWorkspaceParameters(
       setJsonPathValue(parameters, normalizedPath, edit.value, location.path)
     }
     const merged = mergePayloadIntoTomlDocument(document, parameters, root)
-    await writeTextAtomically(location.path, stringify(merged))
+    await writeTextAtomically(spelledPath, stringify(merged))
     return location
   })
 }

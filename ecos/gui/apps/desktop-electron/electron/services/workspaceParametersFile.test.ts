@@ -367,11 +367,22 @@ describe('writeWorkspaceParameters', () => {
 
   it('refuses a symlinked config inside the serialized write', async () => {
     const root = createWorkspace()
+    const alias = join(root, 'home', 'other.toml')
+    writeFileSync(alias, '[params]\ndesign = "gcd"\n')
+    symlinkSync(alias, join(root, 'home', 'ecc.toml'))
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /symlink/i,
+    )
+    expect(readFileSync(alias, 'utf8')).toBe('[params]\ndesign = "gcd"\n')
+  })
+
+  it('refuses a symlinked config pointing outside the config directory', async () => {
+    const root = createWorkspace()
     const outside = join(root, 'outside.toml')
     writeFileSync(outside, '[params]\ndesign = "gcd"\n')
     symlinkSync(outside, join(root, 'home', 'ecc.toml'))
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
-      /symlink/i,
+      /no longer resolves/i,
     )
     expect(readFileSync(outside, 'utf8')).toBe('[params]\ndesign = "gcd"\n')
   })

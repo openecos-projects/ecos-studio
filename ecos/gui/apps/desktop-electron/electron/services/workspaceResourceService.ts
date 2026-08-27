@@ -16,7 +16,7 @@ import {
   locateWorkspaceParametersFile,
   LEGACY_PARAMETERS_BASENAME,
   parseWorkspaceParametersText,
-  readFileNoFollow,
+  readWorkspaceConfigContained,
   WORKSPACE_CONFIG_BASENAME,
   writeWorkspaceParameters,
   type WorkspaceParametersFileLocation,
@@ -87,7 +87,7 @@ export class WorkspaceResourceService {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
         location.path,
       )
-      const raw = await readFileNoFollow(canonicalPath)
+      const raw = await readWorkspaceConfigContained(location.path, canonicalPath)
       return parseWorkspaceParametersText(raw, location.format, root)
     } catch (error) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
@@ -136,6 +136,7 @@ export class WorkspaceResourceService {
     const written = await writeWorkspaceParameters(root, request.parameters, {
       format: location.format,
       path: canonicalPath,
+      spelledPath: location.path,
     })
     return { format: written.format, path: written.path }
   }
@@ -538,7 +539,7 @@ export class WorkspaceResourceService {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
         location.path,
       )
-      const raw = await readFileNoFollow(canonicalPath)
+      const raw = await readWorkspaceConfigContained(location.path, canonicalPath)
       return parseWorkspaceParametersText(raw, location.format, root)
     } catch (error) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
@@ -557,7 +558,7 @@ export class WorkspaceResourceService {
   private async readJsonOrNull(path: string): Promise<Record<string, unknown> | null> {
     try {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-      const raw = await readFileNoFollow(canonicalPath)
+      const raw = await readWorkspaceConfigContained(path, canonicalPath)
       const parsed: unknown = JSON.parse(raw)
       return isRecord(parsed) ? parsed : {}
     } catch (error) {
