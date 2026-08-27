@@ -455,6 +455,10 @@ def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
     assert {item.knob_id.value for item in context.effective_domains} == set(
         CURRENT_VALUES
     ) - {"place.routability_opt"}
+    assert context.current_values is not None
+    assert set(context.current_values) == set(CURRENT_VALUES) - {
+        "place.routability_opt"
+    }
     assert all(item.snapshot_sha256.startswith("sha256:") for item in context.effective_domains)
     payload = planning_context_payload(context)
     assert len(payload["effective_domains"]) == 7

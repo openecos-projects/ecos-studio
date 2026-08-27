@@ -830,6 +830,10 @@ class OptimizationEpisodeController:
     ) -> OptimizationPlanningContext:
         history = self._history(include_receipts=self.receipt_aware_planning)
         attempted = self._attempted_requests()
+        active_values = {
+            knob_id.value: current_values[knob_id.value]
+            for knob_id in ACTIVE_OPTIMIZATION_KNOBS
+        }
         cards = load_parameter_cards()
         native_receipts = self._native_receipts() if self.receipt_aware_planning else ()
         effective_domains = tuple(
@@ -837,7 +841,7 @@ class OptimizationEpisodeController:
                 cards[knob_id],
                 context=self._effective_domain_context(
                     observation,
-                    current_values,
+                    active_values,
                     knob_id,
                     cards[knob_id].tool.revision,
                     cards[knob_id].surface.unit,
@@ -845,7 +849,7 @@ class OptimizationEpisodeController:
                 ),
                 receipts=native_receipts,
                 attempted=attempted,
-                baseline_surface_value=current_values.get(knob_id.value),
+                baseline_surface_value=active_values.get(knob_id.value),
             )
             for knob_id in ACTIVE_OPTIMIZATION_KNOBS
         )
@@ -874,7 +878,7 @@ class OptimizationEpisodeController:
                 "task memory snapshot does not match the episode"
             )
         available_actions = legal_actions(
-            current_values=current_values,
+            current_values=active_values,
             attempted=self._attempted_requests(),
             known_aliases=ineffective_requests,
         )
@@ -910,7 +914,7 @@ class OptimizationEpisodeController:
                         else None
                     ),
                     "budget": self._budget.model_dump(mode="json"),
-                    "current_values": dict(sorted(current_values.items())),
+                    "current_values": dict(sorted(active_values.items())),
                     "legal_actions": [
                         item.model_dump(mode="json") for item in available_actions
                     ],
@@ -939,7 +943,7 @@ class OptimizationEpisodeController:
             knowledge_chunks,
             observation,
             self._budget,
-            dict(current_values),
+            active_values,
             available_actions,
             self._objective,
             task_memory,
