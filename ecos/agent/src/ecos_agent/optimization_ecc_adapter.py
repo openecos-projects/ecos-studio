@@ -262,13 +262,15 @@ class EccCandidateRerunAdapter:
         state: str,
     ) -> KnobApplicationReceipt | ParameterApplicationReceipt | None:
         result = self._result(response)
-        if result is None or "knobApplicationReceipt" not in result:
+        if result is None:
+            return None
+        raw = result.get("parameterApplicationReceipt", result.get("knobApplicationReceipt"))
+        if raw is None:
             return None
         if requested is None:
             raise OptimizationEccAdapterError("application receipt cannot be bound")
         if state not in _TERMINAL_STATES:
             raise OptimizationEccAdapterError("application receipt is non-terminal")
-        raw = result["knobApplicationReceipt"]
         normalized = _normalize_receipt_payload(raw)
         try:
             if isinstance(normalized, Mapping) and normalized.get("schema_version") == "tool.parameter_application_receipt.v1":
