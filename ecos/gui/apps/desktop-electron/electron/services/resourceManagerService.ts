@@ -30,6 +30,7 @@ import { electronLogger } from './logger'
 import { isRelativePathOutsideRoot } from './pathScope'
 import {
   ResourceInstallCoordinator,
+  type ResourceInstallContext,
   type ResourceInstallSubscriber,
 } from './resourceInstallCoordinator'
 import { ResourceMetadataRestoreError } from './resourceInstallErrors'
@@ -811,7 +812,7 @@ export class ResourceManagerService {
     version: string | undefined,
     action: ResourceAction,
     visiting: Set<string>,
-    context: ResourceInstallSubscriber<ResourceJob>,
+    context: ResourceInstallContext<ResourceJob>,
   ): Promise<ResourceOperationResult> {
     const listener = context.publish
     visiting.add(resourceId)
@@ -957,14 +958,17 @@ export class ResourceManagerService {
   }
 
   async cancelResource(resourceId: string): Promise<ResourceOperationResult> {
-    let cancelled = await this.installCoordinator.cancelAndWait(resourceId)
-    if (!cancelled) {
+    let outcome = await this.installCoordinator.cancelAndWait(resourceId)
+    if (outcome === 'not_found') {
       const operation = await this.resolveInstallOperation(resourceId)
       if (operation.resourceId !== resourceId) {
-        cancelled = await this.installCoordinator.cancelAndWait(operation.resourceId)
+        outcome = await this.installCoordinator.cancelAndWait(operation.resourceId)
       }
     }
-    if (!cancelled) {
+    if (outcome === 'too_late') {
+      throw new Error(`Resource installation has already committed for ${resourceId}`)
+    }
+    if (outcome === 'not_found') {
       throw new Error(`No active job for ${resourceId}`)
     }
     return { status: 'cancelled', resource_id: resourceId }
@@ -1247,7 +1251,7 @@ export class ResourceManagerService {
     requestedVersion: string | undefined,
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
-    context: ResourceInstallSubscriber<ResourceJob>,
+    context: ResourceInstallContext<ResourceJob>,
   ): Promise<ResourceOperationResult> {
     const resourceId = `tool:${name}`
     const signal = context.signal
@@ -1415,9 +1419,11 @@ export class ResourceManagerService {
         tempExtract,
         destination,
         async () => {
-          await this.mutateManifest((manifest) => {
-            manifest.installed[resourceId] = manifestEntry
-          }, signal)
+          await context.commit(async () => {
+            await this.mutateManifest((manifest) => {
+              manifest.installed[resourceId] = manifestEntry
+            }, signal)
+          })
         },
         signal,
       )
@@ -1479,7 +1485,7 @@ export class ResourceManagerService {
     requestedVersion: string | undefined,
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
-    context: ResourceInstallSubscriber<ResourceJob>,
+    context: ResourceInstallContext<ResourceJob>,
     installationId?: string,
   ): Promise<ResourceOperationResult> {
     const resourceId = `pdk:${pdkId}`
@@ -1522,6 +1528,7 @@ export class ResourceManagerService {
         target.registrySha256 === resolvedAsset.sha256.toLowerCase() &&
         (await isExistingDirectory(target.root))
       ) {
+        await context.commit(async () => undefined)
         this.publish(listener, {
           resource_id: resourceId,
           action,
@@ -1694,17 +1701,19 @@ export class ResourceManagerService {
         tempExtract,
         destination,
         async () => {
-          await this.pdkInventoryService.registerManagedInstallation(
-            {
-              id: targetInstanceId,
-              familyId: pdkId,
-              displayName: scanned.name || displayName,
-              root: destination,
-              version,
-              registrySha256: resolvedAsset.sha256,
-            },
-            signal,
-          )
+          await context.commit(async () => {
+            await this.pdkInventoryService.registerManagedInstallation(
+              {
+                id: targetInstanceId,
+                familyId: pdkId,
+                displayName: scanned.name || displayName,
+                root: destination,
+                version,
+                registrySha256: resolvedAsset.sha256,
+              },
+              signal,
+            )
+          })
         },
         signal,
       )
@@ -1766,7 +1775,7 @@ export class ResourceManagerService {
     requestedVersion: string | undefined,
     action: ResourceAction,
     listener: ((event: ResourceJob) => void) | undefined,
-    context: ResourceInstallSubscriber<ResourceJob>,
+    context: ResourceInstallContext<ResourceJob>,
   ): Promise<ResourceOperationResult> {
     const resourceId = `mpc:${mpcId}`
     const signal = context.signal
@@ -1906,9 +1915,11 @@ export class ResourceManagerService {
         tempExtract,
         destination,
         async () => {
-          await this.mutateManifest((manifest) => {
-            manifest.installed[resourceId] = manifestEntry
-          }, signal)
+          await context.commit(async () => {
+            await this.mutateManifest((manifest) => {
+              manifest.installed[resourceId] = manifestEntry
+            }, signal)
+          })
         },
         signal,
       )

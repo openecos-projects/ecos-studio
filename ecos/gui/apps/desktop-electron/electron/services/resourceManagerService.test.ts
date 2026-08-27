@@ -5367,6 +5367,191 @@ describe('ResourceManagerService', () => {
     }
   })
 
+  it('does not cancel a tool install after its manifest commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    let cancellation: Promise<unknown> | undefined
+    let service!: ResourceManagerService
+    const progress = vi.fn((event: { phase: string }) => {
+      if (event.phase === 'done' && !cancellation) {
+        cancellation = service
+          .cancelResource('tool:yosys')
+          .catch((error: unknown) => error)
+      }
+    })
+    service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination) => {
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(
+      service.installResource('tool:yosys', undefined, progress),
+    ).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '2026-05-13',
+    })
+    expect(cancellation).toBeDefined()
+    await expect(cancellation).resolves.toMatchObject({
+      message: 'Resource installation has already committed for tool:yosys',
+    })
+    await expect(
+      stat(join(root, 'data', 'tools', 'yosys', '2026-05-13')),
+    ).resolves.toMatchObject({})
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      status: 'installed',
+      installed_version: '2026-05-13',
+    })
+    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'done' }))
+    expect(progress).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'cancelled' }),
+    )
+  })
+
+  it('does not cancel an MPC install after its manifest commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeMpcRegistry(registryPath, archive)
+    let cancellation: Promise<unknown> | undefined
+    let service!: ResourceManagerService
+    const progress = vi.fn((event: { phase: string }) => {
+      if (event.phase === 'done' && !cancellation) {
+        cancellation = service
+          .cancelResource('mpc:mpc-frame')
+          .catch((error: unknown) => error)
+      }
+    })
+    service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir: join(root, 'data', 'mpcs'),
+      archiveExtractor: async (_archivePath, destination) => {
+        await mkdir(join(destination, 'spec'), { recursive: true })
+        await writeFile(join(destination, 'FrameTop.sv'), 'module FrameTop; endmodule\n')
+        await writeFile(
+          join(destination, 'spec', 'spec.json.in'),
+          JSON.stringify({ designs: [{ core_template: { name: 'frame' } }] }),
+        )
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(
+      service.installResource('mpc:mpc-frame', undefined, progress),
+    ).resolves.toEqual({
+      status: 'started',
+      resource_id: 'mpc:mpc-frame',
+      version: '0.1.0',
+    })
+    expect(cancellation).toBeDefined()
+    await expect(cancellation).resolves.toMatchObject({
+      message: 'Resource installation has already committed for mpc:mpc-frame',
+    })
+    await expect(
+      stat(join(root, 'data', 'mpcs', 'mpc-frame', '0.1.0')),
+    ).resolves.toMatchObject({})
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      status: 'installed',
+      installed_version: '0.1.0',
+    })
+    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'done' }))
+    expect(progress).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'cancelled' }),
+    )
+  })
+
+  it('does not cancel a PDK install after its inventory commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createPdkArchive(root)
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    let cancellation: Promise<unknown> | undefined
+    let service!: ResourceManagerService
+    const progress = vi.fn((event: { phase: string }) => {
+      if (event.phase === 'done' && !cancellation) {
+        cancellation = service
+          .cancelResource('pdk:ics55')
+          .catch((error: unknown) => error)
+      }
+    })
+    service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination) => {
+        await cp(join(root, 'pdk-source', 'icsprout55-pdk-1.10.100'), destination, {
+          recursive: true,
+        })
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(
+      service.installResource('pdk:ics55', '1.10.100', progress),
+    ).resolves.toEqual({
+      status: 'started',
+      resource_id: 'pdk:ics55',
+      version: '1.10.100',
+    })
+    expect(cancellation).toBeDefined()
+    await expect(cancellation).resolves.toMatchObject({
+      message: 'Resource installation has already committed for pdk:ics55',
+    })
+    await expect(
+      stat(join(root, 'data', 'pdks', 'ics55', '1.10.100')),
+    ).resolves.toMatchObject({})
+    await expect(service.getPdkInventoryService().listInstallations()).resolves.toEqual([
+      expect.objectContaining({
+        familyId: 'ics55',
+        readiness: 'ready',
+        version: '1.10.100',
+      }),
+    ])
+
+    let repeatCancellation: Promise<unknown> | undefined
+    const repeatProgress = vi.fn((event: { phase: string }) => {
+      if (event.phase === 'done' && !repeatCancellation) {
+        repeatCancellation = service
+          .cancelResource('pdk:ics55')
+          .catch((error: unknown) => error)
+      }
+    })
+    await expect(service.updateResource('pdk:ics55', repeatProgress)).resolves.toEqual({
+      status: 'started',
+      resource_id: 'pdk:ics55',
+      version: '1.10.100',
+    })
+    await expect(repeatCancellation).resolves.toMatchObject({
+      message: 'Resource installation has already committed for pdk:ics55',
+    })
+    expect(repeatProgress).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message: 'ics55 v1.10.100 is already installed',
+        phase: 'done',
+      }),
+    )
+    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'done' }))
+    expect(progress).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'cancelled' }),
+    )
+  })
+
   it('preserves PDK files when a cancelled inventory cannot be restored', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')

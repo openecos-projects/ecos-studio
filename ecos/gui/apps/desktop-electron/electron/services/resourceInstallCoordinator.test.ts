@@ -20,11 +20,15 @@ describe('ResourceInstallCoordinator', () => {
     })
     const firstResult = first.catch((error: unknown) => error)
     await started.promise
+    const secondSubscribed = deferred()
     const second = coordinator.runRoot('tool:second', undefined, async (root) => {
-      return await coordinator.runShared('tool:shared', root, dependencyTask)
+      const shared = coordinator.runShared('tool:shared', root, dependencyTask)
+      secondSubscribed.resolve()
+      return await shared
     })
+    await secondSubscribed.promise
 
-    await expect(coordinator.cancelAndWait('tool:first')).resolves.toBe(true)
+    await expect(coordinator.cancelAndWait('tool:first')).resolves.toBe('cancelled')
     expect(await firstResult).toMatchObject({ name: 'AbortError' })
     expect(dependencySignal?.aborted).toBe(false)
 
@@ -73,7 +77,7 @@ describe('ResourceInstallCoordinator', () => {
 
     allowCleanup.resolve()
     await stopped.promise
-    await expect(cancellation).resolves.toBe(true)
+    await expect(cancellation).resolves.toBe('cancelled')
     expect(await rootResult).toMatchObject({ name: 'AbortError' })
   })
 
@@ -106,12 +110,50 @@ describe('ResourceInstallCoordinator', () => {
     const secondResult = second.catch((error: unknown) => error)
     await secondSubscribed.promise
 
-    await expect(coordinator.cancelAndWait('tool:shared')).resolves.toBe(true)
+    await expect(coordinator.cancelAndWait('tool:shared')).resolves.toBe('cancelled')
     expect(await firstResult).toMatchObject({ name: 'AbortError' })
     expect(await secondResult).toMatchObject({ name: 'AbortError' })
     expect(dependencyTask).toHaveBeenCalledTimes(1)
     expect(coordinator.isActive('tool:first')).toBe(false)
     expect(coordinator.isActive('tool:second')).toBe(false)
+  })
+
+  it('cancels an unshared dependency synchronously before it can commit', async () => {
+    const coordinator = new ResourceInstallCoordinator<string, string>()
+    const dependencyStarted = deferred()
+    const allowDependencyCommit = deferred()
+    const commitTask = vi.fn(async () => undefined)
+    let dependencySignal: AbortSignal | undefined
+
+    const root = coordinator.runRoot('tool:parent', undefined, async (rootSubscriber) => {
+      return await coordinator.runShared(
+        'tool:parent',
+        rootSubscriber,
+        async (parentContext) => {
+          return await coordinator.runShared(
+            'tool:dependency',
+            parentContext,
+            async (dependencyContext) => {
+              dependencySignal = dependencyContext.signal
+              dependencyStarted.resolve()
+              await allowDependencyCommit.promise
+              await dependencyContext.commit(commitTask)
+              return 'dependency installed'
+            },
+          )
+        },
+      )
+    })
+    const rootResult = root.catch((error: unknown) => error)
+    await dependencyStarted.promise
+
+    const cancellation = coordinator.cancelAndWait('tool:parent')
+    expect(dependencySignal?.aborted).toBe(true)
+    allowDependencyCommit.resolve()
+
+    await expect(cancellation).resolves.toBe('cancelled')
+    expect(await rootResult).toMatchObject({ name: 'AbortError' })
+    expect(commitTask).not.toHaveBeenCalled()
   })
 
   it('reports a metadata restore failure instead of a successful cancellation', async () => {
@@ -136,6 +178,64 @@ describe('ResourceInstallCoordinator', () => {
       'metadata restore failed',
     )
     await expect(rootResult).resolves.toBeInstanceOf(ResourceMetadataRestoreError)
+  })
+
+  it('waits for committed work and reports cancellation as too late', async () => {
+    const coordinator = new ResourceInstallCoordinator<string, string>()
+    const committed = deferred()
+    const allowCompletion = deferred()
+    let operationSignal: AbortSignal | undefined
+
+    const root = coordinator.runRoot('tool:root', undefined, async (subscriber) => {
+      return await coordinator.runShared('tool:root', subscriber, async (context) => {
+        operationSignal = context.signal
+        await context.commit(async () => undefined)
+        committed.resolve()
+        await allowCompletion.promise
+        return 'installed'
+      })
+    })
+    await committed.promise
+
+    let cancellationCompleted = false
+    const cancellation = coordinator.cancelAndWait('tool:root').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    await Promise.resolve()
+
+    expect(operationSignal?.aborted).toBe(false)
+    expect(cancellationCompleted).toBe(false)
+
+    allowCompletion.resolve()
+    await expect(root).resolves.toBe('installed')
+    await expect(cancellation).resolves.toBe('too_late')
+  })
+
+  it('reports cancellation as too late when an in-flight commit succeeds', async () => {
+    const coordinator = new ResourceInstallCoordinator<string, string>()
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+
+    const root = coordinator.runRoot('tool:root', undefined, async (subscriber) => {
+      return await coordinator.runShared('tool:root', subscriber, async (context) => {
+        operationSignal = context.signal
+        await context.commit(async () => {
+          commitStarted.resolve()
+          await allowCommit.promise
+        })
+        return 'installed'
+      })
+    })
+    await commitStarted.promise
+
+    const cancellation = coordinator.cancelAndWait('tool:root')
+    expect(operationSignal?.aborted).toBe(true)
+    allowCommit.resolve()
+
+    await expect(root).resolves.toBe('installed')
+    await expect(cancellation).resolves.toBe('too_late')
   })
 })
 
