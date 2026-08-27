@@ -263,6 +263,12 @@ class ParameterApplicationReceipt(_Model):
         knob = self.requested.get("knob_id")
         if knob not in {item.value for item in OptimizationKnob}:
             raise ValueError("receipt requested knob is invalid")
+        try:
+            from ecos_agent.optimization_contracts import RequestedKnobValue
+
+            RequestedKnobValue(knob_id=knob, value=self.requested.get("value"))
+        except (TypeError, ValueError):
+            raise ValueError("receipt requested value is outside the frozen lattice")
         if not isinstance(self.requested.get("unit"), str) or not self.requested.get("unit"):
             raise ValueError("receipt requested unit is invalid")
         if self.materialization.written_value != self.requested.get("value") and knob != OptimizationKnob.CELL_PADDING_X.value:
