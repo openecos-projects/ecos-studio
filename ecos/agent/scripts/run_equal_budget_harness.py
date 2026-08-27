@@ -84,7 +84,7 @@ def run(manifest_path: Path, output: Path, traces_path: Path | None, planning_ca
     )
     payload = {
         "schema_version": "ecos.optimization_equal_budget_harness.v1",
-        "status": "completed" if traces else "not_run",
+        "status": "completed" if any(item.started for item in traces) else "not_run",
         "design_manifest_ref": str(manifest_path),
         "design_manifest_sha256": canonical_sha256({"design_ids": list(design_ids)}),
         "design_ids": list(design_ids),

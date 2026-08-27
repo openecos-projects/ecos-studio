@@ -1,8 +1,21 @@
+import importlib.util
+import json
+from pathlib import Path
+
 from ecos_agent.optimization_equal_budget import (
     CandidateTrace,
     EqualBudgetConfig,
     evaluate_equal_budget,
 )
+
+
+def _load_harness():
+    path = Path(__file__).parents[1] / "scripts" / "run_equal_budget_harness.py"
+    spec = importlib.util.spec_from_file_location("run_equal_budget_harness", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_equal_budget_counts_receipts_and_aliases() -> None:
@@ -95,3 +108,18 @@ def test_equal_budget_reports_terminal_metrics_and_regret() -> None:
     assert summary.drc == (0.0,)
     assert summary.timing == (-0.1,)
     assert summary.congestion == (0.3,)
+
+
+def test_harness_keeps_preexecution_only_trace_not_run(tmp_path) -> None:
+    harness = _load_harness()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"design_ids": [f"d{i}" for i in range(10)]}))
+    traces = tmp_path / "traces.jsonl"
+    traces.write_text(
+        json.dumps({"design_id": "d0", "candidate_id": "c1", "started": False, "terminal_success": False})
+        + "\n"
+    )
+
+    result = harness.run(manifest, tmp_path / "out", traces, planning_calls=1)
+
+    assert result["status"] == "not_run"
