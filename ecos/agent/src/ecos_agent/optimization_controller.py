@@ -235,6 +235,7 @@ class OptimizationControlResult:
     proposal: OptimizationProposal | None = None
     requested: RequestedKnobValue | None = None
     rejection_reason: str | None = None
+    planner_source: Literal["llm", "local_fallback", "repair"] = "llm"
 
 
 class OptimizationProposalPlanner(Protocol):
@@ -1202,6 +1203,7 @@ class OptimizationEpisodeController:
             ),
             self._requested,
             rejection_reason,
+            "local_fallback" if validation_result == "fallback" else "llm",
         )
 
     def _result(self, rejection_reason: str | None = None) -> OptimizationControlResult:
