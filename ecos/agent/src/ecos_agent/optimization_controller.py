@@ -77,6 +77,16 @@ _LEGACY_STATE_FILES = (
     "optimization-episode-state.v4.json",
     "optimization-episode-state.v5.json",
 )
+_TARGET_STEPS = {
+    OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
+    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
+    OptimizationKnob.SYNTH_MAX_FANOUT: "fixFanout",
+    OptimizationKnob.TARGET_DENSITY: "place",
+    OptimizationKnob.TARGET_OVERFLOW: "place",
+    OptimizationKnob.CELL_PADDING_X: "place",
+    OptimizationKnob.ROUTABILITY_OPT: "place",
+    OptimizationKnob.DENSITY_WEIGHT: "place",
+}
 
 
 class OptimizationEpisodeControllerError(ValueError):
@@ -1001,6 +1011,9 @@ class OptimizationEpisodeController:
 
     def _ledger_start(self, request: CandidateExecutionRequest) -> OptimizationInterventionStart:
         proposal_sha256 = canonical_sha256(request.proposal.model_dump(mode="json"))
+        target_step = _TARGET_STEPS[request.requested.knob_id]
+        execution_scope = "full_flow"
+        end_step = "Harden"
         execution_contract_sha256 = canonical_sha256(
             {
                 "intervention_id": request.intervention_id,
@@ -1012,6 +1025,9 @@ class OptimizationEpisodeController:
                 ),
                 "requested": request.requested.model_dump(mode="json"),
                 "parent_candidate_root_ref": request.parent_candidate_root_ref,
+                "target_step": target_step,
+                "end_step": end_step,
+                "execution_scope": execution_scope,
             }
         )
         return OptimizationInterventionStart(
@@ -1038,6 +1054,9 @@ class OptimizationEpisodeController:
             ),
             proposal_action=request.proposal.action,
             requested=request.requested,
+            target_step=target_step,
+            end_step=end_step,
+            execution_scope=execution_scope,
         )
 
     def _complete(
@@ -1143,6 +1162,9 @@ class OptimizationEpisodeController:
                 incumbent_decision=incumbent_decision,
                 decisive_metric=decisive_metric,
                 outcome_details_sha256=canonical_sha256(details),
+                target_step=_TARGET_STEPS[self._requested.knob_id] if self._requested else "place",
+                end_step="Harden",
+                execution_scope="full_flow",
             )
         )
         self._pending_intervention_id = None

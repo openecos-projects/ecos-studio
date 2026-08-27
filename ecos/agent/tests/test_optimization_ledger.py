@@ -122,6 +122,15 @@ def test_ledger_replays_an_effective_value_receipt(tmp_path) -> None:
     assert ledger.replay().terminal_outcomes[0].application_receipt == _application_receipt()
 
 
+def test_ledger_rejects_terminal_execution_contract_drift(tmp_path) -> None:
+    ledger = OptimizationLedger(tmp_path / "episode")
+    ledger.append_start(_start().model_copy(update={"target_step": "Floorplan"}))
+    ledger.append_terminal(_terminal().model_copy(update={"target_step": "place"}))
+
+    with pytest.raises(OptimizationLedgerIntegrityError, match="execution contract"):
+        ledger.verify()
+
+
 def test_ledger_rejects_tampering_and_never_appends_to_an_invalid_chain(tmp_path) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     ledger.append_start(_start())

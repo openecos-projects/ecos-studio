@@ -142,6 +142,9 @@ class OptimizationInterventionStart(_LedgerModel):
     )
     proposal_action: ProposalAction | None = None
     requested: RequestedKnobValue | None = None
+    target_step: str = "place"
+    end_step: str = "Harden"
+    execution_scope: str = "full_flow"
 
     @field_validator("intervention_id", "parent_checkpoint_id", "candidate_checkpoint_id")
     @classmethod
@@ -174,6 +177,8 @@ class OptimizationInterventionStart(_LedgerModel):
         if self.proposal_action is not None and self.requested is not None:
             if self.proposal_action.knob_id != self.requested.knob_id:
                 raise ValueError("ledger proposal action and requested knob must match")
+        if not self.target_step or self.end_step != "Harden" or self.execution_scope != "full_flow":
+            raise ValueError("ledger execution contract is invalid")
         return self
 
 
@@ -195,6 +200,9 @@ class OptimizationTerminalOutcome(_LedgerModel):
     incumbent_decision: IncumbentDecision | None = None
     decisive_metric: SelectionMetric | None = None
     outcome_details_sha256: str
+    target_step: str = "place"
+    end_step: str = "Harden"
+    execution_scope: str = "full_flow"
 
     @model_validator(mode="after")
     def validate_terminal_observation_hash(self) -> "OptimizationTerminalOutcome":
@@ -212,6 +220,8 @@ class OptimizationTerminalOutcome(_LedgerModel):
                 raise ValueError("terminal parameter receipt id does not match")
             if self.materialization_receipt_sha256 != self.parameter_application_receipt.materialization.receipt_sha256:
                 raise ValueError("terminal materialization receipt hash does not match")
+        if not self.target_step or self.end_step != "Harden" or self.execution_scope != "full_flow":
+            raise ValueError("terminal execution contract is invalid")
         return self
 
     @field_validator("intervention_id")
@@ -810,6 +820,14 @@ def _replay_entries(entries: tuple[OptimizationLedgerEntry, ...]) -> Optimizatio
                     raise OptimizationLedgerIntegrityError(
                         "terminal parameter receipt does not match intervention request"
                     )
+            if (
+                payload.target_step != start.target_step
+                or payload.end_step != start.end_step
+                or payload.execution_scope != start.execution_scope
+            ):
+                raise OptimizationLedgerIntegrityError(
+                    "terminal execution contract does not match intervention start"
+                )
             terminal_by_id[payload.intervention_id] = payload
             outcomes.append(payload)
         previous_hash = entry.entry_sha256
