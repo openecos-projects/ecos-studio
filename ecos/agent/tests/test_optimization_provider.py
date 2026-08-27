@@ -10,6 +10,26 @@ from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 from ecos_agent.provider import EcosAgentProvider
 
 
+def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:
+    session = provider.sessions[session_id]
+    pending = session.pending_interaction
+    if pending is None:
+        provider.send_message({"sessionId": session_id, "message": message})
+        return
+    for option_id, value in pending["values"].items():
+        if value == message:
+            provider.answer_interaction(
+                {
+                    "sessionId": session_id,
+                    "requestId": pending["request"]["requestId"],
+                    "kind": pending["request"]["kind"],
+                    "optionId": option_id,
+                }
+            )
+            return
+    raise AssertionError(f"No pending interaction option matches {message!r}")
+
+
 class _FakeCodexProvider:
     def __init__(self) -> None:
         self.interrupted = 0
@@ -128,11 +148,11 @@ def test_gui_optimization_authorization_holds_and_closes_codex_provider(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    provider.send_message({"sessionId": session_id, "message": "4"})
+    _send(provider, session_id, "3")
     assert provider.sessions[session_id].phase == "optimization_objective"
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
+    _send(provider, session_id, "reduce wirelength")
     assert provider.sessions[session_id].phase == "optimization_authorization"
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "1")
 
     deadline = time.monotonic() + 2
     while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
@@ -168,9 +188,9 @@ def test_gui_stop_requests_terminal_closure_before_runner_close(tmp_path: Path) 
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
     assert runner.started.wait(timeout=2)
 
     provider.send_message({"sessionId": session_id, "message": "stop"})
@@ -195,9 +215,9 @@ def test_gui_stop_does_not_hide_a_terminal_closure_failure(tmp_path: Path) -> No
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
     assert runner.started.wait(timeout=2)
 
     provider.send_message({"sessionId": session_id, "message": "stop"})
@@ -222,9 +242,9 @@ def test_gui_stop_preserves_indeterminate_quarantine_phase(tmp_path: Path) -> No
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
     assert runner.started.wait(timeout=2)
 
     provider.send_message({"sessionId": session_id, "message": "stop"})
@@ -248,9 +268,9 @@ def test_gui_optimization_fails_closed_without_runner_factory(tmp_path: Path) ->
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
 
     session = provider.sessions[session_id]
     assert session.optimization_phase == "unavailable"
@@ -276,9 +296,9 @@ def test_gui_runner_start_failure_returns_to_operation(tmp_path: Path) -> None:
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
 
     session = provider.sessions[session_id]
     assert session.phase == "operation"
@@ -303,9 +323,9 @@ def test_gui_optimization_reports_decision_and_winner_evidence(tmp_path: Path) -
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
 
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "reduce wirelength"})
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
     deadline = time.monotonic() + 2
     while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -356,14 +376,13 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
         "sessionId"
     ]
 
-    provider.send_message({"sessionId": session_id, "message": "4"})
+    _send(provider, session_id, "3")
     assert provider.sessions[session_id].phase == "optimization_objective"
 
-    provider.send_message(
-        {
-            "sessionId": session_id,
-            "message": "reduce routed wirelength without breaking DRC",
-        }
+    _send(
+        provider,
+        session_id,
+        "reduce routed wirelength without breaking DRC",
     )
     session = provider.sessions[session_id]
     assert session.phase == "optimization_authorization"
@@ -377,7 +396,7 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
     )
     assert fake_provider.closed == 1
 
-    provider.send_message({"sessionId": session_id, "message": "1"})
+    _send(provider, session_id, "1")
     deadline = time.monotonic() + 2
     while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -407,8 +426,8 @@ def test_gui_optimization_objective_parse_failure_returns_to_operation(tmp_path:
         "sessionId"
     ]
 
-    provider.send_message({"sessionId": session_id, "message": "4"})
-    provider.send_message({"sessionId": session_id, "message": "optimize something"})
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "optimize something")
 
     assert provider.sessions[session_id].phase == "operation"
     assert fake_provider.closed == 1

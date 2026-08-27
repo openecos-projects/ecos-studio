@@ -1,60 +1,57 @@
 import { describe, expect, it } from 'vitest'
 import source from './AIChatPanel.vue?raw'
+import messageItemSource from './MessageItem.vue?raw'
 
 describe('AIChatPanel flow contracts', () => {
-  it('keeps slash commands in the same Agent Chat provider session', () => {
-    expect(source).not.toContain('codexCliTerminal')
-    expect(source).not.toContain('sendCodexCliInput')
-    expect(source).not.toContain('toggleCodexCliMode')
-    expect(source).toContain('await sendAgentMessage(message)')
+  it('routes structured interactions through request id and dedicated answers', () => {
+    expect(source).toContain("event.type === 'interaction'")
+    expect(source).toContain('messageStore.upsertAgentEvent(event)')
+    expect(source).toContain('messageStore.answerInteraction(')
+    expect(source).toContain('agent.answerInteraction(request)')
   })
 
-  it('separates manual workspace setup from bounded optimization on the home screen', () => {
-    expect(source).toContain(
-      "label: 'Start creating a Workspace and run a full RTL-to-GDS flow'",
-    )
-    expect(source).toContain("label: 'Start a bounded optimization episode'")
-    expect(source).toContain("value: '2'")
-  })
-
-  it('routes structured choices through their prompt id and compatible option value', () => {
-    expect(source).toContain("event.type === 'choice'")
-    expect(source).toContain(
-      'messageStore.addChoice(event.choice, event.messageId, event.sessionId)',
-    )
-    expect(source).toContain('candidate.choice?.promptId === promptId')
-    expect(source).toContain('await sendAgentMessage(option.value, false)')
-    expect(source).toContain('messageStore.addMessage(choiceSelectionText(option))')
-  })
-
-  it('renders Cursor-style centered turns with sticky user cards', () => {
+  it('renders centered turns with visually distinct user messages', () => {
     expect(source).toContain('groupMessagesIntoTurns')
     expect(source).toContain('conversationTurns')
     expect(source).toContain('chat-turn__user')
     expect(source).toContain('position: sticky')
     expect(source).toContain('v-for="msg in turn.responses"')
+    expect(source).toContain('pendingInteractionPresentation(messages.value)')
     expect(source).toContain('turnIndex === conversationTurns.length - 1')
     expect(source).toContain('.chat-turn__body')
     expect(source).toContain('background: transparent')
-    expect(source).toContain('margin-inline: auto')
     expect(source).toContain('text-align: left')
     expect(source).toContain('.chat-turn__user {\n  position: sticky')
     expect(source).toContain('display: block')
     expect(source).not.toContain('border-left: 2px solid')
     expect(source).not.toContain('var(--bg-sidebar) 82%')
+    expect(source).toContain('var(--accent-color) 12%')
+    expect(source).not.toContain('chat-turn__user-label')
+    expect(source).not.toContain('chat-turn__agent-label')
   })
 
-  it('keeps confirmed run plans above progress and awaiting plans after Q&A', () => {
+  it('lets messages follow the panel width while keeping Agent text unframed', () => {
+    expect(source).not.toContain('max-width: 44rem')
+    expect(messageItemSource).not.toContain('max-width: 70ch')
+    expect(messageItemSource).not.toContain(
+      'message-bubble--assistant rounded-lg border border-(--border-color) bg-(--bg-secondary)',
+    )
+  })
+
+  it('anchors confirmed plans to their confirmation message', () => {
     expect(source).toContain('AgentSessionContractPanels')
     expect(source).toContain('mode="committed"')
     expect(source).toContain('mode="awaiting"')
-    expect(source.indexOf('mode="committed"')).toBeLessThan(
-      source.indexOf('v-for="msg in turn.responses"'),
-    )
-    expect(source.indexOf('v-for="msg in turn.responses"')).toBeLessThan(
-      source.indexOf('mode="awaiting"'),
-    )
-    expect(source).toContain('activeUi.value.workspaceSetupAnchorTurnId = turnId')
+    expect(source).toContain('v-for="msg in turn.responses"')
+    expect(source).toContain(':message-id="msg.id"')
+    expect(source).toContain('isVisibleResponse(msg)')
+    expect(source).toContain('isAnsweredInteraction(msg)')
+    expect(source).toContain('class="interaction-receipt"')
+    expect(source).toContain('describeInteractionAnswer(interaction, answer)')
+    expect(source).toContain('interactionCompanionIds')
+    expect(source).toContain('v-if="isContractAnchorMessage(msg.id)"')
+    expect(source).toContain('workspaceSetupAnchorMessageId')
+    expect(source).toContain('markContractInteractionAnswered(sessionId, requestId)')
   })
 
   it('keeps tool activity and streaming updates on the structured message path', () => {
@@ -71,13 +68,47 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('scrollToBottomIfNeeded(force, false)')
   })
 
-  it('keeps the composer open during choices while retaining stop and one-message queue controls', () => {
+  it('docks interactions above the global composer and retains run controls', () => {
+    expect(source).toContain('const pendingInteraction = computed(')
+    expect(source).toContain('v-if="pendingInteraction"')
+    expect(source).toContain('class="interaction-dock custom-scrollbar"')
+    expect(source).toContain('<details')
+    expect(source).toContain('class="interaction-dock__summary"')
+    expect(source).toContain('syncInteractionExpanded')
+    expect(source).toContain('@browse-rtl="browseInteractionRtl"')
+    expect(source).toContain('desktopApi.dialog.pickRtlSources({')
+    expect(source).toContain("return interaction.kind !== 'form'")
+    expect(source).toContain('--interaction-dock-max-height: min(42vh, 28rem)')
+    expect(source).toContain('class="interaction-dock__content custom-scrollbar"')
     expect(source).toContain(
-      'const composerLocked = computed(() => isInterruptPending.value || !agentSessionId.value)',
+      'max-height: calc(var(--interaction-dock-max-height) - 3rem)',
     )
+    expect(source).toContain('overflow-y: auto')
     expect(source).not.toContain(
-      'activeChoice.value && !activeChoice.value.allowFreeText',
+      'if (requestId !== previousRequestId) interactionExpanded.value = false',
     )
+    expect(source).toContain(
+      'if (sessionId !== previousSessionId) interactionExpanded.value = false',
+    )
+    expect(source).toContain('<AgentInteractionCard')
+    expect(source).toContain('@undo="undoLastInteraction"')
+    expect(source).toContain('aria-label="Undo last selection"')
+    expect(source).toContain('v-else-if="undoInteraction && !isRunning"')
+    expect(source).toMatch(
+      /event\.type === 'workspace_create'[\s\S]*ui\.undoInteraction = undefined/,
+    )
+    expect(source).toContain('undo: true')
+    expect(source).toContain('messageStore.rewindToInteraction(')
+    expect(source).toContain('<div class="composer-footer">')
+    expect(source).not.toContain('@other="focusComposer"')
+    expect(source).not.toContain('composerInputRef.value?.focus()')
+    expect(source).toContain('if (textMessage) messageStore.addMessage(textMessage)')
+    expect(source).toContain(
+      "textMessage ? '' : describeInteractionAnswer(interaction, answer)",
+    )
+    expect(source).toContain('Boolean(message.interactionAnswer)')
+    expect(source).toContain('handleInteractionText')
+    expect(source).toMatch(/\{ text: message \},\s*true/)
     expect(source).toContain('if (isRunning.value) {')
     expect(source).toContain('queuedMessage.value = message')
     expect(source).toContain('watch(isRunning')
@@ -96,17 +127,29 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('run-status-dot')
     expect(source).toContain('@click="cancelQueuedMessage"')
     expect(source).toContain("return 'Add a follow-up…'")
-    expect(source).toContain('Enter a value, or choose above')
-    expect(source).toContain("activeChoice.value.variant === 'buttons'")
-    expect(source).toContain(
-      "if (activeChoice.value) return 'Ask anything, or choose above'",
-    )
+    expect(source).toContain("return 'Ask anything or reply…'")
     expect(source).toContain("return 'Ask anything…'")
     expect(source).toContain("return 'Connecting…'")
     expect(source).toContain("return 'Unavailable'")
     expect(source).not.toContain('Connecting to ECOS Agent')
     expect(source).not.toContain('ECOS Agent unavailable')
     expect(source).not.toContain('Message ECOS Agent')
+  })
+
+  it('sizes user messages to their content and wraps long text', () => {
+    expect(source).toContain('width: fit-content')
+    expect(source).toContain('max-width: min(82%, 52rem)')
+    expect(source).toContain('overflow-wrap: anywhere')
+  })
+
+  it('overlays interactions without hiding the scrollable conversation tail', () => {
+    expect(source).toContain('ref="interactionDockRef"')
+    expect(source).toContain("'--interaction-overlay-height'")
+    expect(source).toContain('interactionDockObserver = new ResizeObserver')
+    expect(source).toContain('padding-bottom: var(--interaction-overlay-height, 0px)')
+    expect(source).toContain('position: absolute')
+    expect(source).toContain('bottom: 100%')
+    expect(source).not.toContain('flex: 0 1 auto')
   })
 
   it('does not submit while an IME composition is active', () => {
@@ -171,24 +214,48 @@ describe('AIChatPanel flow contracts', () => {
     )
   })
 
+  it('clears the create trigger before reporting a post-create flow failure', () => {
+    const start = source.indexOf('async function maybeRunPostCreateFlow')
+    const end = source.indexOf('function handleAgentEvent', start)
+    const postCreateFlow = source.slice(start, end)
+    const failure = postCreateFlow.slice(postCreateFlow.indexOf('} catch (error)'))
+
+    expect(failure.indexOf('ownerUi.workspaceCreateSetupId = undefined')).toBeGreaterThan(
+      -1,
+    )
+    expect(failure.indexOf('ownerUi.workspaceCreateSetupId = undefined')).toBeLessThan(
+      failure.indexOf("'failed'"),
+    )
+  })
+
   it('runs signoff inspection before path-based export and reports checklist blocking', () => {
     expect(source).toContain("event.type === 'workspace_signoff'")
     expect(source).toContain("ui.lastContractSurface = 'signoff'")
-    expect(source).toContain('workspaceSignoffChoice')
-    expect(source).toContain('@signoff-select="handleWorkspaceSignoffChoice"')
-    expect(source).toContain("submitChoice(option, 'signoff')")
+    expect(source).toContain("event.type === 'interaction'")
+    expect(source).toContain('markContractInteractionAnswered(sessionId, requestId)')
     expect(source).toContain('inspectSignoff({ workspaceHandle })')
     expect(source).toContain("risk.severity === 'blocked'")
     expect(source).toContain('workspace_signoff_inspection:')
     expect(source).toContain('review.status')
+    expect(source).toContain('ui.workspaceSignoffReview = review')
+    expect(source).toContain('workspaceSignoffRows')
+    expect(source).toContain('if (isWorkspaceSignoffPending.value)')
+    expect(source).toContain("? 'Exporting' : 'Checking'")
     expect(source).toContain("contract.action === 'inspect'")
     expect(source).not.toContain('dialog.saveFile({')
     expect(source).toContain('workspaceSignoffOutputPath')
-    expect(source).toContain('handleWorkspaceSignoffPathConfirm')
-    expect(source).toContain('Enter a signoff package output path.')
+    expect(source).not.toContain('handleWorkspaceSignoffPathConfirm')
+    expect(source).toContain('signoff/signoff_package.tar.gz')
     expect(source).toContain('exportSignoff({')
     expect(source).toContain('workspace_signoff_result:')
     expect(source).toContain("canExportSignoffPackage(flow) ? 'Harden'")
+  })
+
+  it('does not bind the signoff panel before a signoff event', () => {
+    expect(source).not.toContain("workspaceSignoffTitle: 'Signoff package export'")
+    expect(source).toContain(
+      "activeUi.value.lastContractSurface === 'signoff' ? 'Signoff package export' : ''",
+    )
   })
 
   it('applies parameter updates from the contract instead of a local knob table', () => {
@@ -297,20 +364,15 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('projectRoot')
     expect(source).toContain('route.query.projectRoot')
     expect(source).toContain('Create another workspace in this project')
+    expect(source).not.toContain("label: 'Update workspace parameters'")
     expect(source).toContain('AgentChatTabStrip')
     expect(source).toContain('createChatTab')
     expect(source).toContain('directory: tab.workspacePath')
   })
 
-  it('prevents replaying stale choice cards after the conversation moves on', () => {
-    expect(source).toContain('messageStore.dismissOpenChoices()')
-    expect(source).toContain('activeChoicePromptId')
-    expect(source).toContain(
-      ':choice-interactive="msg.choice?.promptId === activeChoicePromptId"',
-    )
-    expect(source).toContain(
-      'if (activeChoicePromptId.value && activeChoicePromptId.value !== promptId) return',
-    )
+  it('prevents replaying stale interactions after the conversation moves on', () => {
+    expect(source).toContain('messageStore.answerInteraction(')
+    expect(source).toContain('messageStore.restoreInteraction(requestId)')
   })
 
   it('shows a quiet pending cue while waiting for the next reply', () => {

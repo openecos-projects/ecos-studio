@@ -1,5 +1,7 @@
 import type {
   DesktopAgentEvent,
+  DesktopAgentInteractionAnswerRequest,
+  DesktopAgentInteractionAnswerResponse,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
   DesktopAgentProviderRequest,
@@ -85,6 +87,12 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     request: DesktopAgentSendMessageRequest,
   ): Promise<DesktopAgentSendMessageResponse> {
     return await this.providerForRequest(request).sendMessage(request)
+  }
+
+  async answerInteraction(
+    request: DesktopAgentInteractionAnswerRequest,
+  ): Promise<DesktopAgentInteractionAnswerResponse> {
+    return await this.providerForRequest(request).answerInteraction(request)
   }
 
   async interrupt(request?: DesktopAgentProviderRequest): Promise<void> {

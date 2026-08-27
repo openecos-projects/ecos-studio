@@ -144,6 +144,48 @@ class GuiWorkspaceSetupProposal(BaseModel):
         return self
 
 
+class GuiClarificationOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    label: str
+
+    @field_validator("id", "label")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 256:
+            raise ValueError("clarification option text is invalid")
+        return value
+
+
+class GuiClarificationProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    description: str | None = None
+    options: tuple[GuiClarificationOption, ...]
+
+    @field_validator("title", "description")
+    @classmethod
+    def validate_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value or len(value) > 512:
+            raise ValueError("clarification text is invalid")
+        return value
+
+    @field_validator("options")
+    @classmethod
+    def validate_options(
+        cls, value: tuple[GuiClarificationOption, ...]
+    ) -> tuple[GuiClarificationOption, ...]:
+        if not 1 <= len(value) <= 8 or len({option.id for option in value}) != len(value):
+            raise ValueError("clarification options are invalid")
+        return value
+
+
 class GuiChatResponseProposal(BaseModel):
     """Untrusted local-Codex response for one GUI chat turn.
 
@@ -156,6 +198,7 @@ class GuiChatResponseProposal(BaseModel):
     schema_version: Literal["flow-agent.gui_chat_response.v1"] = "flow-agent.gui_chat_response.v1"
     operation: Literal["1", "2", "3", "4"] | None = None
     answer: str | None = None
+    clarification: GuiClarificationProposal | None = None
     evidence_ids: tuple[str, ...] = ()
 
     @field_validator("answer")
@@ -179,10 +222,12 @@ class GuiChatResponseProposal(BaseModel):
 
     @model_validator(mode="after")
     def validate_route(self) -> "GuiChatResponseProposal":
-        if (self.operation is None) == (self.answer is None):
+        if sum(value is not None for value in (self.operation, self.answer, self.clarification)) != 1:
             raise ValueError("chat response must contain exactly one route")
         if self.operation is not None and self.evidence_ids:
             raise ValueError("chat operation cannot cite source evidence")
+        if self.clarification is not None and self.evidence_ids:
+            raise ValueError("chat clarification cannot cite source evidence")
         return self
 
 
@@ -282,12 +327,12 @@ def recommended_gui_workspace_setup() -> GuiWorkspaceSetupProposal:
         flow_start="Synthesis",
         flow_end="Harden",
         die_area_mode="utilitization_margin",
-        utilitization=0.4,
-        margin=0,
+        utilitization=0.3,
+        margin=2,
         die_width=None,
         die_height=None,
         target_density=0.2,
-        target_overflow=0,
+        target_overflow=0.1,
         project_root=None,
         rtl_path=None,
         filelist_path=None,

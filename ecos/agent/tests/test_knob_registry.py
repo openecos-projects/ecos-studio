@@ -17,6 +17,21 @@ from ecos_agent.provider_support import _tunable_workspace_parameters
 
 
 def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:
+    session = provider.sessions[session_id]
+    pending = session.pending_interaction
+    if pending is not None:
+        for option_id, value in pending["values"].items():
+            if value == message:
+                provider.answer_interaction(
+                    {
+                        "sessionId": session_id,
+                        "requestId": pending["request"]["requestId"],
+                        "kind": pending["request"]["kind"],
+                        "optionId": option_id,
+                    }
+                )
+                return
+        session.pending_interaction = None
     provider.send_message({"sessionId": session_id, "message": message})
 
 
@@ -160,7 +175,7 @@ def test_parameter_update_contract_carries_resolved_writes(tmp_path: Path) -> No
     session_id = provider.start_session({"directory": str(workspace), "mode": "workspace"})[
         "sessionId"
     ]
-    _send(provider, session_id, "1")
+    provider._begin_workspace_parameter_update(provider.sessions[session_id])
     _send(provider, session_id, "raise utilization to 0.7")
 
     session = provider.sessions[session_id]

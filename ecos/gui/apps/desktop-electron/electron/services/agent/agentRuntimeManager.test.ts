@@ -32,6 +32,11 @@ function createProvider(providerId = 'codex'): AgentProviderRuntime {
       messageId: 'message-1',
       sessionId: request.sessionId,
     })),
+    answerInteraction: vi.fn(async (request) => ({
+      accepted: true,
+      requestId: request.requestId,
+      sessionId: request.sessionId,
+    })),
     setMode: vi.fn(async () => status),
     start: vi.fn(async () => {}),
     startSession: vi.fn(async () => ({

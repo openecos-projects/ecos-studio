@@ -133,58 +133,103 @@ describe('messageStore', () => {
     ])
   })
 
-  it('records one answer for the matching choice prompt', () => {
+  it('upserts one pending interaction by request id and consumes it once', () => {
     const store = useMessageStore()
-    const choice = {
-      promptId: 'prompt-1',
-      title: 'Choose a stage',
-      options: [
-        { id: 'prompt-1-1', label: 'place', value: '1' },
-        { id: 'prompt-1-2', label: 'route', value: '2' },
-      ],
-      variant: 'list' as const,
+    const interaction = {
+      interaction: {
+        kind: 'choice' as const,
+        options: [{ id: 'option-1', label: 'Run' }],
+        variant: 'buttons' as const,
+      },
+      kind: 'choice' as const,
+      purpose: 'execution' as const,
+      requestId: 'request-1',
+      schema_version: 'flow-agent.interaction_request.v1' as const,
+      status: 'pending' as const,
+      title: 'Choose an operation',
     }
 
-    store.addChoice(choice, 'choice-message')
+    store.addInteraction(interaction, 'interaction-1')
+    store.addInteraction(interaction, 'interaction-duplicate')
 
-    expect(store.answerChoice(choice.promptId, choice.options[0])).toBe(true)
-    expect(store.answerChoice(choice.promptId, choice.options[1])).toBe(false)
+    expect(store.messages).toHaveLength(1)
+    expect(store.answerInteraction('request-1', 'Run')).toBe(true)
+    expect(store.answerInteraction('request-1', 'Run')).toBe(false)
     expect(store.messages[0]).toMatchObject({
-      answeredOptionId: 'prompt-1-1',
-      id: 'choice-message',
-      type: 'choice',
+      interactionAnswer: 'Run',
+      interaction: { requestId: 'request-1', status: 'answered' },
+      interactionAnswered: true,
     })
   })
 
-  it('dismisses prior open choices when a new choice arrives or free-text advances', () => {
+  it('binds only an explicitly matching interaction description to its preceding prompt', () => {
     const store = useMessageStore()
-    const first = {
-      promptId: 'prompt-1',
-      title: 'Choose an operation',
-      options: [{ id: 'prompt-1-1', label: 'Create', value: '1' }],
-      variant: 'list' as const,
-    }
-    const second = {
-      promptId: 'prompt-2',
-      title: 'Choose an operation',
-      options: [{ id: 'prompt-2-1', label: 'Create', value: '1' }],
-      variant: 'list' as const,
-    }
+    const promptId = store.addAssistantMessage('Choose a run mode.', 'done')
+    store.addInteraction(
+      {
+        interaction: {
+          kind: 'choice',
+          options: [{ id: 'quick', label: 'Quick run' }],
+          variant: 'list',
+        },
+        kind: 'choice',
+        description: 'Choose a run mode.',
+        purpose: 'execution',
+        requestId: 'mode',
+        schema_version: 'flow-agent.interaction_request.v1',
+        status: 'pending',
+        title: 'Run mode',
+      },
+      'mode-interaction',
+    )
 
-    store.addChoice(first, 'choice-1')
-    store.addChoice(second, 'choice-2')
+    expect(store.messages[1]).toMatchObject({ interactionCompanionId: promptId })
 
+    store.addAssistantMessage('Persistent workspace context.', 'done')
+    store.addInteraction(
+      {
+        ...store.messages[1]!.interaction!,
+        description: 'Choose another operation.',
+        requestId: 'operation',
+        status: 'pending',
+      },
+      'operation-interaction',
+    )
+    expect(store.messages[store.messages.length - 1]?.interactionCompanionId).toBeUndefined()
+  })
+
+  it('rewinds messages to the restored interaction after undo', () => {
+    const store = useMessageStore()
+    const interaction = {
+      interaction: {
+        kind: 'choice' as const,
+        options: [{ id: 'option-1', label: 'Run' }],
+        variant: 'list' as const,
+      },
+      kind: 'choice' as const,
+      purpose: 'execution' as const,
+      requestId: 'request-1',
+      schema_version: 'flow-agent.interaction_request.v1' as const,
+      status: 'pending' as const,
+      title: 'Choose',
+    }
+    store.addInteraction(interaction, 'interaction-1')
+    store.addAssistantMessage('Welcome shown before the selection.', 'done')
+    store.answerInteraction('request-1', 'Run')
+    store.addAssistantMessage('Prompt created by the wrong selection.', 'done')
+    store.addInteraction(
+      { ...interaction, canUndo: true, requestId: 'request-2' },
+      'interaction-2',
+    )
+
+    expect(store.rewindToInteraction('request-1')).toBe(true)
+    expect(store.messages).toHaveLength(2)
     expect(store.messages[0]).toMatchObject({
-      answeredOptionId: '__dismissed__',
-      id: 'choice-1',
+      interaction: { canUndo: false, requestId: 'request-1', status: 'pending' },
+      interactionAnswered: false,
+      interactionAnswer: undefined,
     })
-    expect(store.messages[1].answeredOptionId).toBeUndefined()
-
-    store.dismissOpenChoices()
-    expect(store.messages[1]).toMatchObject({
-      answeredOptionId: '__dismissed__',
-      id: 'choice-2',
-    })
+    expect(store.messages[1]?.content).toBe('Welcome shown before the selection.')
   })
 
   it('merges tool deltas with the same provider message id', () => {

@@ -32,7 +32,7 @@ class EcosAgentProtocolServer:
         if request is None:
             self._write({"id": request_id, "error": {"message": "Invalid provider request."}})
             return
-        if request.get("method") == "sendMessage":
+        if request.get("method") in {"sendMessage", "answerInteraction"}:
             self._threads = [thread for thread in self._threads if thread.is_alive()]
             thread = threading.Thread(
                 target=self._handle_request, args=(request, request_id), daemon=True
@@ -46,7 +46,10 @@ class EcosAgentProtocolServer:
         try:
             result = self._dispatch(request)
         except Exception as exc:
-            self._write({"id": request_id, "error": {"message": str(exc)}})
+            error: dict[str, str] = {"message": str(exc)}
+            if request.get("method") == "answerInteraction":
+                error["code"] = _interaction_error_code(str(exc))
+            self._write({"id": request_id, "error": error})
             return
         self._write({"id": request_id, "result": result})
 
@@ -58,6 +61,7 @@ class EcosAgentProtocolServer:
             "start": self.provider.start,
             "startSession": self.provider.start_session,
             "sendMessage": self.provider.send_message,
+            "answerInteraction": self.provider.answer_interaction,
             "interrupt": self.provider.interrupt,
             "getStatus": self.provider.get_status,
             "setMode": self.provider.set_mode,
@@ -68,6 +72,8 @@ class EcosAgentProtocolServer:
         handler = handlers.get(request["method"])
         if handler is None:
             raise ValueError(f"Unsupported provider method: {request['method']}")
+        if request["method"] == "answerInteraction":
+            return handler(params or {}, defer=True)
         return handler(params or {})
 
     def _emit(self, event: dict[str, Any]) -> None:
@@ -90,3 +96,20 @@ def _protocol_request(raw_line: str) -> tuple[dict[str, Any] | None, str | None]
     if not isinstance(request_id, str) or not request_id or not isinstance(method, str) or not method:
         return None, request_id if isinstance(request_id, str) else None
     return payload, request_id
+
+
+def _interaction_error_code(message: str) -> str:
+    text = message.casefold()
+    if "already answered" in text:
+        return "interaction_already_answered"
+    if "superseded" in text:
+        return "interaction_superseded"
+    if "expired" in text:
+        return "interaction_expired"
+    if "option" in text:
+        return "interaction_option_invalid"
+    if "form" in text or "field" in text:
+        return "interaction_form_invalid"
+    if "kind" in text:
+        return "interaction_kind_mismatch"
+    return "interaction_not_pending"

@@ -103,6 +103,38 @@ describe('projectManifestRegistration', () => {
     )
   })
 
+  it('creates a missing manifest before registering a workspace for a new project', async () => {
+    const config = {
+      directory: '/quick-runs/run_1/ws_0001',
+      parameters: { design: 'gcd' },
+      project_context: {
+        mode: 'create',
+        project_name: 'run_1',
+        project_root: '/quick-runs/run_1',
+        project_json_path: '/quick-runs/run_1/project.json',
+      },
+    } as WorkspaceConfig
+
+    await registerProjectManagedWorkspace({
+      workspacePath: config.directory,
+      config,
+      projectContext: projectContextFromWorkspaceConfig(config),
+    })
+
+    expect(mutateProjectManifest.mock.calls).toEqual([
+      ['/quick-runs/run_1', { type: 'create', name: 'run_1', designName: 'gcd' }],
+      [
+        '/quick-runs/run_1',
+        expect.objectContaining({
+          type: 'register-workspace',
+          input: expect.objectContaining({
+            workspacePath: '/quick-runs/run_1/ws_0001',
+          }),
+        }),
+      ],
+    ])
+  })
+
   it('skips manifest writes for standalone workspaces without project context', async () => {
     await registerProjectManagedWorkspace({
       workspacePath: '/workspaces/ws_0001',

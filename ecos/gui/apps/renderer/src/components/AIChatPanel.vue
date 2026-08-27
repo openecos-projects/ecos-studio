@@ -66,33 +66,30 @@
             </div>
           </header>
           <div class="chat-turn__body">
-            <!-- Confirmed plans stay above the run progress they produced -->
-            <AgentSessionContractPanels
-              mode="committed"
-              :choice-disabled="isRunning"
-              :is-last-turn="turnIndex === conversationTurns.length - 1"
-              :turn-id="turn.id"
-              v-bind="contractPanelBind"
-              @create-workspace="createWorkspaceFromAgent"
-              @setup-select="handleWorkspaceSetupChoice"
-              @rerun-select="handleWorkspaceRerunChoice"
-              @continue-select="handleWorkspaceContinueChoice"
-              @parameter-select="handleWorkspaceParameterChoice"
-              @signoff-select="handleWorkspaceSignoffChoice"
-              @signoff-path-input="handleWorkspaceSignoffPathInput"
-              @signoff-path-confirm="handleWorkspaceSignoffPathConfirm"
-              @signoff-path-cancel="handleWorkspaceSignoffPathCancel"
-            />
-            <MessageItem
-              v-for="msg in turn.responses"
-              :key="msg.id"
-              :message="msg"
-              :choice-interactive="msg.choice?.promptId === activeChoicePromptId"
-              :choice-disabled="isRunning"
-              @img-load="onImageLoad"
-              @choice="handleMessageChoice"
-              class="message-item w-full max-w-full min-w-0"
-            />
+            <template v-for="msg in turn.responses" :key="msg.id">
+              <div
+                v-if="isAnsweredInteraction(msg)"
+                class="interaction-receipt"
+                :aria-label="`${msg.interaction?.title}: ${msg.interactionAnswer}`"
+              >
+                <i class="ri-check-line" aria-hidden="true"></i>
+                <span class="interaction-receipt__question">{{ msg.interaction?.title }}</span>
+                <strong class="interaction-receipt__answer">{{ msg.interactionAnswer }}</strong>
+              </div>
+              <MessageItem
+                v-else-if="isVisibleResponse(msg)"
+                :message="msg"
+                @img-load="onImageLoad"
+                class="message-item w-full max-w-full min-w-0"
+              />
+              <AgentSessionContractPanels
+                v-if="isContractAnchorMessage(msg.id)"
+                mode="committed"
+                :message-id="msg.id"
+                v-bind="contractPanelBind"
+                @create-workspace="createWorkspaceFromAgent"
+              />
+            </template>
             <div
               v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
               class="agent-pending"
@@ -108,19 +105,9 @@
             <AgentSessionContractPanels
               v-if="turnIndex === conversationTurns.length - 1"
               mode="awaiting"
-              :choice-disabled="isRunning"
               :is-last-turn="true"
-              :turn-id="turn.id"
               v-bind="contractPanelBind"
               @create-workspace="createWorkspaceFromAgent"
-              @setup-select="handleWorkspaceSetupChoice"
-              @rerun-select="handleWorkspaceRerunChoice"
-              @continue-select="handleWorkspaceContinueChoice"
-              @parameter-select="handleWorkspaceParameterChoice"
-              @signoff-select="handleWorkspaceSignoffChoice"
-              @signoff-path-input="handleWorkspaceSignoffPathInput"
-              @signoff-path-confirm="handleWorkspaceSignoffPathConfirm"
-              @signoff-path-cancel="handleWorkspaceSignoffPathCancel"
             />
           </div>
         </section>
@@ -128,6 +115,60 @@
     </div>
 
     <div class="composer-footer">
+      <details
+        v-if="pendingInteraction"
+        ref="interactionDockRef"
+        class="interaction-dock"
+        :open="interactionExpanded"
+        @toggle="syncInteractionExpanded"
+      >
+        <summary class="interaction-dock__summary">
+          <i
+            class="ri-question-line interaction-dock__summary-icon"
+            aria-hidden="true"
+          ></i>
+          <span class="interaction-dock__summary-copy">
+            <strong>{{ pendingInteraction.title }}</strong>
+            <span>Waiting for your input</span>
+          </span>
+          <i
+            class="ri-arrow-down-s-line interaction-dock__summary-chevron"
+            aria-hidden="true"
+          ></i>
+        </summary>
+        <div class="interaction-dock__content custom-scrollbar">
+          <AgentInteractionCard
+            ref="interactionCardRef"
+            :interaction="pendingInteraction"
+            :disabled="isRunning"
+            @browse-rtl="browseInteractionRtl"
+            @undo="undoLastInteraction"
+            @answer="
+              handleInteraction(
+                pendingInteraction.requestId,
+                pendingInteraction.kind,
+                $event,
+              )
+            "
+          />
+        </div>
+      </details>
+      <div
+        v-else-if="undoInteraction && !isRunning"
+        ref="interactionDockRef"
+        class="interaction-dock custom-scrollbar"
+      >
+        <button
+          type="button"
+          class="interaction-undo"
+          aria-label="Undo last selection"
+          :disabled="isRunning"
+          @click="undoLastInteraction"
+        >
+          <i class="ri-arrow-go-back-line" aria-hidden="true"></i>
+          <span>Undo selection</span>
+        </button>
+      </div>
       <p class="composer-sr-status" role="status" aria-live="polite">
         {{ statusLabel }}
       </p>
@@ -198,16 +239,15 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import type {
-  DesktopAgentChoice,
-  DesktopAgentChoiceOption,
   DesktopAgentEvent,
+  DesktopAgentInteractionRequest,
   DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
-import { joinLocalPath } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import AgentInteractionCard from './AgentInteractionCard.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
 import AgentSessionContractPanels from './AgentSessionContractPanels.vue'
@@ -218,12 +258,16 @@ import {
   navigateInputHistory,
   removeAgentSessionUi,
   resetInputHistoryNavigation,
-  type AgentContractSurface,
   type PendingGuiAction,
 } from './agentSessionUi'
-import { choiceSelectionText } from './agentChoiceDisplay'
 import { displayAgentContractTitle } from './agentContractDisplay'
-import { groupMessagesIntoTurns } from './chatTurns'
+import {
+  describeInteractionAnswer,
+  groupMessagesIntoTurns,
+  pendingInteractionPresentation,
+  type InteractionAnswer,
+} from './chatTurns'
+import type { Message } from '../types'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
@@ -263,6 +307,17 @@ const codexSetupBusy = ref(false)
 let unsubscribeCodexProgress: (() => void) | null = null
 const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(agentShell)
 const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
+const interactionPresentation = computed(() =>
+  pendingInteractionPresentation(messages.value),
+)
+const interactionCompanionIds = computed(
+  () =>
+    new Set(
+      messages.value
+        .map((message) => message.interactionCompanionId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+)
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 const router = useRouter()
 const route = useRoute()
@@ -293,6 +348,7 @@ const agentFlowProgress = useAgentFlowProgress(
 )
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
+const interactionDockRef = ref<HTMLElement | null>(null)
 const agentSessionId = computed({
   get: () => sharedSessionId.value,
   set: (value: string | null) => agentShell.setSessionId(value),
@@ -377,7 +433,6 @@ const isWorkspaceSignoffPending = computed({
 })
 const workspaceSetupContract = computed(() => activeUi.value.workspaceSetupContract)
 const workspaceSetupMessage = computed(() => activeUi.value.workspaceSetupMessage)
-const workspaceSetupChoice = computed(() => activeUi.value.workspaceSetupChoice)
 const workspaceSetupAnsweredOptionId = computed(
   () => activeUi.value.workspaceSetupAnsweredOptionId,
 )
@@ -389,13 +444,11 @@ const workspaceCreateSetupId = computed({
 })
 const workspaceRerunContract = computed(() => activeUi.value.workspaceRerunContract)
 const workspaceRerunMessage = computed(() => activeUi.value.workspaceRerunMessage)
-const workspaceRerunChoice = computed(() => activeUi.value.workspaceRerunChoice)
 const workspaceRerunAnsweredOptionId = computed(
   () => activeUi.value.workspaceRerunAnsweredOptionId,
 )
 const workspaceContinueContract = computed(() => activeUi.value.workspaceContinueContract)
 const workspaceContinueMessage = computed(() => activeUi.value.workspaceContinueMessage)
-const workspaceContinueChoice = computed(() => activeUi.value.workspaceContinueChoice)
 const workspaceContinueAnsweredOptionId = computed(
   () => activeUi.value.workspaceContinueAnsweredOptionId,
 )
@@ -403,21 +456,15 @@ const workspaceParameterContract = computed(
   () => activeUi.value.workspaceParameterContract,
 )
 const workspaceParameterMessage = computed(() => activeUi.value.workspaceParameterMessage)
-const workspaceParameterChoice = computed(() => activeUi.value.workspaceParameterChoice)
 const workspaceParameterAnsweredOptionId = computed(
   () => activeUi.value.workspaceParameterAnsweredOptionId,
 )
-const workspaceSignoffChoice = computed(() => activeUi.value.workspaceSignoffChoice)
 const workspaceSignoffAnsweredOptionId = computed(
   () => activeUi.value.workspaceSignoffAnsweredOptionId,
 )
 const workspaceSignoffOutputPath = computed(
   () => activeUi.value.workspaceSignoffOutputPath,
 )
-const workspaceSignoffPathInputVisible = computed(
-  () => activeUi.value.workspaceSignoffPathInputVisible,
-)
-const lastContractSurface = computed(() => activeUi.value.lastContractSurface)
 const workspaceRerunRows = computed<[string, string][]>(
   () =>
     workspaceRerunContract.value?.fields.map(({ label, value }) => [label, value]) ?? [],
@@ -432,53 +479,58 @@ const workspaceParameterRows = computed<[string, string][]>(
     workspaceParameterContract.value?.fields.map(({ label, value }) => [label, value]) ??
     [],
 )
+const workspaceSignoffRows = computed<[string, string][]>(() => {
+  const review = activeUi.value.workspaceSignoffReview
+  if (!review) return []
+  return [
+    ['Overall', review.status],
+    ...review.groups.map(
+      (group): [string, string] => [
+        group.label,
+        `${group.available}/${group.expected} · ${group.summary}`,
+      ],
+    ),
+    ...review.risks.map(
+      (risk): [string, string] => [
+        `${risk.severity === 'blocked' ? 'Blocked' : 'Warning'}: ${risk.title}`,
+        risk.summary,
+      ],
+    ),
+  ]
+})
 const workspaceRerunExecutionState = computed(() =>
   isWorkspaceRerunPending.value
     ? 'Running'
     : workspaceRerunAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceRerunChoice.value,
-          workspaceRerunAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
 const workspaceContinueExecutionState = computed(() =>
   isWorkspaceContinuePending.value
     ? 'Running'
     : workspaceContinueAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceContinueChoice.value,
-          workspaceContinueAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
 const workspaceParameterExecutionState = computed(() =>
   isWorkspaceParameterPending.value
     ? 'Saving'
     : workspaceParameterAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceParameterChoice.value,
-          workspaceParameterAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
-const workspaceSignoffExecutionState = computed(() =>
-  workspaceSignoffAnsweredOptionId.value ? 'Confirmed' : 'Review',
-)
-
-function contractAnswerState(
-  choice: DesktopAgentChoice | undefined,
-  answeredOptionId: string,
-): string {
-  const option = choice?.options.find((candidate) => candidate.id === answeredOptionId)
-  if (option?.value === '2' || /cancel/i.test(option?.label ?? '')) return 'Cancelled'
-  return 'Confirmed'
-}
+const workspaceSignoffExecutionState = computed(() => {
+  if (isWorkspaceSignoffPending.value) {
+    return activeUi.value.workspaceSignoffReview ? 'Exporting' : 'Checking'
+  }
+  if (workspaceSignoffAnsweredOptionId.value) return 'Confirmed'
+  const status = activeUi.value.workspaceSignoffReview?.status
+  return status ? `${status[0]?.toUpperCase()}${status.slice(1)}` : 'Review'
+})
 
 const contractPanelBind = computed(() => ({
   workspaceContinueAnsweredOptionId: workspaceContinueAnsweredOptionId.value,
-  workspaceContinueAnchorTurnId: activeUi.value.workspaceContinueAnchorTurnId,
-  workspaceContinueChoice: workspaceContinueChoice.value,
+  workspaceContinueAnchorMessageId: activeUi.value.workspaceContinueAnchorMessageId,
   workspaceContinueExecutionState: workspaceContinueExecutionState.value,
   workspaceContinueMessage: workspaceContinueMessage.value,
   workspaceContinueRows: workspaceContinueRows.value,
@@ -487,8 +539,7 @@ const contractPanelBind = computed(() => ({
   ),
   workspaceCreateSetupId: workspaceCreateSetupId.value,
   workspaceParameterAnsweredOptionId: workspaceParameterAnsweredOptionId.value,
-  workspaceParameterAnchorTurnId: activeUi.value.workspaceParameterAnchorTurnId,
-  workspaceParameterChoice: workspaceParameterChoice.value,
+  workspaceParameterAnchorMessageId: activeUi.value.workspaceParameterAnchorMessageId,
   workspaceParameterExecutionState: workspaceParameterExecutionState.value,
   workspaceParameterMessage: workspaceParameterMessage.value,
   workspaceParameterRows: workspaceParameterRows.value,
@@ -496,8 +547,7 @@ const contractPanelBind = computed(() => ({
     workspaceParameterContract.value?.title ?? '',
   ),
   workspaceRerunAnsweredOptionId: workspaceRerunAnsweredOptionId.value,
-  workspaceRerunAnchorTurnId: activeUi.value.workspaceRerunAnchorTurnId,
-  workspaceRerunChoice: workspaceRerunChoice.value,
+  workspaceRerunAnchorMessageId: activeUi.value.workspaceRerunAnchorMessageId,
   workspaceRerunExecutionState: workspaceRerunExecutionState.value,
   workspaceRerunMessage: workspaceRerunMessage.value,
   workspaceRerunRows: workspaceRerunRows.value,
@@ -505,15 +555,14 @@ const contractPanelBind = computed(() => ({
     workspaceRerunContract.value?.title ?? '',
   ),
   workspaceSignoffAnsweredOptionId: workspaceSignoffAnsweredOptionId.value,
-  workspaceSignoffAnchorTurnId: activeUi.value.workspaceSignoffAnchorTurnId,
-  workspaceSignoffChoice: workspaceSignoffChoice.value,
+  workspaceSignoffAnchorMessageId: activeUi.value.workspaceSignoffAnchorMessageId,
   workspaceSignoffExecutionState: workspaceSignoffExecutionState.value,
   workspaceSignoffOutputPath: workspaceSignoffOutputPath.value,
-  workspaceSignoffPathInputVisible: workspaceSignoffPathInputVisible.value,
-  workspaceSignoffTitle: workspaceSignoffChoice.value?.title ?? 'Signoff package export',
+  workspaceSignoffRows: workspaceSignoffRows.value,
+  workspaceSignoffTitle:
+    activeUi.value.lastContractSurface === 'signoff' ? 'Signoff package export' : '',
   workspaceSetupAnsweredOptionId: workspaceSetupAnsweredOptionId.value,
-  workspaceSetupAnchorTurnId: activeUi.value.workspaceSetupAnchorTurnId,
-  workspaceSetupChoice: workspaceSetupChoice.value,
+  workspaceSetupAnchorMessageId: activeUi.value.workspaceSetupAnchorMessageId,
   workspaceSetupContract: workspaceSetupContract.value,
   workspaceSetupMessage: workspaceSetupMessage.value,
 }))
@@ -528,57 +577,77 @@ const isRunning = computed(
     isWorkspaceSignoffPending.value ||
     agentRunStatus.value === 'running',
 )
-const pendingMessageChoice = computed(
-  () =>
-    [...messages.value]
-      .reverse()
-      .find((message) => message.choice && !message.answeredOptionId)?.choice,
+const pendingInteraction = computed(() => interactionPresentation.value.interaction)
+const undoInteraction = computed(() => activeUi.value.undoInteraction)
+const interactionCardRef = ref<{
+  setFieldValue(fieldId: string, value: string): void
+} | null>(null)
+const interactionExpanded = ref(false)
+
+watch(
+  () => agentSessionId.value,
+  (sessionId, previousSessionId) => {
+    if (sessionId !== previousSessionId) interactionExpanded.value = false
+  },
 )
-const activeChoicePromptId = computed(() => pendingMessageChoice.value?.promptId)
-const activeChoice = computed(
+
+function syncInteractionExpanded(event: Event): void {
+  interactionExpanded.value = (event.currentTarget as HTMLDetailsElement).open
+  void nextTick(bindInteractionDockObserver)
+}
+
+function isVisibleResponse(message: Message): boolean {
+  return message.type !== 'interaction' && !interactionCompanionIds.value.has(message.id)
+}
+
+function isAnsweredInteraction(message: Message): boolean {
+  return (
+    message.type === 'interaction' &&
+    message.interaction?.status === 'answered' &&
+    Boolean(message.interactionAnswer)
+  )
+}
+
+function isContractAnchorMessage(messageId: string): boolean {
+  const ui = activeUi.value
+  return [
+    ui.workspaceSetupAnchorMessageId,
+    ui.workspaceRerunAnchorMessageId,
+    ui.workspaceContinueAnchorMessageId,
+    ui.workspaceParameterAnchorMessageId,
+    ui.workspaceSignoffAnchorMessageId,
+  ].includes(messageId)
+}
+const pendingInteractionAcceptsText = computed(() => {
+  const interaction = pendingInteraction.value
+  if (!interaction) return false
+  return interaction.kind !== 'form'
+})
+const composerLocked = computed(
   () =>
-    (lastContractSurface.value === 'setup' && !workspaceSetupAnsweredOptionId.value
-      ? workspaceSetupChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'rerun' && !workspaceRerunAnsweredOptionId.value
-      ? workspaceRerunChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'continue' && !workspaceContinueAnsweredOptionId.value
-      ? workspaceContinueChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'parameter' &&
-    !workspaceParameterAnsweredOptionId.value
-      ? workspaceParameterChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'signoff' && !workspaceSignoffAnsweredOptionId.value
-      ? workspaceSignoffChoice.value
-      : undefined) ??
-    pendingMessageChoice.value,
+    isInterruptPending.value ||
+    !agentSessionId.value ||
+    (Boolean(pendingInteraction.value) && !pendingInteractionAcceptsText.value),
 )
-const composerLocked = computed(() => isInterruptPending.value || !agentSessionId.value)
 const canSubmit = computed(
   () =>
     Boolean(agentSessionId.value) &&
     !isAgentConnecting.value &&
     !composerLocked.value &&
-    (Boolean(inputValue.value.trim()) ||
-      (!isRunning.value && Boolean(activeChoice.value?.allowFreeText))),
+    Boolean(inputValue.value.trim()),
 )
 const composerPlaceholder = computed(() => {
   if (isAgentConnecting.value) return 'Connecting…'
   if (!agentSessionId.value) return 'Unavailable'
+  if (pendingInteraction.value) return 'Ask anything or reply…'
   if (isRunning.value) return 'Add a follow-up…'
-  if (activeChoice.value?.allowFreeText && activeChoice.value.variant === 'buttons') {
-    return 'Enter a value, or choose above'
-  }
-  if (activeChoice.value) return 'Ask anything, or choose above'
   return 'Ask anything…'
 })
 const statusLabel = computed(() => {
   if (isAgentConnecting.value) return 'Connecting'
   if (queuedMessage.value) return 'Agent is working, 1 message queued'
   if (isRunning.value) return isInterruptPending.value ? 'Stopping' : 'Agent is working'
-  if (agentRunStatus.value === 'awaiting_choice') return 'Waiting for your choice'
+  if (agentRunStatus.value === 'awaiting_interaction') return 'Waiting for your input'
   if (agentRunStatus.value === 'interrupted') return 'Interrupted'
   if (!agentSessionId.value) return 'Agent unavailable'
   return 'Ready'
@@ -606,15 +675,14 @@ const emptyStateSuggestions = computed(() => {
     ]
   }
   const suggestions = [
-    { label: 'Update workspace parameters', value: '1' },
-    { label: 'Rerun a completed stage', value: '2' },
-    { label: 'Continue unfinished flow', value: '3' },
+    { label: 'Rerun a completed stage', value: '1' },
+    { label: 'Continue unfinished flow', value: '2' },
   ]
   const projectRoot = activeTab.value?.projectRoot || queryString(route.query.projectRoot)
   if (projectRoot) {
     suggestions.push({
       label: 'Create another workspace in this project',
-      value: '4',
+      value: '3',
     })
   }
   return suggestions
@@ -637,6 +705,8 @@ onUnmounted(() => {
   agentFlowProgress.stop()
   scrollContentObserver?.disconnect()
   scrollContentObserver = undefined
+  interactionDockObserver?.disconnect()
+  interactionDockObserver = undefined
 })
 
 watch(
@@ -723,6 +793,39 @@ async function closeChatTab(id: string): Promise<void> {
   }
 }
 
+async function undoLastInteraction(): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const sessionId = agentSessionId.value
+  const interaction = pendingInteraction.value ?? undoInteraction.value
+  if (
+    !agent ||
+    !sessionId ||
+    !interaction ||
+    (pendingInteraction.value && !pendingInteraction.value.canUndo) ||
+    isAgentRequestPending.value
+  )
+    return
+  isAgentRequestPending.value = true
+  try {
+    const result = await agent.answerInteraction({
+      kind: interaction.kind,
+      providerId: AGENT_PROVIDER_ID,
+      requestId: interaction.requestId,
+      sessionId,
+      undo: true,
+    })
+    if (result.undoneRequestId) {
+      messageStore.rewindToInteraction(result.undoneRequestId, sessionId)
+      activeUi.value.undoInteraction = undefined
+    }
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+  } finally {
+    isAgentRequestPending.value = false
+    messageStore.finishStreamingMessages(sessionId)
+  }
+}
+
 async function startProviderSession(sessionId: string): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   const agent = desktopApi?.agent
@@ -742,7 +845,7 @@ async function startProviderSession(sessionId: string): Promise<void> {
       name: project.name,
       path: project.path,
     }))
-    await agent.startSession({
+    const response = await agent.startSession({
       providerId: AGENT_PROVIDER_ID,
       sessionId,
       mode: tab.mode,
@@ -750,6 +853,9 @@ async function startProviderSession(sessionId: string): Promise<void> {
       ...(tab.workspacePath ? { directory: tab.workspacePath } : {}),
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
     })
+    if (response.pendingInteraction) {
+      messageStore.addInteraction(response.pendingInteraction, undefined, sessionId)
+    }
     agentShell.markTabStarted(sessionId)
     codexSetupStatus.value = null
   } catch (error) {
@@ -973,6 +1079,7 @@ async function maybeRunPostCreateFlow(): Promise<void> {
       }
       await waitForRuntimeOperation(flowResult.operationId)
       const flow = await readWorkspaceFlowResourceApi()
+      ownerUi.workspaceCreateSetupId = undefined
       await reportWorkspaceCreationResult(
         handoff.setupId,
         'succeeded',
@@ -987,6 +1094,7 @@ async function maybeRunPostCreateFlow(): Promise<void> {
     }
   } catch (error) {
     const reason = agentErrorMessage(error)
+    ownerUi.workspaceCreateSetupId = undefined
     try {
       await reportWorkspaceCreationResult(
         handoff.setupId,
@@ -1024,9 +1132,8 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_rerun') {
       ui.workspaceRerunContract = event.contract
       ui.workspaceRerunMessage = event.text ?? ''
-      ui.workspaceRerunChoice = undefined
       ui.workspaceRerunAnsweredOptionId = ''
-      ui.workspaceRerunAnchorTurnId = undefined
+      ui.workspaceRerunAnchorMessageId = undefined
       ui.lastContractSurface = 'rerun'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1034,9 +1141,8 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_continue') {
       ui.workspaceContinueContract = event.contract
       ui.workspaceContinueMessage = event.text ?? ''
-      ui.workspaceContinueChoice = undefined
       ui.workspaceContinueAnsweredOptionId = ''
-      ui.workspaceContinueAnchorTurnId = undefined
+      ui.workspaceContinueAnchorMessageId = undefined
       ui.lastContractSurface = 'continue'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1044,9 +1150,8 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_parameter_update') {
       ui.workspaceParameterContract = event.contract
       ui.workspaceParameterMessage = event.text ?? ''
-      ui.workspaceParameterChoice = undefined
       ui.workspaceParameterAnsweredOptionId = ''
-      ui.workspaceParameterAnchorTurnId = undefined
+      ui.workspaceParameterAnchorMessageId = undefined
       ui.lastContractSurface = 'parameter'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1057,54 +1162,24 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   if (event.type === 'workspace_setup' && event.workspaceSetup) {
     ui.workspaceSetupContract = event.workspaceSetup
     ui.workspaceSetupMessage = event.text ?? ''
-    ui.workspaceSetupChoice = undefined
     ui.workspaceSetupAnsweredOptionId = ''
-    ui.workspaceSetupAnchorTurnId = undefined
+    ui.workspaceSetupAnchorMessageId = undefined
     ui.workspaceSetupStartedId = undefined
     ui.lastContractSurface = 'setup'
     if (isActive) scrollWorkspaceSetupIntoView()
     return
   }
-  if (event.type === 'choice' && event.choice) {
-    if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'setup') {
-      ui.workspaceSetupChoice = event.choice
-      ui.workspaceSetupAnsweredOptionId = ''
-    } else if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'rerun') {
-      ui.workspaceRerunChoice = event.choice
-      ui.workspaceRerunAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'continue'
-    ) {
-      ui.workspaceContinueChoice = event.choice
-      ui.workspaceContinueAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'parameter'
-    ) {
-      ui.workspaceParameterChoice = event.choice
-      ui.workspaceParameterAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'signoff'
-    ) {
-      ui.workspaceSignoffChoice = event.choice
-      ui.workspaceSignoffAnsweredOptionId = ''
-    } else {
-      if (event.choice.variant === 'list') {
-        ui.lastContractSurface = undefined
-        ui.workspaceSetupChoice = undefined
-        ui.workspaceRerunChoice = undefined
-        ui.workspaceContinueChoice = undefined
-        ui.workspaceParameterChoice = undefined
-        ui.workspaceSignoffChoice = undefined
-      }
-      messageStore.addChoice(event.choice, event.messageId, event.sessionId)
-    }
+  if (event.type === 'interaction' && event.interaction) {
+    messageStore.upsertAgentEvent(event)
     if (isActive) scrollWorkspaceSetupIntoView()
     return
   }
+  if (event.type === 'unsupported_interaction') {
+    messageStore.upsertAgentEvent(event)
+    return
+  }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
+    ui.undoInteraction = undefined
     ui.workspaceCreateSetupId = event.workspaceCreateSetupId
     return
   }
@@ -1113,6 +1188,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     event.workspaceRerun &&
     event.workspaceRerunToken
   ) {
+    ui.undoInteraction = undefined
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`,
@@ -1135,6 +1211,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_continue' && event.workspaceContinue) {
+    ui.undoInteraction = undefined
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? 'Continuing unfinished flow.',
@@ -1152,6 +1229,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_parameter_update' && event.workspaceParameterUpdate) {
+    ui.undoInteraction = undefined
     ui.pendingParameterUpdate = event.workspaceParameterUpdate
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
@@ -1170,13 +1248,12 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_signoff' && event.workspaceSignoff) {
+    ui.undoInteraction = undefined
     ui.lastContractSurface = 'signoff'
     if (event.workspaceSignoff.action === 'inspect') {
-      ui.workspaceSignoffChoice = undefined
       ui.workspaceSignoffAnsweredOptionId = ''
-      ui.workspaceSignoffAnchorTurnId = undefined
-      ui.workspaceSignoffOutputPath = ''
-      ui.workspaceSignoffPathInputVisible = false
+      ui.workspaceSignoffAnchorMessageId = undefined
+      ui.workspaceSignoffReview = undefined
     }
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
@@ -1226,6 +1303,26 @@ const NEAR_BOTTOM_THRESHOLD = 80
 /** Whether the viewport was pinned to the latest output before content grew. */
 const stickToBottom = ref(true)
 let scrollContentObserver: ResizeObserver | undefined
+let interactionDockObserver: ResizeObserver | undefined
+
+function bindInteractionDockObserver(): void {
+  interactionDockObserver?.disconnect()
+  const scroll = scrollContainerRef.value
+  const dock = interactionDockRef.value
+  const update = () => {
+    scroll?.style.setProperty(
+      '--interaction-overlay-height',
+      dock ? `${Math.ceil(dock.getBoundingClientRect().height + 8)}px` : '0px',
+    )
+    if (stickToBottom.value) scrollToBottom(false)
+  }
+  update()
+  if (!dock || typeof ResizeObserver === 'undefined') return
+  interactionDockObserver = new ResizeObserver(update)
+  interactionDockObserver.observe(dock)
+}
+
+watch(interactionDockRef, () => nextTick(bindInteractionDockObserver), { flush: 'post' })
 
 /**
  * 判断当前滚动位置是否接近底部
@@ -1330,6 +1427,13 @@ watch(
 const handleSubmit = async (): Promise<void> => {
   if (!canSubmit.value) return
   const message = inputValue.value.trim()
+  if (pendingInteraction.value) {
+    const interaction = pendingInteraction.value
+    inputValue.value = ''
+    resetInputHistory()
+    await handleInteractionText(interaction, message)
+    return
+  }
   if (isRunning.value) {
     if (message) queuedMessage.value = message
     inputValue.value = ''
@@ -1345,9 +1449,8 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isAgentRequestPending.value) return
 
-  // Any outbound user turn closes leftover choice cards so history cannot be replayed.
-  messageStore.dismissOpenChoices()
   if (addToHistory && message) messageStore.addMessage(message)
+  activeUi.value.undoInteraction = undefined
   inputValue.value = ''
   resetInputHistory()
   isAgentRequestPending.value = true
@@ -1365,112 +1468,123 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   }
 }
 
-function handleMessageChoice(promptId: string, option: DesktopAgentChoiceOption): void {
-  if (isRunning.value) return
-  if (activeChoicePromptId.value && activeChoicePromptId.value !== promptId) return
-  const message = messages.value.find(
-    (candidate) => candidate.choice?.promptId === promptId,
-  )
-  if (!message?.choice || !messageStore.answerChoice(message.choice.promptId, option))
-    return
-  void submitChoice(option)
-}
-
-function handleWorkspaceSetupChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceSetupAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceSetupAnsweredOptionId = option.id
-  void submitChoice(option, 'setup')
-}
-
-function handleWorkspaceRerunChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceRerunAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceRerunAnsweredOptionId = option.id
-  void submitChoice(option, 'rerun')
-}
-
-function handleWorkspaceContinueChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceContinueAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceContinueAnsweredOptionId = option.id
-  void submitChoice(option, 'continue')
-}
-
-function handleWorkspaceParameterChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceParameterAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceParameterAnsweredOptionId = option.id
-  void submitChoice(option, 'parameter')
-}
-
-function handleWorkspaceSignoffChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceSignoffAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  if (option.value === '1') {
-    activeUi.value.workspaceSignoffOutputPath ||= defaultSignoffOutputPath(
-      currentProject.value?.path ?? '',
-    )
-    activeUi.value.workspaceSignoffPathInputVisible = true
-    return
-  }
-  activeUi.value.workspaceSignoffAnsweredOptionId = option.id
-  void submitChoice(option, 'signoff')
-}
-
-function handleWorkspaceSignoffPathInput(path: string): void {
-  activeUi.value.workspaceSignoffOutputPath = path
-}
-
-function handleWorkspaceSignoffPathCancel(): void {
-  activeUi.value.workspaceSignoffPathInputVisible = false
-}
-
-function handleWorkspaceSignoffPathConfirm(): void {
-  const path = activeUi.value.workspaceSignoffOutputPath.trim()
-  const option = activeUi.value.workspaceSignoffChoice?.options.find(
-    (candidate) => candidate.value === '1',
-  )
-  if (!path || !option) return
-  activeUi.value.workspaceSignoffOutputPath = path
-  activeUi.value.workspaceSignoffPathInputVisible = false
-  activeUi.value.workspaceSignoffAnsweredOptionId = option.id
-  void submitChoice(option, 'signoff')
-}
-
-async function submitChoice(
-  option: DesktopAgentChoiceOption,
-  contractSurface?: AgentContractSurface,
+async function handleInteraction(
+  requestId: string,
+  kind: 'choice' | 'confirm' | 'form',
+  answer: InteractionAnswer,
+  displayAsMessage = false,
 ): Promise<void> {
-  messageStore.addMessage(choiceSelectionText(option))
-  const turns = conversationTurns.value
-  const turnId = turns[turns.length - 1]?.id
-  if (contractSurface && turnId) {
-    if (contractSurface === 'setup') activeUi.value.workspaceSetupAnchorTurnId = turnId
-    if (contractSurface === 'rerun') activeUi.value.workspaceRerunAnchorTurnId = turnId
-    if (contractSurface === 'continue')
-      activeUi.value.workspaceContinueAnchorTurnId = turnId
-    if (contractSurface === 'parameter')
-      activeUi.value.workspaceParameterAnchorTurnId = turnId
-    if (contractSurface === 'signoff')
-      activeUi.value.workspaceSignoffAnchorTurnId = turnId
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
+  const sessionId = agentSessionId.value
+  if (!agent || !sessionId || isAgentRequestPending.value || !isActiveGuiOwner(sessionId))
+    return
+  const interaction = messages.value.find(
+    (message) => message.interaction?.requestId === requestId,
+  )?.interaction
+  const textMessage = displayAsMessage && 'text' in answer ? answer.text.trim() : ''
+  if (
+    !interaction ||
+    !messageStore.answerInteraction(
+      requestId,
+      textMessage ? '' : describeInteractionAnswer(interaction, answer),
+    )
+  )
+    return
+  if (textMessage) messageStore.addMessage(textMessage)
+  isAgentRequestPending.value = true
+  try {
+    const request =
+      kind === 'form'
+        ? {
+            kind,
+            values: 'values' in answer ? answer.values : {},
+            providerId: AGENT_PROVIDER_ID,
+            requestId,
+            sessionId,
+          }
+        : {
+            kind,
+            ...('text' in answer
+              ? { text: answer.text }
+              : { optionId: 'optionId' in answer ? answer.optionId : '' }),
+            providerId: AGENT_PROVIDER_ID,
+            requestId,
+            sessionId,
+          }
+    const result = await agent.answerInteraction(request)
+    activeUi.value.undoInteraction = result.canUndo ? { kind, requestId } : undefined
+    markContractInteractionAnswered(sessionId, requestId)
+  } catch (error) {
+    messageStore.restoreInteraction(requestId)
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  } finally {
+    isAgentRequestPending.value = false
+    messageStore.finishStreamingMessages()
   }
-  await sendAgentMessage(option.value, false)
+}
+
+async function browseInteractionRtl(fieldId: string): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  if (!desktopApi) return
+  try {
+    const picked = await desktopApi.dialog.pickRtlSources({
+      multiple: false,
+      title: 'Choose RTL file',
+    })
+    const path = picked?.files[0]
+    if (path) interactionCardRef.value?.setFieldValue(fieldId, path)
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  }
+}
+
+async function handleInteractionText(
+  interaction: DesktopAgentInteractionRequest,
+  message: string,
+): Promise<void> {
+  if (!message || !pendingInteractionAcceptsText.value) return
+  if (interaction.kind === 'form' && interaction.interaction.kind === 'form') {
+    const field = interaction.interaction.fields[0]
+    if (!field || interaction.interaction.fields.length !== 1) return
+    await handleInteraction(interaction.requestId, interaction.kind, {
+      values: { [field.id]: message },
+    })
+    return
+  }
+  await handleInteraction(
+    interaction.requestId,
+    interaction.kind,
+    { text: message },
+    true,
+  )
+}
+
+function markContractInteractionAnswered(sessionId: string, requestId: string): void {
+  const ui = sessionUi(sessionId)
+  const anchorMessageId = messages.value.find(
+    (message) => message.interaction?.requestId === requestId,
+  )?.id
+  if (ui.lastContractSurface === 'setup') {
+    ui.workspaceSetupAnsweredOptionId = requestId
+    ui.workspaceSetupAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'rerun') {
+    ui.workspaceRerunAnsweredOptionId = requestId
+    ui.workspaceRerunAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'continue') {
+    ui.workspaceContinueAnsweredOptionId = requestId
+    ui.workspaceContinueAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'parameter') {
+    ui.workspaceParameterAnsweredOptionId = requestId
+    ui.workspaceParameterAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'signoff') {
+    ui.workspaceSignoffAnsweredOptionId = requestId
+    ui.workspaceSignoffAnchorMessageId = anchorMessageId
+  }
 }
 
 function sendSuggestion(suggestion: { label: string; value: string }): void {
@@ -1889,6 +2003,7 @@ async function executeWorkspaceSignoff(
     }
     if (contract.action === 'inspect') {
       const review = await desktopApi.ecc.workspace.inspectSignoff({ workspaceHandle })
+      ui.workspaceSignoffReview = review
       const blocked = review.risks
         .filter((risk) => risk.severity === 'blocked')
         .map((risk) => `${risk.title}: ${risk.summary}`)
@@ -1903,7 +2018,9 @@ async function executeWorkspaceSignoff(
       )
       return
     }
-    const outputPath = ui.workspaceSignoffOutputPath.trim()
+    const outputPath =
+      ui.workspaceSignoffOutputPath.trim() ||
+      `${normalizeWorkspaceRoot(currentProject.value?.path ?? '')}/signoff/signoff_package.tar.gz`
     if (!outputPath) throw new Error('Enter a signoff package output path.')
     const result = await desktopApi.ecc.workspace.exportSignoff({
       outputPath,
@@ -1949,11 +2066,6 @@ async function executeWorkspaceSignoff(
   } finally {
     ui.isWorkspaceSignoffPending = false
   }
-}
-
-function defaultSignoffOutputPath(workspacePath: string): string {
-  const workspace = normalizeWorkspaceRoot(workspacePath)
-  return workspace ? joinLocalPath(workspace, 'signoff/signoff_package.tar.gz') : ''
 }
 
 async function reportWorkspaceSignoffInspection(
@@ -2212,12 +2324,9 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 /* 消息容器约束 - 防止内容撑开父容器；勿设 overflow:hidden / contain，否则 sticky 用户节点失效 */
-/* Cursor light: centered conversation column; user is not a right-side bubble */
 .messages-container {
   box-sizing: border-box;
   width: 100%;
-  max-width: 44rem;
-  margin-inline: auto;
   padding-inline: 0.875rem;
 }
 
@@ -2229,23 +2338,24 @@ const handleKeyDown = (e: KeyboardEvent) => {
   position: sticky;
   top: 0;
   z-index: 5;
-  display: block;
+  display: flex;
+  justify-content: flex-end;
   margin: 0;
   padding: 0.625rem 0 0.375rem;
   background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
   backdrop-filter: blur(8px);
 }
 
-/* Cursor light: white card, centered in the column, text left-aligned */
 .chat-turn__user-inner {
   position: relative;
-  width: 100%;
+  width: fit-content;
+  max-width: min(82%, 52rem);
   min-width: 0;
-  padding: 0.75rem 0.875rem;
-  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
-  border-radius: 0.75rem;
-  background: var(--bg-primary);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  padding: 0.625rem 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
+  border-radius: 0.75rem 0.75rem 0.25rem 0.75rem;
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent-color) 8%, transparent);
 }
 
 .chat-turn__user-text {
@@ -2255,23 +2365,69 @@ const handleKeyDown = (e: KeyboardEvent) => {
   line-height: 1.5;
   text-align: left;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-/* Cursor light: agent reply is plain text in the centered column — no gray card */
+/* Keep each Agent response visually distinct from the surrounding transcript. */
 .chat-turn__body {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 0.5rem;
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  margin: 0.125rem 0 0.875rem;
-  padding: 0.25rem 0.125rem 0.5rem;
+  margin: 0.25rem 0 1rem;
+  padding: 0.375rem 0.125rem 0.625rem;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--text-primary);
+}
+
+.interaction-receipt {
+  display: grid;
+  grid-template-columns: 1rem minmax(8rem, 0.7fr) minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+  min-height: 2rem;
+  padding: 0.375rem 0.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 52%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.interaction-receipt > i {
+  color: var(--accent-color);
+}
+
+.interaction-receipt__question,
+.interaction-receipt__answer {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.interaction-receipt__question {
+  font-weight: 500;
+}
+
+.interaction-receipt__answer {
+  color: var(--text-primary);
+  font-weight: 550;
+}
+
+@media (max-width: 640px) {
+  .chat-turn__user-inner {
+    max-width: 92%;
+  }
+
+  .interaction-receipt {
+    grid-template-columns: 1rem minmax(0, 1fr);
+  }
+
+  .interaction-receipt__answer {
+    grid-column: 2;
+  }
 }
 
 .agent-pending {
@@ -2364,12 +2520,15 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 .agent-chat {
+  position: relative;
   min-height: 0;
   background: var(--bg-primary);
 }
 
 .agent-chat__scroll {
   flex: 1 1 auto;
+  padding-bottom: var(--interaction-overlay-height, 0px);
+  scroll-padding-bottom: var(--interaction-overlay-height, 0px);
 }
 
 .composer-footer {
@@ -2379,6 +2538,143 @@ const handleKeyDown = (e: KeyboardEvent) => {
   padding: 0.75rem 0.875rem 0.875rem;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
   background: color-mix(in srgb, var(--bg-primary) 94%, var(--bg-secondary));
+}
+
+.interaction-dock {
+  --interaction-dock-max-height: min(42vh, 28rem);
+
+  position: absolute;
+  right: 0.875rem;
+  bottom: 100%;
+  left: 0.875rem;
+  z-index: 8;
+  max-height: var(--interaction-dock-max-height);
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--bg-secondary) 52%, var(--bg-primary));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.interaction-dock[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.interaction-dock__summary {
+  display: flex;
+  min-height: 3rem;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  list-style: none;
+  flex: 0 0 auto;
+}
+
+.interaction-dock__summary::-webkit-details-marker {
+  display: none;
+}
+
+.interaction-dock__summary:hover {
+  background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+}
+
+.interaction-dock__summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 50%, transparent);
+  outline-offset: -2px;
+}
+
+.interaction-dock__summary-icon {
+  color: var(--accent-color);
+  font-size: 1rem;
+}
+
+.interaction-dock__summary-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.125rem;
+}
+
+.interaction-dock__summary-copy strong,
+.interaction-dock__summary-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.interaction-dock__summary-copy strong {
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.interaction-dock__summary-copy span {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+}
+
+.interaction-dock__summary-chevron {
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  transition: transform 160ms ease-out;
+}
+
+.interaction-dock[open] .interaction-dock__summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+}
+
+.interaction-dock[open] .interaction-dock__summary-chevron {
+  transform: rotate(180deg);
+}
+
+.interaction-dock__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: calc(var(--interaction-dock-max-height) - 3rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0.875rem;
+}
+
+.interaction-undo {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.interaction-dock > .interaction-undo {
+  margin: 0.25rem;
+}
+
+.interaction-undo:hover:not(:disabled),
+.interaction-undo:focus-visible {
+  border-color: color-mix(in srgb, var(--border-color) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 80%, var(--bg-secondary));
+  color: var(--text-primary);
+}
+
+.interaction-undo:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.interaction-undo:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .composer-sr-status {

@@ -107,23 +107,12 @@
       >
         {{ confirmationText }}
       </p>
-      <AgentChoiceCard
-        v-if="choice"
-        class="mt-4"
-        :answered-option-id="answeredOptionId"
-        :choice="choice"
-        :disabled="choiceDisabled"
-        embedded
-        @select="emit('select', $event)"
-      />
     </template>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { DesktopAgentChoice, DesktopAgentChoiceOption } from '@ecos-studio/shared'
-import AgentChoiceCard from './AgentChoiceCard.vue'
 
 const SUMMARY_KEYS = [
   'Target workspace',
@@ -139,8 +128,6 @@ const SUMMARY_KEYS = [
 const props = withDefaults(
   defineProps<{
     answeredOptionId?: string
-    choice?: DesktopAgentChoice
-    choiceDisabled?: boolean
     confirmationText?: string
     executionState: string
     rows: [string, string][]
@@ -149,16 +136,10 @@ const props = withDefaults(
   }>(),
   {
     answeredOptionId: '',
-    choice: undefined,
-    choiceDisabled: false,
     confirmationText: '',
     summary: '',
   },
 )
-const emit = defineEmits<{
-  select: [option: DesktopAgentChoiceOption]
-}>()
-
 const detailsOpen = ref(false)
 const isCommitted = computed(() => Boolean(props.answeredOptionId))
 const summaryLine = computed(() => {

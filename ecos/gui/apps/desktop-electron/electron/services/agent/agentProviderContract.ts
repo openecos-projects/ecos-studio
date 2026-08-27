@@ -1,5 +1,7 @@
 import type {
   DesktopAgentEvent,
+  DesktopAgentInteractionAnswerRequest,
+  DesktopAgentInteractionAnswerResponse,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
   DesktopAgentProviderRequest,
@@ -22,6 +24,9 @@ export interface AgentProviderRuntime {
   sendMessage(
     request: DesktopAgentSendMessageRequest,
   ): Promise<DesktopAgentSendMessageResponse>
+  answerInteraction(
+    request: DesktopAgentInteractionAnswerRequest,
+  ): Promise<DesktopAgentInteractionAnswerResponse>
   interrupt(request?: DesktopAgentProviderRequest): Promise<void>
   getStatus(request?: DesktopAgentProviderRequest): Promise<DesktopAgentStatus>
   setMode(request: DesktopAgentSetModeRequest): Promise<DesktopAgentStatus>

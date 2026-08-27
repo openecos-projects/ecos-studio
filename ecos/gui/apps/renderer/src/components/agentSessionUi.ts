@@ -1,8 +1,9 @@
 import { reactive } from 'vue'
 import type {
-  DesktopAgentChoice,
   DesktopAgentEvent,
+  DesktopAgentInteractionRequest,
   DesktopAgentRunStatus,
+  EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
 
 export type AgentContractSurface =
@@ -45,33 +46,29 @@ export interface AgentSessionUiState {
   isWorkspaceContinuePending: boolean
   isWorkspaceParameterPending: boolean
   isWorkspaceSignoffPending: boolean
+  undoInteraction?: Pick<DesktopAgentInteractionRequest, 'kind' | 'requestId'>
   workspaceSetupContract?: DesktopAgentEvent['workspaceSetup']
   workspaceSetupMessage: string
-  workspaceSetupChoice?: DesktopAgentChoice
   workspaceSetupAnsweredOptionId: string
-  workspaceSetupAnchorTurnId?: string
+  workspaceSetupAnchorMessageId?: string
   workspaceSetupStartedId?: string
   workspaceCreateSetupId?: string
   workspaceRerunContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceRerunMessage: string
-  workspaceRerunChoice?: DesktopAgentChoice
   workspaceRerunAnsweredOptionId: string
-  workspaceRerunAnchorTurnId?: string
+  workspaceRerunAnchorMessageId?: string
   workspaceContinueContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceContinueMessage: string
-  workspaceContinueChoice?: DesktopAgentChoice
   workspaceContinueAnsweredOptionId: string
-  workspaceContinueAnchorTurnId?: string
+  workspaceContinueAnchorMessageId?: string
   workspaceParameterContract?: NonNullable<DesktopAgentEvent['contract']>
   workspaceParameterMessage: string
-  workspaceParameterChoice?: DesktopAgentChoice
   workspaceParameterAnsweredOptionId: string
-  workspaceParameterAnchorTurnId?: string
-  workspaceSignoffChoice?: DesktopAgentChoice
+  workspaceParameterAnchorMessageId?: string
   workspaceSignoffAnsweredOptionId: string
-  workspaceSignoffAnchorTurnId?: string
+  workspaceSignoffAnchorMessageId?: string
   workspaceSignoffOutputPath: string
-  workspaceSignoffPathInputVisible: boolean
+  workspaceSignoffReview?: EccWorkspaceInspectSignoffResult
   pendingParameterUpdate?: NonNullable<DesktopAgentEvent['workspaceParameterUpdate']>
   lastContractSurface?: AgentContractSurface
   pendingGuiAction?: PendingGuiAction
@@ -101,7 +98,6 @@ export function createAgentSessionUiState(): AgentSessionUiState {
     workspaceParameterAnsweredOptionId: '',
     workspaceSignoffAnsweredOptionId: '',
     workspaceSignoffOutputPath: '',
-    workspaceSignoffPathInputVisible: false,
   }
 }
 

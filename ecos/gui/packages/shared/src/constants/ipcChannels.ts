@@ -125,6 +125,7 @@ export const desktopApiIpcChannels = {
   agentStart: 'agent:start',
   agentStartSession: 'agent:start-session',
   agentSendMessage: 'agent:send-message',
+  agentAnswerInteraction: 'agent:answer-interaction',
   agentInterrupt: 'agent:interrupt',
   agentCodexGetStatus: 'agent:codex-get-status',
   agentCodexInstall: 'agent:codex-install',

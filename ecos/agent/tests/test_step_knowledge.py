@@ -204,6 +204,7 @@ def test_provider_answers_cts_question_without_changing_operation_state() -> Non
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
+    provider.sessions[session_id].pending_interaction = None
 
     provider.send_message({"sessionId": session_id, "message": "CTS stage execution"})
 
@@ -217,6 +218,7 @@ def test_short_stage_acronyms_do_not_match_an_operation_request() -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
+    provider.sessions[session_id].pending_interaction = None
 
     provider.send_message({"sessionId": session_id, "message": "start the flow"})
 

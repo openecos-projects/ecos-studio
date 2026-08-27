@@ -1,6 +1,6 @@
 import type {
   DesignTool,
-  DesktopAgentChoice,
+  DesktopAgentInteractionRequest,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
   WorkspaceStatus as SharedWorkspaceStatus,
@@ -44,7 +44,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'info' | 'map' | 'choice' | 'tool'
+  type?: 'text' | 'image' | 'info' | 'map' | 'interaction' | 'tool'
   /** Ephemeral report/layout content rendered by the workspace GUI. */
   isGuiArtifact?: boolean
   status?: 'loading' | 'done' | 'error'
@@ -57,8 +57,10 @@ export interface Message {
   }
   infoData?: InfoData
   mapData?: MapData
-  choice?: DesktopAgentChoice
-  answeredOptionId?: string
+  interaction?: DesktopAgentInteractionRequest
+  interactionAnswered?: boolean
+  interactionAnswer?: string
+  interactionCompanionId?: string
 }
 
 export interface Thumbnail {

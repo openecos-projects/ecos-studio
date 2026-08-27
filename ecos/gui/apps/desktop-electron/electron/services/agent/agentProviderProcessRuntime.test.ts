@@ -264,7 +264,7 @@ describe('AgentProviderProcessRuntime', () => {
     )
   })
 
-  it('forwards structured choice, status, and streaming fields', () => {
+  it('forwards structured interactions, status, and streaming fields', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
       manifest: {
@@ -284,38 +284,49 @@ describe('AgentProviderProcessRuntime', () => {
       'data',
       `${JSON.stringify({
         event: {
-          choice: {
-            promptId: 'confirm-1',
+          interaction: {
+            interaction: {
+              kind: 'choice',
+              options: [
+                { id: 'confirm-yes', label: 'Confirm' },
+                { id: 'confirm-no', label: 'Cancel' },
+              ],
+              variant: 'buttons',
+            },
+            kind: 'choice',
+            purpose: 'execution',
+            requestId: 'confirm-1',
+            schema_version: 'flow-agent.interaction_request.v1',
+            status: 'pending',
             title: 'Confirm execution',
-            options: [
-              { id: 'confirm-yes', label: 'Confirm', value: '1' },
-              { id: 'confirm-no', label: 'Cancel', value: '2' },
-            ],
-            variant: 'buttons',
           },
           delta: 'working',
           messageId: 'message-1',
           sessionId: 'session-1',
-          status: 'awaiting_choice',
-          type: 'choice',
+          status: 'awaiting_interaction',
+          type: 'interaction',
         },
         type: 'event',
       })}\n`,
     )
 
     expect(listener).toHaveBeenCalledWith({
-      choice: expect.objectContaining({
-        options: expect.arrayContaining([
-          { id: 'confirm-yes', label: 'Confirm', value: '1' },
-        ]),
-        variant: 'buttons',
+      interaction: expect.objectContaining({
+        interaction: expect.objectContaining({
+          options: expect.arrayContaining([{ id: 'confirm-yes', label: 'Confirm' }]),
+          variant: 'buttons',
+        }),
+        kind: 'choice',
+        purpose: 'execution',
+        requestId: 'confirm-1',
+        status: 'pending',
       }),
       delta: 'working',
       messageId: 'message-1',
       providerId: 'local',
       sessionId: 'session-1',
-      status: 'awaiting_choice',
-      type: 'choice',
+      status: 'awaiting_interaction',
+      type: 'interaction',
     })
   })
 
@@ -347,6 +358,73 @@ describe('AgentProviderProcessRuntime', () => {
     )
 
     expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('preserves select defaults and required state in interaction forms', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    const child = harness.children[0]
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          interaction: {
+            interaction: {
+              fields: [
+                {
+                  defaultValue: 'project-b',
+                  id: 'project',
+                  kind: 'select',
+                  label: 'Project',
+                  options: [
+                    { id: 'project-a', label: 'Project A' },
+                    { id: 'project-b', label: 'Project B' },
+                  ],
+                  required: true,
+                },
+              ],
+              kind: 'form',
+            },
+            kind: 'form',
+            purpose: 'execution',
+            requestId: 'form-1',
+            schema_version: 'flow-agent.interaction_request.v1',
+            status: 'pending',
+            title: 'Choose a project',
+          },
+          type: 'interaction',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: expect.objectContaining({
+          interaction: expect.objectContaining({
+            fields: [
+              expect.objectContaining({
+                defaultValue: 'project-b',
+                required: true,
+              }),
+            ],
+          }),
+        }),
+      }),
+    )
   })
 
   it('forwards execution contracts with every resolved parameter field', () => {

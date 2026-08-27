@@ -133,8 +133,10 @@ workspace 中重跑。原始 workspace 不会被覆盖。
 Name 与 Design Name（可默认继承当前设计名），其余 setup 与首页相同；创建成功后
 仍自动 `runAllFlow` 并打开新 workspace。
 
-选择卡作答后会保留“已选择”状态且不可重复点击。底层仍发送兼容状态机的选项值，
-但用户不需要手动输入数字。
+交互卡作答后会保留“已选择”状态且不可重复点击。GUI 通过专用 answer channel
+提交后端生成的 `requestId`：点击选项提交 `optionId`，点击“其他”则在原选项位置输入
+并提交受控的 `text` 回答；表单一次性提交经过字段约束的 `values`。用户不需要手动输入状态机数字
+或执行值。
 
 ## Codex CLI 在哪里发挥作用
 

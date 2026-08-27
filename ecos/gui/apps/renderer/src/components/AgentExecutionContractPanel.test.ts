@@ -17,11 +17,10 @@ describe('AgentExecutionContractPanel', () => {
     )
   })
 
-  it('embeds the shared confirm and cancel choice and locks it after submission', () => {
-    expect(source).toContain('AgentChoiceCard')
-    expect(source).toContain(':answered-option-id="answeredOptionId"')
-    expect(source).toContain(':disabled="choiceDisabled"')
-    expect(source).toContain('@select="emit(\'select\', $event)"')
+  it('leaves interaction answers to the shared interaction renderer', () => {
+    expect(source).toContain('answeredOptionId?: string')
+    expect(source).not.toContain('AgentChoiceCard')
+    expect(source).not.toContain('choiceDisabled')
   })
 
   it('keeps compact confirm cards without a key-value table when fields are empty', () => {

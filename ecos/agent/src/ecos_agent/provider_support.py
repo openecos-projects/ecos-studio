@@ -640,7 +640,6 @@ def _prompt_for_phase(session: Any) -> str:
         ),
         "workspace_design": design_name_prompt(
             session.language,
-            session.inherited_design_name or session.workspace_inputs.project_name or "",
         ),
         "workspace_flow_end": flow_end_prompt(session.language),
         "workspace_rtl": rtl_prompt(session.language, _recommended_path(session, "rtl")),
@@ -707,7 +706,7 @@ def _keyword_operation_choice(
     if mode == "workspace":
         candidates: tuple[tuple[str, tuple[str, ...]], ...] = (
             (
-                "1",
+                "parameter",
                 (
                     "parameter",
                     "参数",
@@ -718,10 +717,10 @@ def _keyword_operation_choice(
                     "utilitization",
                 ),
             ),
-            ("2", ("rerun", "重跑", "re-run", "re run")),
-            ("3", ("continue", "继续", "unfinished")),
+            ("1", ("rerun", "重跑", "re-run", "re run")),
+            ("2", ("continue", "继续", "unfinished")),
             (
-                "4",
+                "3",
                 (
                     "another workspace",
                     "新建 workspace",
@@ -731,7 +730,7 @@ def _keyword_operation_choice(
                 ),
             ),
             (
-                "5" if "5" in allowed_ids else "4",
+                "4" if "4" in allowed_ids else "3",
                 ("optimiz", "优化", "routability search", "tuning"),
             ),
         )
@@ -762,7 +761,8 @@ def _keyword_operation_choice(
     matches = [
         operation_id
         for operation_id, keys in candidates
-        if operation_id in allowed_ids and any(key in text for key in keys)
+        if (operation_id == "parameter" or operation_id in allowed_ids)
+        and any(key in text for key in keys)
     ]
     return matches[0] if len(matches) == 1 else None
 

@@ -48,16 +48,14 @@ def welcome_message(
         return (
             "ECOS Agent is bound to the open workspace."
             f"{location}\n\n"
-            f"It can {capabilities}.\n\n"
-            "Choose an operation below."
+            f"It can {capabilities}."
         )
     return (
         "ECOS Agent is a state-controlled, PPA-oriented design-flow agent. "
         "From the home screen it selects or creates a Project "
         "(directory with project.json), then creates a Workspace under that Project "
         "and runs a full ECC physical-design flow. It can also start a bounded optimization episode "
-        "from an existing baseline workspace completed through Harden.\n\n"
-        "Choose manual flow setup or bounded optimization below."
+        "from an existing baseline workspace completed through Harden."
     )
 
 
@@ -68,8 +66,8 @@ def operation_prompt(language: str) -> str:
 def home_ready_prompt(language: str) -> str:
     return _prompt(
         language,
-        "选择手工创建 Workspace，或为自动优化提供一个已完成的 baseline workspace。",
-        "Choose manual Workspace setup, or provide a completed baseline workspace for bounded optimization.",
+        "可从 RTL 快速运行 Flow、手工创建 Workspace，或为自动优化提供一个已完成的 baseline workspace。",
+        "Run a flow quickly from RTL, use manual Workspace setup, or provide a completed baseline workspace for bounded optimization.",
     )
 
 
@@ -178,8 +176,8 @@ def design_name_prompt(language: str, recommendation: str = "") -> str:
 def flow_end_prompt(language: str) -> str:
     return _prompt(
         language,
-        "选择 flow 的终止阶段。可执行全部步骤，或停在某一阶段。",
-        "Choose where the flow should stop. Run all steps, or end after a specific stage.",
+        "Flow 始终从 Synthesis 开始，并在所选阶段完成后停止。例如，选择 place 仅从 Synthesis 执行至 place；选择“执行全部步骤”则运行至 Harden。",
+        "The flow always starts at Synthesis and stops after the selected stage. For example, choosing place runs Synthesis through place only; Run all steps continues through Harden.",
     )
 
 
@@ -507,6 +505,14 @@ def home_ready_choice(language: str, prompt_id: str) -> dict[str, Any]:
                 ),
                 "2",
             ),
+            (
+                _prompt(
+                    language,
+                    "从 RTL 快速运行 Flow",
+                    "Run a flow from RTL (quick setup)",
+                ),
+                "3",
+            ),
         ),
     )
 
@@ -520,7 +526,6 @@ def operation_choice(
 ) -> dict[str, Any]:
     if mode == "workspace":
         options = [
-            _prompt(language, "修改当前 workspace 参数（只保存）", "Update workspace parameters (save only)"),
             _prompt(language, "从指定阶段重跑", "Rerun a specified stage"),
             _prompt(language, "继续未完成的 flow", "Continue unfinished flow"),
         ]
@@ -579,7 +584,7 @@ def optimization_started_message(language: str) -> str:
 
 
 def project_mode_choice(language: str, prompt_id: str) -> dict[str, Any]:
-    return _choice(
+    choice = _choice(
         prompt_id,
         _prompt(language, "选择 Project", "Choose a Project"),
         (
@@ -588,6 +593,8 @@ def project_mode_choice(language: str, prompt_id: str) -> dict[str, Any]:
         ),
         variant="list",
     )
+    choice["description"] = project_mode_prompt(language)
+    return choice
 
 
 def known_project_choice(
@@ -608,6 +615,11 @@ def known_project_choice(
             for index, (label, path) in enumerate(projects, 1)
         ],
         "allowFreeText": True,
+        "description": _prompt(
+            language,
+            "请选择已有 Project，或输入其他 Project 根目录。",
+            "Choose an existing Project, or enter another Project Root.",
+        ),
         "variant": "list",
     }
 
@@ -710,7 +722,7 @@ def optional_file_choice(
 
 
 def mpc_choice(language: str, prompt_id: str) -> dict[str, Any]:
-    return _choice(
+    choice = _choice(
         prompt_id,
         _prompt(language, "SoC-MPC 模板", "SoC-MPC template"),
         (
@@ -719,12 +731,18 @@ def mpc_choice(language: str, prompt_id: str) -> dict[str, Any]:
         ),
         variant="buttons",
     )
+    choice["description"] = _prompt(
+        language,
+        "SoC-MPC 模板提供顶层 die/core 尺寸、I/O 引脚和核心约束，帮助流程按选定的芯片模板进行布局；不使用则按普通 RTL-to-GDS 流程继续。",
+        "A SoC-MPC template provides top-level die/core geometry, I/O pins, and core constraints so the flow can use the selected chip template; without it, the flow continues as a standard RTL-to-GDS run.",
+    )
+    return choice
 
 
 def recommended_path_choice(
     language: str,
     prompt_id: str,
-    recommendation: str,
+    recommendation: str = "",
     *,
     field: str = "PDK",
 ) -> dict[str, Any]:
@@ -735,10 +753,9 @@ def recommended_path_choice(
         variant="buttons",
         allow_free_text=True,
         labeled_values=(
-            (
-                _prompt(language, "使用推荐路径", "Use recommended path"),
-                recommendation,
-            ),
+            ((_prompt(language, "使用推荐路径", "Use recommended path"), recommendation),)
+            if recommendation
+            else ()
         ),
     )
 
@@ -746,6 +763,14 @@ def recommended_path_choice(
 def default_value_choice(
     language: str, prompt_id: str, label: str, value: object
 ) -> dict[str, Any]:
+    if value == "":
+        return _choice(
+            prompt_id,
+            label,
+            (),
+            variant="buttons",
+            allow_free_text=True,
+        )
     return _choice(
         prompt_id,
         label,

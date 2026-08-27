@@ -191,6 +191,7 @@ def test_provider_answers_place_questions_without_changing_operation_state() -> 
         emit=events.append, chat_response_parser=answer_with_retrieved_knowledge
     )
     session_id = provider.start_session({"mode": "home"})["sessionId"]
+    provider.sessions[session_id].pending_interaction = None
 
     provider.send_message({"sessionId": session_id, "message": "RUDY指标是如何计算的？"})
 

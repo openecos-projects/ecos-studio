@@ -8,7 +8,7 @@ import {
 } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -56,6 +56,7 @@ import {
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
+  type DesktopAgentInteractionAnswerRequest,
   type DesktopAgentInterruptRequest,
   type DesktopAgentWorkspaceRerunContract,
   type DesktopAgentSendMessageRequest,
@@ -119,6 +120,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface DesktopBridgeServices {
+  agentQuickRunRoot?: string
   agentRuntimeService?: AgentProviderRuntime & {
     syncEnvironmentOverrides?(
       overrides: Record<string, string | undefined>,
@@ -702,7 +704,10 @@ export function registerIpc(
 
   const requireAgentSessionOwner = (
     sender: IpcMainInvokeEvent['sender'],
-    request: DesktopAgentInterruptRequest | DesktopAgentSendMessageRequest,
+    request:
+      | DesktopAgentInterruptRequest
+      | DesktopAgentSendMessageRequest
+      | DesktopAgentInteractionAnswerRequest,
   ): void => {
     const providerId = readAgentProviderId(request)
     const subscription = agentSessionSubscriptions.get(
@@ -2089,6 +2094,14 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
     const agentRequest = readAgentStartSessionRequest(request)
+    if (agentRequest.mode === 'home' && services.agentQuickRunRoot) {
+      // ponytail: home sessions reserve an empty root; clean stale roots if churn matters.
+      agentRequest.quickRunProjectRoot = join(
+        services.agentQuickRunRoot,
+        `run_${randomUUID().replaceAll('-', '')}`,
+      )
+      await mkdir(agentRequest.quickRunProjectRoot, { recursive: true })
+    }
     const window = BrowserWindow.fromWebContents(event.sender)
     const windowDirectory = window
       ? workspaceWindowRegistry.getPathForWindow(window)
@@ -2105,6 +2118,12 @@ export function registerIpc(
     const agentRequest = readAgentSendMessageRequest(request)
     requireAgentSessionOwner(event.sender, agentRequest)
     return await requireAgentRuntime(services).sendMessage(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentAnswerInteraction, async (event, request) => {
+    const agentRequest = readAgentInteractionAnswerRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    return await requireAgentRuntime(services).answerInteraction(agentRequest)
   })
 
   handle(desktopApiIpcChannels.agentInterrupt, async (event, request) => {
@@ -2272,6 +2291,89 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
   return {
     message,
     providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readAgentInteractionAnswerRequest(
+  value: unknown,
+): DesktopAgentInteractionAnswerRequest {
+  const record = readAgentRecord(value)
+  const kind = record.kind
+  const requestId = record.requestId
+  if (
+    (kind !== 'choice' && kind !== 'confirm' && kind !== 'form') ||
+    typeof requestId !== 'string' ||
+    !requestId.trim()
+  ) {
+    throw new Error('Invalid agent interaction answer request.')
+  }
+  if (record.undo === true) {
+    if (
+      record.optionId !== undefined ||
+      record.text !== undefined ||
+      record.values !== undefined
+    ) {
+      throw new Error('Undo interaction cannot include an answer.')
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      undo: true,
+    }
+  }
+  if (kind === 'form') {
+    if (!isRecord(record.values))
+      throw new Error('Form interaction values must be an object.')
+    const entries = Object.entries(record.values)
+    if (entries.length > 16) throw new Error('Form interaction has too many fields.')
+    for (const [fieldId, fieldValue] of entries) {
+      if (
+        !fieldId.trim() ||
+        (typeof fieldValue !== 'string' &&
+          typeof fieldValue !== 'number' &&
+          fieldValue !== null) ||
+        (typeof fieldValue === 'string' && fieldValue.length > 4096) ||
+        (typeof fieldValue === 'number' && !Number.isFinite(fieldValue))
+      ) {
+        throw new Error('Invalid form interaction value.')
+      }
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      values: record.values as Record<string, string | number | null>,
+    }
+  }
+  if (record.text !== undefined) {
+    if (
+      typeof record.text !== 'string' ||
+      !record.text.trim() ||
+      record.text.length > 4096 ||
+      record.optionId !== undefined
+    ) {
+      throw new Error('Invalid typed interaction answer.')
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      text: record.text.trim(),
+    }
+  }
+  if (typeof record.optionId !== 'string' || !record.optionId.trim()) {
+    throw new Error('Agent interaction optionId is required.')
+  }
+  return {
+    kind,
+    optionId: record.optionId.trim(),
+    providerId: readAgentProviderId(record),
+    requestId: requestId.trim(),
     sessionId: readAgentSessionId(record.sessionId),
   }
 }
