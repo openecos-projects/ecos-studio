@@ -1,4 +1,4 @@
-import { open, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { open, realpath, rename, rm, stat, writeFile, chmod } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { randomInt } from 'node:crypto'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -282,6 +282,14 @@ export async function writeTextAtomically(
   // one: deriving it here could adopt a directory swapped in after
   // authorization as the accepted target.
   const canonicalParent = options?.authorizedParent ?? (await realpath(parent))
+  // The replacement keeps the existing file's mode: a 0600 config must not
+  // become 0644 (umask default) after a save.
+  let mode: number | undefined
+  try {
+    mode = (await stat(path)).mode & 0o777
+  } catch (error) {
+    if (!isErrno(error, 'ENOENT')) throw error
+  }
   const temporaryPath = `${path}.${process.pid}.${Date.now()}.${randomInt(0, 1_000_000)}.tmp`
   try {
     if ((await realpath(parent)) !== canonicalParent) {
@@ -290,6 +298,9 @@ export async function writeTextAtomically(
       )
     }
     await writeFile(temporaryPath, content, { encoding: 'utf8', flag: 'wx' })
+    if (mode !== undefined) {
+      await chmod(temporaryPath, mode)
+    }
     // Write and rename both address the parent by pathname: revalidate that
     // it still resolves to the authorized directory, so a symlink swapped in
     // after authorization cannot redirect the rename outside the workspace.
@@ -452,24 +463,36 @@ export async function writeWorkspaceParameters(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
     )
   }
-  return await enqueueParameterWrite(location.path, async () => {
+  // Serialize per workspace config slot, not per file: the on-disk format
+  // can change (a legacy JSON migrates to TOML) while an operation queues,
+  // and two operations must never interleave across the two files.
+  return await enqueueParameterWrite(`${root}/home:parameters`, async () => {
     // Runtime-activity guards re-run INSIDE the queue: a flow starting while
     // this operation waited behind another writer must still block it.
     await assertWritable?.()
     assertFiniteNumbers(payload, location.path)
-    const spelledPath = location.spelledPath ?? location.path
-    const canonicalPath = location.spelledPath
-      ? location.path
-      : await realpath(location.path)
-    if (location.format === 'json') {
+    // Re-locate at the head of the queue: when the preferred config changed
+    // while this operation waited (parameters.json -> ecc.toml migration),
+    // the write must land where subsequent reads will look.
+    const onDisk = await locateWorkspaceParametersFile(root)
+    if (!onDisk) {
+      throw new Error(
+        `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+      )
+    }
+    const spelledPath = onDisk.path
+    const canonicalPath = authorizedLocation
+      ? authorizedLocation.path
+      : await realpath(onDisk.path)
+    if (onDisk.format === 'json') {
       // Merge into the existing document: the payload is the GUI's known
       // parameter set, not the whole file — keys the GUI does not display
       // (frontend extras, unrelated agent edits) must survive a save.
       const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
-      const existing = parseJsonPreservingIntegers(raw, location.path)
+      const existing = parseJsonPreservingIntegers(raw, onDisk.path)
       if (!isRecord(existing)) {
         throw new Error(
-          `Invalid workspace configuration: ${location.path} must contain a JSON object`,
+          `Invalid workspace configuration: ${onDisk.path} must contain a JSON object`,
         )
       }
       const merged = mergeRecordsPreservingUnknown(existing, payload)
@@ -481,18 +504,18 @@ export async function writeWorkspaceParameters(
       await writeTextAtomically(spelledPath, `${JSON.stringify(merged, null, 4)}\n`, {
         authorizedParent: dirname(canonicalPath),
       })
-      return location
+      return onDisk
     }
     const document = parseTomlDocument(
       await readWorkspaceConfigContained(spelledPath, canonicalPath),
-      location.path,
+      onDisk.path,
     )
     const merged = mergePayloadIntoTomlDocument(document, payload, root)
     await assertWritable?.()
     await writeTextAtomically(spelledPath, stringify(merged), {
       authorizedParent: dirname(canonicalPath),
     })
-    return location
+    return onDisk
   })
 }
 
@@ -622,28 +645,37 @@ export async function editWorkspaceParameters(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
     )
   }
-  return await enqueueParameterWrite(location.path, async () => {
+  return await enqueueParameterWrite(`${root}/home:parameters`, async () => {
     // Runtime-activity guards re-run INSIDE the queue: a flow starting while
     // this operation waited behind another writer must still block it.
     await assertWritable?.()
     for (const edit of edits) {
       assertFiniteNumbers(edit.value, location.path)
     }
-    const spelledPath = location.spelledPath ?? location.path
-    const canonicalPath = location.spelledPath
-      ? location.path
-      : await realpath(location.path)
+    // Re-locate at the head of the queue: when the preferred config changed
+    // while this operation waited (parameters.json -> ecc.toml migration),
+    // the edit must land where subsequent reads will look.
+    const onDisk = await locateWorkspaceParametersFile(root)
+    if (!onDisk) {
+      throw new Error(
+        `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+      )
+    }
+    const spelledPath = onDisk.path
+    const canonicalPath = authorizedLocation
+      ? authorizedLocation.path
+      : await realpath(onDisk.path)
     const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
-    if (location.format === 'json') {
-      const parsed: unknown = parseJsonPreservingIntegers(raw, location.path)
+    if (onDisk.format === 'json') {
+      const parsed: unknown = parseJsonPreservingIntegers(raw, onDisk.path)
       if (!isRecord(parsed)) {
         throw new Error(
-          `Invalid workspace configuration: ${location.path} must contain a JSON object`,
+          `Invalid workspace configuration: ${onDisk.path} must contain a JSON object`,
         )
       }
       const document = parsed
       for (const edit of edits) {
-        setJsonPathValue(document, edit.json_path, edit.value, location.path)
+        setJsonPathValue(document, edit.json_path, edit.value, onDisk.path)
       }
       const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
       // One more guard pass between the edits and the rename: a flow that
@@ -656,21 +688,21 @@ export async function editWorkspaceParameters(
         raw.endsWith('\n') ? `${serialized}\n` : serialized,
         { authorizedParent: dirname(canonicalPath) },
       )
-      return location
+      return onDisk
     }
-    const document = parseTomlDocument(raw, location.path)
+    const document = parseTomlDocument(raw, onDisk.path)
     const parameters = mergeTomlSections(document, root)
     for (const edit of edits) {
       const normalizedPath = edit.json_path.map((segment) =>
         typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
       )
-      setJsonPathValue(parameters, normalizedPath, edit.value, location.path)
+      setJsonPathValue(parameters, normalizedPath, edit.value, onDisk.path)
     }
     const merged = mergePayloadIntoTomlDocument(document, parameters, root)
     await assertWritable?.()
     await writeTextAtomically(spelledPath, stringify(merged), {
       authorizedParent: dirname(canonicalPath),
     })
-    return location
+    return onDisk
   })
 }

@@ -307,7 +307,7 @@ describe('ProjectManifestService', () => {
         projectRoot,
         mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
       }),
-    ).rejects.toThrow(/safe integer range/i)
+    ).rejects.toThrow(/not a finite number/i)
   })
 
   it('rejects a baseline snapshot holding a non-finite frequency instead of serializing null', async () => {

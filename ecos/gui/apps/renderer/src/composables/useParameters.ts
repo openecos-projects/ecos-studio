@@ -233,7 +233,10 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
   return {
     Size: arr,
     Area: area != null ? losslessNumber(area, 'Core.Area') : 0,
-    'Bounding box': String(c['Bounding box'] ?? c.bounding_box ?? ''),
+    'Bounding box': losslessString(
+      c['Bounding box'] ?? c.bounding_box ?? '',
+      'Bounding box',
+    ),
     Utilitization: losslessNumber(
       c.Utilitization ?? c.utilitization ?? 0.4,
       'Core.Utilitization',
@@ -248,8 +251,24 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
 
 function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value)
-    ? value.map((item) => String(item)).filter((item) => item.length > 0)
+    ? value
+        .map((item) => losslessString(item, 'sim_program_names'))
+        .filter((item) => item.length > 0)
     : []
+}
+
+/**
+ * Boolean conversion for GUI-known fields: a TOML date under one would
+ * otherwise persist as `true` on the next save.
+ */
+function losslessBoolean(value: unknown, label: string): boolean {
+  if (value instanceof Date) {
+    throw new Error(
+      `Parameter ${label} holds a TOML date the GUI cannot edit losslessly; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  return Boolean(value)
 }
 
 export function parametersHaveChipIdentity(
@@ -421,7 +440,7 @@ export function parseParametersRecord(raw: Record<string, unknown>): ParametersD
         ? losslessString(raw.input_filelist, 'input_filelist')
         : undefined,
     sim_program_names: normalizeStringArray(raw.sim_program_names),
-    sim_all_tests: Boolean(raw.sim_all_tests),
+    sim_all_tests: losslessBoolean(raw.sim_all_tests, 'sim_all_tests'),
   }
 }
 

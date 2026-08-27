@@ -1,8 +1,10 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -425,6 +427,31 @@ describe('writeWorkspaceParameters', () => {
     ).rejects.toThrow('blocked')
     expect(calls).toBe(2)
     expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
+  it('lands the save on the newly preferred config when the format migrates mid-queue', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    const location = await writeWorkspaceParameters(
+      root,
+      { 'Max fanout': 48 },
+      undefined,
+      async () => {
+        // Simulate the ecc migration landing while the save was queued.
+        writeHomeFile(root, 'ecc.toml', ECC_TOML)
+      },
+    )
+    expect(location.format).toBe('toml')
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.max_fanout).toBe(48)
+  })
+
+  it('preserves the existing file mode through an atomic replace', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    chmodSync(join(root, 'home', 'ecc.toml'), 0o600)
+    await writeWorkspaceParameters(root, { design: 'gcd' })
+    expect(statSync(join(root, 'home', 'ecc.toml')).mode & 0o777).toBe(0o600)
   })
 
   it('refuses a symlinked config inside the serialized write', async () => {
