@@ -375,10 +375,11 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('messageStore.restoreInteraction(requestId)')
   })
 
-  it('shows a quiet pending cue while waiting for the next reply', () => {
+  it('shows elapsed turn activity while waiting for the next reply', () => {
     expect(source).toContain('showPendingPlaceholder')
     expect(source).toContain('class="agent-pending"')
-    expect(source).toContain('agent-pending__dot')
+    expect(source).toContain(':activity="pendingActivity"')
+    expect(source).not.toContain('agent-pending__dot')
     expect(source).not.toContain('Agent is working…')
     expect(source).not.toContain("'Thinking'")
   })

@@ -299,6 +299,46 @@ export const useMessageStore = defineStore('messages', () => {
       throw new Error('No Agent chat session available for event upsert.')
     }
     const bucket = sessionMessages(sessionId)
+    if (event.type === 'activity' && (event.activity || event.activityNotice)) {
+      const turnId =
+        event.activity?.turnId ??
+        event.activityNotice?.turnId ??
+        `unavailable-${event.messageId ?? generateId()}`
+      let message = bucket.find(
+        (candidate) =>
+          candidate.type === 'activity' && candidate.activity?.turnId === turnId,
+      )
+      if (!message) {
+        message = {
+          activity: {
+            items: [],
+            startedAt: event.activity?.turnStartedAt ?? Date.now(),
+            turnId,
+          },
+          content: '',
+          id: `activity-${turnId}`,
+          role: 'assistant',
+          status: 'loading',
+          type: 'activity',
+        }
+        bucket.push(message)
+      }
+      if (event.activity && message.activity) {
+        const index = message.activity.items.findIndex(
+          (item) => item.itemId === event.activity?.itemId,
+        )
+        if (index >= 0) message.activity.items[index] = event.activity
+        else message.activity.items.push(event.activity)
+        message.activity.startedAt = Math.min(
+          message.activity.startedAt,
+          event.activity.turnStartedAt,
+        )
+      }
+      if (event.activityNotice && message.activity) {
+        message.activity.notice = event.activityNotice.message
+      }
+      return message.id
+    }
     const id = event.messageId ?? generateId()
     const existing = bucket.find((message) => message.id === id)
     if (existing) {
@@ -325,6 +365,7 @@ export const useMessageStore = defineStore('messages', () => {
     for (const message of bucket) {
       if (message.role === 'assistant' && message.status === 'loading') {
         message.status = 'done'
+        if (message.activity) message.activity.completedAt = Date.now()
       }
     }
     // Drop Thinking / search chatter once the turn answer is in; keep flow timelines.

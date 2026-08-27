@@ -1,7 +1,12 @@
 <template>
   <div class="flex w-full min-w-0 justify-start">
+    <AgentActivityStream
+      v-if="message.type === 'activity' && message.activity"
+      :activity="message.activity"
+      :status="message.status"
+    />
     <AgentToolCard
-      v-if="message.type === 'tool'"
+      v-else-if="message.type === 'tool'"
       :content="message.content"
       :status="message.status"
     />
@@ -331,6 +336,7 @@
         <div
           v-if="message.status === 'loading' && !message.content"
           class="flex items-center gap-2"
+          aria-label="Waiting for response"
         >
           <div class="loading-dots flex gap-1">
             <span
@@ -346,7 +352,6 @@
               style="animation-delay: 300ms"
             ></span>
           </div>
-          <span class="text-xs opacity-70">Thinking...</span>
         </div>
 
         <!-- 错误状态 -->
@@ -427,6 +432,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
 import type { Message } from '../types'
+import AgentActivityStream from './AgentActivityStream.vue'
 import AgentToolCard from './AgentToolCard.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'

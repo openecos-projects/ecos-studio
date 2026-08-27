@@ -73,8 +73,12 @@
                 :aria-label="`${msg.interaction?.title}: ${msg.interactionAnswer}`"
               >
                 <i class="ri-check-line" aria-hidden="true"></i>
-                <span class="interaction-receipt__question">{{ msg.interaction?.title }}</span>
-                <strong class="interaction-receipt__answer">{{ msg.interactionAnswer }}</strong>
+                <span class="interaction-receipt__question">{{
+                  msg.interaction?.title
+                }}</span>
+                <strong class="interaction-receipt__answer">{{
+                  msg.interactionAnswer
+                }}</strong>
               </div>
               <MessageItem
                 v-else-if="isVisibleResponse(msg)"
@@ -90,17 +94,12 @@
                 @create-workspace="createWorkspaceFromAgent"
               />
             </template>
-            <div
+            <AgentActivityStream
               v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
               class="agent-pending"
-              role="status"
-              aria-live="polite"
-              :aria-label="isInterruptPending ? 'Stopping' : 'Waiting for reply'"
-            >
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-            </div>
+              :activity="pendingActivity"
+              status="loading"
+            />
             <!-- Awaiting confirmation stays after Q&A, at the end of the latest turn -->
             <AgentSessionContractPanels
               v-if="turnIndex === conversationTurns.length - 1"
@@ -247,6 +246,7 @@ import type {
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import AgentActivityStream from './AgentActivityStream.vue'
 import AgentInteractionCard from './AgentInteractionCard.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
@@ -261,6 +261,7 @@ import {
   type PendingGuiAction,
 } from './agentSessionUi'
 import { displayAgentContractTitle } from './agentContractDisplay'
+import { agentActivityUpdateKey } from './agentActivityPresentation'
 import {
   describeInteractionAnswer,
   groupMessagesIntoTurns,
@@ -484,18 +485,14 @@ const workspaceSignoffRows = computed<[string, string][]>(() => {
   if (!review) return []
   return [
     ['Overall', review.status],
-    ...review.groups.map(
-      (group): [string, string] => [
-        group.label,
-        `${group.available}/${group.expected} · ${group.summary}`,
-      ],
-    ),
-    ...review.risks.map(
-      (risk): [string, string] => [
-        `${risk.severity === 'blocked' ? 'Blocked' : 'Warning'}: ${risk.title}`,
-        risk.summary,
-      ],
-    ),
+    ...review.groups.map((group): [string, string] => [
+      group.label,
+      `${group.available}/${group.expected} · ${group.summary}`,
+    ]),
+    ...review.risks.map((risk): [string, string] => [
+      `${risk.severity === 'blocked' ? 'Blocked' : 'Warning'}: ${risk.title}`,
+      risk.summary,
+    ]),
   ]
 })
 const workspaceRerunExecutionState = computed(() =>
@@ -660,6 +657,11 @@ const showPendingPlaceholder = computed(() => {
   if (!last?.user) return false
   return last.responses.length === 0
 })
+const pendingActivity = computed(() => ({
+  items: [],
+  startedAt: activeUi.value.runStartedAt ?? Date.now(),
+  turnId: agentSessionId.value ?? 'pending',
+}))
 const emptyStateSuggestions = computed(() => {
   const tabMode = activeTab.value?.mode ?? (props.shell === 'home' ? 'home' : 'workspace')
   if (tabMode === 'home') {
@@ -1279,7 +1281,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     messageStore.upsertAgentEvent(event)
     return
   }
-  if (event.type === 'message' || event.type === 'tool') {
+  if (event.type === 'message' || event.type === 'tool' || event.type === 'activity') {
     messageStore.upsertAgentEvent(event)
   }
 }
@@ -1407,6 +1409,7 @@ watch(
       last?.content.length ?? 0,
       last?.status ?? '',
       last?.type ?? '',
+      last?.activity?.items.map(agentActivityUpdateKey).join('|') ?? '',
     ].join(':')
   },
   (signature, previous) => {
@@ -1618,7 +1621,12 @@ async function interruptAgent(): Promise<void> {
 }
 
 watch(isRunning, (running) => {
-  if (!running) void flushQueuedMessage()
+  if (running) {
+    activeUi.value.runStartedAt ??= Date.now()
+    return
+  }
+  activeUi.value.runStartedAt = undefined
+  void flushQueuedMessage()
 })
 
 async function createWorkspaceFromAgent(
@@ -2431,48 +2439,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 .agent-pending {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.28rem;
   margin: 0.25rem 0 0.35rem;
-  min-height: 1.25rem;
-  padding-left: 0.125rem;
-}
-
-.agent-pending__dot {
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-secondary) 70%, transparent);
-  animation: agent-pending-dot 1.05s ease-in-out infinite;
-}
-
-.agent-pending__dot:nth-child(2) {
-  animation-delay: 0.14s;
-}
-
-.agent-pending__dot:nth-child(3) {
-  animation-delay: 0.28s;
-}
-
-@keyframes agent-pending-dot {
-  0%,
-  80%,
-  100% {
-    opacity: 0.28;
-    transform: translateY(0);
-  }
-  40% {
-    opacity: 0.95;
-    transform: translateY(-0.12rem);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-pending__dot {
-    animation: none;
-    opacity: 0.55;
-  }
 }
 
 .message-item {

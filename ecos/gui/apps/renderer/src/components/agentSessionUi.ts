@@ -34,6 +34,7 @@ export type PendingGuiAction =
 
 export interface AgentSessionUiState {
   runStatus: DesktopAgentRunStatus
+  runStartedAt?: number
   inputValue: string
   inputHistoryIndex?: number
   inputHistoryDraft: string
