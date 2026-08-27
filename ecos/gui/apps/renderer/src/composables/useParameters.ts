@@ -262,9 +262,15 @@ function normalizeStringArray(value: unknown): string[] {
  * otherwise persist as `true` on the next save.
  */
 function losslessBoolean(value: unknown, label: string): boolean {
-  if (value instanceof Date) {
+  if (value instanceof Date || typeof value === 'bigint') {
     throw new Error(
-      `Parameter ${label} holds a TOML date the GUI cannot edit losslessly; ` +
+      `Parameter ${label} holds a value the GUI cannot edit losslessly; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(
+      `Parameter ${label} value ${value} is not a finite number; ` +
         'edit the workspace configuration manually',
     )
   }
@@ -300,12 +306,25 @@ export function parametersHaveChipIdentity(
 
 /**
  * String conversion for GUI-known fields: a TOML date under one would
- * otherwise be written back as a locale-dependent string on the next save.
+ * otherwise be written back as a locale-dependent string on the next save,
+ * and a bigint or non-finite number would change type (integer -> string).
  */
 function losslessString(value: unknown, label: string): string {
   if (value instanceof Date) {
     throw new Error(
       `Parameter ${label} holds a TOML date the GUI cannot edit losslessly; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'bigint') {
+    throw new Error(
+      `Parameter ${label} value ${value} exceeds the safe integer range; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(
+      `Parameter ${label} value ${value} is not a finite number; ` +
         'edit the workspace configuration manually',
     )
   }

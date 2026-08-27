@@ -225,7 +225,7 @@ import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import { losslessNumber } from '@/utils/numbers'
+import { losslessNumber, losslessOptionalString } from '@/utils/numbers'
 import {
   getOptionalDesktopApi,
   hasDesktopApi,
@@ -961,7 +961,7 @@ function optionalRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function optionalString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : ''
+  return losslessOptionalString(value, 'workspace parameter')
 }
 
 function optionalNumber(value: unknown, fallback: number): number {

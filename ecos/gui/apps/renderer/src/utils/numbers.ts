@@ -8,6 +8,21 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
 }
 
 /**
+ * optionalString for GUI-known fields: a TOML date or bigint would fall
+ * through to a default and be written back over the original value on the
+ * next save, so fail loud instead of falling back.
+ */
+export function losslessOptionalString(value: unknown, label: string): string {
+  if (value instanceof Date || typeof value === 'bigint') {
+    throw new Error(
+      `Parameter ${label} holds a value the wizard cannot edit losslessly; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  return typeof value === 'string' && value.trim() ? value.trim() : ''
+}
+
+/**
  * TOML parsing yields a bigint exactly when an integer exceeds the safe
  * range, inf/nan as non-finite numbers, and dates as Date instances — all of
  * which a later save would silently persist in corrupted form (rounded,

@@ -210,7 +210,7 @@ import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
 import { waitForDesktopApi } from '@/platform/desktop'
-import { losslessNumber } from '@/utils/numbers'
+import { losslessNumber, losslessOptionalString } from '@/utils/numbers'
 import {
   readOptionalProjectTextFile,
   readWorkspaceParametersFile,
@@ -562,7 +562,7 @@ function stringList(value: unknown): string[] {
 }
 
 function optionalString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : ''
+  return losslessOptionalString(value, 'workspace parameter')
 }
 
 function optionalNumber(value: unknown, fallback: number): number {

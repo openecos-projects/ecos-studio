@@ -446,7 +446,21 @@ function normalizedBaselineParameters(
   return normalized
 }
 
+function assertBaselineScalarClass(value: unknown): void {
+  if (
+    value instanceof Date ||
+    typeof value === 'bigint' ||
+    (typeof value === 'number' && !Number.isFinite(value))
+  ) {
+    throw new Error(
+      'Baseline workspace snapshot holds a parameter value the manifest cannot ' +
+        'represent losslessly; edit the workspace configuration manually',
+    )
+  }
+}
+
 function firstString(...values: unknown[]): string {
+  for (const value of values) assertBaselineScalarClass(value)
   return (
     values
       .find(
@@ -457,6 +471,7 @@ function firstString(...values: unknown[]): string {
 }
 
 function firstValue(...values: unknown[]): unknown {
+  for (const value of values) assertBaselineScalarClass(value)
   return values.find((value) => value !== undefined && value !== null)
 }
 

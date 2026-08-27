@@ -111,13 +111,18 @@ export class WorkspaceResourceService {
       throw new Error('Workspace parameters write requires a parameters object')
     }
     const root = await this.projectScopeProvider.getProjectRoot()
-    if (request.workspace !== undefined) {
-      // The save was dispatched for a specific workspace: refuse to land it
-      // in whichever workspace became active since (an openProject that
-      // registered a new root before the renderer committed the switch).
+    // The save was dispatched for a specific workspace: refuse to land it
+    // in whichever workspace became active since (an openProject that
+    // registered a new root before the renderer committed the switch).
+    // Revalidated on every guard pass inside the serialized write, so a
+    // switch happening while the save queues behind another writer blocks
+    // it too.
+    const assertExpectedWorkspace = async (): Promise<void> => {
+      if (request.workspace === undefined) return
+      const activeRoot = await this.projectScopeProvider.getProjectRoot()
       const [expected, active] = await Promise.all([
-        realpath(request.workspace),
-        realpath(root),
+        realpath(request.workspace as string),
+        realpath(activeRoot),
       ])
       if (expected !== active) {
         throw new Error(
@@ -126,6 +131,7 @@ export class WorkspaceResourceService {
         )
       }
     }
+    await assertExpectedWorkspace()
     const location = await locateWorkspaceParametersFile(root)
     if (!location) {
       throw new Error(
@@ -160,6 +166,7 @@ export class WorkspaceResourceService {
       // Re-checked inside the serialized operation: a flow starting while
       // the save queued behind another writer must still block it.
       async () => {
+        await assertExpectedWorkspace()
         if (
           this.runtimeMutationGuard &&
           (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(root))

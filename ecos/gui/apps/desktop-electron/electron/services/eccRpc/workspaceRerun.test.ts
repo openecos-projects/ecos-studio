@@ -600,4 +600,26 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
       '[params]\ntarget_density = 0.45\n',
     )
   })
+
+  it('rewrites source-rooted values in home/ecc.toml', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    await writeFile(
+      join(source, 'home', 'ecc.toml'),
+      [
+        '[params]',
+        'design = "gcd"',
+        'target_density = 0.45',
+        `source_output_path = "${source}/place_dreamplace/output"`,
+        '',
+      ].join('\n'),
+    )
+    const contract = contractFor(source, flow, artifact)
+
+    await prepareWorkspaceRerun(contract)
+
+    const written = await readFile(`${contract.target_workspace}/home/ecc.toml`, 'utf8')
+    expect(written).toContain(`${contract.target_workspace}/place_dreamplace/output`)
+    expect(written).not.toContain(`${source}/place_dreamplace/output`)
+  })
 })

@@ -343,7 +343,7 @@ describe('ProjectManifestService', () => {
         projectRoot,
         mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
       }),
-    ).rejects.toThrow(/non-finite/i)
+    ).rejects.toThrow(/cannot represent losslessly/i)
   })
 
   it('does not write a partial baseline mutation when its snapshot is incomplete', async () => {

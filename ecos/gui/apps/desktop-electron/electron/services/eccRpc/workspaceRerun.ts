@@ -21,6 +21,7 @@ import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 import {
   editWorkspaceParameters,
   locateWorkspaceParametersFile,
+  WORKSPACE_CONFIG_BASENAME,
 } from '../workspaceParametersFile'
 
 interface WorkspaceRerunRuntime {
@@ -843,7 +844,9 @@ async function rewriteHomeJsonSourcePaths(
   }
 
   for (const entry of entries) {
-    if (!entry.endsWith('.json')) continue
+    // home/ecc.toml carries source-rooted values (pdk_config, custom paths)
+    // in the same spelling the legacy parameters.json used; rewrite both.
+    if (entry !== WORKSPACE_CONFIG_BASENAME && !entry.endsWith('.json')) continue
     if (entry === 'flow_agent_workspace_rerun_contract.v1.json') continue
     const filePath = join(homeDirectory, entry)
     const original = await readFile(filePath, 'utf8')

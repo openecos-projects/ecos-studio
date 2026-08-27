@@ -145,7 +145,7 @@ describe('App workspace reconfiguration wizard wiring', () => {
   })
 
   it('routes prefill number conversion through the lossless bigint guard', () => {
-    expect(appSource).toContain("import { losslessNumber } from '@/utils/numbers'")
+    expect(appSource).toContain("from '@/utils/numbers'")
     const optionalNumberStart = appSource.indexOf('function optionalNumber')
     const optionalNumberEnd = appSource.indexOf(
       'function normalizeDieAreaMode',
