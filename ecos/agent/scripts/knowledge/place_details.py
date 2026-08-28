@@ -11,6 +11,8 @@ PLACE_SOURCE_PATHS = {
     "dreamplace.runner": "ecc/chipcompiler/tools/ecc_dreamplace/runner.py",
     "dreamplace.module": "ecc/chipcompiler/tools/ecc_dreamplace/module.py",
     "dreamplace.placer": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/Placer.py",
+    "dreamplace.basic": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/BasicPlace.py",
+    "dreamplace.database": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/macroPlaceDB.py",
     "dreamplace.nonlinear": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/NonLinearPlace.py",
     "dreamplace.objective": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/PlaceObj.py",
     "ecc.congestion": "ecc/chipcompiler/thirdparty/ecc-tools/src/evaluation/src/module/congestion/congestion_eval.cpp",
@@ -75,8 +77,8 @@ PLACE_PARAMETER_SEMANTICS = {
     "num_bins_x": ("The number of density bins along X.", "It sets the spatial resolution for density, electric potential, and global-placement evaluation."),
     "num_bins_y": ("The number of density bins along Y.", "It sets the spatial resolution for density, electric potential, and global-placement evaluation."),
     "global_place_stages": ("The global-placement stage schedule.", "It defines bins, iterations, wirelength model, optimizer, and learning rate for each stage."),
-    "target_density": ("The target placement density of each density bin during global placement. It is not floorplan Core.Utilitization.", "It is the target of the density-overflow and electric-potential terms, balancing wirelength against placeable area."),
-    "density_weight": ("The initial density-penalty weight.", "It controls the density penalty relative to smooth wirelength and participates in weight updates."),
+    "target_density": ("The target placement density of each density bin during global placement. It is not floorplan Core.Utilitization.", "DREAMPlace raises infeasible low requests to a utilization-derived floor, loads the effective value into the density tensor, and uses it in density-overflow and stopping computations. A runtime consumer observation is required to prove use."),
+    "density_weight": ("The initial density-penalty weight.", "It scales density-weight initialization before the placement objective consumes the weight. DREAMPlace updates the internal weight during optimization and may reinitialize it after routability-driven area adjustment, so the final weight is not an admission alias for the request."),
     "random_seed": ("The random seed.", "It initializes Python, Torch, and CUDA random state for reproducible initial perturbations."),
     "result_dir": ("The placement result directory.", "It receives DreamPlace logs and intermediate outputs."),
     "scale_factor": ("The coordinate and wirelength conversion scale.", "It keeps placement-database values consistent during evaluation and output."),
@@ -89,7 +91,7 @@ PLACE_PARAMETER_SEMANTICS = {
     "global_place_flag": ("Whether global placement runs.", "It controls entry into the NonLinearPlace continuous optimization loop."),
     "legalize_flag": ("Whether internal legalization runs.", "It controls whether the legalizer removes overlaps and aligns cells to sites after global placement."),
     "detailed_place_flag": ("The detailed-placement enable flag.", "It marks detailed placement; the current ECOS default flow does not execute that stage."),
-    "stop_overflow": ("The acceptable global-placement overflow threshold.", "It controls convergence and whether legalization may proceed."),
+    "stop_overflow": ("The acceptable global-placement overflow threshold.", "NonLinearPlace evaluates it in convergence and divergence predicates, and PlaceObj uses it in conditional density-weight updates. Runtime iterations and final overflow are required to prove that the predicate was evaluated."),
     "dtype": ("The placement-tensor data type.", "It affects numerical precision, memory use, and the type used by compiled operators."),
     "detailed_place_engine": ("The external detailed-placer path.", "When the path exists, PlacementEngine invokes that tool after global placement."),
     "detailed_place_command": ("Additional command text for the external detailed placer.", "It is appended to the external detailed-placer invocation."),
@@ -106,7 +108,7 @@ PLACE_PARAMETER_SEMANTICS = {
     "num_threads": ("The CPU thread count.", "It sets OpenMP and Torch parallel thread counts."),
     "dump_global_place_solution_flag": ("The global-placement solution dump switch.", "It controls whether the global-placement solution is saved before legalization."),
     "dump_legalize_solution_flag": ("The legalized-solution dump switch.", "It controls whether the legalizer result is saved."),
-    "routability_opt_flag": ("The routability-optimization switch.", "When enabled, it allows NonLinearPlace to enter routability-driven paths such as area adjustment."),
+    "routability_opt_flag": ("The routability-optimization switch.", "Enabling it constructs routing-utilization operators and permits routing-driven area adjustment. The flag alone does not prove activation; a positive native routability-round count does."),
     "macro_place_flag": ("The macro-placement switch.", "It enables macro preprocessing and macro-legalization paths."),
     "use_bb": ("The bounding-box approximation switch.", "It affects the bounding-box form used by wirelength or congestion modeling."),
     "route_num_bins_x": ("The routing-evaluation grid count along X.", "It sets the X resolution for routability and congestion estimation."),
@@ -134,7 +136,7 @@ PLACE_PARAMETER_SEMANTICS = {
     "macro_overlap_flag": ("The macro-overlap penalty switch.", "It controls whether the objective includes a macro-overlap penalty."),
     "macro_overlap_weight": ("The macro-overlap penalty weight.", "It sets the macro-overlap term's influence in the global-placement objective."),
     "macro_overlap_mult_weight": ("The macro-overlap penalty multiplier.", "It scales the update strength of the macro-overlap penalty."),
-    "cell_padding_x": ("The standard-cell padding along X.", "It expands effective cell width in the placement model to reserve horizontal spacing for legalization."),
+    "cell_padding_x": ("The standard-cell padding along X.", "DREAMPlace quantizes and may cap the padding, then expands movable-cell and pin geometry during placement. A zero effective value means the geometry expansion was not activated; legalization later restores the representation."),
     "bndry_padding_x": ("The placement-boundary padding along X.", "It shrinks the effective horizontal placement range of movable cells."),
     "bndry_padding_y": ("The placement-boundary padding along Y.", "It shrinks the effective vertical placement range of movable cells."),
     "pin_density": ("The pin-density target or threshold.", "It participates in pin-density congestion estimation and area adjustment."),
@@ -171,8 +173,19 @@ def _add_parameters(entries: list[dict[str, object]], documents: dict[str, list[
         evidence = ("dreamplace.config", "dreamplace.overrides", "dreamplace.module")
         if name in GUI_PARAMETER_MAP:
             evidence += ("ecos.params",)
-        if name == "target_density":
-            evidence += ("dreamplace.objective",)
+        consumer_evidence = {
+            "target_density": (
+                "dreamplace.database",
+                "dreamplace.basic",
+                "dreamplace.objective",
+                "dreamplace.nonlinear",
+            ),
+            "stop_overflow": ("dreamplace.objective", "dreamplace.nonlinear"),
+            "cell_padding_x": ("dreamplace.database", "dreamplace.nonlinear"),
+            "routability_opt_flag": ("dreamplace.objective", "dreamplace.nonlinear"),
+            "density_weight": ("dreamplace.objective", "dreamplace.nonlinear"),
+        }
+        evidence += consumer_evidence.get(name, ())
         aliases = (name, name.replace("_", " "), f"DreamPlace {name}")
         if name == "stop_overflow":
             aliases += ("target overflow", "placement target overflow", "placer target overflow")

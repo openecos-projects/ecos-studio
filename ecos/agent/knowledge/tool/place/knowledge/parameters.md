@@ -66,14 +66,14 @@
 
 **Meaning:** The target placement density of each density bin during global placement. It is not floorplan Core.Utilitization.
 
-**Role:** It is the target of the density-overflow and electric-potential terms, balancing wirelength against placeable area.
+**Role:** DREAMPlace raises infeasible low requests to a utilization-derived floor, loads the effective value into the density tensor, and uses it in density-overflow and stopping computations. A runtime consumer observation is required to prove use.
 
 <a id="parameter.dreamplace.density_weight"></a>
 ## parameter.dreamplace.density_weight
 
 **Meaning:** The initial density-penalty weight.
 
-**Role:** It controls the density penalty relative to smooth wirelength and participates in weight updates.
+**Role:** It scales density-weight initialization before the placement objective consumes the weight. DREAMPlace updates the internal weight during optimization and may reinitialize it after routability-driven area adjustment, so the final weight is not an admission alias for the request.
 
 <a id="parameter.dreamplace.random_seed"></a>
 ## parameter.dreamplace.random_seed
@@ -164,7 +164,7 @@
 
 **Meaning:** The acceptable global-placement overflow threshold.
 
-**Role:** It controls convergence and whether legalization may proceed.
+**Role:** NonLinearPlace evaluates it in convergence and divergence predicates, and PlaceObj uses it in conditional density-weight updates. Runtime iterations and final overflow are required to prove that the predicate was evaluated.
 
 <a id="parameter.dreamplace.dtype"></a>
 ## parameter.dreamplace.dtype
@@ -283,7 +283,7 @@
 
 **Meaning:** The routability-optimization switch.
 
-**Role:** When enabled, it allows NonLinearPlace to enter routability-driven paths such as area adjustment.
+**Role:** Enabling it constructs routing-utilization operators and permits routing-driven area adjustment. The flag alone does not prove activation; a positive native routability-round count does.
 
 <a id="parameter.dreamplace.macro_place_flag"></a>
 ## parameter.dreamplace.macro_place_flag
@@ -479,7 +479,7 @@
 
 **Meaning:** The standard-cell padding along X.
 
-**Role:** It expands effective cell width in the placement model to reserve horizontal spacing for legalization.
+**Role:** DREAMPlace quantizes and may cap the padding, then expands movable-cell and pin geometry during placement. A zero effective value means the geometry expansion was not activated; legalization later restores the representation.
 
 <a id="parameter.dreamplace.bndry_padding_x"></a>
 ## parameter.dreamplace.bndry_padding_x

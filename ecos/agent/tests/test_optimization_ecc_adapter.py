@@ -185,6 +185,13 @@ def _native_receipt_payload(candidate_ref: str) -> dict[str, object]:
                 "evidence_sha256": HASH,
             }],
         },
+        "consumer_observation": {
+            "requested_target_density": 0.65,
+            "effective_target_density": 0.65,
+            "density_tensor_value": 0.65,
+            "placement_iteration_count": 4,
+            "evidence_complete": True,
+        },
         "effective_final": {"value": 0.65, "unit": "ratio"},
     }
     payload["evidence_sha256"] = canonical_sha256(payload)

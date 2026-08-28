@@ -285,7 +285,28 @@ def _native_receipt(
     requested: RequestedKnobValue, *, effective_value: object | None = None
 ) -> ParameterApplicationReceipt:
     effective_value = requested.value if effective_value is None else effective_value
-    unit = "site" if requested.knob_id.value == "place.cell_padding_x" else "ratio"
+    is_padding = requested.knob_id.value == "place.cell_padding_x"
+    unit = "site" if is_padding else "ratio"
+    consumer_id = (
+        "dreamplace.cell_size_expansion" if is_padding else "dreamplace.density_objective"
+    )
+    consumer_observation = (
+        {
+            "requested_padding_site": requested.value,
+            "effective_padding_dbu": effective_value,
+            "movable_node_count": 12,
+            "placement_iteration_count": 4,
+            "evidence_complete": True,
+        }
+        if is_padding
+        else {
+            "requested_target_density": requested.value,
+            "effective_target_density": effective_value,
+            "density_tensor_value": effective_value,
+            "placement_iteration_count": 4,
+            "evidence_complete": True,
+        }
+    )
     transitions = ()
     if requested.knob_id.value == "place.target_density" and effective_value != requested.value:
         transitions = (
@@ -328,13 +349,14 @@ def _native_receipt(
             status="used",
             consumers=(
                 {
-                    "consumer_id": "dreamplace.density_objective",
+                    "consumer_id": consumer_id,
                     "outcome": "entered",
                     "evidence_ref": "analysis/parameter_runtime_report.v1.json",
                     "evidence_sha256": HASH,
                 },
             ),
         ),
+        "consumer_observation": consumer_observation,
         "effective_final": EffectiveValue(value=effective_value, unit=unit),
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)

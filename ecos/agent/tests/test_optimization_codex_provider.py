@@ -83,6 +83,13 @@ def _context() -> OptimizationPlanningContext:
                 },
             ),
         ),
+        "consumer_observation": {
+            "requested_target_density": 0.2,
+            "effective_target_density": 0.8,
+            "density_tensor_value": 0.8,
+            "placement_iteration_count": 4,
+            "evidence_complete": True,
+        },
         "effective_final": EffectiveValue(value=0.8, unit="ratio"),
     }
     draft = ParameterApplicationReceipt.model_construct(

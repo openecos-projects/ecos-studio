@@ -227,11 +227,39 @@ def _native_receipt(
 ) -> ParameterApplicationReceipt:
     effective_value = value if effective_value is None else effective_value
     unit = "site" if knob_id.endswith("cell_padding_x") else "ratio"
-    consumer_id = "dreamplace.routability_branch" if knob_id == "place.routability_opt" else (
-        "dreamplace.cell_size_expansion"
-        if knob_id.endswith("cell_padding_x")
-        else "dreamplace.density_objective"
-    )
+    consumer_id = {
+        "place.target_density": "dreamplace.density_objective",
+        "place.target_overflow": "dreamplace.overflow_predicate",
+        "place.cell_padding_x": "dreamplace.cell_size_expansion",
+        "place.routability_opt": "dreamplace.routability_branch",
+        "place.density_weight": "dreamplace.density_preconditioner",
+    }[knob_id]
+    consumer_observation = {
+        "place.target_density": {
+            "effective_target_density": effective_value,
+            "density_tensor_value": effective_value,
+            "placement_iteration_count": 4,
+        },
+        "place.target_overflow": {
+            "effective_stop_overflow": effective_value,
+            "final_overflow": 0.08,
+            "placement_iteration_count": 4,
+        },
+        "place.cell_padding_x": {
+            "effective_padding_dbu": effective_value,
+            "movable_node_count": 12,
+            "placement_iteration_count": 4,
+        },
+        "place.routability_opt": {
+            "branch_round_count": 1 if activation_status == "used" else 0,
+        },
+        "place.density_weight": {
+            "configured_density_weight": effective_value,
+            "final_objective": 12.5,
+            "placement_iteration_count": 4,
+        },
+    }[knob_id]
+    consumer_observation["evidence_complete"] = True
     payload = {
         "receipt_id": f"parameter-receipt-{knob_id.replace('.', '-')}-{value}",
         "tool": ToolRef(name="DREAMPlace", revision="bound"),
@@ -262,6 +290,7 @@ def _native_receipt(
                 },
             ),
         ),
+        "consumer_observation": consumer_observation,
         "effective_final": EffectiveValue(value=effective_value, unit=unit),
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=_HASH)

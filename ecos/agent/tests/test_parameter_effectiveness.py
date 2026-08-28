@@ -26,7 +26,12 @@ from ecos_agent.parameter_evidence_contracts import (
     OptimizationProposalV2,
     ToolRef,
 )
-from ecos_agent.parameter_semantics import CARD_ROOT, ParameterSemanticsError, load_parameter_cards
+from ecos_agent.parameter_semantics import (
+    CARD_ROOT,
+    ParameterSemanticsError,
+    load_parameter_cards,
+    validate_application_receipt,
+)
 
 
 HASH = "sha256:" + "a" * 64
@@ -36,6 +41,55 @@ def test_cards_are_exactly_the_frozen_eight() -> None:
     cards = load_parameter_cards()
     assert {knob.value for knob in cards} == {item.value for item in OptimizationKnob}
     assert [len(card.requested_domain.values) for card in cards.values()] == [13, 16, 12, 18, 2, 21, 23, 16]
+
+
+def test_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> None:
+    cards = load_parameter_cards()
+    dreamplace_cards = [card for card in cards.values() if card.tool.name == "DREAMPlace"]
+
+    assert len(dreamplace_cards) == 5
+    for card in dreamplace_cards:
+        assert card.runtime_semantics is not None
+        assert card.runtime_semantics.mechanism
+        span_ids = {span.span_id for span in card.source_spans}
+        assert None not in span_ids
+        assert {span.role for span in card.source_spans} >= {
+            "runtime_report_producer",
+            "native_consumer",
+        }
+        referenced = {
+            span_id
+            for condition in card.activation_conditions
+            for span_id in condition.source_span_ids
+        } | {
+            span_id
+            for consumer in card.consumers
+            for span_id in consumer.source_span_ids
+        } | set(card.runtime_semantics.source_span_ids)
+        assert referenced <= span_ids
+
+
+def test_loader_rejects_dreamplace_card_without_native_consumer_span(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "cards/place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["source_spans"] = [
+        span for span in card["source_spans"] if span.get("role") == "runtime_report_producer"
+    ]
+    report_span = card["source_spans"][0]["span_id"]
+    for item in (*card["activation_conditions"], *card["consumers"]):
+        item["source_span_ids"] = [report_span]
+    semantics = card["runtime_semantics"]
+    semantics["source_span_ids"] = [report_span]
+    for key in ("metric_relevance", "interactions", "invalidation_rules"):
+        for item in semantics[key]:
+            item["source_span_ids"] = [report_span]
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="native consumer"):
+        load_parameter_cards(root)
 
 
 def _refresh_card_manifest(root) -> None:
@@ -135,6 +189,13 @@ def _density_receipt(
         else (),
         application_status="applied",
         activation=ActivationEvidence(status="used", consumers=({"consumer_id": "dreamplace.density_objective", "outcome": "entered", "evidence_ref": "analysis/density.json", "evidence_sha256": HASH},)),
+        consumer_observation={
+            "requested_target_density": 0.2,
+            "effective_target_density": 0.8,
+            "density_tensor_value": 0.8,
+            "placement_iteration_count": 4,
+            "evidence_complete": True,
+        },
         effective_final=EffectiveValue(value=0.8, unit="ratio"),
     )
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
@@ -148,6 +209,20 @@ def test_density_floor_excludes_only_values_supported_by_typed_rule() -> None:
     domain = compile_effective_domain(card, context=context, receipts=(_density_receipt(build_context_fingerprint(context)),))
     assert domain.allowed_requested_values == (0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
     assert domain.current_coordinate["effective_anchor"] == 0.8
+
+
+def test_dreamplace_used_receipt_requires_consumer_observation() -> None:
+    cards = load_parameter_cards()
+    context = {"design_sha256": HASH, "stage": "place", "tool_revision": "bound"}
+    payload = _density_receipt(build_context_fingerprint(context)).model_dump(
+        mode="json", exclude={"consumer_observation", "evidence_sha256"}
+    )
+    receipt = ParameterApplicationReceipt(
+        **payload, evidence_sha256=canonical_sha256(payload)
+    )
+
+    with pytest.raises(ParameterSemanticsError, match="consumer observation"):
+        validate_application_receipt(receipt, cards)
 
 
 def test_density_floor_without_runtime_trigger_excludes_only_observed_request() -> None:

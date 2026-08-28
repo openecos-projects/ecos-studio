@@ -79,6 +79,102 @@ class RequestedDomain(_Model):
         return values
 
 
+class CardSourceSpan(_Model):
+    span_id: str | None = None
+    role: Literal[
+        "runtime_report_producer",
+        "native_normalization",
+        "native_consumer",
+        "native_predicate",
+        "native_adaptive_update",
+    ] = "runtime_report_producer"
+    file: str
+    start: StrictInt
+    end: StrictInt
+    sha256: str
+
+    @field_validator("span_id")
+    @classmethod
+    def valid_span_id(cls, value: str | None) -> str | None:
+        if value is not None and not _ID.fullmatch(value):
+            raise ValueError("source span id is invalid")
+        return value
+
+    @field_validator("file")
+    @classmethod
+    def safe_file(cls, value: str) -> str:
+        if not value or value.startswith("/") or ".." in value.split("/"):
+            raise ValueError("source span file must be relative")
+        return value
+
+    @field_validator("sha256")
+    @classmethod
+    def valid_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("source span hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def valid_range(self) -> "CardSourceSpan":
+        if self.start < 1 or self.end < self.start:
+            raise ValueError("source span range is invalid")
+        return self
+
+
+class CardActivationCondition(_Model):
+    kind: str
+    predicate: str | None = None
+    source_span_ids: tuple[str, ...] = ()
+
+
+class CardConsumer(_Model):
+    consumer_id: str
+    event: Literal["entered", "evaluated", "geometry_constructed"]
+    role: str | None = None
+    source_span_ids: tuple[str, ...] = ()
+
+
+class CardMetricRelevance(_Model):
+    metric_id: str
+    relation: Literal[
+        "objective_input",
+        "stopping_predicate",
+        "geometry_input",
+        "activation_gate",
+        "runtime_observation",
+    ]
+    source_span_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class CardInteraction(_Model):
+    knob_id: OptimizationKnob
+    relation: Literal[
+        "shared_objective",
+        "conditional_activation",
+        "runtime_reinitialization",
+    ]
+    source_span_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class CardInvalidationRule(_Model):
+    kind: Literal[
+        "global_place_disabled",
+        "no_consumer_observation",
+        "zero_effective_value",
+        "no_routability_round",
+    ]
+    result: Literal["unknown", "not_activated"]
+    source_span_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class CardRuntimeSemantics(_Model):
+    mechanism: str
+    source_span_ids: tuple[str, ...] = Field(min_length=1)
+    metric_relevance: tuple[CardMetricRelevance, ...] = ()
+    interactions: tuple[CardInteraction, ...] = ()
+    invalidation_rules: tuple[CardInvalidationRule, ...] = ()
+
+
 class ParameterSemanticsCard(_Model):
     schema_version: Literal["ecos.parameter_semantics_card.v1"] = "ecos.parameter_semantics_card.v1"
     knob_id: OptimizationKnob
@@ -88,10 +184,11 @@ class ParameterSemanticsCard(_Model):
     requested_domain: RequestedDomain
     write_mapping: dict[str, Any]
     resolution_rules: tuple[dict[str, Any], ...] = ()
-    activation_conditions: tuple[dict[str, Any], ...] = ()
-    consumers: tuple[dict[str, Any], ...] = ()
+    activation_conditions: tuple[CardActivationCondition, ...] = ()
+    consumers: tuple[CardConsumer, ...] = ()
     runtime_probe_ids: tuple[str, ...] = ()
-    source_spans: tuple[dict[str, Any], ...] = ()
+    source_spans: tuple[CardSourceSpan, ...] = ()
+    runtime_semantics: CardRuntimeSemantics | None = None
     review: dict[str, Any]
 
     @field_validator("stage")
@@ -107,6 +204,28 @@ class ParameterSemanticsCard(_Model):
         if len(set(values)) != len(values) or any(not _ID.fullmatch(v) for v in values):
             raise ValueError("runtime probe ids are invalid")
         return values
+
+    @model_validator(mode="after")
+    def source_references_exist(self) -> "ParameterSemanticsCard":
+        span_ids = [span.span_id for span in self.source_spans if span.span_id is not None]
+        if len(span_ids) != len(set(span_ids)):
+            raise ValueError("parameter card source span ids must be unique")
+        references = {
+            source_id
+            for item in (*self.activation_conditions, *self.consumers)
+            for source_id in item.source_span_ids
+        }
+        if self.runtime_semantics is not None:
+            references.update(self.runtime_semantics.source_span_ids)
+            for item in (
+                *self.runtime_semantics.metric_relevance,
+                *self.runtime_semantics.interactions,
+                *self.runtime_semantics.invalidation_rules,
+            ):
+                references.update(item.source_span_ids)
+        if references - set(span_ids):
+            raise ValueError("parameter card source reference is invalid")
+        return self
 
 
 class CardManifest(_Model):
@@ -249,6 +368,7 @@ class ParameterApplicationReceipt(_Model):
     transitions: tuple[RuntimeTransition, ...] = ()
     application_status: Literal["rejected", "unsupported", "ignored", "applied", "unknown"]
     activation: ActivationEvidence
+    consumer_observation: dict[str, Any] | None = None
     effective_final: EffectiveValue
     evidence_sha256: str
 
@@ -284,7 +404,10 @@ class ParameterApplicationReceipt(_Model):
         sequences = [item.sequence for item in self.transitions]
         if sequences != list(range(len(sequences))):
             raise ValueError("runtime transition sequence is not contiguous")
-        expected_hash = canonical_sha256(self.model_dump(mode="json", exclude={"evidence_sha256"}))
+        hash_payload = self.model_dump(mode="json", exclude={"evidence_sha256"})
+        if self.consumer_observation is None:
+            hash_payload.pop("consumer_observation")
+        expected_hash = canonical_sha256(hash_payload)
         if self.evidence_sha256 != expected_hash:
             raise ValueError("receipt evidence hash does not match content")
         return self

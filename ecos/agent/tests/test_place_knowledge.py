@@ -47,6 +47,20 @@ def test_parameter_chunks_are_english_meaning_and_role_only() -> None:
     }
 
 
+def test_dreamplace_tunable_parameters_describe_native_consumption_boundaries() -> None:
+    knowledge = _load_place_knowledge()
+    expected = {
+        "parameter.dreamplace.target_density": "utilization-derived floor",
+        "parameter.dreamplace.stop_overflow": "convergence and divergence predicates",
+        "parameter.dreamplace.cell_padding_x": "expands movable-cell and pin geometry",
+        "parameter.dreamplace.routability_opt_flag": "positive native routability-round count",
+        "parameter.dreamplace.density_weight": "updates the internal weight",
+    }
+
+    for entity_id, text in expected.items():
+        assert text in knowledge.chunk_text(entity_id)
+
+
 def test_failure_chunks_are_english() -> None:
     failures = (BUNDLE_ROOT / "knowledge" / "failures.md").read_text(encoding="utf-8")
 
