@@ -42,22 +42,70 @@ struct Args {
 
     #[arg(long)]
     map_root: Option<PathBuf>,
+
+    #[arg(long)]
+    force_cpu: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
+        let is_wsl = std::env::var_os("WSL_DISTRO_NAME").is_some()
+            || std::env::var_os("WSL_INTEROP").is_some()
+            || std::path::Path::new("/dev/dxg").exists();
+        if is_wsl && !std::path::Path::new("/dev/dri").exists() {
+            std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+            if std::env::var_os("VK_ICD_FILENAMES").is_none()
+                && std::path::Path::new("/usr/share/vulkan/icd.d/lvp_icd.json").exists()
+            {
+                std::env::set_var("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/lvp_icd.json");
+            }
+        }
+    }
+
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 860.0])
             .with_min_inner_size([960.0, 640.0])
             .with_active(true),
         centered: true,
+        wgpu_options: egui_wgpu::WgpuConfiguration {
+            wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
+                instance_descriptor: wgpu::InstanceDescriptor {
+                    backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all()),
+                    ..Default::default()
+                },
+                power_preference: wgpu::PowerPreference::None,
+                device_descriptor: std::sync::Arc::new(|adapter| {
+                    let base_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
+                        wgpu::Limits::downlevel_webgl2_defaults()
+                    } else {
+                        wgpu::Limits::default()
+                    };
+                    wgpu::DeviceDescriptor {
+                        label: Some("egui wgpu device"),
+                        required_features: wgpu::Features::default(),
+                        required_limits: base_limits,
+                        memory_hints: wgpu::MemoryHints::default(),
+                    }
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
         ..Default::default()
     };
     eframe::run_native(
         "Chip Viewer",
         native_options,
         Box::new(move |_cc| {
+            let has_wgpu = if let Some(render_state) = _cc.wgpu_render_state.as_ref() {
+                let limits = render_state.device.limits();
+                let supports_storage_buffers = limits.max_storage_buffers_per_shader_stage >= 1;
+                supports_storage_buffers && !args.force_cpu
+            } else {
+                false
+            };
             Ok(Box::new(ChipViewerApp::open(
                 args.manifest.clone(),
                 args.mode.clone(),
@@ -73,6 +121,7 @@ fn main() -> Result<()> {
                     .as_ref()
                     .map(|s| s.target_format)
                     .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb),
+                has_wgpu,
             )))
         }),
     )

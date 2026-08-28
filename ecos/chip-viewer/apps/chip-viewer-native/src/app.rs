@@ -66,6 +66,7 @@ pub struct CanvasRenderStats {
     pub lod: u8,
     pub visible_drc_count: usize,
     pub visible_antenna_count: usize,
+    pub is_gpu: bool,
 }
 
 struct GpuCachedLabel {
@@ -101,6 +102,7 @@ struct LoadingViewer {
     antenna_statis_path: Option<PathBuf>,
     map_root_path: Option<PathBuf>,
     pub target_format: wgpu::TextureFormat,
+    pub has_wgpu: bool,
 }
 
 struct LoadedViewer {
@@ -1362,6 +1364,7 @@ impl ChipViewerApp {
         antenna_statis_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
         target_format: wgpu::TextureFormat,
+        has_wgpu: bool,
     ) -> Self {
         let edit_enabled = mode == "edit";
         let (sender, receiver) = mpsc::channel();
@@ -1386,6 +1389,7 @@ impl ChipViewerApp {
                 antenna_statis_path,
                 map_root_path,
                 target_format,
+                has_wgpu,
             }),
             theme_initialized: false,
             startup_focus_requested: false,
@@ -1461,6 +1465,7 @@ impl ChipViewerApp {
                     loading.antenna_statis_path.clone(),
                     loading.map_root_path.clone(),
                     loading.target_format,
+                    loading.has_wgpu,
                 ))),
                 Ok(Err(err)) => Some(ViewerState::Error(err)),
                 Err(mpsc::TryRecvError::Disconnected) => Some(ViewerState::Error(
@@ -2021,6 +2026,7 @@ impl LoadedViewer {
         antenna_statis_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
         target_format: wgpu::TextureFormat,
+        has_wgpu: bool,
     ) -> Self {
         let stats = db.stats();
         let grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
@@ -2117,7 +2123,7 @@ impl LoadedViewer {
             geometry_epoch: 1,
             owner_category_cache: OwnerCategoryCache::default(),
             visibility_rules_cache: VisibilityRulesCache::default(),
-            gpu_canvas: crate::canvas_gpu::GpuCanvasState::new_from_env(target_format),
+            gpu_canvas: crate::canvas_gpu::GpuCanvasState::new_with_wgpu(has_wgpu, target_format),
             gpu_tile_instances: std::collections::HashMap::new(),
             gpu_3d_instances_cache: None,
             last_3d_query_rect: None,
@@ -3330,6 +3336,37 @@ impl LoadedViewer {
             return;
         }
 
+        if !self.gpu_canvas.enabled || self.gpu_canvas.failed {
+            let painter = ui.painter();
+            for instance in heatmap.instances.iter() {
+                let rect = shape_screen_rect(
+                    Rect32 {
+                        lx: instance.rect_dbu[0],
+                        ly: instance.rect_dbu[1],
+                        hx: instance.rect_dbu[2],
+                        hy: instance.rect_dbu[3],
+                    },
+                    world,
+                    canvas,
+                    self.zoom,
+                    self.pan,
+                );
+                let visible = rect.intersect(canvas);
+                if visible.is_positive() {
+                    let rgba_bytes = instance.fill_rgba.to_le_bytes();
+                    let alpha = ((rgba_bytes[3] as f32) * heatmap.opacity).round() as u8;
+                    let color = egui::Color32::from_rgba_unmultiplied(
+                        rgba_bytes[0],
+                        rgba_bytes[1],
+                        rgba_bytes[2],
+                        alpha,
+                    );
+                    painter.rect_filled(visible, 0.0, color);
+                }
+            }
+            return;
+        }
+
         let scale = world_to_screen_scale(world, canvas, self.zoom);
         let uniform = crate::canvas_gpu::CanvasUniform {
             world_center_dbu: [
@@ -3642,7 +3679,7 @@ impl LoadedViewer {
             let layer_index = &self.visibility_rules_cache.layer_index;
             let zoom_rules = &self.visibility_rules_cache.zoom_rules;
             let mut visible_ids = Vec::new();
-            if !self.gpu_canvas.enabled {
+            if !self.gpu_canvas.enabled || self.gpu_canvas.failed {
                 let query_start = Instant::now();
                 visible_ids = self.render_cache.visible_shape_ids_for_layers(
                     &self.db,
@@ -3654,7 +3691,7 @@ impl LoadedViewer {
 
             self.paint_gpu_heatmap_overlay(ui, canvas, world);
 
-            if self.gpu_canvas.enabled {
+            if self.gpu_canvas.enabled && !self.gpu_canvas.failed {
                 let gpu_start = Instant::now();
 
                 self.gpu_tile_instances.retain(|key, _| {
@@ -4161,6 +4198,7 @@ impl LoadedViewer {
                 lod: view_lod,
                 visible_drc_count,
                 visible_antenna_count,
+                is_gpu: self.gpu_canvas.enabled && !self.gpu_canvas.failed,
             };
             paint_render_stats_overlay(&painter, canvas, &stats);
         }
@@ -4772,7 +4810,7 @@ impl LoadedViewer {
             painter.text(
                 canvas.center(),
                 egui::Align2::CENTER_CENTER,
-                "3D view requires the GPU canvas",
+                "3D view requires hardware acceleration or GPU canvas (running in CPU fallback mode)",
                 egui::FontId::proportional(14.0),
                 ecos_text_secondary(),
             );
@@ -8178,14 +8216,14 @@ fn paint_render_stats_overlay(
             stats.query_time_ms, stats.filter_time_ms
         ),
         format!(
-            "Mode: {} | Zoom: {:.2} | LOD: {}",
+            "Engine: {} | Mode: {} | Zoom: {:.2}",
+            if stats.is_gpu { "GPU" } else { "CPU Fallback" },
             if stats.use_view_tiles {
                 "Tiles"
             } else {
                 "Exact"
             },
-            stats.zoom,
-            stats.lod
+            stats.zoom
         ),
         format!(
             "Shapes: {} | Est Primitives: {}",
@@ -11661,6 +11699,7 @@ mod tests {
             None,
             None,
             wgpu::TextureFormat::Bgra8Unorm,
+            true,
         );
         loaded.layers = vec![layer_state(1, true)];
         loaded.rebuild_layer_stack();
@@ -11741,6 +11780,7 @@ mod tests {
             None,
             None,
             wgpu::TextureFormat::Bgra8Unorm,
+            true,
         );
         loaded.layers = vec![layer_state(1, true)];
         loaded.rebuild_layer_stack();
@@ -13676,6 +13716,7 @@ mod tests {
             None,
             None,
             wgpu::TextureFormat::Bgra8Unorm,
+            true,
         );
         let delta_path = dir.join("geometry.delta.bin");
 
@@ -13716,9 +13757,37 @@ mod tests {
             None,
             None,
             wgpu::TextureFormat::Bgra8Unorm,
+            true,
         );
 
         assert!(loaded.session_dirty);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn loaded_viewer_falls_back_to_cpu_when_wgpu_unavailable() {
+        let dir = temp_snapshot_dir("cpu-fallback-test");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+            false,
+        );
+
+        assert!(!loaded.gpu_canvas.enabled);
+        assert!(!loaded.gpu_canvas.failed);
 
         let _ = fs::remove_dir_all(&dir);
     }

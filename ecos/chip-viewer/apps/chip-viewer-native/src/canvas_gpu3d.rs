@@ -1472,10 +1472,15 @@ impl egui_wgpu::CallbackTrait for CanvasGpu3dCallback {
         egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
+        if device.limits().max_storage_buffers_per_shader_stage < 1 {
+            return Vec::new();
+        }
         if callback_resources.get::<CanvasGpu3dResources>().is_none() {
             callback_resources.insert(CanvasGpu3dResources::new(device, self.target_format));
         }
-        let resources: &mut CanvasGpu3dResources = callback_resources.get_mut().unwrap();
+        let Some(resources) = callback_resources.get_mut::<CanvasGpu3dResources>() else {
+            return Vec::new();
+        };
         let width = self.target_pixels[0].max(1);
         let height = self.target_pixels[1].max(1);
         resources.ensure_offscreen(device, width, height);
@@ -1536,7 +1541,9 @@ impl egui_wgpu::CallbackTrait for CanvasGpu3dCallback {
         render_pass: &mut wgpu::RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {
-        let resources: &CanvasGpu3dResources = callback_resources.get().unwrap();
+        let Some(resources) = callback_resources.get::<CanvasGpu3dResources>() else {
+            return;
+        };
         let Some(offscreen) = resources.offscreen.as_ref() else {
             return;
         };
