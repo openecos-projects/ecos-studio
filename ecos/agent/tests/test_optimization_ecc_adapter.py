@@ -401,7 +401,6 @@ def test_adapter_binds_and_returns_effective_value_receipt() -> None:
     adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
     receipt = adapter.wait_for_terminal("operation-1")
 
-    assert receipt.application_receipt is None
     assert receipt.parameter_application_receipt is None
 
 
@@ -505,7 +504,6 @@ def test_adapter_does_not_build_a_missing_success_receipt_from_candidate_artifac
     adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
     receipt = adapter.wait_for_terminal("operation-1")
 
-    assert receipt.application_receipt is None
     assert receipt.parameter_application_receipt is None
 
 
@@ -528,7 +526,6 @@ def test_adapter_rejects_an_application_receipt_with_wrong_request_or_written_va
         )
         adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
         receipt = adapter.wait_for_terminal("operation-1")
-        assert receipt.application_receipt is None
         assert receipt.parameter_application_receipt is None
 
 
@@ -550,7 +547,6 @@ def test_adapter_rejects_a_malformed_application_receipt() -> None:
     adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
 
     receipt = adapter.wait_for_terminal("operation-1")
-    assert receipt.application_receipt is None
     assert receipt.parameter_application_receipt is None
 
 

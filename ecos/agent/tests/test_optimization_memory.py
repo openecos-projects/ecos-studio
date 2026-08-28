@@ -12,7 +12,6 @@ from ecos_agent.optimization_contracts import (
     EpisodeBudget,
     ExpectedEffectDirection,
     GateResult,
-    KnobApplicationReceipt,
     ObjectiveMetric,
     ObservationReference,
     OptimizationDecision,
@@ -35,14 +34,16 @@ from ecos_agent.optimization_ledger import (
     OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationTerminalOutcome,
+    _canonical_json,
+    _new_entry,
 )
+from ecos_agent.optimization_legacy_reader import KnobApplicationReceipt
 from ecos_agent.optimization_memory import (
     OptimizationTaskMemoryIntegrityError,
     OptimizationTaskMemoryStore,
     build_task_memory_scope,
 )
 from ecos_agent.optimization_rules import freeze_optimization_objective
-
 
 HASH = "sha256:" + "a" * 64
 WORKSPACE_HASH = "sha256:" + "b" * 64
@@ -183,8 +184,7 @@ def _append_intervention(
     )
     if terminal:
         observation = _terminal(f"terminal-{index}", float(index))
-        ledger.append_terminal(
-            OptimizationTerminalOutcome(
+        terminal_outcome = OptimizationTerminalOutcome(
                 intervention_id=intervention_id,
                 outcome=outcome,
                 candidate_manifest_sha256=HASH,
@@ -199,8 +199,18 @@ def _append_intervention(
                 terminal_observation=observation,
                 application_receipt=application_receipt,
                 outcome_details_sha256=HASH,
-            )
         )
+        if application_receipt is None:
+            ledger.append_terminal(terminal_outcome)
+        else:
+            replay = ledger.replay()
+            entry = _new_entry(
+                len(replay.entries) + 1,
+                replay.chain_head_sha256,
+                terminal_outcome,
+            )
+            with ledger.ledger_path.open("ab") as stream:
+                stream.write(_canonical_json(entry.model_dump(mode="json")) + b"\n")
     _write_state(root, scope, ledger)
 
 
@@ -325,7 +335,7 @@ def test_snapshot_is_bounded_compressed_deterministic_and_updates(tmp_path: Path
     assert sum(len(item.evidence_refs) for item in updated.summaries) == 6
 
 
-def test_task_memory_preserves_application_receipts_in_entries_and_summaries(
+def test_task_memory_does_not_reemit_legacy_application_receipts(
     tmp_path: Path,
 ) -> None:
     store = OptimizationTaskMemoryStore(
@@ -340,8 +350,8 @@ def test_task_memory_preserves_application_receipts_in_entries_and_summaries(
     replay = store.synchronize()
     snapshot = store.snapshot()
 
-    assert replay.entries[0].application_receipt == receipt
-    assert snapshot.summaries[0].application_receipts == (receipt,)
+    assert replay.entries[0].application_receipt is None
+    assert snapshot.summaries[0].application_receipts == ()
     assert store.replay() == replay
 
 

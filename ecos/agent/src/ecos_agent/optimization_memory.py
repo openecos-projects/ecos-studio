@@ -12,11 +12,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
-    KnobApplicationReceipt,
     KnobScalar,
     ObjectiveMetric,
     OptimizationKnob,
@@ -37,6 +43,7 @@ from ecos_agent.optimization_ledger import (
     _validate_relative_path,
     _write_json_atomic,
 )
+from ecos_agent.optimization_legacy_reader import KnobApplicationReceipt
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
 _STORE_FILE = "task-memory.v1.jsonl"
@@ -287,7 +294,6 @@ class _Candidate:
     outcome: OptimizationOutcomeKind
     terminal_observation: TerminalObservation
     evidence: OptimizationTaskMemoryEvidence
-    application_receipt: KnobApplicationReceipt | None
     parameter_application_receipt: ParameterApplicationReceipt | None = None
 
 
@@ -498,7 +504,6 @@ def _derive_candidates(episode_root: Path) -> tuple[_Candidate, ...]:
                     receipt_sha256=terminal.receipt_sha256,
                     terminal_observation_sha256=terminal.terminal_observation_sha256,
                 ),
-                application_receipt=terminal.application_receipt,
                 parameter_application_receipt=terminal.parameter_application_receipt,
             )
         )
@@ -573,8 +578,6 @@ def _build_entry(sequence: int, previous: str | None, candidate: _Candidate):
         "terminal_observation": candidate.terminal_observation.model_dump(mode="json"),
         "evidence": candidate.evidence.model_dump(mode="json"),
     }
-    if candidate.application_receipt is not None:
-        payload["application_receipt"] = candidate.application_receipt.model_dump(mode="json")
     if candidate.parameter_application_receipt is not None:
         payload["parameter_application_receipt"] = candidate.parameter_application_receipt.model_dump(mode="json")
     return OptimizationTaskMemoryEntry(
@@ -633,13 +636,6 @@ def _summaries(
             "metric_ranges": [item.model_dump(mode="json") for item in ranges],
             "evidence_refs": [entry.evidence.model_dump(mode="json") for entry in group],
         }
-        receipts = [
-            entry.application_receipt.model_dump(mode="json")
-            for entry in group
-            if entry.application_receipt is not None
-        ]
-        if receipts:
-            payload["application_receipts"] = receipts
         native_receipts = [
             entry.parameter_application_receipt.model_dump(mode="json")
             for entry in group

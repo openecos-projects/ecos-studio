@@ -23,14 +23,14 @@ from ecos_agent.optimization_baselines import (
 )
 from ecos_agent.optimization_contracts import (
     CANDIDATE_EXECUTION_LIMIT,
+    ROUTABILITY_OBJECTIVE_ORDER,
+    TIMING_GUARDRAIL_ORDER,
     KnobScalar,
     ObjectiveMetric,
     OptimizationKnob,
-    ROUTABILITY_OBJECTIVE_ORDER,
     RequestedKnobValue,
     StrategyDirection,
     TerminalObservation,
-    TIMING_GUARDRAIL_ORDER,
     TimingMetric,
 )
 from ecos_agent.optimization_ecc_adapter import EccContentLengthRpcClient
@@ -45,7 +45,7 @@ from ecos_agent.optimization_gate0 import (
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_observations import build_terminal_observation
-from ecos_agent.optimization_rules import coordinate_value_from_receipt
+from ecos_agent.optimization_rules import coordinate_value_from_native_receipt
 from ecos_agent.optimization_runtime import _current_values
 from ecos_agent.optimization_statistics import (
     baseline_design_statistics,
@@ -481,10 +481,12 @@ def _run_online_method(
         evidence = result.receipt.evidence
         if evidence is None:
             raise BaselineRunnerError("successful candidate evidence is missing")
-        application = result.receipt.application_receipt
+        application = result.receipt.parameter_application_receipt
         if application is None:
-            raise BaselineRunnerError("successful candidate application receipt is missing")
-        effective_value = coordinate_value_from_receipt(
+            raise BaselineRunnerError(
+                "successful candidate parameter application receipt is missing"
+            )
+        effective_value = coordinate_value_from_native_receipt(
             application,
             site_width_dbu=readiness["pdk"]["site_width_dbu"],
         )

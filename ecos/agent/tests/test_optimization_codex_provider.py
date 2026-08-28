@@ -14,12 +14,10 @@ from ecos_agent.codex_provider import (
 from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
-    AppliedKnobValue,
     ExpectedEffectDirection,
     HistoryReference,
-    KnobApplicationReceipt,
-    LegalAction,
     KnowledgeReference,
+    LegalAction,
     ObjectiveMetric,
     ObservationReference,
     OptimizationDecision,
@@ -35,6 +33,13 @@ from ecos_agent.optimization_controller import (
     OptimizationPlanningContext,
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
+from ecos_agent.parameter_evidence_contracts import (
+    ActivationEvidence,
+    EffectiveValue,
+    MaterializationRef,
+    ParameterApplicationReceipt,
+    ToolRef,
+)
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -48,15 +53,46 @@ def _provider(tmp_path: Path) -> CodexAppServerProposalProvider:
 
 
 def _context() -> OptimizationPlanningContext:
-    receipt = KnobApplicationReceipt(
-        receipt_id="receipt-density",
-        requested=RequestedKnobValue(knob_id="place.target_density", value=0.2),
-        written=AppliedKnobValue(knob_id="place.target_density", value=0.2),
-        effective_initial=AppliedKnobValue(
-            knob_id="place.target_density", value=0.8
+    receipt_payload = {
+        "receipt_id": "parameter-receipt-density",
+        "tool": ToolRef(name="DREAMPlace", revision="bound"),
+        "context": {"stage": "place"},
+        "requested": {"knob_id": "place.target_density", "value": 0.2, "unit": "ratio"},
+        "materialization": MaterializationRef(
+            receipt_ref="analysis/candidate_materialization.v1.json",
+            receipt_sha256=HASH,
+            registry_sha256=HASH,
+            patch_sha256=HASH,
+            candidate_ref="candidate-1",
+            workspace_ref="candidate-1",
+            config_before_sha256=HASH,
+            config_after_sha256=HASH,
+            written_value=0.2,
+            unit="ratio",
         ),
-        effective_final=AppliedKnobValue(knob_id="place.target_density", value=0.8),
-        evidence_sha256=HASH,
+        "effective_initial": EffectiveValue(value=0.8, unit="ratio"),
+        "application_status": "applied",
+        "activation": ActivationEvidence(
+            status="used",
+            consumers=(
+                {
+                    "consumer_id": "dreamplace.density_objective",
+                    "outcome": "entered",
+                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+                    "evidence_sha256": HASH,
+                },
+            ),
+        ),
+        "effective_final": EffectiveValue(value=0.8, unit="ratio"),
+    }
+    draft = ParameterApplicationReceipt.model_construct(
+        **receipt_payload, evidence_sha256=HASH
+    )
+    receipt = ParameterApplicationReceipt(
+        **receipt_payload,
+        evidence_sha256=canonical_sha256(
+            draft.model_dump(mode="json", exclude={"evidence_sha256"})
+        ),
     )
     history = OptimizationHistory(
         reference=HistoryReference(
@@ -74,7 +110,7 @@ def _context() -> OptimizationPlanningContext:
             ),
         ),
         requested=RequestedKnobValue(knob_id="place.target_density", value=0.2),
-        application_receipt=receipt,
+        parameter_application_receipt=receipt,
     )
     return OptimizationPlanningContext(
         context_ref=ProposalContextRef(
@@ -223,7 +259,7 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
     assert "exactly the supplied observation_ref" in captured["system"]
     assert "effective values" in captured["system"]
     assert "excluded_surface_values" in captured["system"]
-    assert captured["user"]["history"][0]["application_receipt"][
+    assert captured["user"]["history"][0]["parameter_application_receipt"][
         "effective_initial"
     ]["value"] == 0.8
     schema = captured["output_schema"]

@@ -51,6 +51,7 @@ from ecos_agent.optimization_retrieval import (
 )
 from ecos_agent.optimization_rules import (
     IncumbentDecision,
+    coordinate_value_from_native_receipt,
     freeze_routability_objective,
     native_receipt_is_effective,
 )
@@ -281,6 +282,17 @@ def test_false_routability_receipt_is_effective_without_branch_activation() -> N
     assert not native_receipt_is_effective(
         _native_receipt("place.routability_opt", True, activation_status="not_activated")
     )
+
+
+def test_native_receipt_coordinates_use_requested_density_weight_and_effective_padding() -> None:
+    assert coordinate_value_from_native_receipt(
+        _native_receipt("place.density_weight", 0.001, effective_value=0.0817526),
+        site_width_dbu=200,
+    ) == 0.001
+    assert coordinate_value_from_native_receipt(
+        _native_receipt("place.cell_padding_x", 2, effective_value=200),
+        site_width_dbu=200,
+    ) == 1
 
 
 def _budget() -> BudgetSnapshot:

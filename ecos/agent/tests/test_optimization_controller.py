@@ -9,11 +9,9 @@ import pytest
 from ecos_agent.codex_rpc import CodexProviderError
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
-    AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
-    KnobApplicationReceipt,
     KnowledgeReference,
     LegalAction,
     ObjectiveMetric,
@@ -26,7 +24,6 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEvidence,
     ProposalReason,
     RequestedKnobValue,
-    RuntimeAdjustment,
     StageObservation,
     StrategyDirection,
 )
@@ -58,6 +55,14 @@ from ecos_agent.optimization_retrieval import (
     OptimizationRetrievalResult,
 )
 from ecos_agent.optimization_rules import freeze_optimization_objective
+from ecos_agent.parameter_evidence_contracts import (
+    ActivationEvidence,
+    EffectiveValue,
+    MaterializationRef,
+    ParameterApplicationReceipt,
+    RuntimeTransition,
+    ToolRef,
+)
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -276,37 +281,68 @@ def _terminal(
     return CandidateExecutionReceipt(execution_id=execution_id, started=True, outcome=outcome)
 
 
-def _application_receipt() -> KnobApplicationReceipt:
-    return KnobApplicationReceipt(
-        receipt_id="receipt-1",
-        requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=3),
-        written=AppliedKnobValue(knob_id="place.cell_padding_x", value=600),
-        effective_initial=AppliedKnobValue(knob_id="place.cell_padding_x", value=600),
-        runtime_adjustments=(
-            RuntimeAdjustment(
-                effective_value=AppliedKnobValue(
-                    knob_id="place.cell_padding_x", value=400
-                ),
-                reason="capacity_cap",
+def _native_receipt(
+    requested: RequestedKnobValue, *, effective_value: object | None = None
+) -> ParameterApplicationReceipt:
+    effective_value = requested.value if effective_value is None else effective_value
+    unit = "site" if requested.knob_id.value == "place.cell_padding_x" else "ratio"
+    transitions = ()
+    if requested.knob_id.value == "place.target_density" and effective_value != requested.value:
+        transitions = (
+            RuntimeTransition(
+                sequence=0,
+                **{"from": "materialized"},
+                to="clamped",
+                value=effective_value,
+                reason="utilization floor",
+                rule_id="dreamplace.target_density.utilization_floor",
+                evidence_ref="analysis/parameter_runtime_report.v1.json",
                 evidence_sha256=HASH,
             ),
+        )
+    payload = {
+        "receipt_id": f"parameter-{requested.knob_id.value.replace('.', '-')}",
+        "tool": ToolRef(name="DREAMPlace", revision="bound"),
+        "context": {"stage": "place"},
+        "requested": {
+            "knob_id": requested.knob_id.value,
+            "value": requested.value,
+            "unit": unit,
+        },
+        "materialization": MaterializationRef(
+            receipt_ref="analysis/candidate_materialization.v1.json",
+            receipt_sha256=HASH,
+            registry_sha256=HASH,
+            patch_sha256=HASH,
+            candidate_ref="candidate-1",
+            workspace_ref="candidate-1",
+            config_before_sha256=HASH,
+            config_after_sha256=HASH,
+            written_value=requested.value,
+            unit=unit,
         ),
-        effective_final=AppliedKnobValue(knob_id="place.cell_padding_x", value=400),
-        evidence_sha256=HASH,
-    )
-
-
-def _density_receipt(requested: RequestedKnobValue) -> KnobApplicationReceipt:
-    assert requested.knob_id.value == "place.target_density"
-    return KnobApplicationReceipt(
-        receipt_id="receipt-density",
-        requested=requested,
-        written=AppliedKnobValue(knob_id=requested.knob_id, value=requested.value),
-        effective_initial=AppliedKnobValue(
-            knob_id=requested.knob_id, value=0.8
+        "effective_initial": EffectiveValue(value=effective_value, unit=unit),
+        "transitions": transitions,
+        "application_status": "applied",
+        "activation": ActivationEvidence(
+            status="used",
+            consumers=(
+                {
+                    "consumer_id": "dreamplace.density_objective",
+                    "outcome": "entered",
+                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+                    "evidence_sha256": HASH,
+                },
+            ),
         ),
-        effective_final=AppliedKnobValue(knob_id=requested.knob_id, value=0.8),
-        evidence_sha256=HASH,
+        "effective_final": EffectiveValue(value=effective_value, unit=unit),
+    }
+    draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
+    return ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(
+            draft.model_dump(mode="json", exclude={"evidence_sha256"})
+        ),
     )
 
 
@@ -487,7 +523,7 @@ def test_requested_only_planning_does_not_expose_receipts_or_task_memory(
             execution_id="execution-1",
             started=True,
             outcome=OptimizationOutcomeKind.DEGRADED,
-            application_receipt=_application_receipt(),
+            parameter_application_receipt=_native_receipt(first.requested),
         ),
         incumbent_decision="incumbent_retained",
     )
@@ -495,7 +531,7 @@ def test_requested_only_planning_does_not_expose_receipts_or_task_memory(
 
     context = planner.contexts[1]
     assert context.task_memory is None
-    assert context.history[0].application_receipt is None
+    assert not hasattr(context.history[0], "application_receipt")
     assert context.history[0].parameter_application_receipt is None
     assert all(not domain.thresholds for domain in context.effective_domains)
     state = json.loads(controller.state_path.read_text(encoding="utf-8"))
@@ -1002,7 +1038,7 @@ def test_terminal_outcome_can_only_complete_the_pending_execution(tmp_path: Path
     assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
 
 
-def test_controller_persists_effective_value_receipt_in_terminal_ledger(tmp_path: Path) -> None:
+def test_controller_persists_native_receipt_in_terminal_ledger(tmp_path: Path) -> None:
     controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
     controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
     controller.execute()
@@ -1012,13 +1048,21 @@ def test_controller_persists_effective_value_receipt_in_terminal_ledger(tmp_path
             execution_id="execution-1",
             started=True,
             outcome=OptimizationOutcomeKind.DEGRADED,
-            application_receipt=_application_receipt(),
+            parameter_application_receipt=_native_receipt(
+                RequestedKnobValue(knob_id="place.cell_padding_x", value=3),
+                effective_value=2,
+            ),
         )
     )
 
     outcome = controller.ledger.replay().terminal_outcomes[0]
-    assert outcome.application_receipt is not None
-    assert outcome.application_receipt.effective_final.value == 400
+    assert outcome.application_receipt is None
+    assert outcome.parameter_application_receipt is not None
+    assert outcome.parameter_application_receipt.effective_final.value == 2
+
+
+def test_candidate_execution_receipt_exposes_only_native_parameter_receipts() -> None:
+    assert "application_receipt" not in CandidateExecutionReceipt.__dataclass_fields__
 
 
 def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
@@ -1038,7 +1082,9 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
             execution_id="execution-1",
             started=True,
             outcome=OptimizationOutcomeKind.DEGRADED,
-            application_receipt=_density_receipt(first.requested),
+            parameter_application_receipt=_native_receipt(
+                first.requested, effective_value=0.8
+            ),
         ),
         incumbent_decision="incumbent_retained",
     )
@@ -1072,8 +1118,8 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
     planned = recovered.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     context = planner.contexts[0]
-    assert context.history[0].application_receipt is not None
-    assert context.history[0].application_receipt.effective_initial.value == 0.8
+    assert context.history[0].parameter_application_receipt is not None
+    assert context.history[0].parameter_application_receipt.effective_initial.value == 0.8
     assert tuple(item.value for item in context.excluded_surface_values) == (0.55,)
     assert (
         "place.target_density",
@@ -1100,7 +1146,9 @@ def test_promoting_another_knob_invalidates_the_density_floor(tmp_path: Path) ->
             execution_id="execution-1",
             started=True,
             outcome=OptimizationOutcomeKind.DEGRADED,
-            application_receipt=_density_receipt(first.requested),
+            parameter_application_receipt=_native_receipt(
+                first.requested, effective_value=0.8
+            ),
         ),
         incumbent_decision="incumbent_retained",
     )
@@ -1114,7 +1162,7 @@ def test_promoting_another_knob_invalidates_the_density_floor(tmp_path: Path) ->
             execution_id="execution-2",
             started=True,
             outcome=OptimizationOutcomeKind.IMPROVED,
-            application_receipt=_application_receipt(),
+            parameter_application_receipt=_native_receipt(second.requested),
         ),
         incumbent_decision="candidate_better",
     )

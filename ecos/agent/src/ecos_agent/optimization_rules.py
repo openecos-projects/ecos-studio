@@ -9,18 +9,17 @@ from typing import Iterable, Mapping
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
-    KnobApplicationReceipt,
+    REQUIRED_SIGNOFF_GATES,
+    ROUTABILITY_OBJECTIVE_ORDER,
+    TIMING_GUARDRAIL_ORDER,
+    LegalAction,
     MetricReference,
     ObjectiveMetric,
-    LegalAction,
     OptimizationKnob,
     OptimizationObjectiveContract,
     OptimizationObjectiveProposal,
     ProposalAction,
-    REQUIRED_SIGNOFF_GATES,
     RequestedKnobValue,
-    ROUTABILITY_OBJECTIVE_ORDER,
-    TIMING_GUARDRAIL_ORDER,
     RoutabilityObjectiveContract,
     SelectionMetric,
     StrategyDirection,
@@ -29,7 +28,6 @@ from ecos_agent.optimization_contracts import (
     TimingReference,
 )
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
-
 
 _DENSITY_VALUES = tuple(round(0.1 + 0.05 * i, 2) for i in range(14)) + (0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
 _PADDING_VALUES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16)
@@ -106,17 +104,6 @@ CONTROLLED_COORDINATE_ORDER = (
 ACTIVE_OPTIMIZATION_KNOBS = tuple(
     OptimizationKnob
 )
-
-
-def coordinate_value_from_receipt(
-    receipt: KnobApplicationReceipt, *, site_width_dbu: int
-) -> bool | int | float:
-    if type(site_width_dbu) is not int or site_width_dbu <= 0:
-        raise ValueError("site width is invalid")
-    if receipt.requested.knob_id == OptimizationKnob.DENSITY_WEIGHT:
-        return receipt.requested.value
-    value = receipt.effective_final.value
-    return value / site_width_dbu if receipt.requested.knob_id == OptimizationKnob.CELL_PADDING_X else value
 
 
 def coordinate_value_from_native_receipt(

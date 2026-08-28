@@ -7,7 +7,6 @@ from ecos_agent.optimization_contracts import (
     AppliedKnobValue,
     ExpectedEffect,
     ExpectedEffectDirection,
-    KnobApplicationReceipt,
     ObjectiveMetric,
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
@@ -20,18 +19,20 @@ from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationLedgerIntegrityError,
-    OptimizationPlanningProviderEvidenceAudit,
-    OptimizationPlanningProviderAuditIntegrityError,
     OptimizationLedgerRecoveryRequired,
     OptimizationLedgerStateError,
     OptimizationOutcomeKind,
+    OptimizationPlanningProviderAuditIntegrityError,
+    OptimizationPlanningProviderEvidenceAudit,
     OptimizationTerminalOutcome,
+    _canonical_json,
+    _new_entry,
     build_optimization_artifact_manifest,
     load_optimization_artifact_manifest,
     verify_optimization_artifact_manifest,
     write_optimization_artifact_manifest,
 )
-
+from ecos_agent.optimization_legacy_reader import KnobApplicationReceipt
 
 HASH = "sha256:" + "a" * 64
 
@@ -94,7 +95,7 @@ def test_ledger_retains_a_degraded_outcome_and_replays_it_deterministically(tmp_
     assert manifest.chain_head_sha256 == first_replay.chain_head_sha256
 
 
-def test_ledger_replays_an_effective_value_receipt(tmp_path) -> None:
+def test_ledger_rejects_new_legacy_effective_value_receipts(tmp_path) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     ledger.append_start(
         _start().model_copy(
@@ -117,7 +118,13 @@ def test_ledger_replays_an_effective_value_receipt(tmp_path) -> None:
     )
     terminal = _terminal()
     terminal = terminal.model_copy(update={"application_receipt": _application_receipt()})
-    ledger.append_terminal(terminal)
+    with pytest.raises(OptimizationLedgerStateError, match="legacy application receipt"):
+        ledger.append_terminal(terminal)
+
+    replay = ledger.replay()
+    legacy_entry = _new_entry(2, replay.chain_head_sha256, terminal)
+    with ledger.ledger_path.open("ab") as stream:
+        stream.write(_canonical_json(legacy_entry.model_dump(mode="json")) + b"\n")
 
     assert ledger.replay().terminal_outcomes[0].application_receipt == _application_receipt()
 

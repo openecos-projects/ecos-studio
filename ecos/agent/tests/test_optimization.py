@@ -1,10 +1,11 @@
 import pytest
+from pydantic import ValidationError
+
 from ecos_agent.optimization_contracts import (
     AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
     GateResult,
-    KnobApplicationReceipt,
     KnowledgeReference,
     ObjectiveMetric,
     ObservationReference,
@@ -12,31 +13,30 @@ from ecos_agent.optimization_contracts import (
     OptimizationObjectiveContract,
     OptimizationObjectiveProposal,
     OptimizationProposal,
-    ProposalAction,
     ProposalContextRef,
     ProposalReason,
     RequestedKnobValue,
     RoutabilityObjectiveContract,
-    RuntimeAdjustment,
-    RuntimeObservation,
     SignoffGates,
     StageObservation,
     StrategyDirection,
     TerminalObservation,
     TimingMetric,
 )
+from ecos_agent.optimization_legacy_reader import (
+    KnobApplicationReceipt,
+    RuntimeAdjustment,
+    RuntimeObservation,
+)
 from ecos_agent.optimization_rules import (
     CoordinateDirection,
     IncumbentDecision,
     compare_incumbent,
-    coordinate_value_from_receipt,
     freeze_optimization_objective,
     freeze_routability_objective,
     legal_actions,
     next_coordinate_selection,
-    select_requested_value,
 )
-from pydantic import ValidationError
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -317,7 +317,7 @@ def test_requested_lattice_uses_logical_padding_sites() -> None:
         RequestedKnobValue(knob_id="synth.max_fanout", value=34)
 
 
-def test_knob_receipt_binds_requested_written_and_runtime_effective_values() -> None:
+def test_legacy_receipt_reader_binds_requested_written_and_runtime_values() -> None:
     receipt = KnobApplicationReceipt(
         receipt_id="receipt-1",
         requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=2),
@@ -335,7 +335,6 @@ def test_knob_receipt_binds_requested_written_and_runtime_effective_values() -> 
     )
 
     assert receipt.effective_final.value == 200
-    assert coordinate_value_from_receipt(receipt, site_width_dbu=200) == 1
     assert "runtime_observations" not in receipt.model_dump(mode="json")
 
     with pytest.raises(ValidationError, match="final value"):
@@ -346,7 +345,7 @@ def test_knob_receipt_binds_requested_written_and_runtime_effective_values() -> 
         KnobApplicationReceipt.model_validate(invalid_receipt)
 
 
-def test_density_weight_receipt_keeps_the_requested_search_coordinate() -> None:
+def test_legacy_receipt_reader_preserves_density_weight_evidence() -> None:
     receipt = KnobApplicationReceipt(
         receipt_id="receipt-1",
         requested=RequestedKnobValue(knob_id="place.density_weight", value=0.001),
@@ -369,7 +368,8 @@ def test_density_weight_receipt_keeps_the_requested_search_coordinate() -> None:
         evidence_sha256=HASH,
     )
 
-    assert coordinate_value_from_receipt(receipt, site_width_dbu=200) == 0.001
+    assert receipt.requested.value == 0.001
+    assert receipt.effective_final.value == 0.0817526
 
 
 def test_knob_receipt_rejects_a_mismatched_runtime_knob() -> None:

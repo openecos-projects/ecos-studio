@@ -14,24 +14,19 @@ from pathlib import Path
 from typing import Mapping, Protocol
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import (
-    AppliedKnobValue,
-    KnobApplicationReceipt,
-    OptimizationKnob,
-    RequestedKnobValue,
-)
-from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
-from ecos_agent.parameter_semantics import (
-    ParameterSemanticsError,
-    load_parameter_cards,
-    validate_application_receipt,
-)
+from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
+from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
+from ecos_agent.parameter_semantics import (
+    ParameterSemanticsError,
+    load_parameter_cards,
+    validate_application_receipt,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
@@ -132,7 +127,6 @@ class EccCandidateRerunAdapter:
         self._validate_execution_contract(response, requested)
         evidence = self._evidence(response)
         application_receipt = self._application_receipt(response, requested, state, evidence)
-        legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id[operation_id] = requested
         if state == "failed":
             self._requested_by_execution_id.pop(operation_id, None)
@@ -141,8 +135,7 @@ class EccCandidateRerunAdapter:
                 started=True,
                 outcome=OptimizationOutcomeKind.EXECUTION_FAILED,
                 evidence=evidence,
-                application_receipt=legacy_receipt,
-                parameter_application_receipt=native_receipt,
+                parameter_application_receipt=application_receipt,
             )
         if state == "cancelled":
             self._requested_by_execution_id.pop(operation_id, None)
@@ -151,8 +144,7 @@ class EccCandidateRerunAdapter:
                 started=True,
                 outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
                 evidence=evidence,
-                application_receipt=legacy_receipt,
-                parameter_application_receipt=native_receipt,
+                parameter_application_receipt=application_receipt,
             )
         if state == "succeeded":
             self._requested_by_execution_id.pop(operation_id, None)
@@ -161,8 +153,7 @@ class EccCandidateRerunAdapter:
                 started=True,
                 outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
                 evidence=evidence,
-                application_receipt=legacy_receipt,
-                parameter_application_receipt=native_receipt,
+                parameter_application_receipt=application_receipt,
             )
         return CandidateExecutionReceipt(execution_id=operation_id, started=True)
 
@@ -188,14 +179,12 @@ class EccCandidateRerunAdapter:
         application_receipt = self._application_receipt(
             terminal, self._requested_by_execution_id.get(intervention_id), state, evidence
         )
-        legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id.pop(intervention_id, None)
         return CandidateExecutionReceipt(
             execution_id=intervention_id,
             started=True,
             outcome=outcome,
-            application_receipt=legacy_receipt,
-            parameter_application_receipt=native_receipt,
+            parameter_application_receipt=application_receipt,
         )
 
     def wait_for_terminal(
@@ -228,15 +217,13 @@ class EccCandidateRerunAdapter:
         application_receipt = self._application_receipt(
             terminal, self._requested_by_execution_id.get(execution_id), state, evidence
         )
-        legacy_receipt, native_receipt = _split_application_receipt(application_receipt)
         self._requested_by_execution_id.pop(execution_id, None)
         return CandidateExecutionReceipt(
             execution_id=execution_id,
             started=True,
             outcome=outcome,
             evidence=self._evidence(terminal),
-            application_receipt=legacy_receipt,
-            parameter_application_receipt=native_receipt,
+            parameter_application_receipt=application_receipt,
         )
 
     @staticmethod
@@ -300,7 +287,7 @@ class EccCandidateRerunAdapter:
         requested: RequestedKnobValue | None,
         state: str,
         evidence: CandidateExecutionEvidence | None = None,
-    ) -> KnobApplicationReceipt | ParameterApplicationReceipt | None:
+    ) -> ParameterApplicationReceipt | None:
         result = self._result(response)
         if result is None:
             return None
@@ -421,14 +408,6 @@ class EccCandidateRerunAdapter:
         if require_workspace and response.get("workspaceId") != self._workspace_id:
             raise OptimizationEccAdapterError("operation workspace does not match")
         return operation_id, state
-
-
-def _split_application_receipt(
-    receipt: KnobApplicationReceipt | ParameterApplicationReceipt | None,
-) -> tuple[KnobApplicationReceipt | None, ParameterApplicationReceipt | None]:
-    if isinstance(receipt, ParameterApplicationReceipt):
-        return None, receipt
-    return receipt, None
 
 
 def _normalize_receipt_payload(value: object) -> object:

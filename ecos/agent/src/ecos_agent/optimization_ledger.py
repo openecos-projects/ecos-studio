@@ -27,7 +27,6 @@ from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     HistoryReference,
-    KnobApplicationReceipt,
     OptimizationTaskMemoryReference,
     PlanningProviderEvidence,
     ProposalAction,
@@ -36,6 +35,7 @@ from ecos_agent.optimization_contracts import (
     SelectionMetric,
     TerminalObservation,
 )
+from ecos_agent.optimization_legacy_reader import KnobApplicationReceipt
 from ecos_agent.optimization_rules import IncumbentDecision
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
@@ -623,6 +623,8 @@ class OptimizationLedger:
             return self._append_locked(replay, start)
 
     def append_terminal(self, outcome: OptimizationTerminalOutcome) -> OptimizationLedgerEntry:
+        if outcome.application_receipt is not None:
+            raise OptimizationLedgerStateError("legacy application receipt is read-only")
         with self._exclusive_lock():
             replay = self._verify_locked()
             if outcome.intervention_id not in replay.pending_intervention_ids:

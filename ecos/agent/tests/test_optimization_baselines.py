@@ -6,8 +6,9 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-import ecos_agent.optimization_baseline_runner as baseline_runner
 import pytest
+
+import ecos_agent.optimization_baseline_runner as baseline_runner
 from ecos_agent.optimization_baseline_runner import (
     BaselineCandidateExecution,
     BaselineCandidateFailure,
@@ -359,6 +360,59 @@ def test_online_method_does_not_charge_pre_execution_errors() -> None:
             random_seed=17,
             execute=execute,
         )
+
+
+def test_online_method_uses_native_application_receipt(
+    monkeypatch, tmp_path: Path
+) -> None:
+    native_receipt = object()
+    converted = []
+
+    monkeypatch.setattr(baseline_runner, "_CANDIDATE_LIMIT", 1)
+    monkeypatch.setattr(baseline_runner, "_current_values", lambda *_args: _values())
+    monkeypatch.setattr(
+        baseline_runner,
+        "run_pilot_candidate",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            observation=_terminal(9, 5, 100),
+            receipt=SimpleNamespace(
+                evidence=SimpleNamespace(candidate_root_ref="candidate-1"),
+                parameter_application_receipt=native_receipt,
+            ),
+        ),
+    )
+
+    def convert(receipt, *, site_width_dbu):
+        converted.append((receipt, site_width_dbu))
+        return 0.25
+
+    monkeypatch.setattr(
+        baseline_runner,
+        "coordinate_value_from_native_receipt",
+        convert,
+        raising=False,
+    )
+
+    summary = baseline_runner._run_online_method(
+        BaselineMethod.CONTROLLED_COORDINATE,
+        SimpleNamespace(),
+        "workspace-1",
+        tmp_path,
+        tmp_path / "output",
+        SimpleNamespace(terminal_timeout_seconds=1),
+        {"pdk": {"site_width_dbu": 200}, "config_sha256": HASH},
+        "run-1",
+        "gcd",
+        _terminal(10, 5, 100),
+        {
+            **{metric.value: 0.0 for metric in ObjectiveMetric},
+            **{metric.value: 0.0 for metric in TimingMetric},
+        },
+        17,
+    )
+
+    assert summary["candidate_count"] == 1
+    assert converted == [(native_receipt, 200)]
 
 
 def test_design_runs_online_methods_in_parallel_with_independent_clients(

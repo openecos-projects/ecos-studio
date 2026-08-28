@@ -9,12 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 import ecos_agent.optimization_gate0 as gate0
+from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_contracts import (
-    AppliedKnobValue,
     GateResult,
-    KnobApplicationReceipt,
     ObjectiveMetric,
-    OptimizationKnob,
     RequestedKnobValue,
     SignoffGates,
     StrategyDirection,
@@ -36,7 +34,6 @@ from ecos_agent.optimization_gate0 import (
     require_terminal_receipt,
     run_pilot_candidate,
 )
-from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 
 HASH = "sha256:" + "a" * 64
@@ -322,11 +319,6 @@ def test_design_fails_without_two_distinct_probes_and_one_improvement() -> None:
 
 
 def test_candidate_receipt_fails_closed_without_bound_terminal_evidence() -> None:
-    requested = RequestedKnobValue(
-        knob_id=OptimizationKnob.TARGET_DENSITY,
-        value=0.2,
-    )
-    applied = AppliedKnobValue(knob_id=requested.knob_id, value=requested.value)
     receipt = CandidateExecutionReceipt(
         execution_id="operation-1",
         started=True,
@@ -335,14 +327,6 @@ def test_candidate_receipt_fails_closed_without_bound_terminal_evidence() -> Non
             candidate_root_ref=".agent/candidates/candidate-1",
             candidate_manifest_ref=".agent/candidates/candidate-1/candidate-manifest.json",
             candidate_manifest_sha256=HASH,
-        ),
-        application_receipt=KnobApplicationReceipt(
-            receipt_id="receipt-legacy",
-            requested=requested,
-            written=applied,
-            effective_initial=applied,
-            effective_final=applied,
-            evidence_sha256=HASH,
         ),
     )
 
