@@ -587,6 +587,7 @@ def run_pilot_candidate(
         "intervention_id": request.intervention_id,
         "episode_id": request.episode_id,
         "checkpoint_id": request.checkpoint_id,
+        "context_sha256": request.context_sha256,
         "parent_candidate_root_ref": request.parent_candidate_root_ref,
         "proposal": request.proposal.model_dump(mode="json"),
         "requested": request.requested.model_dump(mode="json"),
@@ -666,6 +667,7 @@ def _candidate_execution_request(
         checkpoint_id="canonical",
         proposal=proposal,
         requested=requested,
+        context_sha256=config_sha256,
         parent_candidate_root_ref=parent_candidate_root_ref,
     )
 

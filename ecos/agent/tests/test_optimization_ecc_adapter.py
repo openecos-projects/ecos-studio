@@ -15,6 +15,7 @@ from ecos_agent.optimization_contracts import (
     ObjectiveMetric,
     ObservationReference,
     OptimizationDecision,
+    OptimizationKnob,
     OptimizationProposal,
     ProposalReason,
     RequestedKnobValue,
@@ -31,6 +32,7 @@ from ecos_agent.optimization_ecc_adapter import (
     _step_render_ack,
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
+from ecos_agent.parameter_semantics import load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -110,6 +112,7 @@ def _request(
         checkpoint_id="checkpoint-1",
         proposal=_proposal(knob_id, direction),
         requested=RequestedKnobValue(knob_id=knob_id, value=value),
+        context_sha256=HASH,
     )
 
 
@@ -136,29 +139,29 @@ def _application_receipt_payload(
     }
 
 
-def _native_receipt_payload(candidate_ref: str) -> dict[str, object]:
-    patch = [{"knob_id": "place.target_density", "value": 0.65}]
-    materialization = {
-        "schema": "ecc.workspace.candidate_materialization.v1",
-        "schema_version": 1,
-        "candidate_id": "candidate-native-1",
-        "target_step": "place",
-        "target": {"step": "place"},
-        "registry_sha256": HASH,
-        "patch": patch,
-        "patch_sha256": canonical_sha256(patch),
-        "receipt_sha256": None,
-        "configs": [],
-        "snapshots": [],
-    }
-    materialization["receipt_sha256"] = canonical_sha256(
-        {key: value for key, value in materialization.items() if key != "receipt_sha256"}
-    )
+def _native_receipt_payload(
+    candidate_ref: str,
+    materialization: dict[str, object],
+    *,
+    parent_ref: str | None = None,
+) -> dict[str, object]:
+    config = materialization["configs"][0]
+    snapshot = materialization["snapshots"][0]
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     payload = {
         "schema_version": "tool.parameter_application_receipt.v1",
         "receipt_id": "parameter-receipt-native-1",
-        "tool": {"name": "DREAMPlace", "revision": "bound", "source_sha256": None},
-        "context": {"stage": "place", "lattice_version": "ecos.optimization_lattice.v1"},
+        "tool": {
+            "name": card.tool.name,
+            "revision": card.tool.revision,
+            "source_sha256": card.tool.source_sha256,
+        },
+        "context": {
+            "run_id": Path(candidate_ref).name,
+            "stage": "place",
+            "lattice_version": "ecos.optimization_lattice.v1",
+            "context_sha256": HASH,
+        },
         "requested": {"knob_id": "place.target_density", "value": 0.65, "unit": "ratio"},
         "materialization": {
             "receipt_ref": "analysis/candidate_materialization.v1.json",
@@ -166,12 +169,21 @@ def _native_receipt_payload(candidate_ref: str) -> dict[str, object]:
             "registry_sha256": HASH,
             "patch_sha256": materialization["patch_sha256"],
             "candidate_ref": candidate_ref,
-            "parent_ref": None,
+            "parent_ref": parent_ref,
             "workspace_ref": candidate_ref,
-            "config_before_sha256": HASH,
-            "config_after_sha256": "sha256:" + "b" * 64,
+            "target_step": "place",
+            "config_ref": config["ref"],
+            "config_before_sha256": config["before_sha256"],
+            "config_after_sha256": config["after_sha256"],
+            "before_snapshot_ref": snapshot["before_ref"],
+            "before_snapshot_sha256": snapshot["before_sha256"],
+            "after_snapshot_ref": snapshot["after_ref"],
+            "after_snapshot_sha256": snapshot["after_sha256"],
             "written_value": 0.65,
             "unit": "ratio",
+            "parent_manifest_ref": None,
+            "parent_manifest_sha256": None,
+            "parent_state_sha256": HASH,
         },
         "effective_initial": {"value": 0.65, "unit": "ratio"},
         "transitions": [],
@@ -198,6 +210,121 @@ def _native_receipt_payload(candidate_ref: str) -> dict[str, object]:
     return payload
 
 
+def _write_candidate_evidence(
+    root: Path,
+    *,
+    parent_ref: str | None = None,
+    terminal_state: str = "succeeded",
+) -> tuple[dict[str, object], dict[str, object], dict[str, Path]]:
+    candidate_ref = ".agent/candidates/candidate-0c4c4b249d945101-intervention-1"
+    candidate = root / candidate_ref
+    analysis = candidate / "analysis"
+    config_path = candidate / "config/dreamplace_ecc.json"
+    before_path = analysis / "candidate_config_snapshots.v1/candidate-0c4c4b249d945101-intervention-1/dreamplace.before.json"
+    after_path = before_path.with_name("dreamplace.after.json")
+    for path, payload in (
+        (config_path, {"target_density": 0.65}),
+        (before_path, {"target_density": 0.6}),
+        (after_path, {"target_density": 0.65}),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    patch = [{"knob_id": "place.target_density", "value": 0.65}]
+    materialization = {
+        "schema": "ecc.workspace.candidate_materialization.v1",
+        "schema_version": 1,
+        "candidate_id": candidate.name,
+        "target_step": "place",
+        "target": {"step": "place"},
+        "registry_sha256": HASH,
+        "patch": patch,
+        "patch_sha256": canonical_sha256(patch),
+        "configs": [{
+            "config_key": "dreamplace",
+            "ref": "config/dreamplace_ecc.json",
+            "before_sha256": file_sha256(before_path),
+            "after_sha256": file_sha256(config_path),
+        }],
+        "snapshots": [{
+            "config_key": "dreamplace",
+            "before_ref": before_path.relative_to(candidate).as_posix(),
+            "before_sha256": file_sha256(before_path),
+            "after_ref": after_path.relative_to(candidate).as_posix(),
+            "after_sha256": file_sha256(after_path),
+        }],
+    }
+    materialization["receipt_sha256"] = canonical_sha256(materialization)
+    materialization_path = analysis / "candidate_materialization.v1.json"
+    materialization_path.write_text(json.dumps(materialization), encoding="utf-8")
+    native = _native_receipt_payload(candidate_ref, materialization, parent_ref=parent_ref)
+    if parent_ref is not None:
+        parent = root / parent_ref
+        parent_manifest = parent / "analysis/candidate_workspace.v1.json"
+        parent_manifest.parent.mkdir(parents=True, exist_ok=True)
+        parent_payload = {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": parent.name,
+            "candidate_root_ref": parent_ref,
+            "parent_candidate_root_ref": None,
+            "candidate_flow_sha256": HASH,
+            "candidate_state_sha256": HASH,
+            "target_step": "place",
+            "end_step": "Harden",
+            "execution_scope": "full_flow",
+            "terminal_state": "succeeded",
+        }
+        parent_manifest.write_text(json.dumps(parent_payload), encoding="utf-8")
+        native["materialization"].update({
+            "parent_manifest_ref": parent_manifest.relative_to(root).as_posix(),
+            "parent_manifest_sha256": file_sha256(parent_manifest),
+            "parent_state_sha256": HASH,
+        })
+    native["evidence_sha256"] = canonical_sha256(
+        {key: value for key, value in native.items() if key != "evidence_sha256"}
+    )
+    manifest = analysis / "candidate_workspace.v1.json"
+    manifest_payload = {
+        "schema": "ecc.workspace.candidate_workspace.v1",
+        "schema_version": 1,
+        "candidate_id": candidate.name,
+        "candidate_root_ref": candidate_ref,
+        "parent_candidate_root_ref": parent_ref,
+        "parent_manifest_ref": native["materialization"]["parent_manifest_ref"],
+        "parent_manifest_sha256": native["materialization"]["parent_manifest_sha256"],
+        "parent_flow_sha256": HASH,
+        "parent_state_sha256": HASH,
+        "candidate_flow_sha256": HASH,
+        "candidate_state_sha256": HASH,
+        "terminal_state": terminal_state,
+        "target_step": "place",
+        "end_step": "Harden",
+        "execution_scope": "full_flow",
+        "artifacts": {
+            "candidate_materialization": {
+                "ref": "analysis/candidate_materialization.v1.json",
+                "sha256": file_sha256(materialization_path),
+            }
+        },
+    }
+    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+    evidence = {
+        "candidateRootRef": candidate_ref,
+        "candidateManifestRef": manifest.relative_to(root).as_posix(),
+        "candidateManifestSha256": file_sha256(manifest),
+        "targetStep": "place",
+        "endStep": "Harden",
+        "executionScope": "full_flow",
+    }
+    return native, evidence, {
+        "manifest": manifest,
+        "materialization": materialization_path,
+        "config": config_path,
+        "before_snapshot": before_path,
+        "after_snapshot": after_path,
+    }
+
+
 def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
     rpc = _FakeEccRpc(_running_operation())
     adapter = EccCandidateRerunAdapter(
@@ -222,6 +349,7 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
                 "patch": [{"knob_id": "place.target_density", "value": 0.65}],
                 "executionScope": "full_flow",
                 "idempotencyKey": "episode-1.intervention-1",
+                "contextSha256": HASH,
             },
         )
     ]
@@ -271,7 +399,7 @@ def test_adapter_reruns_from_the_incumbent_candidate_workspace() -> None:
     assert rpc.calls[0][1]["parentCandidateRootRef"] == ".agent/candidates/candidate-1"
 
 
-def test_adapter_materializes_logical_padding_sites_to_dbu() -> None:
+def test_adapter_sends_padding_in_surface_sites_for_l1_materialization() -> None:
     rpc = _FakeEccRpc(_running_operation())
     adapter = EccCandidateRerunAdapter(
         rpc, workspace_id="workspace-1", site_width_dbu=200
@@ -280,7 +408,7 @@ def test_adapter_materializes_logical_padding_sites_to_dbu() -> None:
     adapter.start(_request("place.cell_padding_x", 2, StrategyDirection.INCREASE))
 
     assert rpc.calls[0][1]["patch"] == [
-        {"knob_id": "place.cell_padding_x", "value": 400}
+        {"knob_id": "place.cell_padding_x", "value": 2}
     ]
 
 
@@ -302,6 +430,7 @@ def test_adapter_rejects_mismatched_request_or_foreign_operation() -> None:
         checkpoint_id=mismatch.checkpoint_id,
         proposal=mismatch.proposal,
         requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=2),
+        context_sha256=HASH,
     )
     with pytest.raises(OptimizationEccAdapterError, match="knob"):
         EccCandidateRerunAdapter(
@@ -321,6 +450,42 @@ def test_adapter_rejects_mismatched_request_or_foreign_operation() -> None:
                 episode_id="..",
             )
         )
+
+    with pytest.raises(OptimizationEccAdapterError, match="context hash"):
+        EccCandidateRerunAdapter(
+            _FakeEccRpc(_running_operation()),
+            workspace_id="workspace-1",
+            site_width_dbu=200,
+        ).start(
+            replace(
+                _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+                context_sha256="sha256:invalid",
+            )
+        )
+
+
+def test_adapter_rejects_application_receipt_from_foreign_context(tmp_path: Path) -> None:
+    native, evidence, _ = _write_candidate_evidence(tmp_path)
+    native["context"]["context_sha256"] = "sha256:" + "b" * 64
+    native["evidence_sha256"] = canonical_sha256(
+        {key: value for key, value in native.items() if key != "evidence_sha256"}
+    )
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {**evidence, "parameterApplicationReceipt": native},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    with pytest.raises(OptimizationEccAdapterError, match="context does not match"):
+        adapter.wait_for_terminal("operation-1")
 
 
 def test_adapter_waits_for_terminal_cancel_receipt() -> None:
@@ -414,36 +579,7 @@ def test_adapter_binds_and_returns_effective_value_receipt() -> None:
 def test_adapter_binds_native_receipt_to_candidate_materialization(
     tmp_path: Path,
 ) -> None:
-    candidate_ref = ".agent/candidates/candidate-native-1"
-    candidate = tmp_path / candidate_ref
-    analysis = candidate / "analysis"
-    analysis.mkdir(parents=True)
-    manifest = analysis / "candidate_workspace.v1.json"
-    manifest.write_text("{}", encoding="utf-8")
-    patch = [{"knob_id": "place.target_density", "value": 0.65}]
-    materialization = {
-        "schema": "ecc.workspace.candidate_materialization.v1",
-        "schema_version": 1,
-        "candidate_id": "candidate-native-1",
-        "target_step": "place",
-        "target": {"step": "place"},
-        "registry_sha256": HASH,
-        "patch": patch,
-        "patch_sha256": canonical_sha256(patch),
-        "configs": [],
-        "snapshots": [],
-    }
-    materialization["receipt_sha256"] = canonical_sha256(materialization)
-    (analysis / "candidate_materialization.v1.json").write_text(
-        json.dumps(materialization),
-        encoding="utf-8",
-    )
-    native = _native_receipt_payload(candidate_ref)
-    evidence = {
-        "candidateRootRef": candidate_ref,
-        "candidateManifestRef": f"{candidate_ref}/analysis/candidate_workspace.v1.json",
-        "candidateManifestSha256": file_sha256(manifest),
-    }
+    native, evidence, _ = _write_candidate_evidence(tmp_path)
     rpc = _FakeEccRpc(
         _running_operation(),
         terminal_response={
@@ -462,27 +598,198 @@ def test_adapter_binds_native_receipt_to_candidate_materialization(
 
     assert receipt.parameter_application_receipt is not None
 
-    bad = json.loads(json.dumps(native))
-    bad["materialization"]["candidate_ref"] = ".agent/candidates/foreign"
-    bad["materialization"]["workspace_ref"] = ".agent/candidates/foreign"
-    bad["evidence_sha256"] = canonical_sha256(
-        {key: value for key, value in bad.items() if key != "evidence_sha256"}
-    )
-    bad_rpc = _FakeEccRpc(
+
+def test_adapter_binds_candidate_parent_manifest(tmp_path: Path) -> None:
+    parent_ref = ".agent/candidates/incumbent-1"
+    native, evidence, _ = _write_candidate_evidence(tmp_path, parent_ref=parent_ref)
+    rpc = _FakeEccRpc(
         _running_operation(),
         terminal_response={
             "operationId": "operation-1",
             "workspaceId": "workspace-1",
             "state": "succeeded",
-            "result": {**evidence, "parameterApplicationReceipt": bad},
+            "result": {**evidence, "parameterApplicationReceipt": native},
         },
     )
-    bad_adapter = EccCandidateRerunAdapter(
-        bad_rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
     )
-    bad_adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+    adapter.start(
+        replace(
+            _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+            parent_candidate_root_ref=parent_ref,
+        )
+    )
+
+    assert adapter.wait_for_terminal("operation-1").parameter_application_receipt
+
+
+def test_adapter_retains_l1_l2_evidence_on_failed_terminal(tmp_path: Path) -> None:
+    native, evidence, _ = _write_candidate_evidence(tmp_path, terminal_state="failed")
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "failed",
+            "result": {**evidence, "parameterApplicationReceipt": native},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    receipt = adapter.wait_for_terminal("operation-1")
+
+    assert receipt.outcome == OptimizationOutcomeKind.EXECUTION_FAILED
+    assert receipt.evidence is not None
+    assert receipt.parameter_application_receipt is not None
+
+
+def test_adapter_retains_l1_l2_evidence_on_cancelled_terminal(tmp_path: Path) -> None:
+    native, evidence, _ = _write_candidate_evidence(tmp_path, terminal_state="succeeded")
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "cancelled",
+            "result": {**evidence, "parameterApplicationReceipt": native},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    receipt = adapter.wait_for_terminal("operation-1")
+
+    assert receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED
+    assert receipt.evidence is not None
+    assert receipt.parameter_application_receipt is not None
+
+
+def test_adapter_rejects_parent_flow_hash_drift(tmp_path: Path) -> None:
+    parent_ref = ".agent/candidates/incumbent-1"
+    native, evidence, paths = _write_candidate_evidence(tmp_path, parent_ref=parent_ref)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["parent_flow_sha256"] = "sha256:" + "b" * 64
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    evidence["candidateManifestSha256"] = file_sha256(paths["manifest"])
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {**evidence, "parameterApplicationReceipt": native},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(
+        replace(
+            _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+            parent_candidate_root_ref=parent_ref,
+        )
+    )
+
+    with pytest.raises(OptimizationEccAdapterError, match="parent manifest"):
+        adapter.wait_for_terminal("operation-1")
+
+
+@pytest.mark.parametrize(
+    ("artifact", "key"),
+    [
+        ("manifest", "artifacts"),
+        ("materialization", "configs"),
+        ("materialization", "snapshots"),
+        ("materialization", "registry_sha256"),
+        ("receipt", "config_ref"),
+        ("receipt", "before_snapshot_ref"),
+        ("receipt", "target_step"),
+    ],
+)
+def test_adapter_fails_closed_when_l1_binding_field_is_missing(
+    tmp_path: Path, artifact: str, key: str
+) -> None:
+    native, evidence, paths = _write_candidate_evidence(tmp_path)
+    if artifact == "receipt":
+        del native["materialization"][key]
+        native["evidence_sha256"] = canonical_sha256(
+            {item: value for item, value in native.items() if item != "evidence_sha256"}
+        )
+    else:
+        path = paths[artifact]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        del payload[key]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {**evidence, "parameterApplicationReceipt": native},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    with pytest.raises(OptimizationEccAdapterError):
+        adapter.wait_for_terminal("operation-1")
+
+
+@pytest.mark.parametrize("artifact", ["config", "before_snapshot", "after_snapshot"])
+def test_adapter_rejects_tampered_l1_files(tmp_path: Path, artifact: str) -> None:
+    native, evidence, paths = _write_candidate_evidence(tmp_path)
+    paths[artifact].write_text("{}", encoding="utf-8")
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {**evidence, "parameterApplicationReceipt": native},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    with pytest.raises(OptimizationEccAdapterError):
+        adapter.wait_for_terminal("operation-1")
+
+
+def test_adapter_rejects_foreign_candidate_even_when_receipts_agree(tmp_path: Path) -> None:
+    native, evidence, _ = _write_candidate_evidence(tmp_path)
+    evidence["candidateRootRef"] = ".agent/candidates/foreign"
+    native["materialization"]["candidate_ref"] = evidence["candidateRootRef"]
+    native["materialization"]["workspace_ref"] = evidence["candidateRootRef"]
+    native["evidence_sha256"] = canonical_sha256(
+        {key: value for key, value in native.items() if key != "evidence_sha256"}
+    )
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {**evidence, "parameterApplicationReceipt": native},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
     with pytest.raises(OptimizationEccAdapterError, match="candidate reference"):
-        bad_adapter.wait_for_terminal("operation-1")
+        adapter.wait_for_terminal("operation-1")
 
 
 def test_adapter_does_not_build_a_missing_success_receipt_from_candidate_artifacts(

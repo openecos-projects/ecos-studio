@@ -21,7 +21,10 @@ from ecos_agent.optimization_controller import (
     CandidateExecutionRequest,
 )
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
+from ecos_agent.parameter_evidence_contracts import (
+    MaterializationRef,
+    ParameterApplicationReceipt,
+)
 from ecos_agent.parameter_semantics import (
     ParameterSemanticsError,
     load_parameter_cards,
@@ -29,6 +32,7 @@ from ecos_agent.parameter_semantics import (
 )
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+_SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 _ALLOWED_METHODS = frozenset(
@@ -81,7 +85,9 @@ class EccCandidateRerunAdapter:
         self._workspace_root = Path(workspace_root).resolve() if workspace_root else None
         if self._workspace_root is not None and not self._workspace_root.is_dir():
             raise OptimizationEccAdapterError("workspace root is unavailable")
-        self._requested_by_execution_id: dict[str, RequestedKnobValue] = {}
+        self._binding_by_execution_id: dict[
+            str, tuple[RequestedKnobValue, str, str | None, str]
+        ] = {}
 
     def close(self) -> None:
         close = getattr(self._rpc, "close", None)
@@ -93,12 +99,15 @@ class EccCandidateRerunAdapter:
             request.intervention_id
         ):
             raise OptimizationEccAdapterError("candidate request id is invalid")
+        if not _SHA256.fullmatch(request.context_sha256):
+            raise OptimizationEccAdapterError("candidate context hash is invalid")
         patch = self._materialize_patch(request)
         return self._start_rerun(
             candidate_id=_candidate_id(request.episode_id, request.intervention_id),
             idempotency_key=f"{request.episode_id}.{request.intervention_id}",
             patch=patch,
             requested=request.requested,
+            context_sha256=request.context_sha256,
             parent_candidate_root_ref=request.parent_candidate_root_ref,
         )
 
@@ -109,8 +118,10 @@ class EccCandidateRerunAdapter:
         idempotency_key: str,
         patch: dict[str, object],
         requested: RequestedKnobValue,
+        context_sha256: str,
         parent_candidate_root_ref: str | None,
     ) -> CandidateExecutionReceipt:
+        candidate_ref = f".agent/candidates/{candidate_id}"
         params = {
             "workspaceId": self._workspace_id,
             "targetStep": _TARGET_STEPS.get(requested.knob_id, "place"),
@@ -119,6 +130,7 @@ class EccCandidateRerunAdapter:
             "patch": [patch],
             "executionScope": "full_flow",
             "idempotencyKey": idempotency_key,
+            "contextSha256": context_sha256,
         }
         if parent_candidate_root_ref is not None:
             params["parentCandidateRootRef"] = parent_candidate_root_ref
@@ -126,10 +138,23 @@ class EccCandidateRerunAdapter:
         operation_id, state = self._validate_operation(response)
         self._validate_execution_contract(response, requested)
         evidence = self._evidence(response)
-        application_receipt = self._application_receipt(response, requested, state, evidence)
-        self._requested_by_execution_id[operation_id] = requested
+        application_receipt = self._application_receipt(
+            response,
+            requested,
+            state,
+            evidence,
+            candidate_ref,
+            parent_candidate_root_ref,
+            context_sha256,
+        )
+        self._binding_by_execution_id[operation_id] = (
+            requested,
+            candidate_ref,
+            parent_candidate_root_ref,
+            context_sha256,
+        )
         if state == "failed":
-            self._requested_by_execution_id.pop(operation_id, None)
+            self._binding_by_execution_id.pop(operation_id, None)
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,
@@ -138,7 +163,7 @@ class EccCandidateRerunAdapter:
                 parameter_application_receipt=application_receipt,
             )
         if state == "cancelled":
-            self._requested_by_execution_id.pop(operation_id, None)
+            self._binding_by_execution_id.pop(operation_id, None)
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,
@@ -147,7 +172,7 @@ class EccCandidateRerunAdapter:
                 parameter_application_receipt=application_receipt,
             )
         if state == "succeeded":
-            self._requested_by_execution_id.pop(operation_id, None)
+            self._binding_by_execution_id.pop(operation_id, None)
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,
@@ -176,14 +201,22 @@ class EccCandidateRerunAdapter:
             else None
         )
         evidence = self._evidence(terminal)
+        binding = self._binding_by_execution_id.get(intervention_id)
         application_receipt = self._application_receipt(
-            terminal, self._requested_by_execution_id.get(intervention_id), state, evidence
+            terminal,
+            binding[0] if binding else None,
+            state,
+            evidence,
+            binding[1] if binding else None,
+            binding[2] if binding else None,
+            binding[3] if binding else None,
         )
-        self._requested_by_execution_id.pop(intervention_id, None)
+        self._binding_by_execution_id.pop(intervention_id, None)
         return CandidateExecutionReceipt(
             execution_id=intervention_id,
             started=True,
             outcome=outcome,
+            evidence=evidence,
             parameter_application_receipt=application_receipt,
         )
 
@@ -205,9 +238,9 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("terminal operation id does not match")
         if state not in _TERMINAL_STATES:
             raise OptimizationEccAdapterError("terminal operation state is invalid")
-        requested = self._requested_by_execution_id.get(execution_id)
-        if requested is not None:
-            self._validate_execution_contract(terminal, requested)
+        binding = self._binding_by_execution_id.get(execution_id)
+        if binding is not None:
+            self._validate_execution_contract(terminal, binding[0])
         outcome = {
             "succeeded": OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
             "failed": OptimizationOutcomeKind.EXECUTION_FAILED,
@@ -215,9 +248,15 @@ class EccCandidateRerunAdapter:
         }.get(state)
         evidence = self._evidence(terminal)
         application_receipt = self._application_receipt(
-            terminal, self._requested_by_execution_id.get(execution_id), state, evidence
+            terminal,
+            binding[0] if binding else None,
+            state,
+            evidence,
+            binding[1] if binding else None,
+            binding[2] if binding else None,
+            binding[3] if binding else None,
         )
-        self._requested_by_execution_id.pop(execution_id, None)
+        self._binding_by_execution_id.pop(execution_id, None)
         return CandidateExecutionReceipt(
             execution_id=execution_id,
             started=True,
@@ -287,6 +326,9 @@ class EccCandidateRerunAdapter:
         requested: RequestedKnobValue | None,
         state: str,
         evidence: CandidateExecutionEvidence | None = None,
+        candidate_ref: str | None = None,
+        parent_ref: str | None = None,
+        context_sha256: str | None = None,
     ) -> ParameterApplicationReceipt | None:
         result = self._result(response)
         if result is None:
@@ -313,11 +355,25 @@ class EccCandidateRerunAdapter:
             or receipt.requested.get("value") != requested.value
         ):
             raise OptimizationEccAdapterError("application receipt written value does not match")
+        if context_sha256 is None or receipt.context.get("context_sha256") != context_sha256:
+            raise OptimizationEccAdapterError("application receipt context does not match")
+        cards = load_parameter_cards()
         try:
-            validate_application_receipt(receipt, load_parameter_cards())
+            validate_application_receipt(receipt, cards)
         except (ParameterSemanticsError, ValueError) as exc:
             raise OptimizationEccAdapterError("application receipt card binding is invalid") from exc
-        self._validate_materialization_binding(receipt, requested, evidence)
+        if candidate_ref is None:
+            raise OptimizationEccAdapterError("application receipt cannot be bound")
+        self._validate_materialization_binding(
+            receipt,
+            requested,
+            evidence,
+            candidate_ref,
+            parent_ref,
+            state,
+            cards[requested.knob_id].surface.file,
+            cards[requested.knob_id].surface.json_path,
+        )
         return receipt
 
     def _validate_materialization_binding(
@@ -325,47 +381,276 @@ class EccCandidateRerunAdapter:
         receipt: ParameterApplicationReceipt,
         requested: RequestedKnobValue,
         evidence: CandidateExecutionEvidence | None,
+        expected_candidate_ref: str,
+        expected_parent_ref: str | None,
+        terminal_state: str,
+        expected_config_ref: str,
+        config_json_path: tuple[str | int, ...],
     ) -> None:
         if self._workspace_root is None:
-            return
+            raise OptimizationEccAdapterError("application receipt workspace is unavailable")
         if evidence is None:
             raise OptimizationEccAdapterError("application receipt has no candidate evidence")
         materialization = receipt.materialization
-        if materialization.candidate_ref != evidence.candidate_root_ref:
+        expected_target = _TARGET_STEPS.get(requested.knob_id, "place")
+        if materialization.candidate_ref != expected_candidate_ref or (
+            evidence.candidate_root_ref != expected_candidate_ref
+        ):
             raise OptimizationEccAdapterError("application receipt candidate reference does not match")
-        if materialization.workspace_ref != evidence.candidate_root_ref:
+        if materialization.workspace_ref != expected_candidate_ref:
             raise OptimizationEccAdapterError("application receipt workspace reference does not match")
+        if materialization.parent_ref != expected_parent_ref:
+            raise OptimizationEccAdapterError("application receipt parent reference does not match")
+        if materialization.target_step != expected_target:
+            raise OptimizationEccAdapterError("application receipt target step does not match")
         try:
-            candidate = (self._workspace_root / evidence.candidate_root_ref).resolve(strict=True)
-            candidate.relative_to(self._workspace_root)
-            manifest = (self._workspace_root / evidence.candidate_manifest_ref).resolve(strict=True)
-            manifest.relative_to(candidate)
-            path = (candidate / materialization.receipt_ref).resolve(strict=True)
-            path.relative_to(candidate)
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            candidate = _safe_path(self._workspace_root, expected_candidate_ref, directory=True)
+            manifest_path = _safe_path(self._workspace_root, evidence.candidate_manifest_ref)
+            manifest_path.relative_to(candidate)
+            manifest = _read_json_object(manifest_path)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise OptimizationEccAdapterError("application receipt materialization is unavailable") from exc
-        if file_sha256(manifest) != evidence.candidate_manifest_sha256:
+        if file_sha256(manifest_path) != evidence.candidate_manifest_sha256:
             raise OptimizationEccAdapterError("application receipt candidate manifest hash does not match")
-        if receipt.context.get("run_id") not in {None, candidate.name}:
+        self._validate_candidate_manifest(
+            manifest,
+            evidence,
+            candidate.name,
+            expected_candidate_ref,
+            expected_parent_ref,
+            expected_target,
+            terminal_state,
+        )
+        if receipt.context.get("run_id") != candidate.name:
             raise OptimizationEccAdapterError("application receipt context does not match candidate")
-        if not isinstance(payload, Mapping):
-            raise OptimizationEccAdapterError("application receipt materialization is invalid")
-        digest_payload = {key: value for key, value in payload.items() if key != "receipt_sha256"}
-        if (
-            payload.get("receipt_sha256") != materialization.receipt_sha256
-            or canonical_sha256(digest_payload) != materialization.receipt_sha256
-        ):
-            raise OptimizationEccAdapterError("application receipt materialization hash does not match")
         expected_value: object = requested.value
         if requested.knob_id == OptimizationKnob.CELL_PADDING_X:
             expected_value = requested.value * self._site_width_dbu
-        if payload.get("patch") != [{"knob_id": requested.knob_id.value, "value": expected_value}]:
-            raise OptimizationEccAdapterError("application receipt materialization patch does not match")
-        if payload.get("registry_sha256") != materialization.registry_sha256:
-            raise OptimizationEccAdapterError("application receipt materialization registry hash does not match")
-        if payload.get("patch_sha256") != materialization.patch_sha256:
-            raise OptimizationEccAdapterError("application receipt materialization patch hash does not match")
+        self._validate_l1_artifact(
+            candidate,
+            manifest,
+            receipt,
+            requested.knob_id.value,
+            expected_value,
+            expected_target,
+            expected_config_ref,
+            config_json_path,
+        )
+        self._validate_parent_binding(manifest, materialization, expected_parent_ref)
+
+    @staticmethod
+    def _validate_candidate_manifest(
+        manifest: Mapping[str, object],
+        evidence: CandidateExecutionEvidence,
+        candidate_id: str,
+        candidate_ref: str,
+        parent_ref: str | None,
+        target_step: str,
+        terminal_state: str,
+    ) -> None:
+        expected = {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": candidate_id,
+            "candidate_root_ref": candidate_ref,
+            "parent_candidate_root_ref": parent_ref,
+            "target_step": target_step,
+            "end_step": "Harden",
+            "execution_scope": "full_flow",
+        }
+        allowed_terminal_states = (
+            _TERMINAL_STATES if terminal_state == "cancelled" else {terminal_state}
+        )
+        if any(manifest.get(key) != value for key, value in expected.items()) or manifest.get(
+            "terminal_state"
+        ) not in allowed_terminal_states:
+            raise OptimizationEccAdapterError("application receipt candidate manifest is invalid")
+        if evidence.candidate_manifest_ref != f"{candidate_ref}/analysis/candidate_workspace.v1.json":
+            raise OptimizationEccAdapterError("application receipt candidate manifest reference is invalid")
+        if (evidence.target_step, evidence.end_step, evidence.execution_scope) != (
+            target_step,
+            "Harden",
+            "full_flow",
+        ):
+            raise OptimizationEccAdapterError("application receipt candidate evidence is incomplete")
+        hashes = (
+            manifest.get("parent_flow_sha256"),
+            manifest.get("parent_state_sha256"),
+            manifest.get("candidate_flow_sha256"),
+            manifest.get("candidate_state_sha256"),
+        )
+        if any(not isinstance(value, str) or not _SHA256.fullmatch(value) for value in hashes):
+            raise OptimizationEccAdapterError("application receipt candidate manifest is incomplete")
+
+    def _validate_l1_artifact(
+        self,
+        candidate: Path,
+        manifest: Mapping[str, object],
+        receipt: ParameterApplicationReceipt,
+        knob_id: str,
+        written_value: object,
+        target_step: str,
+        expected_config_ref: str,
+        config_json_path: tuple[str | int, ...],
+    ) -> None:
+        materialization = receipt.materialization
+        if materialization.receipt_ref != "analysis/candidate_materialization.v1.json":
+            raise OptimizationEccAdapterError("application receipt materialization reference is invalid")
+        try:
+            path = _safe_path(candidate, materialization.receipt_ref)
+            payload = _read_json_object(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise OptimizationEccAdapterError("application receipt materialization is unavailable") from exc
+        artifacts = manifest.get("artifacts")
+        artifact = artifacts.get("candidate_materialization") if isinstance(artifacts, Mapping) else None
+        if not isinstance(artifact, Mapping) or artifact != {
+            "ref": materialization.receipt_ref,
+            "sha256": file_sha256(path),
+        }:
+            raise OptimizationEccAdapterError("application receipt materialization manifest is invalid")
+        self._validate_l1_payload(
+            payload,
+            receipt,
+            candidate.name,
+            knob_id,
+            written_value,
+            target_step,
+            expected_config_ref,
+        )
+        self._validate_l1_files(candidate, payload, receipt, config_json_path)
+
+    @staticmethod
+    def _validate_l1_payload(
+        payload: Mapping[str, object],
+        receipt: ParameterApplicationReceipt,
+        candidate_id: str,
+        knob_id: str,
+        written_value: object,
+        target_step: str,
+        expected_config_ref: str,
+    ) -> None:
+        materialization = receipt.materialization
+        digest_payload = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        patch = [{"knob_id": knob_id, "value": written_value}]
+        if (
+            payload.get("schema") != "ecc.workspace.candidate_materialization.v1"
+            or payload.get("schema_version") != 1
+            or payload.get("candidate_id") != candidate_id
+            or payload.get("target_step") != target_step
+            or payload.get("target") != {"step": target_step}
+            or payload.get("patch") != patch
+            or payload.get("patch_sha256") != canonical_sha256(patch)
+            or payload.get("patch_sha256") != materialization.patch_sha256
+            or payload.get("registry_sha256") != materialization.registry_sha256
+            or payload.get("receipt_sha256") != materialization.receipt_sha256
+            or canonical_sha256(digest_payload) != materialization.receipt_sha256
+            or materialization.written_value != written_value
+            or materialization.config_ref != expected_config_ref
+        ):
+            raise OptimizationEccAdapterError("application receipt materialization is invalid")
+
+    @staticmethod
+    def _validate_l1_files(
+        candidate: Path,
+        payload: Mapping[str, object],
+        receipt: ParameterApplicationReceipt,
+        config_json_path: tuple[str | int, ...],
+    ) -> None:
+        configs, snapshots = payload.get("configs"), payload.get("snapshots")
+        if not isinstance(configs, list) or len(configs) != 1:
+            raise OptimizationEccAdapterError("application receipt materialization config is invalid")
+        if not isinstance(snapshots, list) or len(snapshots) != 1:
+            raise OptimizationEccAdapterError("application receipt materialization snapshot is invalid")
+        config, snapshot = configs[0], snapshots[0]
+        if not isinstance(config, Mapping) or not isinstance(snapshot, Mapping):
+            raise OptimizationEccAdapterError("application receipt materialization files are invalid")
+        materialization = receipt.materialization
+        expected_config = {
+            "ref": materialization.config_ref,
+            "before_sha256": materialization.config_before_sha256,
+            "after_sha256": materialization.config_after_sha256,
+        }
+        expected_snapshot = {
+            "before_ref": materialization.before_snapshot_ref,
+            "before_sha256": materialization.before_snapshot_sha256,
+            "after_ref": materialization.after_snapshot_ref,
+            "after_sha256": materialization.after_snapshot_sha256,
+        }
+        if any(config.get(key) != value for key, value in expected_config.items()) or any(
+            snapshot.get(key) != value for key, value in expected_snapshot.items()
+        ) or config.get("config_key") != snapshot.get("config_key"):
+            raise OptimizationEccAdapterError("application receipt materialization files do not match")
+        if expected_config["before_sha256"] == expected_config["after_sha256"] or (
+            expected_snapshot["before_sha256"] != expected_config["before_sha256"]
+            or expected_snapshot["after_sha256"] != expected_config["after_sha256"]
+        ):
+            raise OptimizationEccAdapterError("application receipt materialization hashes are invalid")
+        try:
+            config_path = _safe_path(candidate, str(expected_config["ref"]))
+            before_path = _safe_path(candidate, str(expected_snapshot["before_ref"]))
+            after_path = _safe_path(candidate, str(expected_snapshot["after_ref"]))
+            config_payload = _read_json_object(config_path)
+            written_value = _nested_json_value(config_payload, config_json_path)
+        except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError) as exc:
+            raise OptimizationEccAdapterError("application receipt materialization file is unavailable") from exc
+        if (
+            file_sha256(config_path) != expected_config["after_sha256"]
+            or file_sha256(before_path) != expected_snapshot["before_sha256"]
+            or file_sha256(after_path) != expected_snapshot["after_sha256"]
+            or written_value != materialization.written_value
+        ):
+            raise OptimizationEccAdapterError("application receipt materialization file hash does not match")
+
+    def _validate_parent_binding(
+        self,
+        manifest: Mapping[str, object],
+        materialization: MaterializationRef,
+        parent_ref: str | None,
+    ) -> None:
+        manifest_parent = (
+            manifest.get("parent_manifest_ref"),
+            manifest.get("parent_manifest_sha256"),
+            manifest.get("parent_state_sha256"),
+        )
+        receipt_parent = (
+            materialization.parent_manifest_ref,
+            materialization.parent_manifest_sha256,
+            materialization.parent_state_sha256,
+        )
+        if manifest_parent != receipt_parent or materialization.parent_state_sha256 is None:
+            raise OptimizationEccAdapterError("application receipt parent binding is invalid")
+        if parent_ref is None:
+            return
+        if self._workspace_root is None or materialization.parent_manifest_ref is None:
+            raise OptimizationEccAdapterError("application receipt parent manifest is unavailable")
+        if materialization.parent_manifest_ref != (
+            f"{parent_ref}/analysis/candidate_workspace.v1.json"
+        ):
+            raise OptimizationEccAdapterError("application receipt parent manifest reference is invalid")
+        try:
+            parent = _safe_path(self._workspace_root, parent_ref, directory=True)
+            path = _safe_path(self._workspace_root, materialization.parent_manifest_ref)
+            path.relative_to(parent)
+            payload = _read_json_object(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise OptimizationEccAdapterError("application receipt parent manifest is unavailable") from exc
+        expected = {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": parent.name,
+            "candidate_root_ref": parent_ref,
+            "candidate_flow_sha256": manifest.get("parent_flow_sha256"),
+            "candidate_state_sha256": materialization.parent_state_sha256,
+            "end_step": "Harden",
+            "execution_scope": "full_flow",
+            "terminal_state": "succeeded",
+        }
+        if (
+            any(payload.get(key) != value for key, value in expected.items())
+            or file_sha256(path) != materialization.parent_manifest_sha256
+            or manifest.get("parent_state_sha256") != materialization.parent_state_sha256
+        ):
+            raise OptimizationEccAdapterError("application receipt parent manifest is invalid")
 
     def _materialize_patch(
         self, request: CandidateExecutionRequest
@@ -377,7 +662,6 @@ class EccCandidateRerunAdapter:
         if request.requested.knob_id == OptimizationKnob.CELL_PADDING_X:
             if type(value) is not int:
                 raise OptimizationEccAdapterError("cell padding value is invalid")
-            value *= self._site_width_dbu
         elif request.requested.knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:
             if type(value) is not int:
                 raise OptimizationEccAdapterError("max fanout value is invalid")
@@ -408,6 +692,40 @@ class EccCandidateRerunAdapter:
         if require_workspace and response.get("workspaceId") != self._workspace_id:
             raise OptimizationEccAdapterError("operation workspace does not match")
         return operation_id, state
+
+
+def _safe_path(root: Path, reference: str, *, directory: bool = False) -> Path:
+    path = root / reference
+    if path.is_symlink():
+        raise ValueError("artifact path is a symbolic link")
+    resolved = path.resolve(strict=True)
+    resolved.relative_to(root)
+    if directory and not resolved.is_dir():
+        raise ValueError("artifact directory is unavailable")
+    if not directory and not resolved.is_file():
+        raise ValueError("artifact file is unavailable")
+    return resolved
+
+
+def _read_json_object(path: Path) -> Mapping[str, object]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("artifact must be a JSON object")
+    return payload
+
+
+def _nested_json_value(
+    payload: Mapping[str, object], path: tuple[str | int, ...]
+) -> object:
+    value: object = payload
+    for key in path:
+        if isinstance(key, str) and isinstance(value, Mapping):
+            value = value[key]
+        elif isinstance(key, int) and isinstance(value, list):
+            value = value[key]
+        else:
+            raise ValueError("config value path is invalid")
+    return value
 
 
 def _normalize_receipt_payload(value: object) -> object:

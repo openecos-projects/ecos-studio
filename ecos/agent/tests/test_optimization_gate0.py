@@ -414,6 +414,7 @@ def test_failed_candidate_records_parent_and_chargeable_receipt(
         (output / "execution-receipt.v1.json").read_text(encoding="utf-8")
     )
     assert request["parent_candidate_root_ref"] == parent_ref
+    assert request["context_sha256"] == HASH
     assert receipt == {
         "execution_id": "execution-1",
         "outcome": "execution_failed",

@@ -272,10 +272,19 @@ class MaterializationRef(_Model):
     candidate_ref: str
     parent_ref: str | None = None
     workspace_ref: str
+    target_step: str | None = None
+    config_ref: str | None = None
     config_before_sha256: str
     config_after_sha256: str
+    before_snapshot_ref: str | None = None
+    before_snapshot_sha256: str | None = None
+    after_snapshot_ref: str | None = None
+    after_snapshot_sha256: str | None = None
     written_value: Scalar
     unit: str
+    parent_manifest_ref: str | None = None
+    parent_manifest_sha256: str | None = None
+    parent_state_sha256: str | None = None
 
     @field_validator(
         "receipt_sha256", "registry_sha256", "patch_sha256", "config_before_sha256", "config_after_sha256"
@@ -286,12 +295,64 @@ class MaterializationRef(_Model):
             raise ValueError("materialization hash is invalid")
         return value
 
-    @field_validator("receipt_ref", "candidate_ref", "workspace_ref", "parent_ref")
+    @field_validator(
+        "before_snapshot_sha256",
+        "after_snapshot_sha256",
+        "parent_manifest_sha256",
+        "parent_state_sha256",
+    )
+    @classmethod
+    def optional_hashes(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("materialization hash is invalid")
+        return value
+
+    @field_validator(
+        "receipt_ref",
+        "candidate_ref",
+        "workspace_ref",
+        "parent_ref",
+        "config_ref",
+        "before_snapshot_ref",
+        "after_snapshot_ref",
+        "parent_manifest_ref",
+    )
     @classmethod
     def refs(cls, value: str | None) -> str | None:
         if value is not None and (not value or value.startswith("/") or ".." in value.split("/")):
             raise ValueError("materialization reference must be relative")
         return value
+
+    @field_validator("target_step")
+    @classmethod
+    def target(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("materialization target step is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def complete_binding(self) -> "MaterializationRef":
+        binding = (
+            self.target_step,
+            self.config_ref,
+            self.before_snapshot_ref,
+            self.before_snapshot_sha256,
+            self.after_snapshot_ref,
+            self.after_snapshot_sha256,
+        )
+        if any(value is not None for value in binding) and any(
+            value is None for value in binding
+        ):
+            raise ValueError("materialization config binding is incomplete")
+        parent_manifest = (self.parent_manifest_ref, self.parent_manifest_sha256)
+        if self.parent_ref is None and any(value is not None for value in parent_manifest):
+            raise ValueError("materialization parent binding is unexpected")
+        if self.parent_ref is not None and (
+            any(value is None for value in parent_manifest)
+            or self.parent_state_sha256 is None
+        ):
+            raise ValueError("materialization parent binding is incomplete")
+        return self
 
 
 class RuntimeTransition(_Model):

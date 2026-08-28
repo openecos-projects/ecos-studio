@@ -253,6 +253,7 @@ class CandidateExecutionRequest:
     checkpoint_id: str
     proposal: OptimizationProposal
     requested: RequestedKnobValue
+    context_sha256: str
     parent_candidate_root_ref: str | None = None
 
 
@@ -637,13 +638,27 @@ class OptimizationEpisodeController:
             return self._result("budget_exhausted")
 
         intervention_id = self._next_intervention_id()
+        planning_entries = self._planning_audit.replay().entries
+        domain = next(
+            (
+                item
+                for item in planning_entries[-1].effective_domains
+                if item.knob_id == self._requested.knob_id
+            ),
+            None,
+        ) if planning_entries else None
+        if domain is None:
+            raise OptimizationEpisodeControllerError(
+                "approved proposal has no context-bound effective domain"
+            )
         request = CandidateExecutionRequest(
-            intervention_id,
-            self.episode_id,
-            self.checkpoint_id,
-            self._proposal,
-            self._requested,
-            self._incumbent_candidate_root_ref,
+            intervention_id=intervention_id,
+            episode_id=self.episode_id,
+            checkpoint_id=self.checkpoint_id,
+            proposal=self._proposal,
+            requested=self._requested,
+            context_sha256=domain.context_sha256,
+            parent_candidate_root_ref=self._incumbent_candidate_root_ref,
         )
         try:
             receipt = self._start_once_with_retry(request)
@@ -1010,7 +1025,7 @@ class OptimizationEpisodeController:
         enabled = (
             configured
             if isinstance(configured, bool)
-            else os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") == "1"
+            else os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1") == "1"
         )
         return enabled and callable(getattr(self.planner, "propose_v2", None))
 
@@ -1213,6 +1228,7 @@ class OptimizationEpisodeController:
                     self._objective.contract_sha256 if self._objective is not None else None
                 ),
                 "requested": request.requested.model_dump(mode="json"),
+                "context_sha256": request.context_sha256,
                 "parent_candidate_root_ref": request.parent_candidate_root_ref,
                 "target_step": target_step,
                 "end_step": end_step,

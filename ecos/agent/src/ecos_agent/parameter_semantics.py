@@ -149,10 +149,15 @@ def validate_application_receipt(
         raise ParameterSemanticsError("application receipt stage does not match card")
     if receipt.context.get("lattice_version") not in {None, LATTICE_VERSION}:
         raise ParameterSemanticsError("application receipt lattice version does not match")
-    if receipt.tool.source_sha256 and card.tool.source_sha256:
-        if receipt.tool.source_sha256 != card.tool.source_sha256:
-            raise ParameterSemanticsError("application receipt tool source does not match card")
-    if receipt.materialization.unit != card.surface.unit:
+    if (
+        card.tool.source_sha256 is None
+        or receipt.tool.source_sha256 != card.tool.source_sha256
+    ):
+        raise ParameterSemanticsError("application receipt tool source does not match card")
+    written_unit = (
+        "dbu" if card.write_mapping.get("kind") == "site_to_dbu" else card.surface.unit
+    )
+    if receipt.materialization.unit != written_unit:
         raise ParameterSemanticsError("application receipt materialization unit does not match card")
     if receipt.activation.status == "used" and receipt.application_status != "applied":
         raise ParameterSemanticsError("used activation requires an applied receipt")

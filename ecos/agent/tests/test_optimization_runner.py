@@ -79,6 +79,20 @@ _CURRENT_VALUES = {
 _TIMING_GUARDRAIL = {metric: 0.0 for metric in TimingMetric}
 
 
+def _execution_context() -> dict[str, object]:
+    return {
+        "design_sha256": _HASH,
+        "rtl_sha256": _HASH,
+        "filelist_sha256": _HASH,
+        "sdc_sha256": _HASH,
+        "pdk_sha256": _HASH,
+        "parent_lineage_sha256": _HASH,
+        "parent_manifest_sha256": _HASH,
+        "site_width_dbu": 200,
+        "seed": 0,
+    }
+
+
 def _objective():
     return freeze_routability_objective(_incumbent())
 
@@ -466,6 +480,7 @@ def test_runner_accepts_false_routability_candidate_with_not_activated_branch(
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
         incumbent=None,
     )
     runner = OptimizationEpisodeRunner(
@@ -501,6 +516,7 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
         incumbent=_incumbent(),
     )
     runner = OptimizationEpisodeRunner(
@@ -649,6 +665,7 @@ def test_requested_only_runner_tracks_requested_not_effective_value(tmp_path: Pa
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
         incumbent=_incumbent(),
         receipt_aware_planning=False,
     )
@@ -690,6 +707,7 @@ def test_runner_persists_stopped_when_stop_arrives_before_ecc_start(tmp_path: Pa
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
         incumbent=_incumbent(),
     )
     runner = OptimizationEpisodeRunner(
@@ -723,6 +741,7 @@ def test_successful_execution_is_classified_by_qor_comparison(tmp_path: Path) ->
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
         incumbent=_incumbent(),
     )
     runner = OptimizationEpisodeRunner(
@@ -754,6 +773,7 @@ def test_timing_regression_is_audited_as_degraded(tmp_path: Path) -> None:
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
         incumbent=_incumbent(),
     )
 
@@ -792,6 +812,7 @@ def test_ineligible_candidate_is_classified_without_an_incumbent(tmp_path: Path)
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
     )
 
     def ineligible_observation(
@@ -844,6 +865,7 @@ def test_eligible_candidate_initializes_from_exempt_ineligible_baseline(
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
         incumbent=baseline,
     )
     runner = OptimizationEpisodeRunner(
@@ -879,6 +901,7 @@ def test_fake_runner_quarantines_missing_terminal_receipt(tmp_path: Path) -> Non
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
     )
     runner = OptimizationEpisodeRunner(
         controller=controller,
@@ -911,6 +934,7 @@ def test_fake_runner_quarantines_terminal_waiter_exception(tmp_path: Path) -> No
         executor=executor,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=_Clock(),
+        execution_context=_execution_context(),
     )
     runner = OptimizationEpisodeRunner(
         controller=controller,

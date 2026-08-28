@@ -12,7 +12,7 @@ from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue, StrategyDirection
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt, ParameterSemanticsCard
 from ecos_agent.parameter_evidence_contracts import OptimizationProposalV2
-from ecos_agent.parameter_semantics import requested_lattice
+from ecos_agent.parameter_semantics import card_hash, requested_lattice
 
 
 class EffectiveDomainError(ValueError):
@@ -26,11 +26,11 @@ class _Model(BaseModel):
 _EXECUTION_CONTEXT_KEYS = {
     "design_sha256", "rtl_sha256", "filelist_sha256", "sdc_sha256", "pdk_sha256",
     "parent_lineage_sha256", "stage", "backend", "tool_revision", "lattice_version",
-    "unit", "site_width_dbu", "seed", "tool_source_sha256",
+    "unit", "site_width_dbu", "seed",
 }
 _DOMAIN_CONTEXT_KEYS = _EXECUTION_CONTEXT_KEYS | {
     "incumbent_state_sha256", "parameter_card_sha256", "parent_manifest_sha256",
-    "terminal_execution_contract_sha256", "current_values",
+    "terminal_execution_contract_sha256", "current_values", "tool_source_sha256",
 }
 
 
@@ -78,11 +78,16 @@ def build_context_fingerprint(context: Mapping[str, Any]) -> str:
     """Hash the complete execution context; callers must provide all binding fields."""
     if not isinstance(context, Mapping) or not context:
         raise EffectiveDomainError("effective-domain context is empty")
+    missing = sorted(
+        key for key in _DOMAIN_CONTEXT_KEYS if key not in context or context[key] is None
+    )
+    if missing:
+        raise EffectiveDomainError(
+            f"effective-domain context is missing binding fields: {', '.join(missing)}"
+        )
     # run_id identifies one execution, while the domain is reusable across the
     # same design/tool/parent context. Keep it in the receipt, out of the key.
-    stable = {key: value for key, value in context.items() if key in _DOMAIN_CONTEXT_KEYS}
-    if not stable:
-        raise EffectiveDomainError("effective-domain context has no binding fields")
+    stable = {key: context[key] for key in _DOMAIN_CONTEXT_KEYS}
     return canonical_sha256(dict(sorted(stable.items(), key=lambda item: item[0])))
 
 
@@ -91,11 +96,14 @@ def _receipt_matches_context(
     context: Mapping[str, Any],
     context_sha256: str,
 ) -> bool:
+    if any(key not in receipt.context or key not in context for key in _EXECUTION_CONTEXT_KEYS):
+        return False
+    if any(receipt.context[key] != context[key] for key in _EXECUTION_CONTEXT_KEYS):
+        return False
+    if receipt.tool.source_sha256 != context["tool_source_sha256"]:
+        return False
     receipt_sha = receipt.context.get("context_sha256")
-    if receipt_sha is not None:
-        return receipt_sha == context_sha256
-    expected = {key: context[key] for key in _EXECUTION_CONTEXT_KEYS if key in context}
-    return bool(expected) and all(receipt.context.get(key) == value for key, value in expected.items())
+    return receipt_sha == context_sha256
 
 
 def application_signature(receipt: ParameterApplicationReceipt) -> str:
@@ -124,13 +132,22 @@ def compile_effective_domain(
     attempted: Iterable[RequestedKnobValue] = (),
     baseline_surface_value: bool | int | float | None = None,
 ) -> EffectiveDomainSnapshot:
-    context_sha = build_context_fingerprint(context)
+    bound_context = dict(context)
+    card_bindings = {
+        "parameter_card_sha256": card_hash(card),
+        "tool_source_sha256": card.tool.source_sha256,
+    }
+    for key, expected in card_bindings.items():
+        if key in bound_context and bound_context[key] != expected:
+            raise EffectiveDomainError(f"effective-domain {key} does not match parameter card")
+        bound_context[key] = expected
+    context_sha = build_context_fingerprint(bound_context)
     lattice = tuple(item.value for item in requested_lattice(card))
     matching = []
     for receipt in receipts:
         if receipt.requested.get("knob_id") != card.knob_id.value:
             continue
-        if not _receipt_matches_context(receipt, context, context_sha):
+        if not _receipt_matches_context(receipt, bound_context, context_sha):
             continue
         matching.append(receipt)
     aliases: set[Any] = set()

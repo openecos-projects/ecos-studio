@@ -7,6 +7,7 @@ from typing import Callable
 import pytest
 
 from ecos_agent.codex_rpc import CodexProviderError
+from ecos_agent.effective_domain import build_context_fingerprint
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
@@ -18,6 +19,7 @@ from ecos_agent.optimization_contracts import (
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
+    OptimizationKnob,
     OptimizationObjectiveContract,
     OptimizationObjectiveProposal,
     PlanningProviderEnvelope,
@@ -61,8 +63,8 @@ from ecos_agent.parameter_evidence_contracts import (
     MaterializationRef,
     ParameterApplicationReceipt,
     RuntimeTransition,
-    ToolRef,
 )
+from ecos_agent.parameter_semantics import card_hash, load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -76,6 +78,20 @@ CURRENT_VALUES = {
     "floorplan.aspect_ratio": 1.0,
     "synth.max_fanout": 32,
 }
+
+
+def _execution_context() -> dict[str, object]:
+    return {
+        "design_sha256": HASH,
+        "rtl_sha256": HASH,
+        "filelist_sha256": HASH,
+        "sdc_sha256": HASH,
+        "pdk_sha256": HASH,
+        "parent_lineage_sha256": HASH,
+        "parent_manifest_sha256": HASH,
+        "site_width_dbu": 200,
+        "seed": 0,
+    }
 
 
 class _Clock:
@@ -266,6 +282,7 @@ def _controller(
             task_memory.scope.scope_sha256 if task_memory is not None else None
         ),
         task_memory_supplier=(lambda: task_memory) if task_memory is not None else None,
+        execution_context=_execution_context(),
         receipt_aware_planning=receipt_aware_planning,
     )
 
@@ -284,6 +301,7 @@ def _terminal(
 def _native_receipt(
     requested: RequestedKnobValue, *, effective_value: object | None = None
 ) -> ParameterApplicationReceipt:
+    card = load_parameter_cards()[requested.knob_id]
     effective_value = requested.value if effective_value is None else effective_value
     is_padding = requested.knob_id.value == "place.cell_padding_x"
     unit = "site" if is_padding else "ratio"
@@ -321,10 +339,39 @@ def _native_receipt(
                 evidence_sha256=HASH,
             ),
         )
+    domain_context = {
+        **_execution_context(),
+        "incumbent_state_sha256": canonical_sha256(None),
+        "stage": card.stage,
+        "backend": "ecc",
+        "tool_revision": card.tool.revision,
+        "parameter_card_sha256": card_hash(card),
+        "lattice_version": "ecos.optimization_lattice.v1",
+        "unit": unit,
+        "current_values": dict(sorted(CURRENT_VALUES.items())),
+        "terminal_execution_contract_sha256": canonical_sha256(
+            {
+                "episode_id": "episode-1",
+                "checkpoint_id": "checkpoint-1",
+                "target_step": card.stage,
+                "end_step": "Harden",
+                "execution_scope": "full_flow",
+            }
+        ),
+        "tool_source_sha256": card.tool.source_sha256,
+    }
     payload = {
         "receipt_id": f"parameter-{requested.knob_id.value.replace('.', '-')}",
-        "tool": ToolRef(name="DREAMPlace", revision="bound"),
-        "context": {"stage": "place"},
+        "tool": card.tool,
+        "context": {
+            **_execution_context(),
+            "stage": card.stage,
+            "backend": "ecc",
+            "tool_revision": card.tool.revision,
+            "lattice_version": "ecos.optimization_lattice.v1",
+            "unit": unit,
+            "context_sha256": build_context_fingerprint(domain_context),
+        },
         "requested": {
             "knob_id": requested.knob_id.value,
             "value": requested.value,
@@ -806,12 +853,13 @@ def _v2_proposal(context: object, domain: object, *, value: object = None) -> di
     }
 
 
-def test_controller_uses_exact_v2_value_only_when_feature_enabled(
+def test_controller_uses_exact_v2_value_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+    monkeypatch.delenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", raising=False)
     planner = _V2FakeCodex(_v2_proposal)
-    controller = _controller(tmp_path, planner, _FakeEcc())
+    executor = _FakeEcc(_started())
+    controller = _controller(tmp_path, planner, executor)
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
@@ -824,6 +872,21 @@ def test_controller_uses_exact_v2_value_only_when_feature_enabled(
     assert result.requested.value in selected_domain.allowed_requested_values
     assert result.requested.knob_id == context.legal_actions[0].knob_id
     assert result.planner_source == "llm"
+
+    controller.execute()
+    selected_domain = next(
+        item for item in context.effective_domains if item.knob_id == result.requested.knob_id
+    )
+    assert executor.start_calls[0].context_sha256 == selected_domain.context_sha256
+
+
+def test_controller_v1_requires_explicit_compatibility_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0")
+    controller = _controller(tmp_path, _V2FakeCodex(_v2_proposal), _FakeEcc())
+
+    assert controller._v2_enabled() is False
 
 
 def test_controller_accepts_llm_selected_non_first_knob(
@@ -969,6 +1032,7 @@ def test_recovery_preserves_the_frozen_objective(tmp_path: Path) -> None:
         executor=_FakeEcc(),
         ledger=controller.ledger,
         clock=_Clock(),
+        execution_context=_execution_context(),
     )
 
     assert recovered.objective == objective
@@ -1135,6 +1199,7 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
         executor=_FakeEcc(),
         ledger=controller.ledger,
         clock=_Clock(),
+        execution_context=_execution_context(),
     )
     deferred = recovered.plan(_observation(), _retrieval(), CURRENT_VALUES)
     planned = recovered.plan(_observation(), _retrieval(), CURRENT_VALUES)
@@ -1142,7 +1207,10 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
     context = planner.contexts[0]
     assert context.history[0].parameter_application_receipt is not None
     assert context.history[0].parameter_application_receipt.effective_initial.value == 0.8
-    assert tuple(item.value for item in context.excluded_surface_values) == (0.55,)
+    density_card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    assert tuple(item.value for item in context.excluded_surface_values) == tuple(
+        value for value in density_card.requested_domain.values if value <= 0.8
+    )
     assert (
         "place.target_density",
         StrategyDirection.DECREASE,
@@ -1150,7 +1218,7 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
     assert deferred.state == OptimizationEpisodeState.PLANNING
     assert planned.rejection_reason == "controlled_coordinate_fallback"
     assert planned.requested == RequestedKnobValue(
-        knob_id="place.target_density", value=0.75
+        knob_id="place.target_density", value=0.875
     )
 
 

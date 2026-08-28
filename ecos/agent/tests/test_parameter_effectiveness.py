@@ -29,12 +29,40 @@ from ecos_agent.parameter_evidence_contracts import (
 from ecos_agent.parameter_semantics import (
     CARD_ROOT,
     ParameterSemanticsError,
+    card_hash,
     load_parameter_cards,
     validate_application_receipt,
 )
 
 
 HASH = "sha256:" + "a" * 64
+
+
+def _domain_context(**updates: object) -> dict[str, object]:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    context: dict[str, object] = {
+        "design_sha256": HASH,
+        "rtl_sha256": HASH,
+        "filelist_sha256": HASH,
+        "sdc_sha256": HASH,
+        "pdk_sha256": HASH,
+        "parent_lineage_sha256": HASH,
+        "stage": "place",
+        "backend": "ecc",
+        "tool_revision": card.tool.revision,
+        "lattice_version": "ecos.optimization_lattice.v1",
+        "unit": "ratio",
+        "site_width_dbu": 200,
+        "seed": 0,
+        "tool_source_sha256": card.tool.source_sha256,
+        "incumbent_state_sha256": HASH,
+        "parameter_card_sha256": card_hash(card),
+        "parent_manifest_sha256": HASH,
+        "terminal_execution_contract_sha256": HASH,
+        "current_values": {"place.target_density": 0.2},
+    }
+    context.update(updates)
+    return context
 
 
 def test_cards_are_exactly_the_frozen_eight() -> None:
@@ -159,12 +187,35 @@ def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
 
 
 def _density_receipt(
-    context_sha: str, *, with_runtime_trigger: bool = True
+    context: dict[str, object], *, with_runtime_trigger: bool = True
 ) -> ParameterApplicationReceipt:
+    receipt_context = {
+        key: context[key]
+        for key in (
+            "design_sha256",
+            "rtl_sha256",
+            "filelist_sha256",
+            "sdc_sha256",
+            "pdk_sha256",
+            "parent_lineage_sha256",
+            "stage",
+            "backend",
+            "tool_revision",
+            "lattice_version",
+            "unit",
+            "site_width_dbu",
+            "seed",
+        )
+    }
+    receipt_context["context_sha256"] = build_context_fingerprint(context)
     payload = dict(
         receipt_id="parameter-receipt-1",
-        tool=ToolRef(name="DREAMPlace", revision="bound"),
-        context={"context_sha256": context_sha},
+        tool=ToolRef(
+            name="DREAMPlace",
+            revision=str(context["tool_revision"]),
+            source_sha256=str(context["tool_source_sha256"]),
+        ),
+        context=receipt_context,
         requested={"knob_id": "place.target_density", "value": 0.2, "unit": "ratio"},
         materialization=MaterializationRef(
             receipt_ref="analysis/materialization.json", receipt_sha256=HASH,
@@ -205,16 +256,16 @@ def _density_receipt(
 def test_density_floor_excludes_only_values_supported_by_typed_rule() -> None:
     cards = load_parameter_cards()
     card = cards[OptimizationKnob.TARGET_DENSITY]
-    context = {"design_sha256": HASH, "stage": "place", "tool_revision": "bound"}
-    domain = compile_effective_domain(card, context=context, receipts=(_density_receipt(build_context_fingerprint(context)),))
+    context = _domain_context()
+    domain = compile_effective_domain(card, context=context, receipts=(_density_receipt(context),))
     assert domain.allowed_requested_values == (0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
     assert domain.current_coordinate["effective_anchor"] == 0.8
 
 
 def test_dreamplace_used_receipt_requires_consumer_observation() -> None:
     cards = load_parameter_cards()
-    context = {"design_sha256": HASH, "stage": "place", "tool_revision": "bound"}
-    payload = _density_receipt(build_context_fingerprint(context)).model_dump(
+    context = _domain_context()
+    payload = _density_receipt(context).model_dump(
         mode="json", exclude={"consumer_observation", "evidence_sha256"}
     )
     receipt = ParameterApplicationReceipt(
@@ -225,12 +276,70 @@ def test_dreamplace_used_receipt_requires_consumer_observation() -> None:
         validate_application_receipt(receipt, cards)
 
 
+def test_application_receipt_requires_card_bound_tool_source() -> None:
+    cards = load_parameter_cards()
+    payload = _density_receipt(_domain_context()).model_dump(
+        mode="json", exclude={"evidence_sha256"}
+    )
+    payload["tool"]["source_sha256"] = None
+    payload["materialization"]["config_after_sha256"] = "sha256:" + "b" * 64
+    receipt = ParameterApplicationReceipt(
+        **payload, evidence_sha256=canonical_sha256(payload)
+    )
+
+    with pytest.raises(ParameterSemanticsError, match="tool source"):
+        validate_application_receipt(receipt, cards)
+
+
+def test_padding_materialization_keeps_surface_and_written_units_distinct() -> None:
+    tool = load_parameter_cards()[OptimizationKnob.CELL_PADDING_X].tool
+    payload = dict(
+        receipt_id="parameter-receipt-padding-1",
+        tool=ToolRef(
+            name=tool.name, revision=tool.revision, source_sha256=tool.source_sha256
+        ),
+        context={"stage": "place", "lattice_version": "ecos.optimization_lattice.v1"},
+        requested={"knob_id": "place.cell_padding_x", "value": 2, "unit": "site"},
+        materialization=MaterializationRef(
+            receipt_ref="analysis/candidate_materialization.v1.json",
+            receipt_sha256=HASH,
+            registry_sha256=HASH,
+            patch_sha256=HASH,
+            candidate_ref=".agent/candidates/candidate-1",
+            workspace_ref=".agent/candidates/candidate-1",
+            target_step="place",
+            config_ref="config/dreamplace_ecc.json",
+            config_before_sha256=HASH,
+            config_after_sha256="sha256:" + "b" * 64,
+            before_snapshot_ref="analysis/snapshots/dreamplace.before.json",
+            before_snapshot_sha256=HASH,
+            after_snapshot_ref="analysis/snapshots/dreamplace.after.json",
+            after_snapshot_sha256="sha256:" + "b" * 64,
+            written_value=400,
+            unit="dbu",
+        ),
+        effective_initial=EffectiveValue(value=400, unit="dbu"),
+        application_status="applied",
+        activation=ActivationEvidence(status="unknown"),
+        effective_final=EffectiveValue(value=400, unit="dbu"),
+    )
+    draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
+    hash_payload = draft.model_dump(mode="json", exclude={"evidence_sha256"})
+    hash_payload.pop("consumer_observation", None)
+    receipt = ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(hash_payload),
+    )
+
+    validate_application_receipt(receipt, load_parameter_cards())
+    assert receipt.requested["unit"] == "site"
+    assert receipt.materialization.unit == "dbu"
+
+
 def test_density_floor_without_runtime_trigger_excludes_only_observed_request() -> None:
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    context = {"design_sha256": HASH, "stage": "place", "tool_revision": "bound"}
-    receipt = _density_receipt(
-        build_context_fingerprint(context), with_runtime_trigger=False
-    )
+    context = _domain_context()
+    receipt = _density_receipt(context, with_runtime_trigger=False)
 
     domain = compile_effective_domain(card, context=context, receipts=(receipt,))
 
@@ -241,44 +350,67 @@ def test_density_floor_without_runtime_trigger_excludes_only_observed_request() 
 def test_rules_empty_does_not_infer_aliases() -> None:
     cards = load_parameter_cards()
     card = cards[OptimizationKnob.FLOORPLAN_ASPECT_RATIO]
-    domain = compile_effective_domain(card, context={"design_sha256": HASH}, baseline_surface_value=1.0)
+    context = _domain_context(
+        stage="Floorplan",
+        tool_revision=card.tool.revision,
+        tool_source_sha256=card.tool.source_sha256,
+        parameter_card_sha256=card_hash(card),
+    )
+    domain = compile_effective_domain(card, context=context, baseline_surface_value=1.0)
     assert domain.excluded_aliases == ()
     assert len(domain.allowed_requested_values) == 13
 
 
 def test_context_fingerprint_ignores_run_id_but_binds_inputs() -> None:
-    context = {
-        "run_id": "candidate-1",
-        "design_sha256": HASH,
-        "rtl_sha256": HASH,
-        "filelist_sha256": HASH,
-        "sdc_sha256": HASH,
-        "pdk_sha256": HASH,
-        "parent_lineage_sha256": HASH,
-        "stage": "place",
-        "backend": "ecc",
-        "tool_revision": "bound",
-        "lattice_version": "ecos.optimization_lattice.v1",
-        "unit": "ratio",
-        "site_width_dbu": 200,
-        "seed": 0,
-    }
+    context = _domain_context(run_id="candidate-1")
     assert build_context_fingerprint(context) == build_context_fingerprint(
         {**context, "run_id": "candidate-2"}
     )
     assert build_context_fingerprint(context) != build_context_fingerprint(
         {**context, "site_width_dbu": 400}
     )
-    assert build_context_fingerprint(
-        {**context, "incumbent_state_sha256": HASH}
-    ) != build_context_fingerprint(
+    assert build_context_fingerprint(context) != build_context_fingerprint(
         {**context, "incumbent_state_sha256": "sha256:" + "b" * 64}
     )
 
 
+def test_context_fingerprint_requires_every_binding_field() -> None:
+    context = _domain_context()
+
+    for key in tuple(context):
+        with pytest.raises(EffectiveDomainError, match="missing binding fields"):
+            build_context_fingerprint({name: value for name, value in context.items() if name != key})
+
+
+def test_effective_domain_rejects_partial_or_mismatched_receipt_context() -> None:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    context = _domain_context()
+    receipt = _density_receipt(context)
+    partial = receipt.model_dump(mode="json", exclude={"evidence_sha256"})
+    partial["context"].pop("pdk_sha256")
+    partial_receipt = ParameterApplicationReceipt(
+        **partial, evidence_sha256=canonical_sha256(partial)
+    )
+    mismatched = receipt.model_dump(mode="json", exclude={"evidence_sha256"})
+    mismatched["context"]["seed"] = 1
+    mismatched_receipt = ParameterApplicationReceipt(
+        **mismatched, evidence_sha256=canonical_sha256(mismatched)
+    )
+    unbound = receipt.model_dump(mode="json", exclude={"evidence_sha256"})
+    unbound["context"].pop("context_sha256")
+    unbound_receipt = ParameterApplicationReceipt(
+        **unbound, evidence_sha256=canonical_sha256(unbound)
+    )
+
+    for candidate in (partial_receipt, mismatched_receipt, unbound_receipt):
+        domain = compile_effective_domain(card, context=context, receipts=(candidate,))
+        assert domain.current_coordinate is None
+        assert domain.observed_application_signatures == ()
+
+
 def test_v2_validator_rejects_value_outside_hash_bound_domain() -> None:
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    domain = compile_effective_domain(card, context={"design_sha256": HASH}, baseline_surface_value=0.2)
+    domain = compile_effective_domain(card, context=_domain_context(), baseline_surface_value=0.2)
     proposal = OptimizationProposalV2(
         context_ref={"episode_id": "episode-1", "checkpoint_id": "place", "input_sha256": HASH},
         decision="propose", reason_code="observation", rationale_summary="bounded proposal",
