@@ -19,7 +19,10 @@ const STEP_CONFIG_FILE_BY_KNOB_PREFIX: Record<string, string> = {
  * `floorplan.utilitization` is stored under Core in legacy JSON.
  */
 const NESTED_PARAMETER_KNOB_PATHS: Record<string, readonly (readonly string[])[]> = {
-  'floorplan.utilitization': [['core', 'utilitization']],
+  'floorplan.utilitization': [
+    ['core', 'utilitization'],
+    ['die_area', 'utilitization'],
+  ],
 }
 
 /**

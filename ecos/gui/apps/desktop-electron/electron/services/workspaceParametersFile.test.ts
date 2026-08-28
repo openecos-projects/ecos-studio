@@ -260,6 +260,38 @@ describe('mergePayloadIntoTomlDocument', () => {
     expect(merged.params.pdk_config).toBe('home/pdk.json')
   })
 
+  it('folds Configure Die/Core geometry into an existing die_area table', () => {
+    const document = {
+      params: {
+        design: 'gcd',
+        die_area: {
+          width: 100,
+          height: 80,
+          utilitization: 0.4,
+          margin: 2,
+          extra: 'keep',
+        },
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      {
+        Die: { Size: [120, 90], Area: 10800 },
+        Core: { Utilitization: 0.55, Margin: [4, 4] },
+      },
+      '/ws',
+    )
+    expect(merged.params.die_area).toEqual({
+      width: 120,
+      height: 90,
+      utilitization: 0.55,
+      margin: 4,
+      extra: 'keep',
+    })
+    expect(merged.params.die).toBeUndefined()
+    expect(merged.params.core).toBeUndefined()
+  })
+
   it('keeps outside pdk_config absolute', () => {
     const document = { params: { design: 'gcd' } }
     const merged = mergePayloadIntoTomlDocument(
@@ -463,6 +495,15 @@ describe('writeWorkspaceParameters', () => {
       expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
     },
   )
+
+  it('rejects undefined payload leaves instead of silently deleting them', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    await expect(
+      writeWorkspaceParameters(root, { Design: undefined as unknown as string }),
+    ).rejects.toThrow(/undefined/)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+  })
 
   it('rejects null, Date, and bigint edit values instead of silently rewriting them', async () => {
     const root = createWorkspace()

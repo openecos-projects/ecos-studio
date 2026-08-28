@@ -80,6 +80,23 @@ describe('parameterWritesMatchPatch', () => {
     ).toBe(false)
   })
 
+  it('accepts the canonical TOML die_area utilization path', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
+        [
+          {
+            file: 'home/ecc.toml',
+            json_path: ['die_area', 'utilitization'],
+            knob_id: 'floorplan.utilitization',
+            surface: 'parameters',
+            value: 0.7,
+          },
+        ],
+      ),
+    ).toBe(true)
+  })
+
   it('accepts a nested table path whose parent is a known parameter table', () => {
     expect(
       parameterWritesMatchPatch(

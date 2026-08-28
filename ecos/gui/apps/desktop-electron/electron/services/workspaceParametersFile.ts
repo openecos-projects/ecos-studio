@@ -431,7 +431,11 @@ async function enqueueParameterWrite<T>(
  * Checked recursively before any merge.
  */
 function assertFiniteNumbers(value: unknown, label: string): void {
-  if (value === undefined) return
+  if (value === undefined) {
+    throw new Error(
+      `Refusing to write ${label}: undefined would delete the parameter leaf`,
+    )
+  }
   if (value === null) {
     throw new Error(`Refusing to write ${label}: null would delete the parameter leaf`)
   }
@@ -457,6 +461,41 @@ function assertFiniteNumbers(value: unknown, label: string): void {
   if (isPlainRecord(value)) {
     for (const item of Object.values(value)) assertFiniteNumbers(item, label)
   }
+}
+
+/**
+ * GUI Configure saves emit legacy Die/Core tables. On a TOML workspace whose
+ * canonical geometry already lives under `die_area`, fold those tables into
+ * the existing leaves and drop Die/Core so a save cannot leave two disagreeing
+ * representations.
+ */
+function foldLegacyGeometryIntoDieArea(
+  existingParams: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): void {
+  const existingDieArea = existingParams.die_area
+  if (!isPlainRecord(existingDieArea)) return
+  const die = isPlainRecord(payload.die) ? payload.die : null
+  const core = isPlainRecord(payload.core) ? payload.core : null
+  if (!die && !core) return
+
+  const overlay: Record<string, unknown> = {}
+  const size = die?.size
+  if (Array.isArray(size) && size.length >= 2) {
+    overlay.width = size[0]
+    overlay.height = size[1]
+  }
+  if (core && Object.prototype.hasOwnProperty.call(core, 'utilitization')) {
+    overlay.utilitization = core.utilitization
+  }
+  if (Array.isArray(core?.margin) && core.margin.length > 0) {
+    overlay.margin = core.margin[0]
+  }
+  payload.die_area = mergeRecordsPreservingUnknown(existingDieArea, overlay)
+  delete payload.die
+  delete payload.core
+  delete existingParams.die
+  delete existingParams.core
 }
 
 /**
@@ -490,6 +529,7 @@ export function mergePayloadIntoTomlDocument(
   // a section-only value like [pdk] config is a live parameter that must
   // survive the mirror re-sync instead of being deleted as a stale mirror.
   const existingParams = mergeTomlSections(document, workspaceRoot)
+  foldLegacyGeometryIntoDieArea(existingParams, flatPayload)
   // Leaf-wise merge: unknown nested members (e.g. a future ecc knob under
   // [params.core]) survive a save that only rewrites known fields; arrays,
   // scalars, and date values replace wholesale.
