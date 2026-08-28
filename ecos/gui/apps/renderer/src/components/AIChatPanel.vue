@@ -1762,6 +1762,7 @@ async function startQuickStart(): Promise<void> {
       messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
     }
   } finally {
+    messageStore.finishStreamingMessages(sessionId ?? undefined)
     quickStartRunning.value = false
     quickStartAbortController = null
   }

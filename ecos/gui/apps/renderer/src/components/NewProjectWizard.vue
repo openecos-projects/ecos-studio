@@ -1611,7 +1611,6 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   deriveDirectoryFromDesign?: boolean
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
-  suggestedWorkspaceName?: string
 }
 
 interface Props {
@@ -1982,10 +1981,7 @@ function initialWorkspaceName(initialConfig?: WorkspaceWizardInitialConfig) {
   if (initialConfig?.directory) {
     return getFileName(initialConfig.directory)
   }
-  return (
-    initialConfig?.suggestedWorkspaceName ??
-    String(initialConfig?.parameters?.design ?? '').trim()
-  )
+  return String(initialConfig?.parameters?.design ?? '').trim()
 }
 
 function defaultWorkspaceName() {

@@ -12,6 +12,19 @@ describe('ECCView project management handoff', () => {
     expect(source).not.toContain('sourceIteration')
   })
 
+  it('does not open the legacy wizard during Quick Start project handoff', () => {
+    const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
+    const prefillEnd = source.indexOf(
+      'function projectManagedWizardInitialConfig',
+      prefillStart,
+    )
+    const prefillSource = source.slice(prefillStart, prefillEnd)
+    expect(prefillSource).toContain("queryString(route.query.quickStart) === '1'")
+    expect(
+      prefillSource.indexOf("queryString(route.query.quickStart) === '1'"),
+    ).toBeLessThan(prefillSource.indexOf('const workspacePath'))
+  })
+
   it('keeps optional source workspace defaults from blocking the wizard', () => {
     const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
     const prefillEnd = source.indexOf(

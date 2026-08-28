@@ -49,7 +49,6 @@
     <!-- 全局新建工程向导 -->
     <NewProjectWizard
       v-if="showNewProjectWizard"
-      ref="quickStartWizardRef"
       :title="workspaceWizardTitle"
       :initial-config="workspaceWizardInitialConfig"
       @close="handleWizardClose"
@@ -62,7 +61,7 @@
       :style="{ left: `${quickStartCursor.left}px`, top: `${quickStartCursor.top}px` }"
       aria-hidden="true"
     >
-      <i class="ri-cursor-line"></i>
+      <i class="ri-cursor-fill"></i>
     </div>
 
     <Teleport to="body">
@@ -295,7 +294,6 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   deriveDirectoryFromDesign?: boolean
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
-  suggestedWorkspaceName?: string
 }
 
 const router = useRouter()
@@ -389,7 +387,6 @@ const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
-const quickStartWizardRef = ref<{ focus?: () => void } | null>(null)
 const quickStartCursor = reactive({ visible: false, left: 0, top: 0 })
 let quickStartWizardResolve: ((config: WorkspaceConfig) => void) | null = null
 let quickStartWizardReject: ((error: Error) => void) | null = null
@@ -485,10 +482,11 @@ async function createWorkspaceFromAgent(
 
 provide(agentWorkspaceSetupKey, createWorkspaceFromAgent)
 
-const runQuickStart: QuickStartRunner = async (onEvent) => {
+const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
   if (quickStartRunning) throw new Error('A Quick Start workflow is already running.')
   quickStartRunning = true
   try {
+    signal?.throwIfAborted()
     const api = desktopApi.value ?? (await waitForDesktopApi())
     desktopApi.value = api
     const versions = await api.app.getVersions()
@@ -498,18 +496,34 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
       listResources: async () => resources,
       navigate: async (surface: string) => {
         if (surface === 'project-management') {
-          const homeProjectButton = document.querySelector<HTMLButtonElement>(
-            '.project-management-entry',
-          )
-          if (homeProjectButton) {
-            await moveQuickStartCursor(homeProjectButton)
-            homeProjectButton.click()
-          } else {
-            await router.push('/projects')
+          let homeProjectButton: HTMLButtonElement | undefined
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            signal?.throwIfAborted()
+            homeProjectButton =
+              document.querySelector<HTMLButtonElement>('.project-management-entry') ??
+              undefined
+            if (homeProjectButton) break
+            await delay(100, signal)
           }
-          await delay(450)
+          if (!homeProjectButton) {
+            throw new Error('Quick Start could not find the Project Management button.')
+          }
+          await moveQuickStartCursor(homeProjectButton, signal, {
+            offsetX: 96,
+            offsetY: 96,
+          })
+          signal?.throwIfAborted()
+          homeProjectButton.click()
+          await delay(450, signal)
+          if (route.path === '/projects') {
+            await router.replace({
+              path: '/projects',
+              query: { ...route.query, quickStart: '1' },
+            })
+          }
           let newProjectButton: HTMLButtonElement | undefined
           for (let attempt = 0; attempt < 30; attempt += 1) {
+            signal?.throwIfAborted()
             newProjectButton = [
               ...document.querySelectorAll<HTMLButtonElement>('.project-toolbar-action'),
             ].find(
@@ -518,12 +532,13 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
                 'new project',
             )
             if (newProjectButton) break
-            await delay(100)
+            await delay(100, signal)
           }
           if (newProjectButton) {
-            await moveQuickStartCursor(newProjectButton)
+            await moveQuickStartCursor(newProjectButton, signal)
+            signal?.throwIfAborted()
             newProjectButton.click()
-            await delay(350)
+            await delay(350, signal)
           }
         }
       },
@@ -545,11 +560,17 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
         const projectRoot = normalizeLocalPath(
           await api.app.prepareQuickStartProject(projectName),
         )
+        await showQuickStartProjectDialog(
+          {
+            projectName,
+            designName: 'gcd',
+            projectRoot,
+            mpcId: input.mpc?.id ?? '',
+          },
+          signal,
+        )
+        signal?.throwIfAborted()
         const mpc = input.mpc ? await quickStartMpcSnapshot(api, input.mpc) : null
-        const result = await api.projectManifest.mutate({
-          mutation: { type: 'create', name: projectName, designName: 'gcd', mpc },
-          projectRoot,
-        })
         await api.workspace.registerProjectRoot(projectRoot)
         await writeQuickStartRunRecord(api, projectRoot, {
           design_resource: input.design,
@@ -573,8 +594,9 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
           workflow_id: 'backend-gcd-quick-start',
           workflow_version: '1.0.0',
         })
+        await delay(250, signal)
         return {
-          id: result.content ? JSON.parse(result.content).project_id : projectName,
+          id: projectName,
           name: projectName,
           root: projectRoot,
           mpc,
@@ -595,8 +617,8 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
           parameters: {
             design: 'gcd',
             description: 'Created by Quick Start',
-            top_module: 'gcd',
-            clock: 'clk',
+            top_module: '',
+            clock: '',
             frequency_max: 50,
             max_fanout: 32,
             die_area_mode: 'utilitization_margin',
@@ -638,18 +660,7 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
             project_json_path: joinLocalPath(project.root, 'project.json'),
           },
         }
-        await router.push({
-          path: '/ecc',
-          query: {
-            projectRoot: project.root,
-            projectName: project.name,
-            designName: 'gcd',
-            workspacePath,
-            workspaceId,
-            quickStart: '1',
-          },
-        })
-        const createdConfig = await driveQuickStartWorkspaceWizard(config)
+        const createdConfig = await driveQuickStartWorkspaceWizard(config, signal)
         await writeQuickStartRunRecord(api, workspacePath, {
           project: { name: project.name, root: project.root },
           snapshot: {
@@ -668,7 +679,6 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
           query: {
             projectRoot: input.project.root,
             projectName: input.project.name,
-            quickStart: '1',
           },
         })
         await nextTick()
@@ -677,7 +687,7 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
           typeof window !== 'undefined' &&
           typeof window.matchMedia === 'function' &&
           window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        await delay(reducedMotion ? 100 : 800)
+        await delay(reducedMotion ? 100 : 800, signal)
         showStepConfigDialog.value = false
       },
       startFlow: async (input: { project: any; workspace: any }) => {
@@ -710,8 +720,13 @@ const runQuickStart: QuickStartRunner = async (onEvent) => {
         return flowResult
       },
     }
-    await runQuickStartWorkflow(host, onEvent)
+    await runQuickStartWorkflow(host, onEvent, signal)
   } finally {
+    quickStartCursor.visible = false
+    if (signal?.aborted) {
+      closeQuickStartProjectDialog()
+      resetWorkspaceWizard()
+    }
     quickStartRunning = false
   }
 }
@@ -724,6 +739,7 @@ async function resolveQuickStartResources(
   api: DesktopApi,
 ): Promise<QuickStartResourceSnapshot> {
   const listed = (await api.resources.list()).resources
+  const pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
   const ready = (resource: ResourceInfo | undefined) =>
     Boolean(
       resource &&
@@ -747,11 +763,7 @@ async function resolveQuickStartResources(
           version: 'local',
         }
       : null
-  const pdkCandidates = listed.filter(
-    (resource) =>
-      resource.type === 'pdk' && resource.id.startsWith('pdk:ics55') && ready(resource),
-  )
-  const pdk = pdkCandidates.find((resource) => resource.active) ?? pdkCandidates[0]
+  const pdk = ready(pdkCandidate) ? pdkCandidate : undefined
   const mpcCandidates = listed.filter(
     (resource) =>
       resource.type === 'mpc' &&
@@ -772,9 +784,11 @@ async function resolveQuickStartResources(
     )
   }
   if (!pdk) {
-    const candidate = listed.find(
-      (resource) => resource.type === 'pdk' && resource.id.startsWith('pdk:ics55'),
-    )
+    const candidate =
+      pdkCandidate ??
+      listed.find(
+        (resource) => resource.type === 'pdk' && resource.id.startsWith('pdk:ics55'),
+      )
     diagnostics.push(
       candidate
         ? `PDK pdk:ics55 is not Ready (status=${candidate.status}, version=${candidate.installed_version ?? 'none'}, path=${candidate.path ?? 'none'}, health=${resourceHealth(candidate)}).`
@@ -895,29 +909,30 @@ async function nextQuickStartWorkspaceId(
 
 async function driveQuickStartWorkspaceWizard(
   config: WorkspaceConfig,
+  signal?: AbortSignal,
 ): Promise<WorkspaceConfig> {
   const created = new Promise<WorkspaceConfig>((resolve, reject) => {
     quickStartWizardResolve = resolve
     quickStartWizardReject = reject
   })
-  workspaceWizardInitialConfig.value = {
-    ...config,
-    suggestedWorkspaceName: getPathLeafName(config.directory),
-  }
+  workspaceWizardInitialConfig.value = { ...config }
   showNewProjectWizard.value = true
   try {
     for (let step = 1; step < 6; step += 1) {
-      await clickQuickStartWizardButton('Continue', step)
+      await clickQuickStartWizardButton('Continue', step, signal)
       if (step === 1) {
-        await showQuickStartInput('density_065_from_floorplan')
+        await showQuickStartInput(
+          'density_065_from_floorplan',
+          getPathLeafName(config.directory),
+          signal,
+        )
       }
     }
-    await showQuickStartInput('top')
-    await showQuickStartInput('clk')
-    await clickQuickStartWizardButton('Create Workspace', 6)
+    await showQuickStartInput('top', 'gcd', signal)
+    await showQuickStartInput('clk', 'clk', signal)
+    await clickQuickStartWizardButton('Create Workspace', 6, signal)
     return await created
   } finally {
-    quickStartCursor.visible = false
     quickStartWizardResolve = null
     quickStartWizardReject = null
   }
@@ -926,13 +941,15 @@ async function driveQuickStartWorkspaceWizard(
 async function clickQuickStartWizardButton(
   label: string,
   expectedStep: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   let button: HTMLButtonElement | undefined
   for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
     await nextTick()
     const wizard = document.querySelector<HTMLElement>('.new-workspace-wizard-panel')
     if (wizard?.dataset.currentStep !== String(expectedStep)) {
-      await delay(100)
+      await delay(100, signal)
       continue
     }
     button = [
@@ -945,40 +962,199 @@ async function clickQuickStartWizardButton(
         !candidate.disabled,
     )
     if (button) break
-    await delay(100)
+    await delay(100, signal)
   }
   if (!button)
     throw new Error(
       `Quick Start could not find an enabled ${label} button on wizard step ${expectedStep}.`,
     )
-  await moveQuickStartCursor(button)
+  await moveQuickStartCursor(button, signal)
+  signal?.throwIfAborted()
   button.click()
-  await delay(850)
+  await delay(850, signal)
 }
 
-async function showQuickStartInput(placeholder: string): Promise<void> {
+async function showQuickStartInput(
+  placeholder: string,
+  value?: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted()
   await nextTick()
   const input = document.querySelector<HTMLInputElement>(
     `.new-workspace-wizard-panel input[placeholder="${placeholder}"]`,
   )
-  if (input) await moveQuickStartCursor(input)
+  if (!input) return
+  await moveQuickStartCursor(input, signal)
+  if (value !== undefined) await typeQuickStartInput(input, value, signal)
 }
 
-async function moveQuickStartCursor(target: HTMLElement): Promise<void> {
+async function typeQuickStartInput(
+  input: HTMLInputElement,
+  value: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  input.value = ''
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  for (const character of value) {
+    signal?.throwIfAborted()
+    input.value += character
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await delay(35, signal)
+  }
+}
+
+async function showQuickStartProjectDialog(
+  input: {
+    projectName: string
+    designName: string
+    projectRoot: string
+    mpcId: string
+  },
+  signal?: AbortSignal,
+): Promise<void> {
+  for (const [name, value] of [
+    ['project-name', input.projectName],
+    ['design-name', input.designName],
+    ['project-storage-location', input.projectRoot],
+  ]) {
+    signal?.throwIfAborted()
+    const field = document.querySelector<HTMLInputElement>(
+      `.new-project-dialog input[name="${name}"]`,
+    )
+    if (!field) throw new Error(`Quick Start could not find the ${name} field.`)
+    await moveQuickStartCursor(field, signal)
+    await typeQuickStartInput(field, value, signal)
+  }
+
+  let select: HTMLSelectElement | null = null
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    select = document.querySelector<HTMLSelectElement>(
+      '.new-project-dialog select[name="managed-mpc"]',
+    )
+    if (
+      select &&
+      !select.disabled &&
+      [...select.options].some((option) => option.value === input.mpcId)
+    ) {
+      break
+    }
+    await delay(100, signal)
+  }
+  if (!select || select.disabled) {
+    throw new Error('Quick Start could not select the managed MPC.')
+  }
+  await moveQuickStartCursor(select, signal)
+  signal?.throwIfAborted()
+  select.value = input.mpcId
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+  await delay(450, signal)
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    const loadingMpcSpec = [
+      ...document.querySelectorAll('.new-project-dialog .modal-help'),
+    ].some((message) => message.textContent?.includes('Loading MPC design specification'))
+    if (!loadingMpcSpec) break
+    await delay(100, signal)
+  }
+
+  const createButton = document.querySelector<HTMLButtonElement>(
+    '.new-project-dialog .primary-button',
+  )
+  if (!createButton || createButton.disabled) {
+    throw new Error('Quick Start could not find an enabled Create button.')
+  }
+  createButton.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  await delay(350, signal)
+  await moveQuickStartCursor(createButton, signal)
+  signal?.throwIfAborted()
+  createButton.click()
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    if (!document.querySelector('.new-project-dialog')) {
+      await clickQuickStartProjectWorkspaceButton(input.projectName, signal)
+      return
+    }
+    await delay(100, signal)
+  }
+  throw new Error('Quick Start project dialog did not close after creation.')
+}
+
+async function clickQuickStartProjectWorkspaceButton(
+  projectName: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    signal?.throwIfAborted()
+    const projectRow = [
+      ...document.querySelectorAll<HTMLElement>('article.project-workspace-tree'),
+    ].find(
+      (candidate) =>
+        candidate.querySelector('.project-tree-row strong')?.textContent?.trim() ===
+        projectName,
+    )
+    const newButton = projectRow?.querySelector<HTMLButtonElement>(
+      '.project-tree-actions .row-primary-action',
+    )
+    if (newButton && !newButton.disabled) {
+      await moveQuickStartCursor(newButton, signal)
+      signal?.throwIfAborted()
+      newButton.click()
+      await delay(350, signal)
+      return
+    }
+    await delay(100, signal)
+  }
+  throw new Error(
+    `Quick Start could not find the new workspace button for ${projectName}.`,
+  )
+}
+
+function closeQuickStartProjectDialog(): void {
+  document.querySelector<HTMLButtonElement>('.new-project-dialog .modal-close')?.click()
+}
+
+async function moveQuickStartCursor(
+  target: HTMLElement,
+  signal?: AbortSignal,
+  offset: { offsetX: number; offsetY: number } = { offsetX: -96, offsetY: -96 },
+): Promise<void> {
   const rect = target.getBoundingClientRect()
-  quickStartCursor.visible = true
-  quickStartCursor.left = rect.left + Math.min(rect.width - 10, rect.width * 0.72)
-  quickStartCursor.top = rect.top + Math.min(rect.height - 8, rect.height * 0.72)
+  const left = rect.left + Math.min(rect.width - 10, rect.width * 0.72)
+  const top = rect.top + Math.min(rect.height - 8, rect.height * 0.72)
+  if (!quickStartCursor.visible) {
+    quickStartCursor.left = left + offset.offsetX
+    quickStartCursor.top = top + offset.offsetY
+    quickStartCursor.visible = true
+    await nextTick()
+    await delay(120, signal)
+  }
+  quickStartCursor.left = left
+  quickStartCursor.top = top
   await nextTick()
-  await delay(1500)
+  await delay(1500, signal)
 }
 
 function joinLocalPath(root: string, child: string): string {
   return `${normalizeLocalPath(root).replace(/\/$/, '')}/${child.replace(/^\/+/, '')}`
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, milliseconds))
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout)
+      reject(signal.reason)
+    }
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, milliseconds)
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) onAbort()
+  })
 }
 const showAboutDialog = ref(false)
 const terminalExpanded = ref(false)
@@ -1955,16 +2131,10 @@ onUnmounted(() => {
   position: fixed;
   z-index: 10001;
   pointer-events: none;
-  display: grid;
-  width: 2.4rem;
-  height: 2.4rem;
-  place-items: center;
-  border: 2px solid white;
-  border-radius: 999px;
-  background: var(--accent-color);
-  color: white;
-  font-size: 1.65rem;
-  filter: drop-shadow(0 3px 5px rgb(0 0 0 / 42%));
+  color: var(--text-primary);
+  font-size: 1.85rem;
+  filter: drop-shadow(0 1px 1px rgb(255 255 255 / 88%))
+    drop-shadow(0 3px 5px rgb(0 0 0 / 42%));
   transform: translate(-50%, -50%);
   transition:
     left 1s cubic-bezier(0.22, 1, 0.36, 1),

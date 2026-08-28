@@ -194,6 +194,14 @@ describe('ProjectsView project management surface', () => {
     expect(projectStyles).not.toContain('.project-tree-row:hover .row-action-secondary')
   })
 
+  it('preserves the Quick Start handoff marker when opening a workspace', () => {
+    const createStart = source.indexOf('async function createWorkspaceForProject')
+    const createEnd = source.indexOf('function requestDeleteWorkspace', createStart)
+    const createSource = source.slice(createStart, createEnd)
+    expect(createSource).toContain('queryString(route.query.quickStart)')
+    expect(createSource).toContain('quickStart: queryString(route.query.quickStart)')
+  })
+
   it('lets the selected project collapse its workspace list without hiding its summary', () => {
     expect(source).toContain('class="circle-action project-collapse-toggle"')
     expect(source).toContain('projectWorkspaceListExpanded(project.model.id)')
@@ -430,6 +438,10 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('selectProjectStorageLocation')
     expect(source).toContain('createProjectFolderDraft')
     expect(source).toContain('mutateProjectManifest')
+    expect(source).toContain('name="project-name"')
+    expect(source).toContain('name="design-name"')
+    expect(source).toContain('name="project-storage-location"')
+    expect(source).toContain('name="managed-mpc"')
 
     const createStart = source.indexOf('async function createProjectFolderDraft')
     const createEnd = source.indexOf('const goBack =', createStart)

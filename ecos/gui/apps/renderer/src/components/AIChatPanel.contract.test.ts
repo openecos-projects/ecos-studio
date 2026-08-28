@@ -19,6 +19,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('interaction.interaction.options[2]?.id === answer.optionId')
     expect(source).not.toContain('class="quick-start-suggestion"')
     expect(source).toContain('await startQuickStart()')
+    expect(source).toContain(
+      'messageStore.finishStreamingMessages(sessionId ?? undefined)',
+    )
     expect(source).toContain("interaction.title !== 'Get started'")
   })
 
