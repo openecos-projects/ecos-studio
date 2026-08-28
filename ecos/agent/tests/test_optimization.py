@@ -523,16 +523,20 @@ def test_objective_is_frozen_from_one_parent_terminal_observation() -> None:
         0.9
     )
 
+    ineligible = _terminal(
+        "ineligible-baseline",
+        dr=0,
+        overflow=0,
+        wirelength=7,
+        signoff=GateResult.FAIL,
+    )
     with pytest.raises(ValueError, match="eligible"):
-        freeze_routability_objective(
-            _terminal(
-                "ineligible-baseline",
-                dr=0,
-                overflow=0,
-                wirelength=0,
-                signoff=GateResult.FAIL,
-            )
-        )
+        freeze_routability_objective(ineligible)
+
+    exempt = freeze_routability_objective(
+        ineligible, allow_ineligible_baseline=True
+    )
+    assert exempt.reference_value(ObjectiveMetric.ROUTE_WIRELENGTH) == 7
 
 
 def test_legacy_terminal_observation_dump_excludes_v3_defaults() -> None:

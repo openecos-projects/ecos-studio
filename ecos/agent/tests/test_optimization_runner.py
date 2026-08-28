@@ -707,6 +707,46 @@ def test_ineligible_candidate_is_classified_without_an_incumbent(tmp_path: Path)
     runner.close()
 
 
+def test_eligible_candidate_initializes_from_exempt_ineligible_baseline(
+    tmp_path: Path,
+) -> None:
+    planner = _FakePlanner()
+    executor = _SuccessfulExecutor()
+    baseline = _incumbent().model_copy(
+        update={"signoff_gates": SignoffGates.all(GateResult.FAIL)}
+    )
+    controller = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        incumbent=baseline,
+    )
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=_terminal_observation,
+        objective=freeze_routability_objective(
+            baseline, allow_ineligible_baseline=True
+        ),
+        baseline_eligibility_exempt=True,
+    )
+
+    turn = runner.run_turn()
+
+    assert turn.incumbent_comparison is not None
+    assert turn.incumbent_comparison.decision == IncumbentDecision.INITIALIZED
+    assert controller.incumbent == turn.terminal_observation
+    runner.close()
+
+
 def test_fake_runner_quarantines_missing_terminal_receipt(tmp_path: Path) -> None:
     planner = _FakePlanner()
     executor = _MissingTerminalExecutor()

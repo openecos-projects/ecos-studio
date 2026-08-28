@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -61,6 +62,21 @@ def _load_harness():
 def _load_experiment_runner():
     path = Path(__file__).parents[1] / "scripts" / "run_equal_budget_experiment.py"
     spec = importlib.util.spec_from_file_location("run_equal_budget_experiment", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_functional_smoke_finalizer():
+    path = (
+        Path(__file__).parents[1]
+        / "scripts"
+        / "finalize_equal_budget_functional_smoke.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "finalize_equal_budget_functional_smoke", path
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -483,6 +499,10 @@ def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> 
         "reference_runtime_seconds_by_design": {
             design_id: 1.0 for design_id in design_ids
         },
+        "elapsed_wall_time_seconds_by_mode": {
+            mode: {design_id: 1.0 for design_id in design_ids}
+            for mode in ("requested_only", "receipt_aware")
+        },
         "seed": 0,
         "tool_revision": "ecc-test",
         "input_manifest_sha256": "sha256:" + "a" * 64,
@@ -553,6 +573,116 @@ def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> 
         )
 
 
+def test_harness_separates_completed_functional_smoke_from_research_evaluation(
+    tmp_path,
+) -> None:
+    harness = _load_harness()
+    design_ids = [f"d{i}" for i in range(10)]
+    smoke_ids = design_ids[:6]
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"design_ids": design_ids}), encoding="utf-8")
+
+    def write_traces(path: Path, mode: str, prefix: str) -> None:
+        path.write_text(
+            "".join(
+                json.dumps(
+                        {
+                            "design_id": design_id,
+                            "candidate_id": f"{prefix}-{design_id}-{index}",
+                            "started": True,
+                            "terminal_success": True,
+                            "planning_mode": mode,
+                            "receipt_status": "ok",
+                            "application_status": "applied",
+                            "activation_status": "used",
+                        }
+                )
+                + "\n"
+                for design_id in smoke_ids
+                for index in range(2)
+            ),
+            encoding="utf-8",
+        )
+
+    requested = tmp_path / "requested.jsonl"
+    receipt = tmp_path / "receipt.jsonl"
+    write_traces(requested, "requested-only", "requested")
+    write_traces(receipt, "receipt-aware", "receipt")
+    runtimes = {design_id: 10.0 for design_id in smoke_ids}
+    elapsed = {
+        mode: {design_id: 100.0 for design_id in smoke_ids}
+        for mode in ("requested_only", "receipt_aware")
+    }
+
+    report = harness.run(
+        manifest,
+        tmp_path / "smoke",
+        requested,
+        receipt,
+        requested_only_planning_calls=12,
+        receipt_aware_planning_calls=12,
+        reference_runtime_seconds_by_design=runtimes,
+        elapsed_wall_time_seconds_by_mode=elapsed,
+        functional_smoke_design_ids=tuple(smoke_ids),
+        seed=0,
+        tool_revision="ecc-test",
+        input_manifest_sha256="sha256:" + "a" * 64,
+    )
+
+    assert report["status"] == "incomplete"
+    assert report["engineering_status"] == "completed"
+    assert report["engineering_classification"] == "Engineering Complete"
+    assert report["research_evaluation_status"] == "incomplete"
+    assert report["research_claim"] == "not_assessed"
+    assert report["research_classification"] == "Research Claim Not Assessed"
+    assert report["ignored_knobs"] == ["place.routability_opt"]
+    assert report["design_coverage"] == {
+        "observed": smoke_ids,
+        "missing": design_ids[6:],
+        "required": design_ids,
+    }
+    assert report["elapsed_wall_time_seconds_by_mode"] == elapsed
+
+    elapsed["receipt_aware"][smoke_ids[0]] = 221.0
+    over_budget = harness.run(
+        manifest,
+        tmp_path / "over-budget-smoke",
+        requested,
+        receipt,
+        requested_only_planning_calls=12,
+        receipt_aware_planning_calls=12,
+        reference_runtime_seconds_by_design=runtimes,
+        elapsed_wall_time_seconds_by_mode=elapsed,
+        functional_smoke_design_ids=tuple(smoke_ids),
+        seed=0,
+        tool_revision="ecc-test",
+        input_manifest_sha256="sha256:" + "a" * 64,
+    )
+    assert over_budget["engineering_status"] == "incomplete"
+
+    elapsed["receipt_aware"][smoke_ids[0]] = 100.0
+    rows = [json.loads(line) for line in requested.read_text(encoding="utf-8").splitlines()]
+    rows[0]["terminal_success"] = False
+    requested.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    failed_terminal = harness.run(
+        manifest,
+        tmp_path / "failed-terminal-smoke",
+        requested,
+        receipt,
+        requested_only_planning_calls=12,
+        receipt_aware_planning_calls=12,
+        reference_runtime_seconds_by_design=runtimes,
+        elapsed_wall_time_seconds_by_mode=elapsed,
+        functional_smoke_design_ids=tuple(smoke_ids),
+        seed=0,
+        tool_revision="ecc-test",
+        input_manifest_sha256="sha256:" + "a" * 64,
+    )
+    assert failed_terminal["engineering_status"] == "incomplete"
+
+
 def test_started_trace_requires_mode_and_receipt_measurement(tmp_path) -> None:
     harness = _load_harness()
     design_ids = [f"d{i}" for i in range(10)]
@@ -619,6 +749,10 @@ def test_requested_only_trace_keeps_posthoc_receipt_measurement(tmp_path) -> Non
         receipt_aware_planning_calls=0,
         reference_runtime_seconds_by_design={
             design_id: 1.0 for design_id in design_ids
+        },
+        elapsed_wall_time_seconds_by_mode={
+            mode: {"d0": 0.0}
+            for mode in ("requested_only", "receipt_aware")
         },
         seed=0,
         tool_revision="ecc-test",
@@ -864,6 +998,154 @@ def test_phase8_calibration_uses_three_default_flow_replays(tmp_path, monkeypatc
     assert len(starts) == 3
     assert all(item["rerun"] is True for item in starts)
     assert all(item["origin"] == "gui" for item in starts)
+
+
+def test_phase8_mode_explicitly_exempts_the_reference_baseline(
+    tmp_path, monkeypatch
+) -> None:
+    module = _load_experiment_runner()
+    captured = {}
+
+    class FakeProvider:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def select_model(self, _model) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    fake_runner = SimpleNamespace(
+        budget=SimpleNamespace(
+            consumed_candidates=2,
+            consumed_planning_calls=2,
+            elapsed_wall_time_seconds=3.0,
+        ),
+        state=module.OptimizationEpisodeState.PLANNING,
+        close=lambda: None,
+    )
+
+    def create_runner(context, _provider):
+        captured.update(context)
+        return fake_runner
+
+    monkeypatch.setattr(module, "CodexAppServerProposalProvider", FakeProvider)
+    monkeypatch.setattr(module, "create_optimization_runner", create_runner)
+    monkeypatch.setattr(
+        module,
+        "export_episode_traces",
+        lambda **_kwargs: ((), 2, "requested-only"),
+    )
+    design = module.DesignSpec(
+        "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
+    )
+
+    module._run_mode(
+        design,
+        tmp_path / "workspace",
+        _terminal_observation(),
+        1.0,
+        tmp_path / "output",
+        run_id="run",
+        model="model",
+        seed=1,
+        mode="requested-only",
+    )
+
+    assert captured["baseline_eligibility_exempt"] is True
+
+
+def test_phase8_functional_smoke_finalizer_never_starts_eda(
+    tmp_path, monkeypatch
+) -> None:
+    module = _load_functional_smoke_finalizer()
+    runner = module.experiment
+    design_ids = ("gcd", "i2c", "cia", "zipdiv", "cordic", "xtea")
+    designs = tuple(
+        runner.DesignSpec(
+            design_id,
+            "top",
+            "clk",
+            tmp_path / f"{design_id}.f",
+            (),
+            tmp_path / f"{design_id}.sdc",
+        )
+        for design_id in design_ids
+    )
+    manifest = runner.ExperimentManifest(HASH, designs, {}, "ics55", tmp_path)
+    output = tmp_path / "output"
+    run_root = output / "runs" / "run"
+    run_root.mkdir(parents=True)
+    captured = {}
+
+    class FakeHarness:
+        @staticmethod
+        def run(*_args, **kwargs):
+            captured.update(kwargs)
+            return {
+                "status": "incomplete",
+                "engineering_status": "completed",
+                "research_evaluation_status": "incomplete",
+            }
+
+    monkeypatch.setattr(
+        runner,
+        "_verify_workspace_binding",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        module,
+        "_load_existing_calibration",
+        lambda _path: (_terminal_observation(), 10.0),
+    )
+    monkeypatch.setattr(
+        module,
+        "_export_existing_mode",
+        lambda *_args, **kwargs: {
+            "traces": (
+                SimpleNamespace(
+                    design_id=kwargs["design_id"],
+                    candidate_id=f"{kwargs['mode']}-1",
+                    started=True,
+                ),
+                SimpleNamespace(
+                    design_id=kwargs["design_id"],
+                    candidate_id=f"{kwargs['mode']}-2",
+                    started=True,
+                ),
+            ),
+            "planning_calls": 2,
+            "elapsed_wall_time_seconds": 100.0,
+        },
+    )
+    monkeypatch.setattr(runner, "_load_harness", lambda: FakeHarness)
+    monkeypatch.setattr(
+        runner,
+        "_ensure_workspace",
+        lambda *_args, **_kwargs: pytest.fail("finalization started EDA"),
+    )
+
+    report = module.finalize_functional_smoke(
+        manifest,
+        tmp_path / "manifest.json",
+        output,
+        tmp_path / "workspaces",
+        run_id="run",
+        seed=1,
+        tool_revision="ecc-test",
+    )
+
+    assert report["engineering_status"] == "completed"
+    assert captured["functional_smoke_design_ids"] == design_ids
+    assert captured["reference_runtime_seconds_by_design"] == {
+        design_id: 10.0 for design_id in design_ids
+    }
+    assert captured["elapsed_wall_time_seconds_by_mode"] == {
+        mode: {design_id: 100.0 for design_id in design_ids}
+        for mode in ("requested_only", "receipt_aware")
+    }
+    assert (run_root / "run-manifest.v1.json").is_file()
 
 
 def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:

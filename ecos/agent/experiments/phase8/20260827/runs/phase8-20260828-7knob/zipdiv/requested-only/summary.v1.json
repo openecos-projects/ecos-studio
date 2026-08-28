@@ -1,0 +1,9 @@
+{
+  "design_id": "zipdiv",
+  "episode_id": "phase8-phase8-20260828-7knob-zipdiv-requested-only",
+  "mode": "requested-only",
+  "planning_calls": 2,
+  "schema_version": "ecos.phase8_design_mode.v1",
+  "started_candidates": 2,
+  "trace_sha256": "sha256:078b93635f0e103732455939815c9276e42e02af71d75e35f1869a1058690e18"
+}

@@ -1,0 +1,9 @@
+{
+  "design_id": "cordic",
+  "episode_id": "phase8-phase8-20260828-7knob-cordic-requested-only",
+  "mode": "requested-only",
+  "planning_calls": 2,
+  "schema_version": "ecos.phase8_design_mode.v1",
+  "started_candidates": 2,
+  "trace_sha256": "sha256:5035fdbeecabb2f9c62d7beb360c46235b00b073abb6a4b18a203db8339819fe"
+}

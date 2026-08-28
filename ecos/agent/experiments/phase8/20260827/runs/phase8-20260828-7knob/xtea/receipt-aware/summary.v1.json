@@ -1,0 +1,9 @@
+{
+  "design_id": "xtea",
+  "episode_id": "phase8-phase8-20260828-7knob-xtea-receipt-aware",
+  "mode": "receipt-aware",
+  "planning_calls": 2,
+  "schema_version": "ecos.phase8_design_mode.v1",
+  "started_candidates": 2,
+  "trace_sha256": "sha256:01f5c0ae358253d8a752e8d69cc9968d42f62f9df32f3709ca997f909ec3974e"
+}

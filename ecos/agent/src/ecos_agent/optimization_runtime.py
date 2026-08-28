@@ -82,6 +82,9 @@ def create_optimization_runner(
     receipt_aware_planning = context.get("receipt_aware_planning", True)
     if type(receipt_aware_planning) is not bool:
         raise OptimizationRuntimeError("receipt-aware planning flag is invalid")
+    baseline_eligibility_exempt = context.get("baseline_eligibility_exempt", False)
+    if type(baseline_eligibility_exempt) is not bool:
+        raise OptimizationRuntimeError("baseline eligibility exemption is invalid")
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
@@ -102,7 +105,10 @@ def create_optimization_runner(
             "seed": context.get("seed", 0),
         }
     design_id = _design_id(workspace)
-    routability_objective = freeze_routability_objective(terminal_observation)
+    routability_objective = freeze_routability_objective(
+        terminal_observation,
+        allow_ineligible_baseline=baseline_eligibility_exempt,
+    )
     reference_runtime = context.get("reference_runtime_seconds")
     if reference_runtime is None:
         reference_runtime = _optimization_rerun_runtime_seconds(workspace)
@@ -233,6 +239,7 @@ def create_optimization_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
+        baseline_eligibility_exempt=baseline_eligibility_exempt,
         stop_event=stop_event,
         site_width_dbu=site_width_dbu,
     )

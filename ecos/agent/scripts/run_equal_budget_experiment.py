@@ -250,6 +250,13 @@ def run_experiment(
         mode: sum(modes[mode]["planning_calls"] for _, _, modes in results)
         for mode in traces
     }
+    elapsed_wall_time = {
+        mode: {
+            design_id: modes[mode]["elapsed_wall_time_seconds"]
+            for design_id, _, modes in results
+        }
+        for mode in traces
+    }
     inputs = {}
     for mode, rows in traces.items():
         path = run_root / f"{mode}-input.jsonl"
@@ -267,6 +274,7 @@ def run_experiment(
         planning_calls["requested-only"],
         planning_calls["receipt-aware"],
         reference_runtime_seconds_by_design=runtimes,
+        elapsed_wall_time_seconds_by_mode=elapsed_wall_time,
         seed=seed,
         tool_revision=tool_revision,
         input_manifest_sha256=manifest.manifest_sha256,
@@ -282,6 +290,7 @@ def run_experiment(
             "input_manifest_sha256": manifest.manifest_sha256,
             "reference_runtime_seconds_by_design": runtimes,
             "planning_calls": planning_calls,
+            "elapsed_wall_time_seconds_by_mode": elapsed_wall_time,
             "trace_sha256": {mode: file_sha256(path) for mode, path in inputs.items()},
             "harness_status": report["status"],
         },
@@ -621,6 +630,7 @@ def _run_mode(
             "seed": seed,
             "reference_runtime_seconds": reference_runtime,
             "receipt_aware_planning": mode == "receipt-aware",
+            "baseline_eligibility_exempt": True,
         },
         provider,
     )
@@ -632,6 +642,7 @@ def _run_mode(
             in {OptimizationEpisodeState.CREATED, OptimizationEpisodeState.PLANNING}
         ):
             runner.run_turn()
+        elapsed_wall_time_seconds = runner.budget.elapsed_wall_time_seconds
     finally:
         runner.close()
         provider.close()
@@ -654,10 +665,15 @@ def _run_mode(
             "episode_id": episode_id,
             "planning_calls": planning_calls,
             "started_candidates": sum(item.started for item in traces),
+            "elapsed_wall_time_seconds": elapsed_wall_time_seconds,
             "trace_sha256": canonical_sha256([item.__dict__ for item in traces]),
         },
     )
-    return {"traces": traces, "planning_calls": planning_calls}
+    return {
+        "traces": traces,
+        "planning_calls": planning_calls,
+        "elapsed_wall_time_seconds": elapsed_wall_time_seconds,
+    }
 
 
 def _objective():

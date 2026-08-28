@@ -1,0 +1,9 @@
+{
+  "design_id": "xtea",
+  "episode_id": "phase8-phase8-20260828-7knob-xtea-requested-only",
+  "mode": "requested-only",
+  "planning_calls": 2,
+  "schema_version": "ecos.phase8_design_mode.v1",
+  "started_candidates": 2,
+  "trace_sha256": "sha256:a8f400416edfdae38c9d01c8385aff9d774ddad1195626f79b492b506d462960"
+}

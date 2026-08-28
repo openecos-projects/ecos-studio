@@ -1,0 +1,9 @@
+{
+  "design_id": "cia",
+  "episode_id": "phase8-phase8-20260828-7knob-cia-requested-only",
+  "mode": "requested-only",
+  "planning_calls": 2,
+  "schema_version": "ecos.phase8_design_mode.v1",
+  "started_candidates": 2,
+  "trace_sha256": "sha256:e2bdf48120ad6a8c1dcf6abafecded7a756b52da9c5639734e92d3e9a5f62f48"
+}

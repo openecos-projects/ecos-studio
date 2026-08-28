@@ -199,8 +199,10 @@ def _effective_preserve_metrics(
 
 def freeze_routability_objective(
     baseline: TerminalObservation,
+    *,
+    allow_ineligible_baseline: bool = False,
 ) -> RoutabilityObjectiveContract:
-    if not baseline.eligible_for_incumbent:
+    if not allow_ineligible_baseline and not baseline.eligible_for_incumbent:
         raise ValueError("baseline terminal observation is not eligible")
     return RoutabilityObjectiveContract(
         references=tuple(

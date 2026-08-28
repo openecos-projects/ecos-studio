@@ -63,11 +63,14 @@ class OptimizationEpisodeRunner:
         ]
         | None = None,
         objective: RoutabilityObjectiveContract | None = None,
+        baseline_eligibility_exempt: bool = False,
         stop_event: threading.Event | None = None,
         site_width_dbu: int = 1,
     ) -> None:
         if type(site_width_dbu) is not int or site_width_dbu <= 0:
             raise OptimizationEpisodeRunnerError("site width is invalid")
+        if type(baseline_eligibility_exempt) is not bool:
+            raise OptimizationEpisodeRunnerError("baseline eligibility exemption is invalid")
         self._controller = controller
         self._observation_supplier = observation_supplier
         self._retrieval_supplier = retrieval_supplier
@@ -75,6 +78,7 @@ class OptimizationEpisodeRunner:
         self._terminal_waiter = terminal_waiter
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
+        self._baseline_eligibility_exempt = baseline_eligibility_exempt
         self._stop_event = stop_event or threading.Event()
         self._site_width_dbu = site_width_dbu
 
@@ -209,7 +213,9 @@ class OptimizationEpisodeRunner:
         if not candidate.eligible_for_incumbent:
             return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
         incumbent = self._controller.incumbent
-        if incumbent is None:
+        if incumbent is None or (
+            self._baseline_eligibility_exempt and not incumbent.eligible_for_incumbent
+        ):
             return IncumbentComparison(IncumbentDecision.INITIALIZED, None)
         comparison = compare_incumbent(
             incumbent=incumbent,

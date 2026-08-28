@@ -1,0 +1,56 @@
+{
+  "elapsed_wall_time_seconds_by_mode": {
+    "receipt_aware": {
+      "cia": 723.0467015840113,
+      "cordic": 539.0541454516351,
+      "gcd": 937.6951530054212,
+      "i2c": 1047.9053684677929,
+      "xtea": 458.899121619761,
+      "zipdiv": 344.8639410920441
+    },
+    "requested_only": {
+      "cia": 352.16555839404464,
+      "cordic": 804.9265817571431,
+      "gcd": 431.5974278803915,
+      "i2c": 330.44101182185113,
+      "xtea": 373.24561784416437,
+      "zipdiv": 540.9278812054545
+    }
+  },
+  "engineering_status": "completed",
+  "execution_design_ids": [
+    "gcd",
+    "i2c",
+    "cia",
+    "zipdiv",
+    "cordic",
+    "xtea"
+  ],
+  "finalized_from_existing": true,
+  "ignored_knobs": [
+    "place.routability_opt"
+  ],
+  "input_manifest_sha256": "sha256:f542c4bef1ff1f6e52c023d27c21ac613344be3ceb78c72818b38cf595a48218",
+  "model": "gpt-5.6-sol",
+  "planning_calls": {
+    "receipt-aware": 12,
+    "requested-only": 12
+  },
+  "reference_runtime_seconds_by_design": {
+    "cia": 262.0,
+    "cordic": 442.0,
+    "gcd": 235.0,
+    "i2c": 252.0,
+    "xtea": 223.0,
+    "zipdiv": 255.0
+  },
+  "research_evaluation_status": "incomplete",
+  "run_id": "phase8-20260828-7knob",
+  "schema_version": "ecos.phase8_execution_run.v1",
+  "seed": 20260827,
+  "tool_revision": "eae7564014d9d4b6f7d6a3e22fedfb933cd31472",
+  "trace_sha256": {
+    "receipt-aware": "sha256:2777c922e9975a25d731b7d245194e9bd403ec6390833eeee8faa8d8e286d1ac",
+    "requested-only": "sha256:8c7510884dc40fe1001eb8552b8b5fdf64a5c2fa5b80f5f3bd18fc74952dcca4"
+  }
+}
