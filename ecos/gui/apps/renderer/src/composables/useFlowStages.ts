@@ -64,6 +64,18 @@ const FIXED_SETUP_STAGES: FlowStage[] = Object.entries(STEP_METADATA)
   }))
 
 const FRONTEND_FLOW_RETRY_DELAYS_MS = [120, 300, 600] as const
+const optimisticFlowStageStart = ref<{
+  projectPath: string
+  resetAll: boolean
+  stepPath: string
+} | null>(null)
+
+function normalizeProjectPath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/')
+  return normalized.length > 1 && normalized.endsWith('/')
+    ? normalized.slice(0, -1)
+    : normalized
+}
 
 /**
  * 将 flow.json 数据转换为 FlowStage 格式（与侧边栏加载逻辑一致）
@@ -466,13 +478,6 @@ export function useFlowStages() {
     unwatchFlowJsonFile = null
   }
 
-  function normalizeProjectPath(path: string): string {
-    const normalized = path.trim().replace(/\\/g, '/')
-    return normalized.length > 1 && normalized.endsWith('/')
-      ? normalized.slice(0, -1)
-      : normalized
-  }
-
   function resetRunStagesForRerun(affectedSteps: readonly string[] = []): void {
     invalidateFlowStageLoads()
     if (affectedSteps.length === 0) {
@@ -527,7 +532,6 @@ export function useFlowStages() {
     if (isTerminalFailure) {
       const command = typeof eventData.cmd === 'string' ? eventData.cmd : ''
       if (command && command !== 'rtl2gds' && command !== 'run_step') return
-      invalidateFlowStageLoads()
       markOngoingRunStagesIncomplete()
       return
     }
@@ -541,9 +545,6 @@ export function useFlowStages() {
     }
     const stepName = typeof eventData.step === 'string' ? eventData.step : ''
     if (!stepName) return
-    // Runtime notifications are newer than any resource read that was
-    // already in flight when the step event arrived.
-    invalidateFlowStageLoads()
     const eventResponse = (event as { response?: unknown }).response
     const phase = typeof eventData.phase === 'string' ? eventData.phase : ''
     const state =
@@ -592,7 +593,7 @@ export function useFlowStages() {
    * 乐观更新：将第一个非 Success 的 run 步骤设为 Ongoing
    * 在用户点击 Run RTL2GDS 时调用，立即反映运行状态
    */
-  function setFirstRunStepOngoing(options: { resetAll?: boolean } = {}): void {
+  function applyFirstRunStepOngoing(options: { resetAll?: boolean } = {}): void {
     if (options.resetAll) {
       resetRunStagesForRerun()
     } else {
@@ -612,11 +613,24 @@ export function useFlowStages() {
     }
   }
 
+  function setFirstRunStepOngoing(options: { resetAll?: boolean } = {}): void {
+    const projectPath = normalizeProjectPath(currentProject.value?.path ?? '')
+    if (!projectPath) {
+      applyFirstRunStepOngoing(options)
+      return
+    }
+    optimisticFlowStageStart.value = {
+      projectPath,
+      resetAll: Boolean(options.resetAll),
+      stepPath: '',
+    }
+  }
+
   /**
    * 乐观更新：将指定 path 的 run 步骤设为 Ongoing
    * 单步运行 run_step 时调用，与侧栏第一栏状态指示一致
    */
-  function setRunStepOngoingByPath(stepPath: string): void {
+  function applyRunStepOngoingByPath(stepPath: string): void {
     if (!stepPath) return
     forgetRuntimeStepState(stepPath)
     const key = stepPath.toLowerCase()
@@ -631,6 +645,20 @@ export function useFlowStages() {
         'Ongoing',
         dynamicFlowStages.value[idx].tool,
       )
+    }
+  }
+
+  function setRunStepOngoingByPath(stepPath: string): void {
+    if (!stepPath) return
+    const projectPath = normalizeProjectPath(currentProject.value?.path ?? '')
+    if (!projectPath) {
+      applyRunStepOngoingByPath(stepPath)
+      return
+    }
+    optimisticFlowStageStart.value = {
+      projectPath,
+      resetAll: false,
+      stepPath,
     }
   }
 
@@ -689,6 +717,24 @@ export function useFlowStages() {
     flush: 'sync',
     immediate: true,
   })
+
+  watch(
+    optimisticFlowStageStart,
+    (request) => {
+      if (
+        !request ||
+        request.projectPath !== normalizeProjectPath(currentProject.value?.path ?? '')
+      ) {
+        return
+      }
+      if (request.stepPath) {
+        applyRunStepOngoingByPath(request.stepPath)
+      } else {
+        applyFirstRunStepOngoing({ resetAll: request.resetAll })
+      }
+    },
+    { flush: 'sync' },
+  )
 
   unregisterHomeRunArtifactReset = onHomeRunArtifactReset((projectPath) => {
     const currentProjectPath = currentProject.value?.path

@@ -1,13 +1,15 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
-  activatePdkApi,
   cancelResourceApi,
   checkResourceUpdatesApi,
   importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
+  listPdkInstallationsApi,
+  pdkInstallationToResourceItem,
   removePdkReferenceApi,
+  removePdkInstallationApi,
   resourceListToTools,
   subscribeResourceProgress,
   uninstallResourceApi,
@@ -17,8 +19,6 @@ import {
 import type { InstallProgress, ResourceItem, ToolInfo } from '@/api/plugin'
 
 const PROGRESS_UPDATE_INTERVAL_MS = 180
-type LocalResourceImporter = (resourceId: string, path: string) => Promise<unknown>
-
 export const usePluginStore = defineStore('plugin', () => {
   const resources = ref<ResourceItem[]>([])
   const tools = ref<ToolInfo[]>([])
@@ -48,15 +48,23 @@ export const usePluginStore = defineStore('plugin', () => {
   }
 
   function _resourceName(resourceId: string): string {
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     if (resource) {
       return resource.name
     }
     return resourceId.replace(/^(tool|pdk):/, '')
   }
 
+  function _resourceById(resourceId: string): ResourceItem | undefined {
+    return (
+      resources.value.find(
+        (item) => item.id === resourceId && item.type === 'pdk' && item.path !== null,
+      ) ?? resources.value.find((item) => item.id === resourceId)
+    )
+  }
+
   function _toolNameForResourceId(resourceId: string): string | null {
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     if (resource?.type === 'tool') {
       return resource.name
     }
@@ -136,7 +144,7 @@ export const usePluginStore = defineStore('plugin', () => {
   }
 
   function _setResourceStatus(resourceId: string, status: ResourceItem['status']): void {
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     if (!resource) {
       return
     }
@@ -151,7 +159,7 @@ export const usePluginStore = defineStore('plugin', () => {
     resourceErrors.value[resourceId] = message
     _syncLegacyToolError(resourceId, message)
 
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     if (!resource) {
       return
     }
@@ -169,7 +177,17 @@ export const usePluginStore = defineStore('plugin', () => {
     }
     error.value = null
     try {
-      const nextResources = await listResourcesApi()
+      const [genericResources, installations] = await Promise.all([
+        listResourcesApi(),
+        listPdkInstallationsApi(),
+      ])
+      const inventoryResources = installations.map(pdkInstallationToResourceItem)
+      const nextResources = [
+        ...genericResources.filter(
+          (resource) => resource.type !== 'pdk' || resource.path === null,
+        ),
+        ...inventoryResources,
+      ]
       if (fetchSequence === _fetchSequence) {
         resources.value = nextResources
         _syncLegacyTools()
@@ -293,11 +311,15 @@ export const usePluginStore = defineStore('plugin', () => {
   async function uninstallResource(resourceId: string): Promise<void> {
     delete resourceErrors.value[resourceId]
     _syncLegacyToolError(resourceId)
-    const resource = resources.value.find((item) => item.id === resourceId)
+    const resource = _resourceById(resourceId)
     const prevStatus = resource?.status
     const prevError = resource?.error ?? null
     try {
-      await uninstallResourceApi(resourceId)
+      if (resource?.source === 'managed' || resource?.source === 'imported') {
+        await removePdkInstallationApi(resourceId)
+      } else {
+        await uninstallResourceApi(resourceId)
+      }
       if (resource) {
         resource.status = resource.type === 'tool' ? 'uninstalling' : 'removing'
         resource.error = null
@@ -328,30 +350,30 @@ export const usePluginStore = defineStore('plugin', () => {
     await uninstallResource(_toolResourceId(name))
   }
 
-  async function activatePdk(resourceId: string): Promise<void> {
-    await activatePdkApi(resourceId)
-    await fetchTools({ silent: true })
-  }
-
   async function validatePdk(resourceId: string): Promise<void> {
     await validatePdkApi(resourceId)
     await fetchTools({ silent: true })
   }
 
   async function removePdkReference(resourceId: string): Promise<void> {
-    await removePdkReferenceApi(resourceId)
+    const resource = resources.value.find(
+      (item) =>
+        item.id === resourceId &&
+        (item.source === 'managed' || item.source === 'imported'),
+    )
+    if (resource?.source === 'managed' || resource?.source === 'imported') {
+      await removePdkInstallationApi(resourceId)
+    } else {
+      await removePdkReferenceApi(resourceId)
+    }
     await fetchTools({ silent: true })
   }
 
-  async function importLocalResource(
-    resourceId: string,
-    path: string,
-    importer: LocalResourceImporter = importLocalResourcePathApi,
-  ): Promise<void> {
+  async function importLocalResource(resourceId: string, path: string): Promise<void> {
     delete resourceErrors.value[resourceId]
     _syncLegacyToolError(resourceId)
     try {
-      await importer(resourceId, path)
+      await importLocalResourcePathApi(resourceId, path)
       await fetchTools({ silent: true })
     } catch (e) {
       _setResourceError(
@@ -403,7 +425,6 @@ export const usePluginStore = defineStore('plugin', () => {
     uninstallResource,
     install,
     uninstall,
-    activatePdk,
     validatePdk,
     removePdkReference,
     importLocalResource,

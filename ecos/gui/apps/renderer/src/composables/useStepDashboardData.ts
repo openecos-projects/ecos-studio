@@ -12,6 +12,13 @@ import {
 } from '@/api/workspaceResources'
 import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
+import {
+  buildCongestionTiles,
+  buildFlowInsightSteps,
+  congestionCandidatePngPaths,
+  parseCongestionCsv,
+  type CongestionMapTileModel,
+} from '@/components/flow-insights/flowInsightsData'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { onWorkspaceRerunPrepared } from '@/composables/homeRunArtifacts'
 import { registerRuntimeStepRenderTask } from '@/composables/runtimeStepRenderSync'
@@ -20,6 +27,7 @@ import {
   checklistSummary,
   dbDistributions,
   dbHighlights,
+  designStatisSummary,
   drcInsights,
   floorplanInsights,
   hardenOutputInsights,
@@ -42,6 +50,7 @@ import {
   type StepDashboardDrcInsights,
   type StepDashboardDistribution,
   type StepDashboardFloorplanInsights,
+  type StepDesignStatis,
   type StepDashboardHardenInsights,
   type StepDashboardLvsInsights,
   type StepDashboardMetric,
@@ -85,7 +94,11 @@ export interface StepDashboardData {
   timingAnalysis: StepDashboardTimingAnalysis | null
   layoutUrl: string | null
   mapUrl: string | null
-  placeDensityMapUrl: string | null
+  /** Congestion/density map tiles from this step's own feature maps (place/CTS). */
+  congestionTiles: CongestionMapTileModel[]
+  congestionTileUrls: Map<string, string>
+  /** Metric table of Design Layout / Design Statis from this step's db.json feature. */
+  designStatis: StepDesignStatis | null
   hasGeometry: boolean
   reports: StepDashboardReport[]
 }
@@ -190,12 +203,14 @@ function releaseDashboardImages(
   data: StepDashboardData,
   replacement?: StepDashboardData,
 ): void {
-  const retainedUrls = new Set([
-    replacement?.layoutUrl,
-    replacement?.mapUrl,
-    replacement?.placeDensityMapUrl,
-  ])
-  for (const url of [data.layoutUrl, data.mapUrl, data.placeDensityMapUrl]) {
+  const retainedUrls = new Set([replacement?.layoutUrl, replacement?.mapUrl])
+  for (const url of [data.layoutUrl, data.mapUrl]) {
+    if (!retainedUrls.has(url)) revokeBlobUrl(url)
+  }
+  if (replacement) {
+    for (const url of replacement.congestionTileUrls.values()) retainedUrls.add(url)
+  }
+  for (const url of data.congestionTileUrls.values()) {
     if (!retainedUrls.has(url)) revokeBlobUrl(url)
   }
 }
@@ -370,9 +385,12 @@ export function useStepDashboardData() {
         : isPlace
           ? `${resourceStep.directory}/feature/${resourceStep.name}.map.json`
           : ''
-      const placeDensityMapPath = isPlace
-        ? `${resourceStep.directory}/feature/density_map/place_allcell_density.png`
-        : ''
+      const isCongestionStep =
+        resourceStep.name.trim().toLowerCase() === 'place' ||
+        resourceStep.name.trim().toLowerCase() === 'cts'
+      const congestionCandidateStep = isCongestionStep
+        ? buildFlowInsightSteps([resourceStep])[0]
+        : null
       const layoutPath = resourceStep.resources.output.image?.exists
         ? stringInfo(layoutResponse.info, 'image')
         : ''
@@ -418,16 +436,46 @@ export function useStepDashboardData() {
       ])
       if (version !== requestVersion) return
 
-      const [layoutUrl, mapUrl, placeDensityMapUrl] = await Promise.all([
+      const [layoutUrl, mapUrl] = await Promise.all([
         readImage(layoutPath),
         readImage(availableMapPath),
-        readOptionalImage(placeDensityMapPath),
       ])
       if (version !== requestVersion) {
         revokeBlobUrl(layoutUrl)
         revokeBlobUrl(mapUrl)
-        revokeBlobUrl(placeDensityMapUrl)
         return
+      }
+
+      // Congestion/density map tiles for this step's own feature maps (place/CTS)
+      let congestionTiles: CongestionMapTileModel[] = []
+      let congestionTileUrls = new Map<string, string>()
+      if (congestionCandidateStep) {
+        const probed = await Promise.all(
+          congestionCandidatePngPaths(congestionCandidateStep).map(
+            async (pngPath) => [pngPath, await readOptionalImage(pngPath)] as const,
+          ),
+        )
+        for (const [pngPath, url] of probed) {
+          if (url) congestionTileUrls.set(pngPath, url)
+        }
+        if (version !== requestVersion) {
+          for (const url of congestionTileUrls.values()) revokeBlobUrl(url)
+          return
+        }
+        congestionTiles = buildCongestionTiles(
+          [congestionCandidateStep],
+          new Set(congestionTileUrls.keys()),
+        )
+        await Promise.all(
+          congestionTiles.map(async (tile) => {
+            const text = await readText(tile.csvPath)
+            tile.stats = text ? parseCongestionCsv(text) : null
+          }),
+        )
+        if (version !== requestVersion) {
+          for (const url of congestionTileUrls.values()) revokeBlobUrl(url)
+          return
+        }
       }
 
       const keyMetrics = stepKeyMetrics(resourceStep.name, stepJson)
@@ -492,7 +540,9 @@ export function useStepDashboardData() {
             : null,
         layoutUrl,
         mapUrl,
-        placeDensityMapUrl,
+        congestionTiles,
+        congestionTileUrls,
+        designStatis: designStatisSummary(dbJson),
         hasGeometry: Boolean(resourceStep.resources.output.geometryManifest?.exists),
         reports: reportFiles(
           resourceStep.resources.report,
@@ -502,7 +552,7 @@ export function useStepDashboardData() {
       if (!cacheKey) {
         revokeBlobUrl(layoutUrl)
         revokeBlobUrl(mapUrl)
-        revokeBlobUrl(placeDensityMapUrl)
+        for (const url of congestionTileUrls.values()) revokeBlobUrl(url)
         return
       }
       replaceCachedStepDashboardData(cacheKey, nextData)

@@ -21,6 +21,13 @@ import type {
 } from './resources.ts'
 import type { EccRuntimeApi } from './eccRuntime.ts'
 import type {
+  PdkBinding,
+  PdkImportRequest,
+  PdkInstallationSnapshot,
+  PdkLocateRequest,
+  PdkResolveBindingRequest,
+} from './pdkInventory.ts'
+import type {
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
 } from '../utils/projectManifest.ts'
@@ -84,6 +91,7 @@ export interface DesktopSaveFileDialogOptions {
   defaultPath?: string
   filters?: DesktopFileDialogFilter[]
   ensureDirectory?: boolean
+  content?: string
 }
 
 export interface DesktopRtlSourceDialogOptions {
@@ -271,6 +279,7 @@ export interface DesktopApi {
     clearProjectRoot(): Promise<void>
     requestProjectPathAccess(path: string): Promise<string>
     authorizeWaveform(path: string): Promise<string>
+    openWaveformExternal(path: string): Promise<void>
     readProjectTextFile(path: string): Promise<string>
     readOptionalProjectTextFile(path: string): Promise<string | null>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
@@ -333,7 +342,6 @@ export interface DesktopApi {
     update(resourceId: string): Promise<ResourceOperationResult>
     cancel(resourceId: string): Promise<ResourceOperationResult>
     uninstall(resourceId: string): Promise<ResourceOperationResult>
-    activatePdk(resourceId: string): Promise<ResourceOperationResult>
     validatePdk(
       resourceId: string,
     ): Promise<{ resource_id: string; health: { status: string } }>
@@ -346,6 +354,13 @@ export interface DesktopApi {
       refreshRegistry?: boolean
     }): Promise<ResourceUpdateCheckResult>
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
+  }
+  pdkInventory: {
+    list(): Promise<PdkInstallationSnapshot[]>
+    import(request: PdkImportRequest): Promise<PdkInstallationSnapshot>
+    locate(request: PdkLocateRequest): Promise<PdkInstallationSnapshot>
+    remove(installationId: string): Promise<{ unboundProjectIds: string[] }>
+    resolveBinding(request: PdkResolveBindingRequest): Promise<PdkBinding | null>
   }
   runtime: DesignRuntimeApi
   ecc: EccRuntimeApi

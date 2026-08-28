@@ -81,6 +81,9 @@ class FakeRpcClient implements EccRpcRuntimeClient {
 
     const response = this.responses.shift()
     if (response === undefined) {
+      if (method === 'workspace.recover_interrupted') {
+        return { recovered: [] } as T
+      }
       throw new Error(`Unexpected RPC call without a queued response: ${method}`)
     }
     if (response instanceof Error) {
@@ -276,6 +279,22 @@ describe('EccRpcRuntimeService pool', () => {
 
     blockedA.resolve({ rerun: false })
     await expect(flowA).resolves.toEqual({ rerun: false })
+  })
+
+  it('checks for an interrupted marker when a workspace opens', async () => {
+    const pool = createPool()
+    await pool.service.openWorkspace({ directory: '/work/demo' })
+
+    expect(
+      pool
+        .clientFor('/work/demo')
+        .calls.filter((call) => call.method === 'workspace.recover_interrupted'),
+    ).toEqual([
+      {
+        method: 'workspace.recover_interrupted',
+        params: { workspaceId: 'id-/work/demo' },
+      },
+    ])
   })
 
   it('reuses one sidecar for the same directory and creates one per directory', async () => {

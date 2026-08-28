@@ -204,7 +204,7 @@ jobs:
         with:
           name: ecos-studio-release-windows
           if-no-files-found: error
-          path: ecos/gui/apps/desktop-electron/release/**/*.exe
+          path: ecos/gui/apps/desktop-electron/release/ECOS-Studio_*.exe
 
   release:
     name: Create Release
@@ -259,7 +259,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -t ASSETS < <(find build/release -type f \( -name '*.AppImage' -o -name '*.dmg' -o -name '*.exe' \) | sort)
+          mapfile -t ASSETS < <(find build/release -type f \( -name 'ECOS-Studio_*.AppImage' -o -name 'ECOS-Studio_*.dmg' -o -name 'ECOS-Studio_*.exe' \) | sort)
           gh release create "${{ steps.version.outputs.full_tag }}" \
             --title "ECOS Studio ${{ steps.version.outputs.full_tag }}" \
             --notes-file release-notes.md \

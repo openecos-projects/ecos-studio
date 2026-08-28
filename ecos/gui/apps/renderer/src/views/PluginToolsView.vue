@@ -236,8 +236,7 @@
                         removalActionForRow(row) !== null ||
                         canImportLocalResource(row) ||
                         (row.statusKind !== 'installing' &&
-                          (row.actions.includes('activate') ||
-                            row.actions.includes('validate')))
+                          row.actions.includes('validate'))
                       "
                     >
                       <button
@@ -307,18 +306,6 @@
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-restart-line" aria-hidden="true"></i>
-                      </button>
-                      <button
-                        v-else-if="
-                          row.statusKind !== 'installing' &&
-                          row.actions.includes('activate')
-                        "
-                        type="button"
-                        class="row-action-btn icon-only primary"
-                        data-title="Activate"
-                        @click.stop="handlePdkActivate(row)"
-                      >
-                        <i class="ri-check-line" aria-hidden="true"></i>
                       </button>
                       <button
                         v-else-if="
@@ -482,7 +469,7 @@ type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
 
 const router = useRouter()
 const pluginStore = usePluginStore()
-const { importPdkForResource } = usePdkManager()
+const { importPdk } = usePdkManager()
 
 const searchQuery = ref('')
 const searchInput = ref('')
@@ -707,7 +694,7 @@ async function handleRowInstall(row: ResourceRow): Promise<void> {
 }
 
 async function handleRowCancel(row: ResourceRow): Promise<void> {
-  await pluginStore.cancelResource(row.id)
+  await pluginStore.cancelResource(row.resource.id)
 }
 
 async function handleLocalImport(row: ResourceRow): Promise<void> {
@@ -719,6 +706,13 @@ async function handleLocalImport(row: ResourceRow): Promise<void> {
   next.add(row.id)
   importingResourceIds.value = next
   try {
+    if (row.type === 'pdk') {
+      if (await importPdk()) {
+        void pluginStore.fetchTools({ silent: true })
+      }
+      return
+    }
+
     const desktopApi = await waitForDesktopApi()
     const path = await desktopApi.dialog.pickDirectory({
       title: `Select Local ${row.name} Directory`,
@@ -727,21 +721,11 @@ async function handleLocalImport(row: ResourceRow): Promise<void> {
       return
     }
 
-    await pluginStore.importLocalResource(
-      row.id,
-      path,
-      row.type === 'pdk' ? importPdkForResource : undefined,
-    )
+    await pluginStore.importLocalResource(row.id, path)
   } finally {
     const done = new Set(importingResourceIds.value)
     done.delete(row.id)
     importingResourceIds.value = done
-  }
-}
-
-async function handlePdkActivate(row: ResourceRow): Promise<void> {
-  if (row.resource) {
-    await pluginStore.activatePdk(row.resource.id)
   }
 }
 
@@ -762,13 +746,13 @@ async function handleRowRemove(row: ResourceRow): Promise<void> {
 
   if (action === 'remove_reference') {
     if (row.type === 'pdk') {
-      await pluginStore.removePdkReference(row.id)
+      await pluginStore.removePdkReference(row.resource.id)
       return
     }
-    await pluginStore.uninstallResource(row.id)
+    await pluginStore.uninstallResource(row.resource.id)
     return
   }
-  await pluginStore.uninstallResource(row.id)
+  await pluginStore.uninstallResource(row.resource.id)
 }
 
 async function downloadSelected(): Promise<void> {

@@ -330,3 +330,94 @@
 .step-config-root details.raw-json > summary::-webkit-details-marker {
   display: none;
 }
+
+/* ---- Baseline side-by-side comparison ---- */
+
+.step-config-root .sc-compare {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.step-config-root .sc-compare-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.step-config-root .sc-compare.is-split .sc-compare-col--baseline {
+  flex: 1 1 0%;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  /* Re-scope the container queries so per-column grids collapse by column width */
+  container-type: inline-size;
+  container-name: step-config;
+}
+
+.step-config-root .sc-compare.is-split .sc-compare-col--current {
+  flex: 1 1 0%;
+  /* Same container re-scope for the editable column */
+  container-type: inline-size;
+  container-name: step-config;
+}
+
+/* Read-only baseline column: reference styling, no mutation affordances */
+.step-config-root .is-readonly .sc-pro-btn {
+  display: none;
+}
+
+.step-config-root .is-readonly input,
+.step-config-root .is-readonly textarea,
+.step-config-root .is-readonly .p-checkbox,
+.step-config-root .is-readonly .p-select {
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  opacity: 0.85;
+  cursor: default;
+}
+
+/* Diff highlighting (amber accent, matching --sc-orange warnings) */
+.step-config-root .sc-diff {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--sc-orange) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--sc-orange);
+}
+
+.step-config-root .sc-diff-row > td:first-child {
+  box-shadow: inset 2px 0 0 var(--sc-orange);
+}
+
+.step-config-root .sc-diff-row > td {
+  background: color-mix(in srgb, var(--sc-orange) 6%, transparent);
+}
+
+.step-config-root .sc-diff-panel > .sc-pro-section__title,
+.step-config-root .sc-diff-panel > .sc-pro-section__desc,
+.step-config-root .sc-diff-panel > .sc-pro-subpanel__title {
+  color: var(--sc-orange);
+}
+
+.step-config-root .sc-diff-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sc-orange) 18%, transparent);
+  color: var(--sc-orange);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.step-config-root .sc-diff-badge:is(span) {
+  vertical-align: middle;
+}
+
+.step-config-root .btn-text.is-active {
+  color: var(--accent-color);
+  box-shadow: inset 0 -2px 0 var(--accent-color);
+}

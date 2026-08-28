@@ -209,7 +209,7 @@ describe('ProjectScopeService', () => {
     })
   })
 
-  it('allows frontend source roots declared by workspace parameters', async () => {
+  it('requires explicit approval before allowing frontend source roots', async () => {
     const root = await createTempDir('ecos-project-root-')
     const sourceRoot = await createTempDir('ecos-frontend-source-')
     const sourceFile = join(sourceRoot, 'rtl', 'cpu.sv')
@@ -232,6 +232,15 @@ describe('ProjectScopeService', () => {
     await runWithWindowScope(1, async () => {
       await service.registerProjectRoot(root)
 
+      await expect(service.requestProjectPathAccess(sourceFile)).rejects.toThrow(
+        'outside current project root',
+      )
+      await expect(service.listPendingExternalReadRoots()).resolves.toEqual([
+        join(sourceRoot, 'rtl'),
+      ])
+      await expect(
+        service.approvePendingExternalReadRoots(root, [join(sourceRoot, 'rtl')]),
+      ).resolves.toEqual([join(sourceRoot, 'rtl')])
       await expect(service.requestProjectPathAccess(sourceFile)).resolves.toBe(sourceFile)
       await expect(service.requestProjectPathAccess(outsideFile)).rejects.toThrow(
         'outside current project scope',
@@ -263,10 +272,110 @@ describe('ProjectScopeService', () => {
     const service = new ProjectScopeService()
     await runWithWindowScope(1, async () => {
       await service.registerProjectRoot(root)
+      await service.approvePendingExternalReadRoots(root, [rtlDir])
 
       await expect(service.requestProjectPathAccess(sourceFile)).resolves.toBe(sourceFile)
       await expect(service.requestProjectPathAccess(siblingFile)).rejects.toThrow(
         'outside current project scope',
+      )
+    })
+  })
+
+  it('reuses persisted approval only for roots still declared by the project', async () => {
+    const root = await createTempDir('ecos-project-root-')
+    const sourceRoot = await createTempDir('ecos-frontend-source-')
+    const sourceFile = join(sourceRoot, 'cpu.sv')
+    const storedGrants = new Map<string, string[]>()
+    const readGrantProvider = {
+      get: async (projectRoot: string) => storedGrants.get(projectRoot) ?? [],
+      set: async (projectRoot: string, roots: string[]) => {
+        storedGrants.set(projectRoot, roots)
+      },
+    }
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(sourceFile, 'module cpu; endmodule')
+    await writeFile(join(sourceRoot, 'filelist.cpu.f'), 'cpu.sv')
+    await writeFile(
+      join(root, 'home', 'parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        cpu_filelist: join(sourceRoot, 'filelist.cpu.f'),
+      }),
+    )
+
+    const firstService = new ProjectScopeService({ readGrantProvider })
+    await runWithWindowScope(1, async () => {
+      await firstService.registerProjectRoot(root)
+      await firstService.approvePendingExternalReadRoots(root, [sourceRoot])
+    })
+
+    const reloadedService = new ProjectScopeService({ readGrantProvider })
+    await runWithWindowScope(2, async () => {
+      await reloadedService.registerProjectRoot(root)
+      await expect(reloadedService.listPendingExternalReadRoots()).resolves.toEqual([])
+      await expect(reloadedService.requestProjectPathAccess(sourceFile)).resolves.toBe(
+        sourceFile,
+      )
+    })
+  })
+
+  it('rejects an approval snapshot after the active project changes', async () => {
+    const rootA = await createTempDir('ecos-project-root-a-')
+    const rootB = await createTempDir('ecos-project-root-b-')
+    const sourceRootA = await createTempDir('ecos-frontend-source-a-')
+    const sourceRootB = await createTempDir('ecos-frontend-source-b-')
+    const sourceFileB = join(sourceRootB, 'cpu.sv')
+    for (const [root, sourceRoot] of [
+      [rootA, sourceRootA],
+      [rootB, sourceRootB],
+    ]) {
+      await mkdir(join(root, 'home'), { recursive: true })
+      await writeFile(join(sourceRoot, 'cpu.sv'), 'module cpu; endmodule')
+      await writeFile(join(sourceRoot, 'filelist.cpu.f'), 'cpu.sv')
+      await writeFile(
+        join(root, 'home', 'parameters.json'),
+        JSON.stringify({
+          'Design Tool': 'frontend',
+          cpu_filelist: join(sourceRoot, 'filelist.cpu.f'),
+        }),
+      )
+    }
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(rootA)
+      const pendingRootsA = await service.listPendingExternalReadRoots()
+
+      await service.registerProjectRoot(rootB)
+      await expect(
+        service.approvePendingExternalReadRoots(rootA, pendingRootsA),
+      ).rejects.toThrow('no longer matches the active project')
+      await expect(service.requestProjectPathAccess(sourceFileB)).rejects.toThrow(
+        'outside current project root',
+      )
+    })
+  })
+
+  it('never offers a project ancestor as an external read root', async () => {
+    const ancestor = await createTempDir('ecos-project-parent-')
+    const root = join(ancestor, 'workspace')
+    const siblingFile = join(ancestor, 'ecos-private.txt')
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(siblingFile, 'private')
+    await writeFile(
+      join(root, 'home', 'parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        sim_soc_root: ancestor,
+      }),
+    )
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(root)
+      await expect(service.listPendingExternalReadRoots()).resolves.toEqual([])
+      await expect(service.requestProjectPathAccess(siblingFile)).rejects.toThrow(
+        'outside current project root',
       )
     })
   })

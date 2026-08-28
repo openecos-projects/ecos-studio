@@ -165,6 +165,7 @@ defineProps<{
 const emit = defineEmits<{
   close: []
   export: []
+  exportReport: []
   refresh: []
 }>()
 

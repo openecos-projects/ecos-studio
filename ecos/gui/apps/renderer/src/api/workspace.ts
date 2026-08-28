@@ -1,7 +1,7 @@
 import { toDesktopBridgeData } from './desktopPayload'
 import { CMDEnum, ResponseEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
-import type { DesignTool } from '@ecos-studio/shared'
+import { projectIdFromName, type DesignTool } from '@ecos-studio/shared'
 
 // Types for API requests and responses
 export interface ProjectInfo {
@@ -97,6 +97,8 @@ export function createWorkspaceApi(options: {
   origin_verilog?: string
   rtl_list?: string[]
   pdk_root?: string
+  pdk_installation_id?: string
+  pdk_requirement?: import('@ecos-studio/shared').PdkRequirement
   filelist?: string
   design_input_mode?: string
   sdc?: string
@@ -208,6 +210,8 @@ export function createWorkspaceApi(options: {
     origin_verilog: options.origin_verilog || '',
     rtl_list: options.rtl_list || [],
     pdk_root: options.pdk_root || '',
+    pdk_installation_id: options.pdk_installation_id || '',
+    pdk_requirement: options.pdk_requirement,
     filelist: options.filelist || '',
     design_input_mode: options.design_input_mode || '',
     sdc: options.sdc || '',
@@ -230,6 +234,18 @@ export function createWorkspaceApi(options: {
         pdk: String(data.pdk ?? ''),
         pdkJson: data.pdk_json ?? null,
         pdkRoot: String(data.pdk_root ?? ''),
+        pdkInstallationId: String(data.pdk_installation_id ?? ''),
+        pdkRequirement: data.pdk_requirement as
+          | import('@ecos-studio/shared').PdkRequirement
+          | undefined,
+        projectId: projectIdFromContext(
+          data.project_context as Record<string, unknown>,
+          String(data.directory ?? ''),
+        ),
+        projectRoot: projectRootFromContext(
+          data.project_context as Record<string, unknown>,
+          String(data.directory ?? ''),
+        ),
         rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
         sdc: String(data.sdc ?? ''),
       },
@@ -244,4 +260,22 @@ export function createWorkspaceApi(options: {
       message: [],
       response: ResponseEnum.success,
     })) as Promise<WorkspaceResponse>
+}
+
+function projectRootFromContext(
+  context: Record<string, unknown>,
+  workspaceDirectory: string,
+): string {
+  return String(context.project_root || workspaceDirectory)
+}
+
+function projectIdFromContext(
+  context: Record<string, unknown>,
+  workspaceDirectory: string,
+): string {
+  if (context.project_id) return String(context.project_id)
+  const name = String(
+    context.project_name || workspaceDirectory.split(/[/\\]/).pop() || 'project',
+  )
+  return projectIdFromName(name)
 }

@@ -9,6 +9,7 @@ const draft = defineModel<unknown>({ required: true })
 
 const props = defineProps<{
   step: StepEnum
+  readonly?: boolean
 }>()
 const emit = defineEmits<{ initialized: [] }>()
 let initialized = false
@@ -45,5 +46,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <component :is="activeView" v-model="draft" @initialized="emitInitialized" />
+  <component
+    :is="activeView"
+    v-model="draft"
+    :readonly="readonly"
+    @initialized="emitInitialized"
+  />
 </template>

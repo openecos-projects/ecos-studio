@@ -39,6 +39,8 @@ import type {
   EccWorkspaceSyncConfigResult,
 } from '@ecos-studio/shared'
 
+import { electronLogger } from '../logger'
+
 import { normalizeWorkspacePath } from '../workspacePath'
 import { WorkspaceSessionNotFoundError } from './workspaceSessions'
 import {
@@ -183,8 +185,17 @@ export class EccRpcRuntimeService {
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     const requestKey = normalizeWorkspacePath(request.directory)
     const runtime = this.getOrCreateRuntime(request.directory)
-    return runtime.openWorkspace(request).then((result) => {
+    return runtime.openWorkspace(request).then(async (result) => {
       this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+      try {
+        await runtime.recoverInterrupted(result.workspaceHandle)
+      } catch (error) {
+        electronLogger.error(
+          '[runtime] failed to recover interrupted operations while opening %s: %s',
+          result.directory,
+          error,
+        )
+      }
       return result
     })
   }

@@ -49,6 +49,8 @@ chmod +x <latest-release-file>.AppImage
 ./<latest-release-file>.AppImage
 ```
 
+**Note:** The AppImage runtime requires FUSE 2 (`libfuse.so.2`). Most distributions ship it by default, but FUSE-3-only systems (e.g. Ubuntu 24.04) do not. Either install it — `sudo apt install libfuse2` on Debian/Ubuntu — or bypass FUSE by running `./<latest-release-file>.AppImage --appimage-extract-and-run`. See [#173](https://github.com/openecos-projects/ecos-studio/issues/173) for details.
+
 ## Quick Start (For Developers)
 
 ```bash

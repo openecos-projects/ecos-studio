@@ -100,6 +100,33 @@ describe('useFlowStages runtime updates', () => {
     scope.stop()
   })
 
+  it('shares an optimistic step start across mounted flow stage consumers', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo', designTool: 'backend' })
+    testState.workspaceSession = ref(null)
+    testState.runtimeEvents = ref([])
+    testState.readWorkspaceFlowResourceApi.mockReset()
+    testState.readWorkspaceFlowResourceApi.mockResolvedValue({
+      steps: [
+        { name: 'Synthesis', state: 'Success', tool: 'yosys' },
+        { name: 'CTS', state: 'Incomplete', tool: 'ecc' },
+      ],
+    })
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const runControlStages = scope.run(() => useFlowStages())!
+    const dashboardStages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() => {
+      expect(dashboardStages.dynamicFlowStages.value[1]?.state).toBe('Incomplete')
+    })
+
+    runControlStages.setFirstRunStepOngoing()
+
+    expect(runControlStages.dynamicFlowStages.value[1]?.state).toBe('Ongoing')
+    expect(dashboardStages.dynamicFlowStages.value[1]?.state).toBe('Ongoing')
+    scope.stop()
+  })
+
   it('keeps the complete frontend flow on the frontend resource path', async () => {
     testState.currentProject = ref({
       path: '/workspace/frontend',
@@ -476,5 +503,104 @@ describe('useFlowStages runtime updates', () => {
     expect(testState.readWorkspaceFlowResourceApi).toHaveBeenCalledTimes(2)
     scope.stop()
     testState.resourceVersions = null
+  })
+
+  it('keeps the complete flow when runtime events arrive before the snapshot', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo', designTool: 'backend' })
+    testState.workspaceSession = ref({ workspaceId: 'backend-runtime-handle' })
+    testState.runtimeEvents = ref([])
+    let resolveSnapshot: (value: {
+      flow: {
+        steps: Array<{
+          name: string
+          state: string
+          tool: string
+          runtime: string
+          peakMemory: number
+        }>
+      }
+    }) => void = () => undefined
+    testState.getWorkspaceRuntimeSnapshotApi.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve
+        }),
+    )
+
+    const { useFlowStages } = await import('./useFlowStages')
+    const scope = effectScope()
+    const stages = scope.run(() => useFlowStages())!
+
+    await vi.waitFor(() =>
+      expect(testState.getWorkspaceRuntimeSnapshotApi).toHaveBeenCalled(),
+    )
+    testState.runtimeEvents.value.push(
+      {
+        data: {
+          runtimeProtocolType: 'step.completed',
+          state: 'Success',
+          step: 'Synthesis',
+          tool: 'ecc',
+        },
+      },
+      {
+        data: {
+          runtimeProtocolType: 'step.completed',
+          state: 'Incomplete',
+          step: 'Floorplan',
+          tool: 'ecc',
+        },
+      },
+      {
+        data: {
+          runtimeProtocolType: 'operation.failed',
+        },
+      },
+    )
+
+    resolveSnapshot({
+      flow: {
+        steps: [
+          {
+            name: 'Synthesis',
+            state: 'Success',
+            tool: 'ecc',
+            runtime: '',
+            peakMemory: 0,
+          },
+          {
+            name: 'Floorplan',
+            state: 'Incomplete',
+            tool: 'ecc',
+            runtime: '',
+            peakMemory: 0,
+          },
+          {
+            name: 'Place',
+            state: 'Unstart',
+            tool: 'dreamplace',
+            runtime: '',
+            peakMemory: 0,
+          },
+          {
+            name: 'CTS',
+            state: 'Unstart',
+            tool: 'ecc',
+            runtime: '',
+            peakMemory: 0,
+          },
+        ],
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(stages.dynamicFlowStages.value.map((stage) => stage.label)).toEqual([
+        'Synthesis',
+        'Floorplan',
+        'Place',
+        'CTS',
+      ])
+    })
+    scope.stop()
   })
 })

@@ -102,6 +102,7 @@ const desktopBridge = {
     clearProjectRoot: async () => undefined,
     requestProjectPathAccess: async (path: string) => path,
     authorizeWaveform: async (path: string) => path,
+    openWaveformExternal: async (_path: string) => undefined,
     readProjectTextFile: async () => '',
     readOptionalProjectTextFile: async () => null,
     readProjectTextFileTail: async () => null,
@@ -180,7 +181,6 @@ const desktopBridge = {
     update: async (resourceId) => ({ status: 'started', resource_id: resourceId }),
     cancel: async (resourceId) => ({ status: 'cancelled', resource_id: resourceId }),
     uninstall: async (resourceId) => ({ status: 'uninstalled', resource_id: resourceId }),
-    activatePdk: async (resourceId) => ({ status: 'activated', resource_id: resourceId }),
     validatePdk: async (resourceId) => ({
       resource_id: resourceId,
       health: { status: 'ok' },
@@ -205,6 +205,7 @@ const desktopBridge = {
     }),
     onProgress: () => () => undefined,
   },
+  pdkInventory: {} as DesktopApi['pdkInventory'],
   runtime: {} as DesktopApi['runtime'],
   ecc: {
     events: {

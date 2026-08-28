@@ -186,8 +186,15 @@ function responseFromRuntimeEvent(
     cmd: command,
     designTool: event.designTool,
     directory: 'workspaceDirectory' in event ? event.workspaceDirectory : undefined,
+    errorCode: 'code' in event ? event.code : undefined,
+    errorDetails: 'details' in event ? event.details : undefined,
     executionScope,
-    jobId: 'operationId' in event ? event.operationId : undefined,
+    jobId:
+      'operationId' in event
+        ? event.operationId
+        : 'interruptedOperationId' in event
+          ? event.interruptedOperationId
+          : undefined,
     logFile: 'logFile' in event ? event.logFile : undefined,
     method,
     phase: event.type === 'operation.progress' ? event.phase : undefined,

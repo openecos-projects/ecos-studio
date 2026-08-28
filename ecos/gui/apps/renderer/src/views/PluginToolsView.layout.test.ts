@@ -193,20 +193,16 @@ describe('PluginToolsView resource table layout', () => {
     expect(importButtonIndex).toBeLessThan(installButtonIndex)
   })
 
-  it('marks a row import busy before opening the native directory picker', () => {
+  it('marks a row import busy before choosing the import flow', () => {
     const busyFlagIndex = pluginToolsViewSource.indexOf(
       'importingResourceIds.value = next',
     )
-    const directoryPickerIndex = pluginToolsViewSource.indexOf(
-      'desktopApi.dialog.pickDirectory',
-    )
+    const pdkImportIndex = pluginToolsViewSource.indexOf("if (row.type === 'pdk')")
 
-    expect(pluginToolsViewSource).toContain('importPdkForResource')
-    expect(pluginToolsViewSource).toContain(
-      "row.type === 'pdk' ? importPdkForResource : undefined",
-    )
+    expect(pluginToolsViewSource).toContain('const { importPdk } = usePdkManager()')
+    expect(pluginToolsViewSource).toContain('if (await importPdk())')
     expect(busyFlagIndex).toBeGreaterThan(-1)
-    expect(directoryPickerIndex).toBeGreaterThan(-1)
-    expect(busyFlagIndex).toBeLessThan(directoryPickerIndex)
+    expect(pdkImportIndex).toBeGreaterThan(-1)
+    expect(busyFlagIndex).toBeLessThan(pdkImportIndex)
   })
 })

@@ -7,6 +7,6 @@ describe('WorkspaceViewWrapper sidebar selection', () => {
       `<FrontendLeftSidebar v-if="currentProject?.designTool === 'frontend'" />`,
     )
     expect(source).toContain('<LeftSidebar v-else />')
-    expect(source).toContain('const { closeProject, currentProject } = useWorkspace()')
+    expect(source).toContain('const { currentProject } = useWorkspace()')
   })
 })

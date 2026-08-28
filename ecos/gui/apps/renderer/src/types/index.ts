@@ -1,6 +1,7 @@
 import type {
   DesignTool,
   DesktopAgentChoice,
+  PdkReadiness,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
   WorkspaceStatus as SharedWorkspaceStatus,
@@ -100,10 +101,8 @@ export interface ImportedPdk {
   }
   source?: string
   version?: string
-  active?: boolean
-  status?: string
-  valid?: boolean
-  knownLayout?: boolean
+  readiness: PdkReadiness
+  supportsEccDefaults: boolean
 }
 
 export interface DesignFile {

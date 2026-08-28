@@ -669,6 +669,20 @@ export interface CongestionMapAvailability {
   files: Array<{ pngPath: string; csvPath: string; layoutCsvPath: string }>
 }
 
+/** Candidate congestion/density map PNG paths for one step, per the map specs. */
+export function congestionCandidatePngPaths(step: FlowInsightStep): string[] {
+  const paths: string[] = []
+  for (const spec of CONGESTION_MAP_SPECS) {
+    for (const direction of spec.directions) {
+      const fileStem = spec.filePrefixPattern
+        .replace('{step}', step.name)
+        .replace('{direction}', direction)
+      paths.push(`${step.directory}/feature/${spec.directory}/${fileStem}.png`)
+    }
+  }
+  return paths
+}
+
 /**
  * 构建拥塞图 tile 列表。png/csv 内容存在性由调用方（异步读取）补充，
  * 此函数只负责路径推导与规格匹配。

@@ -1,5 +1,6 @@
 <template>
   <div class="frontend-workspace wave-workspace-clean">
+    <FrontendExperimentalBanner class="m-3" />
     <section class="wave-workspace-layout">
       <aside class="wave-list">
         <button
@@ -76,6 +77,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 
 interface WaveSelection {
   path: string
