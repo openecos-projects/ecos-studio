@@ -99,11 +99,12 @@ CONTROLLED_COORDINATE_ORDER = (
     CoordinateAction(OptimizationKnob.TARGET_OVERFLOW, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.CELL_PADDING_X, CoordinateDirection.DECREASE),
     CoordinateAction(OptimizationKnob.CELL_PADDING_X, CoordinateDirection.INCREASE),
+    CoordinateAction(OptimizationKnob.ROUTABILITY_OPT, CoordinateDirection.TOGGLE),
     CoordinateAction(OptimizationKnob.DENSITY_WEIGHT, CoordinateDirection.DECREASE),
     CoordinateAction(OptimizationKnob.DENSITY_WEIGHT, CoordinateDirection.INCREASE),
 )
 ACTIVE_OPTIMIZATION_KNOBS = tuple(
-    knob for knob in OptimizationKnob if knob != OptimizationKnob.ROUTABILITY_OPT
+    OptimizationKnob
 )
 
 
@@ -132,6 +133,19 @@ def coordinate_value_from_native_receipt(
     if type(value) not in {bool, int, float}:
         raise ValueError("native receipt effective value is unavailable")
     return value / site_width_dbu if knob_id == OptimizationKnob.CELL_PADDING_X else value
+
+
+def native_receipt_is_effective(receipt: ParameterApplicationReceipt) -> bool:
+    """Return whether a native receipt is a valid optimization intervention."""
+    if receipt.application_status != "applied":
+        return False
+    if receipt.activation.status == "used":
+        return True
+    return (
+        receipt.requested.get("knob_id") == OptimizationKnob.ROUTABILITY_OPT.value
+        and receipt.requested.get("value") is False
+        and receipt.activation.status == "not_activated"
+    )
 
 
 def legal_actions(

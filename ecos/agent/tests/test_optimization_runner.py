@@ -52,6 +52,7 @@ from ecos_agent.optimization_retrieval import (
 from ecos_agent.optimization_rules import (
     IncumbentDecision,
     freeze_routability_objective,
+    native_receipt_is_effective,
 )
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
 from ecos_agent.parameter_evidence_contracts import (
@@ -186,6 +187,26 @@ class _SuccessfulExecutor(_FakeExecutor):
         )
 
 
+class _RoutabilityFalseExecutor(_SuccessfulExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.terminal_receipts = iter(
+            (
+                CandidateExecutionReceipt(
+                    execution_id="execution-1",
+                    started=True,
+                    outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+                    evidence=_evidence("execution-1"),
+                    parameter_application_receipt=_native_receipt(
+                        "place.routability_opt",
+                        False,
+                        activation_status="not_activated",
+                    ),
+                ),
+            )
+        )
+
+
 def _evidence(execution_id: str) -> CandidateExecutionEvidence:
     return CandidateExecutionEvidence(
         candidate_root_ref=f".agent/candidates/{execution_id}",
@@ -197,11 +218,15 @@ def _evidence(execution_id: str) -> CandidateExecutionEvidence:
 
 
 def _native_receipt(
-    knob_id: str, value: object, *, effective_value: object | None = None
+    knob_id: str,
+    value: object,
+    *,
+    effective_value: object | None = None,
+    activation_status: str = "used",
 ) -> ParameterApplicationReceipt:
     effective_value = value if effective_value is None else effective_value
     unit = "site" if knob_id.endswith("cell_padding_x") else "ratio"
-    consumer_id = (
+    consumer_id = "dreamplace.routability_branch" if knob_id == "place.routability_opt" else (
         "dreamplace.cell_size_expansion"
         if knob_id.endswith("cell_padding_x")
         else "dreamplace.density_objective"
@@ -226,11 +251,11 @@ def _native_receipt(
         "effective_initial": EffectiveValue(value=effective_value, unit=unit),
         "application_status": "applied",
         "activation": ActivationEvidence(
-            status="used",
+            status=activation_status,
             consumers=(
                 {
                     "consumer_id": consumer_id,
-                    "outcome": "entered",
+                    "outcome": "entered" if activation_status == "used" else "evaluated",
                     "evidence_ref": "analysis/parameter_runtime_report.v1.json",
                     "evidence_sha256": _HASH,
                 },
@@ -244,6 +269,17 @@ def _native_receipt(
         evidence_sha256=canonical_sha256(
             draft.model_dump(mode="json", exclude={"evidence_sha256"})
         ),
+    )
+
+
+def test_false_routability_receipt_is_effective_without_branch_activation() -> None:
+    assert native_receipt_is_effective(
+        _native_receipt(
+            "place.routability_opt", False, activation_status="not_activated"
+        )
+    )
+    assert not native_receipt_is_effective(
+        _native_receipt("place.routability_opt", True, activation_status="not_activated")
     )
 
 
@@ -367,6 +403,49 @@ def _incumbent() -> TerminalObservation:
         },
         timing_guardrail=_TIMING_GUARDRAIL,
     )
+
+
+class _RoutabilityPlanner(_FakePlanner):
+    def propose(self, context: OptimizationPlanningContext) -> object:
+        self.contexts.append(context)
+        return _proposal(context, "place.routability_opt", StrategyDirection.DISABLE)
+
+
+def test_runner_accepts_false_routability_candidate_with_not_activated_branch(
+    tmp_path: Path,
+) -> None:
+    planner = _RoutabilityPlanner()
+    executor = _RoutabilityFalseExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-routability-false",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        incumbent=None,
+    )
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=_terminal_observation,
+        objective=_objective(),
+    )
+
+    turn = runner.run_turn()
+
+    assert turn.incumbent_comparison is not None
+    assert turn.incumbent_comparison.decision == IncumbentDecision.INITIALIZED
+    assert controller.incumbent is not None
+    assert controller.ledger.replay().terminal_outcomes[0].outcome == (
+        OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+    )
+    runner.close()
 
 
 def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_path: Path) -> None:

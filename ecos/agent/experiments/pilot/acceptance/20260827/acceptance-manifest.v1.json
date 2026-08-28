@@ -1,5 +1,5 @@
 {
-  "candidate_count": 7,
+  "candidate_count": 8,
   "entries": [
     {
       "activation_status": "used",
@@ -134,6 +134,28 @@
       "terminal_observation_sha256": "sha256:586b37be8122b671efa98f5eeed65a4862e4f4da2b36d3d29495ee835e8b8086"
     },
     {
+      "activation_status": "not_activated",
+      "candidate_id": "candidate-routability-false-parent-v3b-20260827",
+      "candidate_manifest_ref": ".agent/candidates/candidate-routability-false-parent-v3b-20260827/analysis/candidate_workspace.v1.json",
+      "candidate_manifest_sha256": "sha256:b571f8f290641ebf8de5a45f4be3a11eb3490539d177de99e9710a841a717eb8",
+      "candidate_root_ref": ".agent/candidates/candidate-routability-false-parent-v3b-20260827",
+      "card_sha256": "sha256:af167cc5501d17666df17c02ce3ae75869ed95a081a1e2ccd34b31c874edd2b8",
+      "issues": [],
+      "knob_id": "place.routability_opt",
+      "materialization_ref": ".agent/candidates/candidate-routability-false-parent-v3b-20260827/analysis/candidate_materialization.v1.json",
+      "materialization_sha256": "sha256:aac26d07cfc42b4a96eaa5baff379f66e9735b86e7fe0f6894d26fc6302349b7",
+      "native_receipt_ref": ".agent/candidates/candidate-routability-false-parent-v3b-20260827/analysis/parameter_application_receipt.v1.json",
+      "native_receipt_sha256": "sha256:a02f0ee692287be6d5b8aff7a4a3ddfb916b69689d69f3445791ddaf41cf0cd6",
+      "replay": {
+        "available": true,
+        "end_step": "Harden",
+        "operation": "candidate.rerun",
+        "target_step": "place"
+      },
+      "terminal_observation_ref": "terminal-observations/place.routability_opt.json",
+      "terminal_observation_sha256": "sha256:b839a6a86394b0cd1159e10412baea9855a2282aa0cecc0934379b13fb967c2b"
+    },
+    {
       "activation_status": "used",
       "candidate_id": "candidate-accept-density-weight-v3-20260827",
       "candidate_manifest_ref": ".agent/candidates/candidate-accept-density-weight-v3-20260827/analysis/candidate_workspace.v1.json",
@@ -156,10 +178,8 @@
       "terminal_observation_sha256": "sha256:0327679e4404fbf430cc415e27aa66ffb7b47f4dbddd46a1c0e1d79cc7519f45"
     }
   ],
-  "ignored_knobs": [
-    "place.routability_opt"
-  ],
-  "manifest_sha256": "sha256:74594e6976cfd09025af8330ac0fc1f56392e8b41fa6d0f753a13d2a9fdd38e3",
+  "ignored_knobs": [],
+  "manifest_sha256": "sha256:a371d5e17a439f281ffd2f71f725d9cd17cc3f25fc0a6941ac218b15d85ecc98",
   "schema_version": "ecos.parameter_acceptance_manifest.v1",
   "workspace": "experiments/pilot/results/gate0-20260824-d/gcd/workspace"
 }

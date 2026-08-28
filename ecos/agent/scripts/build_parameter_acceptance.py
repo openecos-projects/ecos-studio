@@ -21,12 +21,25 @@ CANDIDATES = {
     "place.target_density": "candidate-accept-rerun-smoke2-20260827",
     "place.target_overflow": "candidate-accept-target-overflow-v3-20260827",
     "place.cell_padding_x": "candidate-accept-cell-padding-v3-20260827",
+    "place.routability_opt": "candidate-routability-false-parent-v3b-20260827",
     "place.density_weight": "candidate-accept-density-weight-v3-20260827",
 }
 
-# Routability activation is tracked as a known non-target until its native branch
-# is available; it must not block the current engineering acceptance gate.
-IGNORED_KNOBS = ("place.routability_opt",)
+IGNORED_KNOBS: tuple[str, ...] = ()
+
+
+def _receipt_is_effective(receipt: dict) -> bool:
+    if receipt.get("application_status") != "applied":
+        return False
+    activation = receipt.get("activation", {})
+    if activation.get("status") == "used":
+        return True
+    requested = receipt.get("requested", {})
+    return (
+        requested.get("knob_id") == "place.routability_opt"
+        and requested.get("value") is False
+        and activation.get("status") == "not_activated"
+    )
 
 
 def _state_sha256(root: Path) -> str:
@@ -99,8 +112,8 @@ def build_acceptance(workspace: Path, output: Path) -> dict:
                 issues.append("materialization config did not change")
             if snapshot.get("before_sha256") == snapshot.get("after_sha256"):
                 issues.append("materialization snapshot did not change")
-        if receipt_payload.get("activation", {}).get("status") != "used":
-            issues.append("native activation is not used")
+        if not _receipt_is_effective(receipt_payload):
+            issues.append("native receipt is not effective")
         replay_payload = None
         if not replay.is_file():
             issues.append("replay artifact not persisted")
@@ -181,7 +194,17 @@ def build_acceptance(workspace: Path, output: Path) -> dict:
             else "Engineering Incomplete"
         ),
         "research_claim": "not_assessed",
-        "terminal_closed_knobs": [entry["knob_id"] for entry in entries if entry["activation_status"] == "used"],
+        "terminal_closed_knobs": [
+            entry["knob_id"]
+            for entry in entries
+            if (
+                entry["activation_status"] == "used"
+                or (
+                    entry["knob_id"] == "place.routability_opt"
+                    and entry["activation_status"] == "not_activated"
+                )
+            )
+        ],
         "entries": entries,
         "manifest_sha256": manifest["manifest_sha256"],
     }

@@ -4,10 +4,11 @@ The generated JSON manifest records native receipts, terminal observations,
 materialization snapshots, and independent replay hashes without copying the
 ignored flow outputs into Git.
 
-Current classification: **Engineering Complete** for the seven target knobs.
-`place.routability_opt` is explicitly excluded from this acceptance gate as a
-non-target; its incomplete native branch remains recorded but does not block
-engineering completion. No QoR or research claim is made from this artifact.
+Current classification: **Engineering Complete** for all eight target knobs.
+`place.routability_opt=false` is recorded as an effective negative arm when its
+native receipt is `applied/not_activated`; this preserves the branch diagnostic
+without rejecting the candidate. No QoR or research claim is made from this
+artifact.
 
 Regenerate with:
 

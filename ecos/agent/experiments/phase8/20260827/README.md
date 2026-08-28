@@ -5,9 +5,16 @@ The engineering evaluation is complete for the six frozen smoke designs:
 receipt-aware planning each executed two independent terminal candidates per
 design, for 12 started candidates and 12 planning calls per mode.
 
-The active domain contains seven knobs. `place.routability_opt` is retained only
-for card/schema/history compatibility and is excluded from planning, execution,
-analysis, and Engineering completion.
+The optimizer implementation now accepts all eight frozen knobs, including
+`place.routability_opt`. A `false` routability request is an effective negative
+arm when the native receipt records `application_status: applied` and
+`activation.status: not_activated`; the branch diagnostic remains separately
+counted. A `true` request requires the routability branch to enter.
+
+The compact run recorded in this directory predates that change and remains a
+seven-knob historical artifact (`ignored_knobs` is intentionally preserved in
+its generated manifests). A new Phase 8 rerun will emit `ignored_knobs: []` and
+include routability candidates in the traces and equal-budget statistics.
 
 `aggregate-report.v1.json` records:
 

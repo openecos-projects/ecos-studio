@@ -635,7 +635,7 @@ def test_harness_separates_completed_functional_smoke_from_research_evaluation(
     assert report["research_evaluation_status"] == "incomplete"
     assert report["research_claim"] == "not_assessed"
     assert report["research_classification"] == "Research Claim Not Assessed"
-    assert report["ignored_knobs"] == ["place.routability_opt"]
+    assert report["ignored_knobs"] == []
     assert report["design_coverage"] == {
         "observed": smoke_ids,
         "missing": design_ids[6:],

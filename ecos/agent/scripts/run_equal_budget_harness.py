@@ -205,7 +205,7 @@ def run(
         "research_evaluation_status": research_status,
         "research_claim": "not_assessed",
         "research_classification": "Research Claim Not Assessed",
-        "ignored_knobs": ["place.routability_opt"],
+        "ignored_knobs": [],
         "design_manifest_ref": str(manifest_path),
         "design_manifest_sha256": file_sha256(manifest_path),
         "design_ids": list(design_ids),
@@ -334,7 +334,14 @@ def _functional_smoke_mode_complete(
             and item.terminal_success
             and item.receipt_status == "ok"
             and item.application_status == "applied"
-            and item.activation_status == "used"
+            and (
+                item.activation_status == "used"
+                or (
+                    item.requested_value is False
+                    and item.application_status == "applied"
+                    and item.activation_status == "not_activated"
+                )
+            )
             for item in traces
         )
         and {

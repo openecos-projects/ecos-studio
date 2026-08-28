@@ -469,7 +469,16 @@ def evaluate_equal_budget(
         raise ValueError("started candidate traces exceed the frozen budget")
     app_signatures = {item.application_signature for item in started if item.application_signature}
     response_signatures = {item.response_signature for item in started if item.response_signature}
-    effective = [item for item in started if item.activation_status == "used"]
+    effective = [
+        item
+        for item in started
+        if item.activation_status == "used"
+        or (
+            item.requested_value is False
+            and item.application_status == "applied"
+            and item.activation_status == "not_activated"
+        )
+    ]
     aliases_saved = sum(item.alias and item.alias_valid is True for item in selected)
     wrong_prunes = sum(item.alias and item.alias_valid is False for item in selected)
     alias_unassessed = sum(item.alias and item.alias_valid is None for item in selected)

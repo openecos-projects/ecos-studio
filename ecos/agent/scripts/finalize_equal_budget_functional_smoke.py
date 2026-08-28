@@ -122,7 +122,7 @@ def finalize_functional_smoke(
             "tool_revision": tool_revision,
             "input_manifest_sha256": manifest.manifest_sha256,
             "execution_design_ids": list(FUNCTIONAL_SMOKE_DESIGN_IDS),
-            "ignored_knobs": ["place.routability_opt"],
+            "ignored_knobs": [],
             "reference_runtime_seconds_by_design": runtimes,
             "planning_calls": planning_calls,
             "elapsed_wall_time_seconds_by_mode": elapsed,

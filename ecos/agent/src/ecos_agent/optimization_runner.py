@@ -28,6 +28,7 @@ from ecos_agent.optimization_rules import (
     compare_incumbent,
     coordinate_value_from_native_receipt,
     coordinate_value_from_receipt,
+    native_receipt_is_effective,
 )
 
 
@@ -164,7 +165,7 @@ class OptimizationEpisodeRunner:
             comparison = IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
         if planning.requested is not None and (
             receipt.parameter_application_receipt is None
-            or receipt.parameter_application_receipt.activation.status != "used"
+            or not native_receipt_is_effective(receipt.parameter_application_receipt)
         ):
             comparison = IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
         completed = self._controller.complete_terminal(
@@ -241,7 +242,7 @@ class OptimizationEpisodeRunner:
             and comparison.decision
             in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
             and receipt.parameter_application_receipt is not None
-            and receipt.parameter_application_receipt.activation.status == "used"
+            and native_receipt_is_effective(receipt.parameter_application_receipt)
         ):
             self._controller.promote_incumbent(candidate, receipt.evidence)
             if requested is not None:
