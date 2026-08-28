@@ -46,7 +46,10 @@ export function configureGpuMode(options: ConfigureGpuModeOptions): void {
     options.env.WSL_DISTRO_NAME !== undefined || options.env.WSL_INTEROP !== undefined
 
   if (isWsl && options.platform === 'linux') {
-    options.app.commandLine.appendSwitch('disable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan')
+    options.app.commandLine.appendSwitch(
+      'disable-features',
+      'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan',
+    )
   }
 
   if (!shouldUseSoftwareGpu(options) && !isWsl) {
