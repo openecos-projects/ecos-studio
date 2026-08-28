@@ -487,7 +487,13 @@ function stringArray(...values: unknown[]): string[] {
 }
 
 function numberArray(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
+  if (value == null) return []
+  if (!Array.isArray(value)) {
+    throw new Error(
+      'Baseline workspace snapshot holds a scalar where a die/core dimension ' +
+        'array was expected; edit the workspace configuration manually',
+    )
+  }
   // Positional semantics: dropping or rounding ANY element would silently
   // shift the rest into the wrong slots (die.size[0] -> die_width). Numeric
   // strings convert (legacy JSON writes them); everything else fails loud.

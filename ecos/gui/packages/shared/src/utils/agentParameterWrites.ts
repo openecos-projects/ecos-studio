@@ -7,6 +7,7 @@ import { hasSafeJsonPath } from './jsonPath.ts'
 import { normalizeParameterKey } from './parameterKeys.ts'
 
 const PARAMETER_SURFACE_FILES = new Set(['home/ecc.toml', 'home/parameters.json'])
+const NESTED_PARAMETER_TABLES = new Set(['core', 'die', 'die_area'])
 
 /**
  * Canonical identity of a resolved write: both workspace-config aliases
@@ -63,16 +64,24 @@ export function parameterWritesMatchPatch(
 }
 
 /**
- * The advertised knob is bound to the write path by its last canonical
- * segment. `place.target_density` may be spelled `target_density` or
- * `Target density`, but it may not land on `pdk_root`.
+ * The advertised knob is bound to the complete write path, not just the
+ * last segment: `place.target_density` may be spelled `target_density` or
+ * `Target density`, and `floorplan.utilitization` may live under `Core`,
+ * but `['future', 'target_density']` is not the advertised knob.
  */
 function writePathMatchesKnob(write: DesktopAgentWorkspaceParameterWrite): boolean {
   const last = write.json_path[write.json_path.length - 1]
   if (typeof last !== 'string') return false
   const knobParts = write.knob_id.split('.')
   const knobLeaf = knobParts[knobParts.length - 1]
-  return Boolean(knobLeaf) && normalizeParameterKey(last) === knobLeaf
+  if (!knobLeaf || normalizeParameterKey(last) !== knobLeaf) return false
+  if (write.json_path.length === 1) return true
+  if (write.surface === 'step_config' || write.json_path.length !== 2) return false
+  const parent = write.json_path[0]
+  return (
+    typeof parent === 'string' &&
+    NESTED_PARAMETER_TABLES.has(normalizeParameterKey(parent))
+  )
 }
 
 function writeValueMatchesPatch(

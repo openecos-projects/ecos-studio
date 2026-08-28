@@ -335,6 +335,14 @@ describe('writeWorkspaceParameters', () => {
     },
   )
 
+  it('does not treat identifier-embedded digits as numeric values', async () => {
+    const root = createWorkspace()
+    const content = `${ECC_TOML}\ncorner1e20 = "slow"\n`
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toContain('corner1e20')
+  })
+
   it('rejects a JSON float that cannot round-trip through Number', async () => {
     const root = createWorkspace()
     const content = '{ "Design": "gcd", "threshold": 0.12345678901234567 }\n'

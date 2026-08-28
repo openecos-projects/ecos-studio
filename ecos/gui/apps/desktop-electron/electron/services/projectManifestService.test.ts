@@ -382,6 +382,42 @@ describe('ProjectManifestService', () => {
     ).rejects.toThrow(/scalar where a parameter table/i)
   })
 
+  it('rejects a baseline snapshot holding a scalar die.size instead of dropping geometry', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspacePath = join(projectRoot, 'ws_0001')
+    const service = createService(projectRoot, undefined, {
+      loadBaselineSnapshot: async () => ({
+        parameters: {
+          pdk: 'ics55',
+          pdk_root: '/pdks/ics55',
+          design: 'gcd',
+          top_module: 'gcd',
+          clock: 'clk',
+          die: { size: new Date('1979-05-27T00:00:00Z') },
+          core: { utilitization: 0.4, margin: [3, 3] },
+        },
+        pdk: {},
+        db: { INPUT: {} },
+      }),
+    })
+
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'project label', designName: 'project_design' },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'register-workspace', input: { projectRoot, workspacePath } },
+    })
+
+    await expect(
+      service.mutate({
+        projectRoot,
+        mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
+      }),
+    ).rejects.toThrow(/die\/core dimension array/i)
+  })
+
   it('does not write a partial baseline mutation when its snapshot is incomplete', async () => {
     const projectRoot = await createTemporaryProject()
     const workspacePath = join(projectRoot, 'ws_0001')

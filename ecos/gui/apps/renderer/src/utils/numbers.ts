@@ -39,7 +39,13 @@ export function losslessOptionalRecord(
 ): Record<string, unknown> | null {
   if (value == null) return null
   assertLosslessShape(value, label)
-  return isPlainRecord(value) ? value : null
+  if (!isPlainRecord(value)) {
+    throw new Error(
+      `Parameter ${label} must be a table, not a scalar; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  return value
 }
 
 /**

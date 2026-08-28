@@ -682,6 +682,13 @@ function assertTomlNumbersSafe(text: string, label: string): void {
       continue
     }
     if (char === '+' || char === '-' || (char >= '0' && char <= '9')) {
+      const previous = index > 0 ? text[index - 1] : ''
+      // Bare keys (`corner1e20`) and table-header segments embed digits;
+      // only tokens that are not a continuation of an identifier are values.
+      if (previous && /[A-Za-z0-9_]/.test(previous)) {
+        index += 1
+        continue
+      }
       const token = matchTomlNumberToken(text, index)
       if (token) {
         if (token.includes('.') || /[eE]/.test(token)) {

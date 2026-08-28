@@ -45,6 +45,32 @@ describe('parameterWritesMatchPatch', () => {
     ).toBe(false)
   })
 
+  it('rejects a write whose path only shares the knob leaf', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.target_density', value: 0.55 }],
+        [densityWrite({ json_path: ['future', 'target_density'] })],
+      ),
+    ).toBe(false)
+  })
+
+  it('accepts a nested table path whose parent is a known parameter table', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
+        [
+          {
+            file: 'home/parameters.json',
+            json_path: ['Core', 'Utilitization'],
+            knob_id: 'floorplan.utilitization',
+            surface: 'parameters',
+            value: 0.7,
+          },
+        ],
+      ),
+    ).toBe(true)
+  })
+
   it('rejects prototype-related json_path segments', () => {
     expect(
       parameterWritesMatchPatch(
