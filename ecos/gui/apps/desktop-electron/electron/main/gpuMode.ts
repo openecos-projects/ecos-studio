@@ -48,8 +48,9 @@ export function configureGpuMode(options: ConfigureGpuModeOptions): void {
   if (isWsl && options.platform === 'linux') {
     options.app.commandLine.appendSwitch(
       'disable-features',
-      'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan',
+      'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VizDisplayCompositor',
     )
+    options.app.commandLine.appendSwitch('disable-gpu-sandbox')
   }
 
   if (!shouldUseSoftwareGpu(options) && !isWsl) {
