@@ -404,6 +404,37 @@ def test_optimization_planner_v2_schema_excludes_the_current_coordinate() -> Non
     ]["enum"] == [0.25]
 
 
+def test_optimization_planner_v2_schema_exposes_all_domains() -> None:
+    first = _domain()
+    payload = first.model_dump(mode="json", exclude={"snapshot_sha256"})
+    payload.update(
+        knob_id="floorplan.aspect_ratio",
+        current_coordinate={"surface_value": 1.0, "effective_anchor": None},
+        surface_values=[0.5, 1.0],
+        allowed_requested_values=[0.5],
+    )
+    second = EffectiveDomainSnapshot(
+        **payload,
+        snapshot_sha256=canonical_sha256(payload),
+    )
+
+    schema = _optimization_proposal_output_schema_v2(
+        (first, second),
+        (
+            ("place.target_density", ("increase",)),
+            ("floorplan.aspect_ratio", ("decrease",)),
+        ),
+    )
+
+    assert schema["$defs"]["OptimizationKnob"]["enum"] == [
+        "place.target_density",
+        "floorplan.aspect_ratio",
+    ]
+    assert schema["$defs"]["NumericProposalActionV2"]["properties"][
+        "requested_value"
+    ]["anyOf"]
+
+
 def test_optimization_planner_v2_rejects_untrusted_domain(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

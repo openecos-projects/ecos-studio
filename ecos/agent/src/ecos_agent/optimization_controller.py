@@ -1023,28 +1023,53 @@ class OptimizationEpisodeController:
         )
         return enabled and callable(getattr(self.planner, "propose_v2", None))
 
-    def _v2_domain(self, context: OptimizationPlanningContext) -> EffectiveDomainSnapshot:
-        if not context.effective_domains or not context.legal_actions:
-            raise EffectiveDomainError("v2 planning domain is unavailable")
-        for action in context.legal_actions:
-            for domain in context.effective_domains:
-                if domain.knob_id == action.knob_id and domain.allowed_requested_values:
-                    return domain
-        raise EffectiveDomainError("v2 planning domain has no legal action")
+    @staticmethod
+    def _v2_domains(
+        context: OptimizationPlanningContext,
+    ) -> tuple[EffectiveDomainSnapshot, ...]:
+        legal_knobs = {action.knob_id for action in context.legal_actions}
+        return tuple(
+            domain
+            for domain in context.effective_domains
+            if domain.knob_id in legal_knobs and domain.allowed_requested_values
+        )
 
     def _v2_provider_payload_sha256(self, context: OptimizationPlanningContext) -> str:
-        domain = self._v2_domain(context)
+        domains = self._v2_domains(context)
+        if not domains:
+            raise EffectiveDomainError("v2 planning domain is unavailable")
         payload = planning_context_payload(context)
-        payload["effective_domain"] = domain.model_dump(mode="json")
+        if len(domains) == 1:
+            payload["effective_domain"] = domains[0].model_dump(mode="json")
+        else:
+            payload["effective_domains"] = [item.model_dump(mode="json") for item in domains]
         return canonical_sha256(payload)
 
     def _invoke_planner(self, context: OptimizationPlanningContext) -> _PlannerTurn:
         if not self._v2_enabled():
             return _PlannerTurn(self._parse_proposal(self.planner.propose(context)))
-        domain = self._v2_domain(context)
-        raw = self.planner.propose_v2(context, domain)
+        domains = self._v2_domains(context)
+        if not domains:
+            raise EffectiveDomainError("v2 planning domain is unavailable")
+        raw = self.planner.propose_v2(context, domains)
+        try:
+            parsed = OptimizationProposalV2.model_validate(raw)
+        except (TypeError, ValueError) as exc:
+            raise EffectiveDomainError("optimization proposal v2 is invalid") from exc
+        if parsed.action is None:
+            return _PlannerTurn(
+                self._v2_to_v1(parsed),
+                None,
+                self._v2_provider_payload_sha256(context),
+            )
+        domain = next(
+            (item for item in domains if item.knob_id == parsed.action.knob_id),
+            None,
+        )
+        if domain is None:
+            raise EffectiveDomainError("v2 proposal knob is not legal")
         proposal = validate_optimization_proposal_v2(
-            raw,
+            parsed,
             domain,
             context_ref=context.context_ref.model_dump(mode="json"),
             attempted=self._attempted_requests(),
@@ -1446,7 +1471,11 @@ class OptimizationEpisodeController:
                 planner_source=planner_source,
             )
 
-        action = context.legal_actions[0]
+        attempted_knobs = {item.knob_id for item in self._attempted_requests()}
+        action = next(
+            (item for item in context.legal_actions if item.knob_id not in attempted_knobs),
+            context.legal_actions[0],
+        )
         fallback = self._fallback_proposal(context, action)
         assert fallback.action is not None
         requested = select_requested_value(

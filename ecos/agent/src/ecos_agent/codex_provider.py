@@ -8,7 +8,7 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Callable, Iterable, Literal, Mapping
+from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict
 
@@ -327,33 +327,39 @@ class CodexAppServerProposalProvider:
     def propose_v2(
         self,
         context: OptimizationPlanningContext,
-        domain: Mapping[str, Any] | EffectiveDomainSnapshot,
+        domain: Mapping[str, Any]
+        | EffectiveDomainSnapshot
+        | Sequence[EffectiveDomainSnapshot],
     ) -> dict[str, Any]:
         """Opt-in exact-value proposal lane; production v1 remains the default."""
         if self.env.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") != "1":
             raise CodexProviderError("optimization proposal v2 is not enabled", failure_class="unsupported")
         try:
-            domain_snapshot = (
-                domain
-                if isinstance(domain, EffectiveDomainSnapshot)
-                else EffectiveDomainSnapshot.model_validate(domain)
-            )
+            domains = _normalize_v2_domains(domain)
         except (TypeError, ValueError) as exc:
             raise CodexProviderError(
                 "optimization proposal v2 domain is invalid", failure_class="missing_input"
             ) from exc
         payload = _optimization_planning_payload(context)
-        payload["effective_domain"] = domain_snapshot.model_dump(mode="json")
+        if len(domains) == 1:
+            payload["effective_domain"] = domains[0].model_dump(mode="json")
+        else:
+            payload["effective_domains"] = [item.model_dump(mode="json") for item in domains]
         system = (
             "Return one JSON object matching ecos.optimization_proposal.v2. "
-            "Use only the supplied exact allowlist and domain hash; never emit commands, paths, workspaces, RPCs, or execution authority."
+            "Choose at most one knob from the supplied legal actions and use that knob's exact "
+            "allowlist and domain hash; "
+            "never emit commands, paths, workspaces, RPCs, or execution authority."
         )
         output_schema = _optimization_proposal_output_schema_v2(
-            domain_snapshot,
+            domains,
             tuple(
-                action.direction.value
-                for action in context.legal_actions
-                if action.knob_id == domain_snapshot.knob_id
+                (domain.knob_id.value, tuple(
+                    action.direction.value
+                    for action in context.legal_actions
+                    if action.knob_id == domain.knob_id
+                ))
+                for domain in domains
             ),
         )
         envelope_payload = {
@@ -1033,39 +1039,103 @@ def _optimization_proposal_output_schema() -> dict[str, Any]:
     return schema
 
 
+def _normalize_v2_domains(
+    domain: Mapping[str, Any]
+    | EffectiveDomainSnapshot
+    | Sequence[EffectiveDomainSnapshot],
+) -> tuple[EffectiveDomainSnapshot, ...]:
+    values = (
+        tuple(domain)
+        if not isinstance(domain, (EffectiveDomainSnapshot, Mapping))
+        else (domain,)
+    )
+    try:
+        normalized = tuple(
+            item if isinstance(item, EffectiveDomainSnapshot)
+            else EffectiveDomainSnapshot.model_validate(item)
+            for item in values
+        )
+    except (TypeError, ValueError) as exc:
+        raise CodexProviderError(
+            "optimization proposal v2 domain is invalid", failure_class="missing_input"
+        ) from exc
+    if not normalized or len({item.knob_id for item in normalized}) != len(normalized):
+        raise CodexProviderError(
+            "optimization proposal v2 domains are invalid", failure_class="missing_input"
+        )
+    return normalized
+
+
 def _optimization_proposal_output_schema_v2(
-    domain: EffectiveDomainSnapshot,
-    legal_directions: tuple[str, ...],
+    domains: Sequence[EffectiveDomainSnapshot]
+    | EffectiveDomainSnapshot,
+    legal_directions: Sequence[tuple[str, tuple[str, ...]]]
+    | tuple[str, ...],
 ) -> dict[str, Any]:
     """Schema for the opt-in exact-value proposal contract."""
-    current_value = (
-        domain.current_coordinate.get("surface_value")
-        if isinstance(domain.current_coordinate, dict)
-        else None
-    )
-    allowed_values = [
-        value
-        for value in domain.allowed_requested_values
-        if value != current_value
-    ]
-    if not allowed_values or not legal_directions:
+    domains = _normalize_v2_domains(domains)
+    if legal_directions and isinstance(legal_directions[0], str):
+        direction_map = {domains[0].knob_id.value: tuple(legal_directions)}
+    else:
+        direction_map = dict(legal_directions)
+    allowed_by_knob = {
+        domain.knob_id.value: [
+            value
+            for value in domain.allowed_requested_values
+            if value != (
+                domain.current_coordinate.get("surface_value")
+                if isinstance(domain.current_coordinate, dict)
+                else None
+            )
+        ]
+        for domain in domains
+    }
+    if any(
+        not values or not direction_map.get(knob)
+        for knob, values in allowed_by_knob.items()
+    ):
         raise CodexProviderError(
             "optimization proposal v2 domain has no legal output",
             failure_class="missing_input",
         )
     schema = OptimizationProposalV2.model_json_schema()
-    schema["$defs"]["OptimizationKnob"]["enum"] = [domain.knob_id.value]
-    schema["$defs"]["StrategyDirection"]["enum"] = list(legal_directions)
-    schema["$defs"]["NumericProposalActionV2"]["properties"]["requested_value"] = {
-        "enum": allowed_values,
-        "type": (
+    schema["$defs"]["OptimizationKnob"]["enum"] = list(allowed_by_knob)
+    schema["$defs"]["StrategyDirection"]["enum"] = sorted(
+        {direction for directions in direction_map.values() for direction in directions}
+    )
+    allowed_values = [value for values in allowed_by_knob.values() for value in values]
+    value_schema = schema["$defs"]["NumericProposalActionV2"]["properties"][
+        "requested_value"
+    ]
+    if len(domains) == 1:
+        value_schema["enum"] = allowed_by_knob[domains[0].knob_id.value]
+        value_schema["type"] = (
             "boolean"
-            if all(type(value) is bool for value in allowed_values)
+            if all(type(value) is bool for value in value_schema["enum"])
             else "integer"
-            if all(type(value) is int for value in allowed_values)
+            if all(type(value) is int for value in value_schema["enum"])
             else "number"
-        ),
-    }
+        )
+        value_schema.pop("anyOf", None)
+        _require_all_schema_properties(schema)
+        return schema
+    value_schema["anyOf"] = [
+        {
+            "type": "boolean",
+            "enum": [value for value in allowed_values if type(value) is bool],
+        },
+        {
+            "type": "integer",
+            "enum": [value for value in allowed_values if type(value) is int],
+        },
+        {
+            "type": "number",
+            "enum": [value for value in allowed_values if type(value) is float],
+        },
+    ]
+    value_schema["anyOf"] = [item for item in value_schema["anyOf"] if item["enum"]]
+    value_schema.pop("enum", None)
+    value_schema.pop("type", None)
     _require_all_schema_properties(schema)
     return schema
 

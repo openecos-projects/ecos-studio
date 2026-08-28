@@ -712,6 +712,8 @@ class _V2FakeCodex(_FakeCodex):
 
 def _v2_proposal(context: object, domain: object, *, value: object = None) -> dict[str, object]:
     action = context.legal_actions[0]
+    if isinstance(domain, tuple):
+        domain = next(item for item in domain if item.knob_id == action.knob_id)
     current = context.current_values[action.knob_id.value]
     if value is None:
         candidates = (
@@ -757,9 +759,45 @@ def test_controller_uses_exact_v2_value_only_when_feature_enabled(
 
     context, domain = planner.v2_calls[0]
     assert result.requested is not None
-    assert result.requested.value in domain.allowed_requested_values
+    assert len(domain) > 1
+    selected_domain = next(
+        item for item in domain if item.knob_id == result.requested.knob_id
+    )
+    assert result.requested.value in selected_domain.allowed_requested_values
     assert result.requested.knob_id == context.legal_actions[0].knob_id
     assert result.planner_source == "llm"
+
+
+def test_controller_accepts_llm_selected_non_first_knob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+
+    def choose_aspect_ratio(
+        context: object, domains: tuple[object, ...]
+    ) -> dict[str, object]:
+        proposal = _v2_proposal(context, domains)
+        domain = next(
+            item for item in domains if item.knob_id.value == "floorplan.aspect_ratio"
+        )
+        proposal["action"] = {
+            **proposal["action"],
+            "knob_id": "floorplan.aspect_ratio",
+            "direction": "decrease",
+            "requested_value": 0.75,
+            "effective_domain_sha256": domain.snapshot_sha256,
+        }
+        return proposal
+
+    planner = _V2FakeCodex(choose_aspect_ratio)
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.planner_source == "llm"
+    assert result.requested == RequestedKnobValue(
+        knob_id="floorplan.aspect_ratio", value=0.75
+    )
 
 
 def test_controller_repairs_one_invalid_v2_response_before_accepting_exact_value(
