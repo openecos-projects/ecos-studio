@@ -349,6 +349,22 @@ describe('useSignoffPackageExport export action', () => {
     )
   })
 
+  it('uses the canonical TOML design key for the default archive name', async () => {
+    const api = createApi()
+    api.readParameters.mockResolvedValueOnce({ design: 'rocket_core' })
+    const mounted = mountComposable(ref({ path: '/workspaces/active path' }))
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    await openReviewAndConfirm(mounted)
+
+    expect(api.saveFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: '/workspaces/signoff/rocket_core_signoff_package.tar.gz',
+      }),
+    )
+  })
+
   it('falls back to the workspace leaf for the default name', async () => {
     const api = createApi()
     api.readParameters.mockResolvedValueOnce({ Design: '   ' })
