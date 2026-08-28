@@ -142,7 +142,7 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain('disabled: !props.hasWorkspace')
   })
 
-  it('shows signoff export below workspace update and binds its eligibility', () => {
+  it('shows workspace exports only on the workspace route', () => {
     const updateIndex = topBarSource.indexOf("label: 'Update Workspace'")
     const exportIndex = topBarSource.indexOf("label: 'Export Signoff Package'")
     const metricsIndex = topBarSource.indexOf("label: 'Export Design Summary'")
@@ -150,7 +150,11 @@ describe('TopBar drag region layout', () => {
     expect(exportIndex).toBeGreaterThan(updateIndex)
     expect(metricsIndex).toBeGreaterThan(exportIndex)
     expect(topBarSource).toContain('appMenuActionIds.exportSignoffPackage')
-    expect(topBarSource).toContain('disabled: !props.signoffPackageExportEnabled')
+    expect(topBarSource).toMatch(
+      /\.\.\.\(isWorkspaceRoute\.value[\s\S]*label: 'Export Signoff Package'[\s\S]*label: 'Export Design Summary'/,
+    )
+    expect(topBarSource).not.toContain('signoffPackageExportEnabled')
+    expect(topBarSource).not.toContain('designReportExportEnabled')
     expect(topBarSource).toContain('appMenuActionIds.exportDesignSummary')
   })
 

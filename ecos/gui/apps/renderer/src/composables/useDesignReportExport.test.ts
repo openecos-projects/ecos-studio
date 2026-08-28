@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { appMenuActionIds } from '@ecos-studio/shared'
 import { useDesignReportExport } from './useDesignReportExport'
 
-const mockSetActionEnabled = vi.fn()
 const mockGetIndex = vi.fn()
 const mockReadFlow = vi.fn()
 const mockReadParameters = vi.fn()
@@ -19,7 +17,6 @@ vi.mock('@/platform/desktop', () => ({
     app: {
       getVersions: mockGetVersions,
     },
-    menu: { setActionEnabled: mockSetActionEnabled },
     workspaceResources: {
       getIndex: mockGetIndex,
       readFlow: mockReadFlow,
@@ -39,7 +36,6 @@ vi.mock('@/platform/desktop', () => ({
     app: {
       getVersions: mockGetVersions,
     },
-    menu: { setActionEnabled: mockSetActionEnabled },
     workspaceResources: {
       getIndex: mockGetIndex,
       readFlow: mockReadFlow,
@@ -136,28 +132,6 @@ describe('useDesignReportExport', () => {
     })
   })
 
-  it('enables menu action when workspace is open and disables when closed', async () => {
-    const composable = useDesignReportExport({
-      currentProject,
-      showToast,
-    })
-
-    expect(composable.designReportExportEnabled.value).toBe(false)
-    expect(mockSetActionEnabled).toHaveBeenCalledWith(
-      appMenuActionIds.exportDesignSummary,
-      false,
-    )
-
-    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
-    await Promise.resolve()
-
-    expect(composable.designReportExportEnabled.value).toBe(true)
-    expect(mockSetActionEnabled).toHaveBeenCalledWith(
-      appMenuActionIds.exportDesignSummary,
-      true,
-    )
-  })
-
   it('loads workspace data and generates report content on openDesignReportExport', async () => {
     currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
     const composable = useDesignReportExport({
@@ -187,6 +161,37 @@ describe('useDesignReportExport', () => {
 
     composable.selectedFormat.value = 'text'
     expect(composable.generatedContent.value).toContain('ECOS STUDIO — DESIGN SUMMARY')
+  })
+
+  it('resolves fallback analysis paths inside the active workspace', async () => {
+    const workspacePath = '/projects/gcd/ws_001'
+    currentProject.value = { path: workspacePath, name: 'gcd_run' }
+    const composable = useDesignReportExport({ currentProject, showToast })
+
+    composable.openDesignReportExport()
+    await vi.waitFor(() => expect(composable.loading.value).toBe(false))
+
+    const requestedPaths = mockRequestProjectPathAccess.mock.calls.map(
+      ([path]) => path as string,
+    )
+    expect(requestedPaths).toContain(
+      `${workspacePath}/sta_ecc/analysis/sta_timing_issues.json`,
+    )
+    expect(requestedPaths.every((path) => path.startsWith(`${workspacePath}/`))).toBe(
+      true,
+    )
+  })
+
+  it('does not read a path when project access is denied', async () => {
+    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    mockRequestProjectPathAccess.mockResolvedValue(null)
+    const composable = useDesignReportExport({ currentProject, showToast })
+
+    composable.openDesignReportExport()
+    await vi.waitFor(() => expect(composable.loading.value).toBe(false))
+
+    expect(mockRequestProjectPathAccess).toHaveBeenCalled()
+    expect(mockReadOptionalProjectTextFile).not.toHaveBeenCalled()
   })
 
   it('copies content to clipboard and shows success toast', async () => {
