@@ -233,7 +233,7 @@ export function assertNoSubMillisecondDatetimes(text: string, label: string): vo
  * document (e.g. a bare TOML date) is a configuration error, not an empty
  * parameter set to overwrite on the next save.
  */
-function parseTomlDocument(text: string, label: string): Record<string, unknown> {
+export function parseTomlDocument(text: string, label: string): Record<string, unknown> {
   assertTomlNumbersSafe(text, label)
   const document: unknown = parse(text, { integersAsBigInt: 'asNeeded' })
   if (!isPlainRecord(document)) {
@@ -622,7 +622,7 @@ function assertJsonNumbersSafe(text: string, label: string): void {
       continue
     }
     if (char === '-' || (char >= '0' && char <= '9')) {
-      const token = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(index))?.[0]
+      const token = matchJsonNumberToken(text, index)
       if (token) {
         assertNumberTokenRoundTrips(token, label)
         index += token.length
@@ -681,8 +681,8 @@ function assertTomlNumbersSafe(text: string, label: string): void {
       index += 1
       continue
     }
-    if (char === '-' || (char >= '0' && char <= '9')) {
-      const token = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(index))?.[0]
+    if (char === '+' || char === '-' || (char >= '0' && char <= '9')) {
+      const token = matchTomlNumberToken(text, index)
       if (token) {
         if (token.includes('.') || /[eE]/.test(token)) {
           assertNumberTokenRoundTrips(token, label)
@@ -695,8 +695,34 @@ function assertTomlNumbersSafe(text: string, label: string): void {
   }
 }
 
+function matchJsonNumberToken(text: string, index: number): string | null {
+  return (
+    /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(index))?.[0] ?? null
+  )
+}
+
+function matchTomlNumberToken(text: string, index: number): string | null {
+  const token =
+    /^[+-]?(?:\d(?:_?\d)*)(?:\.\d(?:_?\d)*)?(?:[eE][+-]?\d(?:_?\d)*)?/.exec(
+      text.slice(index),
+    )?.[0] ?? null
+  if (!token) return null
+  const next = text[index + token.length]
+  // Dates (`1979-05-27`) and times (`07:32:00`) also start with digits.
+  if (next === '-' || next === ':') return null
+  return token
+}
+
+/**
+ * A number token is safe to rewrite only when its significant decimal form
+ * matches JS's shortest round-trip of the IEEE-754 value. Extra digits
+ * (`0.12345678901234567`), over-long integer-mantissa exponents, and
+ * underscore-decorated TOML floats that stringify to a different spelling
+ * would otherwise be silently shortened.
+ */
 function assertNumberTokenRoundTrips(token: string, label: string): void {
-  const parsed = Number(token)
+  const normalized = token.replace(/_/g, '')
+  const parsed = Number(normalized)
   if (!Number.isFinite(parsed)) {
     throw new Error(
       `Unsafe number ${token} in ${label}: not representable as a finite number`,
@@ -708,19 +734,45 @@ function assertNumberTokenRoundTrips(token: string, label: string): void {
         'Number.MAX_SAFE_INTEGER and would lose precision',
     )
   }
-  if (/^-?\d+$/.test(token)) return
-  const exponentIndex = token.search(/[eE]/)
-  const mantissa = (exponentIndex === -1 ? token : token.slice(0, exponentIndex))
-    .replace(/(\.\d*?)0+$/, '$1')
-    .replace(/\.$/, '')
-  const exponent = exponentIndex === -1 ? '' : token.slice(exponentIndex)
-  if (!mantissa.includes('.')) return
-  const chopped = `${mantissa.slice(0, -1)}${exponent}`
-  if (Number(chopped) === parsed) {
+  const original = significantDecimal(normalized)
+  const shortest = significantDecimal(String(parsed))
+  if (original.digits !== shortest.digits || original.exp !== shortest.exp) {
     throw new Error(
       `Unsafe number ${token} in ${label}: cannot round-trip as a JavaScript number`,
     )
   }
+}
+
+function significantDecimal(token: string): { digits: string; exp: number } {
+  let text = token
+  let sign = ''
+  if (text.startsWith('+')) text = text.slice(1)
+  if (text.startsWith('-')) {
+    sign = '-'
+    text = text.slice(1)
+  }
+  let exp = 0
+  const exponentIndex = text.search(/[eE]/)
+  if (exponentIndex !== -1) {
+    exp = Number(text.slice(exponentIndex + 1))
+    text = text.slice(0, exponentIndex)
+  }
+  const dot = text.indexOf('.')
+  if (dot !== -1) {
+    exp -= text.length - dot - 1
+    text = `${text.slice(0, dot)}${text.slice(dot + 1)}`
+  }
+  text = text.replace(/^0+/, '') || '0'
+  if (text !== '0') {
+    const trailing = /0+$/.exec(text)
+    if (trailing) {
+      exp += trailing[0].length
+      text = text.slice(0, text.length - trailing[0].length)
+    }
+  } else {
+    exp = 0
+  }
+  return { digits: `${sign}${text}`, exp }
 }
 
 /**

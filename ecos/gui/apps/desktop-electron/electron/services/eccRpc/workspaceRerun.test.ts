@@ -670,6 +670,25 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     // Prose that merely shares the prefix is never rewritten.
     expect(written).toContain(`compare ${source}-old against this run`)
   })
+
+  it('refuses to rewrite home/ecc.toml when an untouched float cannot round-trip', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    await writeFile(
+      join(source, 'home', 'ecc.toml'),
+      [
+        '[params]',
+        'design = "gcd"',
+        `source_output_path = "${source}/place_dreamplace/output"`,
+        '[flow]',
+        'threshold = 0.12345678901234567',
+        '',
+      ].join('\n'),
+    )
+    const contract = contractFor(source, flow, artifact)
+
+    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(/cannot round-trip/)
+  })
 })
 
 describe('rewriteJsonSourcePathStrings', () => {

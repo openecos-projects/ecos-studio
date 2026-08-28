@@ -24,11 +24,12 @@ import {
   assertNoSubMillisecondDatetimes,
   editWorkspaceParameters,
   locateWorkspaceParametersFile,
+  parseTomlDocument,
   readFileNoFollow,
   WORKSPACE_CONFIG_BASENAME,
   writeTextAtomically,
 } from '../workspaceParametersFile'
-import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
+import { stringify as stringifyToml } from 'smol-toml'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
@@ -956,7 +957,7 @@ async function rewriteHomeJsonSourcePaths(
       // stays correct (a textual replacement corrupts escaped paths and
       // misses their unescaped form).
       assertNoSubMillisecondDatetimes(original, filePath)
-      const document = parseToml(original, { integersAsBigInt: 'asNeeded' })
+      const document = parseTomlDocument(original, filePath)
       if (rewriteTomlSourcePathLeaves(document, prefixes, options.targetWorkspace)) {
         await writeTextAtomically(filePath, stringifyToml(document))
       }

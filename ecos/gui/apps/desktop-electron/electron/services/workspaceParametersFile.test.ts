@@ -317,14 +317,32 @@ describe('writeWorkspaceParameters', () => {
     })
   })
 
-  it('rejects a high-precision float that a rewrite would silently round', async () => {
+  it.each([
+    ['0.123456789012345678901234', 'extra decimal digits'],
+    ['0.12345678901234567', '17-digit decimal'],
+    ['123456789012345678901e-20', 'integer-mantissa exponent'],
+    ['0.123_456_789_012_345_678', 'underscore-decorated TOML float'],
+  ])(
+    'rejects a high-precision float %s (%s) that a rewrite would silently round',
+    async (literal) => {
+      const root = createWorkspace()
+      const content = `${ECC_TOML}\n[flow]\nthreshold = ${literal}\n`
+      writeHomeFile(root, 'ecc.toml', content)
+      await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+        /cannot round-trip/,
+      )
+      expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    },
+  )
+
+  it('rejects a JSON float that cannot round-trip through Number', async () => {
     const root = createWorkspace()
-    const content = `${ECC_TOML}\n[flow]\nthreshold = 0.123456789012345678901234\n`
-    writeHomeFile(root, 'ecc.toml', content)
-    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
-      /cannot round-trip/,
-    )
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    const content = '{ "Design": "gcd", "threshold": 0.12345678901234567 }\n'
+    writeHomeFile(root, 'parameters.json', content)
+    await expect(
+      writeWorkspaceParameters(root, { Design: 'gcd', 'Max fanout': 48 }),
+    ).rejects.toThrow(/cannot round-trip/)
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toBe(content)
   })
 
   it('rejects a legacy parameters.json holding an unsafe integer instead of rounding it', async () => {
