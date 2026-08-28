@@ -9,6 +9,7 @@ import {
   isForbiddenJsonPathSegment,
   normalizeParameterKey,
   normalizeParameterKeys,
+  readOwnJsonPathSegment,
 } from '@ecos-studio/shared'
 
 export const WORKSPACE_CONFIG_BASENAME = 'ecc.toml'
@@ -881,17 +882,65 @@ function setJsonPathValue(
   jsonPath: readonly (string | number)[],
   value: unknown,
   label: string,
+  resolveDisplayKeys = false,
 ): void {
   if (jsonPath.some((segment) => isForbiddenJsonPathSegment(segment))) {
     throw new Error(
       `Parameter path ${JSON.stringify(jsonPath)} is not allowed in ${label}.`,
     )
   }
-  assignOwnJsonPathValue(document, jsonPath, value, () => {
+  const resolvedPath = resolveDisplayKeys
+    ? resolveExistingJsonPath(document, jsonPath)
+    : jsonPath
+  assignOwnJsonPathValue(document, resolvedPath, value, () => {
     throw new Error(
       `Parameter path ${JSON.stringify(jsonPath)} does not exist in ${label}.`,
     )
   })
+}
+
+/**
+ * Legacy JSON stores display keys (`Target density`). Agent/rerun contracts
+ * may spell the canonical leaf (`target_density`). Match existing own keys
+ * by the ecc mechanical rule; when a long key and its canonical duplicate
+ * both exist, the long key wins.
+ */
+function resolveExistingJsonPath(
+  document: Record<string, unknown>,
+  jsonPath: readonly (string | number)[],
+): (string | number)[] {
+  let node: unknown = document
+  const resolved: (string | number)[] = []
+  for (const segment of jsonPath) {
+    const actual = resolveExistingJsonPathSegment(node, segment)
+    if (actual === undefined) return [...jsonPath]
+    resolved.push(actual)
+    node = readOwnJsonPathSegment(node, actual)
+  }
+  return resolved
+}
+
+function resolveExistingJsonPathSegment(
+  node: unknown,
+  segment: string | number,
+): string | number | undefined {
+  if (typeof segment === 'number') {
+    return Array.isArray(node) && segment < node.length ? segment : undefined
+  }
+  if (!isRecord(node)) return undefined
+  const canonical = normalizeParameterKey(segment)
+  const matches: string[] = []
+  for (const key of Object.keys(node)) {
+    if (
+      Object.prototype.hasOwnProperty.call(node, key) &&
+      normalizeParameterKey(key) === canonical
+    ) {
+      matches.push(key)
+    }
+  }
+  if (matches.length === 0) return undefined
+  if (matches.length === 1) return matches[0]
+  return matches.find((key) => key !== canonical) ?? matches[0]
 }
 
 /**
@@ -957,7 +1006,7 @@ export async function editWorkspaceParameters(
       }
       const document = parsed
       for (const edit of edits) {
-        setJsonPathValue(document, edit.json_path, edit.value, onDisk.path)
+        setJsonPathValue(document, edit.json_path, edit.value, onDisk.path, true)
       }
       const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
       // One more guard pass between the edits and the rename: a flow that

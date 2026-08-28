@@ -80,6 +80,23 @@ describe('parameterWritesMatchPatch', () => {
     ).toBe(false)
   })
 
+  it('accepts routability_opt_flag as the workspace-config leaf for place.routability_opt', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.routability_opt', value: true }],
+        [
+          {
+            file: 'home/ecc.toml',
+            json_path: ['routability_opt_flag'],
+            knob_id: 'place.routability_opt',
+            surface: 'parameters',
+            value: 1,
+          },
+        ],
+      ),
+    ).toBe(true)
+  })
+
   it('accepts the canonical TOML die_area utilization path', () => {
     expect(
       parameterWritesMatchPatch(

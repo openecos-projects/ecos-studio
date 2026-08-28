@@ -722,6 +722,29 @@ describe('editWorkspaceParameters', () => {
     expect(written['Frequency max [MHz]']).toBe(200)
   })
 
+  it('applies canonical agent paths to a legacy parameters.json workspace', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      JSON.stringify(
+        { Design: 'gcd', 'Target density': 0.2, 'Routability opt flag': 1 },
+        null,
+        4,
+      ),
+    )
+    await editWorkspaceParameters(root, [
+      { json_path: ['target_density'], value: 0.55 },
+      { json_path: ['routability_opt_flag'], value: 0 },
+    ])
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(written['Target density']).toBe(0.55)
+    expect(written['Routability opt flag']).toBe(0)
+    expect(written).not.toHaveProperty('target_density')
+  })
+
   it('throws when no parameters file exists', async () => {
     const root = createWorkspace()
     await expect(

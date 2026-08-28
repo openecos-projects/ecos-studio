@@ -26,6 +26,15 @@ const NESTED_PARAMETER_KNOB_PATHS: Record<string, readonly (readonly string[])[]
 }
 
 /**
+ * Parameter-surface leaves that do not match the knob's last segment.
+ * `place.routability_opt` is stored as `routability_opt_flag` in the
+ * workspace config and as `routability_opt` in the DreamPlace step config.
+ */
+const PARAMETER_SURFACE_KNOB_LEAVES: Record<string, readonly string[]> = {
+  'place.routability_opt': ['routability_opt_flag'],
+}
+
+/**
  * Canonical identity of a resolved write: both workspace-config aliases
  * (`home/ecc.toml` and `home/parameters.json`) materialize onto whichever
  * config actually exists, so they must collide. String path segments are
@@ -108,11 +117,16 @@ function allowedWriteLocations(knobId: string): Array<{
   const prefix = parts[0]
   const leaf = parts[parts.length - 1]
   if (!prefix || !leaf) return []
+  const parameterLeaves = PARAMETER_SURFACE_KNOB_LEAVES[knobId] ?? [leaf]
   const locations: Array<{
     files: readonly string[]
     path: readonly string[]
     surface: DesktopAgentWorkspaceParameterWrite['surface']
-  }> = [{ files: PARAMETER_SURFACE_FILES, path: [leaf], surface: 'parameters' }]
+  }> = parameterLeaves.map((parameterLeaf) => ({
+    files: PARAMETER_SURFACE_FILES,
+    path: [parameterLeaf],
+    surface: 'parameters',
+  }))
   for (const nested of NESTED_PARAMETER_KNOB_PATHS[knobId] ?? []) {
     locations.push({
       files: PARAMETER_SURFACE_FILES,
