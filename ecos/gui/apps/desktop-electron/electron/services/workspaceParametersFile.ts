@@ -4,7 +4,12 @@ import { randomInt } from 'node:crypto'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { parse, stringify } from 'smol-toml'
-import { normalizeParameterKey, normalizeParameterKeys } from '@ecos-studio/shared'
+import {
+  assignOwnJsonPathValue,
+  isForbiddenJsonPathSegment,
+  normalizeParameterKey,
+  normalizeParameterKeys,
+} from '@ecos-studio/shared'
 
 export const WORKSPACE_CONFIG_BASENAME = 'ecc.toml'
 export const LEGACY_PARAMETERS_BASENAME = 'parameters.json'
@@ -229,6 +234,7 @@ export function assertNoSubMillisecondDatetimes(text: string, label: string): vo
  * parameter set to overwrite on the next save.
  */
 function parseTomlDocument(text: string, label: string): Record<string, unknown> {
+  assertTomlNumbersSafe(text, label)
   const document: unknown = parse(text, { integersAsBigInt: 'asNeeded' })
   if (!isPlainRecord(document)) {
     throw new Error(
@@ -598,13 +604,12 @@ function detectJsonIndent(raw: string): number {
 }
 
 /**
- * JSON.parse silently rounds numbers beyond Number.MAX_SAFE_INTEGER, so
- * reading or rewriting a config would corrupt values the operation never
- * touched. Scan number literals outside strings — every form (integer,
- * decimal, exponent) — and refuse when the parsed value is an integer past
- * the safe range, i.e. the literal cannot round-trip exactly.
+ * JSON.parse silently rounds numbers that cannot round-trip as IEEE-754
+ * values, so reading or rewriting a config would corrupt literals the
+ * operation never touched. Scan number tokens outside strings and refuse
+ * any token whose parsed form does not stringify back to itself.
  */
-function assertJsonIntegersSafe(text: string, label: string): void {
+function assertJsonNumbersSafe(text: string, label: string): void {
   let index = 0
   while (index < text.length) {
     const char = text[index]
@@ -619,19 +624,7 @@ function assertJsonIntegersSafe(text: string, label: string): void {
     if (char === '-' || (char >= '0' && char <= '9')) {
       const token = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(index))?.[0]
       if (token) {
-        const parsed = Number(token)
-        if (!Number.isFinite(parsed)) {
-          // 1e400 overflows to Infinity and would be rewritten as null.
-          throw new Error(
-            `Unsafe number ${token} in ${label}: not representable as a finite number`,
-          )
-        }
-        if (Number.isInteger(parsed) && Math.abs(parsed) > Number.MAX_SAFE_INTEGER) {
-          throw new Error(
-            `Unsafe number ${token} in ${label}: exceeds ` +
-              'Number.MAX_SAFE_INTEGER and would lose precision',
-          )
-        }
+        assertNumberTokenRoundTrips(token, label)
         index += token.length
         continue
       }
@@ -641,17 +634,93 @@ function assertJsonIntegersSafe(text: string, label: string): void {
 }
 
 function parseJsonPreservingIntegers(text: string, label: string): unknown {
-  assertJsonIntegersSafe(text, label)
+  assertJsonNumbersSafe(text, label)
   return JSON.parse(text)
 }
 
-const FORBIDDEN_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
-
-function readJsonPathSegment(node: unknown, key: string | number): unknown {
-  if (typeof key === 'number') {
-    return Array.isArray(node) && key < node.length ? node[key] : undefined
+/**
+ * smol-toml also parses floats at IEEE-754 precision. A later stringify
+ * would silently shorten an untouched high-precision token, so refuse
+ * those tokens before rewriting the document.
+ */
+function assertTomlNumbersSafe(text: string, label: string): void {
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]
+    if (char === '#') {
+      while (index < text.length && text[index] !== '\n') index += 1
+      continue
+    }
+    if (char === '"' || char === "'") {
+      const quote = char
+      if (text[index + 1] === quote && text[index + 2] === quote) {
+        index += 3
+        while (index < text.length) {
+          if (quote === '"' && text[index] === '\\') {
+            index += 2
+            continue
+          }
+          if (
+            text[index] === quote &&
+            text[index + 1] === quote &&
+            text[index + 2] === quote
+          ) {
+            index += 3
+            if (text[index] === quote) index += 1
+            if (text[index] === quote) index += 1
+            break
+          }
+          index += 1
+        }
+        continue
+      }
+      index += 1
+      while (index < text.length && text[index] !== quote) {
+        index += quote === '"' && text[index] === '\\' ? 2 : 1
+      }
+      index += 1
+      continue
+    }
+    if (char === '-' || (char >= '0' && char <= '9')) {
+      const token = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(index))?.[0]
+      if (token) {
+        if (token.includes('.') || /[eE]/.test(token)) {
+          assertNumberTokenRoundTrips(token, label)
+        }
+        index += token.length
+        continue
+      }
+    }
+    index += 1
   }
-  return isRecord(node) && Object.hasOwn(node, key) ? node[key] : undefined
+}
+
+function assertNumberTokenRoundTrips(token: string, label: string): void {
+  const parsed = Number(token)
+  if (!Number.isFinite(parsed)) {
+    throw new Error(
+      `Unsafe number ${token} in ${label}: not representable as a finite number`,
+    )
+  }
+  if (Number.isInteger(parsed) && Math.abs(parsed) > Number.MAX_SAFE_INTEGER) {
+    throw new Error(
+      `Unsafe number ${token} in ${label}: exceeds ` +
+        'Number.MAX_SAFE_INTEGER and would lose precision',
+    )
+  }
+  if (/^-?\d+$/.test(token)) return
+  const exponentIndex = token.search(/[eE]/)
+  const mantissa = (exponentIndex === -1 ? token : token.slice(0, exponentIndex))
+    .replace(/(\.\d*?)0+$/, '$1')
+    .replace(/\.$/, '')
+  const exponent = exponentIndex === -1 ? '' : token.slice(exponentIndex)
+  if (!mantissa.includes('.')) return
+  const chopped = `${mantissa.slice(0, -1)}${exponent}`
+  if (Number(chopped) === parsed) {
+    throw new Error(
+      `Unsafe number ${token} in ${label}: cannot round-trip as a JavaScript number`,
+    )
+  }
 }
 
 /**
@@ -667,26 +736,16 @@ function setJsonPathValue(
   value: unknown,
   label: string,
 ): void {
-  const missing = (): never => {
+  if (jsonPath.some((segment) => isForbiddenJsonPathSegment(segment))) {
+    throw new Error(
+      `Parameter path ${JSON.stringify(jsonPath)} is not allowed in ${label}.`,
+    )
+  }
+  assignOwnJsonPathValue(document, jsonPath, value, () => {
     throw new Error(
       `Parameter path ${JSON.stringify(jsonPath)} does not exist in ${label}.`,
     )
-  }
-  for (const segment of jsonPath) {
-    if (typeof segment === 'string' && FORBIDDEN_PATH_SEGMENTS.has(segment)) {
-      throw new Error(
-        `Parameter path ${JSON.stringify(jsonPath)} is not allowed in ${label}.`,
-      )
-    }
-  }
-  let node: unknown = document
-  for (const key of jsonPath.slice(0, -1)) {
-    node = readJsonPathSegment(node, key) ?? missing()
-  }
-  const last = jsonPath[jsonPath.length - 1]
-  if (last === undefined || readJsonPathSegment(node, last) === undefined) missing()
-  if (typeof last === 'number') (node as unknown[])[last] = value
-  else (node as Record<string, unknown>)[last] = value
+  })
 }
 
 /**

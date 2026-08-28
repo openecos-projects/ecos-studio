@@ -36,6 +36,24 @@ describe('parameterWritesMatchPatch', () => {
     ).toBe(false)
   })
 
+  it('rejects a same-value write aimed at a different parameter leaf', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.target_density', value: 0.55 }],
+        [densityWrite({ json_path: ['pdk_root'] })],
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects prototype-related json_path segments', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.target_density', value: 0.55 }],
+        [densityWrite({ json_path: ['__proto__', 'toString'] })],
+      ),
+    ).toBe(false)
+  })
+
   it('rejects a parameters surface aimed at a step-config file', () => {
     expect(
       parameterWritesMatchPatch(

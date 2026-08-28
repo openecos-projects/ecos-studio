@@ -25,6 +25,7 @@ import type {
 } from '@ecos-studio/shared'
 import {
   desktopAgentParameterWriteFiles,
+  hasSafeJsonPath,
   parameterWritesMatchPatch,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from './agentProviderContract'
@@ -923,13 +924,7 @@ function readWorkspaceParameterWrites(
       (surface !== 'parameters' && surface !== 'step_config') ||
       !isWorkspaceRerunParameterValue(record.value) ||
       !Array.isArray(jsonPath) ||
-      jsonPath.length === 0 ||
-      jsonPath.length > 8 ||
-      !jsonPath.every(
-        (segment) =>
-          (typeof segment === 'string' && segment.length > 0 && segment.length <= 128) ||
-          (typeof segment === 'number' && Number.isInteger(segment) && segment >= 0),
-      )
+      !hasSafeJsonPath(jsonPath as (string | number)[])
     ) {
       return null
     }

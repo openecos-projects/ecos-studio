@@ -3,6 +3,7 @@ import {
   type DesktopAgentWorkspaceParameterWrite,
   type DesktopAgentWorkspaceRerunParameterPatch,
 } from '../contracts/desktopAgent.ts'
+import { hasSafeJsonPath } from './jsonPath.ts'
 import { normalizeParameterKey } from './parameterKeys.ts'
 
 const PARAMETER_SURFACE_FILES = new Set(['home/ecc.toml', 'home/parameters.json'])
@@ -49,6 +50,8 @@ export function parameterWritesMatchPatch(
       writePaths.has(pathKey) ||
       !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
       PARAMETER_SURFACE_FILES.has(write.file) !== (write.surface === 'parameters') ||
+      !hasSafeJsonPath(write.json_path) ||
+      !writePathMatchesKnob(write) ||
       !writeValueMatchesPatch(write, patchItem)
     ) {
       return false
@@ -57,6 +60,19 @@ export function parameterWritesMatchPatch(
     writePaths.add(pathKey)
     return true
   })
+}
+
+/**
+ * The advertised knob is bound to the write path by its last canonical
+ * segment. `place.target_density` may be spelled `target_density` or
+ * `Target density`, but it may not land on `pdk_root`.
+ */
+function writePathMatchesKnob(write: DesktopAgentWorkspaceParameterWrite): boolean {
+  const last = write.json_path[write.json_path.length - 1]
+  if (typeof last !== 'string') return false
+  const knobParts = write.knob_id.split('.')
+  const knobLeaf = knobParts[knobParts.length - 1]
+  return Boolean(knobLeaf) && normalizeParameterKey(last) === knobLeaf
 }
 
 function writeValueMatchesPatch(

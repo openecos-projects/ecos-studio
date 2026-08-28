@@ -595,6 +595,20 @@ describe('AgentProviderProcessRuntime', () => {
     ).not.toHaveBeenCalled()
   })
 
+  it('drops parameter updates whose json_path would pollute Object.prototype', () => {
+    expect(
+      emitParameterUpdate([
+        {
+          file: 'config/dreamplace_ecc.json',
+          json_path: ['__proto__', 'toString'],
+          knob_id: 'floorplan.utilitization',
+          surface: 'step_config',
+          value: 0.7,
+        },
+      ]),
+    ).not.toHaveBeenCalled()
+  })
+
   it('drops parameter updates that pair the parameters surface with a step-config file', () => {
     expect(
       emitParameterUpdate([

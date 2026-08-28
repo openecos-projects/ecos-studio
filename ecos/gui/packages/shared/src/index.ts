@@ -173,6 +173,12 @@ export {
   parameterWritesMatchPatch,
 } from './utils/agentParameterWrites.ts'
 export {
+  assignOwnJsonPathValue,
+  hasSafeJsonPath,
+  isForbiddenJsonPathSegment,
+  readOwnJsonPathSegment,
+} from './utils/jsonPath.ts'
+export {
   appMenuActionIds,
   desktopMenuEventIds,
   type DesktopProjectFileChangedEvent,

@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   executeWorkspaceRerun,
   prepareWorkspaceRerun,
+  rewriteJsonSourcePathStrings,
   rewriteSourceRootedPath,
 } from './workspaceRerun'
 
@@ -494,6 +495,21 @@ describe('prepareWorkspaceRerun', () => {
       },
     ],
     [
+      'uses a prototype-polluting json_path',
+      (contract: DesktopAgentWorkspaceRerunContract) => {
+        contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
+        contract.writes = [
+          {
+            file: 'config/dreamplace_ecc.json',
+            json_path: ['__proto__', 'toString'],
+            knob_id: 'place.density_weight',
+            surface: 'step_config',
+            value: 0.1,
+          },
+        ]
+      },
+    ],
+    [
       'aliases the same parameter leaf through both config files',
       (contract: DesktopAgentWorkspaceRerunContract) => {
         contract.parameter_patch = [
@@ -653,6 +669,31 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     expect(written).not.toContain(`${source}/place_dreamplace/output`)
     // Prose that merely shares the prefix is never rewritten.
     expect(written).toContain(`compare ${source}-old against this run`)
+  })
+})
+
+describe('rewriteJsonSourcePathStrings', () => {
+  it('rewrites JSON-escaped Windows path tokens without breaking the document', () => {
+    const rewritten = rewriteJsonSourcePathStrings(
+      '{"origin":"C:\\\\runs\\\\gcd\\\\origin\\\\gcd.v","keep":0.55}',
+      [String.raw`C:\runs\gcd`],
+      String.raw`C:\runs\gcd_rerun_place`,
+    )
+    expect(JSON.parse(rewritten)).toEqual({
+      origin: String.raw`C:\runs\gcd_rerun_place\origin\gcd.v`,
+      keep: 0.55,
+    })
+  })
+
+  it('re-escapes a native Windows replacement into slash-based JSON', () => {
+    const rewritten = rewriteJsonSourcePathStrings(
+      '{"origin":"C:/runs/gcd/origin/gcd.v"}',
+      [String.raw`C:\runs\gcd`],
+      String.raw`C:\runs\gcd_rerun_place`,
+    )
+    expect(JSON.parse(rewritten)).toEqual({
+      origin: String.raw`C:\runs\gcd_rerun_place\origin\gcd.v`,
+    })
   })
 })
 

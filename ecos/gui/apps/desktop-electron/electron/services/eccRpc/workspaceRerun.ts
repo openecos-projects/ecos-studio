@@ -13,6 +13,8 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
+  assignOwnJsonPathValue,
+  hasSafeJsonPath,
   parameterWritesMatchPatch,
   type DesktopAgentWorkspaceParameterWrite,
   type DesktopAgentWorkspaceRerunContract,
@@ -473,15 +475,7 @@ function hasValidParameterWrites(
 }
 
 function hasValidJsonPath(path: (string | number)[]): boolean {
-  return (
-    path.length > 0 &&
-    path.length <= 8 &&
-    path.every(
-      (segment) =>
-        (typeof segment === 'string' && segment.length > 0 && segment.length <= 128) ||
-        (typeof segment === 'number' && Number.isInteger(segment) && segment >= 0),
-    )
-  )
+  return hasSafeJsonPath(path)
 }
 
 function isValidParameterValue(
@@ -644,27 +638,9 @@ function setWorkspaceParameterValue(
   document: Record<string, unknown>,
   write: DesktopAgentWorkspaceParameterWrite,
 ): void {
-  let node: unknown = document
-  for (const segment of write.json_path.slice(0, -1)) {
-    node = workspaceParameterPathValue(node, segment)
-    if (node === undefined) throw new Error(`Parameter ${write.knob_id} does not exist.`)
-  }
-  const last = write.json_path.at(-1)!
-  if (workspaceParameterPathValue(node, last) === undefined) {
+  assignOwnJsonPathValue(document, write.json_path, write.value, () => {
     throw new Error(`Parameter ${write.knob_id} does not exist.`)
-  }
-  if (typeof last === 'number' && Array.isArray(node)) node[last] = write.value
-  else if (typeof last === 'string' && isRecord(node)) node[last] = write.value
-  else throw new Error(`Parameter ${write.knob_id} has an invalid write path.`)
-}
-
-function workspaceParameterPathValue(node: unknown, segment: string | number): unknown {
-  if (typeof segment === 'number') return Array.isArray(node) ? node[segment] : undefined
-  return isRecord(node) ? node[segment] : undefined
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  })
 }
 
 function detectJsonIndent(raw: string): number {
@@ -805,11 +781,69 @@ function normalizePathSeparators(value: string): string {
 }
 
 /**
+ * Rewrite decoded JSON string tokens with rewriteSourceRootedPath, then
+ * re-escape only those tokens. Raw-text replacement misses JSON-escaped
+ * Windows paths (`C:\\runs\\gcd`) and can insert unescaped native
+ * separators into otherwise slash-based JSON.
+ */
+export function rewriteJsonSourcePathStrings(
+  raw: string,
+  prefixes: string[],
+  targetWorkspace: string,
+): string {
+  let index = 0
+  let output = ''
+  while (index < raw.length) {
+    const char = raw[index]
+    if (char !== '"') {
+      output += char
+      index += 1
+      continue
+    }
+    const start = index
+    index += 1
+    let decoded = ''
+    let escaped = false
+    while (index < raw.length) {
+      const current = raw[index]
+      if (escaped) {
+        if (current === 'u' && /^[0-9a-fA-F]{4}/.test(raw.slice(index + 1, index + 5))) {
+          decoded += String.fromCharCode(
+            Number.parseInt(raw.slice(index + 1, index + 5), 16),
+          )
+          index += 5
+        } else {
+          decoded += unescapeJsonChar(current)
+          index += 1
+        }
+        escaped = false
+        continue
+      }
+      if (current === '\\') {
+        escaped = true
+        index += 1
+        continue
+      }
+      if (current === '"') {
+        index += 1
+        break
+      }
+      decoded += current
+      index += 1
+    }
+    const rewritten = rewriteSourceRootedPath(decoded, prefixes, targetWorkspace)
+    output += rewritten === decoded ? raw.slice(start, index) : JSON.stringify(rewritten)
+  }
+  return output
+}
+
+/**
  * Rewrite a parsed string scalar that is the source workspace root or a
  * path under it. Comparison is separator-normalized so Windows leaves
  * (`C:\runs\gcd\origin\gcd.v`) match a `/`-terminated prefix; the
  * replacement keeps the original value's separator style.
  */
+
 export function rewriteSourceRootedPath(
   value: string,
   prefixes: string[],
@@ -928,21 +962,35 @@ async function rewriteHomeJsonSourcePaths(
       }
       continue
     }
-    let next = original
-    for (const prefix of prefixes) {
-      const trimmedPrefix = trimPathSeparators(prefix)
-      if (!trimmedPrefix || trimmedPrefix === options.targetWorkspace) continue
-      // Path-boundary-aware replacement: a value is workspace-rooted only
-      // when the prefix is followed by a separator or ends the string, so
-      // prose like "compare /work/chip-old" is never rewritten.
-      next = next.split(`${trimmedPrefix}/`).join(`${options.targetWorkspace}/`)
-      next = next.split(`${trimmedPrefix}\\`).join(`${options.targetWorkspace}\\`)
-      next = next.split(`"${trimmedPrefix}"`).join(`"${options.targetWorkspace}"`)
-      next = next.split(`'${trimmedPrefix}'`).join(`'${options.targetWorkspace}'`)
+    const rewritten = rewriteJsonSourcePathStrings(
+      original,
+      prefixes,
+      options.targetWorkspace,
+    )
+    if (rewritten !== original) {
+      await writeTextAtomically(filePath, rewritten)
     }
-    if (next !== original) {
-      await writeTextAtomically(filePath, next)
-    }
+  }
+}
+
+function unescapeJsonChar(char: string): string {
+  switch (char) {
+    case '"':
+    case '\\':
+    case '/':
+      return char
+    case 'b':
+      return '\b'
+    case 'f':
+      return '\f'
+    case 'n':
+      return '\n'
+    case 'r':
+      return '\r'
+    case 't':
+      return '\t'
+    default:
+      return char
   }
 }
 

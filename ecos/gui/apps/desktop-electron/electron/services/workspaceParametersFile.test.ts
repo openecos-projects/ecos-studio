@@ -317,6 +317,16 @@ describe('writeWorkspaceParameters', () => {
     })
   })
 
+  it('rejects a high-precision float that a rewrite would silently round', async () => {
+    const root = createWorkspace()
+    const content = `${ECC_TOML}\n[flow]\nthreshold = 0.123456789012345678901234\n`
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /cannot round-trip/,
+    )
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+  })
+
   it('rejects a legacy parameters.json holding an unsafe integer instead of rounding it', async () => {
     const root = createWorkspace()
     writeHomeFile(

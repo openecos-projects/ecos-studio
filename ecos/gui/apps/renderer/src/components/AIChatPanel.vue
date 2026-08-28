@@ -188,13 +188,14 @@ import {
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import type {
-  DesktopAgentChoice,
-  DesktopAgentChoiceOption,
-  DesktopAgentEvent,
-  DesktopAgentWorkspaceParameterWrite,
-  DesktopCodexDependencyStatus,
-  DesktopCodexInstallProgressEvent,
+import {
+  assignOwnJsonPathValue,
+  type DesktopAgentChoice,
+  type DesktopAgentChoiceOption,
+  type DesktopAgentEvent,
+  type DesktopAgentWorkspaceParameterWrite,
+  type DesktopCodexDependencyStatus,
+  type DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
@@ -1827,26 +1828,9 @@ function setJsonPathValue(
   document: Record<string, unknown>,
   write: DesktopAgentWorkspaceParameterWrite,
 ): void {
-  const missing = (): never => {
+  assignOwnJsonPathValue(document, write.json_path, write.value, () => {
     throw new Error(`Parameter ${write.knob_id} does not exist in ${write.file}.`)
-  }
-  let node: unknown = document
-  for (const key of write.json_path.slice(0, -1)) {
-    node = readJsonPathSegment(node, key) ?? missing()
-  }
-  const last = write.json_path[write.json_path.length - 1]
-  if (readJsonPathSegment(node, last) === undefined) missing()
-  if (typeof last === 'number') (node as unknown[])[last] = write.value
-  else (node as Record<string, unknown>)[last] = write.value
-}
-
-function readJsonPathSegment(node: unknown, key: string | number): unknown {
-  if (typeof key === 'number') {
-    return Array.isArray(node) && key < node.length ? node[key] : undefined
-  }
-  return typeof node === 'object' && node !== null && !Array.isArray(node)
-    ? (node as Record<string, unknown>)[key]
-    : undefined
+  })
 }
 
 /**
