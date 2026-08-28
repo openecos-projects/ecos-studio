@@ -1781,7 +1781,11 @@ async function applyWorkspaceParameterWrites(
   // Phase 1: prepare and validate every edit in memory — a missing path or
   // malformed document fails loudly before anything is written, instead of
   // leaving earlier step-config changes behind on a later failure.
-  const preparedStepConfigWrites: Array<{ path: string; content: string }> = []
+  const preparedStepConfigWrites: Array<{
+    path: string
+    content: string
+    original: string
+  }> = []
   for (const [file, fileWrites] of byFile) {
     if (file === 'home/ecc.toml' || file === 'home/parameters.json') {
       // The on-disk configuration format (ecc.toml vs parameters.json) is
@@ -1800,23 +1804,63 @@ async function applyWorkspaceParameterWrites(
     const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
     preparedStepConfigWrites.push({
       path,
+      original: raw,
       content: raw.endsWith('\n') ? `${serialized}\n` : serialized,
     })
   }
-  // Phase 2: commit. The authoritative config edit goes first (atomic in
-  // the main process), then the prepared step-config files.
-  if (parameterSurfaceWrites.length > 0) {
-    await desktopApi.workspace.editWorkspaceParameters(
-      workspaceRoot,
-      parameterSurfaceWrites.map((write) => ({
-        json_path: write.json_path,
-        value: write.value,
-      })),
-    )
+  const originalWorkspaceConfig =
+    parameterSurfaceWrites.length > 0
+      ? await readExistingWorkspaceConfig(desktopApi, workspaceRoot)
+      : null
+  const restorations: Array<{ path: string; content: string }> = []
+  try {
+    // Phase 2: commit. The authoritative config edit goes first (atomic in
+    // the main process), then the prepared step-config files. If a later
+    // write fails, restore every file already committed in this attempt.
+    if (parameterSurfaceWrites.length > 0) {
+      const edited = await desktopApi.workspace.editWorkspaceParameters(
+        workspaceRoot,
+        parameterSurfaceWrites.map((write) => ({
+          json_path: write.json_path,
+          value: write.value,
+        })),
+      )
+      if (originalWorkspaceConfig) {
+        restorations.push(originalWorkspaceConfig)
+      } else {
+        restorations.push({ path: edited.path, content: '' })
+      }
+    }
+    for (const { path, content, original } of preparedStepConfigWrites) {
+      await desktopApi.workspace.writeProjectTextFile(path, content)
+      restorations.push({ path, content: original })
+    }
+  } catch (error) {
+    for (const restoration of restorations.reverse()) {
+      try {
+        await desktopApi.workspace.writeProjectTextFile(
+          restoration.path,
+          restoration.content,
+        )
+      } catch {
+        // Best-effort rollback: still report the original commit failure.
+      }
+    }
+    throw error
   }
-  for (const { path, content } of preparedStepConfigWrites) {
-    await desktopApi.workspace.writeProjectTextFile(path, content)
-  }
+}
+
+async function readExistingWorkspaceConfig(
+  desktopApi: NonNullable<ReturnType<typeof getOptionalDesktopApi>>,
+  workspaceRoot: string,
+): Promise<{ path: string; content: string } | null> {
+  const tomlPath = `${workspaceRoot}/home/ecc.toml`
+  const jsonPath = `${workspaceRoot}/home/parameters.json`
+  const toml = await desktopApi.workspace.readOptionalProjectTextFile(tomlPath)
+  if (toml != null && toml !== '') return { path: tomlPath, content: toml }
+  const json = await desktopApi.workspace.readOptionalProjectTextFile(jsonPath)
+  if (json != null && json !== '') return { path: jsonPath, content: json }
+  return null
 }
 
 /** Keeps the Agent's formatting identical to whatever already wrote the file. */

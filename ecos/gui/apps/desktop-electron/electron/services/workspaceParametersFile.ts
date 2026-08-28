@@ -431,6 +431,95 @@ async function enqueueParameterWrite<T>(
  * instead of failing, and TOML stringify silently drops null/undefined.
  * Checked recursively before any merge.
  */
+const GUI_KNOWN_TOML_SCALAR_KEYS = new Set([
+  'pdk',
+  'design',
+  'description',
+  'design_tool',
+  'top_module',
+  'clock',
+  'frequency_max',
+  'max_fanout',
+  'target_density',
+  'target_overflow',
+  'global_right_padding',
+  'cell_padding_x',
+  'routability_opt_flag',
+  'bottom_layer',
+  'top_layer',
+  'pdk_root',
+])
+
+const GUI_KNOWN_TOML_TABLE_KEYS: Record<string, ReadonlySet<string>> = {
+  die: new Set(['size', 'area']),
+  core: new Set([
+    'size',
+    'area',
+    'bounding_box',
+    'utilitization',
+    'margin',
+    'aspect_ratio',
+  ]),
+  die_area: new Set(['width', 'height', 'utilitization', 'margin', 'mode']),
+}
+
+/**
+ * Agent/rerun TOML edits stringify the whole flattened document. A Date or
+ * bigint already sitting in a GUI-known leaf would otherwise be rewritten
+ * successfully here, then fail when the renderer reloads it. Unknown leaves
+ * stay untouched so non-GUI knobs can still hold those scalars.
+ */
+function assertGuiKnownTomlLeavesLossless(
+  parameters: Record<string, unknown>,
+  label: string,
+): void {
+  for (const [key, value] of Object.entries(parameters)) {
+    const nestedKeys = GUI_KNOWN_TOML_TABLE_KEYS[key]
+    if (nestedKeys) {
+      if (isPlainRecord(value)) {
+        for (const [nestedKey, nested] of Object.entries(value)) {
+          if (!nestedKeys.has(nestedKey)) continue
+          assertGuiKnownScalarLossless(nested, `${label}:${key}.${nestedKey}`)
+        }
+      } else {
+        assertGuiKnownScalarLossless(value, `${label}:${key}`)
+      }
+      continue
+    }
+    if (!GUI_KNOWN_TOML_SCALAR_KEYS.has(key)) continue
+    assertGuiKnownScalarLossless(value, `${label}:${key}`)
+  }
+}
+
+function assertGuiKnownScalarLossless(value: unknown, label: string): void {
+  if (value == null) return
+  if (Array.isArray(value)) {
+    for (const item of value) assertGuiKnownScalarLossless(item, label)
+    return
+  }
+  if (isPlainRecord(value)) {
+    for (const item of Object.values(value)) assertGuiKnownScalarLossless(item, label)
+    return
+  }
+  if (value instanceof Date || typeof value === 'bigint') {
+    throw new Error(
+      `Refusing to rewrite ${label}: existing value cannot be represented losslessly`,
+    )
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(`Refusing to rewrite ${label}: existing value is not a finite number`)
+  }
+  if (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    !Number.isSafeInteger(value)
+  ) {
+    throw new Error(
+      `Refusing to rewrite ${label}: existing integer exceeds Number.MAX_SAFE_INTEGER`,
+    )
+  }
+}
+
 function assertFiniteNumbers(value: unknown, label: string): void {
   if (value === undefined) {
     throw new Error(
@@ -1024,6 +1113,7 @@ export async function editWorkspaceParameters(
     assertNoSubMillisecondDatetimes(raw, onDisk.path)
     const document = parseTomlDocument(raw, onDisk.path)
     const parameters = mergeTomlSections(document, root)
+    assertGuiKnownTomlLeavesLossless(parameters, onDisk.path)
     for (const edit of edits) {
       const normalizedPath = edit.json_path.map((segment) =>
         typeof segment === 'string' ? normalizeParameterKey(segment) : segment,

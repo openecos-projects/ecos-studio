@@ -162,6 +162,8 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain(
       'throw new Error(`Parameter ${write.knob_id} does not exist in ${write.file}.`)',
     )
+    expect(source).toContain('restorations.reverse()')
+    expect(source).toContain('readExistingWorkspaceConfig')
   })
 
   it('pushes parameter writes back through ECC so the next run sees them', () => {

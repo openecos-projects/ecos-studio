@@ -710,6 +710,31 @@ describe('editWorkspaceParameters', () => {
     ).rejects.toThrow(/does not exist/i)
   })
 
+  it('rejects TOML edits when a GUI-known leaf already holds a Date or bigint', async () => {
+    const root = createWorkspace()
+    const content = ECC_TOML.replace(
+      'target_density = 0.2',
+      'target_density = 1979-05-27',
+    )
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 32 }]),
+    ).rejects.toThrow(/cannot be represented losslessly/)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+  })
+
+  it('still allows TOML edits when an unknown leaf holds a Date', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'ecc.toml',
+      ECC_TOML.replace('max_fanout = 20', 'max_fanout = 20\ncheckpoint = 1979-05-27'),
+    )
+    await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 32 }])
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.max_fanout).toBe(32)
+  })
+
   it('applies display-key paths to a legacy parameters.json workspace', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
