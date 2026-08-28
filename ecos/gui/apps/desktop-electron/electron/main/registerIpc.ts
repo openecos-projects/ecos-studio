@@ -258,6 +258,7 @@ export interface DesktopBridgeServices {
     readParameters(): Promise<Record<string, unknown> | null>
     writeParameters(request: {
       parameters: Record<string, unknown>
+      workspace: string
     }): Promise<{ format: 'toml' | 'json'; path: string }>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
   }
@@ -1777,9 +1778,20 @@ export function registerIpc(
   handle(
     desktopApiIpcChannels.workspaceResourcesWriteParameters,
     async (_event, request) => {
-      return await services.workspaceResourceService.writeParameters(
-        request as { parameters: Record<string, unknown>; workspace?: string },
-      )
+      if (
+        !isRecord(request) ||
+        !isRecord(request.parameters) ||
+        typeof request.workspace !== 'string' ||
+        request.workspace.trim() === ''
+      ) {
+        throw new Error(
+          'Workspace parameters write requires a parameters object and workspace path',
+        )
+      }
+      return await services.workspaceResourceService.writeParameters({
+        parameters: request.parameters,
+        workspace: request.workspace,
+      })
     },
   )
 

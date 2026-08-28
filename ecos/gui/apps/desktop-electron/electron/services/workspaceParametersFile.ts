@@ -834,9 +834,15 @@ export async function restoreTextIfCurrentRevision(
   canonicalPath: string,
   expectedCurrent: string,
   previous: string,
+  assertWritable?: () => Promise<void>,
 ): Promise<'restored' | 'skipped'> {
   const current = await readWorkspaceConfigContained(spelledPath, canonicalPath)
   if (current !== expectedCurrent) return 'skipped'
+  // Re-run the runtime/active-workspace guard immediately before the restore
+  // rename: a flow that started after the failed write must not observe a
+  // rollback happening underneath it. A blocked restore is reported as a
+  // rollback failure instead of silently leaving mixed revisions.
+  await assertWritable?.()
   await writeTextAtomically(spelledPath, previous, {
     authorizedParent: dirname(canonicalPath),
   })
@@ -1311,6 +1317,9 @@ export async function applyQueuedWorkspaceParameterWrites(
             setJsonPathValue(document, edit.json_path, edit.value, step.spelledPath)
           }
           const writtenContent = serializeJsonDocument(document, raw)
+          // Guard again immediately before the rename: a flow that started
+          // during the read/parse must still block the step-config commit.
+          await assertWritable?.()
           await writeTextAtomically(step.spelledPath, writtenContent, {
             authorizedParent: dirname(step.canonicalPath),
           })
@@ -1331,6 +1340,7 @@ export async function applyQueuedWorkspaceParameterWrites(
               restoration.canonicalPath,
               restoration.expectedCurrent,
               restoration.previous,
+              assertWritable,
             )
           } catch (restoreError) {
             restoreErrors.push(restoreError)

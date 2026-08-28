@@ -985,4 +985,77 @@ describe('queued agent rollback', () => {
     expect(readFileSync(path, 'utf8')).toBe(configureRevision)
     expect(configureRevision).not.toBe(agentRevision)
   })
+
+  it('re-checks the runtime guard immediately before a step-config rename', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(
+      join(root, 'config', 'dreamplace_ecc.json'),
+      '{\n    "density_weight": 0.2\n}\n',
+    )
+    const original = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    const originalStep = readFileSync(join(root, 'config', 'dreamplace_ecc.json'), 'utf8')
+    let guardCalls = 0
+
+    await expect(
+      applyQueuedWorkspaceParameterWrites(
+        root,
+        [{ json_path: ['max_fanout'], value: 64 }],
+        [
+          {
+            canonicalPath: join(root, 'config', 'dreamplace_ecc.json'),
+            edits: [{ json_path: ['density_weight'], value: 0.1 }],
+            spelledPath: join(root, 'config', 'dreamplace_ecc.json'),
+          },
+        ],
+        undefined,
+        async () => {
+          guardCalls += 1
+          // 1 queue, 2 prepare, 3 parameter rename, 4 step pre-read,
+          // 5 step pre-rename. Fail only on the last so rollback can still run.
+          if (guardCalls === 5) {
+            throw new Error('workspace flow is running')
+          }
+        },
+      ),
+    ).rejects.toThrow(/workspace flow is running/)
+
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(original)
+    expect(readFileSync(join(root, 'config', 'dreamplace_ecc.json'), 'utf8')).toBe(
+      originalStep,
+    )
+  })
+
+  it('surfaces a rollback failure when the restore rename is blocked', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    const original = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    const missingStep = join(root, 'config', 'dreamplace_ecc.json')
+    let guardCalls = 0
+
+    await expect(
+      applyQueuedWorkspaceParameterWrites(
+        root,
+        [{ json_path: ['max_fanout'], value: 64 }],
+        [
+          {
+            canonicalPath: missingStep,
+            edits: [{ json_path: ['density_weight'], value: 0.1 }],
+            spelledPath: missingStep,
+          },
+        ],
+        undefined,
+        async () => {
+          guardCalls += 1
+          // Parameter commit succeeds (1-3). Step read then fails; restore is 5.
+          if (guardCalls === 5) {
+            throw new Error('workspace flow is running')
+          }
+        },
+      ),
+    ).rejects.toThrow(/rollback failed/)
+
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).not.toBe(original)
+  })
 })

@@ -320,8 +320,10 @@ const desktopApi: DesktopApi = {
     readFlow: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadFlow),
     readParameters: () =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadParameters),
-    writeParameters: (request: { parameters: Record<string, unknown> }) =>
-      invokeDesktop(desktopApiIpcChannels.workspaceResourcesWriteParameters, request),
+    writeParameters: (request: {
+      parameters: Record<string, unknown>
+      workspace: string
+    }) => invokeDesktop(desktopApiIpcChannels.workspaceResourcesWriteParameters, request),
     resolveStepInfo: (request: WorkspaceStepInfoRequest) =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesResolveStepInfo, request),
   },

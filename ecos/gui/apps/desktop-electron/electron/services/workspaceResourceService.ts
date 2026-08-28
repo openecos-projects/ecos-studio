@@ -105,10 +105,13 @@ export class WorkspaceResourceService {
    */
   async writeParameters(request: {
     parameters: Record<string, unknown>
-    workspace?: string
+    workspace: string
   }): Promise<{ format: WorkspaceParametersFileLocation['format']; path: string }> {
     if (!request || typeof request !== 'object' || !isRecord(request.parameters)) {
       throw new Error('Workspace parameters write requires a parameters object')
+    }
+    if (typeof request.workspace !== 'string' || request.workspace.trim() === '') {
+      throw new Error('Workspace parameters write requires a workspace path')
     }
     const root = await this.projectScopeProvider.getProjectRoot()
     // The save was dispatched for a specific workspace: refuse to land it
@@ -118,10 +121,9 @@ export class WorkspaceResourceService {
     // switch happening while the save queues behind another writer blocks
     // it too.
     const assertExpectedWorkspace = async (): Promise<void> => {
-      if (request.workspace === undefined) return
       const activeRoot = await this.projectScopeProvider.getProjectRoot()
       const [expected, active] = await Promise.all([
-        realpath(request.workspace as string),
+        realpath(request.workspace),
         realpath(activeRoot),
       ])
       if (expected !== active) {

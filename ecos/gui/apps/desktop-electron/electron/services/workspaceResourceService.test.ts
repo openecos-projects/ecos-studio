@@ -76,6 +76,36 @@ describe('WorkspaceResourceService', () => {
     )
   })
 
+  it('rejects a parameters save that omits the workspace binding', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+
+    await expect(
+      service.writeParameters({
+        parameters: { Design: 'gcd' },
+        workspace: '',
+      }),
+    ).rejects.toThrow(/requires a workspace path/)
+  })
+
+  it('writes parameters when the workspace binding matches the active root', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+
+    const result = await service.writeParameters({
+      parameters: { Design: 'aes' },
+      workspace: root,
+    })
+
+    expect(result.format).toBe('json')
+    const written = JSON.parse(
+      await readFile(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(written.Design).toBe('aes')
+  })
+
   it('builds an ECC step resource index from parameters and flow files', async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })
@@ -997,6 +1027,7 @@ describe('writeParameters', () => {
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const result = await service.writeParameters({
       parameters: { 'Frequency max [MHz]': 150 },
+      workspace: root,
     })
 
     expect(result.format).toBe('toml')
@@ -1013,6 +1044,7 @@ describe('writeParameters', () => {
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const result = await service.writeParameters({
       parameters: { Design: 'gcd', 'Max fanout': 24 },
+      workspace: root,
     })
 
     expect(result.format).toBe('json')
@@ -1037,7 +1069,7 @@ describe('writeParameters', () => {
     })
 
     await expect(
-      service.writeParameters({ parameters: { frequency_max: 150 } }),
+      service.writeParameters({ parameters: { frequency_max: 150 }, workspace: root }),
     ).rejects.toThrow(/flow is running/i)
     const parameters = await service.readParameters()
     expect(parameters).toMatchObject({ design: 'gcd' })
@@ -1048,7 +1080,9 @@ describe('writeParameters', () => {
     const root = await tempWorkspace()
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     await expect(
-      service.writeParameters({} as { parameters: Record<string, unknown> }),
+      service.writeParameters(
+        {} as { parameters: Record<string, unknown>; workspace: string },
+      ),
     ).rejects.toThrow(/parameters object/i)
   })
 
