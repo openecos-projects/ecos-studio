@@ -62,7 +62,7 @@ export function losslessNumberList(value: unknown, label: string): number[] {
         'edit the workspace configuration manually',
     )
   }
-  return value.map((item) => losslessNumber(item, label)).filter(Number.isFinite)
+  return value.map((item) => losslessNumber(item, label))
 }
 
 /**
@@ -112,5 +112,45 @@ export function losslessNumber(value: unknown, label: string): number {
         'edit the workspace configuration manually',
     )
   }
-  return Number(value)
+  if (
+    typeof value === 'number' &&
+    !Number.isSafeInteger(value) &&
+    Number.isInteger(value)
+  ) {
+    throw new Error(
+      `Parameter ${label} value ${value} exceeds the safe integer range; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed) || String(parsed) !== trimmed) {
+      throw new Error(
+        `Parameter ${label} value ${value} cannot round-trip as a JavaScript number; ` +
+          'edit the workspace configuration manually',
+      )
+    }
+    if (Number.isInteger(parsed) && !Number.isSafeInteger(parsed)) {
+      throw new Error(
+        `Parameter ${label} value ${value} exceeds the safe integer range; ` +
+          'edit the workspace configuration manually',
+      )
+    }
+    return parsed
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    throw new Error(
+      `Parameter ${label} value ${value} is not a finite number; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (Number.isInteger(parsed) && !Number.isSafeInteger(parsed)) {
+    throw new Error(
+      `Parameter ${label} value ${parsed} exceeds the safe integer range; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  return parsed
 }

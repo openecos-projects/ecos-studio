@@ -447,6 +447,15 @@ function assertFiniteNumbers(value: unknown, label: string): void {
   if (typeof value === 'number' && !Number.isFinite(value)) {
     throw new Error(`Refusing to write ${label}: non-finite number in parameters payload`)
   }
+  if (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    !Number.isSafeInteger(value)
+  ) {
+    throw new Error(
+      `Refusing to write ${label}: integer ${value} exceeds Number.MAX_SAFE_INTEGER`,
+    )
+  }
   if (Array.isArray(value)) {
     for (const item of value) {
       if (item === undefined) {
@@ -492,10 +501,31 @@ function foldLegacyGeometryIntoDieArea(
     overlay.margin = core.margin[0]
   }
   payload.die_area = mergeRecordsPreservingUnknown(existingDieArea, overlay)
-  delete payload.die
-  delete payload.core
-  delete existingParams.die
-  delete existingParams.core
+  stripMigratedGeometryTable(payload, 'die', ['size', 'area'])
+  stripMigratedGeometryTable(payload, 'core', ['utilitization', 'margin', 'size', 'area'])
+  stripMigratedGeometryTable(existingParams, 'die', ['size', 'area'])
+  stripMigratedGeometryTable(existingParams, 'core', [
+    'utilitization',
+    'margin',
+    'size',
+    'area',
+  ])
+}
+
+function stripMigratedGeometryTable(
+  record: Record<string, unknown>,
+  key: string,
+  geometryKeys: readonly string[],
+): void {
+  const table = record[key]
+  if (!isPlainRecord(table)) {
+    delete record[key]
+    return
+  }
+  const next: Record<string, unknown> = { ...table }
+  for (const geometryKey of geometryKeys) delete next[geometryKey]
+  if (Object.keys(next).length === 0) delete record[key]
+  else record[key] = next
 }
 
 /**

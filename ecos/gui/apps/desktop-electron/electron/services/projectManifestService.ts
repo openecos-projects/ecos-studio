@@ -501,13 +501,36 @@ function numberArray(value: unknown): number[] {
   // shift the rest into the wrong slots (die.size[0] -> die_width). Numeric
   // strings convert (legacy JSON writes them); everything else fails loud.
   return value.map((entry) => {
-    if (typeof entry === 'number' && Number.isFinite(entry)) return entry
-    if (
-      typeof entry === 'string' &&
-      entry.trim() !== '' &&
-      Number.isFinite(Number(entry))
-    ) {
-      return Number(entry)
+    if (typeof entry === 'number') {
+      if (!Number.isFinite(entry)) {
+        throw new Error(
+          'Baseline workspace snapshot holds a die/core dimension that is not a ' +
+            'finite number; edit the workspace configuration manually',
+        )
+      }
+      if (Number.isInteger(entry) && !Number.isSafeInteger(entry)) {
+        throw new Error(
+          'Baseline workspace snapshot holds a die/core dimension that exceeds ' +
+            'the safe integer range; edit the workspace configuration manually',
+        )
+      }
+      return entry
+    }
+    if (typeof entry === 'string' && entry.trim() !== '') {
+      const parsed = Number(entry.trim())
+      if (!Number.isFinite(parsed) || String(parsed) !== entry.trim()) {
+        throw new Error(
+          'Baseline workspace snapshot holds a die/core dimension that cannot ' +
+            'round-trip as a JavaScript number; edit the workspace configuration manually',
+        )
+      }
+      if (Number.isInteger(parsed) && !Number.isSafeInteger(parsed)) {
+        throw new Error(
+          'Baseline workspace snapshot holds a die/core dimension that exceeds ' +
+            'the safe integer range; edit the workspace configuration manually',
+        )
+      }
+      return parsed
     }
     throw new Error(
       'Baseline workspace snapshot holds a die/core dimension that is not a ' +

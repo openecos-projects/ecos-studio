@@ -292,6 +292,23 @@ describe('mergePayloadIntoTomlDocument', () => {
     expect(merged.params.core).toBeUndefined()
   })
 
+  it('keeps unknown nested die/core leaves when folding geometry into die_area', () => {
+    const document = {
+      params: {
+        design: 'gcd',
+        die_area: { width: 100, height: 80, utilitization: 0.4, margin: 2 },
+        core: { utilitization: 0.4, margin: [2, 2], future_knob: 'keep' },
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { Core: { Utilitization: 0.55, Margin: [4, 4] } },
+      '/ws',
+    )
+    expect(merged.params.die_area).toMatchObject({ utilitization: 0.55, margin: 4 })
+    expect(merged.params.core).toEqual({ future_knob: 'keep' })
+  })
+
   it('keeps outside pdk_config absolute', () => {
     const document = { params: { design: 'gcd' } }
     const merged = mergePayloadIntoTomlDocument(

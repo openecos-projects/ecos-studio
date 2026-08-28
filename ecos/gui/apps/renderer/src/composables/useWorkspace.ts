@@ -1518,12 +1518,14 @@ export function useWorkspace() {
         if (pdk !== undefined) snapshot.pdk = pdk
         if (topModule !== undefined) snapshot.topModule = topModule
         if (frequencyTarget !== undefined) snapshot.frequencyTarget = frequencyTarget
-        const core = params['Core'] ?? params['core']
-        if (isRecord(core)) {
-          const coreUtilization =
-            asNumber(core['Utilitization']) ?? asNumber(core['utilitization'])
-          if (coreUtilization !== undefined) snapshot.coreUtilization = coreUtilization
-        }
+        const dieArea = params['Die Area'] ?? params.die_area
+        const core = params.Core ?? params.core
+        const coreUtilization =
+          (isRecord(dieArea) ? asNumber(dieArea.utilitization) : undefined) ??
+          (isRecord(core)
+            ? (asNumber(core.Utilitization) ?? asNumber(core.utilitization))
+            : undefined)
+        if (coreUtilization !== undefined) snapshot.coreUtilization = coreUtilization
       }
     } catch {
       console.warn('Failed to read workspace parameters for snapshot')
