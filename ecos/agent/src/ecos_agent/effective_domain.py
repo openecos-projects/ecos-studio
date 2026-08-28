@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
 from typing import Any, Iterable, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-import re
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue, StrategyDirection
-from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt, ParameterSemanticsCard
-from ecos_agent.parameter_evidence_contracts import OptimizationProposalV2
+from ecos_agent.optimization_contracts import (
+    OptimizationKnob,
+    RequestedKnobValue,
+    StrategyDirection,
+)
+from ecos_agent.parameter_evidence_contracts import (
+    OptimizationProposalV2,
+    ParameterApplicationReceipt,
+    ParameterSemanticsCard,
+)
 from ecos_agent.parameter_semantics import card_hash, requested_lattice
 
 

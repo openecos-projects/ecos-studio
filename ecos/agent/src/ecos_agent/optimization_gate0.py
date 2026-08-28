@@ -16,11 +16,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Mapping, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt
-from pydantic import field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from ecos_agent.contracts import GUI_WORKSPACE_FLOW_STEPS
-from ecos_agent.hashing import file_sha256
+from ecos_agent.effective_domain import build_context_fingerprint
+from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     CANDIDATE_EXECUTION_LIMIT,
     ROUTABILITY_OBJECTIVE_ORDER,
@@ -52,7 +61,18 @@ from ecos_agent.optimization_observations import (
     build_candidate_terminal_observation,
     build_terminal_observation,
 )
-from ecos_agent.optimization_runtime import _ecc_executable
+from ecos_agent.optimization_runtime import (
+    _current_values,
+    _ecc_executable,
+    _incumbent_workspace,
+    _optimization_execution_context,
+    _parent_manifest_sha256,
+)
+from ecos_agent.parameter_semantics import (
+    LATTICE_VERSION,
+    card_hash,
+    load_parameter_cards,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -578,6 +598,14 @@ def run_pilot_candidate(
         direction,
         baseline,
         str(config_sha256),
+        _pilot_context_sha256(
+            workspace,
+            site_width,
+            baseline,
+            requested,
+            episode_id,
+            parent_candidate_root_ref,
+        ),
         episode_id=episode_id,
         parent_candidate_root_ref=parent_candidate_root_ref,
         rationale_summary=rationale_summary,
@@ -637,6 +665,7 @@ def _candidate_execution_request(
     direction: StrategyDirection,
     baseline: TerminalObservation,
     config_sha256: str,
+    context_sha256: str,
     *,
     episode_id: str,
     parent_candidate_root_ref: str | None,
@@ -667,9 +696,66 @@ def _candidate_execution_request(
         checkpoint_id="canonical",
         proposal=proposal,
         requested=requested,
-        context_sha256=config_sha256,
+        context_sha256=context_sha256,
         parent_candidate_root_ref=parent_candidate_root_ref,
     )
+
+
+def _pilot_context_sha256(
+    workspace: Path,
+    site_width_dbu: int,
+    baseline: TerminalObservation,
+    requested: RequestedKnobValue,
+    episode_id: str,
+    parent_candidate_root_ref: str | None,
+) -> str:
+    parent_workspace = _incumbent_workspace(workspace.resolve(), parent_candidate_root_ref)
+    parent_manifest_sha256 = (
+        file_sha256(parent_workspace / "analysis" / "candidate_workspace.v1.json")
+        if parent_candidate_root_ref is not None
+        else _parent_manifest_sha256(parent_workspace, baseline)
+    )
+    execution_context = _optimization_execution_context(
+        parent_workspace,
+        site_width_dbu,
+        0,
+        parent_manifest_sha256,
+    )
+    card = load_parameter_cards()[requested.knob_id]
+    target_step = _candidate_target_step(requested.knob_id)
+    context = {
+        **execution_context,
+        "incumbent_state_sha256": canonical_sha256(baseline.model_dump(mode="json")),
+        "stage": target_step,
+        "backend": "ecc",
+        "tool_revision": card.tool.revision,
+        "parameter_card_sha256": card_hash(card),
+        "lattice_version": LATTICE_VERSION,
+        "unit": card.surface.unit,
+        "current_values": dict(
+            sorted(_current_values(parent_workspace, site_width_dbu).items())
+        ),
+        "terminal_execution_contract_sha256": canonical_sha256(
+            {
+                "episode_id": episode_id,
+                "checkpoint_id": "canonical",
+                "target_step": target_step,
+                "end_step": "Harden",
+                "execution_scope": "full_flow",
+            }
+        ),
+        "tool_source_sha256": card.tool.source_sha256,
+    }
+    return build_context_fingerprint(context)
+
+
+def _candidate_target_step(knob_id: OptimizationKnob) -> str:
+    if knob_id in {
+        OptimizationKnob.FLOORPLAN_CORE_UTIL,
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+    }:
+        return "Floorplan"
+    return "fixFanout" if knob_id == OptimizationKnob.SYNTH_MAX_FANOUT else "place"
 
 
 def _baseline_values(baseline: Gate0Baseline) -> dict[str, bool | int | float]:

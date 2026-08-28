@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from ecos_agent.codex_provider import (
     CodexAppServerProposalProvider,
     CodexProviderError,
@@ -21,6 +20,7 @@ from ecos_agent.optimization_contracts import (
     ObjectiveMetric,
     ObservationReference,
     OptimizationDecision,
+    OptimizationKnob,
     OptimizationProposal,
     ProposalAction,
     ProposalContextRef,
@@ -38,8 +38,8 @@ from ecos_agent.parameter_evidence_contracts import (
     EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
-    ToolRef,
 )
+from ecos_agent.parameter_semantics import load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -53,9 +53,10 @@ def _provider(tmp_path: Path) -> CodexAppServerProposalProvider:
 
 
 def _context() -> OptimizationPlanningContext:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     receipt_payload = {
         "receipt_id": "parameter-receipt-density",
-        "tool": ToolRef(name="DREAMPlace", revision="bound"),
+        "tool": card.tool,
         "context": {"stage": "place"},
         "requested": {"knob_id": "place.target_density", "value": 0.2, "unit": "ratio"},
         "materialization": MaterializationRef(
@@ -344,10 +345,11 @@ def test_optimization_planner_exposes_one_consumable_turn_evidence(
     assert provider.consume_planning_evidence() is None
 
 
-def test_optimization_planner_v2_is_fail_closed_until_explicitly_enabled(
+def test_optimization_planner_v2_is_enabled_by_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     provider = _provider(tmp_path)
+    provider.env.pop("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", None)
     context = _context()
     called = False
 
@@ -358,9 +360,31 @@ def test_optimization_planner_v2_is_fail_closed_until_explicitly_enabled(
 
     monkeypatch.setattr(provider, "_request_json", request)
 
-    with pytest.raises(CodexProviderError, match="not enabled") as error:
-        provider.propose_v2(context, _domain())
+    result = provider.propose_v2(context, _domain())
 
+    assert provider.optimization_proposal_v2_enabled is True
+    assert result["schema_version"] == "ecos.optimization_proposal.v2"
+    assert called is True
+
+
+def test_optimization_planner_v1_requires_explicit_compatibility_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "0"
+    called = False
+
+    def request(**_kwargs: object) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return _proposal_v2(_context(), _domain())
+
+    monkeypatch.setattr(provider, "_request_json", request)
+
+    with pytest.raises(CodexProviderError, match="not enabled") as error:
+        provider.propose_v2(_context(), _domain())
+
+    assert provider.optimization_proposal_v2_enabled is False
     assert error.value.failure_class == "unsupported"
     assert called is False
 

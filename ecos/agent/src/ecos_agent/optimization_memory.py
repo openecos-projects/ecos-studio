@@ -44,7 +44,14 @@ from ecos_agent.optimization_ledger import (
     _write_json_atomic,
 )
 from ecos_agent.optimization_legacy_reader import KnobApplicationReceipt
+from ecos_agent.optimization_rules import native_receipt_is_effective
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
+from ecos_agent.parameter_semantics import (
+    ParameterSemanticsError,
+    card_hash,
+    load_parameter_cards,
+    validate_application_receipt,
+)
 
 _STORE_FILE = "task-memory.v1.jsonl"
 _SCOPE_FILE = "optimization-task-memory-scope.v1.json"
@@ -52,6 +59,14 @@ _STATE_FILE = "optimization-episode-state.v6.json"
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _MAX_RECORDS = 6
+_SUCCESSFUL_QUALITY_OUTCOMES = frozenset(
+    {
+        OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+        OptimizationOutcomeKind.IMPROVED,
+        OptimizationOutcomeKind.DEGRADED,
+        OptimizationOutcomeKind.TRADEOFF,
+    }
+)
 
 
 class OptimizationTaskMemoryError(ValueError):
@@ -554,7 +569,7 @@ def _verify_source_trace(scope, state, ledger, decisions) -> None:
 
 
 def _eligible(start, terminal) -> bool:
-    return all(
+    complete = all(
         value is not None
         for value in (
             start.proposal_action,
@@ -565,6 +580,29 @@ def _eligible(start, terminal) -> bool:
             terminal.terminal_observation,
             terminal.terminal_observation_sha256,
         )
+    )
+    receipt = terminal.parameter_application_receipt
+    observation = terminal.terminal_observation
+    if (
+        not complete
+        or terminal.outcome not in _SUCCESSFUL_QUALITY_OUTCOMES
+        or receipt is None
+        or observation.schema_version != "ecos.terminal_observation.v3"
+        or not observation.eligible_for_incumbent
+    ):
+        return False
+    try:
+        cards = load_parameter_cards()
+        card = cards[start.requested.knob_id]
+        validate_application_receipt(receipt, cards)
+    except (KeyError, ParameterSemanticsError, TypeError, ValueError):
+        return False
+    return (
+        terminal.parameter_card_sha256 == card_hash(card)
+        and terminal.receipt_sha256 == receipt.evidence_sha256
+        and receipt.requested.get("knob_id") == start.requested.knob_id.value
+        and receipt.requested.get("value") == start.requested.value
+        and native_receipt_is_effective(receipt)
     )
 
 

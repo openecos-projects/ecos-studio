@@ -26,6 +26,7 @@ from ecos_agent.contracts import (
     StageRoutingProposal,
 )
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
+from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     OptimizationObjectiveProposal,
@@ -33,13 +34,12 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
 )
-from ecos_agent.effective_domain import EffectiveDomainSnapshot
-from ecos_agent.parameter_evidence_contracts import OptimizationProposalV2
 from ecos_agent.optimization_controller import (
     OptimizationPlanningContext,
     planning_context_payload,
 )
 from ecos_agent.optimization_rules import ACTIVE_OPTIMIZATION_KNOBS
+from ecos_agent.parameter_evidence_contracts import OptimizationProposalV2
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal
 
 
@@ -106,7 +106,7 @@ class CodexAppServerProposalProvider:
 
     @property
     def optimization_proposal_v2_enabled(self) -> bool:
-        return self.env.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") == "1"
+        return self.env.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1") == "1"
 
     def interrupt(self) -> None:
         with self._state_lock:
@@ -331,8 +331,8 @@ class CodexAppServerProposalProvider:
         | EffectiveDomainSnapshot
         | Sequence[EffectiveDomainSnapshot],
     ) -> dict[str, Any]:
-        """Opt-in exact-value proposal lane; production v1 remains the default."""
-        if self.env.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0") != "1":
+        """Default exact-value proposal lane; v1 requires explicit compatibility mode."""
+        if not self.optimization_proposal_v2_enabled:
             raise CodexProviderError("optimization proposal v2 is not enabled", failure_class="unsupported")
         try:
             domains = _normalize_v2_domains(domain)

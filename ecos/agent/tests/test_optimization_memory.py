@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
     AppliedKnobValue,
@@ -43,7 +42,20 @@ from ecos_agent.optimization_memory import (
     OptimizationTaskMemoryStore,
     build_task_memory_scope,
 )
+from ecos_agent.optimization_metric_contracts import (
+    EvaluationMetricCategory,
+    EvaluationMetricDirection,
+    EvaluationMetricRole,
+    TerminalEvaluationMetric,
+)
 from ecos_agent.optimization_rules import freeze_optimization_objective
+from ecos_agent.parameter_evidence_contracts import (
+    ActivationEvidence,
+    EffectiveValue,
+    MaterializationRef,
+    ParameterApplicationReceipt,
+)
+from ecos_agent.parameter_semantics import card_hash, load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 WORKSPACE_HASH = "sha256:" + "b" * 64
@@ -61,7 +73,14 @@ def _objective(primary: ObjectiveMetric = ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLO
 
 
 def _terminal(observation_id: str, overflow: float) -> TerminalObservation:
+    one = {
+        "rcx_expected_corner_count",
+        "rcx_spef_file_count",
+        "sta_corner_count",
+        "sta_expected_corner_count",
+    }
     return TerminalObservation(
+        schema_version="ecos.terminal_observation.v3",
         observation_id=observation_id,
         evidence_manifest_sha256=HASH,
         evidence_valid=True,
@@ -73,6 +92,108 @@ def _terminal(observation_id: str, overflow: float) -> TerminalObservation:
             ObjectiveMetric.ROUTE_WIRELENGTH: 100.0 + overflow,
         },
         timing_guardrail={metric: 0.0 for metric in TimingMetric},
+        evaluation_metrics=tuple(
+            TerminalEvaluationMetric(
+                metric_id=metric_id,
+                value=1.0 if metric_id in one else 0.0,
+                unit="count",
+                category=EvaluationMetricCategory.ELIGIBILITY,
+                role=EvaluationMetricRole.GATE,
+                direction=EvaluationMetricDirection.EXACT,
+                source_refs=("analysis/terminal.json",),
+            )
+            for metric_id in (
+                "drc_count",
+                "lvs_count",
+                "rcx_expected_corner_count",
+                "rcx_spef_file_count",
+                "rcx_missing_corner_count",
+                "rcx_spef_parse_failure_count",
+                "sta_corner_count",
+                "sta_expected_corner_count",
+                "sta_missing_corner_count",
+                "sta_setup_violation_count",
+                "sta_hold_violation_count",
+                "harden_artifact_missing_count",
+            )
+        ),
+        evaluation_metrics_complete=True,
+        sta_corner_ids=("typical",),
+        sta_corner_set_sha256=canonical_sha256({"corners": ["typical"]}),
+    )
+
+
+def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
+    card = load_parameter_cards()["place.cell_padding_x"]
+    effective = value * 200
+    payload = {
+        "receipt_id": f"parameter-receipt-padding-{value}",
+        "tool": card.tool,
+        "context": {
+            "stage": "place",
+            "lattice_version": "ecos.optimization_lattice.v1",
+        },
+        "requested": {
+            "knob_id": "place.cell_padding_x",
+            "value": value,
+            "unit": "site",
+        },
+        "materialization": MaterializationRef(
+            receipt_ref="analysis/candidate_materialization.v1.json",
+            receipt_sha256=HASH,
+            registry_sha256=HASH,
+            patch_sha256=HASH,
+            candidate_ref="candidate-1",
+            workspace_ref="candidate-1",
+            config_before_sha256=HASH,
+            config_after_sha256=WORKSPACE_HASH,
+            written_value=effective,
+            unit="dbu",
+        ),
+        "effective_initial": EffectiveValue(value=effective, unit="dbu"),
+        "application_status": "applied",
+        "activation": ActivationEvidence(
+            status="used",
+            consumers=(
+                {
+                    "consumer_id": "dreamplace.cell_size_expansion",
+                    "outcome": "entered",
+                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+                    "evidence_sha256": HASH,
+                },
+            ),
+        ),
+        "consumer_observation": {
+            "effective_padding_dbu": effective,
+            "movable_node_count": 1,
+            "evidence_complete": True,
+        },
+        "effective_final": EffectiveValue(value=effective, unit="dbu"),
+    }
+    draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
+    return ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(
+            draft.model_dump(mode="json", exclude={"evidence_sha256"})
+        ),
+    )
+
+
+def _replace_receipt(
+    receipt: ParameterApplicationReceipt, **updates: object
+) -> ParameterApplicationReceipt:
+    payload = {
+        name: getattr(receipt, name)
+        for name in receipt.__class__.model_fields
+        if name != "evidence_sha256"
+    }
+    payload.update(updates)
+    draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
+    return ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(
+            draft.model_dump(mode="json", exclude={"evidence_sha256"})
+        ),
     )
 
 
@@ -122,6 +243,10 @@ def _append_intervention(
     outcome: OptimizationOutcomeKind = OptimizationOutcomeKind.IMPROVED,
     terminal: bool = True,
     application_receipt: KnobApplicationReceipt | None = None,
+    include_native_receipt: bool = True,
+    parameter_application_receipt: ParameterApplicationReceipt | None = None,
+    observation: TerminalObservation | None = None,
+    terminal_receipt_sha256: str | None = None,
 ) -> None:
     context_ref = ProposalContextRef(
         episode_id=scope.episode_id,
@@ -166,6 +291,7 @@ def _append_intervention(
     )
     intervention_id = f"intervention-{index}"
     ledger = OptimizationLedger(root)
+    requested = RequestedKnobValue(knob_id="place.cell_padding_x", value=index % 4)
     ledger.append_start(
         OptimizationInterventionStart(
             intervention_id=intervention_id,
@@ -179,11 +305,16 @@ def _append_intervention(
             environment_sha256=HASH,
             objective_contract_sha256=scope.objective_contract_sha256,
             proposal_action=proposal.action,
-            requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=index % 4),
+            requested=requested,
         )
     )
     if terminal:
-        observation = _terminal(f"terminal-{index}", float(index))
+        observation = observation or _terminal(f"terminal-{index}", float(index))
+        native_receipt = None
+        if include_native_receipt and application_receipt is None:
+            native_receipt = parameter_application_receipt or (
+                _parameter_application_receipt(requested.value)
+            )
         terminal_outcome = OptimizationTerminalOutcome(
                 intervention_id=intervention_id,
                 outcome=outcome,
@@ -192,12 +323,29 @@ def _append_intervention(
                 candidate_manifest_ref=(
                     f".agent/optimization/{scope.episode_id}/candidates/{index}/manifest.json"
                 ),
-                receipt_sha256=HASH,
+                receipt_sha256=(
+                    terminal_receipt_sha256
+                    or (native_receipt.evidence_sha256 if native_receipt is not None else HASH)
+                ),
                 terminal_observation_sha256=canonical_sha256(
                     observation.model_dump(mode="json")
                 ),
                 terminal_observation=observation,
                 application_receipt=application_receipt,
+                parameter_application_receipt=native_receipt,
+                parameter_card_sha256=(
+                    card_hash(load_parameter_cards()[requested.knob_id])
+                    if native_receipt is not None
+                    else None
+                ),
+                materialization_receipt_sha256=(
+                    native_receipt.materialization.receipt_sha256
+                    if native_receipt is not None
+                    else None
+                ),
+                parameter_application_receipt_id=(
+                    native_receipt.receipt_id if native_receipt is not None else None
+                ),
                 outcome_details_sha256=HASH,
         )
         if application_receipt is None:
@@ -246,6 +394,7 @@ def test_memory_promotes_only_terminal_closed_evidence_and_sync_is_idempotent(
     source_scope = _scope("episode-source")
     ledger = OptimizationLedger(source_root)
     observation = _terminal("terminal-1", 1.0)
+    native_receipt = _parameter_application_receipt(1)
     ledger.append_terminal(
         OptimizationTerminalOutcome(
             intervention_id="intervention-1",
@@ -255,9 +404,15 @@ def test_memory_promotes_only_terminal_closed_evidence_and_sync_is_idempotent(
             candidate_manifest_ref=(
                 ".agent/optimization/episode-source/candidates/1/manifest.json"
             ),
-            receipt_sha256=HASH,
+            receipt_sha256=native_receipt.evidence_sha256,
             terminal_observation_sha256=canonical_sha256(observation.model_dump(mode="json")),
             terminal_observation=observation,
+            parameter_application_receipt=native_receipt,
+            parameter_card_sha256=card_hash(
+                load_parameter_cards()["place.cell_padding_x"]
+            ),
+            materialization_receipt_sha256=native_receipt.materialization.receipt_sha256,
+            parameter_application_receipt_id=native_receipt.receipt_id,
             outcome_details_sha256=HASH,
         )
     )
@@ -267,7 +422,7 @@ def test_memory_promotes_only_terminal_closed_evidence_and_sync_is_idempotent(
     second = store.synchronize()
     assert len(first.entries) == 1
     assert first.entries[0].evidence.candidate_manifest_ref.endswith("manifest.json")
-    assert first.entries[0].evidence.receipt_sha256 == HASH
+    assert first.entries[0].evidence.receipt_sha256 == native_receipt.evidence_sha256
     assert second == first
 
 
@@ -335,7 +490,7 @@ def test_snapshot_is_bounded_compressed_deterministic_and_updates(tmp_path: Path
     assert sum(len(item.evidence_refs) for item in updated.summaries) == 6
 
 
-def test_task_memory_does_not_reemit_legacy_application_receipts(
+def test_task_memory_rejects_legacy_application_receipts(
     tmp_path: Path,
 ) -> None:
     store = OptimizationTaskMemoryStore(
@@ -350,37 +505,130 @@ def test_task_memory_does_not_reemit_legacy_application_receipts(
     replay = store.synchronize()
     snapshot = store.snapshot()
 
-    assert replay.entries[0].application_receipt is None
-    assert snapshot.summaries[0].application_receipts == ()
+    assert replay.entries == ()
+    assert snapshot.summaries == ()
     assert store.replay() == replay
 
 
-def test_legacy_task_memory_v1_without_receipt_keeps_its_hash_shape(
+def test_task_memory_rejects_terminal_without_native_receipt(
     tmp_path: Path,
 ) -> None:
     store = OptimizationTaskMemoryStore(
         tmp_path / "optimization", _scope("episode-current")
     )
-    _episode(store, _scope("episode-source"))
+    source_scope = _scope("episode-source")
+    root = store.root / source_scope.episode_id
+    store.ensure_episode_scope(root, source_scope)
+    _append_intervention(root, source_scope, index=1, include_native_receipt=False)
 
     replay = store.synchronize()
-    record = json.loads(store.store_path.read_text(encoding="utf-8"))
-    payload = {
-        key: value
-        for key, value in record.items()
-        if key not in {"sequence", "previous_entry_sha256", "entry_sha256"}
-    }
-
-    assert "application_receipt" not in payload
-    assert record["entry_sha256"] == canonical_sha256(
-        {
-            "schema_version": "ecos.optimization_task_memory_entry.v1",
-            "sequence": 1,
-            "previous_entry_sha256": None,
-            "payload": payload,
-        }
-    )
+    assert replay.entries == ()
     assert store.replay() == replay
+
+
+def test_task_memory_rejects_terminal_with_foreign_receipt_hash(tmp_path: Path) -> None:
+    store = OptimizationTaskMemoryStore(
+        tmp_path / "optimization", _scope("episode-current")
+    )
+    source_scope = _scope("episode-source")
+    root = store.root / source_scope.episode_id
+    store.ensure_episode_scope(root, source_scope)
+    _append_intervention(
+        root,
+        source_scope,
+        index=1,
+        terminal_receipt_sha256=WORKSPACE_HASH,
+    )
+
+    assert store.synchronize().entries == ()
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    (
+        OptimizationOutcomeKind.EXECUTION_FAILED,
+        OptimizationOutcomeKind.EVIDENCE_INVALID,
+        OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+    ),
+)
+def test_task_memory_rejects_unsuccessful_outcomes(
+    tmp_path: Path, outcome: OptimizationOutcomeKind
+) -> None:
+    store = OptimizationTaskMemoryStore(
+        tmp_path / "optimization", _scope("episode-current")
+    )
+    _episode(store, _scope("episode-source"))
+    source_scope = _scope("episode-failed")
+    root = store.root / source_scope.episode_id
+    store.ensure_episode_scope(root, source_scope)
+    _append_intervention(root, source_scope, index=1, outcome=outcome)
+
+    replay = store.synchronize()
+
+    assert len(replay.entries) == 1
+    assert replay.entries[0].scope.episode_id == "episode-source"
+
+
+def test_task_memory_requires_eligible_v3_terminal_observation(tmp_path: Path) -> None:
+    store = OptimizationTaskMemoryStore(
+        tmp_path / "optimization", _scope("episode-current")
+    )
+    for episode_id, observation in (
+        (
+            "episode-v2",
+            TerminalObservation(
+                observation_id="terminal-v2",
+                evidence_manifest_sha256=HASH,
+                evidence_valid=True,
+                harden_artifacts_complete=True,
+                signoff_gates=SignoffGates.all(GateResult.PASS),
+                metrics=_terminal("unused", 1.0).metrics,
+                timing_guardrail={metric: 0.0 for metric in TimingMetric},
+            ),
+        ),
+        (
+            "episode-ineligible",
+            _terminal("terminal-ineligible", 1.0).model_copy(
+                update={"evidence_valid": False}
+            ),
+        ),
+    ):
+        scope = _scope(episode_id)
+        root = store.root / scope.episode_id
+        store.ensure_episode_scope(root, scope)
+        _append_intervention(root, scope, index=1, observation=observation)
+
+    assert store.synchronize().entries == ()
+
+
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {"context": {"stage": "route"}},
+        {
+            "application_status": "ignored",
+            "activation": ActivationEvidence(status="unknown"),
+        },
+    ),
+)
+def test_task_memory_rejects_invalid_or_ineffective_native_receipt(
+    tmp_path: Path, updates: dict[str, object]
+) -> None:
+    store = OptimizationTaskMemoryStore(
+        tmp_path / "optimization", _scope("episode-current")
+    )
+    scope = _scope("episode-source")
+    root = store.root / scope.episode_id
+    store.ensure_episode_scope(root, scope)
+    receipt = _replace_receipt(_parameter_application_receipt(1), **updates)
+    _append_intervention(
+        root,
+        scope,
+        index=1,
+        parameter_application_receipt=receipt,
+    )
+
+    assert store.synchronize().entries == ()
 
 
 def test_memory_store_rejects_hash_tampering(tmp_path: Path) -> None:

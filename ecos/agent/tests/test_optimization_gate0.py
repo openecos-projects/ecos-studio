@@ -6,9 +6,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import ecos_agent.optimization_gate0 as gate0
+import pytest
 from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_contracts import (
     GateResult,
@@ -356,6 +355,7 @@ def test_success_candidate_rejects_missing_native_parameter_receipt(
             )
 
     monkeypatch.setattr(gate0, "EccCandidateRerunAdapter", SuccessfulAdapter)
+    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: HASH)
 
     with pytest.raises(Gate0Error, match="native parameter application receipt"):
         run_pilot_candidate(
@@ -388,6 +388,7 @@ def test_failed_candidate_records_parent_and_chargeable_receipt(
             )
 
     monkeypatch.setattr(gate0, "EccCandidateRerunAdapter", FailedAdapter)
+    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: HASH)
     output = tmp_path / "candidate"
     parent_ref = ".agent/candidates/incumbent-1"
 
@@ -420,3 +421,44 @@ def test_failed_candidate_records_parent_and_chargeable_receipt(
         "outcome": "execution_failed",
         "started": True,
     }
+
+
+def test_pilot_context_uses_complete_domain_fingerprint(monkeypatch, tmp_path: Path) -> None:
+    execution_context = {
+        "design_sha256": HASH,
+        "rtl_sha256": HASH,
+        "filelist_sha256": HASH,
+        "sdc_sha256": HASH,
+        "pdk_sha256": HASH,
+        "parent_lineage_sha256": HASH,
+        "parent_manifest_sha256": HASH,
+        "site_width_dbu": 200,
+        "seed": 0,
+    }
+    current_values = {
+        "floorplan.core_util": 0.5,
+        "floorplan.aspect_ratio": 1.0,
+        "synth.max_fanout": 24,
+        "place.target_density": 0.6,
+        "place.target_overflow": 0.1,
+        "place.cell_padding_x": 1,
+        "place.routability_opt": True,
+        "place.density_weight": 8e-5,
+    }
+    monkeypatch.setattr(gate0, "_incumbent_workspace", lambda workspace, _ref: workspace)
+    monkeypatch.setattr(gate0, "_parent_manifest_sha256", lambda *_args: HASH)
+    monkeypatch.setattr(
+        gate0, "_optimization_execution_context", lambda *_args: execution_context
+    )
+    monkeypatch.setattr(gate0, "_current_values", lambda *_args: current_values)
+    requested = RequestedKnobValue(knob_id="place.target_density", value=0.65)
+
+    first = gate0._pilot_context_sha256(
+        tmp_path, 200, _terminal(10, 5, 100), requested, "gate0-pilot", None
+    )
+    second = gate0._pilot_context_sha256(
+        tmp_path, 200, _terminal(11, 5, 100), requested, "gate0-pilot", None
+    )
+
+    assert gate0._SHA256.fullmatch(first)
+    assert first != second
