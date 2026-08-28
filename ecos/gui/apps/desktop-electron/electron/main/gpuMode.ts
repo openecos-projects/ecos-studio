@@ -42,7 +42,14 @@ function shouldUseSoftwareGpu(options: Omit<ConfigureGpuModeOptions, 'app'>): bo
 }
 
 export function configureGpuMode(options: ConfigureGpuModeOptions): void {
-  if (!shouldUseSoftwareGpu(options)) {
+  const isWsl =
+    options.env.WSL_DISTRO_NAME !== undefined || options.env.WSL_INTEROP !== undefined
+
+  if (isWsl && options.platform === 'linux') {
+    options.app.commandLine.appendSwitch('disable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan')
+  }
+
+  if (!shouldUseSoftwareGpu(options) && !isWsl) {
     return
   }
 
