@@ -197,6 +197,17 @@ describe('useParameters helpers', () => {
     expect(parameters['Bottom layer']).toBe('MET2')
     expect(parameters['Top layer']).toBe('MET5')
   })
+  it('reads canonical die_area geometry when Die/Core tables are absent', () => {
+    const parsed = parseParametersRecord({
+      pdk: 'ics55',
+      design: 'demo',
+      die_area: { width: 120, height: 80, utilitization: 0.5, margin: 3 },
+    })
+    expect(parsed.Die.Size).toEqual([120, 80])
+    expect(parsed.Core.Utilitization).toBe(0.5)
+    expect(parsed.Core.Margin).toEqual([3, 3])
+  })
+
   it('rejects bigint parameters instead of rounding them silently', () => {
     expect(() =>
       parseParametersRecord({

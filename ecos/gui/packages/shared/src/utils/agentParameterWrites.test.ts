@@ -54,6 +54,32 @@ describe('parameterWritesMatchPatch', () => {
     ).toBe(false)
   })
 
+  it('rejects a write that parks the knob leaf under an unrelated table', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.target_density', value: 0.55 }],
+        [densityWrite({ json_path: ['core', 'target_density'] })],
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects a step-config write aimed at the wrong tool file', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.density_weight', value: 0.1 }],
+        [
+          {
+            file: 'config/cts_ecc.json',
+            json_path: ['density_weight'],
+            knob_id: 'place.density_weight',
+            surface: 'step_config',
+            value: 0.1,
+          },
+        ],
+      ),
+    ).toBe(false)
+  })
+
   it('accepts a nested table path whose parent is a known parameter table', () => {
     expect(
       parameterWritesMatchPatch(

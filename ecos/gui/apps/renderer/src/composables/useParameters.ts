@@ -183,8 +183,27 @@ function firstResponseMessage(
   return response?.message?.[0] || fallback
 }
 
-function normalizeDie(d: unknown): ParametersData['Die'] {
-  if (d == null) return { Size: [], Area: 0 }
+function dieSizeFromDieArea(dieArea: unknown): number[] {
+  if (dieArea == null) return []
+  if (!isPlainRecord(dieArea)) {
+    throw new Error(
+      'Parameter die_area must be a table, not a scalar; edit the workspace configuration manually',
+    )
+  }
+  const width = dieArea.width
+  const height = dieArea.height
+  if (width == null && height == null) return []
+  return [
+    losslessNumber(width ?? 0, 'die_area.width'),
+    losslessNumber(height ?? 0, 'die_area.height'),
+  ]
+}
+
+function normalizeDie(d: unknown, dieArea?: unknown): ParametersData['Die'] {
+  if (d == null) {
+    const size = dieSizeFromDieArea(dieArea)
+    return { Size: size, Area: size.length >= 2 ? size[0]! * size[1]! : 0 }
+  }
   if (!isPlainRecord(d)) {
     throw new Error(
       'Parameter die must be a table, not a scalar; edit the workspace configuration manually',
@@ -192,20 +211,36 @@ function normalizeDie(d: unknown): ParametersData['Die'] {
   }
   const size = d.Size ?? d.size
   const area = d.Area ?? d.area
+  const listed = losslessNumberList(size, 'Die.Size')
+  const fromDieArea = listed.length >= 2 ? listed : dieSizeFromDieArea(dieArea)
   return {
-    Size: losslessNumberList(size, 'Die.Size'),
+    Size: fromDieArea,
     Area: area != null ? losslessNumber(area, 'Die.Area') : 0,
   }
 }
 
-function normalizeCore(c: unknown): ParametersData['Core'] {
+function normalizeCore(c: unknown, dieArea?: unknown): ParametersData['Core'] {
+  const dieAreaTable = dieArea == null ? null : isPlainRecord(dieArea) ? dieArea : null
+  if (dieArea != null && dieAreaTable == null) {
+    throw new Error(
+      'Parameter die_area must be a table, not a scalar; edit the workspace configuration manually',
+    )
+  }
   if (c == null) {
+    const utilitization =
+      dieAreaTable?.utilitization != null
+        ? losslessNumber(dieAreaTable.utilitization, 'die_area.utilitization')
+        : 0.4
+    const margin =
+      dieAreaTable?.margin != null
+        ? losslessNumber(dieAreaTable.margin, 'die_area.margin')
+        : 2
     return {
       Size: [],
       Area: 0,
       'Bounding box': '',
-      Utilitization: 0.4,
-      Margin: [2, 2],
+      Utilitization: utilitization,
+      Margin: [margin, margin],
       'Aspect ratio': 1,
     }
   }
@@ -218,8 +253,14 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
   const area = c.Area ?? c.area
   const margin = c.Margin ?? c.margin
   const listedMargin = losslessNumberList(margin, 'Core.Margin')
+  const dieAreaMargin =
+    dieAreaTable?.margin != null
+      ? losslessNumber(dieAreaTable.margin, 'die_area.margin')
+      : 2
   const m: [number, number] =
-    listedMargin.length >= 2 ? [listedMargin[0]!, listedMargin[1]!] : [2, 2]
+    listedMargin.length >= 2
+      ? [listedMargin[0]!, listedMargin[1]!]
+      : [dieAreaMargin, dieAreaMargin]
   return {
     Size: losslessNumberList(size, 'Core.Size'),
     Area: area != null ? losslessNumber(area, 'Core.Area') : 0,
@@ -228,7 +269,7 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
       'Bounding box',
     ),
     Utilitization: losslessNumber(
-      c.Utilitization ?? c.utilitization ?? 0.4,
+      c.Utilitization ?? c.utilitization ?? dieAreaTable?.utilitization ?? 0.4,
       'Core.Utilitization',
     ),
     Margin: m,
@@ -353,8 +394,8 @@ export function parseParametersRecord(raw: Record<string, unknown>): ParametersD
     'Top module': losslessString(raw['Top module'] ?? raw.top_module ?? '', 'Top module'),
     top_module:
       raw.top_module != null ? losslessString(raw.top_module, 'top_module') : undefined,
-    Die: normalizeDie(raw.Die ?? raw.die),
-    Core: normalizeCore(raw.Core ?? raw.core),
+    Die: normalizeDie(raw.Die ?? raw.die, raw['Die Area'] ?? raw.die_area),
+    Core: normalizeCore(raw.Core ?? raw.core, raw['Die Area'] ?? raw.die_area),
     'Max fanout': losslessNumber(raw['Max fanout'] ?? raw.max_fanout ?? 20, 'Max fanout'),
     'Target density': losslessNumber(
       raw['Target density'] ?? raw.target_density ?? 0.3,

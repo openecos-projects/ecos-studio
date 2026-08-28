@@ -508,6 +508,15 @@ export class WorkspaceService {
       )
     }
     const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
+    const [canonicalWorkspace, canonicalRoot] = await Promise.all([
+      realpath(workspacePath),
+      realpath(authorizingRoot),
+    ])
+    if (canonicalWorkspace !== canonicalRoot) {
+      throw new Error(
+        'Refusing to edit workspace parameters: the target is not the active workspace',
+      )
+    }
     const canonicalPath =
       await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
     await this.assertCanWriteProjectTextFile(canonicalPath)
@@ -524,11 +533,12 @@ export class WorkspaceService {
       // starting while the edit queued behind another writer) blocks it.
       async () => {
         const activeRoot = await this.projectScopeProvider.getProjectRoot()
-        const [expected, active] = await Promise.all([
+        const [expected, active, target] = await Promise.all([
           realpath(authorizingRoot),
           realpath(activeRoot),
+          realpath(workspacePath),
         ])
-        if (expected !== active) {
+        if (expected !== active || target !== active) {
           throw new Error(
             'Refusing to edit workspace parameters: the active workspace ' +
               'changed before the edit completed',

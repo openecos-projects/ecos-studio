@@ -471,7 +471,10 @@ function normalizeSourceParameters(
   parametersJson: Record<string, unknown> | null,
 ): Record<string, unknown> {
   if (!parametersJson) return {}
-  const dieAreaRecord = optionalRecord(parametersJson['Die Area']) ?? {}
+  const dieAreaRecord =
+    optionalRecord(parametersJson['Die Area']) ??
+    optionalRecord(parametersJson.die_area) ??
+    {}
   const die =
     optionalRecord(parametersJson.Die) ?? optionalRecord(parametersJson.die) ?? {}
   const core =

@@ -940,6 +940,20 @@ describe('editWorkspaceParameters', () => {
     )
   })
 
+  it('refuses to edit parameters in a nested workspace under the active root', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const nested = join(directory, 'archive', 'other')
+    await mkdir(join(nested, 'home'), { recursive: true })
+    const tomlPath = join(nested, 'home', 'ecc.toml')
+    await writeFile(tomlPath, '[params]\ndesign = "gcd"\n', 'utf8')
+
+    const { service } = createWorkspaceService(directory, tomlPath)
+    await expect(
+      service.editWorkspaceParameters(nested, [{ json_path: ['design'], value: 'x' }]),
+    ).rejects.toThrow(/not the active workspace/)
+    await expect(readFile(tomlPath, 'utf8')).resolves.toBe('[params]\ndesign = "gcd"\n')
+  })
+
   it('edits parameters in a real ecc.toml file', async () => {
     const directory = await createTempDir('ecos-workspace-service-')
     const homeDir = join(directory, 'home')

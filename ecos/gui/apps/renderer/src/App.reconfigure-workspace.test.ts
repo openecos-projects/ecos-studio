@@ -182,6 +182,7 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(normalizeSource.indexOf('dieSize[1]', heightLine)).toBeLessThan(
       normalizeSource.indexOf('parametersJson?.die_height', heightLine),
     )
+    expect(normalizeSource).toContain('parametersJson?.die_area')
   })
 
   it('records project-managed workspaces into project.json after wizard create and reconfigure', () => {

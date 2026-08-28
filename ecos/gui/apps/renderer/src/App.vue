@@ -739,7 +739,10 @@ function normalizeWorkspaceParameters(
   parametersJson: Record<string, unknown> | null,
   workspacePath: string,
 ): WorkspaceConfig['parameters'] {
-  const dieArea = optionalRecord(parametersJson?.['Die Area']) ?? {}
+  const dieArea =
+    optionalRecord(parametersJson?.['Die Area']) ??
+    optionalRecord(parametersJson?.die_area) ??
+    {}
   const die =
     optionalRecord(parametersJson?.Die) ?? optionalRecord(parametersJson?.die) ?? {}
   const core =

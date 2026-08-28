@@ -427,14 +427,31 @@ async function enqueueParameterWrite<T>(
 /**
  * Incoming payload/edit values face the same rules as the document on disk:
  * a non-finite number would serialize as null (JSON) or inf/nan (TOML)
- * instead of failing. Checked recursively before any merge.
+ * instead of failing, and TOML stringify silently drops null/undefined.
+ * Checked recursively before any merge.
  */
 function assertFiniteNumbers(value: unknown, label: string): void {
+  if (value === undefined) return
+  if (value === null) {
+    throw new Error(`Refusing to write ${label}: null would delete the parameter leaf`)
+  }
+  if (typeof value === 'bigint' || value instanceof Date) {
+    throw new Error(
+      `Refusing to write ${label}: value cannot be represented losslessly in the workspace configuration`,
+    )
+  }
   if (typeof value === 'number' && !Number.isFinite(value)) {
     throw new Error(`Refusing to write ${label}: non-finite number in parameters payload`)
   }
   if (Array.isArray(value)) {
-    for (const item of value) assertFiniteNumbers(item, label)
+    for (const item of value) {
+      if (item === undefined) {
+        throw new Error(
+          `Refusing to write ${label}: sparse array values are not representable`,
+        )
+      }
+      assertFiniteNumbers(item, label)
+    }
     return
   }
   if (isPlainRecord(value)) {
@@ -840,6 +857,11 @@ export async function editWorkspaceParameters(
     // this operation waited behind another writer must still block it.
     await assertWritable?.()
     for (const edit of edits) {
+      if (edit.value === undefined) {
+        throw new Error(
+          `Refusing to write ${location.path}: undefined would delete the parameter leaf`,
+        )
+      }
       assertFiniteNumbers(edit.value, location.path)
     }
     // Re-locate at the head of the queue: when the preferred config changed

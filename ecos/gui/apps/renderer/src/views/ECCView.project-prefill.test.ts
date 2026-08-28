@@ -234,6 +234,7 @@ describe('branch prefill canonical parameters', () => {
     )
     const normalizeSource = source.slice(normalizeStart, normalizeEnd)
     expect(normalizeSource).toContain('die.size')
+    expect(normalizeSource).toContain('die_area')
     expect(normalizeSource).toContain('core.margin')
     expect(normalizeSource).toContain('dieSize[0]')
     expect(normalizeSource).toContain('dieSize[1]')

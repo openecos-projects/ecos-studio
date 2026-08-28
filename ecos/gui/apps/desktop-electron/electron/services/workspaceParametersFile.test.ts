@@ -464,6 +464,23 @@ describe('writeWorkspaceParameters', () => {
     },
   )
 
+  it('rejects null, Date, and bigint edit values instead of silently rewriting them', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['design'], value: null }]),
+    ).rejects.toThrow(/null/)
+    await expect(
+      editWorkspaceParameters(root, [
+        { json_path: ['design'], value: new Date('2026-08-27T00:00:00Z') },
+      ]),
+    ).rejects.toThrow(/losslessly/)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64n }]),
+    ).rejects.toThrow(/losslessly/)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
   it('rejects non-finite numbers in the incoming payload and edit values', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'ecc.toml', ECC_TOML)

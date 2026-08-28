@@ -418,6 +418,57 @@ describe('ProjectManifestService', () => {
     ).rejects.toThrow(/die\/core dimension array/i)
   })
 
+  it('reads canonical die_area geometry when selecting a QoR baseline', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspacePath = join(projectRoot, 'ws_0001')
+    const service = createService(projectRoot, undefined, {
+      loadBaselineSnapshot: async () => ({
+        parameters: {
+          pdk: 'ics55',
+          pdk_root: '/pdks/ics55',
+          design: 'gcd',
+          top_module: 'gcd',
+          clock: 'clk',
+          die_area: {
+            width: 120,
+            height: 80,
+            utilitization: 0.5,
+            margin: 4,
+            mode: 'width_height',
+          },
+        },
+        pdk: {},
+        db: { INPUT: {} },
+      }),
+    })
+
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'project label', designName: 'project_design' },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'register-workspace', input: { projectRoot, workspacePath } },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
+    })
+
+    const manifest = parseProjectManifest(
+      await readFile(join(projectRoot, 'project.json'), 'utf8'),
+    )
+    expect(manifest.base_design.parameters).toEqual(
+      expect.objectContaining({
+        die_width: 120,
+        die_height: 80,
+        utilitization: 0.5,
+        margin: 4,
+        die_area_mode: 'width_height',
+      }),
+    )
+  })
+
   it('does not write a partial baseline mutation when its snapshot is incomplete', async () => {
     const projectRoot = await createTemporaryProject()
     const workspacePath = join(projectRoot, 'ws_0001')

@@ -415,10 +415,11 @@ function normalizedBaselineParameters(
 ): Record<string, unknown> {
   const die = recordValue(parameters.Die) ?? recordValue(parameters.die) ?? {}
   const core = recordValue(parameters.Core) ?? recordValue(parameters.core) ?? {}
-  const dieArea = recordValue(parameters['Die Area']) ?? {}
+  const dieArea =
+    recordValue(parameters['Die Area']) ?? recordValue(parameters.die_area) ?? {}
   const dieSize = numberArray(die.Size ?? die.size)
   const margins = numberArray(core.Margin ?? core.margin)
-  const normalized = {
+  const normalized: Record<string, unknown> = {
     design: firstString(parameters.Design, parameters.design),
     top_module: firstString(
       parameters['Top module'],
@@ -443,7 +444,9 @@ function normalizedBaselineParameters(
     margin: firstValue(dieArea.margin, margins[0], parameters.margin),
   }
   assertBaselineScalarsSafe(normalized)
-  return normalized
+  return Object.fromEntries(
+    Object.entries(normalized).filter(([, value]) => value !== undefined && value !== ''),
+  )
 }
 
 function assertBaselineScalarClass(value: unknown): void {

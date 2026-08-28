@@ -6,8 +6,21 @@ import {
 import { hasSafeJsonPath } from './jsonPath.ts'
 import { normalizeParameterKey } from './parameterKeys.ts'
 
-const PARAMETER_SURFACE_FILES = new Set(['home/ecc.toml', 'home/parameters.json'])
-const NESTED_PARAMETER_TABLES = new Set(['core', 'die', 'die_area'])
+const PARAMETER_SURFACE_FILES = ['home/ecc.toml', 'home/parameters.json'] as const
+const STEP_CONFIG_FILE_BY_KNOB_PREFIX: Record<string, string> = {
+  place: 'config/dreamplace_ecc.json',
+  legalization: 'config/dreamplace_ecc.json',
+  cts: 'config/cts_ecc.json',
+  route: 'config/route_ecc.json',
+}
+
+/**
+ * Extra canonical parameter-surface paths beyond the flat knob leaf.
+ * `floorplan.utilitization` is stored under Core in legacy JSON.
+ */
+const NESTED_PARAMETER_KNOB_PATHS: Record<string, readonly (readonly string[])[]> = {
+  'floorplan.utilitization': [['core', 'utilitization']],
+}
 
 /**
  * Canonical identity of a resolved write: both workspace-config aliases
@@ -19,7 +32,7 @@ const NESTED_PARAMETER_TABLES = new Set(['core', 'die', 'die_area'])
 export function canonicalParameterWriteKey(
   write: DesktopAgentWorkspaceParameterWrite,
 ): string {
-  const file = PARAMETER_SURFACE_FILES.has(write.file)
+  const file = (PARAMETER_SURFACE_FILES as readonly string[]).includes(write.file)
     ? 'home/workspace-config'
     : write.file
   const path = write.json_path.map((segment) =>
@@ -50,7 +63,8 @@ export function parameterWritesMatchPatch(
       writeKnobs.has(write.knob_id) ||
       writePaths.has(pathKey) ||
       !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
-      PARAMETER_SURFACE_FILES.has(write.file) !== (write.surface === 'parameters') ||
+      (PARAMETER_SURFACE_FILES as readonly string[]).includes(write.file) !==
+        (write.surface === 'parameters') ||
       !hasSafeJsonPath(write.json_path) ||
       !writePathMatchesKnob(write) ||
       !writeValueMatchesPatch(write, patchItem)
@@ -64,24 +78,50 @@ export function parameterWritesMatchPatch(
 }
 
 /**
- * The advertised knob is bound to the complete write path, not just the
- * last segment: `place.target_density` may be spelled `target_density` or
- * `Target density`, and `floorplan.utilitization` may live under `Core`,
- * but `['future', 'target_density']` is not the advertised knob.
+ * Each advertised knob may only land on an explicit (surface, file, path)
+ * combination. `place.target_density` is the flat leaf on the workspace
+ * config; it is not `core.target_density`, and a step-config knob may not
+ * target a different tool's config file.
  */
 function writePathMatchesKnob(write: DesktopAgentWorkspaceParameterWrite): boolean {
-  const last = write.json_path[write.json_path.length - 1]
-  if (typeof last !== 'string') return false
-  const knobParts = write.knob_id.split('.')
-  const knobLeaf = knobParts[knobParts.length - 1]
-  if (!knobLeaf || normalizeParameterKey(last) !== knobLeaf) return false
-  if (write.json_path.length === 1) return true
-  if (write.surface === 'step_config' || write.json_path.length !== 2) return false
-  const parent = write.json_path[0]
-  return (
-    typeof parent === 'string' &&
-    NESTED_PARAMETER_TABLES.has(normalizeParameterKey(parent))
+  const canonicalPath = write.json_path.map((segment) =>
+    typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
   )
+  if (canonicalPath.some((segment) => typeof segment !== 'string')) return false
+  return allowedWriteLocations(write.knob_id).some(
+    (location) =>
+      location.surface === write.surface &&
+      (location.files as readonly string[]).includes(write.file) &&
+      JSON.stringify(location.path) === JSON.stringify(canonicalPath),
+  )
+}
+
+function allowedWriteLocations(knobId: string): Array<{
+  files: readonly string[]
+  path: readonly string[]
+  surface: DesktopAgentWorkspaceParameterWrite['surface']
+}> {
+  const parts = knobId.split('.')
+  const prefix = parts[0]
+  const leaf = parts[parts.length - 1]
+  if (!prefix || !leaf) return []
+  const locations: Array<{
+    files: readonly string[]
+    path: readonly string[]
+    surface: DesktopAgentWorkspaceParameterWrite['surface']
+  }> = [{ files: PARAMETER_SURFACE_FILES, path: [leaf], surface: 'parameters' }]
+  for (const nested of NESTED_PARAMETER_KNOB_PATHS[knobId] ?? []) {
+    locations.push({
+      files: PARAMETER_SURFACE_FILES,
+      path: nested,
+      surface: 'parameters',
+    })
+  }
+  const stepFile = STEP_CONFIG_FILE_BY_KNOB_PREFIX[prefix]
+  if (stepFile) {
+    locations.push({ files: [stepFile], path: [leaf], surface: 'step_config' })
+  }
+  return locations
 }
 
 function writeValueMatchesPatch(
