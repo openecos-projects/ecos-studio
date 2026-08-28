@@ -1,0 +1,89 @@
+import { describe, expect, it } from 'vitest'
+
+import type { DesktopAgentWorkspaceParameterWrite } from '../contracts/desktopAgent.ts'
+import {
+  canonicalParameterWriteKey,
+  parameterWritesMatchPatch,
+} from './agentParameterWrites.ts'
+
+const densityWrite = (
+  overrides: Partial<DesktopAgentWorkspaceParameterWrite> = {},
+): DesktopAgentWorkspaceParameterWrite => ({
+  file: 'home/ecc.toml',
+  json_path: ['target_density'],
+  knob_id: 'place.target_density',
+  surface: 'parameters',
+  value: 0.55,
+  ...overrides,
+})
+
+describe('parameterWritesMatchPatch', () => {
+  it('accepts a 1:1 knob/value/surface match', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.target_density', value: 0.55 }],
+        [densityWrite()],
+      ),
+    ).toBe(true)
+  })
+
+  it('rejects a write whose path or value does not match the advertised patch', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.target_density', value: 0.55 }],
+        [densityWrite({ json_path: ['pdk_root'], value: '/tmp/other' })],
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects a parameters surface aimed at a step-config file', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [{ knob_id: 'place.target_density', value: 0.55 }],
+        [
+          densityWrite({
+            file: 'config/dreamplace_ecc.json',
+            json_path: ['density_weight'],
+          }),
+        ],
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects duplicate logical targets across workspace-config aliases', () => {
+    expect(
+      parameterWritesMatchPatch(
+        [
+          { knob_id: 'place.target_density', value: 0.55 },
+          { knob_id: 'place.target_overflow', value: 0.1 },
+        ],
+        [
+          densityWrite(),
+          densityWrite({
+            file: 'home/parameters.json',
+            json_path: ['Target density'],
+            knob_id: 'place.target_overflow',
+            value: 0.1,
+          }),
+        ],
+      ),
+    ).toBe(false)
+  })
+
+  it('accepts an empty patch with no writes', () => {
+    expect(parameterWritesMatchPatch([], [])).toBe(true)
+  })
+})
+
+describe('canonicalParameterWriteKey', () => {
+  it('folds alias files and display-key path segments together', () => {
+    expect(canonicalParameterWriteKey(densityWrite())).toBe(
+      canonicalParameterWriteKey(
+        densityWrite({
+          file: 'home/parameters.json',
+          json_path: ['Target density'],
+        }),
+      ),
+    )
+  })
+})

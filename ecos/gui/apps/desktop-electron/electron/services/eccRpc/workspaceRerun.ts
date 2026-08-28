@@ -13,7 +13,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
-  desktopAgentParameterWriteFiles,
+  parameterWritesMatchPatch,
   type DesktopAgentWorkspaceParameterWrite,
   type DesktopAgentWorkspaceRerunContract,
 } from '@ecos-studio/shared'
@@ -462,43 +462,14 @@ function hasValidParameterWrites(
   writes: DesktopAgentWorkspaceParameterWrite[],
 ): boolean {
   if (!Array.isArray(writes) || writes.length !== patch.length) return false
-  const patchesByKnob = new Map(patch.map((item) => [item.knob_id, item]))
-  const writeKnobs = new Set<string>()
-  const writePaths = new Set<string>()
-  return writes.every((write) => {
-    const pathKey = `${write.file}:${JSON.stringify(write.json_path)}`
-    const patchItem = patchesByKnob.get(write.knob_id)
-    if (
-      !patchItem ||
-      writeKnobs.has(write.knob_id) ||
-      writePaths.has(pathKey) ||
-      !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
-      (write.surface === 'parameters' &&
-        write.file !== 'home/ecc.toml' &&
-        write.file !== 'home/parameters.json') ||
-      (write.surface === 'step_config' &&
-        (write.file === 'home/ecc.toml' || write.file === 'home/parameters.json')) ||
-      !hasValidJsonPath(write.json_path) ||
-      !isValidParameterValue(write.value) ||
-      !writeValueMatchesPatch(write, patchItem)
-    ) {
-      return false
-    }
-    writeKnobs.add(write.knob_id)
-    writePaths.add(pathKey)
-    return true
-  })
-}
-
-function writeValueMatchesPatch(
-  write: DesktopAgentWorkspaceParameterWrite,
-  patch: DesktopAgentWorkspaceRerunContract['parameter_patch'][number],
-): boolean {
-  const expected =
-    patch.knob_id === 'place.routability_opt' && typeof patch.value === 'boolean'
-      ? Number(patch.value)
-      : patch.value
-  return JSON.stringify(write.value) === JSON.stringify(expected)
+  if (
+    !writes.every(
+      (write) => hasValidJsonPath(write.json_path) && isValidParameterValue(write.value),
+    )
+  ) {
+    return false
+  }
+  return parameterWritesMatchPatch(patch, writes)
 }
 
 function hasValidJsonPath(path: (string | number)[]): boolean {
@@ -825,6 +796,44 @@ async function rewriteAndPruneWorkspaceRerunHome(options: {
   await pruneWorkspaceRerunChecklistJson(join(home, 'checklist.json'), wipedStageNames)
 }
 
+function trimPathSeparators(value: string): string {
+  return value.replace(/[\\/]+$/g, '')
+}
+
+function normalizePathSeparators(value: string): string {
+  return value.replace(/\\/g, '/')
+}
+
+/**
+ * Rewrite a parsed string scalar that is the source workspace root or a
+ * path under it. Comparison is separator-normalized so Windows leaves
+ * (`C:\runs\gcd\origin\gcd.v`) match a `/`-terminated prefix; the
+ * replacement keeps the original value's separator style.
+ */
+export function rewriteSourceRootedPath(
+  value: string,
+  prefixes: string[],
+  targetWorkspace: string,
+): string {
+  const valueNormalized = normalizePathSeparators(value)
+  const targetTrimmed = trimPathSeparators(targetWorkspace)
+  const targetNormalized = normalizePathSeparators(targetTrimmed)
+  const separator = value.includes('\\') || targetWorkspace.includes('\\') ? '\\' : '/'
+  for (const prefix of prefixes) {
+    const trimmed = trimPathSeparators(prefix)
+    if (!trimmed) continue
+    const trimmedNormalized = normalizePathSeparators(trimmed)
+    if (!trimmedNormalized || trimmedNormalized === targetNormalized) continue
+    if (valueNormalized === trimmedNormalized) return targetWorkspace
+    if (valueNormalized.startsWith(`${trimmedNormalized}/`)) {
+      const rest = valueNormalized.slice(trimmedNormalized.length + 1)
+      const renderedRest = separator === '\\' ? rest.replace(/\//g, '\\') : rest
+      return `${targetTrimmed}${separator}${renderedRest}`
+    }
+  }
+  return value
+}
+
 /**
  * Rewrite source-workspace prefixes inside parsed TOML string scalars: a
  * value is workspace-rooted only when it equals the source prefix or lives
@@ -836,17 +845,8 @@ function rewriteTomlSourcePathLeaves(
   prefixes: string[],
   targetWorkspace: string,
 ): boolean {
-  const rewriteValue = (value: string): string => {
-    for (const prefix of prefixes) {
-      const trimmed = prefix.replace(/\/+$/, '')
-      if (!trimmed || trimmed === targetWorkspace) continue
-      if (value === trimmed) return targetWorkspace
-      if (value.startsWith(`${trimmed}/`)) {
-        return `${targetWorkspace}/${value.slice(trimmed.length + 1)}`
-      }
-    }
-    return value
-  }
+  const rewriteValue = (value: string): string =>
+    rewriteSourceRootedPath(value, prefixes, targetWorkspace)
   const visit = (current: unknown): boolean => {
     if (Array.isArray(current)) {
       let changed = false
@@ -930,12 +930,13 @@ async function rewriteHomeJsonSourcePaths(
     }
     let next = original
     for (const prefix of prefixes) {
-      const trimmedPrefix = prefix.replace(/\/+$/, '')
+      const trimmedPrefix = trimPathSeparators(prefix)
       if (!trimmedPrefix || trimmedPrefix === options.targetWorkspace) continue
       // Path-boundary-aware replacement: a value is workspace-rooted only
       // when the prefix is followed by a separator or ends the string, so
       // prose like "compare /work/chip-old" is never rewritten.
       next = next.split(`${trimmedPrefix}/`).join(`${options.targetWorkspace}/`)
+      next = next.split(`${trimmedPrefix}\\`).join(`${options.targetWorkspace}\\`)
       next = next.split(`"${trimmedPrefix}"`).join(`"${options.targetWorkspace}"`)
       next = next.split(`'${trimmedPrefix}'`).join(`'${options.targetWorkspace}'`)
     }
@@ -948,11 +949,11 @@ async function rewriteHomeJsonSourcePaths(
 function uniquePathPrefixes(values: string[]): string[] {
   const prefixes = new Set<string>()
   for (const value of values) {
-    const trimmed = value.trim()
+    const trimmed = trimPathSeparators(value.trim())
     if (!trimmed) continue
     prefixes.add(trimmed)
-    const normalized = trimmed.replace(/\\/g, '/')
-    if (normalized !== trimmed) prefixes.add(normalized)
+    prefixes.add(trimmed.replace(/\\/g, '/'))
+    prefixes.add(trimmed.replace(/\//g, '\\'))
   }
   return [...prefixes].sort((left, right) => right.length - left.length)
 }

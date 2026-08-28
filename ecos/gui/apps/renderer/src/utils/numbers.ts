@@ -7,22 +7,56 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
   return prototype === Object.prototype || prototype === null
 }
 
+function assertLosslessShape(value: unknown, label: string): void {
+  if (value instanceof Date) {
+    throw new Error(
+      `Parameter ${label} holds a TOML date where a table or array was expected; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'bigint') {
+    throw new Error(
+      `Parameter ${label} value ${value} exceeds the safe integer range; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(
+      `Parameter ${label} value ${value} is not a finite number; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+}
+
 /**
- * optionalRecord for GUI-known table fields: a TOML date where a table is
- * expected would otherwise flatten into defaults that a save then persists
- * over the original value, so fail loud instead.
+ * optionalRecord for GUI-known table fields: a TOML date, bigint, or
+ * non-finite scalar where a table is expected would otherwise flatten into
+ * defaults that a save then persists over the original value, so fail loud.
  */
 export function losslessOptionalRecord(
   value: unknown,
   label: string,
 ): Record<string, unknown> | null {
-  if (value instanceof Date) {
+  if (value == null) return null
+  assertLosslessShape(value, label)
+  return isPlainRecord(value) ? value : null
+}
+
+/**
+ * GUI-known numeric arrays (`die.size`, `core.margin`): a defined
+ * non-array (date, bigint, scalar) would otherwise load as `[]` and be
+ * overwritten on the next save.
+ */
+export function losslessNumberList(value: unknown, label: string): number[] {
+  if (value == null) return []
+  assertLosslessShape(value, label)
+  if (!Array.isArray(value)) {
     throw new Error(
-      `Parameter ${label} holds a TOML date where a table was expected; ` +
+      `Parameter ${label} must be an array, not a scalar; ` +
         'edit the workspace configuration manually',
     )
   }
-  return isPlainRecord(value) ? value : null
+  return value.map((item) => losslessNumber(item, label)).filter(Number.isFinite)
 }
 
 /**

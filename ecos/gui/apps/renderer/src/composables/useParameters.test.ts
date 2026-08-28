@@ -234,6 +234,9 @@ describe('useParameters helpers', () => {
     expect(() =>
       parseParametersRecord({ pdk: 'ics55', design: 'demo', max_fanout: when }),
     ).toThrow(/TOML date/)
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', die: { size: when } }),
+    ).toThrow(/table or array was expected/)
   })
 
   it('treats empty snapshots as missing chip identity', () => {

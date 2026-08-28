@@ -227,6 +227,7 @@ import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
 import {
   losslessNumber,
+  losslessNumberList,
   losslessOptionalString,
   losslessOptionalRecord,
 } from '@/utils/numbers'
@@ -990,10 +991,7 @@ function stringList(value: unknown): string[] {
 }
 
 function numberList(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((item) => losslessNumber(item, 'workspace parameter'))
-    .filter(Number.isFinite)
+  return losslessNumberList(value, 'workspace parameter')
 }
 
 function normalizeLocalPath(path: string): string {

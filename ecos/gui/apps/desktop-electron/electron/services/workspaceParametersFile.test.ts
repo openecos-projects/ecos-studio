@@ -412,6 +412,22 @@ describe('writeWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
   })
 
+  it.each([
+    ['four-quote closer', 'note = """foo""""\n'],
+    ['five-quote closer', 'note = """foo"""""\n'],
+  ])(
+    'still rejects sub-millisecond datetimes after a %s multiline string',
+    async (_label, note) => {
+      const root = createWorkspace()
+      const content = `${ECC_TOML}\n${note}checkpoint = 1979-05-27T07:32:00.999999Z\n`
+      writeHomeFile(root, 'ecc.toml', content)
+      await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+        /millisecond precision/i,
+      )
+      expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    },
+  )
+
   it('rejects non-finite numbers in the incoming payload and edit values', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'ecc.toml', ECC_TOML)

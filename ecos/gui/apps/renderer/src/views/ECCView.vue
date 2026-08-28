@@ -212,6 +212,7 @@ import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAf
 import { waitForDesktopApi } from '@/platform/desktop'
 import {
   losslessNumber,
+  losslessNumberList,
   losslessOptionalString,
   losslessOptionalRecord,
 } from '@/utils/numbers'
@@ -568,10 +569,7 @@ function optionalNumber(value: unknown, fallback: number): number {
 }
 
 function numberList(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((item) => losslessNumber(item, 'workspace parameter'))
-    .filter(Number.isFinite)
+  return losslessNumberList(value, 'workspace parameter')
 }
 
 function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | undefined {

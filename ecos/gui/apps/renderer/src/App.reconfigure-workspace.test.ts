@@ -159,7 +159,9 @@ describe('App workspace reconfiguration wizard wiring', () => {
       'function normalizeLocalPath',
       numberListStart,
     )
-    expect(appSource.slice(numberListStart, numberListEnd)).toContain('losslessNumber(')
+    expect(appSource.slice(numberListStart, numberListEnd)).toContain(
+      'losslessNumberList(',
+    )
   })
 
   it('falls back to flat die_width/die_height keys when prefilling reconfigure defaults', () => {

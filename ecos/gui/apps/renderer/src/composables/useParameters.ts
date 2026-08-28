@@ -12,7 +12,7 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { refreshConfigApi } from '@/api/flow'
 import { CMDEnum, ResponseEnum } from '@/api/type'
-import { losslessNumber, isPlainRecord } from '@/utils/numbers'
+import { losslessNumber, losslessNumberList, isPlainRecord } from '@/utils/numbers'
 
 // ============ 类型定义 ============
 // 与 ecc/chipcompiler/data/parameter.py 中 ICS55_PARAMETERS_TEMPLATE 及 workspace 写入的 PDK Root 对齐
@@ -192,11 +192,8 @@ function normalizeDie(d: unknown): ParametersData['Die'] {
   }
   const size = d.Size ?? d.size
   const area = d.Area ?? d.area
-  const arr = Array.isArray(size)
-    ? size.map((item) => losslessNumber(item, 'Die.Size'))
-    : []
   return {
-    Size: arr,
+    Size: losslessNumberList(size, 'Die.Size'),
     Area: area != null ? losslessNumber(area, 'Die.Area') : 0,
   }
 }
@@ -219,19 +216,12 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
   }
   const size = c.Size ?? c.size
   const area = c.Area ?? c.area
-  const arr = Array.isArray(size)
-    ? size.map((item) => losslessNumber(item, 'Core.Size'))
-    : []
   const margin = c.Margin ?? c.margin
-  let m: [number, number] = [2, 2]
-  if (Array.isArray(margin) && margin.length >= 2) {
-    m = [
-      losslessNumber(margin[0], 'Core.Margin'),
-      losslessNumber(margin[1], 'Core.Margin'),
-    ]
-  }
+  const listedMargin = losslessNumberList(margin, 'Core.Margin')
+  const m: [number, number] =
+    listedMargin.length >= 2 ? [listedMargin[0]!, listedMargin[1]!] : [2, 2]
   return {
-    Size: arr,
+    Size: losslessNumberList(size, 'Core.Size'),
     Area: area != null ? losslessNumber(area, 'Core.Area') : 0,
     'Bounding box': losslessString(
       c['Bounding box'] ?? c.bounding_box ?? '',
@@ -250,11 +240,20 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
 }
 
 function normalizeStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value
-        .map((item) => losslessString(item, 'sim_program_names'))
-        .filter((item) => item.length > 0)
-    : []
+  if (value == null) return []
+  if (
+    value instanceof Date ||
+    typeof value === 'bigint' ||
+    (typeof value === 'number' && !Number.isFinite(value)) ||
+    !Array.isArray(value)
+  ) {
+    throw new Error(
+      'Parameter sim_program_names must be an array; edit the workspace configuration manually',
+    )
+  }
+  return value
+    .map((item) => losslessString(item, 'sim_program_names'))
+    .filter((item) => item.length > 0)
 }
 
 /**

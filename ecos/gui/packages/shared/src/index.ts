@@ -169,6 +169,10 @@ export type {
 } from './contracts/desktopAgent.ts'
 export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
 export {
+  canonicalParameterWriteKey,
+  parameterWritesMatchPatch,
+} from './utils/agentParameterWrites.ts'
+export {
   appMenuActionIds,
   desktopMenuEventIds,
   type DesktopProjectFileChangedEvent,

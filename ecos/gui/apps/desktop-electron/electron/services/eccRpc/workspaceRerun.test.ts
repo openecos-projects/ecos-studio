@@ -14,7 +14,11 @@ import { join } from 'node:path'
 import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { executeWorkspaceRerun, prepareWorkspaceRerun } from './workspaceRerun'
+import {
+  executeWorkspaceRerun,
+  prepareWorkspaceRerun,
+  rewriteSourceRootedPath,
+} from './workspaceRerun'
 
 const temporaryRoots: string[] = []
 
@@ -489,6 +493,31 @@ describe('prepareWorkspaceRerun', () => {
         contract.parameter_patch = [{ knob_id: 'place.target_density', value: 1 }]
       },
     ],
+    [
+      'aliases the same parameter leaf through both config files',
+      (contract: DesktopAgentWorkspaceRerunContract) => {
+        contract.parameter_patch = [
+          { knob_id: 'place.target_density', value: 0.55 },
+          { knob_id: 'place.target_overflow', value: 0.1 },
+        ]
+        contract.writes = [
+          {
+            file: 'home/ecc.toml',
+            json_path: ['target_density'],
+            knob_id: 'place.target_density',
+            surface: 'parameters',
+            value: 0.55,
+          },
+          {
+            file: 'home/parameters.json',
+            json_path: ['Target density'],
+            knob_id: 'place.target_overflow',
+            surface: 'parameters',
+            value: 0.1,
+          },
+        ]
+      },
+    ],
   ])('fails closed before copying when the contract %s', async (_case, mutate) => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
@@ -624,5 +653,27 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     expect(written).not.toContain(`${source}/place_dreamplace/output`)
     // Prose that merely shares the prefix is never rewritten.
     expect(written).toContain(`compare ${source}-old against this run`)
+  })
+})
+
+describe('rewriteSourceRootedPath', () => {
+  it('rewrites Windows leaves against a slash-terminated prefix', () => {
+    expect(
+      rewriteSourceRootedPath(
+        String.raw`C:\runs\gcd\origin\gcd.v`,
+        [String.raw`C:\runs\gcd/`],
+        String.raw`C:\runs\gcd_rerun_place`,
+      ),
+    ).toBe(String.raw`C:\runs\gcd_rerun_place\origin\gcd.v`)
+  })
+
+  it('leaves prose that only shares the prefix untouched', () => {
+    expect(
+      rewriteSourceRootedPath(
+        String.raw`compare C:\runs\gcd-old against this run`,
+        [String.raw`C:\runs\gcd`],
+        String.raw`C:\runs\gcd_rerun_place`,
+      ),
+    ).toBe(String.raw`compare C:\runs\gcd-old against this run`)
   })
 })
