@@ -152,7 +152,7 @@ describe('App workspace reconfiguration wizard wiring', () => {
       optionalNumberStart,
     )
     expect(appSource.slice(optionalNumberStart, optionalNumberEnd)).toContain(
-      'losslessNumber(',
+      'losslessOptionalNumber(',
     )
     const numberListStart = appSource.indexOf('function numberList')
     const numberListEnd = appSource.indexOf(

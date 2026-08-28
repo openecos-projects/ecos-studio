@@ -189,7 +189,6 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import {
-  assignOwnJsonPathValue,
   type DesktopAgentChoice,
   type DesktopAgentChoiceOption,
   type DesktopAgentEvent,
@@ -1763,7 +1762,9 @@ function normalizeWorkspaceRoot(value: string): string {
 /**
  * Applies the Agent's resolved write instructions. The knob-to-location mapping
  * lives in the Agent registry, so an unsupported knob fails loudly here instead
- * of being dropped by a second, out-of-date table.
+ * of being dropped by a second, out-of-date table. The main process commits
+ * every file through the serialized atomic parameter queue and rolls back
+ * only the revision this operation produced.
  */
 async function applyWorkspaceParameterWrites(
   workspaceRoot: string,
@@ -1771,110 +1772,7 @@ async function applyWorkspaceParameterWrites(
 ): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   if (!desktopApi) throw new Error('Desktop API is unavailable.')
-  const byFile = new Map<string, DesktopAgentWorkspaceParameterWrite[]>()
-  for (const write of writes) {
-    const group = byFile.get(write.file)
-    if (group) group.push(write)
-    else byFile.set(write.file, [write])
-  }
-  const parameterSurfaceWrites: DesktopAgentWorkspaceParameterWrite[] = []
-  // Phase 1: prepare and validate every edit in memory — a missing path or
-  // malformed document fails loudly before anything is written, instead of
-  // leaving earlier step-config changes behind on a later failure.
-  const preparedStepConfigWrites: Array<{
-    path: string
-    content: string
-    original: string
-  }> = []
-  for (const [file, fileWrites] of byFile) {
-    if (file === 'home/ecc.toml' || file === 'home/parameters.json') {
-      // The on-disk configuration format (ecc.toml vs parameters.json) is
-      // resolved in the main process; edit paths are interpreted in the
-      // actual file's vocabulary there.
-      parameterSurfaceWrites.push(...fileWrites)
-      continue
-    }
-    const path = `${workspaceRoot}/${file}`
-    const raw = await desktopApi.workspace.readProjectTextFile(path)
-    if (!raw.trim()) throw new Error(`${file} is missing or empty in this workspace.`)
-    const document = JSON.parse(raw) as Record<string, unknown>
-    for (const write of fileWrites) {
-      setJsonPathValue(document, write)
-    }
-    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
-    preparedStepConfigWrites.push({
-      path,
-      original: raw,
-      content: raw.endsWith('\n') ? `${serialized}\n` : serialized,
-    })
-  }
-  const originalWorkspaceConfig =
-    parameterSurfaceWrites.length > 0
-      ? await readExistingWorkspaceConfig(desktopApi, workspaceRoot)
-      : null
-  const restorations: Array<{ path: string; content: string }> = []
-  try {
-    // Phase 2: commit. The authoritative config edit goes first (atomic in
-    // the main process), then the prepared step-config files. If a later
-    // write fails, restore every file already committed in this attempt.
-    if (parameterSurfaceWrites.length > 0) {
-      const edited = await desktopApi.workspace.editWorkspaceParameters(
-        workspaceRoot,
-        parameterSurfaceWrites.map((write) => ({
-          json_path: write.json_path,
-          value: write.value,
-        })),
-      )
-      if (originalWorkspaceConfig) {
-        restorations.push(originalWorkspaceConfig)
-      } else {
-        restorations.push({ path: edited.path, content: '' })
-      }
-    }
-    for (const { path, content, original } of preparedStepConfigWrites) {
-      await desktopApi.workspace.writeProjectTextFile(path, content)
-      restorations.push({ path, content: original })
-    }
-  } catch (error) {
-    for (const restoration of restorations.reverse()) {
-      try {
-        await desktopApi.workspace.writeProjectTextFile(
-          restoration.path,
-          restoration.content,
-        )
-      } catch {
-        // Best-effort rollback: still report the original commit failure.
-      }
-    }
-    throw error
-  }
-}
-
-async function readExistingWorkspaceConfig(
-  desktopApi: NonNullable<ReturnType<typeof getOptionalDesktopApi>>,
-  workspaceRoot: string,
-): Promise<{ path: string; content: string } | null> {
-  const tomlPath = `${workspaceRoot}/home/ecc.toml`
-  const jsonPath = `${workspaceRoot}/home/parameters.json`
-  const toml = await desktopApi.workspace.readOptionalProjectTextFile(tomlPath)
-  if (toml != null && toml !== '') return { path: tomlPath, content: toml }
-  const json = await desktopApi.workspace.readOptionalProjectTextFile(jsonPath)
-  if (json != null && json !== '') return { path: jsonPath, content: json }
-  return null
-}
-
-/** Keeps the Agent's formatting identical to whatever already wrote the file. */
-function detectJsonIndent(raw: string): number {
-  return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 4
-}
-
-function setJsonPathValue(
-  document: Record<string, unknown>,
-  write: DesktopAgentWorkspaceParameterWrite,
-): void {
-  assignOwnJsonPathValue(document, write.json_path, write.value, () => {
-    throw new Error(`Parameter ${write.knob_id} does not exist in ${write.file}.`)
-  })
+  await desktopApi.workspace.applyWorkspaceParameterWrites(workspaceRoot, writes)
 }
 
 /**

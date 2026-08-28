@@ -78,6 +78,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         format: 'toml',
         path: '/tmp/home/ecc.toml',
       }),
+      applyWorkspaceParameterWrites: async () => undefined,
       readProjectTextFileTail: async () => null,
       readProjectBinaryFile: async () => new Uint8Array(),
       writeProjectTextFile: async () => undefined,

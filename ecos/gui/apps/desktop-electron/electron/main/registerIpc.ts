@@ -57,6 +57,7 @@ import {
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
   type DesktopAgentInterruptRequest,
+  type DesktopAgentWorkspaceParameterWrite,
   type DesktopAgentWorkspaceRerunContract,
   type DesktopAgentSendMessageRequest,
   type DesktopAgentStartRequest,
@@ -183,6 +184,10 @@ export interface DesktopBridgeServices {
       workspacePath: string,
       edits: { json_path: (string | number)[]; value: unknown }[],
     ): Promise<{ format: 'toml' | 'json'; path: string }>
+    applyWorkspaceParameterWrites(
+      workspacePath: string,
+      writes: DesktopAgentWorkspaceParameterWrite[],
+    ): Promise<void>
     readProjectTextFile(path: string): Promise<string>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail(
@@ -1498,6 +1503,22 @@ export function registerIpc(
       return await services.workspaceService.editWorkspaceParameters(
         workspacePath as string,
         edits as { json_path: (string | number)[]; value: unknown }[],
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceApplyWorkspaceParameterWrites,
+    async (_event, workspacePath, writes) => {
+      if (typeof workspacePath !== 'string') {
+        throw new Error('Workspace path must be a string')
+      }
+      if (!Array.isArray(writes)) {
+        throw new Error('Workspace parameter writes must be an array')
+      }
+      await services.workspaceService.applyWorkspaceParameterWrites(
+        workspacePath,
+        writes as DesktopAgentWorkspaceParameterWrite[],
       )
     },
   )

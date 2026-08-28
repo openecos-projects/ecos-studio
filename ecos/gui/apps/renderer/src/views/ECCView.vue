@@ -211,8 +211,8 @@ import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
 import { waitForDesktopApi } from '@/platform/desktop'
 import {
-  losslessNumber,
   losslessNumberList,
+  losslessOptionalNumber,
   losslessOptionalString,
   losslessOptionalRecord,
 } from '@/utils/numbers'
@@ -567,8 +567,7 @@ function optionalString(value: unknown): string {
 }
 
 function optionalNumber(value: unknown, fallback: number): number {
-  const numberValue = losslessNumber(value, 'workspace parameter')
-  return Number.isFinite(numberValue) ? numberValue : fallback
+  return losslessOptionalNumber(value, fallback, 'workspace parameter')
 }
 
 function numberList(value: unknown): number[] {

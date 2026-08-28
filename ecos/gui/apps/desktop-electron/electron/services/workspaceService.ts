@@ -13,16 +13,21 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { watch, type FSWatcher } from 'chokidar'
-import type {
-  DesktopProjectFileChangedEvent,
-  DesktopProjectFileChangeEventType,
-  DesktopProjectDirectoryEntry,
-  DesktopProjectTextFileChunk,
-  DesktopProjectTextFileTail,
-  DesktopProjectTextFileUpdate,
-  ScannedPdkDirectory,
-  ScannedRtlDirectory,
-  WorkspaceDirectoryReplacement,
+import {
+  desktopAgentParameterWriteFiles,
+  hasSafeJsonPath,
+  type DesktopAgentWorkspaceParameterWrite,
+  type DesktopProjectFileChangedEvent,
+  type DesktopProjectFileChangeEventType,
+  type DesktopProjectDirectoryEntry,
+  type DesktopProjectTextFileChunk,
+  type DesktopProjectTextFileTail,
+  type DesktopProjectTextFileUpdate,
+  type ScannedPdkDirectory,
+  type ScannedRtlDirectory,
+  type WorkspaceDesignFileAddResult,
+  type WorkspaceDesignFileEntry,
+  type WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
 import { LogTailService } from './logTailService'
 import { isPathWithinRoot, isSameOrAncestorPath } from './pathScope'
@@ -34,15 +39,13 @@ import {
   removeWorkspaceDesignFile,
 } from './designFileService'
 import {
+  applyQueuedWorkspaceParameterWrites,
   editWorkspaceParameters as editWorkspaceParametersFile,
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
   readWorkspaceConfigContained,
+  type PreparedStepConfigWrite,
 } from './workspaceParametersFile'
-import type {
-  WorkspaceDesignFileAddResult,
-  WorkspaceDesignFileEntry,
-} from '@ecos-studio/shared'
 
 export interface ProjectScopeProvider {
   approvePendingExternalReadRoots?(
@@ -545,6 +548,118 @@ export class WorkspaceService {
           )
         }
         await this.assertCanWriteProjectTextFile(canonicalPath)
+      },
+    )
+  }
+
+  /**
+   * Apply Agent parameter writes (workspace config + step configs) through
+   * the serialized atomic parameter queue. Rollback restores only the
+   * revision this operation produced.
+   */
+  async applyWorkspaceParameterWrites(
+    workspacePath: string,
+    writes: DesktopAgentWorkspaceParameterWrite[],
+  ): Promise<void> {
+    const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
+    const [canonicalWorkspace, canonicalRoot] = await Promise.all([
+      realpath(workspacePath),
+      realpath(authorizingRoot),
+    ])
+    if (canonicalWorkspace !== canonicalRoot) {
+      throw new Error(
+        'Refusing to apply workspace parameter writes: the target is not the active workspace',
+      )
+    }
+
+    const parameterEdits: { json_path: (string | number)[]; value: unknown }[] = []
+    const stepConfigWrites: PreparedStepConfigWrite[] = []
+    const seenStepFiles = new Set<string>()
+    for (const write of writes) {
+      if (
+        !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
+        !hasSafeJsonPath(write.json_path)
+      ) {
+        throw new Error(
+          `Parameter path ${JSON.stringify(write.json_path)} is not allowed in ${write.file}.`,
+        )
+      }
+      if (write.file === 'home/ecc.toml' || write.file === 'home/parameters.json') {
+        parameterEdits.push({ json_path: write.json_path, value: write.value })
+        continue
+      }
+      const spelledPath = join(workspacePath, write.file)
+      const targetStats = await lstat(spelledPath)
+      if (targetStats.isSymbolicLink()) {
+        throw new Error(`Refusing to edit step config through a symlink: ${spelledPath}`)
+      }
+      const canonicalPath =
+        await this.projectScopeProvider.requestWritableProjectPathAccess(spelledPath)
+      await this.assertCanWriteProjectTextFile(canonicalPath)
+      if (!seenStepFiles.has(write.file)) {
+        seenStepFiles.add(write.file)
+        stepConfigWrites.push({
+          canonicalPath,
+          edits: writes
+            .filter((item) => item.file === write.file)
+            .map((item) => ({ json_path: item.json_path, value: item.value })),
+          spelledPath,
+        })
+      }
+    }
+
+    let authorizedLocation:
+      | {
+          format: 'toml' | 'json'
+          path: string
+          spelledPath: string
+        }
+      | undefined
+    if (parameterEdits.length > 0) {
+      const location = await locateWorkspaceParametersFile(workspacePath)
+      if (!location) {
+        throw new Error(`Workspace parameters file not found under: ${workspacePath}`)
+      }
+      const targetStats = await lstat(location.path)
+      if (targetStats.isSymbolicLink()) {
+        throw new Error(
+          `Refusing to edit workspace parameters through a symlink: ${location.path}`,
+        )
+      }
+      const canonicalPath =
+        await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
+      await this.assertCanWriteProjectTextFile(canonicalPath)
+      authorizedLocation = {
+        format: location.format,
+        path: canonicalPath,
+        spelledPath: location.path,
+      }
+    }
+
+    await applyQueuedWorkspaceParameterWrites(
+      workspacePath,
+      parameterEdits,
+      stepConfigWrites,
+      authorizedLocation,
+      async () => {
+        const activeRoot = await this.projectScopeProvider.getProjectRoot()
+        const [expected, active, target] = await Promise.all([
+          realpath(authorizingRoot),
+          realpath(activeRoot),
+          realpath(workspacePath),
+        ])
+        if (expected !== active || target !== active) {
+          throw new Error(
+            'Refusing to apply workspace parameter writes: the active workspace ' +
+              'changed before the write completed',
+          )
+        }
+        if (authorizedLocation) {
+          await this.assertCanWriteProjectTextFile(authorizedLocation.path)
+        }
+        for (const step of stepConfigWrites) {
+          await this.assertCanWriteProjectTextFile(step.canonicalPath)
+        }
       },
     )
   }

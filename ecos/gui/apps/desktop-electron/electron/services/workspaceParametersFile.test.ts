@@ -13,11 +13,13 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  applyQueuedWorkspaceParameterWrites,
   editWorkspaceParameters,
   locateWorkspaceParametersFile,
   mergePayloadIntoTomlDocument,
   mergeTomlSections,
   readWorkspaceParameters,
+  restoreTextIfCurrentRevision,
   writeWorkspaceParameters,
 } from './workspaceParametersFile'
 
@@ -940,5 +942,47 @@ describe('parameter write serialization', () => {
     expect(parameters?.frequency_max).toBe(175)
     expect(parameters?.max_fanout).toBe(48)
     expect(saved.format).toBe('toml')
+  })
+})
+
+describe('queued agent rollback', () => {
+  it('restores the parameter file when a later step-config write fails', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    const original = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    const missingStep = join(root, 'config', 'dreamplace_ecc.json')
+
+    await expect(
+      applyQueuedWorkspaceParameterWrites(
+        root,
+        [{ json_path: ['max_fanout'], value: 64 }],
+        [
+          {
+            canonicalPath: missingStep,
+            edits: [{ json_path: ['density_weight'], value: 0.1 }],
+            spelledPath: missingStep,
+          },
+        ],
+      ),
+    ).rejects.toThrow(/ENOENT|no such file|missing or empty/i)
+
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(original)
+  })
+
+  it('does not restore a later Configure save that replaced the agent revision', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    const path = join(root, 'home', 'ecc.toml')
+    const previous = readFileSync(path, 'utf8')
+    await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64 }])
+    const agentRevision = readFileSync(path, 'utf8')
+    await writeWorkspaceParameters(root, { 'Max fanout': 80 })
+    const configureRevision = readFileSync(path, 'utf8')
+
+    await expect(
+      restoreTextIfCurrentRevision(path, path, agentRevision, previous),
+    ).resolves.toBe('skipped')
+    expect(readFileSync(path, 'utf8')).toBe(configureRevision)
+    expect(configureRevision).not.toBe(agentRevision)
   })
 })

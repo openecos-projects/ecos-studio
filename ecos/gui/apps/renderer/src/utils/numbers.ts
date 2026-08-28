@@ -87,6 +87,20 @@ export function losslessOptionalString(value: unknown, label: string): string {
 }
 
 /**
+ * optionalNumber for GUI-known numeric fields: omitted values (null/undefined)
+ * keep their documented defaults. Defined but unrepresentable values still
+ * fail loud so a later save cannot persist a corrupted conversion.
+ */
+export function losslessOptionalNumber(
+  value: unknown,
+  fallback: number,
+  label: string,
+): number {
+  if (value == null) return fallback
+  return losslessNumber(value, label)
+}
+
+/**
  * TOML parsing yields a bigint exactly when an integer exceeds the safe
  * range, inf/nan as non-finite numbers, and dates as Date instances — all of
  * which a later save would silently persist in corrupted form (rounded,

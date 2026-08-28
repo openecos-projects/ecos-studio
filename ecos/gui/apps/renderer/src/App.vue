@@ -226,8 +226,8 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
 import {
-  losslessNumber,
   losslessNumberList,
+  losslessOptionalNumber,
   losslessOptionalString,
   losslessOptionalRecord,
 } from '@/utils/numbers'
@@ -972,8 +972,7 @@ function optionalString(value: unknown): string {
 }
 
 function optionalNumber(value: unknown, fallback: number): number {
-  const parsed = losslessNumber(value, 'workspace parameter')
-  return Number.isFinite(parsed) ? parsed : fallback
+  return losslessOptionalNumber(value, fallback, 'workspace parameter')
 }
 
 function normalizeDieAreaMode(

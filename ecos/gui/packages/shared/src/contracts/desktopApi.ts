@@ -46,6 +46,7 @@ import type {
 import type {
   DesktopAgentEvent,
   DesktopAgentInterruptRequest,
+  DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
   DesktopAgentWorkspaceRerunPrepareResult,
@@ -289,6 +290,10 @@ export interface DesktopApi {
       workspacePath: string,
       edits: { json_path: (string | number)[]; value: unknown }[],
     ): Promise<{ format: 'toml' | 'json'; path: string }>
+    applyWorkspaceParameterWrites(
+      workspacePath: string,
+      writes: DesktopAgentWorkspaceParameterWrite[],
+    ): Promise<void>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail?(
       path: string,

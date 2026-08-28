@@ -970,3 +970,83 @@ describe('editWorkspaceParameters', () => {
     await expect(readFile(tomlPath, 'utf8')).resolves.toContain('design = "updated"')
   })
 })
+
+describe('applyWorkspaceParameterWrites', () => {
+  function createApplyService(rootPath: string): WorkspaceService {
+    const projectScopeProvider = createProjectScopeProvider(rootPath, rootPath)
+    projectScopeProvider.requestWritableProjectPathAccess = vi.fn(
+      async (path: string) => path,
+    )
+    return new WorkspaceService({
+      projectScopeProvider,
+      replacementJournalDirectory: join(rootPath, '.workspace-replacement-journals'),
+    })
+  }
+
+  it('rolls back the parameter file when a later step-config write fails', async () => {
+    const directory = await createTempDir('ecos-workspace-service-apply-rollback-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await mkdir(join(directory, 'config'), { recursive: true })
+    const tomlPath = join(directory, 'home', 'ecc.toml')
+    const original = '[params]\ndesign = "gcd"\nmax_fanout = 20\n'
+    await writeFile(tomlPath, original, 'utf8')
+    await writeFile(
+      join(directory, 'config', 'dreamplace_ecc.json'),
+      '{\n    "other_key": 1\n}\n',
+      'utf8',
+    )
+
+    const service = createApplyService(directory)
+    await expect(
+      service.applyWorkspaceParameterWrites(directory, [
+        {
+          file: 'home/ecc.toml',
+          json_path: ['max_fanout'],
+          knob_id: 'cts.max_fanout',
+          surface: 'parameters',
+          value: 64,
+        },
+        {
+          file: 'config/dreamplace_ecc.json',
+          json_path: ['density_weight'],
+          knob_id: 'place.density_weight',
+          surface: 'step_config',
+          value: 0.1,
+        },
+      ]),
+    ).rejects.toThrow(/does not exist/)
+
+    await expect(readFile(tomlPath, 'utf8')).resolves.toBe(original)
+  })
+
+  it('applies parameter and step-config writes together', async () => {
+    const directory = await createTempDir('ecos-workspace-service-apply-ok-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await mkdir(join(directory, 'config'), { recursive: true })
+    const tomlPath = join(directory, 'home', 'ecc.toml')
+    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
+    await writeFile(tomlPath, '[params]\ndesign = "gcd"\nmax_fanout = 20\n', 'utf8')
+    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
+
+    const service = createApplyService(directory)
+    await service.applyWorkspaceParameterWrites(directory, [
+      {
+        file: 'home/ecc.toml',
+        json_path: ['max_fanout'],
+        knob_id: 'cts.max_fanout',
+        surface: 'parameters',
+        value: 64,
+      },
+      {
+        file: 'config/dreamplace_ecc.json',
+        json_path: ['density_weight'],
+        knob_id: 'place.density_weight',
+        surface: 'step_config',
+        value: 0.1,
+      },
+    ])
+
+    await expect(readFile(tomlPath, 'utf8')).resolves.toContain('max_fanout = 64')
+    await expect(readFile(stepPath, 'utf8')).resolves.toContain('"density_weight": 0.1')
+  })
+})

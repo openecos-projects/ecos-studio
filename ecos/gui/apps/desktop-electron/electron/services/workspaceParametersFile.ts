@@ -408,7 +408,7 @@ export async function writeTextAtomically(
  */
 const parameterWriteQueues = new Map<string, Promise<unknown>>()
 
-async function enqueueParameterWrite<T>(
+export async function enqueueParameterWrite<T>(
   path: string,
   operation: () => Promise<T>,
 ): Promise<T> {
@@ -423,6 +423,16 @@ async function enqueueParameterWrite<T>(
       parameterWriteQueues.delete(path)
     }
   }
+}
+
+export async function workspaceParameterWriteQueueKey(
+  root: string,
+  authorizedLocation?: WorkspaceParametersFileLocation,
+): Promise<string> {
+  const queueKey = authorizedLocation
+    ? dirname(authorizedLocation.path)
+    : await realpath(join(root, 'home'))
+  return `${queueKey}:parameters`
 }
 
 /**
@@ -716,64 +726,121 @@ export async function writeWorkspaceParameters(
   // equivalent roots ("/ws" vs "/ws/.", native vs slash-normalized) must
   // share one queue, and two operations must never interleave across the
   // two formats (a legacy JSON can migrate to TOML mid-queue).
-  const queueKey = authorizedLocation
-    ? dirname(authorizedLocation.path)
-    : await realpath(join(root, 'home'))
-  return await enqueueParameterWrite(`${queueKey}:parameters`, async () => {
-    // Runtime-activity guards re-run INSIDE the queue: a flow starting while
-    // this operation waited behind another writer must still block it.
-    await assertWritable?.()
-    assertFiniteNumbers(payload, location.path)
-    // Re-locate at the head of the queue: when the preferred config changed
-    // while this operation waited (parameters.json -> ecc.toml migration),
-    // the write must land where subsequent reads will look.
-    const onDisk = await locateWorkspaceParametersFile(root)
-    if (!onDisk) {
-      throw new Error(
-        `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
-      )
-    }
-    const spelledPath = onDisk.path
-    const canonicalPath = authorizedLocation
-      ? authorizedLocation.path
-      : await realpath(onDisk.path)
-    if (onDisk.format === 'json') {
-      // Merge into the existing document: the payload is the GUI's known
-      // parameter set, not the whole file — keys the GUI does not display
-      // (frontend extras, unrelated agent edits) must survive a save.
-      const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
-      const existing = parseJsonPreservingIntegers(raw, onDisk.path)
-      if (!isRecord(existing)) {
+  return await enqueueParameterWrite(
+    await workspaceParameterWriteQueueKey(root, authorizedLocation),
+    async () => {
+      // Runtime-activity guards re-run INSIDE the queue: a flow starting while
+      // this operation waited behind another writer must still block it.
+      await assertWritable?.()
+      assertFiniteNumbers(payload, location.path)
+      // Re-locate at the head of the queue: when the preferred config changed
+      // while this operation waited (parameters.json -> ecc.toml migration),
+      // the write must land where subsequent reads will look.
+      const onDisk = await locateWorkspaceParametersFile(root)
+      if (!onDisk) {
         throw new Error(
-          `Invalid workspace configuration: ${onDisk.path} must contain a JSON object`,
+          `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
         )
       }
-      const merged = mergeRecordsPreservingUnknown(existing, payload)
-      // One more guard pass between the merge and the rename: a flow that
-      // started while this operation read and merged must still block the
-      // commit (the remaining window is the rename itself; closing it needs
-      // the runtime's own cross-process lock).
+      const spelledPath = onDisk.path
+      const canonicalPath = authorizedLocation
+        ? authorizedLocation.path
+        : await realpath(onDisk.path)
+      if (onDisk.format === 'json') {
+        // Merge into the existing document: the payload is the GUI's known
+        // parameter set, not the whole file — keys the GUI does not display
+        // (frontend extras, unrelated agent edits) must survive a save.
+        const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
+        const existing = parseJsonPreservingIntegers(raw, onDisk.path)
+        if (!isRecord(existing)) {
+          throw new Error(
+            `Invalid workspace configuration: ${onDisk.path} must contain a JSON object`,
+          )
+        }
+        const merged = mergeRecordsPreservingUnknown(existing, payload)
+        // One more guard pass between the merge and the rename: a flow that
+        // started while this operation read and merged must still block the
+        // commit (the remaining window is the rename itself; closing it needs
+        // the runtime's own cross-process lock).
+        await assertWritable?.()
+        await writeTextAtomically(spelledPath, `${JSON.stringify(merged, null, 4)}\n`, {
+          authorizedParent: dirname(canonicalPath),
+        })
+        return onDisk
+      }
+      const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
+      assertNoSubMillisecondDatetimes(raw, onDisk.path)
+      const document = parseTomlDocument(raw, onDisk.path)
+      const merged = mergePayloadIntoTomlDocument(document, payload, root)
       await assertWritable?.()
-      await writeTextAtomically(spelledPath, `${JSON.stringify(merged, null, 4)}\n`, {
+      await writeTextAtomically(spelledPath, stringify(merged), {
         authorizedParent: dirname(canonicalPath),
       })
       return onDisk
-    }
-    const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
-    assertNoSubMillisecondDatetimes(raw, onDisk.path)
-    const document = parseTomlDocument(raw, onDisk.path)
-    const merged = mergePayloadIntoTomlDocument(document, payload, root)
-    await assertWritable?.()
-    await writeTextAtomically(spelledPath, stringify(merged), {
-      authorizedParent: dirname(canonicalPath),
-    })
-    return onDisk
-  })
+    },
+  )
 }
 
 export interface WorkspaceParameterEdit {
   json_path: readonly (string | number)[]
   value: unknown
+}
+
+export interface WorkspaceParameterCommitResult {
+  canonicalPath: string
+  format: WorkspaceParametersFormat
+  path: string
+  previousContent: string
+  writtenContent: string
+}
+
+export interface PreparedStepConfigWrite {
+  canonicalPath: string
+  edits: readonly WorkspaceParameterEdit[]
+  spelledPath: string
+}
+
+export function serializeJsonDocument(
+  document: Record<string, unknown>,
+  raw: string,
+): string {
+  const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
+  return raw.endsWith('\n') ? `${serialized}\n` : serialized
+}
+
+export async function readJsonObjectContained(
+  spelledPath: string,
+  canonicalPath: string,
+  label = spelledPath,
+): Promise<{ document: Record<string, unknown>; raw: string }> {
+  const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
+  const parsed: unknown = parseJsonPreservingIntegers(raw, label)
+  if (!isRecord(parsed)) {
+    throw new Error(
+      `Invalid workspace configuration: ${label} must contain a JSON object`,
+    )
+  }
+  return { document: parsed, raw }
+}
+
+/**
+ * Restore `previous` only when the spelled file still holds `expectedCurrent`
+ * (the revision this operation wrote). A later Configure save that landed
+ * after our write must not be clobbered. The caller must already hold the
+ * parameter write queue.
+ */
+export async function restoreTextIfCurrentRevision(
+  spelledPath: string,
+  canonicalPath: string,
+  expectedCurrent: string,
+  previous: string,
+): Promise<'restored' | 'skipped'> {
+  const current = await readWorkspaceConfigContained(spelledPath, canonicalPath)
+  if (current !== expectedCurrent) return 'skipped'
+  await writeTextAtomically(spelledPath, previous, {
+    authorizedParent: dirname(canonicalPath),
+  })
+  return 'restored'
 }
 
 function detectJsonIndent(raw: string): number {
@@ -1057,74 +1124,228 @@ export async function editWorkspaceParameters(
       `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
     )
   }
-  const queueKey = authorizedLocation
-    ? dirname(authorizedLocation.path)
-    : await realpath(join(root, 'home'))
-  return await enqueueParameterWrite(`${queueKey}:parameters`, async () => {
-    // Runtime-activity guards re-run INSIDE the queue: a flow starting while
-    // this operation waited behind another writer must still block it.
-    await assertWritable?.()
-    for (const edit of edits) {
-      if (edit.value === undefined) {
-        throw new Error(
-          `Refusing to write ${location.path}: undefined would delete the parameter leaf`,
-        )
-      }
-      assertFiniteNumbers(edit.value, location.path)
-    }
-    // Re-locate at the head of the queue: when the preferred config changed
-    // while this operation waited (parameters.json -> ecc.toml migration),
-    // the edit must land where subsequent reads will look.
-    const onDisk = await locateWorkspaceParametersFile(root)
-    if (!onDisk) {
+  return await enqueueParameterWrite(
+    await workspaceParameterWriteQueueKey(root, authorizedLocation),
+    async () => {
+      const committed = await commitWorkspaceParameterEdits(
+        root,
+        edits,
+        authorizedLocation,
+        assertWritable,
+      )
+      return { format: committed.format, path: committed.path }
+    },
+  )
+}
+
+export interface PreparedWorkspaceTextWrite {
+  canonicalPath: string
+  previousContent: string
+  spelledPath: string
+  writtenContent: string
+}
+
+/**
+ * Read-modify in memory. The caller must already hold the parameter write
+ * queue; this does not enqueue or rename.
+ */
+export async function prepareWorkspaceParameterEdits(
+  root: string,
+  edits: readonly WorkspaceParameterEdit[],
+  authorizedLocation?: WorkspaceParametersFileLocation,
+  assertWritable?: () => Promise<void>,
+): Promise<PreparedWorkspaceTextWrite & { format: WorkspaceParametersFormat }> {
+  const location = authorizedLocation ?? (await locateWorkspaceParametersFile(root))
+  if (!location) {
+    throw new Error(
+      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+    )
+  }
+  await assertWritable?.()
+  for (const edit of edits) {
+    if (edit.value === undefined) {
       throw new Error(
-        `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+        `Refusing to write ${location.path}: undefined would delete the parameter leaf`,
       )
     }
-    const spelledPath = onDisk.path
-    const canonicalPath = authorizedLocation
-      ? authorizedLocation.path
-      : await realpath(onDisk.path)
-    const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
-    if (onDisk.format === 'json') {
-      const parsed: unknown = parseJsonPreservingIntegers(raw, onDisk.path)
-      if (!isRecord(parsed)) {
-        throw new Error(
-          `Invalid workspace configuration: ${onDisk.path} must contain a JSON object`,
-        )
-      }
-      const document = parsed
-      for (const edit of edits) {
-        setJsonPathValue(document, edit.json_path, edit.value, onDisk.path, true)
-      }
-      const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
-      // One more guard pass between the edits and the rename: a flow that
-      // started while this operation read and merged must still block the
-      // commit (the remaining window is the rename itself; closing it needs
-      // the runtime's own cross-process lock).
-      await assertWritable?.()
-      await writeTextAtomically(
-        spelledPath,
-        raw.endsWith('\n') ? `${serialized}\n` : serialized,
-        { authorizedParent: dirname(canonicalPath) },
+    assertFiniteNumbers(edit.value, location.path)
+  }
+  const onDisk = await locateWorkspaceParametersFile(root)
+  if (!onDisk) {
+    throw new Error(
+      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+    )
+  }
+  const spelledPath = onDisk.path
+  const canonicalPath = authorizedLocation
+    ? authorizedLocation.path
+    : await realpath(onDisk.path)
+  const raw = await readWorkspaceConfigContained(spelledPath, canonicalPath)
+  if (onDisk.format === 'json') {
+    const parsed: unknown = parseJsonPreservingIntegers(raw, onDisk.path)
+    if (!isRecord(parsed)) {
+      throw new Error(
+        `Invalid workspace configuration: ${onDisk.path} must contain a JSON object`,
       )
-      return onDisk
     }
-    assertNoSubMillisecondDatetimes(raw, onDisk.path)
-    const document = parseTomlDocument(raw, onDisk.path)
-    const parameters = mergeTomlSections(document, root)
-    assertGuiKnownTomlLeavesLossless(parameters, onDisk.path)
+    const document = parsed
     for (const edit of edits) {
-      const normalizedPath = edit.json_path.map((segment) =>
-        typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
-      )
-      setJsonPathValue(parameters, normalizedPath, edit.value, onDisk.path)
+      setJsonPathValue(document, edit.json_path, edit.value, onDisk.path, true)
     }
-    const merged = mergePayloadIntoTomlDocument(document, parameters, root)
-    await assertWritable?.()
-    await writeTextAtomically(spelledPath, stringify(merged), {
-      authorizedParent: dirname(canonicalPath),
-    })
-    return onDisk
+    return {
+      canonicalPath,
+      format: onDisk.format,
+      previousContent: raw,
+      spelledPath,
+      writtenContent: serializeJsonDocument(document, raw),
+    }
+  }
+  assertNoSubMillisecondDatetimes(raw, onDisk.path)
+  const document = parseTomlDocument(raw, onDisk.path)
+  const parameters = mergeTomlSections(document, root)
+  assertGuiKnownTomlLeavesLossless(parameters, onDisk.path)
+  for (const edit of edits) {
+    const normalizedPath = edit.json_path.map((segment) =>
+      typeof segment === 'string' ? normalizeParameterKey(segment) : segment,
+    )
+    setJsonPathValue(parameters, normalizedPath, edit.value, onDisk.path)
+  }
+  const merged = mergePayloadIntoTomlDocument(document, parameters, root)
+  return {
+    canonicalPath,
+    format: onDisk.format,
+    previousContent: raw,
+    spelledPath,
+    writtenContent: stringify(merged),
+  }
+}
+
+export async function commitWorkspaceParameterEdits(
+  root: string,
+  edits: readonly WorkspaceParameterEdit[],
+  authorizedLocation?: WorkspaceParametersFileLocation,
+  assertWritable?: () => Promise<void>,
+): Promise<WorkspaceParameterCommitResult> {
+  const prepared = await prepareWorkspaceParameterEdits(
+    root,
+    edits,
+    authorizedLocation,
+    assertWritable,
+  )
+  await assertWritable?.()
+  await writeTextAtomically(prepared.spelledPath, prepared.writtenContent, {
+    authorizedParent: dirname(prepared.canonicalPath),
   })
+  return {
+    canonicalPath: prepared.canonicalPath,
+    format: prepared.format,
+    path: prepared.spelledPath,
+    previousContent: prepared.previousContent,
+    writtenContent: prepared.writtenContent,
+  }
+}
+
+function applyErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Apply parameter-surface edits and step-config writes in one queued
+ * operation. Later writes that fail roll back earlier files only when those
+ * files still hold the revision this operation produced, so a Configure save
+ * that landed in between is left intact. Rollback failures are surfaced.
+ *
+ * The caller must already have authorized every path; this function does not
+ * follow symlinks on the spelled leaves.
+ */
+export async function applyQueuedWorkspaceParameterWrites(
+  root: string,
+  parameterEdits: readonly WorkspaceParameterEdit[],
+  stepConfigWrites: readonly PreparedStepConfigWrite[],
+  authorizedLocation?: WorkspaceParametersFileLocation,
+  assertWritable?: () => Promise<void>,
+): Promise<void> {
+  if (parameterEdits.length === 0 && stepConfigWrites.length === 0) return
+  return await enqueueParameterWrite(
+    await workspaceParameterWriteQueueKey(root, authorizedLocation),
+    async () => {
+      await assertWritable?.()
+      const restorations: Array<{
+        canonicalPath: string
+        expectedCurrent: string
+        previous: string
+        spelledPath: string
+      }> = []
+      try {
+        if (parameterEdits.length > 0) {
+          const committed = await commitWorkspaceParameterEdits(
+            root,
+            parameterEdits,
+            authorizedLocation,
+            assertWritable,
+          )
+          restorations.push({
+            canonicalPath: committed.canonicalPath,
+            expectedCurrent: committed.writtenContent,
+            previous: committed.previousContent,
+            spelledPath: committed.path,
+          })
+        }
+        for (const step of stepConfigWrites) {
+          await assertWritable?.()
+          const { document, raw } = await readJsonObjectContained(
+            step.spelledPath,
+            step.canonicalPath,
+            step.spelledPath,
+          )
+          if (!raw.trim()) {
+            throw new Error(`${step.spelledPath} is missing or empty in this workspace.`)
+          }
+          for (const edit of step.edits) {
+            if (edit.value === undefined) {
+              throw new Error(
+                `Refusing to write ${step.spelledPath}: undefined would delete the parameter leaf`,
+              )
+            }
+            assertFiniteNumbers(edit.value, step.spelledPath)
+            setJsonPathValue(document, edit.json_path, edit.value, step.spelledPath)
+          }
+          const writtenContent = serializeJsonDocument(document, raw)
+          await writeTextAtomically(step.spelledPath, writtenContent, {
+            authorizedParent: dirname(step.canonicalPath),
+          })
+          restorations.push({
+            canonicalPath: step.canonicalPath,
+            expectedCurrent: writtenContent,
+            previous: raw,
+            spelledPath: step.spelledPath,
+          })
+        }
+      } catch (error) {
+        const restoreErrors: unknown[] = []
+        for (let index = restorations.length - 1; index >= 0; index -= 1) {
+          const restoration = restorations[index]!
+          try {
+            await restoreTextIfCurrentRevision(
+              restoration.spelledPath,
+              restoration.canonicalPath,
+              restoration.expectedCurrent,
+              restoration.previous,
+            )
+          } catch (restoreError) {
+            restoreErrors.push(restoreError)
+          }
+        }
+        if (restoreErrors.length > 0) {
+          throw new Error(
+            `${applyErrorMessage(error)}; rollback failed for ` +
+              `${restoreErrors.length} file(s): ` +
+              restoreErrors.map(applyErrorMessage).join('; '),
+            { cause: error },
+          )
+        }
+        throw error
+      }
+    },
+  )
 }

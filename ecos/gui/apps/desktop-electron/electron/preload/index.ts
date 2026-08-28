@@ -186,6 +186,12 @@ const desktopApi: DesktopApi = {
         workspacePath,
         edits,
       ),
+    applyWorkspaceParameterWrites: (workspacePath, writes) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceApplyWorkspaceParameterWrites,
+        workspacePath,
+        writes,
+      ),
     readProjectTextFileTail: (path, maxChars) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceReadProjectTextFileTail,
