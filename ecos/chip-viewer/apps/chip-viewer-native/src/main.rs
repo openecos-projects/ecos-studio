@@ -48,7 +48,8 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    let mut wgpu_backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
     if std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
         let is_wsl = std::env::var_os("WSL_DISTRO_NAME").is_some()
             || std::env::var_os("WSL_INTEROP").is_some()
@@ -59,6 +60,9 @@ fn main() -> Result<()> {
                 && std::path::Path::new("/usr/share/vulkan/icd.d/lvp_icd.json").exists()
             {
                 std::env::set_var("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/lvp_icd.json");
+            } else {
+                wgpu_backends = wgpu::Backends::GL;
+                args.force_cpu = true;
             }
         }
     }
@@ -72,7 +76,7 @@ fn main() -> Result<()> {
         wgpu_options: egui_wgpu::WgpuConfiguration {
             wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
                 instance_descriptor: wgpu::InstanceDescriptor {
-                    backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all()),
+                    backends: wgpu_backends,
                     ..Default::default()
                 },
                 power_preference: wgpu::PowerPreference::None,
