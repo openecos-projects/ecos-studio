@@ -290,8 +290,35 @@ describe('mergePayloadIntoTomlDocument', () => {
       margin: 4,
       extra: 'keep',
     })
-    expect(merged.params.die).toBeUndefined()
+    expect(merged.params.die).toEqual({ area: 10800 })
     expect(merged.params.core).toBeUndefined()
+  })
+
+  it('keeps geometry fields that die_area cannot represent', () => {
+    const document = {
+      params: {
+        design: 'gcd',
+        die_area: { width: 100, height: 80, utilitization: 0.4, margin: 2 },
+        die: { size: [100, 80], area: 8000 },
+        core: { size: [80, 60], area: 4800, utilitization: 0.4, margin: [2, 2] },
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      {
+        Die: { Size: [120, 90], Area: 10800 },
+        Core: { Size: [96, 72], Area: 6912, Utilitization: 0.55, Margin: [4, 4] },
+      },
+      '/ws',
+    )
+    expect(merged.params.die_area).toEqual({
+      width: 120,
+      height: 90,
+      utilitization: 0.55,
+      margin: 4,
+    })
+    expect(merged.params.die).toEqual({ area: 10800 })
+    expect(merged.params.core).toEqual({ size: [96, 72], area: 6912 })
   })
 
   it('keeps unknown nested die/core leaves when folding geometry into die_area', () => {
@@ -392,6 +419,18 @@ describe('writeWorkspaceParameters', () => {
     writeHomeFile(root, 'ecc.toml', content)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
     expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toContain('corner1e20')
+  })
+
+  it('does not treat dashed or dotted key segments as numeric values', async () => {
+    const root = createWorkspace()
+    const content = `foo-1e20 = "keep"\n${ECC_TOML}\n[params.extra]\nfoo.1e20 = "keep"\n`
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(readWorkspaceParameters(root)).resolves.toMatchObject({ design: 'gcd' })
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
+    const written = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    expect(written).toContain('keep')
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters).toMatchObject({ design: 'gcd' })
   })
 
   it('rejects a JSON float that cannot round-trip through Number', async () => {

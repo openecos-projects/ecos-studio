@@ -125,8 +125,9 @@ export function losslessOptionalNumber(
  * TOML parsing yields a bigint exactly when an integer exceeds the safe
  * range, inf/nan as non-finite numbers, and dates as Date instances — all of
  * which a later save would silently persist in corrupted form (rounded,
- * null, or an epoch timestamp). Fail loud instead; strings and other
- * non-numeric inputs still convert (NaN) so fallback handling keeps working.
+ * null, or an epoch timestamp). Fail loud instead. Exact numeric strings
+ * still convert; null, booleans, and other non-numbers are rejected so
+ * `Number(null) === 0` cannot rewrite a geometry array.
  */
 export function losslessNumber(value: unknown, label: string): number {
   if (typeof value === 'bigint') {
@@ -175,18 +176,8 @@ export function losslessNumber(value: unknown, label: string): number {
     }
     return parsed
   }
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) {
-    throw new Error(
-      `Parameter ${label} value ${value} is not a finite number; ` +
-        'edit the workspace configuration manually',
-    )
-  }
-  if (Number.isInteger(parsed) && !Number.isSafeInteger(parsed)) {
-    throw new Error(
-      `Parameter ${label} value ${parsed} exceeds the safe integer range; ` +
-        'edit the workspace configuration manually',
-    )
-  }
-  return parsed
+  if (typeof value === 'number') return value
+  throw new Error(
+    `Parameter ${label} must be a number; edit the workspace configuration manually`,
+  )
 }

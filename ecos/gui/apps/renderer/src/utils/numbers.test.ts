@@ -86,4 +86,10 @@ describe('losslessNumberList', () => {
       /finite number|round-trip/,
     )
   })
+
+  it('rejects null and boolean members instead of coercing them to numbers', () => {
+    expect(() => losslessNumberList([null, 4], 'Core.Margin')).toThrow(/must be a number/)
+    expect(() => losslessNumberList([true, 4], 'Core.Margin')).toThrow(/must be a number/)
+    expect(() => losslessNumberList([false, 200], 'Die.Size')).toThrow(/must be a number/)
+  })
 })

@@ -579,9 +579,10 @@ function assertFiniteNumbers(value: unknown, label: string): void {
 
 /**
  * GUI Configure saves emit legacy Die/Core tables. On a TOML workspace whose
- * canonical geometry already lives under `die_area`, fold those tables into
- * the existing leaves and drop Die/Core so a save cannot leave two disagreeing
- * representations.
+ * canonical geometry already lives under `die_area`, fold the overlapping
+ * leaves into that table and drop only those mapped keys so a save cannot
+ * leave two disagreeing representations. Fields with no `die_area`
+ * equivalent (`die.area`, `core.size`, `core.area`) stay on Die/Core.
  */
 function foldLegacyGeometryIntoDieArea(
   existingParams: Record<string, unknown>,
@@ -606,15 +607,10 @@ function foldLegacyGeometryIntoDieArea(
     overlay.margin = core.margin[0]
   }
   payload.die_area = mergeRecordsPreservingUnknown(existingDieArea, overlay)
-  stripMigratedGeometryTable(payload, 'die', ['size', 'area'])
-  stripMigratedGeometryTable(payload, 'core', ['utilitization', 'margin', 'size', 'area'])
-  stripMigratedGeometryTable(existingParams, 'die', ['size', 'area'])
-  stripMigratedGeometryTable(existingParams, 'core', [
-    'utilitization',
-    'margin',
-    'size',
-    'area',
-  ])
+  stripMigratedGeometryTable(payload, 'die', ['size'])
+  stripMigratedGeometryTable(payload, 'core', ['utilitization', 'margin'])
+  stripMigratedGeometryTable(existingParams, 'die', ['size'])
+  stripMigratedGeometryTable(existingParams, 'core', ['utilitization', 'margin'])
 }
 
 function stripMigratedGeometryTable(
@@ -900,6 +896,7 @@ function parseJsonPreservingIntegers(text: string, label: string): unknown {
  */
 function assertTomlNumbersSafe(text: string, label: string): void {
   let index = 0
+  let expectingValue = false
   while (index < text.length) {
     const char = text[index]
     if (char === '#') {
@@ -927,6 +924,7 @@ function assertTomlNumbersSafe(text: string, label: string): void {
           }
           index += 1
         }
+        expectingValue = false
         continue
       }
       index += 1
@@ -934,25 +932,40 @@ function assertTomlNumbersSafe(text: string, label: string): void {
         index += quote === '"' && text[index] === '\\' ? 2 : 1
       }
       index += 1
+      expectingValue = false
       continue
     }
-    if (char === '+' || char === '-' || (char >= '0' && char <= '9')) {
-      const previous = index > 0 ? text[index - 1] : ''
-      // Bare keys (`corner1e20`) and table-header segments embed digits;
-      // only tokens that are not a continuation of an identifier are values.
-      if (previous && /[A-Za-z0-9_]/.test(previous)) {
-        index += 1
-        continue
-      }
+    if (char === '=' || char === ',') {
+      expectingValue = true
+      index += 1
+      continue
+    }
+    if (char === '[') {
+      // Inline arrays keep the value position (`margin = [2, 2]`). A table
+      // header starts a key, so only scan digits after `=` / `,`.
+      index += 1
+      continue
+    }
+    if (char === ']' || char === '{' || char === '}' || char === '\n') {
+      expectingValue = false
+      index += 1
+      continue
+    }
+    if (
+      expectingValue &&
+      (char === '+' || char === '-' || (char >= '0' && char <= '9'))
+    ) {
       const token = matchTomlNumberToken(text, index)
       if (token) {
         if (token.includes('.') || /[eE]/.test(token)) {
           assertNumberTokenRoundTrips(token, label)
         }
         index += token.length
+        expectingValue = false
         continue
       }
     }
+    if (char !== ' ' && char !== '\t' && char !== '\r') expectingValue = false
     index += 1
   }
 }
