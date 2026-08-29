@@ -58,6 +58,7 @@
     <div
       v-if="quickStartCursor.visible"
       class="quick-start-cursor"
+      :class="{ 'is-clicking': quickStartCursor.clicking }"
       :style="{ left: `${quickStartCursor.left}px`, top: `${quickStartCursor.top}px` }"
       aria-hidden="true"
     >
@@ -388,7 +389,7 @@ const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
-const quickStartCursor = reactive({ visible: false, left: 0, top: 0 })
+const quickStartCursor = reactive({ clicking: false, visible: false, left: 0, top: 0 })
 let quickStartWizardResolve: ((config: WorkspaceConfig) => void) | null = null
 let quickStartWizardReject: ((error: Error) => void) | null = null
 const showStepConfigDialog = ref(false)
@@ -483,9 +484,10 @@ async function createWorkspaceFromAgent(
 
 provide(agentWorkspaceSetupKey, createWorkspaceFromAgent)
 
-const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
+const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => {
   if (quickStartRunning) throw new Error('A Quick Start workflow is already running.')
   quickStartRunning = true
+  const narrate = (message: string): void => onNarration?.(message)
   try {
     signal?.throwIfAborted()
     const api = desktopApi.value ?? (await waitForDesktopApi())
@@ -509,12 +511,11 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
           if (!homeProjectButton) {
             throw new Error('Quick Start could not find the Project Management button.')
           }
-          await moveQuickStartCursor(homeProjectButton, signal, {
+          narrate('现在打开项目管理页面，准备创建 Project。')
+          await clickQuickStartTarget(homeProjectButton, signal, {
             offsetX: 96,
             offsetY: 96,
           })
-          signal?.throwIfAborted()
-          homeProjectButton.click()
           await delay(450, signal)
           if (route.path === '/projects') {
             await router.replace({
@@ -536,9 +537,8 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
             await delay(100, signal)
           }
           if (newProjectButton) {
-            await moveQuickStartCursor(newProjectButton, signal)
-            signal?.throwIfAborted()
-            newProjectButton.click()
+            narrate('项目管理页面已打开，接下来进入新建 Project。')
+            await clickQuickStartTarget(newProjectButton, signal)
             await delay(350, signal)
           }
         }
@@ -548,6 +548,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
         mpc: QuickStartResourceSnapshot['mpc']
         pdk: QuickStartResourceSnapshot['pdk']
       }) => {
+        narrate('现在正在创建 Project，使用 GCD 示例和已准备好的 MPC 配置。')
         if (!api.app.getQuickStartRoot) {
           throw new Error('Quick Start storage is unavailable in this desktop runtime.')
         }
@@ -569,6 +570,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
             mpcId: input.mpc?.id ?? '',
           },
           signal,
+          narrate,
         )
         signal?.throwIfAborted()
         const mpc = input.mpc ? await quickStartMpcSnapshot(api, input.mpc) : null
@@ -608,6 +610,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
         resources: QuickStartResourceSnapshot
       }) => {
         const project = input.project as { name: string; root: string }
+        narrate('现在正在创建 Workspace。')
         const workspaceId = await nextQuickStartWorkspaceId(api, project.root)
         const workspacePath = joinLocalPath(project.root, workspaceId)
         const config: WorkspaceConfig = {
@@ -669,7 +672,12 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
             project_json_path: joinLocalPath(project.root, 'project.json'),
           },
         }
-        const createdConfig = await driveQuickStartWorkspaceWizard(config, signal)
+        narrate('接下来配置 PDK、布局密度、顶层模块和时钟。')
+        const createdConfig = await driveQuickStartWorkspaceWizard(
+          config,
+          signal,
+          narrate,
+        )
         await writeQuickStartRunRecord(api, workspacePath, {
           project: { name: project.name, root: project.root },
           snapshot: {
@@ -683,6 +691,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
         return { id: workspaceId, path: workspacePath, config: createdConfig }
       },
       handoff: async (input: { project: any; workspace: any }) => {
+        narrate('Workspace 已创建，正在打开 Workspace 页面。')
         await router.push({
           path: '/workspace/home',
           query: {
@@ -700,6 +709,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
         showStepConfigDialog.value = false
       },
       startFlow: async (input: { project: any; workspace: any }) => {
+        narrate('现在正在启动完整 RTL 到 GDS 流程。')
         const flowResult = await runAllFlow({ rerun: false })
         if (!flowResult) throw new Error('Run All Flow did not start.')
         await writeQuickStartRunRecord(api, input.workspace.path, {
@@ -949,6 +959,7 @@ async function nextQuickStartWorkspaceId(
 async function driveQuickStartWorkspaceWizard(
   config: WorkspaceConfig,
   signal?: AbortSignal,
+  narrate?: (message: string) => void,
 ): Promise<WorkspaceConfig> {
   const created = new Promise<WorkspaceConfig>((resolve, reject) => {
     quickStartWizardResolve = resolve
@@ -960,6 +971,7 @@ async function driveQuickStartWorkspaceWizard(
     for (let step = 1; step < 6; step += 1) {
       await clickQuickStartWizardButton('Continue', step, signal)
       if (step === 1) {
+        narrate?.('正在填写布局密度和 Workspace 目录。')
         await showQuickStartInput(
           'density_065_from_floorplan',
           getPathLeafName(config.directory),
@@ -967,6 +979,7 @@ async function driveQuickStartWorkspaceWizard(
         )
       }
     }
+    narrate?.('正在填写顶层模块 gcd 和时钟 clk。')
     await showQuickStartInput('top', 'gcd', signal)
     await showQuickStartInput('clk', 'clk', signal)
     await clickQuickStartWizardButton('Create Workspace', 6, signal)
@@ -1007,10 +1020,7 @@ async function clickQuickStartWizardButton(
     throw new Error(
       `Quick Start could not find an enabled ${label} button on wizard step ${expectedStep}.`,
     )
-  await moveQuickStartCursor(button, signal)
-  signal?.throwIfAborted()
-  button.click()
-  await delay(850, signal)
+  await clickQuickStartTarget(button, signal)
 }
 
 async function showQuickStartInput(
@@ -1051,7 +1061,9 @@ async function showQuickStartProjectDialog(
     mpcId: string
   },
   signal?: AbortSignal,
+  narrate?: (message: string) => void,
 ): Promise<void> {
+  narrate?.('正在填写 Project 名称、设计名称和存储位置。')
   for (const [name, value] of [
     ['project-name', input.projectName],
     ['design-name', input.designName],
@@ -1106,9 +1118,8 @@ async function showQuickStartProjectDialog(
   }
   createButton.scrollIntoView({ behavior: 'smooth', block: 'center' })
   await delay(350, signal)
-  await moveQuickStartCursor(createButton, signal)
-  signal?.throwIfAborted()
-  createButton.click()
+  narrate?.('Project 信息已填写，正在提交创建。')
+  await clickQuickStartTarget(createButton, signal)
   for (let attempt = 0; attempt < 100; attempt += 1) {
     signal?.throwIfAborted()
     if (!document.querySelector('.new-project-dialog')) {
@@ -1137,10 +1148,7 @@ async function clickQuickStartProjectWorkspaceButton(
       '.project-tree-actions .row-primary-action',
     )
     if (newButton && !newButton.disabled) {
-      await moveQuickStartCursor(newButton, signal)
-      signal?.throwIfAborted()
-      newButton.click()
-      await delay(350, signal)
+      await clickQuickStartTarget(newButton, signal)
       return
     }
     await delay(100, signal)
@@ -1152,6 +1160,25 @@ async function clickQuickStartProjectWorkspaceButton(
 
 function closeQuickStartProjectDialog(): void {
   document.querySelector<HTMLButtonElement>('.new-project-dialog .modal-close')?.click()
+}
+
+async function clickQuickStartTarget(
+  target: HTMLElement,
+  signal?: AbortSignal,
+  offset: { offsetX: number; offsetY: number } = { offsetX: -96, offsetY: -96 },
+): Promise<void> {
+  await moveQuickStartCursor(target, signal, offset)
+  signal?.throwIfAborted()
+  target.classList.add('quick-start-target-highlight')
+  quickStartCursor.clicking = true
+  try {
+    await delay(400, signal)
+    target.click()
+    await delay(900, signal)
+  } finally {
+    target.classList.remove('quick-start-target-highlight')
+    quickStartCursor.clicking = false
+  }
 }
 
 async function moveQuickStartCursor(
@@ -1172,7 +1199,7 @@ async function moveQuickStartCursor(
   quickStartCursor.left = left
   quickStartCursor.top = top
   await nextTick()
-  await delay(1500, signal)
+  await delay(2000, signal)
 }
 
 function joinLocalPath(root: string, child: string): string {
@@ -2180,9 +2207,70 @@ onUnmounted(() => {
     top 1s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.quick-start-cursor::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.35);
+}
+
+.quick-start-cursor i {
+  display: inline-block;
+}
+
+.quick-start-cursor.is-clicking i {
+  animation: quick-start-cursor-press 300ms ease-out;
+}
+
+.quick-start-cursor.is-clicking::after {
+  animation: quick-start-cursor-ripple 850ms ease-out;
+}
+
+:global(.quick-start-target-highlight) {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-color) 24%, transparent);
+  transition:
+    outline-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+@keyframes quick-start-cursor-press {
+  50% {
+    transform: scale(0.78);
+  }
+}
+
+@keyframes quick-start-cursor-ripple {
+  0% {
+    opacity: 0.78;
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .quick-start-cursor {
     transition-duration: 100ms;
+  }
+
+  .quick-start-cursor.is-clicking i,
+  .quick-start-cursor.is-clicking::after {
+    animation: none;
+  }
+
+  :global(.quick-start-target-highlight) {
+    transition: none;
   }
 }
 

@@ -14,11 +14,17 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("props.shell !== 'home'")
     expect(source).toContain('class="quick-start-stop"')
     expect(source).toContain('stopQuickStart()')
-    expect(source).toContain('quickStartRunner((event) =>')
+    expect(source).toContain('await quickStartRunner(')
     expect(source).toContain("schema_version: 'flow-agent.activity.v1'")
     expect(source).toContain('interaction.interaction.options[2]?.id === answer.optionId')
     expect(source).not.toContain('class="quick-start-suggestion"')
     expect(source).toContain('await startQuickStart()')
+    expect(source).toContain('const narrationMessageId = sessionId')
+    expect(source).toContain('messageStore.appendToMessage(narrationMessageId')
+    expect(source).toContain('我先检查 GCD 示例、ICS55 PDK 和 MPC 资源。')
+    expect(source).toContain('Quick Start 已完成，完整 RTL 到 GDS 流程已经启动。')
+    expect(source).toContain('quickStartAbortController.signal')
+    expect(source).toContain('appendNarration,')
     expect(source).toContain(
       'messageStore.finishStreamingMessages(sessionId ?? undefined)',
     )

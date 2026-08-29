@@ -45,13 +45,12 @@ describe('agent workspace creation', () => {
 })
 
 describe('quick start resources', () => {
-  it('renders the Quick Start cursor without a circular backing', () => {
-    const start = source.indexOf('.quick-start-cursor {')
-    const end = source.indexOf('@media (prefers-reduced-motion', start)
-    const cursorStyle = source.slice(start, end)
-
-    expect(cursorStyle).not.toContain('border-radius')
-    expect(cursorStyle).not.toContain('background:')
+  it('renders a click-aware cursor and target highlight', () => {
+    expect(source).toContain(':class="{ \'is-clicking\': quickStartCursor.clicking }"')
+    expect(source).toContain('.quick-start-cursor::after')
+    expect(source).toContain('.quick-start-cursor i')
+    expect(source).toContain('quick-start-cursor-ripple')
+    expect(source).toContain('quick-start-target-highlight')
   })
 
   it('hides the cursor when Quick Start is idle', () => {
@@ -81,7 +80,7 @@ describe('quick start resources', () => {
     )
     expect(navigateSource).toContain('offsetX: 96')
     expect(navigateSource).toContain('offsetY: 96')
-    expect(navigateSource).toContain('homeProjectButton.click()')
+    expect(navigateSource).toContain('clickQuickStartTarget(homeProjectButton')
     expect(navigateSource).not.toContain("router.push('/projects')")
   })
 
@@ -118,7 +117,7 @@ describe('quick start resources', () => {
     expect(createSource).toContain('projectRoot,')
     expect(createSource).toContain('mpcId: input.mpc?.id')
     expect(createSource).toContain('registerProjectRoot(projectRoot)')
-    expect(source).toContain('createButton.click()')
+    expect(source).toContain('clickQuickStartTarget(createButton')
     expect(source).toContain(
       'clickQuickStartProjectWorkspaceButton(input.projectName, signal)',
     )
@@ -148,10 +147,12 @@ describe('quick start resources', () => {
 
   it('forwards cancellation through the workflow and wizard driver', () => {
     expect(source).toContain(
-      'const runQuickStart: QuickStartRunner = async (onEvent, signal) =>',
+      'const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) =>',
     )
     expect(source).toContain('runQuickStartWorkflow(host, onEvent, signal)')
     expect(source).toContain('signal?.throwIfAborted()')
+    expect(source).toContain('await delay(2000, signal)')
+    expect(source).toContain('quickStartCursor.clicking = true')
   })
 
   it('keeps one Project-scoped run record and no dead handoff query', () => {

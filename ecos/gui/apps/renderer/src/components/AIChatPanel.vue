@@ -1713,51 +1713,63 @@ async function startQuickStart(): Promise<void> {
   const sessionId = agentSessionId.value
   quickStartRunning.value = true
   quickStartAbortController = new AbortController()
-  if (sessionId) messageStore.addMessage('Quick Start · GCD backend flow')
+  if (sessionId) messageStore.addMessage('Quick Start · GCD 示例流程')
+  const narrationMessageId = sessionId
+    ? messageStore.addAssistantMessage(
+        '我会一步一步带你完成 Quick Start。\n\n',
+        'loading',
+        sessionId,
+      )
+    : null
+  const appendNarration = (message: string): void => {
+    if (!narrationMessageId) return
+    messageStore.appendToMessage(narrationMessageId, `${message}\n\n`)
+  }
   const startedAtByStep = new Map<string, number>()
   const turnId = `quick-start-${Date.now()}`
   try {
-    await quickStartRunner((event) => {
-      if (!sessionId) return
-      const now = Date.now()
-      const startedAt = startedAtByStep.get(event.stepId) ?? now
-      if (event.status === 'running') startedAtByStep.set(event.stepId, startedAt)
-      messageStore.upsertAgentEvent({
-        activity: {
-          arguments: JSON.stringify({
-            capability: event.capability,
-            surface: event.surface,
-          }),
-          durationMs:
-            event.status === 'running' ? undefined : Math.max(0, now - startedAt),
-          itemId: `quick-start-${event.stepId}`,
-          kind: 'tool_call',
-          progress: event.status === 'running' ? event.labelKey : undefined,
-          result: event.status === 'completed' ? event.detailKey : undefined,
-          schema_version: 'flow-agent.activity.v1',
-          startedAt,
-          status: event.status,
-          tool: event.labelKey,
-          turnId,
-          turnStartedAt: startedAt,
-        },
-        messageId: `quick-start-${event.stepId}`,
-        providerId: AGENT_PROVIDER_ID,
-        sessionId,
-        type: 'activity',
-      })
-    }, quickStartAbortController.signal)
-    if (sessionId) {
-      messageStore.addAssistantMessage(
-        'Quick Start completed. Run All Flow is running.',
-        'done',
-        sessionId,
-      )
-    }
+    await quickStartRunner(
+      (event) => {
+        if (!sessionId) return
+        if (event.status === 'running' && event.stepId === 'preflight') {
+          appendNarration('我先检查 GCD 示例、ICS55 PDK 和 MPC 资源。')
+        }
+        const now = Date.now()
+        const startedAt = startedAtByStep.get(event.stepId) ?? now
+        if (event.status === 'running') startedAtByStep.set(event.stepId, startedAt)
+        messageStore.upsertAgentEvent({
+          activity: {
+            arguments: JSON.stringify({
+              capability: event.capability,
+              surface: event.surface,
+            }),
+            durationMs:
+              event.status === 'running' ? undefined : Math.max(0, now - startedAt),
+            itemId: `quick-start-${event.stepId}`,
+            kind: 'tool_call',
+            progress: event.status === 'running' ? event.labelKey : undefined,
+            result: event.status === 'completed' ? event.detailKey : undefined,
+            schema_version: 'flow-agent.activity.v1',
+            startedAt,
+            status: event.status,
+            tool: event.labelKey,
+            turnId,
+            turnStartedAt: startedAt,
+          },
+          messageId: `quick-start-${event.stepId}`,
+          providerId: AGENT_PROVIDER_ID,
+          sessionId,
+          type: 'activity',
+        })
+      },
+      quickStartAbortController.signal,
+      appendNarration,
+    )
+    appendNarration('Quick Start 已完成，完整 RTL 到 GDS 流程已经启动。')
   } catch (error) {
     if (!sessionId) return
     if (isQuickStartAbort(error)) {
-      messageStore.addAssistantMessage('Quick Start stopped.', 'done', sessionId)
+      appendNarration('Quick Start 已停止。')
     } else {
       messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
     }
