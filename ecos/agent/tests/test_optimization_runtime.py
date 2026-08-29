@@ -109,7 +109,9 @@ def test_optimization_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -
         _optimization_rerun_runtime_seconds(tmp_path)
 
 
-def test_design_id_comes_from_workspace_parameters_and_fails_closed(tmp_path: Path) -> None:
+def test_design_id_comes_from_workspace_parameters_and_fails_closed(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "home").mkdir()
     parameters = tmp_path / "home" / "parameters.json"
     parameters.write_text(json.dumps({"Design": "aes_core"}), encoding="utf-8")
@@ -168,7 +170,9 @@ def test_current_values_read_the_eight_runtime_knob_surfaces(tmp_path: Path) -> 
     }
 
 
-def test_incumbent_workspace_resolves_only_registered_candidate_roots(tmp_path: Path) -> None:
+def test_incumbent_workspace_resolves_only_registered_candidate_roots(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "workspace"
     candidate = workspace / ".agent" / "candidates" / "candidate-1"
     candidate.mkdir(parents=True)
@@ -179,7 +183,9 @@ def test_incumbent_workspace_resolves_only_registered_candidate_roots(tmp_path: 
         _incumbent_workspace(workspace, "../outside")
 
 
-def test_parent_manifest_binds_terminal_evidence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_parent_manifest_binds_terminal_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         "ecos_agent.optimization_runtime.build_optimization_artifact_manifest",
         lambda *_args: SimpleNamespace(manifest_sha256=_HASH),
@@ -198,15 +204,24 @@ def test_parent_manifest_binds_terminal_evidence(monkeypatch: pytest.MonkeyPatch
 def test_runtime_requires_a_hash_bound_optimization_objective() -> None:
     objective = _semantic_objective()
 
-    assert _optimization_objective(objective).primary_metric == ObjectiveMetric.ROUTE_WIRELENGTH
-    with pytest.raises(OptimizationRuntimeError, match="optimization objective is missing"):
+    assert (
+        _optimization_objective(objective).primary_metric
+        == ObjectiveMetric.ROUTE_WIRELENGTH
+    )
+    with pytest.raises(
+        OptimizationRuntimeError, match="optimization objective is missing"
+    ):
         _optimization_objective(None)
     objective["primary_metric"] = ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
-    with pytest.raises(OptimizationRuntimeError, match="optimization objective is invalid"):
+    with pytest.raises(
+        OptimizationRuntimeError, match="optimization objective is invalid"
+    ):
         _optimization_objective(objective)
 
 
-def test_terminal_waiter_propagates_stop_to_cancel_and_returns_terminal_receipt() -> None:
+def test_terminal_waiter_propagates_stop_to_cancel_and_returns_terminal_receipt() -> (
+    None
+):
     events: list[str] = []
     stop = threading.Event()
     stop.set()
@@ -240,7 +255,9 @@ def test_terminal_waiter_cancels_when_timeout_expires_between_clock_reads(
 ) -> None:
     calls: list[str] = []
     clock = iter((0.0, 0.05, 0.2))
-    monkeypatch.setattr("ecos_agent.optimization_runtime._monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        "ecos_agent.optimization_runtime._monotonic", lambda: next(clock)
+    )
 
     class Executor:
         def wait_for_terminal(self, *_args: object, **_kwargs: object):
@@ -275,6 +292,9 @@ class _FakeRpc:
         self.calls.append(workspace)
         return "workspace-1"
 
+    def ecc_revision(self) -> str:
+        return "ecc-test-revision"
+
     def close(self) -> None:
         self.closed = True
 
@@ -293,9 +313,12 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
         "ecos_agent.optimization_runtime.EccContentLengthRpcClient", lambda _path: rpc
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime.build_terminal_observation", lambda _path: _terminal()
+        "ecos_agent.optimization_runtime.build_terminal_observation",
+        lambda _path: _terminal(),
     )
-    monkeypatch.setattr("ecos_agent.optimization_runtime._site_width_dbu", lambda _path: 200)
+    monkeypatch.setattr(
+        "ecos_agent.optimization_runtime._site_width_dbu", lambda _path: 200
+    )
     monkeypatch.setattr(
         "ecos_agent.optimization_runtime._current_values",
         lambda _path, _site_width: {
@@ -305,7 +328,8 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
         },
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime._parent_manifest_sha256", lambda _path, _terminal: _HASH
+        "ecos_agent.optimization_runtime._parent_manifest_sha256",
+        lambda _path, _terminal: _HASH,
     )
     monkeypatch.setattr(
         "ecos_agent.optimization_runtime._optimization_rerun_runtime_seconds",
@@ -327,7 +351,9 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     episode_root = workspace / ".agent" / "optimization" / "episode-new"
     assert (episode_root / "optimization-task-memory-scope.v1.json").is_file()
     state = json.loads(
-        (episode_root / "optimization-episode-state.v6.json").read_text(encoding="utf-8")
+        (episode_root / "optimization-episode-state.v6.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert state["task_memory_scope_sha256"].startswith("sha256:")
     assert runner.budget.budget.wall_time_limit_seconds == 264.0

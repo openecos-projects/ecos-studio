@@ -76,7 +76,9 @@ def _application_receipt() -> KnobApplicationReceipt:
     )
 
 
-def test_ledger_retains_a_degraded_outcome_and_replays_it_deterministically(tmp_path) -> None:
+def test_ledger_retains_a_degraded_outcome_and_replays_it_deterministically(
+    tmp_path,
+) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
 
     ledger.append_start(_start())
@@ -93,6 +95,14 @@ def test_ledger_retains_a_degraded_outcome_and_replays_it_deterministically(tmp_
     manifest = ledger.write_manifest()
     assert manifest.ledger_sha256 == file_sha256(ledger.ledger_path)
     assert manifest.chain_head_sha256 == first_replay.chain_head_sha256
+
+
+def test_terminal_outcome_rejects_conflicting_incumbent_decision() -> None:
+    payload = _terminal().model_dump(mode="json")
+    payload["incumbent_decision"] = "candidate_better"
+
+    with pytest.raises(ValueError, match="does not match outcome"):
+        OptimizationTerminalOutcome.model_validate(payload)
 
 
 def test_ledger_rejects_new_legacy_effective_value_receipts(tmp_path) -> None:
@@ -117,8 +127,12 @@ def test_ledger_rejects_new_legacy_effective_value_receipts(tmp_path) -> None:
         )
     )
     terminal = _terminal()
-    terminal = terminal.model_copy(update={"application_receipt": _application_receipt()})
-    with pytest.raises(OptimizationLedgerStateError, match="legacy application receipt"):
+    terminal = terminal.model_copy(
+        update={"application_receipt": _application_receipt()}
+    )
+    with pytest.raises(
+        OptimizationLedgerStateError, match="legacy application receipt"
+    ):
         ledger.append_terminal(terminal)
 
     replay = ledger.replay()
@@ -126,7 +140,10 @@ def test_ledger_rejects_new_legacy_effective_value_receipts(tmp_path) -> None:
     with ledger.ledger_path.open("ab") as stream:
         stream.write(_canonical_json(legacy_entry.model_dump(mode="json")) + b"\n")
 
-    assert ledger.replay().terminal_outcomes[0].application_receipt == _application_receipt()
+    assert (
+        ledger.replay().terminal_outcomes[0].application_receipt
+        == _application_receipt()
+    )
 
 
 def test_ledger_rejects_terminal_execution_contract_drift(tmp_path) -> None:
@@ -138,13 +155,17 @@ def test_ledger_rejects_terminal_execution_contract_drift(tmp_path) -> None:
         ledger.verify()
 
 
-def test_ledger_rejects_tampering_and_never_appends_to_an_invalid_chain(tmp_path) -> None:
+def test_ledger_rejects_tampering_and_never_appends_to_an_invalid_chain(
+    tmp_path,
+) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     ledger.append_start(_start())
     ledger.append_terminal(_terminal())
 
     contents = ledger.ledger_path.read_text(encoding="utf-8")
-    ledger.ledger_path.write_text(contents.replace("degraded", "improved"), encoding="utf-8")
+    ledger.ledger_path.write_text(
+        contents.replace("degraded", "improved"), encoding="utf-8"
+    )
 
     with pytest.raises(OptimizationLedgerIntegrityError, match="hash"):
         ledger.verify()
@@ -152,7 +173,9 @@ def test_ledger_rejects_tampering_and_never_appends_to_an_invalid_chain(tmp_path
         ledger.append_start(_start("intervention-2"))
 
 
-def test_ledger_recovers_only_a_torn_final_record_and_marks_it_pending(tmp_path) -> None:
+def test_ledger_recovers_only_a_torn_final_record_and_marks_it_pending(
+    tmp_path,
+) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     start = _start()
     ledger.append_start(start)
@@ -170,7 +193,9 @@ def test_ledger_recovers_only_a_torn_final_record_and_marks_it_pending(tmp_path)
         ledger.append_start(start)
 
 
-def test_ledger_recovery_keeps_a_complete_final_record_without_its_newline(tmp_path) -> None:
+def test_ledger_recovery_keeps_a_complete_final_record_without_its_newline(
+    tmp_path,
+) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     start = _start()
     ledger.append_start(start)
@@ -183,7 +208,9 @@ def test_ledger_recovery_keeps_a_complete_final_record_without_its_newline(tmp_p
     assert ledger.ledger_path.read_bytes().endswith(b"\n")
 
 
-def test_ledger_requires_one_start_and_one_terminal_record_per_intervention(tmp_path) -> None:
+def test_ledger_requires_one_start_and_one_terminal_record_per_intervention(
+    tmp_path,
+) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
 
     with pytest.raises(OptimizationLedgerStateError, match="not pending"):
@@ -195,7 +222,9 @@ def test_ledger_requires_one_start_and_one_terminal_record_per_intervention(tmp_
         ledger.append_terminal(_terminal())
 
 
-def test_intervention_start_requires_distinct_parent_and_candidate_checkpoints() -> None:
+def test_intervention_start_requires_distinct_parent_and_candidate_checkpoints() -> (
+    None
+):
     payload = _start().model_dump()
     payload["candidate_checkpoint_id"] = payload["parent_checkpoint_id"]
 
@@ -236,7 +265,9 @@ def test_empty_ledger_manifest_binds_the_real_empty_ledger_file(tmp_path) -> Non
         ledger.verify_manifest(manifest)
 
 
-def test_artifact_manifest_uses_full_sha256_for_a_large_file_and_detects_changes(tmp_path) -> None:
+def test_artifact_manifest_uses_full_sha256_for_a_large_file_and_detects_changes(
+    tmp_path,
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     artifact = workspace / "large.log"
@@ -255,7 +286,9 @@ def test_artifact_manifest_uses_full_sha256_for_a_large_file_and_detects_changes
         verify_optimization_artifact_manifest(workspace, manifest)
 
 
-def test_artifact_manifest_is_portable_and_rejects_escape_or_symlink_inputs(tmp_path) -> None:
+def test_artifact_manifest_is_portable_and_rejects_escape_or_symlink_inputs(
+    tmp_path,
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     artifact = workspace / "result.json"
@@ -327,5 +360,7 @@ def test_planning_provider_evidence_is_hash_bound_to_a_planning_call(tmp_path) -
 
     contents = audit.audit_path.read_text(encoding="utf-8")
     audit.audit_path.write_text(contents.replace("turn-1", "turn-2"), encoding="utf-8")
-    with pytest.raises(OptimizationPlanningProviderAuditIntegrityError, match="invalid hash"):
+    with pytest.raises(
+        OptimizationPlanningProviderAuditIntegrityError, match="invalid hash"
+    ):
         audit.verify()

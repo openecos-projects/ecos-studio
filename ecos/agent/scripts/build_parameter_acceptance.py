@@ -7,8 +7,13 @@ import json
 from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue
 from ecos_agent.optimization_controller import CandidateExecutionEvidence
 from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization_ecc_evidence import (
+    OptimizationEccAdapterError,
+    validate_candidate_artifacts,
+)
 from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
@@ -22,7 +27,10 @@ from ecos_agent.optimization_memory import (
 )
 from ecos_agent.optimization_observations import build_candidate_terminal_observation
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
-from ecos_agent.parameter_semantics import load_parameter_cards, validate_application_receipt
+from ecos_agent.parameter_semantics import (
+    load_parameter_cards,
+    validate_application_receipt,
+)
 
 CANDIDATES = {
     "floorplan.core_util": "candidate-fb53a8688a8318c2-candidate-accept-core-util-v3-20260827",
@@ -103,7 +111,7 @@ def _validate_native_receipt(
         or receipt.materialization.workspace_ref != candidate_ref
     ):
         issues.append("native receipt candidate binding mismatch")
-    dumped = receipt.model_dump(mode="json")
+    dumped = receipt.model_dump(mode="json", by_alias=True)
     runtime_fields = (
         "application_status",
         "effective_initial",
@@ -115,6 +123,66 @@ def _validate_native_receipt(
     if any(runtime_payload.get(field) != dumped.get(field) for field in runtime_fields):
         issues.append("native receipt does not match runtime report")
     return receipt, issues
+
+
+def _validate_candidate_artifact_binding(
+    *,
+    workspace: Path,
+    payload: dict,
+    evidence: CandidateExecutionEvidence,
+    receipt: ParameterApplicationReceipt,
+    card,
+) -> str | None:
+    site_width_dbu = receipt.context.get("site_width_dbu")
+    if type(site_width_dbu) is not int or site_width_dbu <= 0:
+        return "application receipt site width binding is unavailable"
+    try:
+        validate_candidate_artifacts(
+            workspace_root=workspace,
+            site_width_dbu=site_width_dbu,
+            receipt=receipt,
+            requested=RequestedKnobValue(
+                knob_id=OptimizationKnob(receipt.requested["knob_id"]),
+                value=receipt.requested["value"],
+            ),
+            evidence=evidence,
+            candidate_ref=payload["candidate_root_ref"],
+            parent_ref=payload.get("parent_candidate_root_ref"),
+            terminal_state=payload["terminal_state"],
+            target_step=payload["target_step"],
+            config_ref=card.surface.file,
+            config_json_path=tuple(card.surface.json_path),
+        )
+    except (OptimizationEccAdapterError, TypeError, ValueError, KeyError) as exc:
+        return f"candidate artifact binding failed: {exc}"
+    return None
+
+
+def _has_native_density_floor_override(receipt: dict) -> bool:
+    if receipt.get("requested", {}).get("knob_id") != "place.target_density":
+        return False
+    requested = receipt.get("requested", {}).get("value")
+    effective = receipt.get("effective_initial", {}).get("value")
+    final = receipt.get("effective_final", {}).get("value")
+    observation = receipt.get("consumer_observation") or {}
+    if (
+        type(requested) not in {int, float}
+        or type(effective) not in {int, float}
+        or requested >= effective
+        or final != effective
+        or observation.get("effective_target_density") != effective
+        or observation.get("density_tensor_value") != effective
+    ):
+        return False
+    return any(
+        transition.get("to") == "overridden"
+        and transition.get("rule_id") == "dreamplace.target_density.utilization_floor"
+        and transition.get("value") == effective
+        and bool(transition.get("evidence_ref"))
+        and bool(transition.get("evidence_sha256"))
+        for transition in receipt.get("transitions", [])
+        if isinstance(transition, dict)
+    )
 
 
 def _state_sha256(root: Path) -> str:
@@ -144,7 +212,9 @@ def _read_json_artifact(path: Path, label: str, issues: list[str]) -> dict:
     return payload
 
 
-def _verified_episode_replays(workspace: Path, episode_roots: tuple[Path, ...]) -> tuple[dict, ...]:
+def _verified_episode_replays(
+    workspace: Path, episode_roots: tuple[Path, ...]
+) -> tuple[dict, ...]:
     optimization_root = (workspace / ".agent/optimization").resolve()
     verified = []
     for requested_root in episode_roots:
@@ -205,7 +275,9 @@ def _matching_trace_episode(
         }
         for ledger_entry in replay["ledger_entries"]:
             terminal = ledger_entry.payload
-            if not isinstance(terminal, OptimizationTerminalOutcome) or not _terminal_matches(
+            if not isinstance(
+                terminal, OptimizationTerminalOutcome
+            ) or not _terminal_matches(
                 terminal,
                 candidate_root_ref,
                 candidate_manifest_sha256,
@@ -294,9 +366,13 @@ def build_acceptance(
     for knob_id, candidate_id in CANDIDATES.items():
         candidate_root = workspace / ".agent" / "candidates" / candidate_id
         candidate_manifest = candidate_root / "analysis" / "candidate_workspace.v1.json"
-        materialization = candidate_root / "analysis" / "candidate_materialization.v1.json"
+        materialization = (
+            candidate_root / "analysis" / "candidate_materialization.v1.json"
+        )
         receipt = candidate_root / "analysis" / "parameter_application_receipt.v1.json"
-        runtime_report = candidate_root / "analysis" / "parameter_runtime_report.v1.json"
+        runtime_report = (
+            candidate_root / "analysis" / "parameter_runtime_report.v1.json"
+        )
         replay = candidate_root / "analysis" / "candidate_execution_receipt.v1.json"
         payload = json.loads(candidate_manifest.read_text(encoding="utf-8"))
         artifacts = payload.get("artifacts", {})
@@ -314,7 +390,9 @@ def build_acceptance(
                 payload.setdefault("_artifact_issues", []).append(f"{key} ref mismatch")
             if declared_artifact.get("sha256") != file_sha256(relative):
                 # Keep processing so the report contains all independent failures.
-                payload.setdefault("_artifact_issues", []).append(f"{key} hash mismatch")
+                payload.setdefault("_artifact_issues", []).append(
+                    f"{key} hash mismatch"
+                )
         evidence = CandidateExecutionEvidence(
             payload["candidate_root_ref"],
             payload["candidate_root_ref"] + "/analysis/candidate_workspace.v1.json",
@@ -327,7 +405,8 @@ def build_acceptance(
         observation_path = observation_dir / f"{knob_id}.json"
         observation_path.parent.mkdir(parents=True, exist_ok=True)
         observation_path.write_text(
-            json.dumps(observation.model_dump(mode="json"), sort_keys=True, indent=2) + "\n",
+            json.dumps(observation.model_dump(mode="json"), sort_keys=True, indent=2)
+            + "\n",
             encoding="utf-8",
         )
         issues = payload.pop("_artifact_issues", [])
@@ -360,6 +439,14 @@ def build_acceptance(
         issues.extend(receipt_issues)
         if native_receipt is None or not _receipt_is_effective(receipt_payload):
             issues.append("native receipt is not effective")
+        elif binding_issue := _validate_candidate_artifact_binding(
+            workspace=workspace,
+            payload=payload,
+            evidence=evidence,
+            receipt=native_receipt,
+            card=card_by_id[knob_id],
+        ):
+            issues.append(binding_issue)
         if not observation.eligible_for_incumbent:
             issues.append("terminal observation is not eligible for incumbent")
         replay_payload = None
@@ -371,14 +458,18 @@ def build_acceptance(
                 issues.append("replay schema mismatch")
             if replay_payload.get("candidate_id") != payload.get("candidate_id"):
                 issues.append("replay candidate id mismatch")
-            if replay_payload.get("candidate_root_ref") != payload.get("candidate_root_ref"):
+            if replay_payload.get("candidate_root_ref") != payload.get(
+                "candidate_root_ref"
+            ):
                 issues.append("replay candidate root mismatch")
             if replay_payload.get("parent_candidate_root_ref") != payload.get(
                 "parent_candidate_root_ref"
             ):
                 issues.append("replay parent mismatch")
             parent_ref = payload.get("parent_candidate_root_ref")
-            parent_root = workspace / parent_ref if isinstance(parent_ref, str) else workspace
+            parent_root = (
+                workspace / parent_ref if isinstance(parent_ref, str) else workspace
+            )
             expected_parent_state = _state_sha256(parent_root)
             if payload.get("parent_state_sha256") != expected_parent_state:
                 issues.append("candidate parent state hash mismatch")
@@ -390,7 +481,9 @@ def build_acceptance(
                 issues.append("replay end step mismatch")
             if replay_payload.get("execution_scope") != payload.get("execution_scope"):
                 issues.append("replay execution scope mismatch")
-            if replay_payload.get("parent_flow_sha256") != payload.get("parent_flow_sha256"):
+            if replay_payload.get("parent_flow_sha256") != payload.get(
+                "parent_flow_sha256"
+            ):
                 issues.append("replay parent flow mismatch")
             if replay_payload.get("candidate_manifest_sha256") != file_sha256(
                 candidate_manifest
@@ -399,11 +492,17 @@ def build_acceptance(
         requested = receipt_payload.get("requested", {})
         effective = receipt_payload.get("effective_initial", {})
         expected_unit = (
-            "objective_weight" if knob_id.endswith("density_weight") else requested.get("unit")
+            "objective_weight"
+            if knob_id.endswith("density_weight")
+            else requested.get("unit")
         )
         if requested.get("unit") != expected_unit:
             issues.append(f"native receipt unit mismatch; expected {expected_unit}")
-        if requested.get("value") != effective.get("value") and knob_id != "place.cell_padding_x":
+        if (
+            requested.get("value") != effective.get("value")
+            and knob_id != "place.cell_padding_x"
+            and not _has_native_density_floor_override(receipt_payload)
+        ):
             issues.append("effective initial does not match requested value")
         card_sha256 = canonical_sha256(card_by_id[knob_id].model_dump(mode="json"))
         terminal_sha256 = canonical_sha256(observation.model_dump(mode="json"))
@@ -432,8 +531,12 @@ def build_acceptance(
                     file_sha256(materialization) if materialization.is_file() else None
                 ),
                 "native_receipt_ref": str(receipt.relative_to(workspace)),
-                "native_receipt_sha256": file_sha256(receipt) if receipt.is_file() else None,
-                "activation_status": receipt_payload.get("activation", {}).get("status"),
+                "native_receipt_sha256": file_sha256(receipt)
+                if receipt.is_file()
+                else None,
+                "activation_status": receipt_payload.get("activation", {}).get(
+                    "status"
+                ),
                 "issues": issues,
                 "terminal_observation_ref": str(observation_path.relative_to(output)),
                 "terminal_observation_sha256": terminal_sha256,
@@ -449,7 +552,8 @@ def build_acceptance(
                     "operation": "candidate.rerun",
                     "target_step": payload["target_step"],
                     "end_step": payload["end_step"],
-                    "available": replay_payload is not None and not any(
+                    "available": replay_payload is not None
+                    and not any(
                         issue.startswith(("replay ", "candidate parent state hash"))
                         for issue in issues
                     ),

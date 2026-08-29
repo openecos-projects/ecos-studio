@@ -77,7 +77,12 @@ def frozen_workspace(tmp_path: Path) -> Path:
     )
     _write_json(
         root / "home/parameters.json",
-        {"Design": "tiny", "Target density": 0.2, "Cell padding x": 300, "Routability opt flag": 1},
+        {
+            "Design": "tiny",
+            "Target density": 0.2,
+            "Cell padding x": 300,
+            "Routability opt flag": 1,
+        },
     )
     _write_json(
         root / "place_dreamplace/analysis/qor_metrics.json",
@@ -161,7 +166,13 @@ def frozen_workspace(tmp_path: Path) -> Path:
         "ML_125/RCworst": (8.9, 0.1, 964, 103.3, 89.1),
         "TYP_25/TYPICAL": (8.5, 0.14, 672, 66.8, 0.267),
     }
-    for corner, (setup_wns, hold_wns, frequency_mhz, dynamic_uw, leakage_uw) in corners.items():
+    for corner, (
+        setup_wns,
+        hold_wns,
+        frequency_mhz,
+        dynamic_uw,
+        leakage_uw,
+    ) in corners.items():
         feature_root = root / "sta_ecc/feature" / corner
         _write_json(
             feature_root / "qor_summary.json",
@@ -196,16 +207,21 @@ def frozen_workspace(tmp_path: Path) -> Path:
                 "expected_corner_count": len(configured_corners),
                 "loaded_corners": configured_corners,
                 "signoff_metrics": {
-                    "corners": [
-                        {"sta_corner": corner} for corner in configured_corners
-                    ]
+                    "corners": [{"sta_corner": corner} for corner in configured_corners]
                 },
             }
         },
     )
-    _write_json(root / "drc_ecc/checklist.json", _checklist(("quality.drc.clean", "pass")))
-    _write_json(root / "lvs_ecc/checklist.json", _checklist(("quality.lvs.clean", "pass")))
-    _write_json(root / "filler_ecc/checklist.json", _checklist(("quality.filler.complete", "pass")))
+    _write_json(
+        root / "drc_ecc/checklist.json", _checklist(("quality.drc.clean", "pass"))
+    )
+    _write_json(
+        root / "lvs_ecc/checklist.json", _checklist(("quality.lvs.clean", "pass"))
+    )
+    _write_json(
+        root / "filler_ecc/checklist.json",
+        _checklist(("quality.filler.complete", "pass")),
+    )
     _write_json(
         root / "RCX_ecc/checklist.json",
         _checklist(
@@ -322,13 +338,18 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert by_id[("ppa", "sta_worst_dynamic_power", "MAX_125/Cworst")].value == 105.2
     assert by_id[("ppa", "sta_worst_leakage_power", "ML_125/RCworst")].value == 89.1
     assert by_id[("routing_diagnostic", "route_via_count", None)].value == 1705
-    assert by_id[("routing_diagnostic", "route_dr_total_patch_count", None)].value == 126
+    assert (
+        by_id[("routing_diagnostic", "route_dr_total_patch_count", None)].value == 126
+    )
     assert by_id[("cost", "flow_tool_runtime", None)].value == 55
     assert by_id[("cost", "flow_peak_memory", None)].value == 500
     assert by_id[("cost", "flow_stage_count", None)].value == 10
     assert by_id[("cost", "flow_nonzero_peak_memory_stage_count", None)].value == 8
     assert by_id[("corner_robustness", "sta_setup_wns", "TYP_25/TYPICAL")].value == 8.5
-    assert by_id[("corner_robustness", "sta_dynamic_power", "TYP_25/TYPICAL")].value == 66.8
+    assert (
+        by_id[("corner_robustness", "sta_dynamic_power", "TYP_25/TYPICAL")].value
+        == 66.8
+    )
     assert observation.sta_corner_ids == (
         "MAX_125/Cworst",
         "ML_125/RCworst",
@@ -357,10 +378,14 @@ def test_terminal_observation_fails_closed_without_numeric_eligibility(
 ) -> None:
     path = frozen_workspace / "lvs_ecc/analysis/qor_metrics.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
-    payload["metrics"] = [item for item in payload["metrics"] if item["id"] != "lvs_count"]
+    payload["metrics"] = [
+        item for item in payload["metrics"] if item["id"] != "lvs_count"
+    ]
     _write_json(path, payload)
 
-    with pytest.raises(OptimizationObservationError, match="evaluation metric is unavailable"):
+    with pytest.raises(
+        OptimizationObservationError, match="evaluation metric is unavailable"
+    ):
         build_terminal_observation(frozen_workspace)
 
 
@@ -378,7 +403,7 @@ def test_terminal_observation_rejects_nonzero_numeric_eligibility(
     assert observation.eligible_for_incumbent is False
 
 
-def test_terminal_observation_marks_missing_power_as_report_incomplete(
+def test_terminal_observation_marks_missing_power_as_ineligible(
     frozen_workspace: Path,
 ) -> None:
     power_path = frozen_workspace / "sta_ecc/feature/MAX_125/Cworst/power_summary.json"
@@ -386,24 +411,26 @@ def test_terminal_observation_marks_missing_power_as_report_incomplete(
 
     observation = build_terminal_observation(frozen_workspace)
 
-    assert observation.eligible_for_incumbent is True
     assert observation.evaluation_metrics_complete is False
+    assert observation.eligible_for_incumbent is False
     assert not any(
         metric.metric_id in {"sta_worst_dynamic_power", "sta_worst_leakage_power"}
         for metric in observation.evaluation_metrics
     )
 
 
-def test_terminal_observation_marks_missing_cost_as_report_incomplete(
+def test_terminal_observation_marks_missing_cost_as_ineligible(
     frozen_workspace: Path,
 ) -> None:
     (frozen_workspace / "CTS_ecc/analysis/qor_metrics.json").unlink()
 
     observation = build_terminal_observation(frozen_workspace)
 
-    assert observation.eligible_for_incumbent is True
     assert observation.evaluation_metrics_complete is False
-    by_id = {metric.metric_id: metric.value for metric in observation.evaluation_metrics}
+    assert observation.eligible_for_incumbent is False
+    by_id = {
+        metric.metric_id: metric.value for metric in observation.evaluation_metrics
+    }
     assert by_id["flow_stage_count"] == 10
     assert by_id["flow_cost_covered_stage_count"] == 9
     assert "flow_tool_runtime" not in by_id
@@ -462,7 +489,9 @@ def test_terminal_observation_requires_each_timing_guardrail_metric(
 ) -> None:
     path = frozen_workspace / "sta_ecc/analysis/qor_metrics.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
-    payload["metrics"] = [item for item in payload["metrics"] if item["id"] != metric_id]
+    payload["metrics"] = [
+        item for item in payload["metrics"] if item["id"] != metric_id
+    ]
     _write_json(path, payload)
 
     with pytest.raises(OptimizationObservationError, match="timing guardrail metric"):
@@ -575,10 +604,14 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
     assert observation.metrics["route_la_total_overflow"] == 1.0
 
     candidate_flow = candidate_root / "home/flow.json"
-    candidate_flow.write_text(candidate_flow.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    candidate_flow.write_text(
+        candidate_flow.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+    )
     candidate_2_root = frozen_workspace / ".agent/candidates/candidate-2"
     shutil.copytree(candidate_root, candidate_2_root)
-    manifest_2_ref = ".agent/candidates/candidate-2/analysis/candidate_workspace.v1.json"
+    manifest_2_ref = (
+        ".agent/candidates/candidate-2/analysis/candidate_workspace.v1.json"
+    )
     manifest_2_path = frozen_workspace / manifest_2_ref
     _write_json(
         manifest_2_path,
@@ -598,9 +631,9 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
         candidate_manifest_sha256=file_sha256(manifest_2_path),
     )
 
-    assert build_candidate_terminal_observation(frozen_workspace, evidence_2).observation_id == (
-        "terminal-Harden"
-    )
+    assert build_candidate_terminal_observation(
+        frozen_workspace, evidence_2
+    ).observation_id == ("terminal-Harden")
 
 
 def test_candidate_terminal_observation_rejects_tampered_candidate_flow_hash(
@@ -711,7 +744,9 @@ def test_optimization_retrieval_uses_fixed_query_inputs_and_independent_channels
     )
     tool = _RecordingRetriever("parameter.dreamplace")
     general = _RecordingRetriever("strategy.congestion")
-    retriever = OptimizationKnowledgeRetriever(tool_retriever=tool, general_retriever=general)
+    retriever = OptimizationKnowledgeRetriever(
+        tool_retriever=tool, general_retriever=general
+    )
 
     result = retriever.retrieve(request)
 
@@ -728,7 +763,11 @@ def test_optimization_retrieval_uses_fixed_query_inputs_and_independent_channels
         KnowledgeChannel.TOOL,
         KnowledgeChannel.GENERAL,
     }
-    assert all(len(channel.knowledge_refs) == 3 for channel in result.channels if channel.enabled)
+    assert all(
+        len(channel.knowledge_refs) == 3
+        for channel in result.channels
+        if channel.enabled
+    )
     assert tool.calls[0][1] == ("floorplan", "fixfanout", "place")
     assert general.calls[0][1] == ("floorplan", "place")
     assert "0.88" not in tool.calls[0][0]

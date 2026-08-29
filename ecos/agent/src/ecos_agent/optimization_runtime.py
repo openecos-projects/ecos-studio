@@ -88,22 +88,6 @@ def create_optimization_runner(
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
-    try:
-        execution_context = _optimization_execution_context(
-            workspace, site_width_dbu, context.get("seed", 0), parent_manifest
-        )
-    except OptimizationRuntimeError:
-        if (workspace / "origin").exists():
-            raise
-        if type(context.get("seed", 0)) is not int:
-            raise OptimizationRuntimeError("optimization seed is invalid")
-        # Legacy unit fixtures have no materialized inputs; production workspaces do.
-        execution_context = {
-            "design_sha256": parent_manifest,
-            "parent_lineage_sha256": parent_manifest,
-            "site_width_dbu": site_width_dbu,
-            "seed": context.get("seed", 0),
-        }
     design_id = _design_id(workspace)
     routability_objective = freeze_routability_objective(
         terminal_observation,
@@ -134,6 +118,28 @@ def create_optimization_runner(
     rpc = EccContentLengthRpcClient(_ecc_executable())
     ledger = _ledger(ledger_root)
     try:
+        ecc_revision = rpc.ecc_revision()
+        try:
+            execution_context = _optimization_execution_context(
+                workspace,
+                site_width_dbu,
+                context.get("seed", 0),
+                parent_manifest,
+                ecc_revision,
+            )
+        except OptimizationRuntimeError:
+            if (workspace / "origin").exists():
+                raise
+            if type(context.get("seed", 0)) is not int:
+                raise OptimizationRuntimeError("optimization seed is invalid")
+            # Legacy unit fixtures have no materialized inputs; production workspaces do.
+            execution_context = {
+                "design_sha256": parent_manifest,
+                "parent_lineage_sha256": parent_manifest,
+                "ecc_revision": ecc_revision,
+                "site_width_dbu": site_width_dbu,
+                "seed": context.get("seed", 0),
+            }
         workspace_id = rpc.open_workspace(workspace)
         executor = EccCandidateRerunAdapter(
             rpc,
@@ -228,7 +234,9 @@ def create_optimization_runner(
 
     def terminal_observation_supplier(_observation, receipt):
         if receipt.evidence is None:
-            raise OptimizationRuntimeError("ECC terminal receipt has no candidate evidence")
+            raise OptimizationRuntimeError(
+                "ECC terminal receipt has no candidate evidence"
+            )
         return build_candidate_terminal_observation(workspace, receipt.evidence)
 
     return OptimizationEpisodeRunner(
@@ -298,11 +306,17 @@ def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> s
 
 
 def _optimization_execution_context(
-    workspace: Path, site_width_dbu: int, seed: object, parent_manifest: str
+    workspace: Path,
+    site_width_dbu: int,
+    seed: object,
+    parent_manifest: str,
+    ecc_revision: str,
 ) -> dict[str, object]:
     """Return only immutable, reproducible inputs used by domain fingerprints."""
     if type(seed) is not int:
         raise OptimizationRuntimeError("optimization seed is invalid")
+    if not isinstance(ecc_revision, str) or not ecc_revision.strip():
+        raise OptimizationRuntimeError("ECC revision is invalid")
     origin = workspace / "origin"
     input_hashes: dict[str, str] = {}
     for key, relative in (
@@ -320,7 +334,9 @@ def _optimization_execution_context(
         if not files:
             raise OptimizationRuntimeError(f"optimization {key} input is unavailable")
         hashes = [file_sha256(path) for path in files]
-        input_hashes[key] = hashes[0] if len(hashes) == 1 else canonical_sha256({"files": hashes})
+        input_hashes[key] = (
+            hashes[0] if len(hashes) == 1 else canonical_sha256({"files": hashes})
+        )
     try:
         parameters = json.loads(
             (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
@@ -329,9 +345,14 @@ def _optimization_execution_context(
         tech_lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
         pdk_sha256 = file_sha256(tech_lef)
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise OptimizationRuntimeError("optimization PDK evidence is unavailable") from exc
+        raise OptimizationRuntimeError(
+            "optimization PDK evidence is unavailable"
+        ) from exc
     design_sha256 = canonical_sha256(
-        {key: input_hashes[key] for key in ("rtl_sha256", "filelist_sha256", "sdc_sha256")}
+        {
+            key: input_hashes[key]
+            for key in ("rtl_sha256", "filelist_sha256", "sdc_sha256")
+        }
     )
     return {
         **input_hashes,
@@ -339,6 +360,7 @@ def _optimization_execution_context(
         "pdk_sha256": pdk_sha256,
         "parent_lineage_sha256": file_sha256(workspace / "home" / "flow.json"),
         "parent_manifest_sha256": parent_manifest,
+        "ecc_revision": ecc_revision,
         "site_width_dbu": site_width_dbu,
         "seed": seed,
     }
@@ -368,7 +390,9 @@ def _incumbent_workspace(workspace: Path, candidate_root_ref: str | None) -> Pat
         resolved = candidate.resolve(strict=True)
         resolved.relative_to(workspace)
     except (OSError, ValueError) as exc:
-        raise OptimizationRuntimeError("incumbent candidate workspace is invalid") from exc
+        raise OptimizationRuntimeError(
+            "incumbent candidate workspace is invalid"
+        ) from exc
     if not resolved.is_dir():
         raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
     return resolved
@@ -386,7 +410,9 @@ def _design_id(workspace: Path) -> str:
             (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
         )
     except (OSError, json.JSONDecodeError) as exc:
-        raise OptimizationRuntimeError("workspace design identifier is unavailable") from exc
+        raise OptimizationRuntimeError(
+            "workspace design identifier is unavailable"
+        ) from exc
     value = payload.get("Design")
     if not isinstance(value, str) or not _DESIGN_ID.fullmatch(value):
         raise OptimizationRuntimeError("workspace design identifier is invalid")
@@ -395,12 +421,18 @@ def _design_id(workspace: Path) -> str:
 
 def _optimization_rerun_runtime_seconds(workspace: Path) -> float:
     try:
-        payload = json.loads((workspace / "home" / "flow.json").read_text(encoding="utf-8"))
+        payload = json.loads(
+            (workspace / "home" / "flow.json").read_text(encoding="utf-8")
+        )
     except (OSError, json.JSONDecodeError) as exc:
-        raise OptimizationRuntimeError("optimization rerun flow evidence is unavailable") from exc
+        raise OptimizationRuntimeError(
+            "optimization rerun flow evidence is unavailable"
+        ) from exc
     steps = payload.get("steps")
     if not isinstance(steps, list):
-        raise OptimizationRuntimeError("optimization rerun flow completion evidence is invalid")
+        raise OptimizationRuntimeError(
+            "optimization rerun flow completion evidence is invalid"
+        )
     total = 0.0
     for stage in _OPTIMIZATION_RERUN_STAGES:
         total += _successful_flow_stage_runtime_seconds(steps, stage)
@@ -410,9 +442,13 @@ def _optimization_rerun_runtime_seconds(workspace: Path) -> float:
 
 
 def _successful_flow_stage_runtime_seconds(steps: list[object], stage: str) -> float:
-    matches = [item for item in steps if isinstance(item, dict) and item.get("name") == stage]
+    matches = [
+        item for item in steps if isinstance(item, dict) and item.get("name") == stage
+    ]
     if len(matches) != 1 or matches[0].get("state") != "Success":
-        raise OptimizationRuntimeError("optimization rerun flow completion evidence is invalid")
+        raise OptimizationRuntimeError(
+            "optimization rerun flow completion evidence is invalid"
+        )
     runtime = matches[0].get("runtime")
     if not isinstance(runtime, str):
         raise OptimizationRuntimeError("optimization rerun runtime evidence is invalid")
@@ -425,7 +461,9 @@ def _successful_flow_stage_runtime_seconds(steps: list[object], stage: str) -> f
     return float(hours * 3600 + minutes * 60 + seconds)
 
 
-def _current_values(workspace: Path, site_width_dbu: int) -> dict[str, bool | int | float]:
+def _current_values(
+    workspace: Path, site_width_dbu: int
+) -> dict[str, bool | int | float]:
     try:
         parameters = json.loads(
             (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
@@ -452,7 +490,10 @@ def _current_values(workspace: Path, site_width_dbu: int) -> dict[str, bool | in
         values["place.target_density"], bool
     ):
         raise OptimizationRuntimeError("target density parameter is invalid")
-    if type(values["place.cell_padding_x"]) not in {int, float} or values["place.cell_padding_x"] < 0:
+    if (
+        type(values["place.cell_padding_x"]) not in {int, float}
+        or values["place.cell_padding_x"] < 0
+    ):
         raise OptimizationRuntimeError("cell padding parameter is invalid")
     return values
 
@@ -481,15 +522,25 @@ def _ecc_executable() -> Path:
 
 def _site_width_dbu(workspace: Path) -> int:
     try:
-        params = json.loads((workspace / "home" / "parameters.json").read_text(encoding="utf-8"))
+        params = json.loads(
+            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
+        )
         pdk_root = Path(params["PDK Root"])
         lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
         text = lef.read_text(encoding="utf-8")
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise OptimizationRuntimeError("PDK technology LEF is unavailable") from exc
     units_match = re.search(r"DATABASE\s+MICRONS\s+(\d+)", text, re.IGNORECASE)
-    site_match = re.search(r"SITE\s+(?:core7|CoreSite)\b(?P<body>.*?)END\s+(?:core7|CoreSite)", text, re.IGNORECASE | re.DOTALL)
-    size_match = re.search(r"SIZE\s+([0-9]+(?:\.[0-9]+)?)\s+BY", site_match.group("body") if site_match else "", re.IGNORECASE)
+    site_match = re.search(
+        r"SITE\s+(?:core7|CoreSite)\b(?P<body>.*?)END\s+(?:core7|CoreSite)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    size_match = re.search(
+        r"SIZE\s+([0-9]+(?:\.[0-9]+)?)\s+BY",
+        site_match.group("body") if site_match else "",
+        re.IGNORECASE,
+    )
     if not units_match or not size_match:
         raise OptimizationRuntimeError("PDK site width is unavailable")
     width = round(float(units_match.group(1)) * float(size_match.group(1)))
@@ -503,9 +554,13 @@ def _terminal_timeout_seconds() -> float:
     try:
         value = float(raw)
     except ValueError as exc:
-        raise OptimizationRuntimeError("ECOS_AGENT_ECC_TERMINAL_TIMEOUT_SECONDS is invalid") from exc
+        raise OptimizationRuntimeError(
+            "ECOS_AGENT_ECC_TERMINAL_TIMEOUT_SECONDS is invalid"
+        ) from exc
     if value <= 0:
-        raise OptimizationRuntimeError("ECOS_AGENT_ECC_TERMINAL_TIMEOUT_SECONDS is invalid")
+        raise OptimizationRuntimeError(
+            "ECOS_AGENT_ECC_TERMINAL_TIMEOUT_SECONDS is invalid"
+        )
     return value
 
 

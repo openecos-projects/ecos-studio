@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
@@ -10,9 +11,23 @@ from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobVal
 from ecos_agent.parameter_evidence_contracts import CardManifest, ParameterSemanticsCard
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
-_PACKAGE_CARD_ROOT = Path(__file__).resolve().parent / "knowledge" / "optimization" / "parameter-effectiveness"
-_SOURCE_CARD_ROOT = Path(__file__).resolve().parents[2] / "knowledge" / "optimization" / "parameter-effectiveness"
-CARD_ROOT = _PACKAGE_CARD_ROOT if (_PACKAGE_CARD_ROOT / "manifest.json").is_file() else _SOURCE_CARD_ROOT
+_PACKAGE_CARD_ROOT = (
+    Path(__file__).resolve().parent
+    / "knowledge"
+    / "optimization"
+    / "parameter-effectiveness"
+)
+_SOURCE_CARD_ROOT = (
+    Path(__file__).resolve().parents[2]
+    / "knowledge"
+    / "optimization"
+    / "parameter-effectiveness"
+)
+CARD_ROOT = (
+    _PACKAGE_CARD_ROOT
+    if (_PACKAGE_CARD_ROOT / "manifest.json").is_file()
+    else _SOURCE_CARD_ROOT
+)
 LATTICE_VERSION = "ecos.optimization_lattice.v1"
 FROZEN_KNOBS = tuple(OptimizationKnob)
 EXPECTED_LATTICE_COUNTS = {
@@ -55,7 +70,9 @@ class ParameterSemanticsError(ValueError):
     """Parameter cards cannot be trusted for this runtime."""
 
 
-def load_parameter_cards(root: Path | None = None, *, tool_revisions: dict[str, str] | None = None) -> dict[OptimizationKnob, ParameterSemanticsCard]:
+def load_parameter_cards(
+    root: Path | None = None, *, tool_revisions: dict[str, str] | None = None
+) -> dict[OptimizationKnob, ParameterSemanticsCard]:
     base = Path(root or CARD_ROOT).resolve()
     manifest_path = base / "manifest.json"
     try:
@@ -67,11 +84,25 @@ def load_parameter_cards(root: Path | None = None, *, tool_revisions: dict[str, 
     cards: dict[OptimizationKnob, ParameterSemanticsCard] = {}
     listed = set()
     for item in manifest.cards:
-        knob_id, relative, expected_hash = item.get("knob_id"), item.get("path"), item.get("sha256")
-        if not isinstance(knob_id, str) or not isinstance(relative, str) or not isinstance(expected_hash, str):
+        knob_id, relative, expected_hash = (
+            item.get("knob_id"),
+            item.get("path"),
+            item.get("sha256"),
+        )
+        if (
+            not isinstance(knob_id, str)
+            or not isinstance(relative, str)
+            or not isinstance(expected_hash, str)
+        ):
             raise ParameterSemanticsError("parameter card manifest entry is invalid")
-        if knob_id in listed or Path(relative).is_absolute() or ".." in Path(relative).parts:
-            raise ParameterSemanticsError("parameter card manifest has duplicate or unsafe entry")
+        if (
+            knob_id in listed
+            or Path(relative).is_absolute()
+            or ".." in Path(relative).parts
+        ):
+            raise ParameterSemanticsError(
+                "parameter card manifest has duplicate or unsafe entry"
+            )
         listed.add(knob_id)
         path = base / relative
         try:
@@ -82,16 +113,24 @@ def load_parameter_cards(root: Path | None = None, *, tool_revisions: dict[str, 
             raise
         except (OSError, ValueError) as exc:
             raise ParameterSemanticsError("parameter card is invalid") from exc
-        if card.knob_id.value != knob_id or card.review.get("status") != "source-audited":
-            raise ParameterSemanticsError("parameter card identity or review status is invalid")
+        if (
+            card.knob_id.value != knob_id
+            or card.review.get("status") != "source-audited"
+        ):
+            raise ParameterSemanticsError(
+                "parameter card identity or review status is invalid"
+            )
         try:
             expected_values = tuple(item.value for item in requested_lattice(card))
         except ValueError as exc:
             raise ParameterSemanticsError("parameter card lattice is invalid") from exc
-        if len(expected_values) != EXPECTED_LATTICE_COUNTS[card.knob_id] or tuple(
-            card.requested_domain.values
-        ) != expected_values:
-            raise ParameterSemanticsError("parameter card lattice does not match the frozen contract")
+        if (
+            len(expected_values) != EXPECTED_LATTICE_COUNTS[card.knob_id]
+            or tuple(card.requested_domain.values) != expected_values
+        ):
+            raise ParameterSemanticsError(
+                "parameter card lattice does not match the frozen contract"
+            )
         spec = knob_spec(knob_id)
         target = spec.read_target
         expected_type, expected_unit = _EXPECTED_SURFACES[card.knob_id]
@@ -102,33 +141,57 @@ def load_parameter_cards(root: Path | None = None, *, tool_revisions: dict[str, 
             or card.surface.unit != expected_unit
             or card.stage != spec.step.value
         ):
-            raise ParameterSemanticsError("parameter card surface does not match registry")
-        if not card.runtime_probe_ids or not set(card.runtime_probe_ids) <= _REGISTERED_PROBES:
-            raise ParameterSemanticsError("parameter card runtime probe is not registered")
-        consumer_ids = {
-            item.consumer_id
-            for item in card.consumers
-        }
+            raise ParameterSemanticsError(
+                "parameter card surface does not match registry"
+            )
+        if (
+            not card.runtime_probe_ids
+            or not set(card.runtime_probe_ids) <= _REGISTERED_PROBES
+        ):
+            raise ParameterSemanticsError(
+                "parameter card runtime probe is not registered"
+            )
+        consumer_ids = {item.consumer_id for item in card.consumers}
         if not consumer_ids or not consumer_ids <= _REGISTERED_PROBES:
             raise ParameterSemanticsError("parameter card consumer is not registered")
         if card.tool.name == "DREAMPlace":
             roles = {span.role for span in card.source_spans}
-            if card.runtime_semantics is None or any(span.span_id is None for span in card.source_spans):
-                raise ParameterSemanticsError("DREAMPlace parameter card runtime semantics are incomplete")
+            if card.runtime_semantics is None or any(
+                span.span_id is None for span in card.source_spans
+            ):
+                raise ParameterSemanticsError(
+                    "DREAMPlace parameter card runtime semantics are incomplete"
+                )
+            if (
+                card.tool.source_sha256 is None
+                or "runtime_report_producer" not in roles
+            ):
+                raise ParameterSemanticsError(
+                    "DREAMPlace parameter card runtime report producer is missing"
+                )
             if "native_consumer" not in roles:
-                raise ParameterSemanticsError("DREAMPlace parameter card native consumer source is missing")
+                raise ParameterSemanticsError(
+                    "DREAMPlace parameter card native consumer source is missing"
+                )
         _validate_source_spans(card, base)
-        if tool_revisions is not None and tool_revisions.get(card.tool.name) != card.tool.revision:
+        if (
+            tool_revisions is not None
+            and tool_revisions.get(card.tool.name) != card.tool.revision
+        ):
             raise ParameterSemanticsError("parameter card tool revision does not match")
         if card.knob_id in cards:
             raise ParameterSemanticsError("duplicate parameter card")
         cards[card.knob_id] = card
     if set(cards) != set(FROZEN_KNOBS) or len(cards) != 8:
-        raise ParameterSemanticsError("parameter card set must contain exactly eight knobs")
+        raise ParameterSemanticsError(
+            "parameter card set must contain exactly eight knobs"
+        )
     return cards
 
 
-def validate_parameter_cards(root: Path | None = None, *, tool_revisions: dict[str, str] | None = None) -> None:
+def validate_parameter_cards(
+    root: Path | None = None, *, tool_revisions: dict[str, str] | None = None
+) -> None:
     load_parameter_cards(root, tool_revisions=tool_revisions)
 
 
@@ -141,84 +204,201 @@ def validate_application_receipt(
         raise ParameterSemanticsError("application receipt type is invalid")
     knob = OptimizationKnob(receipt.requested["knob_id"])
     card = cards.get(knob)
-    if card is None or receipt.tool.name != card.tool.name or receipt.tool.revision != card.tool.revision:
-        raise ParameterSemanticsError("application receipt tool/card binding is invalid")
+    if (
+        card is None
+        or receipt.tool.name != card.tool.name
+        or receipt.tool.revision != card.tool.revision
+    ):
+        raise ParameterSemanticsError(
+            "application receipt tool/card binding is invalid"
+        )
     if receipt.requested.get("unit") != card.surface.unit:
         raise ParameterSemanticsError("application receipt unit does not match card")
     if receipt.context.get("stage") not in {None, card.stage}:
         raise ParameterSemanticsError("application receipt stage does not match card")
     if receipt.context.get("lattice_version") not in {None, LATTICE_VERSION}:
-        raise ParameterSemanticsError("application receipt lattice version does not match")
+        raise ParameterSemanticsError(
+            "application receipt lattice version does not match"
+        )
     if (
         card.tool.source_sha256 is None
         or receipt.tool.source_sha256 != card.tool.source_sha256
     ):
-        raise ParameterSemanticsError("application receipt tool source does not match card")
+        raise ParameterSemanticsError(
+            "application receipt tool source does not match card"
+        )
     written_unit = (
         "dbu" if card.write_mapping.get("kind") == "site_to_dbu" else card.surface.unit
     )
     if receipt.materialization.unit != written_unit:
-        raise ParameterSemanticsError("application receipt materialization unit does not match card")
+        raise ParameterSemanticsError(
+            "application receipt materialization unit does not match card"
+        )
     if receipt.activation.status == "used" and receipt.application_status != "applied":
         raise ParameterSemanticsError("used activation requires an applied receipt")
-    if card.tool.name == "DREAMPlace" and receipt.activation.status == "used":
-        _validate_dreamplace_observation(receipt)
+    allowed = {item.consumer_id for item in card.consumers}
+    if _is_routability_false_arm(receipt):
+        _validate_routability_false_arm(receipt, allowed)
+    if card.tool.name == "DREAMPlace" and receipt.activation.status in {
+        "used",
+        "not_activated",
+    }:
+        if receipt.activation.status == "used":
+            _validate_dreamplace_observation(receipt)
+        _validate_dreamplace_consumer_evidence(receipt)
     if (
         receipt.application_status == "applied"
         and receipt.materialization.config_before_sha256
         == receipt.materialization.config_after_sha256
     ):
         raise ParameterSemanticsError("applied receipt must bind a changed config")
-    allowed = {item.consumer_id for item in card.consumers}
     for consumer in receipt.activation.consumers:
         if consumer.consumer_id not in allowed:
-            raise ParameterSemanticsError("application receipt consumer is not registered")
+            raise ParameterSemanticsError(
+                "application receipt consumer is not registered"
+            )
+
+
+def _is_routability_false_arm(receipt: ParameterApplicationReceipt) -> bool:
+    return (
+        receipt.requested.get("knob_id") == "place.routability_opt"
+        and receipt.requested.get("value") is False
+        and receipt.application_status == "applied"
+        and receipt.activation.status == "not_activated"
+    )
+
+
+def _validate_routability_false_arm(
+    receipt: ParameterApplicationReceipt,
+    allowed_consumers: set[str],
+) -> None:
+    observation = receipt.consumer_observation
+    gate_evaluated = any(
+        consumer.consumer_id in allowed_consumers and consumer.outcome == "evaluated"
+        for consumer in receipt.activation.consumers
+    )
+    if (
+        not gate_evaluated
+        or not isinstance(observation, dict)
+        or observation.get("evidence_complete") is not True
+        or observation.get("branch_round_count") != 0
+    ):
+        raise ParameterSemanticsError(
+            "DREAMPlace routability gate evaluation evidence is incomplete"
+        )
 
 
 def _validate_dreamplace_observation(receipt: ParameterApplicationReceipt) -> None:
     observation = receipt.consumer_observation
-    if not isinstance(observation, dict) or observation.get("evidence_complete") is not True:
+    if (
+        not isinstance(observation, dict)
+        or observation.get("evidence_complete") is not True
+    ):
         raise ParameterSemanticsError("DREAMPlace consumer observation is incomplete")
     knob_id = receipt.requested["knob_id"]
     effective = receipt.effective_initial.value
     expected_fields = {
         "place.target_density": ("effective_target_density", "density_tensor_value"),
-        "place.target_overflow": ("effective_stop_overflow", "placement_iteration_count"),
+        "place.target_overflow": (
+            "effective_stop_overflow",
+            "placement_iteration_count",
+        ),
         "place.cell_padding_x": ("effective_padding_dbu", "movable_node_count"),
         "place.routability_opt": ("branch_round_count",),
-        "place.density_weight": ("configured_density_weight", "placement_iteration_count"),
+        "place.density_weight": (
+            "configured_density_weight",
+            "placement_iteration_count",
+        ),
     }[knob_id]
     if any(observation.get(field) is None for field in expected_fields):
-        raise ParameterSemanticsError("DREAMPlace consumer observation fields are missing")
+        raise ParameterSemanticsError(
+            "DREAMPlace consumer observation fields are missing"
+        )
     effective_field = expected_fields[0]
     if knob_id != "place.routability_opt" and observation[effective_field] != effective:
-        raise ParameterSemanticsError("DREAMPlace consumer observation value does not match")
+        raise ParameterSemanticsError(
+            "DREAMPlace consumer observation value does not match"
+        )
     if knob_id == "place.routability_opt" and observation["branch_round_count"] <= 0:
         raise ParameterSemanticsError("DREAMPlace routability consumer was not entered")
+
+
+def _validate_dreamplace_consumer_evidence(
+    receipt: ParameterApplicationReceipt,
+) -> None:
+    observation = receipt.consumer_observation
+    if not isinstance(observation, dict):
+        raise ParameterSemanticsError("DREAMPlace consumer observation is incomplete")
+    bound_consumers = set()
+    for consumer in receipt.activation.consumers:
+        expected_hash = canonical_sha256(
+            {
+                "consumer_id": consumer.consumer_id,
+                "outcome": consumer.outcome,
+                "consumer_observation": observation,
+            }
+        )
+        if consumer.evidence_sha256 != expected_hash:
+            raise ParameterSemanticsError(
+                "DREAMPlace consumer evidence hash does not match observation"
+            )
+        bound_consumers.add((consumer.evidence_ref, consumer.evidence_sha256))
+    for transition in receipt.transitions:
+        if (
+            receipt.requested["knob_id"] == "place.target_density"
+            and transition.to == "overridden"
+            and transition.rule_id == "dreamplace.target_density.utilization_floor"
+            and (transition.evidence_ref, transition.evidence_sha256)
+            not in bound_consumers
+        ):
+            raise ParameterSemanticsError(
+                "DREAMPlace transition evidence is not bound to activation consumer"
+            )
 
 
 def _validate_source_spans(card: ParameterSemanticsCard, card_root: Path) -> None:
     if not card.source_spans:
         raise ParameterSemanticsError("parameter card source spans are missing")
     source_checkout = _source_checkout_root()
-    producer_hashes = {
-        span.sha256 for span in card.source_spans if span.role == "runtime_report_producer"
-    }
-    if card.tool.source_sha256 and card.tool.source_sha256 not in producer_hashes:
-        raise ParameterSemanticsError("parameter card tool source is not a report producer")
+    producer_source_bound = False
     for span in card.source_spans:
         if source_checkout is None:
             if card_root != _PACKAGE_CARD_ROOT:
-                raise ParameterSemanticsError("parameter card source checkout is unavailable")
+                raise ParameterSemanticsError(
+                    "parameter card source checkout is unavailable"
+                )
             continue
         path = (source_checkout / span.file).resolve()
         try:
             path.relative_to(source_checkout)
             lines = path.read_text(encoding="utf-8").splitlines()
         except (OSError, ValueError, UnicodeError) as exc:
-            raise ParameterSemanticsError("parameter card source span is unavailable") from exc
-        if span.end > len(lines) or file_sha256(path) != span.sha256:
-            raise ParameterSemanticsError("parameter card source span hash does not match")
+            raise ParameterSemanticsError(
+                "parameter card source span is unavailable"
+            ) from exc
+        if (
+            span.end > len(lines)
+            or _span_sha256(lines, span.start, span.end) != span.sha256
+        ):
+            raise ParameterSemanticsError(
+                "parameter card source span hash does not match"
+            )
+        if (
+            span.role == "runtime_report_producer"
+            and file_sha256(path) == card.tool.source_sha256
+        ):
+            producer_source_bound = True
+    if card.tool.source_sha256 is None or (
+        source_checkout is not None and not producer_source_bound
+    ):
+        raise ParameterSemanticsError(
+            "parameter card tool source is not a report producer"
+        )
+
+
+def _span_sha256(lines: list[str], start: int, end: int) -> str:
+    text = "\n".join(lines[start - 1 : end]) + "\n"
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _source_checkout_root() -> Path | None:
@@ -234,14 +414,19 @@ def card_hash(card: ParameterSemanticsCard) -> str:
 
 
 def requested_lattice(card: ParameterSemanticsCard) -> tuple[RequestedKnobValue, ...]:
-    return tuple(RequestedKnobValue(knob_id=card.knob_id, value=value) for value in card.requested_domain.values)
+    return tuple(
+        RequestedKnobValue(knob_id=card.knob_id, value=value)
+        for value in card.requested_domain.values
+    )
 
 
 def narrative_view(card: ParameterSemanticsCard) -> dict[str, object]:
     return {
         "knob_id": card.knob_id.value,
         "stage": card.stage,
-        "conditions": [item.model_dump(mode="json") for item in card.activation_conditions],
+        "conditions": [
+            item.model_dump(mode="json") for item in card.activation_conditions
+        ],
         "consumers": [item.model_dump(mode="json") for item in card.consumers],
         "runtime_semantics": (
             card.runtime_semantics.model_dump(mode="json")

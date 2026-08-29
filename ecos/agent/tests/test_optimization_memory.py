@@ -126,6 +126,23 @@ def _terminal(observation_id: str, overflow: float) -> TerminalObservation:
 def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
     card = load_parameter_cards()["place.cell_padding_x"]
     effective = value * 200
+    observation = {
+        "effective_padding_dbu": effective,
+        "movable_node_count": 1,
+        "evidence_complete": True,
+    }
+    consumer = {
+        "consumer_id": "dreamplace.cell_size_expansion",
+        "outcome": "entered",
+        "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+        "evidence_sha256": canonical_sha256(
+            {
+                "consumer_id": "dreamplace.cell_size_expansion",
+                "outcome": "entered",
+                "consumer_observation": observation,
+            }
+        ),
+    }
     payload = {
         "receipt_id": f"parameter-receipt-padding-{value}",
         "tool": card.tool,
@@ -154,20 +171,9 @@ def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
         "application_status": "applied",
         "activation": ActivationEvidence(
             status="used",
-            consumers=(
-                {
-                    "consumer_id": "dreamplace.cell_size_expansion",
-                    "outcome": "entered",
-                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-                    "evidence_sha256": HASH,
-                },
-            ),
+            consumers=(consumer,),
         ),
-        "consumer_observation": {
-            "effective_padding_dbu": effective,
-            "movable_node_count": 1,
-            "evidence_complete": True,
-        },
+        "consumer_observation": observation,
         "effective_final": EffectiveValue(value=effective, unit="dbu"),
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
@@ -316,37 +322,41 @@ def _append_intervention(
                 _parameter_application_receipt(requested.value)
             )
         terminal_outcome = OptimizationTerminalOutcome(
-                intervention_id=intervention_id,
-                outcome=outcome,
-                candidate_manifest_sha256=HASH,
-                candidate_root_ref=f".agent/optimization/{scope.episode_id}/candidates/{index}",
-                candidate_manifest_ref=(
-                    f".agent/optimization/{scope.episode_id}/candidates/{index}/manifest.json"
-                ),
-                receipt_sha256=(
-                    terminal_receipt_sha256
-                    or (native_receipt.evidence_sha256 if native_receipt is not None else HASH)
-                ),
-                terminal_observation_sha256=canonical_sha256(
-                    observation.model_dump(mode="json")
-                ),
-                terminal_observation=observation,
-                application_receipt=application_receipt,
-                parameter_application_receipt=native_receipt,
-                parameter_card_sha256=(
-                    card_hash(load_parameter_cards()[requested.knob_id])
+            intervention_id=intervention_id,
+            outcome=outcome,
+            candidate_manifest_sha256=HASH,
+            candidate_root_ref=f".agent/optimization/{scope.episode_id}/candidates/{index}",
+            candidate_manifest_ref=(
+                f".agent/optimization/{scope.episode_id}/candidates/{index}/manifest.json"
+            ),
+            receipt_sha256=(
+                terminal_receipt_sha256
+                or (
+                    native_receipt.evidence_sha256
                     if native_receipt is not None
-                    else None
-                ),
-                materialization_receipt_sha256=(
-                    native_receipt.materialization.receipt_sha256
-                    if native_receipt is not None
-                    else None
-                ),
-                parameter_application_receipt_id=(
-                    native_receipt.receipt_id if native_receipt is not None else None
-                ),
-                outcome_details_sha256=HASH,
+                    else HASH
+                )
+            ),
+            terminal_observation_sha256=canonical_sha256(
+                observation.model_dump(mode="json")
+            ),
+            terminal_observation=observation,
+            application_receipt=application_receipt,
+            parameter_application_receipt=native_receipt,
+            parameter_card_sha256=(
+                card_hash(load_parameter_cards()[requested.knob_id])
+                if native_receipt is not None
+                else None
+            ),
+            materialization_receipt_sha256=(
+                native_receipt.materialization.receipt_sha256
+                if native_receipt is not None
+                else None
+            ),
+            parameter_application_receipt_id=(
+                native_receipt.receipt_id if native_receipt is not None else None
+            ),
+            outcome_details_sha256=HASH,
         )
         if application_receipt is None:
             ledger.append_terminal(terminal_outcome)
@@ -362,7 +372,9 @@ def _append_intervention(
     _write_state(root, scope, ledger)
 
 
-def _episode(store: OptimizationTaskMemoryStore, scope, *, terminal: bool = True) -> Path:
+def _episode(
+    store: OptimizationTaskMemoryStore, scope, *, terminal: bool = True
+) -> Path:
     root = store.root / scope.episode_id
     store.ensure_episode_scope(root, scope)
     _append_intervention(root, scope, index=1, terminal=terminal)
@@ -405,7 +417,9 @@ def test_memory_promotes_only_terminal_closed_evidence_and_sync_is_idempotent(
                 ".agent/optimization/episode-source/candidates/1/manifest.json"
             ),
             receipt_sha256=native_receipt.evidence_sha256,
-            terminal_observation_sha256=canonical_sha256(observation.model_dump(mode="json")),
+            terminal_observation_sha256=canonical_sha256(
+                observation.model_dump(mode="json")
+            ),
             terminal_observation=observation,
             parameter_application_receipt=native_receipt,
             parameter_card_sha256=card_hash(
@@ -453,7 +467,9 @@ def test_snapshot_isolates_workspace_design_objective_and_current_episode(
     assert snapshot.scope == current
 
 
-def test_snapshot_is_bounded_compressed_deterministic_and_updates(tmp_path: Path) -> None:
+def test_snapshot_is_bounded_compressed_deterministic_and_updates(
+    tmp_path: Path,
+) -> None:
     current = _scope("episode-current")
     store = OptimizationTaskMemoryStore(tmp_path / "optimization", current)
     for index in range(1, 8):

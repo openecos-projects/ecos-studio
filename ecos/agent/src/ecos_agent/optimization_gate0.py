@@ -212,14 +212,23 @@ def load_gate0_config(config_path: Path) -> Gate0Config:
     return config
 
 
-def noise_profile(default_replays: Sequence[TerminalObservation]) -> dict[str, dict[str, float]]:
-    if len(default_replays) < 2 or any(not item.eligible_for_incumbent for item in default_replays):
+def noise_profile(
+    default_replays: Sequence[TerminalObservation],
+) -> dict[str, dict[str, float]]:
+    if len(default_replays) < 2 or any(
+        not item.eligible_for_incumbent for item in default_replays
+    ):
         raise Gate0Error("default replays cannot define a noise profile")
     rows = [_all_metrics(item) for item in default_replays]
     keys = tuple(rows[0])
     return {
-        "reference": {key: float(statistics.median(row[key] for row in rows)) for key in keys},
-        "epsilon": {key: max(row[key] for row in rows) - min(row[key] for row in rows) for key in keys},
+        "reference": {
+            key: float(statistics.median(row[key] for row in rows)) for key in keys
+        },
+        "epsilon": {
+            key: max(row[key] for row in rows) - min(row[key] for row in rows)
+            for key in keys
+        },
     }
 
 
@@ -231,7 +240,9 @@ def compare_observations(
     if not candidate.eligible_for_incumbent:
         return "candidate_ineligible"
     metrics = _all_metrics(candidate)
-    required = {item.value for item in (*ROUTABILITY_OBJECTIVE_ORDER, *TIMING_GUARDRAIL_ORDER)}
+    required = {
+        item.value for item in (*ROUTABILITY_OBJECTIVE_ORDER, *TIMING_GUARDRAIL_ORDER)
+    }
     if set(reference) != required or set(epsilon) != required:
         raise Gate0Error("noise comparison metrics are incomplete")
     for metric in TIMING_GUARDRAIL_ORDER:
@@ -252,7 +263,9 @@ def qualify_design(
     default_replays: Sequence[TerminalObservation],
     probes: Mapping[str, TerminalObservation],
 ) -> dict[str, object]:
-    if len(default_replays) != 3 or set(probes) != {item[0] for item in _EXPECTED_PROBES}:
+    if len(default_replays) != 3 or set(probes) != {
+        item[0] for item in _EXPECTED_PROBES
+    }:
         raise Gate0Error("Gate 0 design evidence is incomplete")
     profile = noise_profile(default_replays)
     reference, epsilon = profile["reference"], profile["epsilon"]
@@ -269,7 +282,10 @@ def qualify_design(
     best = min(improving, key=lambda key: _objective_tuple(probes[key]), default=None)
     defaults_eligible = all(item.eligible_for_incumbent for item in default_replays)
     return {
-        "qualified": canonical.eligible_for_incumbent and defaults_eligible and distinct >= 2 and bool(improving),
+        "qualified": canonical.eligible_for_incumbent
+        and defaults_eligible
+        and distinct >= 2
+        and bool(improving),
         "canonical_eligible": canonical.eligible_for_incumbent,
         "default_replays_eligible": defaults_eligible,
         "distinct_probe_count": distinct,
@@ -281,8 +297,14 @@ def qualify_design(
 
 
 def qualify_pool(designs: Mapping[str, Mapping[str, object]]) -> dict[str, object]:
-    all_qualified = bool(designs) and all(item.get("qualified") is True for item in designs.values())
-    best = {item.get("best_probe_id") for item in designs.values() if item.get("best_probe_id")}
+    all_qualified = bool(designs) and all(
+        item.get("qualified") is True for item in designs.values()
+    )
+    best = {
+        item.get("best_probe_id")
+        for item in designs.values()
+        if item.get("best_probe_id")
+    }
     return {
         "qualified": all_qualified and len(best) > 1,
         "all_designs_qualified": all_qualified,
@@ -290,8 +312,13 @@ def qualify_pool(designs: Mapping[str, Mapping[str, object]]) -> dict[str, objec
     }
 
 
-def require_terminal_receipt(receipt: CandidateExecutionReceipt) -> CandidateExecutionEvidence:
-    if not receipt.started or receipt.outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED:
+def require_terminal_receipt(
+    receipt: CandidateExecutionReceipt,
+) -> CandidateExecutionEvidence:
+    if (
+        not receipt.started
+        or receipt.outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+    ):
         raise Gate0Error("candidate execution did not succeed")
     if receipt.evidence is None:
         raise Gate0Error("candidate terminal evidence is missing")
@@ -309,11 +336,17 @@ def readiness_report(config_path: Path) -> dict[str, object]:
         "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH_ecos.lef",
         "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ_tt_1p2_25_nldm.lib",
     )
-    if pdk_root.is_symlink() or any(not (pdk_root / item).is_file() for item in required_pdk):
+    if pdk_root.is_symlink() or any(
+        not (pdk_root / item).is_file() for item in required_pdk
+    ):
         raise Gate0Error("ICS55 PDK readiness check failed")
     executable = _ecc_executable()
     version = subprocess.run(
-        [str(executable), "--version"], check=True, capture_output=True, text=True, timeout=30
+        [str(executable), "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
     ).stdout.strip()
     budget = EpisodeBudget.from_reference_rerun(1)
     if budget.minimum_candidate_executions != CANDIDATE_EXECUTION_LIMIT:
@@ -326,7 +359,10 @@ def readiness_report(config_path: Path) -> dict[str, object]:
         "ready": True,
         "config_sha256": file_sha256(path),
         "ecc": {"executable": str(executable), "version": version},
-        "environment": {"python": platform.python_version(), "platform": platform.platform()},
+        "environment": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+        },
         "pdk": {"root": str(pdk_root), "site_width_dbu": _pdk_site_width_dbu(pdk_root)},
         "pilot_minimum_candidate_executions": budget.minimum_candidate_executions,
         "designs": [
@@ -335,7 +371,8 @@ def readiness_report(config_path: Path) -> dict[str, object]:
                 "top_module": design.top_module,
                 "clock_name": design.clock_name,
                 "input_sha256": {
-                    key: getattr(design, key).sha256 for key in ("rtl", "filelist", "sdc")
+                    key: getattr(design, key).sha256
+                    for key in ("rtl", "filelist", "sdc")
                 },
             }
             for design in config.designs
@@ -358,21 +395,28 @@ def run_gate0(
     config_path = Path(config_path).resolve()
     config = load_gate0_config(config_path)
     readiness = readiness_report(config_path)
-    selected = tuple(item for item in config.designs if not design_ids or item.design_id in design_ids)
+    selected = tuple(
+        item
+        for item in config.designs
+        if not design_ids or item.design_id in design_ids
+    )
     if not selected or set(design_ids) - {item.design_id for item in selected}:
         raise Gate0Error("selected Gate 0 design is invalid")
     run_root = Path(results_root).resolve() / run_id
     if run_root.exists():
         raise Gate0Error("Gate 0 run directory already exists")
     run_root.mkdir(parents=True)
-    _write_json(run_root / "run-manifest.v1.json", {
-        "schema_version": "ecos.optimization_gate0_run.v1",
-        "run_id": run_id,
-        "config_sha256": readiness["config_sha256"],
-        "design_ids": [item.design_id for item in selected],
-        "max_workers": max_workers,
-        "readiness": readiness,
-    })
+    _write_json(
+        run_root / "run-manifest.v1.json",
+        {
+            "schema_version": "ecos.optimization_gate0_run.v1",
+            "run_id": run_id,
+            "config_sha256": readiness["config_sha256"],
+            "design_ids": [item.design_id for item in selected],
+            "max_workers": max_workers,
+            "readiness": readiness,
+        },
+    )
     reports: dict[str, dict[str, object]] = {}
     execution_slots = threading.BoundedSemaphore(max_workers)
     try:
@@ -393,7 +437,10 @@ def run_gate0(
                 design.design_id: report for design, report in zip(selected, results)
             }
     except Exception as exc:
-        _write_json(run_root / "failure.v1.json", {"error_type": type(exc).__name__, "message": str(exc)})
+        _write_json(
+            run_root / "failure.v1.json",
+            {"error_type": type(exc).__name__, "message": str(exc)},
+        )
         raise
     pool = qualify_pool(reports)
     summary = {
@@ -429,7 +476,9 @@ def _run_design(
             client.close()
     workspace_id = canonical["workspace_id"]
     observation = canonical["observation"]
-    if not isinstance(workspace_id, str) or not isinstance(observation, TerminalObservation):
+    if not isinstance(workspace_id, str) or not isinstance(
+        observation, TerminalObservation
+    ):
         raise Gate0Error("canonical baseline record is invalid")
     site_width = int(readiness["pdk"]["site_width_dbu"])  # type: ignore[index]
     values = _baseline_values(config.baseline)
@@ -452,7 +501,9 @@ def _run_design(
         for probe in config.probes
     ]
 
-    def execute(spec: tuple[str, RequestedKnobValue, StrategyDirection]) -> TerminalObservation:
+    def execute(
+        spec: tuple[str, RequestedKnobValue, StrategyDirection],
+    ) -> TerminalObservation:
         candidate_id, requested, direction = spec
         with execution_slots:
             candidate_client = EccContentLengthRpcClient(
@@ -510,7 +561,11 @@ def _run_canonical(
     create_request = {
         "directory": str(workspace),
         "filelist": str(_snapshot_path(config_path, design.filelist)),
-        "flowConfig": {"start_step": "Synthesis", "end_step": "Harden", "steps": list(GUI_WORKSPACE_FLOW_STEPS)},
+        "flowConfig": {
+            "start_step": "Synthesis",
+            "end_step": "Harden",
+            "steps": list(GUI_WORKSPACE_FLOW_STEPS),
+        },
         "originDef": "",
         "originVerilog": "",
         "parameters": {
@@ -533,7 +588,9 @@ def _run_canonical(
     }
     _write_json(output / "workspace-create-request.v1.json", create_request)
     started = time.monotonic()
-    created = _pilot_request(client, "workspace.create", create_request, timeout_seconds=120)
+    created = _pilot_request(
+        client, "workspace.create", create_request, timeout_seconds=120
+    )
     workspace_id = created.get("workspaceId")
     if not isinstance(workspace_id, str) or not _ID.fullmatch(workspace_id):
         raise Gate0Error("workspace.create returned an invalid workspace id")
@@ -544,14 +601,23 @@ def _run_canonical(
         "idempotencyKey": f"gate0.{design.design_id}.canonical",
     }
     _write_json(output / "flow-start-request.v1.json", flow_request)
-    operation = _pilot_request(client, "operation.start_flow", flow_request, timeout_seconds=30)
-    terminal = _wait_operation(client, operation, float(config.terminal_timeout_seconds))
+    operation = _pilot_request(
+        client, "operation.start_flow", flow_request, timeout_seconds=30
+    )
+    terminal = _wait_operation(
+        client, operation, float(config.terminal_timeout_seconds)
+    )
     _write_json(output / "flow-terminal-result.v1.json", terminal)
     if terminal.get("state") != "succeeded":
         raise Gate0Error("canonical flow did not succeed")
     observation = build_terminal_observation(workspace)
-    _write_json(output / "canonical-observation.v1.json", observation.model_dump(mode="json"))
-    _write_json(output / "canonical-runtime.v1.json", {"elapsed_seconds": time.monotonic() - started})
+    _write_json(
+        output / "canonical-observation.v1.json", observation.model_dump(mode="json")
+    )
+    _write_json(
+        output / "canonical-runtime.v1.json",
+        {"elapsed_seconds": time.monotonic() - started},
+    )
     if not observation.eligible_for_incumbent:
         raise Gate0Error("canonical baseline is not terminal eligible")
     return {"workspace_id": workspace_id, "observation": observation}
@@ -565,11 +631,20 @@ class _RecordingRpc:
 
     def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
         response = self.client.call(method, params)
-        self.call_record = {"method": method, "params": params, "response": response}
+        if method != "rpc.hello":
+            self.call_record = {
+                "method": method,
+                "params": params,
+                "response": response,
+            }
         return response
 
-    def wait_for_terminal(self, operation_id: str, timeout_seconds: float) -> dict[str, object] | None:
-        self.terminal_record = self.client.wait_for_terminal(operation_id, timeout_seconds)
+    def wait_for_terminal(
+        self, operation_id: str, timeout_seconds: float
+    ) -> dict[str, object] | None:
+        self.terminal_record = self.client.wait_for_terminal(
+            operation_id, timeout_seconds
+        )
         return self.terminal_record
 
 
@@ -592,6 +667,7 @@ def run_pilot_candidate(
     knowledge_refs: Sequence[KnowledgeReference] = (),
 ) -> PilotCandidateRun:
     output.mkdir()
+    ecc_revision = client.ecc_revision()
     request = _candidate_execution_request(
         candidate_id,
         requested,
@@ -603,23 +679,29 @@ def run_pilot_candidate(
             site_width,
             baseline,
             requested,
-            episode_id,
             parent_candidate_root_ref,
+            ecc_revision,
         ),
+        ecc_revision=ecc_revision,
         episode_id=episode_id,
         parent_candidate_root_ref=parent_candidate_root_ref,
         rationale_summary=rationale_summary,
         knowledge_refs=knowledge_refs,
     )
-    _write_json(output / "candidate-request.v1.json", {
-        "intervention_id": request.intervention_id,
-        "episode_id": request.episode_id,
-        "checkpoint_id": request.checkpoint_id,
-        "context_sha256": request.context_sha256,
-        "parent_candidate_root_ref": request.parent_candidate_root_ref,
-        "proposal": request.proposal.model_dump(mode="json"),
-        "requested": request.requested.model_dump(mode="json"),
-    })
+    _write_json(
+        output / "candidate-request.v1.json",
+        {
+            "intervention_id": request.intervention_id,
+            "episode_id": request.episode_id,
+            "checkpoint_id": request.checkpoint_id,
+            "context_sha256": request.context_sha256,
+            "seed": request.seed,
+            "ecc_revision": request.ecc_revision,
+            "parent_candidate_root_ref": request.parent_candidate_root_ref,
+            "proposal": request.proposal.model_dump(mode="json"),
+            "requested": request.requested.model_dump(mode="json"),
+        },
+    )
     recording = _RecordingRpc(client)
     adapter = EccCandidateRerunAdapter(
         recording,
@@ -630,32 +712,52 @@ def run_pilot_candidate(
     started = time.monotonic()
     receipt = adapter.start(request)
     if receipt.outcome is None:
-        receipt = adapter.wait_for_terminal(receipt.execution_id, timeout_seconds=timeout_seconds)
+        receipt = adapter.wait_for_terminal(
+            receipt.execution_id, timeout_seconds=timeout_seconds
+        )
     _write_json(output / "rpc-call.v1.json", recording.call_record)
-    _write_json(output / "terminal-result.v1.json", recording.terminal_record or recording.call_record)
+    _write_json(
+        output / "terminal-result.v1.json",
+        recording.terminal_record or recording.call_record,
+    )
     if receipt.evidence is not None:
-        _write_json(output / "candidate-evidence.v1.json", {
-            "candidate_root_ref": receipt.evidence.candidate_root_ref,
-            "candidate_manifest_ref": receipt.evidence.candidate_manifest_ref,
-            "candidate_manifest_sha256": receipt.evidence.candidate_manifest_sha256,
-        })
+        _write_json(
+            output / "candidate-evidence.v1.json",
+            {
+                "candidate_root_ref": receipt.evidence.candidate_root_ref,
+                "candidate_manifest_ref": receipt.evidence.candidate_manifest_ref,
+                "candidate_manifest_sha256": receipt.evidence.candidate_manifest_sha256,
+            },
+        )
     if receipt.parameter_application_receipt is not None:
         _write_json(
             output / "parameter-application-receipt.v1.json",
             receipt.parameter_application_receipt.model_dump(mode="json"),
         )
-    _write_json(output / "execution-receipt.v1.json", {
-        "execution_id": receipt.execution_id,
-        "started": receipt.started,
-        "outcome": receipt.outcome.value if receipt.outcome is not None else None,
-    })
-    if receipt.started and receipt.outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED:
-        _write_json(output / "runtime.v1.json", {"elapsed_seconds": time.monotonic() - started})
+    _write_json(
+        output / "execution-receipt.v1.json",
+        {
+            "execution_id": receipt.execution_id,
+            "started": receipt.started,
+            "outcome": receipt.outcome.value if receipt.outcome is not None else None,
+        },
+    )
+    if (
+        receipt.started
+        and receipt.outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+    ):
+        _write_json(
+            output / "runtime.v1.json", {"elapsed_seconds": time.monotonic() - started}
+        )
         raise PilotCandidateExecutionError(receipt)
     evidence = require_terminal_receipt(receipt)
     observation = build_candidate_terminal_observation(workspace, evidence)
-    _write_json(output / "terminal-observation.v1.json", observation.model_dump(mode="json"))
-    _write_json(output / "runtime.v1.json", {"elapsed_seconds": time.monotonic() - started})
+    _write_json(
+        output / "terminal-observation.v1.json", observation.model_dump(mode="json")
+    )
+    _write_json(
+        output / "runtime.v1.json", {"elapsed_seconds": time.monotonic() - started}
+    )
     return PilotCandidateRun(observation, receipt)
 
 
@@ -667,29 +769,41 @@ def _candidate_execution_request(
     config_sha256: str,
     context_sha256: str,
     *,
+    ecc_revision: str,
     episode_id: str,
     parent_candidate_root_ref: str | None,
     rationale_summary: str,
     knowledge_refs: Sequence[KnowledgeReference],
 ) -> CandidateExecutionRequest:
-    proposal = OptimizationProposal.model_validate({
-        "context_ref": {"episode_id": episode_id, "checkpoint_id": "canonical", "input_sha256": config_sha256},
-        "decision": OptimizationDecision.PROPOSE,
-        "reason_code": ProposalReason.OBSERVATION,
-        "rationale_summary": rationale_summary,
-        "observation_refs": [ObservationReference(
-            observation_id=baseline.observation_id, sha256=baseline.evidence_manifest_sha256
-        ).model_dump()],
-        "knowledge_refs": [item.model_dump(mode="json") for item in knowledge_refs],
-        "action": {
-            "knob_id": requested.knob_id,
-            "direction": direction,
-            "expected_effects": [{
-                "metric_id": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
-                "direction": ExpectedEffectDirection.UNKNOWN,
-            }],
-        },
-    })
+    proposal = OptimizationProposal.model_validate(
+        {
+            "context_ref": {
+                "episode_id": episode_id,
+                "checkpoint_id": "canonical",
+                "input_sha256": config_sha256,
+            },
+            "decision": OptimizationDecision.PROPOSE,
+            "reason_code": ProposalReason.OBSERVATION,
+            "rationale_summary": rationale_summary,
+            "observation_refs": [
+                ObservationReference(
+                    observation_id=baseline.observation_id,
+                    sha256=baseline.evidence_manifest_sha256,
+                ).model_dump()
+            ],
+            "knowledge_refs": [item.model_dump(mode="json") for item in knowledge_refs],
+            "action": {
+                "knob_id": requested.knob_id,
+                "direction": direction,
+                "expected_effects": [
+                    {
+                        "metric_id": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+                        "direction": ExpectedEffectDirection.UNKNOWN,
+                    }
+                ],
+            },
+        }
+    )
     return CandidateExecutionRequest(
         intervention_id=candidate_id,
         episode_id=episode_id,
@@ -697,6 +811,8 @@ def _candidate_execution_request(
         proposal=proposal,
         requested=requested,
         context_sha256=context_sha256,
+        seed=0,
+        ecc_revision=ecc_revision,
         parent_candidate_root_ref=parent_candidate_root_ref,
     )
 
@@ -706,10 +822,12 @@ def _pilot_context_sha256(
     site_width_dbu: int,
     baseline: TerminalObservation,
     requested: RequestedKnobValue,
-    episode_id: str,
     parent_candidate_root_ref: str | None,
+    ecc_revision: str,
 ) -> str:
-    parent_workspace = _incumbent_workspace(workspace.resolve(), parent_candidate_root_ref)
+    parent_workspace = _incumbent_workspace(
+        workspace.resolve(), parent_candidate_root_ref
+    )
     parent_manifest_sha256 = (
         file_sha256(parent_workspace / "analysis" / "candidate_workspace.v1.json")
         if parent_candidate_root_ref is not None
@@ -720,6 +838,7 @@ def _pilot_context_sha256(
         site_width_dbu,
         0,
         parent_manifest_sha256,
+        ecc_revision,
     )
     card = load_parameter_cards()[requested.knob_id]
     target_step = _candidate_target_step(requested.knob_id)
@@ -728,6 +847,7 @@ def _pilot_context_sha256(
         "incumbent_state_sha256": canonical_sha256(baseline.model_dump(mode="json")),
         "stage": target_step,
         "backend": "ecc",
+        "ecc_revision": ecc_revision,
         "tool_revision": card.tool.revision,
         "parameter_card_sha256": card_hash(card),
         "lattice_version": LATTICE_VERSION,
@@ -737,8 +857,6 @@ def _pilot_context_sha256(
         ),
         "terminal_execution_contract_sha256": canonical_sha256(
             {
-                "episode_id": episode_id,
-                "checkpoint_id": "canonical",
                 "target_step": target_step,
                 "end_step": "Harden",
                 "execution_scope": "full_flow",
@@ -766,9 +884,15 @@ def _baseline_values(baseline: Gate0Baseline) -> dict[str, bool | int | float]:
     }
 
 
-def _probe_request(probe: Gate0Probe, values: Mapping[str, bool | int | float]) -> RequestedKnobValue:
+def _probe_request(
+    probe: Gate0Probe, values: Mapping[str, bool | int | float]
+) -> RequestedKnobValue:
     current = values[probe.knob_id.value]
-    value = not current if probe.knob_id == OptimizationKnob.ROUTABILITY_OPT else current + probe.delta  # type: ignore[operator]
+    value = (
+        not current
+        if probe.knob_id == OptimizationKnob.ROUTABILITY_OPT
+        else current + probe.delta
+    )  # type: ignore[operator]
     if isinstance(value, float):
         value = round(value, 2)
     return RequestedKnobValue(knob_id=probe.knob_id, value=value)
@@ -795,7 +919,9 @@ def _pilot_request(
 
 
 def _wait_operation(
-    client: EccContentLengthRpcClient, operation: Mapping[str, object], timeout_seconds: float
+    client: EccContentLengthRpcClient,
+    operation: Mapping[str, object],
+    timeout_seconds: float,
 ) -> dict[str, object]:
     if operation.get("state") in _TERMINAL_STATES:
         return dict(operation)
@@ -820,12 +946,22 @@ def _snapshot_path(config_path: Path, snapshot: Gate0Snapshot) -> Path:
 
 def _pdk_site_width_dbu(pdk_root: Path) -> int:
     try:
-        text = (pdk_root / "prtech/techLEF/N551P6M_ecos.lef").read_text(encoding="utf-8")
+        text = (pdk_root / "prtech/techLEF/N551P6M_ecos.lef").read_text(
+            encoding="utf-8"
+        )
     except OSError as exc:
         raise Gate0Error("PDK technology LEF is unavailable") from exc
     units = re.search(r"DATABASE\s+MICRONS\s+(\d+)", text, re.IGNORECASE)
-    site = re.search(r"SITE\s+(?:core7|CoreSite)\b(?P<body>.*?)END\s+(?:core7|CoreSite)", text, re.IGNORECASE | re.DOTALL)
-    size = re.search(r"SIZE\s+([0-9]+(?:\.[0-9]+)?)\s+BY", site.group("body") if site else "", re.IGNORECASE)
+    site = re.search(
+        r"SITE\s+(?:core7|CoreSite)\b(?P<body>.*?)END\s+(?:core7|CoreSite)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    size = re.search(
+        r"SIZE\s+([0-9]+(?:\.[0-9]+)?)\s+BY",
+        site.group("body") if site else "",
+        re.IGNORECASE,
+    )
     if not units or not size:
         raise Gate0Error("PDK site width is unavailable")
     width = round(int(units.group(1)) * float(size.group(1)))
@@ -837,7 +973,10 @@ def _pdk_site_width_dbu(pdk_root: Path) -> int:
 def _all_metrics(observation: TerminalObservation) -> dict[str, float]:
     return {
         **{key.value: float(value) for key, value in observation.metrics.items()},
-        **{key.value: float(value) for key, value in observation.timing_guardrail.items()},
+        **{
+            key.value: float(value)
+            for key, value in observation.timing_guardrail.items()
+        },
     }
 
 
@@ -846,27 +985,42 @@ def _objective_tuple(observation: TerminalObservation) -> tuple[float, ...]:
 
 
 def _is_distinct(
-    reference: Mapping[str, float], observation: TerminalObservation, epsilon: Mapping[str, float]
+    reference: Mapping[str, float],
+    observation: TerminalObservation,
+    epsilon: Mapping[str, float],
 ) -> bool:
     if not observation.eligible_for_incumbent:
         return False
-    return any(abs(value - reference[key]) > epsilon[key] for key, value in _all_metrics(observation).items())
+    return any(
+        abs(value - reference[key]) > epsilon[key]
+        for key, value in _all_metrics(observation).items()
+    )
 
 
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     temporary.replace(path)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     agent_root = Path(__file__).resolve().parents[2]
-    parser = argparse.ArgumentParser(description="Run ECOS optimization Readiness and Gate 0")
-    parser.add_argument("--config", type=Path, default=agent_root / "experiments/pilot/pilot.v1.json")
-    parser.add_argument("--results-root", type=Path, default=agent_root / "experiments/pilot/results")
+    parser = argparse.ArgumentParser(
+        description="Run ECOS optimization Readiness and Gate 0"
+    )
+    parser.add_argument(
+        "--config", type=Path, default=agent_root / "experiments/pilot/pilot.v1.json"
+    )
+    parser.add_argument(
+        "--results-root", type=Path, default=agent_root / "experiments/pilot/results"
+    )
     parser.add_argument("--readiness-only", action="store_true")
-    parser.add_argument("--run-id", default=time.strftime("gate0-%Y%m%dT%H%M%S", time.gmtime()))
+    parser.add_argument(
+        "--run-id", default=time.strftime("gate0-%Y%m%dT%H%M%S", time.gmtime())
+    )
     parser.add_argument("--design", action="append", default=[])
     parser.add_argument("--max-workers", type=int, default=3)
     args = parser.parse_args(argv)

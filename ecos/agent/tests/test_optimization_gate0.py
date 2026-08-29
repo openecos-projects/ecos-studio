@@ -82,11 +82,31 @@ def _config(snapshot: Path, sha256: str) -> dict[str, object]:
             "routability_opt": True,
         },
         "probes": [
-            {"probe_id": "density-decrease", "knob_id": "place.target_density", "delta": -0.05},
-            {"probe_id": "density-increase", "knob_id": "place.target_density", "delta": 0.05},
-            {"probe_id": "padding-decrease", "knob_id": "place.cell_padding_x", "delta": -1},
-            {"probe_id": "padding-increase", "knob_id": "place.cell_padding_x", "delta": 1},
-            {"probe_id": "routability-toggle", "knob_id": "place.routability_opt", "delta": None},
+            {
+                "probe_id": "density-decrease",
+                "knob_id": "place.target_density",
+                "delta": -0.05,
+            },
+            {
+                "probe_id": "density-increase",
+                "knob_id": "place.target_density",
+                "delta": 0.05,
+            },
+            {
+                "probe_id": "padding-decrease",
+                "knob_id": "place.cell_padding_x",
+                "delta": -1,
+            },
+            {
+                "probe_id": "padding-increase",
+                "knob_id": "place.cell_padding_x",
+                "delta": 1,
+            },
+            {
+                "probe_id": "routability-toggle",
+                "knob_id": "place.routability_opt",
+                "delta": None,
+            },
         ],
         "designs": [
             {
@@ -214,7 +234,9 @@ def test_design_candidates_use_parallel_independent_rpc_sessions(
         time.sleep(0.02 if "default" in candidate_id else 0.01)
         with lock:
             active -= 1
-        value = float(candidate_id.rsplit("-", 1)[-1]) if "default" in candidate_id else 0
+        value = (
+            float(candidate_id.rsplit("-", 1)[-1]) if "default" in candidate_id else 0
+        )
         return gate0.PilotCandidateRun(_terminal(10, 5, 100 + value), object())
 
     monkeypatch.setattr(gate0, "EccContentLengthRpcClient", FakeClient)
@@ -226,14 +248,22 @@ def test_design_candidates_use_parallel_independent_rpc_sessions(
         config,
         design,
         tmp_path / "design",
-        {"ecc": {"executable": "/ecc"}, "pdk": {"site_width_dbu": 200}, "config_sha256": HASH},
+        {
+            "ecc": {"executable": "/ecc"},
+            "pdk": {"site_width_dbu": 200},
+            "config_sha256": HASH,
+        },
         max_workers=3,
         execution_slots=threading.BoundedSemaphore(3),
     )
 
     assert peak == 3
-    assert [item["metrics"]["route_wirelength"] for item in report["default_replays"]] == [101, 102, 103]
-    assert list(report["probe_observations"]) == [item.probe_id for item in config.probes]
+    assert [
+        item["metrics"]["route_wirelength"] for item in report["default_replays"]
+    ] == [101, 102, 103]
+    assert list(report["probe_observations"]) == [
+        item.probe_id for item in config.probes
+    ]
     assert len(created) == 9
     assert all(client.closed for client in created)
 
@@ -250,18 +280,35 @@ def test_noise_profile_and_comparison_use_default_replay_range() -> None:
     assert profile["reference"]["route_dr_total_violation_count"] == 11
     assert profile["epsilon"]["route_dr_total_violation_count"] == 2
     assert profile["epsilon"]["route_wirelength"] == 4
-    assert compare_observations(
-        profile["reference"], _terminal(8, 5, 120, setup_wns=-0.11), profile["epsilon"]
-    ) == "better"
-    assert compare_observations(
-        profile["reference"], _terminal(8, 5, 120, setup_wns=-0.20), profile["epsilon"]
-    ) == "timing_regression"
-    assert compare_observations(
-        profile["reference"], _terminal(10, 5, 103, setup_wns=-0.11), profile["epsilon"]
-    ) == "noise_tie"
+    assert (
+        compare_observations(
+            profile["reference"],
+            _terminal(8, 5, 120, setup_wns=-0.11),
+            profile["epsilon"],
+        )
+        == "better"
+    )
+    assert (
+        compare_observations(
+            profile["reference"],
+            _terminal(8, 5, 120, setup_wns=-0.20),
+            profile["epsilon"],
+        )
+        == "timing_regression"
+    )
+    assert (
+        compare_observations(
+            profile["reference"],
+            _terminal(10, 5, 103, setup_wns=-0.11),
+            profile["epsilon"],
+        )
+        == "noise_tie"
+    )
 
 
-def test_design_and_pool_qualification_require_signal_improvement_and_diversity() -> None:
+def test_design_and_pool_qualification_require_signal_improvement_and_diversity() -> (
+    None
+):
     baseline = _terminal(10, 5, 100)
     defaults = (baseline, baseline, baseline)
     gcd = qualify_design(
@@ -333,6 +380,20 @@ def test_candidate_receipt_fails_closed_without_bound_terminal_evidence() -> Non
         require_terminal_receipt(receipt)
 
 
+def test_recording_rpc_keeps_candidate_call_when_revision_is_checked() -> None:
+    client = SimpleNamespace(call=lambda method, params: {"method": method})
+    recording = gate0._RecordingRpc(client)
+
+    recording.call("candidate.rerun", {"candidateId": "candidate-1"})
+    recording.call("rpc.hello", {"version": 1})
+
+    assert recording.call_record == {
+        "method": "candidate.rerun",
+        "params": {"candidateId": "candidate-1"},
+        "response": {"method": "candidate.rerun"},
+    }
+
+
 def test_success_candidate_rejects_missing_native_parameter_receipt(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -359,7 +420,7 @@ def test_success_candidate_rejects_missing_native_parameter_receipt(
 
     with pytest.raises(Gate0Error, match="native parameter application receipt"):
         run_pilot_candidate(
-            SimpleNamespace(),
+            SimpleNamespace(ecc_revision=lambda: "ecc-test-revision"),
             "workspace-1",
             tmp_path,
             200,
@@ -394,7 +455,7 @@ def test_failed_candidate_records_parent_and_chargeable_receipt(
 
     with pytest.raises(PilotCandidateExecutionError):
         run_pilot_candidate(
-            object(),
+            SimpleNamespace(ecc_revision=lambda: "ecc-test-revision"),
             "workspace-1",
             tmp_path,
             200,
@@ -423,7 +484,9 @@ def test_failed_candidate_records_parent_and_chargeable_receipt(
     }
 
 
-def test_pilot_context_uses_complete_domain_fingerprint(monkeypatch, tmp_path: Path) -> None:
+def test_pilot_context_uses_complete_domain_fingerprint(
+    monkeypatch, tmp_path: Path
+) -> None:
     execution_context = {
         "design_sha256": HASH,
         "rtl_sha256": HASH,
@@ -432,6 +495,7 @@ def test_pilot_context_uses_complete_domain_fingerprint(monkeypatch, tmp_path: P
         "pdk_sha256": HASH,
         "parent_lineage_sha256": HASH,
         "parent_manifest_sha256": HASH,
+        "ecc_revision": "ecc-test-revision",
         "site_width_dbu": 200,
         "seed": 0,
     }
@@ -445,7 +509,9 @@ def test_pilot_context_uses_complete_domain_fingerprint(monkeypatch, tmp_path: P
         "place.routability_opt": True,
         "place.density_weight": 8e-5,
     }
-    monkeypatch.setattr(gate0, "_incumbent_workspace", lambda workspace, _ref: workspace)
+    monkeypatch.setattr(
+        gate0, "_incumbent_workspace", lambda workspace, _ref: workspace
+    )
     monkeypatch.setattr(gate0, "_parent_manifest_sha256", lambda *_args: HASH)
     monkeypatch.setattr(
         gate0, "_optimization_execution_context", lambda *_args: execution_context
@@ -454,10 +520,20 @@ def test_pilot_context_uses_complete_domain_fingerprint(monkeypatch, tmp_path: P
     requested = RequestedKnobValue(knob_id="place.target_density", value=0.65)
 
     first = gate0._pilot_context_sha256(
-        tmp_path, 200, _terminal(10, 5, 100), requested, "gate0-pilot", None
+        tmp_path,
+        200,
+        _terminal(10, 5, 100),
+        requested,
+        None,
+        "ecc-test-revision",
     )
     second = gate0._pilot_context_sha256(
-        tmp_path, 200, _terminal(11, 5, 100), requested, "gate0-pilot", None
+        tmp_path,
+        200,
+        _terminal(11, 5, 100),
+        requested,
+        None,
+        "ecc-test-revision",
     )
 
     assert gate0._SHA256.fullmatch(first)

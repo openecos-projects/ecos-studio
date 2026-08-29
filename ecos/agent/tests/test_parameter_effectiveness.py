@@ -49,6 +49,7 @@ def _domain_context(**updates: object) -> dict[str, object]:
         "parent_lineage_sha256": HASH,
         "stage": "place",
         "backend": "ecc",
+        "ecc_revision": "0.1.0-alpha.11",
         "tool_revision": card.tool.revision,
         "lattice_version": "ecos.optimization_lattice.v1",
         "unit": "ratio",
@@ -68,12 +69,23 @@ def _domain_context(**updates: object) -> dict[str, object]:
 def test_cards_are_exactly_the_frozen_eight() -> None:
     cards = load_parameter_cards()
     assert {knob.value for knob in cards} == {item.value for item in OptimizationKnob}
-    assert [len(card.requested_domain.values) for card in cards.values()] == [13, 16, 12, 18, 2, 21, 23, 16]
+    assert [len(card.requested_domain.values) for card in cards.values()] == [
+        13,
+        16,
+        12,
+        18,
+        2,
+        21,
+        23,
+        16,
+    ]
 
 
 def test_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> None:
     cards = load_parameter_cards()
-    dreamplace_cards = [card for card in cards.values() if card.tool.name == "DREAMPlace"]
+    dreamplace_cards = [
+        card for card in cards.values() if card.tool.name == "DREAMPlace"
+    ]
 
     assert len(dreamplace_cards) == 5
     for card in dreamplace_cards:
@@ -85,15 +97,19 @@ def test_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> No
             "runtime_report_producer",
             "native_consumer",
         }
-        referenced = {
-            span_id
-            for condition in card.activation_conditions
-            for span_id in condition.source_span_ids
-        } | {
-            span_id
-            for consumer in card.consumers
-            for span_id in consumer.source_span_ids
-        } | set(card.runtime_semantics.source_span_ids)
+        referenced = (
+            {
+                span_id
+                for condition in card.activation_conditions
+                for span_id in condition.source_span_ids
+            }
+            | {
+                span_id
+                for consumer in card.consumers
+                for span_id in consumer.source_span_ids
+            }
+            | set(card.runtime_semantics.source_span_ids)
+        )
         assert referenced <= span_ids
 
 
@@ -103,7 +119,9 @@ def test_loader_rejects_dreamplace_card_without_native_consumer_span(tmp_path) -
     card_path = root / "cards/place.target_density.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
     card["source_spans"] = [
-        span for span in card["source_spans"] if span.get("role") == "runtime_report_producer"
+        span
+        for span in card["source_spans"]
+        if span.get("role") == "runtime_report_producer"
     ]
     report_span = card["source_spans"][0]["span_id"]
     for item in (*card["activation_conditions"], *card["consumers"]):
@@ -120,6 +138,41 @@ def test_loader_rejects_dreamplace_card_without_native_consumer_span(tmp_path) -
         load_parameter_cards(root)
 
 
+def test_loader_rejects_dreamplace_card_without_runtime_report_producer(
+    tmp_path,
+) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "cards/place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["tool"].pop("source_sha256", None)
+    card["source_spans"] = [
+        span
+        for span in card["source_spans"]
+        if span.get("role") != "runtime_report_producer"
+    ]
+    card["runtime_semantics"]["invalidation_rules"] = []
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="runtime report producer"):
+        load_parameter_cards(root)
+
+
+def test_loader_rejects_source_span_hash_when_line_range_changes(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "cards/place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["source_spans"][1]["start"] = 1
+    card["source_spans"][1]["end"] = 1
+    card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="source span hash"):
+        load_parameter_cards(root)
+
+
 def _refresh_card_manifest(root) -> None:
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -128,7 +181,9 @@ def _refresh_card_manifest(root) -> None:
     manifest["manifest_sha256"] = canonical_sha256(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
-    manifest_path.write_text(json.dumps(manifest, separators=(",", ":")), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, separators=(",", ":")), encoding="utf-8"
+    )
 
 
 def test_loader_rejects_changed_frozen_lattice(tmp_path) -> None:
@@ -176,7 +231,11 @@ def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
     )
     env = dict(os.environ, PYTHONPATH=str(site_dir))
     result = subprocess.run(
-        [sys.executable, "-c", "from ecos_agent.parameter_semantics import load_parameter_cards; assert len(load_parameter_cards()) == 8"],
+        [
+            sys.executable,
+            "-c",
+            "from ecos_agent.parameter_semantics import load_parameter_cards; assert len(load_parameter_cards()) == 8",
+        ],
         cwd=tmp_path,
         env=env,
         check=False,
@@ -200,6 +259,7 @@ def _density_receipt(
             "parent_lineage_sha256",
             "stage",
             "backend",
+            "ecc_revision",
             "tool_revision",
             "lattice_version",
             "unit",
@@ -208,6 +268,25 @@ def _density_receipt(
         )
     }
     receipt_context["context_sha256"] = build_context_fingerprint(context)
+    observation = {
+        "requested_target_density": 0.2,
+        "effective_target_density": 0.8,
+        "density_tensor_value": 0.8,
+        "placement_iteration_count": 4,
+        "evidence_complete": True,
+    }
+    consumer_evidence = {
+        "consumer_id": "dreamplace.density_objective",
+        "outcome": "entered",
+        "evidence_ref": "analysis/density.json",
+        "evidence_sha256": canonical_sha256(
+            {
+                "consumer_id": "dreamplace.density_objective",
+                "outcome": "entered",
+                "consumer_observation": observation,
+            }
+        ),
+    }
     payload = dict(
         receipt_id="parameter-receipt-1",
         tool=ToolRef(
@@ -218,10 +297,16 @@ def _density_receipt(
         context=receipt_context,
         requested={"knob_id": "place.target_density", "value": 0.2, "unit": "ratio"},
         materialization=MaterializationRef(
-            receipt_ref="analysis/materialization.json", receipt_sha256=HASH,
-            registry_sha256=HASH, patch_sha256=HASH, candidate_ref="candidate-1",
-            workspace_ref="workspace", config_before_sha256=HASH,
-            config_after_sha256=HASH, written_value=0.2, unit="ratio",
+            receipt_ref="analysis/materialization.json",
+            receipt_sha256=HASH,
+            registry_sha256=HASH,
+            patch_sha256=HASH,
+            candidate_ref="candidate-1",
+            workspace_ref="workspace",
+            config_before_sha256=HASH,
+            config_after_sha256="sha256:" + "b" * 64,
+            written_value=0.2,
+            unit="ratio",
         ),
         effective_initial=EffectiveValue(value=0.8, unit="ratio"),
         transitions=(
@@ -232,32 +317,37 @@ def _density_receipt(
                 value=0.8,
                 reason="utilization lower bound",
                 rule_id="dreamplace.target_density.utilization_floor",
-                evidence_ref="analysis/density.json",
-                evidence_sha256=HASH,
+                evidence_ref=consumer_evidence["evidence_ref"],
+                evidence_sha256=consumer_evidence["evidence_sha256"],
             ),
         )
         if with_runtime_trigger
         else (),
         application_status="applied",
-        activation=ActivationEvidence(status="used", consumers=({"consumer_id": "dreamplace.density_objective", "outcome": "entered", "evidence_ref": "analysis/density.json", "evidence_sha256": HASH},)),
-        consumer_observation={
-            "requested_target_density": 0.2,
-            "effective_target_density": 0.8,
-            "density_tensor_value": 0.8,
-            "placement_iteration_count": 4,
-            "evidence_complete": True,
-        },
+        activation=ActivationEvidence(status="used", consumers=(consumer_evidence,)),
+        consumer_observation=observation,
         effective_final=EffectiveValue(value=0.8, unit="ratio"),
     )
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
-    return ParameterApplicationReceipt(**payload, evidence_sha256=canonical_sha256(draft.model_dump(mode="json", exclude={"evidence_sha256"})))
+    return ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(
+            draft.model_dump(mode="json", exclude={"evidence_sha256"})
+        ),
+    )
 
 
 def test_density_floor_excludes_only_values_supported_by_typed_rule() -> None:
     cards = load_parameter_cards()
     card = cards[OptimizationKnob.TARGET_DENSITY]
     context = _domain_context()
-    domain = compile_effective_domain(card, context=context, receipts=(_density_receipt(context),))
+    receipt = _density_receipt(context)
+    domain = compile_effective_domain(
+        card,
+        context=context,
+        receipts=(receipt,),
+        current_receipts=(receipt,),
+    )
     assert domain.allowed_requested_values == (0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
     assert domain.current_coordinate["effective_anchor"] == 0.8
 
@@ -276,6 +366,46 @@ def test_dreamplace_used_receipt_requires_consumer_observation() -> None:
         validate_application_receipt(receipt, cards)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    (
+        ("evidence_ref", "analysis/other.json"),
+        ("evidence_sha256", "sha256:" + "b" * 64),
+    ),
+)
+def test_density_floor_transition_requires_bound_consumer_evidence(
+    field: str,
+    value: str,
+) -> None:
+    cards = load_parameter_cards()
+    payload = _density_receipt(_domain_context()).model_dump(
+        mode="json", exclude={"evidence_sha256"}
+    )
+    payload["transitions"][0][field] = value
+    receipt = ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(payload),
+    )
+
+    with pytest.raises(ParameterSemanticsError, match="transition evidence"):
+        validate_application_receipt(receipt, cards)
+
+
+def test_dreamplace_consumer_evidence_hash_is_observation_bound() -> None:
+    cards = load_parameter_cards()
+    payload = _density_receipt(_domain_context()).model_dump(
+        mode="json", exclude={"evidence_sha256"}
+    )
+    payload["activation"]["consumers"][0]["evidence_sha256"] = "sha256:" + "b" * 64
+    receipt = ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(payload),
+    )
+
+    with pytest.raises(ParameterSemanticsError, match="consumer evidence"):
+        validate_application_receipt(receipt, cards)
+
+
 def test_application_receipt_requires_card_bound_tool_source() -> None:
     cards = load_parameter_cards()
     payload = _density_receipt(_domain_context()).model_dump(
@@ -289,6 +419,106 @@ def test_application_receipt_requires_card_bound_tool_source() -> None:
 
     with pytest.raises(ParameterSemanticsError, match="tool source"):
         validate_application_receipt(receipt, cards)
+
+
+def _routability_false_receipt(
+    *, with_consumer: bool = True, with_observation: bool = True
+) -> ParameterApplicationReceipt:
+    card = load_parameter_cards()[OptimizationKnob.ROUTABILITY_OPT]
+    observation = {
+        "branch_round_count": 0,
+        "evidence_complete": True,
+    }
+    evidence_sha256 = canonical_sha256(
+        {
+            "consumer_id": "dreamplace.routability_branch",
+            "outcome": "evaluated",
+            "consumer_observation": observation,
+        }
+    )
+    payload = dict(
+        receipt_id="parameter-receipt-routability-false",
+        tool=ToolRef(
+            name=card.tool.name,
+            revision=card.tool.revision,
+            source_sha256=card.tool.source_sha256,
+        ),
+        context={"stage": "place", "lattice_version": "ecos.optimization_lattice.v1"},
+        requested={
+            "knob_id": "place.routability_opt",
+            "value": False,
+            "unit": "boolean",
+        },
+        materialization=MaterializationRef(
+            receipt_ref="analysis/candidate_materialization.v1.json",
+            receipt_sha256=HASH,
+            registry_sha256=HASH,
+            patch_sha256=HASH,
+            candidate_ref="candidate-1",
+            workspace_ref="candidate-1",
+            config_before_sha256=HASH,
+            config_after_sha256="sha256:" + "b" * 64,
+            written_value=False,
+            unit="boolean",
+        ),
+        effective_initial=EffectiveValue(value=False, unit="boolean"),
+        application_status="applied",
+        activation=ActivationEvidence(
+            status="not_activated",
+            consumers=(
+                {
+                    "consumer_id": "dreamplace.routability_branch",
+                    "outcome": "evaluated",
+                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+                    "evidence_sha256": evidence_sha256,
+                },
+            )
+            if with_consumer
+            else (),
+        ),
+        effective_final=EffectiveValue(value=False, unit="boolean"),
+    )
+    if with_observation:
+        payload["consumer_observation"] = observation
+    draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
+    hash_payload = draft.model_dump(mode="json", exclude={"evidence_sha256"})
+    if not with_observation:
+        hash_payload.pop("consumer_observation", None)
+    return ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(hash_payload),
+    )
+
+
+def test_routability_false_receipt_requires_gate_evaluation_evidence() -> None:
+    receipt = _routability_false_receipt(
+        with_consumer=False,
+        with_observation=False,
+    )
+
+    with pytest.raises(ParameterSemanticsError, match="routability gate"):
+        validate_application_receipt(receipt, load_parameter_cards())
+
+
+def test_routability_false_receipt_accepts_gate_evaluated_negative_arm() -> None:
+    validate_application_receipt(
+        _routability_false_receipt(),
+        load_parameter_cards(),
+    )
+
+
+def test_routability_false_receipt_requires_observation_bound_consumer_hash() -> None:
+    payload = _routability_false_receipt().model_dump(
+        mode="json", exclude={"evidence_sha256"}
+    )
+    payload["activation"]["consumers"][0]["evidence_sha256"] = HASH
+    receipt = ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(payload),
+    )
+
+    with pytest.raises(ParameterSemanticsError, match="consumer evidence"):
+        validate_application_receipt(receipt, load_parameter_cards())
 
 
 def test_padding_materialization_keeps_surface_and_written_units_distinct() -> None:
@@ -341,7 +571,12 @@ def test_density_floor_without_runtime_trigger_excludes_only_observed_request() 
     context = _domain_context()
     receipt = _density_receipt(context, with_runtime_trigger=False)
 
-    domain = compile_effective_domain(card, context=context, receipts=(receipt,))
+    domain = compile_effective_domain(
+        card,
+        context=context,
+        receipts=(receipt,),
+        current_receipts=(receipt,),
+    )
 
     assert domain.excluded_aliases == (0.2,)
     assert 0.15 in domain.allowed_requested_values
@@ -372,6 +607,9 @@ def test_context_fingerprint_ignores_run_id_but_binds_inputs() -> None:
     assert build_context_fingerprint(context) != build_context_fingerprint(
         {**context, "incumbent_state_sha256": "sha256:" + "b" * 64}
     )
+    assert build_context_fingerprint(context) != build_context_fingerprint(
+        {**context, "ecc_revision": "0.1.0-alpha.12"}
+    )
 
 
 def test_context_fingerprint_requires_every_binding_field() -> None:
@@ -379,7 +617,9 @@ def test_context_fingerprint_requires_every_binding_field() -> None:
 
     for key in tuple(context):
         with pytest.raises(EffectiveDomainError, match="missing binding fields"):
-            build_context_fingerprint({name: value for name, value in context.items() if name != key})
+            build_context_fingerprint(
+                {name: value for name, value in context.items() if name != key}
+            )
 
 
 def test_effective_domain_rejects_partial_or_mismatched_receipt_context() -> None:
@@ -410,22 +650,128 @@ def test_effective_domain_rejects_partial_or_mismatched_receipt_context() -> Non
 
 def test_v2_validator_rejects_value_outside_hash_bound_domain() -> None:
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    domain = compile_effective_domain(card, context=_domain_context(), baseline_surface_value=0.2)
+    domain = compile_effective_domain(
+        card, context=_domain_context(), baseline_surface_value=0.2
+    )
     proposal = OptimizationProposalV2(
-        context_ref={"episode_id": "episode-1", "checkpoint_id": "place", "input_sha256": HASH},
-        decision="propose", reason_code="observation", rationale_summary="bounded proposal",
+        context_ref={
+            "episode_id": "episode-1",
+            "checkpoint_id": "place",
+            "input_sha256": HASH,
+        },
+        decision="propose",
+        reason_code="observation",
+        rationale_summary="bounded proposal",
         observation_refs=({"observation_id": "obs-1", "sha256": HASH},),
         action=NumericProposalActionV2(
-            knob_id=card.knob_id, direction="increase", requested_value=0.85,
+            knob_id=card.knob_id,
+            direction="increase",
+            requested_value=0.85,
             effective_domain_sha256=domain.snapshot_sha256,
-            expected_effects=({"metric_id": "route_wirelength", "direction": "decrease"},),
+            expected_effects=(
+                {"metric_id": "route_wirelength", "direction": "decrease"},
+            ),
         ),
     )
     validate_numeric_proposal(proposal, domain)
-    invalid = proposal.model_copy(update={"action": proposal.action.model_copy(update={"requested_value": 0.1})})
+    invalid = proposal.model_copy(
+        update={"action": proposal.action.model_copy(update={"requested_value": 0.1})}
+    )
     try:
         validate_numeric_proposal(invalid, domain)
     except EffectiveDomainError:
         pass
     else:
         raise AssertionError("out-of-domain proposal was accepted")
+
+
+@pytest.mark.parametrize(
+    ("current", "direction", "requested"),
+    (
+        (False, "enable", False),
+        (False, "disable", True),
+        (True, "enable", True),
+        (True, "disable", True),
+    ),
+)
+def test_v2_boolean_validator_rejects_direction_mismatch_and_noop(
+    current: bool, direction: str, requested: bool
+) -> None:
+    card = load_parameter_cards()[OptimizationKnob.ROUTABILITY_OPT]
+    context = _domain_context(
+        stage=card.stage,
+        tool_revision=card.tool.revision,
+        tool_source_sha256=card.tool.source_sha256,
+        parameter_card_sha256=card_hash(card),
+        unit=card.surface.unit,
+        current_values={"place.routability_opt": current},
+    )
+    domain = compile_effective_domain(
+        card, context=context, baseline_surface_value=current
+    )
+    proposal = OptimizationProposalV2(
+        context_ref={
+            "episode_id": "episode-1",
+            "checkpoint_id": "place",
+            "input_sha256": HASH,
+        },
+        decision="propose",
+        reason_code="observation",
+        rationale_summary="bounded boolean proposal",
+        observation_refs=({"observation_id": "obs-1", "sha256": HASH},),
+        action=NumericProposalActionV2(
+            knob_id=card.knob_id,
+            direction=direction,
+            requested_value=requested,
+            effective_domain_sha256=domain.snapshot_sha256,
+            expected_effects=(
+                {"metric_id": "route_wirelength", "direction": "decrease"},
+            ),
+        ),
+    )
+
+    with pytest.raises(EffectiveDomainError, match="boolean|no-op"):
+        validate_numeric_proposal(proposal, domain)
+
+
+@pytest.mark.parametrize(
+    ("current", "direction", "requested"),
+    ((False, "enable", True), (True, "disable", False)),
+)
+def test_v2_boolean_validator_accepts_exact_state_transition(
+    current: bool, direction: str, requested: bool
+) -> None:
+    card = load_parameter_cards()[OptimizationKnob.ROUTABILITY_OPT]
+    context = _domain_context(
+        stage=card.stage,
+        tool_revision=card.tool.revision,
+        tool_source_sha256=card.tool.source_sha256,
+        parameter_card_sha256=card_hash(card),
+        unit=card.surface.unit,
+        current_values={"place.routability_opt": current},
+    )
+    domain = compile_effective_domain(
+        card, context=context, baseline_surface_value=current
+    )
+    proposal = OptimizationProposalV2(
+        context_ref={
+            "episode_id": "episode-1",
+            "checkpoint_id": "place",
+            "input_sha256": HASH,
+        },
+        decision="propose",
+        reason_code="observation",
+        rationale_summary="bounded boolean proposal",
+        observation_refs=({"observation_id": "obs-1", "sha256": HASH},),
+        action=NumericProposalActionV2(
+            knob_id=card.knob_id,
+            direction=direction,
+            requested_value=requested,
+            effective_domain_sha256=domain.snapshot_sha256,
+            expected_effects=(
+                {"metric_id": "route_wirelength", "direction": "decrease"},
+            ),
+        ),
+    )
+
+    validate_numeric_proposal(proposal, domain)

@@ -65,6 +65,14 @@ CARD_PATH = (
 )
 
 
+def _card_for(knob: OptimizationKnob) -> ParameterSemanticsCard:
+    path = (
+        Path(__file__).parents[1]
+        / f"knowledge/optimization/parameter-effectiveness/cards/{knob.value}.json"
+    )
+    return ParameterSemanticsCard.model_validate_json(path.read_bytes())
+
+
 def _card() -> ParameterSemanticsCard:
     return ParameterSemanticsCard.model_validate_json(CARD_PATH.read_bytes())
 
@@ -74,15 +82,48 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
-def _write_candidate(workspace: Path) -> dict[str, Path]:
+def _receipt_hash_payload(receipt: dict) -> dict:
+    payload = {key: value for key, value in receipt.items() if key != "evidence_sha256"}
+    if payload.get("consumer_observation") is None:
+        payload.pop("consumer_observation", None)
+    return payload
+
+
+def _write_candidate(
+    workspace: Path,
+    *,
+    knob: OptimizationKnob = OptimizationKnob.TARGET_DENSITY,
+    requested_value: float = 0.65,
+    written_value: int | float | None = None,
+    effective_value: int | float = 0.65,
+    requested_unit: str = "ratio",
+    written_unit: str = "ratio",
+    config_key: str = "dreamplace",
+    config_field: str = "target_density",
+    consumer_id: str = "dreamplace.density_objective",
+    observation_payload: dict | None = None,
+    transitions: list[dict] | None = None,
+) -> dict[str, Path]:
     candidate_id = "candidate-acceptance-test"
     candidate_ref = f".agent/candidates/{candidate_id}"
+    candidate_root = workspace / candidate_ref
     analysis = workspace / candidate_ref / "analysis"
     materialization_path = analysis / "candidate_materialization.v1.json"
     receipt_path = analysis / "parameter_application_receipt.v1.json"
     runtime_path = analysis / "parameter_runtime_report.v1.json"
     manifest_path = analysis / "candidate_workspace.v1.json"
     replay_path = analysis / "candidate_execution_receipt.v1.json"
+    config_path = candidate_root / "config/dreamplace_ecc.json"
+    before_snapshot_path = analysis / "snapshots/dreamplace_ecc.before.json"
+    after_snapshot_path = analysis / "snapshots/dreamplace_ecc.after.json"
+    written = requested_value if written_value is None else written_value
+    _write_json(before_snapshot_path, {config_field: 0})
+    _write_json(after_snapshot_path, {config_field: written})
+    _write_json(config_path, {config_field: written})
+    patch = [{"knob_id": knob.value, "value": written}]
+    patch_sha256 = canonical_sha256(patch)
+    before_sha256 = file_sha256(before_snapshot_path)
+    after_sha256 = file_sha256(after_snapshot_path)
     materialization = {
         "schema": "ecc.workspace.candidate_materialization.v1",
         "schema_version": 1,
@@ -90,36 +131,41 @@ def _write_candidate(workspace: Path) -> dict[str, Path]:
         "target_step": "place",
         "target": {"step": "place"},
         "registry_sha256": HASH,
-        "patch": [{"knob_id": "place.target_density", "value": 0.65}],
-        "patch_sha256": HASH,
+        "patch": patch,
+        "patch_sha256": patch_sha256,
         "configs": [
             {
-                "before_sha256": HASH,
-                "after_sha256": "sha256:" + "b" * 64,
+                "ref": "config/dreamplace_ecc.json",
+                "config_key": config_key,
+                "before_sha256": before_sha256,
+                "after_sha256": after_sha256,
             }
         ],
         "snapshots": [
             {
-                "before_sha256": HASH,
-                "after_sha256": "sha256:" + "b" * 64,
+                "config_key": config_key,
+                "before_ref": "analysis/snapshots/dreamplace_ecc.before.json",
+                "before_sha256": before_sha256,
+                "after_ref": "analysis/snapshots/dreamplace_ecc.after.json",
+                "after_sha256": after_sha256,
             }
         ],
     }
     materialization["receipt_sha256"] = canonical_sha256(materialization)
     _write_json(materialization_path, materialization)
-    card = _card()
-    observation = {
+    card = _card_for(knob)
+    observation = observation_payload or {
         "evidence_complete": True,
-        "effective_target_density": 0.65,
-        "density_tensor_value": 0.65,
+        "effective_target_density": effective_value,
+        "density_tensor_value": effective_value,
     }
     evidence = {
-        "consumer_id": "dreamplace.density_objective",
+        "consumer_id": consumer_id,
         "outcome": "entered",
         "evidence_ref": "analysis/parameter_runtime_report.v1.json",
         "evidence_sha256": canonical_sha256(
             {
-                "consumer_id": "dreamplace.density_objective",
+                "consumer_id": consumer_id,
                 "outcome": "entered",
                 "consumer_observation": observation,
             }
@@ -132,9 +178,9 @@ def _write_candidate(workspace: Path) -> dict[str, Path]:
             "status": "used",
             "consumers": [evidence],
         },
-        "effective_initial": {"value": 0.65, "unit": "ratio"},
-        "effective_final": {"value": 0.65, "unit": "ratio"},
-        "transitions": [],
+        "effective_initial": {"value": effective_value, "unit": written_unit},
+        "effective_final": {"value": effective_value, "unit": written_unit},
+        "transitions": transitions or [],
         "consumer_observation": observation,
     }
     _write_json(runtime_path, runtime)
@@ -146,33 +192,34 @@ def _write_candidate(workspace: Path) -> dict[str, Path]:
             "run_id": candidate_id,
             "stage": "place",
             "lattice_version": "ecos.optimization_lattice.v1",
+            "site_width_dbu": 2000,
         },
         "requested": {
-            "knob_id": "place.target_density",
-            "value": 0.65,
-            "unit": "ratio",
+            "knob_id": knob.value,
+            "value": requested_value,
+            "unit": requested_unit,
         },
         "materialization": {
             "receipt_ref": "analysis/candidate_materialization.v1.json",
             "receipt_sha256": materialization["receipt_sha256"],
             "registry_sha256": HASH,
-            "patch_sha256": HASH,
+            "patch_sha256": patch_sha256,
             "candidate_ref": candidate_ref,
             "parent_ref": None,
             "workspace_ref": candidate_ref,
-            "target_step": None,
-            "config_ref": None,
-            "config_before_sha256": HASH,
-            "config_after_sha256": "sha256:" + "b" * 64,
-            "before_snapshot_ref": None,
-            "before_snapshot_sha256": None,
-            "after_snapshot_ref": None,
-            "after_snapshot_sha256": None,
-            "written_value": 0.65,
-            "unit": "ratio",
+            "target_step": "place",
+            "config_ref": "config/dreamplace_ecc.json",
+            "config_before_sha256": before_sha256,
+            "config_after_sha256": after_sha256,
+            "before_snapshot_ref": "analysis/snapshots/dreamplace_ecc.before.json",
+            "before_snapshot_sha256": before_sha256,
+            "after_snapshot_ref": "analysis/snapshots/dreamplace_ecc.after.json",
+            "after_snapshot_sha256": after_sha256,
+            "written_value": written,
+            "unit": written_unit,
             "parent_manifest_ref": None,
             "parent_manifest_sha256": None,
-            "parent_state_sha256": None,
+            "parent_state_sha256": HASH,
         },
         "effective_initial": runtime["effective_initial"],
         "transitions": runtime["transitions"],
@@ -181,7 +228,7 @@ def _write_candidate(workspace: Path) -> dict[str, Path]:
         "consumer_observation": runtime["consumer_observation"],
         "effective_final": runtime["effective_final"],
     }
-    receipt["evidence_sha256"] = canonical_sha256(receipt)
+    receipt["evidence_sha256"] = canonical_sha256(_receipt_hash_payload(receipt))
     _write_json(receipt_path, receipt)
     manifest = {
         "schema": "ecc.workspace.candidate_workspace.v1",
@@ -191,10 +238,14 @@ def _write_candidate(workspace: Path) -> dict[str, Path]:
         "parent_candidate_root_ref": None,
         "parent_flow_sha256": HASH,
         "parent_state_sha256": HASH,
+        "parent_manifest_ref": None,
+        "parent_manifest_sha256": None,
         "target_step": "place",
         "end_step": "Harden",
         "execution_scope": "full_flow",
         "terminal_state": "succeeded",
+        "candidate_flow_sha256": "sha256:" + "c" * 64,
+        "candidate_state_sha256": "sha256:" + "d" * 64,
         "artifacts": {
             "candidate_materialization": {
                 "ref": "analysis/candidate_materialization.v1.json",
@@ -305,8 +356,12 @@ def _write_trace(
         checkpoint_id=scope.checkpoint_id,
         input_sha256=HASH,
     )
+    native = ParameterApplicationReceipt.model_validate_json(
+        paths["receipt"].read_bytes()
+    )
+    knob = OptimizationKnob(native.requested["knob_id"])
     action = ProposalAction(
-        knob_id=OptimizationKnob.TARGET_DENSITY,
+        knob_id=knob,
         direction=StrategyDirection.DECREASE,
         expected_effects=(
             {
@@ -320,7 +375,9 @@ def _write_trace(
         decision=OptimizationDecision.PROPOSE,
         reason_code=ProposalReason.OBSERVATION,
         rationale_summary="Replay one acceptance candidate.",
-        observation_refs=(ObservationReference(observation_id="observation-1", sha256=HASH),),
+        observation_refs=(
+            ObservationReference(observation_id="observation-1", sha256=HASH),
+        ),
         action=action,
     )
     planning = OptimizationPlanningAudit(episode_root).append(
@@ -340,7 +397,6 @@ def _write_trace(
         state=OptimizationEpisodeState.AWAITING_EXECUTION,
         objective_contract_sha256=scope.objective_contract_sha256,
     )
-    native = ParameterApplicationReceipt.model_validate_json(paths["receipt"].read_bytes())
     candidate_ref = ".agent/candidates/candidate-acceptance-test"
     ledger = OptimizationLedger(episode_root)
     ledger.append_start(
@@ -357,8 +413,8 @@ def _write_trace(
             objective_contract_sha256=scope.objective_contract_sha256,
             proposal_action=action,
             requested=RequestedKnobValue(
-                knob_id=OptimizationKnob.TARGET_DENSITY,
-                value=0.65,
+                knob_id=knob,
+                value=native.requested["value"],
             ),
         )
     )
@@ -377,7 +433,7 @@ def _write_trace(
             ),
             terminal_observation=observation,
             parameter_application_receipt=native,
-            parameter_card_sha256=card_hash(_card()),
+            parameter_card_sha256=card_hash(_card_for(knob)),
             materialization_receipt_sha256=native.materialization.receipt_sha256,
             parameter_application_receipt_id=native.receipt_id,
             outcome_details_sha256=HASH,
@@ -406,9 +462,7 @@ def _write_trace(
 def _rewrite_receipt(paths: dict[str, Path], mutate) -> None:
     receipt = json.loads(paths["receipt"].read_text(encoding="utf-8"))
     mutate(receipt)
-    receipt["evidence_sha256"] = canonical_sha256(
-        {key: value for key, value in receipt.items() if key != "evidence_sha256"}
-    )
+    receipt["evidence_sha256"] = canonical_sha256(_receipt_hash_payload(receipt))
     _write_json(paths["receipt"], receipt)
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     manifest["artifacts"]["parameter_application_receipt"]["sha256"] = file_sha256(
@@ -494,7 +548,9 @@ def test_acceptance_fails_closed_on_unbound_evidence(
     elif case == "missing_runtime":
         paths["runtime"].unlink()
     elif case == "missing_card_source":
-        _rewrite_receipt(paths, lambda receipt: receipt["tool"].update(source_sha256=None))
+        _rewrite_receipt(
+            paths, lambda receipt: receipt["tool"].update(source_sha256=None)
+        )
     elif case == "unbound_replay":
         replay = json.loads(paths["replay"].read_text(encoding="utf-8"))
         replay["candidate_manifest_sha256"] = None
@@ -513,7 +569,9 @@ def test_acceptance_fails_closed_on_unbound_evidence(
         episode_roots=(() if episode_root is None else (episode_root,)),
     )
 
-    report = json.loads((output / "acceptance-report.v1.json").read_text(encoding="utf-8"))
+    report = json.loads(
+        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+    )
     assert report["classification"] == classification
     issues = report["entries"][0]["issues"]
     if issue is None:
@@ -522,3 +580,216 @@ def test_acceptance_fails_closed_on_unbound_evidence(
     else:
         assert any(issue in item for item in issues)
         assert report["terminal_closed_knobs"] == []
+
+
+def _patch_acceptance_for_single_density(
+    monkeypatch: pytest.MonkeyPatch,
+    observation: TerminalObservation,
+    *,
+    knob: OptimizationKnob = OptimizationKnob.TARGET_DENSITY,
+) -> None:
+    monkeypatch.setattr(
+        acceptance,
+        "CANDIDATES",
+        {knob.value: "candidate-acceptance-test"},
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "load_parameter_cards",
+        lambda: {knob: _card_for(knob)},
+    )
+    monkeypatch.setattr(
+        optimization_memory,
+        "load_parameter_cards",
+        lambda: {knob: _card_for(knob)},
+    )
+    monkeypatch.setattr(acceptance, "_state_sha256", lambda _: HASH)
+    monkeypatch.setattr(
+        acceptance,
+        "build_candidate_terminal_observation",
+        lambda *_: observation,
+    )
+
+
+def test_acceptance_allows_evidenced_target_density_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    output = tmp_path / "output"
+    observation_payload = {
+        "evidence_complete": True,
+        "effective_target_density": 0.8,
+        "density_tensor_value": 0.8,
+    }
+    override_hash = canonical_sha256(
+        {
+            "consumer_id": "dreamplace.density_objective",
+            "outcome": "entered",
+            "consumer_observation": observation_payload,
+        }
+    )
+    paths = _write_candidate(
+        workspace,
+        requested_value=0.2,
+        effective_value=0.8,
+        transitions=[
+            {
+                "sequence": 0,
+                "from": "requested",
+                "to": "overridden",
+                "value": 0.8,
+                "reason": "Raised to the native utilization floor.",
+                "rule_id": "dreamplace.target_density.utilization_floor",
+                "iteration": None,
+                "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+                "evidence_sha256": override_hash,
+            }
+        ],
+    )
+    observation = _terminal()
+    episode_root = _write_trace(workspace, paths, observation)
+    _patch_acceptance_for_single_density(monkeypatch, observation)
+
+    acceptance.build_acceptance(workspace, output, episode_roots=(episode_root,))
+
+    report = json.loads(
+        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+    )
+    assert report["classification"] == "Engineering Complete"
+    assert report["entries"][0]["issues"] == []
+    assert report["terminal_closed_knobs"] == ["place.target_density"]
+
+
+def test_acceptance_requires_l1_materialization_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    output = tmp_path / "output"
+    paths = _write_candidate(workspace)
+
+    def remove_l1_binding(receipt: dict) -> None:
+        receipt["materialization"].update(
+            {
+                "target_step": None,
+                "config_ref": None,
+                "before_snapshot_ref": None,
+                "before_snapshot_sha256": None,
+                "after_snapshot_ref": None,
+                "after_snapshot_sha256": None,
+                "parent_state_sha256": None,
+            }
+        )
+
+    _rewrite_receipt(paths, remove_l1_binding)
+    observation = _terminal()
+    episode_root = _write_trace(workspace, paths, observation)
+    _patch_acceptance_for_single_density(monkeypatch, observation)
+
+    acceptance.build_acceptance(workspace, output, episode_roots=(episode_root,))
+
+    report = json.loads(
+        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+    )
+    assert report["classification"] == "Engineering Incomplete"
+    assert any("candidate artifact" in item for item in report["entries"][0]["issues"])
+    assert report["terminal_closed_knobs"] == []
+
+
+def _write_padding_candidate(
+    workspace: Path,
+    *,
+    written_value: int = 4000,
+    effective_value: int = 4000,
+) -> dict[str, Path]:
+    return _write_candidate(
+        workspace,
+        knob=OptimizationKnob.CELL_PADDING_X,
+        requested_value=2,
+        written_value=written_value,
+        effective_value=effective_value,
+        requested_unit="site",
+        written_unit="dbu",
+        config_field="cell_padding_x",
+        consumer_id="dreamplace.cell_size_expansion",
+        observation_payload={
+            "evidence_complete": True,
+            "effective_padding_dbu": effective_value,
+            "movable_node_count": 10,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("paths_mutation", "classification"),
+    (
+        (None, "Engineering Complete"),
+        ("wrong_written_value", "Engineering Incomplete"),
+    ),
+)
+def test_acceptance_validates_cell_padding_site_to_dbu_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    paths_mutation: str | None,
+    classification: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    output = tmp_path / "output"
+    paths = _write_padding_candidate(
+        workspace,
+        written_value=(2 if paths_mutation == "wrong_written_value" else 4000),
+        effective_value=(2 if paths_mutation == "wrong_written_value" else 4000),
+    )
+    observation = _terminal()
+    episode_root = _write_trace(workspace, paths, observation)
+    _patch_acceptance_for_single_density(
+        monkeypatch,
+        observation,
+        knob=OptimizationKnob.CELL_PADDING_X,
+    )
+
+    acceptance.build_acceptance(workspace, output, episode_roots=(episode_root,))
+
+    report = json.loads(
+        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+    )
+    assert report["classification"] == classification
+    if classification == "Engineering Complete":
+        assert report["terminal_closed_knobs"] == ["place.cell_padding_x"]
+    else:
+        assert any(
+            "candidate artifact" in item for item in report["entries"][0]["issues"]
+        )
+        assert report["terminal_closed_knobs"] == []
+
+
+@pytest.mark.parametrize("mutation", ("missing_config", "tampered_after_snapshot"))
+def test_acceptance_rejects_unavailable_or_tampered_l1_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    output = tmp_path / "output"
+    paths = _write_candidate(workspace)
+    candidate_root = paths["manifest"].parents[1]
+    if mutation == "missing_config":
+        (candidate_root / "config/dreamplace_ecc.json").unlink()
+    else:
+        _write_json(
+            candidate_root / "analysis/snapshots/dreamplace_ecc.after.json",
+            {"target_density": 0.7},
+        )
+    observation = _terminal()
+    episode_root = _write_trace(workspace, paths, observation)
+    _patch_acceptance_for_single_density(monkeypatch, observation)
+
+    acceptance.build_acceptance(workspace, output, episode_roots=(episode_root,))
+
+    report = json.loads(
+        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+    )
+    assert report["classification"] == "Engineering Incomplete"
+    assert any("candidate artifact" in item for item in report["entries"][0]["issues"])
+    assert report["terminal_closed_knobs"] == []

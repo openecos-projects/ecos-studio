@@ -13,6 +13,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
+    GateResult,
     KnowledgeReference,
     LegalAction,
     ObjectiveMetric,
@@ -27,9 +28,14 @@ from ecos_agent.optimization_contracts import (
     ProposalReason,
     RequestedKnobValue,
     StageObservation,
+    SignoffGates,
     StrategyDirection,
+    TerminalObservation,
+    TimingMetric,
 )
 from ecos_agent.optimization_controller import (
+    CandidateExecutionEvidence,
+    CandidateExecutionRequest,
     CandidateExecutionReceipt,
     OptimizationAgentMode,
     OptimizationEpisodeController,
@@ -49,6 +55,12 @@ from ecos_agent.optimization_ledger import (
 from ecos_agent.optimization_memory import (
     OptimizationTaskMemoryStore,
     build_task_memory_scope,
+)
+from ecos_agent.optimization_metric_contracts import (
+    EvaluationMetricCategory,
+    EvaluationMetricDirection,
+    EvaluationMetricRole,
+    TerminalEvaluationMetric,
 )
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
@@ -89,6 +101,7 @@ def _execution_context() -> dict[str, object]:
         "pdk_sha256": HASH,
         "parent_lineage_sha256": HASH,
         "parent_manifest_sha256": HASH,
+        "ecc_revision": "0.1.0-alpha.11",
         "site_width_dbu": 200,
         "seed": 0,
     }
@@ -195,7 +208,9 @@ def _observation() -> StageObservation:
 
 
 def _retrieval() -> OptimizationRetrievalResult:
-    reference = KnowledgeReference(entity_id="strategy.congestion.padding.v1", chunk_sha256=CHUNK_HASH)
+    reference = KnowledgeReference(
+        entity_id="strategy.congestion.padding.v1", chunk_sha256=CHUNK_HASH
+    )
     request = OptimizationRetrievalRequest(
         task_id="task-1",
         current_stage="place",
@@ -295,7 +310,9 @@ def _terminal(
     outcome: OptimizationOutcomeKind,
     execution_id: str = "execution-1",
 ) -> CandidateExecutionReceipt:
-    return CandidateExecutionReceipt(execution_id=execution_id, started=True, outcome=outcome)
+    return CandidateExecutionReceipt(
+        execution_id=execution_id, started=True, outcome=outcome
+    )
 
 
 def _native_receipt(
@@ -306,7 +323,9 @@ def _native_receipt(
     is_padding = requested.knob_id.value == "place.cell_padding_x"
     unit = "site" if is_padding else "ratio"
     consumer_id = (
-        "dreamplace.cell_size_expansion" if is_padding else "dreamplace.density_objective"
+        "dreamplace.cell_size_expansion"
+        if is_padding
+        else "dreamplace.density_objective"
     )
     consumer_observation = (
         {
@@ -326,7 +345,10 @@ def _native_receipt(
         }
     )
     transitions = ()
-    if requested.knob_id.value == "place.target_density" and effective_value != requested.value:
+    if (
+        requested.knob_id.value == "place.target_density"
+        and effective_value != requested.value
+    ):
         transitions = (
             RuntimeTransition(
                 sequence=0,
@@ -344,6 +366,7 @@ def _native_receipt(
         "incumbent_state_sha256": canonical_sha256(None),
         "stage": card.stage,
         "backend": "ecc",
+        "ecc_revision": "0.1.0-alpha.11",
         "tool_revision": card.tool.revision,
         "parameter_card_sha256": card_hash(card),
         "lattice_version": "ecos.optimization_lattice.v1",
@@ -351,8 +374,6 @@ def _native_receipt(
         "current_values": dict(sorted(CURRENT_VALUES.items())),
         "terminal_execution_contract_sha256": canonical_sha256(
             {
-                "episode_id": "episode-1",
-                "checkpoint_id": "checkpoint-1",
                 "target_step": card.stage,
                 "end_step": "Harden",
                 "execution_scope": "full_flow",
@@ -423,6 +444,59 @@ def _density_proposal(context: object) -> dict[str, object]:
     )
 
 
+def _eligible_terminal(
+    observation_id: str = "terminal-eligible",
+) -> TerminalObservation:
+    one = {
+        "rcx_expected_corner_count",
+        "rcx_spef_file_count",
+        "sta_corner_count",
+        "sta_expected_corner_count",
+    }
+    return TerminalObservation(
+        schema_version="ecos.terminal_observation.v3",
+        observation_id=observation_id,
+        evidence_manifest_sha256=HASH,
+        evidence_valid=True,
+        harden_artifacts_complete=True,
+        signoff_gates=SignoffGates.all(GateResult.PASS),
+        metrics={
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 0,
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 0,
+            ObjectiveMetric.ROUTE_WIRELENGTH: 100,
+        },
+        timing_guardrail={metric: 0 for metric in TimingMetric},
+        evaluation_metrics=tuple(
+            TerminalEvaluationMetric(
+                metric_id=metric_id,
+                value=1 if metric_id in one else 0,
+                unit="count",
+                category=EvaluationMetricCategory.ELIGIBILITY,
+                role=EvaluationMetricRole.GATE,
+                direction=EvaluationMetricDirection.EXACT,
+                source_refs=("analysis/terminal.json",),
+            )
+            for metric_id in (
+                "drc_count",
+                "lvs_count",
+                "rcx_expected_corner_count",
+                "rcx_spef_file_count",
+                "rcx_missing_corner_count",
+                "rcx_spef_parse_failure_count",
+                "sta_corner_count",
+                "sta_expected_corner_count",
+                "sta_missing_corner_count",
+                "sta_setup_violation_count",
+                "sta_hold_violation_count",
+                "harden_artifact_missing_count",
+            )
+        ),
+        evaluation_metrics_complete=True,
+        sta_corner_ids=("typical",),
+        sta_corner_set_sha256=canonical_sha256({"corners": ["typical"]}),
+    )
+
+
 def _task_memory_snapshot(tmp_path: Path):
     objective = _objective()
     scope = build_task_memory_scope(
@@ -435,7 +509,9 @@ def _task_memory_snapshot(tmp_path: Path):
     return OptimizationTaskMemoryStore(tmp_path / "task-memory", scope).snapshot()
 
 
-def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(tmp_path: Path) -> None:
+def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(
+    tmp_path: Path,
+) -> None:
     codex = _FakeCodex(_proposal)
     ecc = _FakeEcc(_terminal(OptimizationOutcomeKind.DEGRADED))
     controller = _controller(tmp_path, codex, ecc)
@@ -452,10 +528,15 @@ def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(tmp_pat
     assert controller.budget.consumed_planning_calls == 1
     assert controller.budget.consumed_candidates == 1
     assert len(ecc.start_calls) == 1
-    assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
+    assert (
+        controller.ledger.replay().terminal_outcomes[0].outcome
+        == OptimizationOutcomeKind.DEGRADED
+    )
 
 
-def test_controller_binds_codex_turn_evidence_to_the_planning_audit(tmp_path: Path) -> None:
+def test_controller_binds_codex_turn_evidence_to_the_planning_audit(
+    tmp_path: Path,
+) -> None:
     controller = _controller(
         tmp_path,
         _AuditedFakeCodex(_proposal),
@@ -469,12 +550,15 @@ def test_controller_binds_codex_turn_evidence_to_the_planning_audit(tmp_path: Pa
     state = json.loads(controller.state_path.read_text(encoding="utf-8"))
     assert provider.entries[0].planning_entry_sha256 == planning.entries[0].entry_sha256
     assert state["planning_provider_audit_event_count"] == 1
-    assert state["planning_provider_audit_chain_head_sha256"] == provider.chain_head_sha256
+    assert (
+        state["planning_provider_audit_chain_head_sha256"] == provider.chain_head_sha256
+    )
     recovered = OptimizationEpisodeController.recover(
         planner=_AuditedFakeCodex(_proposal),
         executor=_FakeEcc(_started()),
         ledger=controller.ledger,
         clock=_Clock(),
+        execution_context=_execution_context(),
     )
     assert recovered.state == OptimizationEpisodeState.AWAITING_EXECUTION
 
@@ -507,6 +591,7 @@ def test_controller_binds_task_memory_snapshot_and_rejects_unknown_refs(
         clock=_Clock(),
         task_memory_scope_sha256=snapshot.scope.scope_sha256,
         task_memory_supplier=lambda: snapshot,
+        execution_context=_execution_context(),
     )
     assert recovered.task_memory_scope_sha256 == snapshot.scope.scope_sha256
 
@@ -536,7 +621,10 @@ def test_controller_persists_attempted_requested_values(tmp_path: Path) -> None:
         ),
     )
 
-    assert controller.plan(_observation(), _retrieval(), CURRENT_VALUES).requested.value == 3
+    assert (
+        controller.plan(_observation(), _retrieval(), CURRENT_VALUES).requested.value
+        == 3
+    )
     controller.execute()
     planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
@@ -557,13 +645,20 @@ def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
     assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
     context = codex.contexts[0]
     assert len(context.effective_domains) == 8
-    assert {item.knob_id.value for item in context.effective_domains} == set(CURRENT_VALUES)
+    assert {item.knob_id.value for item in context.effective_domains} == set(
+        CURRENT_VALUES
+    )
     assert context.current_values is not None
     assert set(context.current_values) == set(CURRENT_VALUES)
-    assert all(item.snapshot_sha256.startswith("sha256:") for item in context.effective_domains)
+    assert all(
+        item.snapshot_sha256.startswith("sha256:") for item in context.effective_domains
+    )
     payload = planning_context_payload(context)
     assert len(payload["effective_domains"]) == 8
-    assert payload["effective_domains"][0]["snapshot_sha256"] == context.effective_domains[0].snapshot_sha256
+    assert (
+        payload["effective_domains"][0]["snapshot_sha256"]
+        == context.effective_domains[0].snapshot_sha256
+    )
     audit = OptimizationPlanningAudit(tmp_path / "episode").replay()
     assert tuple(
         item.snapshot_sha256 for item in audit.entries[0].effective_domains
@@ -624,6 +719,7 @@ def test_recovery_rejects_planning_mode_drift(tmp_path: Path) -> None:
             executor=_FakeEcc(),
             ledger=controller.ledger,
             clock=_Clock(),
+            execution_context=_execution_context(),
             receipt_aware_planning=True,
         )
 
@@ -641,7 +737,9 @@ def test_planning_domain_excludes_attempted_value_without_rewriting_proposal(
 
     context = codex.contexts[0]
     density = next(
-        item for item in context.effective_domains if item.knob_id.value == "place.target_density"
+        item
+        for item in context.effective_domains
+        if item.knob_id.value == "place.target_density"
     )
     assert 0.85 in density.excluded_aliases
     assert 0.85 not in density.allowed_requested_values
@@ -655,18 +753,25 @@ def test_planning_domain_excludes_attempted_value_without_rewriting_proposal(
     [
         lambda context: _proposal(
             context,
-            context_ref={**context.context_ref.model_dump(), "checkpoint_id": "other-checkpoint"},
+            context_ref={
+                **context.context_ref.model_dump(),
+                "checkpoint_id": "other-checkpoint",
+            },
         ),
         lambda context: _proposal(
             context,
             observation_refs=[
-                ObservationReference(observation_id="old-observation", sha256=HASH).model_dump()
+                ObservationReference(
+                    observation_id="old-observation", sha256=HASH
+                ).model_dump()
             ],
         ),
         lambda context: _proposal(
             context,
             knowledge_refs=[
-                KnowledgeReference(entity_id="strategy.congestion.other.v1", chunk_sha256=CHUNK_HASH).model_dump()
+                KnowledgeReference(
+                    entity_id="strategy.congestion.other.v1", chunk_sha256=CHUNK_HASH
+                ).model_dump()
             ],
         ),
         lambda context: {**_proposal(context), "workspace": "/tmp/escape"},
@@ -690,11 +795,17 @@ def test_contract_mutations_are_rejected_before_fake_ecc_side_effects(
     assert ecc.start_calls == []
 
 
-def test_no_knowledge_mode_hides_chunks_and_rejects_knowledge_references(tmp_path: Path) -> None:
+def test_no_knowledge_mode_hides_chunks_and_rejects_knowledge_references(
+    tmp_path: Path,
+) -> None:
     codex = _FakeCodex(
         lambda context: _proposal(
             context,
-            knowledge_refs=[KnowledgeReference(entity_id="strategy.congestion.padding.v1", chunk_sha256=CHUNK_HASH).model_dump()],
+            knowledge_refs=[
+                KnowledgeReference(
+                    entity_id="strategy.congestion.padding.v1", chunk_sha256=CHUNK_HASH
+                ).model_dump()
+            ],
         )
     )
     controller = _controller(
@@ -815,14 +926,17 @@ class _V2FakeCodex(_FakeCodex):
         return response(context, domain) if callable(response) else response
 
 
-def _v2_proposal(context: object, domain: object, *, value: object = None) -> dict[str, object]:
+def _v2_proposal(
+    context: object, domain: object, *, value: object = None
+) -> dict[str, object]:
     action = context.legal_actions[0]
     if isinstance(domain, tuple):
         domain = next(item for item in domain if item.knob_id == action.knob_id)
     current = context.current_values[action.knob_id.value]
     if value is None:
         candidates = (
-            item for item in domain.allowed_requested_values
+            item
+            for item in domain.allowed_requested_values
             if item > current
             if action.direction == StrategyDirection.INCREASE
         )
@@ -875,9 +989,12 @@ def test_controller_uses_exact_v2_value_by_default(
 
     controller.execute()
     selected_domain = next(
-        item for item in context.effective_domains if item.knob_id == result.requested.knob_id
+        item
+        for item in context.effective_domains
+        if item.knob_id == result.requested.knob_id
     )
     assert executor.start_calls[0].context_sha256 == selected_domain.context_sha256
+    assert executor.start_calls[0].seed == 0
 
 
 def test_controller_v1_requires_explicit_compatibility_flag(
@@ -935,10 +1052,62 @@ def test_controller_repairs_one_invalid_v2_response_before_accepting_exact_value
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert len(planner.v2_calls) == 2
+    assert controller.budget.consumed_planning_calls == 2
     assert result.requested is not None
     assert result.planner_source == "repair"
-    decision = OptimizationDecisionAudit(tmp_path / "episode").replay().entries[-1]
-    assert decision.planner_source == "repair"
+    planning = OptimizationPlanningAudit(tmp_path / "episode").replay().entries
+    decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert len(planning) == 2
+    assert len(decisions) == 2
+    assert decisions[0].validation_result == "rejected"
+    assert decisions[0].planning_entry_sha256 == planning[0].entry_sha256
+    assert decisions[-1].planner_source == "repair"
+    assert decisions[-1].planning_entry_sha256 == planning[-1].entry_sha256
+
+
+def test_v2_repair_refreshes_wall_time_and_planning_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+    clock = _Clock()
+
+    def invalid(context: object, domain: object) -> dict[str, object]:
+        clock.now = 5.0
+        return _v2_proposal(context, domain, value=999)
+
+    planner = _V2FakeCodex(invalid, _v2_proposal)
+    controller = _controller(tmp_path, planner, _FakeEcc(), clock=clock)
+
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    first_context, _ = planner.v2_calls[0]
+    repair_context, _ = planner.v2_calls[1]
+    assert first_context.budget.elapsed_wall_time_seconds == 0
+    assert repair_context.budget.elapsed_wall_time_seconds == 5
+    assert repair_context.budget.consumed_planning_calls == 2
+    assert controller.budget.elapsed_wall_time_seconds == 5
+
+
+def test_v2_repair_does_not_exceed_planning_call_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+    planner = _V2FakeCodex(
+        lambda context, domain: _v2_proposal(context, domain, value=999)
+    )
+    controller = _controller(
+        tmp_path,
+        planner,
+        _FakeEcc(),
+        budget=_budget(planning=59),
+    )
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert len(planner.v2_calls) == 1
+    assert controller.budget.consumed_planning_calls == 60
+    assert result.rejection_reason == "planning_budget_exhausted"
+    assert len(OptimizationPlanningAudit(tmp_path / "episode").replay().entries) == 1
 
 
 def test_controller_falls_back_immediately_after_v2_repair_failure(
@@ -958,9 +1127,22 @@ def test_controller_falls_back_immediately_after_v2_repair_failure(
     assert result.planner_source == "local_fallback"
     decision = OptimizationDecisionAudit(tmp_path / "episode").replay().entries[-1]
     assert decision.planner_source == "local_fallback"
+    decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert [entry.planner_source for entry in decisions] == [
+        "llm",
+        "repair",
+        "local_fallback",
+    ]
+    assert [entry.validation_result for entry in decisions] == [
+        "rejected",
+        "rejected",
+        "fallback",
+    ]
 
 
-def test_stop_is_deferred_until_fixed_candidate_budget_is_exhausted(tmp_path: Path) -> None:
+def test_stop_is_deferred_until_fixed_candidate_budget_is_exhausted(
+    tmp_path: Path,
+) -> None:
     def stop(context: object) -> dict[str, object]:
         proposal = _proposal(context)
         proposal.update(
@@ -996,7 +1178,9 @@ def test_planning_decisions_are_hash_bound_and_replayable(tmp_path: Path) -> Non
     assert entries[0].requested == result.requested
 
 
-def test_objective_is_bound_to_planning_state_decision_and_execution(tmp_path: Path) -> None:
+def test_objective_is_bound_to_planning_state_decision_and_execution(
+    tmp_path: Path,
+) -> None:
     objective = _objective()
     codex = _FakeCodex(_proposal)
     controller = _controller(
@@ -1051,7 +1235,10 @@ def test_missing_fake_ecc_receipt_is_charged_and_quarantined(tmp_path: Path) -> 
 
     assert result.state == OptimizationEpisodeState.QUARANTINED
     assert controller.budget.consumed_candidates == 1
-    assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.INDETERMINATE
+    assert (
+        controller.ledger.replay().terminal_outcomes[0].outcome
+        == OptimizationOutcomeKind.INDETERMINATE
+    )
     state = json.loads(controller.state_path.read_text(encoding="utf-8"))
     assert state["attempted_requests"] == [
         {"knob_id": "place.cell_padding_x", "value": 3}
@@ -1076,7 +1263,9 @@ def test_not_started_retries_once_without_consuming_a_candidate(tmp_path: Path) 
     assert controller.ledger.replay().entries == ()
 
 
-def test_timeout_cancels_once_and_quarantines_when_fake_ecc_has_no_receipt(tmp_path: Path) -> None:
+def test_timeout_cancels_once_and_quarantines_when_fake_ecc_has_no_receipt(
+    tmp_path: Path,
+) -> None:
     codex = _FakeCodex(_proposal)
     ecc = _FakeEcc(_started(), cancel_receipt=_started())
     controller = _controller(tmp_path, codex, ecc)
@@ -1088,12 +1277,17 @@ def test_timeout_cancels_once_and_quarantines_when_fake_ecc_has_no_receipt(tmp_p
     assert quarantined.state == OptimizationEpisodeState.QUARANTINED
     assert controller.budget.consumed_candidates == 1
     assert len(ecc.cancel_calls) == 1
-    assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.INDETERMINATE
+    assert (
+        controller.ledger.replay().terminal_outcomes[0].outcome
+        == OptimizationOutcomeKind.INDETERMINATE
+    )
     with pytest.raises(OptimizationEpisodeControllerError, match="already requested"):
         controller.timeout()
 
 
-def test_timeout_with_terminal_cancel_receipt_preserves_negative_outcome(tmp_path: Path) -> None:
+def test_timeout_with_terminal_cancel_receipt_preserves_negative_outcome(
+    tmp_path: Path,
+) -> None:
     codex = _FakeCodex(_proposal)
     ecc = _FakeEcc(
         _started(),
@@ -1111,7 +1305,9 @@ def test_timeout_with_terminal_cancel_receipt_preserves_negative_outcome(tmp_pat
     )
 
 
-def test_terminal_outcome_can_only_complete_the_pending_execution(tmp_path: Path) -> None:
+def test_terminal_outcome_can_only_complete_the_pending_execution(
+    tmp_path: Path,
+) -> None:
     controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
     controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
     controller.execute()
@@ -1121,7 +1317,10 @@ def test_terminal_outcome_can_only_complete_the_pending_execution(tmp_path: Path
     )
 
     assert result.state == OptimizationEpisodeState.PLANNING
-    assert controller.ledger.replay().terminal_outcomes[0].outcome == OptimizationOutcomeKind.DEGRADED
+    assert (
+        controller.ledger.replay().terminal_outcomes[0].outcome
+        == OptimizationOutcomeKind.DEGRADED
+    )
 
 
 def test_controller_persists_native_receipt_in_terminal_ledger(tmp_path: Path) -> None:
@@ -1151,7 +1350,26 @@ def test_candidate_execution_receipt_exposes_only_native_parameter_receipts() ->
     assert "application_receipt" not in CandidateExecutionReceipt.__dataclass_fields__
 
 
-def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
+def test_candidate_execution_request_rejects_non_integer_seed(tmp_path: Path) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc())
+    planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert planned.proposal is not None
+    assert planned.requested is not None
+
+    with pytest.raises(ValueError, match="seed"):
+        CandidateExecutionRequest(
+            intervention_id="intervention-1",
+            episode_id="episode-1",
+            checkpoint_id="checkpoint-1",
+            proposal=planned.proposal,
+            requested=planned.requested,
+            context_sha256=HASH,
+            seed=True,
+            ecc_revision="0.1.0-alpha.11",
+        )
+
+
+def test_recovery_does_not_use_receipt_without_eligible_terminal_observation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1206,20 +1424,269 @@ def test_recovery_uses_non_promoted_effective_density_history_for_next_value(
 
     context = planner.contexts[0]
     assert context.history[0].parameter_application_receipt is not None
-    assert context.history[0].parameter_application_receipt.effective_initial.value == 0.8
-    density_card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    assert tuple(item.value for item in context.excluded_surface_values) == tuple(
-        value for value in density_card.requested_domain.values if value <= 0.8
+    density_domain = next(
+        item
+        for item in context.effective_domains
+        if item.knob_id == OptimizationKnob.TARGET_DENSITY
     )
-    assert (
-        "place.target_density",
-        StrategyDirection.DECREASE,
-    ) not in tuple((item.knob_id.value, item.direction) for item in context.legal_actions)
+    assert density_domain.current_coordinate == {
+        "surface_value": CURRENT_VALUES["place.target_density"],
+        "effective_anchor": None,
+    }
+    assert tuple(item.value for item in context.excluded_surface_values) == (0.55,)
     assert deferred.state == OptimizationEpisodeState.PLANNING
     assert planned.rejection_reason == "controlled_coordinate_fallback"
-    assert planned.requested == RequestedKnobValue(
+    assert planned.requested != RequestedKnobValue(
         knob_id="place.target_density", value=0.875
     )
+
+
+def test_same_execution_context_reuses_eligible_receipt_across_episodes(
+    tmp_path: Path,
+) -> None:
+    optimization_root = tmp_path / "optimization"
+    first = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=_FakeCodex(_density_proposal),
+        executor=_FakeEcc(_started()),
+        ledger=OptimizationLedger(optimization_root / "episode-1"),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+    planned = first.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert planned.requested is not None
+    first.execute()
+    first.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.DEGRADED,
+            parameter_application_receipt=_native_receipt(
+                planned.requested, effective_value=0.8
+            ),
+        ),
+        _eligible_terminal(),
+        incumbent_decision="incumbent_retained",
+    )
+
+    second_planner = _FakeCodex(_proposal)
+    second = OptimizationEpisodeController(
+        episode_id="episode-2",
+        checkpoint_id="checkpoint-2",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=second_planner,
+        executor=_FakeEcc(),
+        ledger=OptimizationLedger(optimization_root / "episode-2"),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+    second.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    density_domain = next(
+        item
+        for item in second_planner.contexts[0].effective_domains
+        if item.knob_id == OptimizationKnob.TARGET_DENSITY
+    )
+    assert density_domain.current_coordinate == {
+        "surface_value": CURRENT_VALUES["place.target_density"],
+        "effective_anchor": None,
+    }
+    assert density_domain.thresholds[0].value == 0.8
+    assert density_domain.observed_response_signatures
+    assert 0.8 not in density_domain.allowed_requested_values
+
+
+def test_cross_episode_receipt_scan_rejects_symlinked_ledger_root(
+    tmp_path: Path,
+) -> None:
+    external_root = tmp_path / "external" / "episode-1"
+    first = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=_FakeCodex(_density_proposal),
+        executor=_FakeEcc(_started()),
+        ledger=OptimizationLedger(external_root),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+    planned = first.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert planned.requested is not None
+    first.execute()
+    first.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.DEGRADED,
+            parameter_application_receipt=_native_receipt(
+                planned.requested, effective_value=0.8
+            ),
+        ),
+        _eligible_terminal(),
+        incumbent_decision="incumbent_retained",
+    )
+
+    optimization_root = tmp_path / "optimization"
+    optimization_root.mkdir()
+    try:
+        (optimization_root / "linked-episode").symlink_to(
+            external_root, target_is_directory=True
+        )
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    second = OptimizationEpisodeController(
+        episode_id="episode-2",
+        checkpoint_id="checkpoint-2",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=_FakeCodex(_proposal),
+        executor=_FakeEcc(),
+        ledger=OptimizationLedger(optimization_root / "episode-2"),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+
+    assert second._native_receipts() == ()
+
+
+def test_sibling_promoted_receipt_does_not_replace_new_episode_baseline(
+    tmp_path: Path,
+) -> None:
+    optimization_root = tmp_path / "optimization"
+    evidence = CandidateExecutionEvidence(
+        candidate_root_ref=".agent/candidates/candidate-a",
+        candidate_manifest_ref=(
+            ".agent/candidates/candidate-a/analysis/candidate_workspace.v1.json"
+        ),
+        candidate_manifest_sha256=HASH,
+    )
+    first = OptimizationEpisodeController(
+        episode_id="episode-a",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=_FakeCodex(_density_proposal),
+        executor=_FakeEcc(_started()),
+        ledger=OptimizationLedger(optimization_root / "episode-a"),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+    planned = first.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert planned.requested is not None
+    first.execute()
+    first.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+            evidence=evidence,
+            parameter_application_receipt=_native_receipt(
+                planned.requested, effective_value=0.8
+            ),
+        ),
+        _eligible_terminal(),
+        outcome=OptimizationOutcomeKind.IMPROVED,
+        incumbent_decision="candidate_better",
+    )
+
+    planner = _FakeCodex(_proposal)
+    second = OptimizationEpisodeController(
+        episode_id="episode-b",
+        checkpoint_id="checkpoint-2",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=_FakeEcc(),
+        ledger=OptimizationLedger(optimization_root / "episode-b"),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+    second.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    density_domain = next(
+        item
+        for item in planner.contexts[0].effective_domains
+        if item.knob_id == OptimizationKnob.TARGET_DENSITY
+    )
+    assert density_domain.current_coordinate == {
+        "surface_value": CURRENT_VALUES["place.target_density"],
+        "effective_anchor": None,
+    }
+    assert density_domain.thresholds[0].value == 0.8
+
+
+def test_promoted_receipt_is_current_only_for_its_bound_incumbent(
+    tmp_path: Path,
+) -> None:
+    evidence = CandidateExecutionEvidence(
+        candidate_root_ref=".agent/candidates/candidate-a",
+        candidate_manifest_ref=(
+            ".agent/candidates/candidate-a/analysis/candidate_workspace.v1.json"
+        ),
+        candidate_manifest_sha256=HASH,
+    )
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_density_proposal),
+        _FakeEcc(_started()),
+    )
+    planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert planned.requested is not None
+    controller.execute()
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+            evidence=evidence,
+            parameter_application_receipt=_native_receipt(planned.requested),
+        ),
+        _eligible_terminal(),
+        outcome=OptimizationOutcomeKind.IMPROVED,
+        incumbent_decision="candidate_better",
+    )
+
+    assert controller._native_receipts(promoted_only=True) == ()
+    controller.promote_incumbent(_eligible_terminal(), evidence)
+    assert len(controller._native_receipts(promoted_only=True)) == 1
+
+
+def test_episode_identity_does_not_change_execution_contract_fingerprint(
+    tmp_path: Path,
+) -> None:
+    first_planner = _FakeCodex(_proposal)
+    second_planner = _FakeCodex(_proposal)
+    for episode_id, checkpoint_id, planner in (
+        ("episode-1", "checkpoint-1", first_planner),
+        ("episode-2", "checkpoint-2", second_planner),
+    ):
+        controller = OptimizationEpisodeController(
+            episode_id=episode_id,
+            checkpoint_id=checkpoint_id,
+            mode=OptimizationAgentMode.FULL_AGENT,
+            budget=_budget(),
+            planner=planner,
+            executor=_FakeEcc(),
+            ledger=OptimizationLedger(tmp_path / episode_id),
+            clock=_Clock(),
+            execution_context=_execution_context(),
+        )
+        controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    first_domains = {
+        item.knob_id: item.context_sha256
+        for item in first_planner.contexts[0].effective_domains
+    }
+    second_domains = {
+        item.knob_id: item.context_sha256
+        for item in second_planner.contexts[0].effective_domains
+    }
+    assert first_domains == second_domains
 
 
 def test_promoting_another_knob_invalidates_the_density_floor(tmp_path: Path) -> None:
@@ -1271,7 +1738,9 @@ def test_promoting_another_knob_invalidates_the_density_floor(tmp_path: Path) ->
     )
 
 
-def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_path: Path) -> None:
+def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(
+    tmp_path: Path,
+) -> None:
     codex = _FakeCodex(_proposal)
     ecc = _FakeEcc(_started())
     controller = _controller(tmp_path, codex, ecc)
@@ -1283,6 +1752,7 @@ def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_p
         executor=_FakeEcc(),
         ledger=controller.ledger,
         clock=_Clock(),
+        execution_context=_execution_context(),
     )
     assert recovered.state == OptimizationEpisodeState.QUARANTINED
     assert recovered.budget.consumed_candidates == 1
@@ -1297,13 +1767,43 @@ def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(tmp_p
             executor=_FakeEcc(),
             ledger=controller.ledger,
             clock=_Clock(),
+            execution_context=_execution_context(),
+        )
+
+
+@pytest.mark.parametrize(
+    "changed_context",
+    (
+        {**_execution_context(), "seed": 1},
+        {**_execution_context(), "ecc_revision": "0.1.0-alpha.12"},
+    ),
+)
+def test_recovery_rejects_execution_context_drift_before_approved_execution(
+    tmp_path: Path,
+    changed_context: dict[str, object],
+) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    with pytest.raises(
+        OptimizationEpisodeControllerError,
+        match="execution context does not match",
+    ):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(_started()),
+            ledger=controller.ledger,
+            clock=_Clock(),
+            execution_context=changed_context,
         )
 
 
 @pytest.mark.parametrize("version", ("v2", "v5"))
 def test_recovery_rejects_a_pre_policy_episode(tmp_path: Path, version: str) -> None:
     controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
-    controller.state_path.rename(controller.state_path.with_name(f"optimization-episode-state.{version}.json"))
+    controller.state_path.rename(
+        controller.state_path.with_name(f"optimization-episode-state.{version}.json")
+    )
 
     with pytest.raises(OptimizationEpisodeControllerError, match="pre-policy"):
         OptimizationEpisodeController.recover(
@@ -1314,7 +1814,9 @@ def test_recovery_rejects_a_pre_policy_episode(tmp_path: Path, version: str) -> 
         )
 
 
-def test_decision_audit_rejects_malformed_hash_and_tampered_record(tmp_path: Path) -> None:
+def test_decision_audit_rejects_malformed_hash_and_tampered_record(
+    tmp_path: Path,
+) -> None:
     audit = OptimizationDecisionAudit(tmp_path / "episode")
     with pytest.raises(ValueError, match="hash is invalid"):
         audit.append(
@@ -1333,5 +1835,7 @@ def test_decision_audit_rejects_malformed_hash_and_tampered_record(tmp_path: Pat
     record["rejection_reason"] = "tampered"
     path.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
-    with pytest.raises(OptimizationDecisionAuditIntegrityError, match="record 1 is invalid"):
+    with pytest.raises(
+        OptimizationDecisionAuditIntegrityError, match="record 1 is invalid"
+    ):
         OptimizationDecisionAudit(tmp_path / "episode").verify()

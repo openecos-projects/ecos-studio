@@ -199,7 +199,9 @@ class OptimizationObjectiveContract(_ContractModel):
             raise ValueError("primary metric cannot also be preserved")
         if len(set(self.preserve_metrics)) != len(self.preserve_metrics):
             raise ValueError("preserve metrics must be unique")
-        expected = canonical_sha256(self.model_dump(mode="json", exclude={"contract_sha256"}))
+        expected = canonical_sha256(
+            self.model_dump(mode="json", exclude={"contract_sha256"})
+        )
         if self.contract_sha256 != expected:
             raise ValueError("objective contract hash does not match its content")
         return self
@@ -396,7 +398,9 @@ class ProposalAction(_ContractModel):
 
     @field_validator("expected_effects")
     @classmethod
-    def validate_effects(cls, value: tuple[ExpectedEffect, ...]) -> tuple[ExpectedEffect, ...]:
+    def validate_effects(
+        cls, value: tuple[ExpectedEffect, ...]
+    ) -> tuple[ExpectedEffect, ...]:
         if len({effect.metric_id for effect in value}) != len(value):
             raise ValueError("expected effects must be unique")
         return value
@@ -419,12 +423,16 @@ class ProposalAction(_ContractModel):
 
 
 class OptimizationProposal(_ContractModel):
-    schema_version: Literal["ecos.optimization_proposal.v1"] = "ecos.optimization_proposal.v1"
+    schema_version: Literal["ecos.optimization_proposal.v1"] = (
+        "ecos.optimization_proposal.v1"
+    )
     context_ref: ProposalContextRef
     decision: OptimizationDecision
     reason_code: ProposalReason
     rationale_summary: str
-    observation_refs: tuple[ObservationReference, ...] = Field(min_length=1, max_length=13)
+    observation_refs: tuple[ObservationReference, ...] = Field(
+        min_length=1, max_length=13
+    )
     history_refs: tuple[HistoryReference, ...] = Field(default=(), max_length=6)
     knowledge_refs: tuple[KnowledgeReference, ...] = Field(default=(), max_length=6)
     task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = Field(
@@ -444,7 +452,9 @@ class OptimizationProposal(_ContractModel):
         "observation_refs", "history_refs", "knowledge_refs", "task_memory_refs"
     )
     @classmethod
-    def validate_unique_references(cls, value: tuple[object, ...]) -> tuple[object, ...]:
+    def validate_unique_references(
+        cls, value: tuple[object, ...]
+    ) -> tuple[object, ...]:
         identifiers = [next(iter(item.model_dump().values())) for item in value]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("proposal references must be unique")
@@ -474,15 +484,42 @@ class RequestedKnobValue(_ContractModel):
             OptimizationKnob.CELL_PADDING_X,
             OptimizationKnob.SYNTH_MAX_FANOUT,
         }:
-            lattice = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16) if self.knob_id == OptimizationKnob.CELL_PADDING_X else (
-                8, 12, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 48, 56, 64,
+            lattice = (
+                (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16)
+                if self.knob_id == OptimizationKnob.CELL_PADDING_X
+                else (
+                    8,
+                    12,
+                    16,
+                    18,
+                    20,
+                    22,
+                    24,
+                    26,
+                    28,
+                    30,
+                    32,
+                    36,
+                    40,
+                    48,
+                    56,
+                    64,
+                )
             )
-            label = "cell padding" if self.knob_id == OptimizationKnob.CELL_PADDING_X else "max fanout"
+            label = (
+                "cell padding"
+                if self.knob_id == OptimizationKnob.CELL_PADDING_X
+                else "max fanout"
+            )
             if type(self.value) is not int or self.value not in lattice:
                 raise ValueError(f"{label} is outside the frozen lattice")
         else:
-            valid = type(self.value) in {int, float} and not isinstance(self.value, bool)
-            if not valid or not _is_requested_lattice_value(self.knob_id, float(self.value)):
+            valid = type(self.value) in {int, float} and not isinstance(
+                self.value, bool
+            )
+            if not valid or not _is_requested_lattice_value(
+                self.knob_id, float(self.value)
+            ):
                 raise ValueError(f"{self.knob_id.value} is outside the frozen lattice")
         return self
 
@@ -511,17 +548,25 @@ class AppliedKnobValue(_ContractModel):
         if not valid or not math.isfinite(float(self.value)):
             raise ValueError("effective numeric knob value is invalid")
         value = float(self.value)
-        if self.knob_id in {
-            OptimizationKnob.TARGET_DENSITY,
-            OptimizationKnob.FLOORPLAN_CORE_UTIL,
-        } and not 0 < value <= 1:
+        if (
+            self.knob_id
+            in {
+                OptimizationKnob.TARGET_DENSITY,
+                OptimizationKnob.FLOORPLAN_CORE_UTIL,
+            }
+            and not 0 < value <= 1
+        ):
             raise ValueError("effective bounded ratio is invalid")
         if self.knob_id == OptimizationKnob.TARGET_OVERFLOW and not 0 <= value <= 1:
             raise ValueError("effective target overflow is invalid")
-        if self.knob_id in {
-            OptimizationKnob.DENSITY_WEIGHT,
-            OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
-        } and value <= 0:
+        if (
+            self.knob_id
+            in {
+                OptimizationKnob.DENSITY_WEIGHT,
+                OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+            }
+            and value <= 0
+        ):
             raise ValueError("effective positive knob value is invalid")
         return self
 
@@ -531,7 +576,9 @@ WALL_TIME_LIMIT_MULTIPLIER = 22
 
 
 class EpisodeBudget(_ContractModel):
-    schema_version: Literal["ecos.optimization_budget.v5"] = "ecos.optimization_budget.v5"
+    schema_version: Literal["ecos.optimization_budget.v5"] = (
+        "ecos.optimization_budget.v5"
+    )
     candidate_execution_limit: Literal[20] = CANDIDATE_EXECUTION_LIMIT
     planning_call_limit: Literal[60] = 60
     minimum_candidate_executions: Literal[20] = CANDIDATE_EXECUTION_LIMIT
@@ -596,7 +643,9 @@ class BudgetSnapshot(_ContractModel):
 
     @property
     def remaining_wall_time_seconds(self) -> float:
-        return max(0.0, self.budget.wall_time_limit_seconds - self.elapsed_wall_time_seconds)
+        return max(
+            0.0, self.budget.wall_time_limit_seconds - self.elapsed_wall_time_seconds
+        )
 
     @property
     def exhausted(self) -> bool:
@@ -703,7 +752,9 @@ class TerminalObservation(_ContractModel):
     evaluation_metrics_complete: bool | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    sta_corner_ids: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
+    sta_corner_ids: tuple[str, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     sta_corner_set_sha256: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -724,9 +775,13 @@ class TerminalObservation(_ContractModel):
 
     @field_validator("metrics")
     @classmethod
-    def validate_metrics(cls, value: dict[ObjectiveMetric, float]) -> dict[ObjectiveMetric, float]:
+    def validate_metrics(
+        cls, value: dict[ObjectiveMetric, float]
+    ) -> dict[ObjectiveMetric, float]:
         if set(value) != set(ROUTABILITY_OBJECTIVE_ORDER):
-            raise ValueError("terminal metrics must contain the frozen objective metrics")
+            raise ValueError(
+                "terminal metrics must contain the frozen objective metrics"
+            )
         if any(not math.isfinite(number) or number < 0 for number in value.values()):
             raise ValueError("terminal metrics must be finite and non-negative")
         return value
@@ -737,7 +792,9 @@ class TerminalObservation(_ContractModel):
         cls, value: dict[TimingMetric, float]
     ) -> dict[TimingMetric, float]:
         if set(value) != set(TIMING_GUARDRAIL_ORDER):
-            raise ValueError("terminal timing guardrail must contain the frozen timing metrics")
+            raise ValueError(
+                "terminal timing guardrail must contain the frozen timing metrics"
+            )
         if any(not math.isfinite(number) for number in value.values()):
             raise ValueError("terminal timing guardrail metrics must be finite")
         return value
@@ -792,6 +849,10 @@ class TerminalObservation(_ContractModel):
             self.evidence_valid
             and self.harden_artifacts_complete
             and self.signoff_gates.passed
+            and (
+                self.schema_version == "ecos.terminal_observation.v2"
+                or self.evaluation_metrics_complete is True
+            )
             and self._numeric_eligibility_passed
         )
 
@@ -817,9 +878,11 @@ class TerminalObservation(_ContractModel):
         return (
             all(values.get(metric_id) == 0 for metric_id in zero_metrics)
             and values.get("rcx_expected_corner_count", 0) > 0
-            and values.get("rcx_spef_file_count") == values.get("rcx_expected_corner_count")
+            and values.get("rcx_spef_file_count")
+            == values.get("rcx_expected_corner_count")
             and values.get("sta_expected_corner_count", 0) > 0
-            and values.get("sta_corner_count") == values.get("sta_expected_corner_count")
+            and values.get("sta_corner_count")
+            == values.get("sta_expected_corner_count")
         )
 
 
@@ -834,8 +897,11 @@ class MetricReference(_ContractModel):
             raise ValueError("reference value must be finite and non-negative")
         return value
 
+
 class RoutabilityObjectiveContract(_ContractModel):
-    schema_version: Literal["ecos.routability_objective.v3"] = "ecos.routability_objective.v3"
+    schema_version: Literal["ecos.routability_objective.v3"] = (
+        "ecos.routability_objective.v3"
+    )
     references: tuple[MetricReference, ...]
     timing_guardrail: "TimingGuardrailContract"
 
@@ -849,7 +915,11 @@ class RoutabilityObjectiveContract(_ContractModel):
         return value
 
     def reference_value(self, metric_id: ObjectiveMetric) -> float:
-        return next(item.reference_value for item in self.references if item.metric_id == metric_id)
+        return next(
+            item.reference_value
+            for item in self.references
+            if item.metric_id == metric_id
+        )
 
     @property
     def contract_sha256(self) -> str:
@@ -867,6 +937,7 @@ class TimingReference(_ContractModel):
             raise ValueError("timing reference value must be finite")
         return value
 
+
 class TimingGuardrailContract(_ContractModel):
     schema_version: Literal["ecos.timing_guardrail.v2"] = "ecos.timing_guardrail.v2"
     references: tuple[TimingReference, ...]
@@ -881,17 +952,84 @@ class TimingGuardrailContract(_ContractModel):
         return value
 
     def reference_value(self, metric_id: TimingMetric) -> float:
-        return next(item.reference_value for item in self.references if item.metric_id == metric_id)
+        return next(
+            item.reference_value
+            for item in self.references
+            if item.metric_id == metric_id
+        )
 
 
 _REQUESTED_LATTICES = {
-    OptimizationKnob.TARGET_DENSITY: tuple(round(0.1 + 0.05 * i, 2) for i in range(14)) + (0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95),
-    OptimizationKnob.TARGET_OVERFLOW: (0.0, 0.02, 0.04, 0.06, 0.07, 0.08, 0.085, 0.09, 0.095, 0.1, 0.105, 0.11, 0.115, 0.12, 0.13, 0.14, 0.16, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0),
-    OptimizationKnob.DENSITY_WEIGHT: (0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.00065, 0.00075, 0.00085, 0.001, 0.00125, 0.0015, 0.002, 0.0025, 0.0035, 0.005, 0.0075, 0.01),
-    OptimizationKnob.FLOORPLAN_CORE_UTIL: tuple(round(0.2 + 0.05 * i, 2) for i in range(16)),
-    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: (0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.33, 1.5, 2.0, 3.0, 4.0, 5.0),
+    OptimizationKnob.TARGET_DENSITY: tuple(round(0.1 + 0.05 * i, 2) for i in range(14))
+    + (0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95),
+    OptimizationKnob.TARGET_OVERFLOW: (
+        0.0,
+        0.02,
+        0.04,
+        0.06,
+        0.07,
+        0.08,
+        0.085,
+        0.09,
+        0.095,
+        0.1,
+        0.105,
+        0.11,
+        0.115,
+        0.12,
+        0.13,
+        0.14,
+        0.16,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.75,
+        1.0,
+    ),
+    OptimizationKnob.DENSITY_WEIGHT: (
+        0.00001,
+        0.000025,
+        0.00005,
+        0.0001,
+        0.00025,
+        0.0005,
+        0.00065,
+        0.00075,
+        0.00085,
+        0.001,
+        0.00125,
+        0.0015,
+        0.002,
+        0.0025,
+        0.0035,
+        0.005,
+        0.0075,
+        0.01,
+    ),
+    OptimizationKnob.FLOORPLAN_CORE_UTIL: tuple(
+        round(0.2 + 0.05 * i, 2) for i in range(16)
+    ),
+    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: (
+        0.2,
+        0.25,
+        0.33,
+        0.5,
+        0.67,
+        0.75,
+        1.0,
+        1.33,
+        1.5,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+    ),
 }
 
 
 def _is_requested_lattice_value(knob_id: OptimizationKnob, value: float) -> bool:
-    return any(math.isclose(value, item, abs_tol=1e-12) for item in _REQUESTED_LATTICES[knob_id])
+    return any(
+        math.isclose(value, item, abs_tol=1e-12)
+        for item in _REQUESTED_LATTICES[knob_id]
+    )

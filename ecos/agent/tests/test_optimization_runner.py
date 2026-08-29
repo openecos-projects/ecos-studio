@@ -88,6 +88,7 @@ def _execution_context() -> dict[str, object]:
         "pdk_sha256": _HASH,
         "parent_lineage_sha256": _HASH,
         "parent_manifest_sha256": _HASH,
+        "ecc_revision": "0.1.0-alpha.11",
         "site_width_dbu": 200,
         "seed": 0,
     }
@@ -109,7 +110,9 @@ class _FakePlanner:
     def propose(self, context: OptimizationPlanningContext) -> object:
         self.contexts.append(context)
         if not context.history:
-            return _proposal(context, "place.cell_padding_x", StrategyDirection.INCREASE)
+            return _proposal(
+                context, "place.cell_padding_x", StrategyDirection.INCREASE
+            )
         assert len(context.history) == 1
         assert context.history[0].outcome == OptimizationOutcomeKind.DEGRADED
         return _proposal(
@@ -298,7 +301,9 @@ def _native_receipt(
             consumers=(
                 {
                     "consumer_id": consumer_id,
-                    "outcome": "entered" if activation_status == "used" else "evaluated",
+                    "outcome": "entered"
+                    if activation_status == "used"
+                    else "evaluated",
                     "evidence_ref": "analysis/parameter_runtime_report.v1.json",
                     "evidence_sha256": _HASH,
                 },
@@ -307,7 +312,9 @@ def _native_receipt(
         "consumer_observation": consumer_observation,
         "effective_final": EffectiveValue(value=effective_value, unit=unit),
     }
-    draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=_HASH)
+    draft = ParameterApplicationReceipt.model_construct(
+        **payload, evidence_sha256=_HASH
+    )
     return ParameterApplicationReceipt(
         **payload,
         evidence_sha256=canonical_sha256(
@@ -323,19 +330,29 @@ def test_false_routability_receipt_is_effective_without_branch_activation() -> N
         )
     )
     assert not native_receipt_is_effective(
-        _native_receipt("place.routability_opt", True, activation_status="not_activated")
+        _native_receipt(
+            "place.routability_opt", True, activation_status="not_activated"
+        )
     )
 
 
-def test_native_receipt_coordinates_use_requested_density_weight_and_effective_padding() -> None:
-    assert coordinate_value_from_native_receipt(
-        _native_receipt("place.density_weight", 0.001, effective_value=0.0817526),
-        site_width_dbu=200,
-    ) == 0.001
-    assert coordinate_value_from_native_receipt(
-        _native_receipt("place.cell_padding_x", 2, effective_value=200),
-        site_width_dbu=200,
-    ) == 1
+def test_native_receipt_coordinates_use_requested_density_weight_and_effective_padding() -> (
+    None
+):
+    assert (
+        coordinate_value_from_native_receipt(
+            _native_receipt("place.density_weight", 0.001, effective_value=0.0817526),
+            site_width_dbu=200,
+        )
+        == 0.001
+    )
+    assert (
+        coordinate_value_from_native_receipt(
+            _native_receipt("place.cell_padding_x", 2, effective_value=200),
+            site_width_dbu=200,
+        )
+        == 1
+    )
 
 
 def _budget() -> BudgetSnapshot:
@@ -356,7 +373,9 @@ def _proposal(
         "rationale_summary": "Use the next bounded congestion strategy.",
         "observation_refs": [context.observation_ref.model_dump()],
         "history_refs": history_refs or [],
-        "knowledge_refs": [reference.model_dump() for reference in context.knowledge_refs],
+        "knowledge_refs": [
+            reference.model_dump() for reference in context.knowledge_refs
+        ],
         "action": {
             "knob_id": knob_id,
             "direction": direction,
@@ -384,7 +403,9 @@ def _retrieval(
     observation: StageObservation,
     previous_outcome: OptimizationOutcomeKind | None,
 ) -> OptimizationRetrievalResult:
-    reference = KnowledgeReference(entity_id="strategy.congestion.padding.v1", chunk_sha256=_CHUNK_HASH)
+    reference = KnowledgeReference(
+        entity_id="strategy.congestion.padding.v1", chunk_sha256=_CHUNK_HASH
+    )
     request = OptimizationRetrievalRequest(
         task_id="task-1",
         current_stage=observation.stage,
@@ -410,7 +431,15 @@ def _terminal_observation(
     eligibility = tuple(
         TerminalEvaluationMetric(
             metric_id=metric_id,
-            value=0.0 if metric_id not in {"rcx_expected_corner_count", "rcx_spef_file_count", "sta_expected_corner_count", "sta_corner_count"} else 1.0,
+            value=0.0
+            if metric_id
+            not in {
+                "rcx_expected_corner_count",
+                "rcx_spef_file_count",
+                "sta_expected_corner_count",
+                "sta_corner_count",
+            }
+            else 1.0,
             unit="count",
             category=EvaluationMetricCategory.ELIGIBILITY,
             role=EvaluationMetricRole.GATE,
@@ -418,10 +447,18 @@ def _terminal_observation(
             source_refs=("analysis/terminal.json",),
         )
         for metric_id in (
-            "drc_count", "lvs_count", "rcx_expected_corner_count", "rcx_spef_file_count",
-            "rcx_missing_corner_count", "rcx_spef_parse_failure_count", "sta_corner_count",
-            "sta_expected_corner_count", "sta_missing_corner_count", "sta_setup_violation_count",
-            "sta_hold_violation_count", "harden_artifact_missing_count",
+            "drc_count",
+            "lvs_count",
+            "rcx_expected_corner_count",
+            "rcx_spef_file_count",
+            "rcx_missing_corner_count",
+            "rcx_spef_parse_failure_count",
+            "sta_corner_count",
+            "sta_expected_corner_count",
+            "sta_missing_corner_count",
+            "sta_setup_violation_count",
+            "sta_hold_violation_count",
+            "harden_artifact_missing_count",
         )
     )
     return TerminalObservation(
@@ -504,7 +541,9 @@ def test_runner_accepts_false_routability_candidate_with_not_activated_branch(
     runner.close()
 
 
-def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_path: Path) -> None:
+def test_fake_runner_completes_two_replanning_turns_with_bounded_history(
+    tmp_path: Path,
+) -> None:
     planner = _FakePlanner()
     executor = _FakeExecutor()
     controller = OptimizationEpisodeController(
@@ -538,7 +577,10 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert controller.budget.consumed_candidates == 2
     assert controller.budget.consumed_planning_calls == 2
     assert first.retrieval.request.previous_intervention_outcome is None
-    assert second.retrieval.request.previous_intervention_outcome == OptimizationOutcomeKind.DEGRADED
+    assert (
+        second.retrieval.request.previous_intervention_outcome
+        == OptimizationOutcomeKind.DEGRADED
+    )
     assert planner.contexts[0].history == ()
     assert planner.contexts[1].history[0].requested.value == 3
     assert planner.contexts[1].current_values is not None
@@ -546,9 +588,12 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert executor.requests[0].parent_candidate_root_ref is None
     assert executor.requests[1].parent_candidate_root_ref is None
     assert planner.contexts[1].history[0].terminal_observation is not None
-    assert planner.contexts[1].history[0].terminal_observation.metrics[
-        ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
-    ] == 3.0
+    assert (
+        planner.contexts[1]
+        .history[0]
+        .terminal_observation.metrics[ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW]
+        == 3.0
+    )
     assert first.incumbent_comparison is not None
     assert first.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
     assert second.incumbent_comparison is not None
@@ -557,8 +602,13 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert controller.incumbent.observation_id == "terminal-execution-2"
     assert controller.incumbent_candidate_root_ref == ".agent/candidates/execution-2"
     assert runner._current_values["place.target_density"] == 0.8
-    assert planner.contexts[0].context_ref.input_sha256 != planner.contexts[1].context_ref.input_sha256
-    assert [outcome.outcome for outcome in controller.ledger.replay().terminal_outcomes] == [
+    assert (
+        planner.contexts[0].context_ref.input_sha256
+        != planner.contexts[1].context_ref.input_sha256
+    )
+    assert [
+        outcome.outcome for outcome in controller.ledger.replay().terminal_outcomes
+    ] == [
         OptimizationOutcomeKind.DEGRADED,
         OptimizationOutcomeKind.IMPROVED,
     ]
@@ -619,7 +669,9 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert all(item.receipt_status == "ok" for item in started_traces)
     audit_path = tmp_path / "episode" / "optimization-planning-audit.v1.jsonl"
     audit_path.write_text(
-        audit_path.read_text(encoding="utf-8").replace('"history_count":1', '"history_count":0'),
+        audit_path.read_text(encoding="utf-8").replace(
+            '"history_count":1', '"history_count":0'
+        ),
         encoding="utf-8",
     )
     with pytest.raises(OptimizationPlanningAuditIntegrityError, match="invalid hash"):
@@ -628,7 +680,9 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(tmp_pat
     assert (controller.ledger.root / "optimization-ledger-manifest.v1.json").is_file()
 
 
-def test_requested_only_runner_tracks_requested_not_effective_value(tmp_path: Path) -> None:
+def test_requested_only_runner_tracks_requested_not_effective_value(
+    tmp_path: Path,
+) -> None:
     class DensityPlanner(_FakePlanner):
         def propose(self, context: OptimizationPlanningContext) -> object:
             self.contexts.append(context)
@@ -684,7 +738,9 @@ def test_requested_only_runner_tracks_requested_not_effective_value(tmp_path: Pa
     assert runner._current_values["place.target_density"] == 0.15
 
 
-def test_runner_persists_stopped_when_stop_arrives_before_ecc_start(tmp_path: Path) -> None:
+def test_runner_persists_stopped_when_stop_arrives_before_ecc_start(
+    tmp_path: Path,
+) -> None:
     stop_event = threading.Event()
 
     class StopAfterProposalPlanner(_FakePlanner):
@@ -800,7 +856,9 @@ def test_timing_regression_is_audited_as_degraded(tmp_path: Path) -> None:
     assert outcome.decisive_metric == TimingMetric.STA_SETUP_WNS
 
 
-def test_ineligible_candidate_is_classified_without_an_incumbent(tmp_path: Path) -> None:
+def test_ineligible_candidate_is_classified_without_an_incumbent(
+    tmp_path: Path,
+) -> None:
     planner = _FakePlanner()
     executor = _SuccessfulExecutor()
     controller = OptimizationEpisodeController(
@@ -834,6 +892,51 @@ def test_ineligible_candidate_is_classified_without_an_incumbent(tmp_path: Path)
         current_values=_CURRENT_VALUES,
         terminal_waiter=executor.wait_for_terminal,
         terminal_observation_supplier=ineligible_observation,
+        objective=_objective(),
+    )
+
+    turn = runner.run_turn()
+
+    assert turn.incumbent_comparison is not None
+    assert turn.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
+    assert controller.incumbent is None
+    assert controller.ledger.replay().terminal_outcomes[0].outcome == (
+        OptimizationOutcomeKind.CANDIDATE_INELIGIBLE
+    )
+    runner.close()
+
+
+def test_incomplete_terminal_metrics_are_not_compared_or_promoted(
+    tmp_path: Path,
+) -> None:
+    planner = _FakePlanner()
+    executor = _SuccessfulExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+
+    def incomplete_observation(
+        observation: StageObservation, receipt: CandidateExecutionReceipt
+    ) -> TerminalObservation:
+        return _terminal_observation(observation, receipt).model_copy(
+            update={"evaluation_metrics_complete": False}
+        )
+
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=incomplete_observation,
         objective=_objective(),
     )
 

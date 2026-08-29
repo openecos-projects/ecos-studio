@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol
 
+from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
@@ -39,6 +40,7 @@ _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 _ALLOWED_METHODS = frozenset(
     {
         "workspace.open",
+        "rpc.hello",
         "candidate.rerun",
         "operation.cancel",
         "operation.status",
@@ -79,12 +81,15 @@ class EccCandidateRerunAdapter:
         self._rpc = rpc
         self._workspace_id = workspace_id
         self._site_width_dbu = site_width_dbu
-        self._workspace_root = Path(workspace_root).resolve() if workspace_root else None
+        self._workspace_root = (
+            Path(workspace_root).resolve() if workspace_root else None
+        )
         if self._workspace_root is not None and not self._workspace_root.is_dir():
             raise OptimizationEccAdapterError("workspace root is unavailable")
         self._binding_by_execution_id: dict[
-            str, tuple[RequestedKnobValue, str, str | None, str]
+            str, tuple[RequestedKnobValue, str, str | None, str, int]
         ] = {}
+        self._ecc_revision: str | None = None
 
     def close(self) -> None:
         close = getattr(self._rpc, "close", None)
@@ -98,6 +103,10 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("candidate request id is invalid")
         if not _SHA256.fullmatch(request.context_sha256):
             raise OptimizationEccAdapterError("candidate context hash is invalid")
+        if self.ecc_revision() != request.ecc_revision:
+            raise OptimizationEccAdapterError(
+                "candidate ECC revision does not match execution context"
+            )
         patch = self._materialize_patch(request)
         return self._start_rerun(
             candidate_id=_candidate_id(request.episode_id, request.intervention_id),
@@ -105,6 +114,7 @@ class EccCandidateRerunAdapter:
             patch=patch,
             requested=request.requested,
             context_sha256=request.context_sha256,
+            seed=request.seed,
             parent_candidate_root_ref=request.parent_candidate_root_ref,
         )
 
@@ -116,8 +126,11 @@ class EccCandidateRerunAdapter:
         patch: dict[str, object],
         requested: RequestedKnobValue,
         context_sha256: str,
+        seed: int,
         parent_candidate_root_ref: str | None,
     ) -> CandidateExecutionReceipt:
+        if type(seed) is not int:
+            raise OptimizationEccAdapterError("candidate seed is invalid")
         candidate_ref = f".agent/candidates/{candidate_id}"
         params = {
             "workspaceId": self._workspace_id,
@@ -128,6 +141,7 @@ class EccCandidateRerunAdapter:
             "executionScope": "full_flow",
             "idempotencyKey": idempotency_key,
             "contextSha256": context_sha256,
+            "seed": seed,
         }
         if parent_candidate_root_ref is not None:
             params["parentCandidateRootRef"] = parent_candidate_root_ref
@@ -143,12 +157,14 @@ class EccCandidateRerunAdapter:
             candidate_ref,
             parent_candidate_root_ref,
             context_sha256,
+            seed,
         )
         self._binding_by_execution_id[operation_id] = (
             requested,
             candidate_ref,
             parent_candidate_root_ref,
             context_sha256,
+            seed,
         )
         if state == "failed":
             self._binding_by_execution_id.pop(operation_id, None)
@@ -207,6 +223,7 @@ class EccCandidateRerunAdapter:
             binding[1] if binding else None,
             binding[2] if binding else None,
             binding[3] if binding else None,
+            binding[4] if binding else None,
         )
         self._binding_by_execution_id.pop(intervention_id, None)
         return CandidateExecutionReceipt(
@@ -252,6 +269,7 @@ class EccCandidateRerunAdapter:
             binding[1] if binding else None,
             binding[2] if binding else None,
             binding[3] if binding else None,
+            binding[4] if binding else None,
         )
         self._binding_by_execution_id.pop(execution_id, None)
         return CandidateExecutionReceipt(
@@ -269,11 +287,21 @@ class EccCandidateRerunAdapter:
         result = EccCandidateRerunAdapter._result(response)
         if result is None:
             return
-        fields = (result.get("targetStep"), result.get("endStep"), result.get("executionScope"))
+        fields = (
+            result.get("targetStep"),
+            result.get("endStep"),
+            result.get("executionScope"),
+        )
         if all(value is None for value in fields):
             return
-        if fields != (_TARGET_STEPS.get(requested.knob_id, "place"), "Harden", "full_flow"):
-            raise OptimizationEccAdapterError("candidate execution contract does not match")
+        if fields != (
+            _TARGET_STEPS.get(requested.knob_id, "place"),
+            "Harden",
+            "full_flow",
+        ):
+            raise OptimizationEccAdapterError(
+                "candidate execution contract does not match"
+            )
 
     @staticmethod
     def _evidence(response: Mapping[str, object]) -> CandidateExecutionEvidence | None:
@@ -298,15 +326,21 @@ class EccCandidateRerunAdapter:
                 "candidate_manifest_sha256",
             )
         )
-        optional = tuple(values[key] for key in ("target_step", "end_step", "execution_scope"))
+        optional = tuple(
+            values[key] for key in ("target_step", "end_step", "execution_scope")
+        )
         if not all(isinstance(value, str) for value in required) or any(
             value is not None and not isinstance(value, str) for value in optional
         ):
-            raise OptimizationEccAdapterError("candidate terminal evidence is incomplete")
+            raise OptimizationEccAdapterError(
+                "candidate terminal evidence is incomplete"
+            )
         try:
             return CandidateExecutionEvidence(**values)
         except ValueError as exc:
-            raise OptimizationEccAdapterError("candidate terminal evidence is invalid") from exc
+            raise OptimizationEccAdapterError(
+                "candidate terminal evidence is invalid"
+            ) from exc
 
     @staticmethod
     def _result(response: Mapping[str, object]) -> Mapping[str, object] | None:
@@ -326,6 +360,7 @@ class EccCandidateRerunAdapter:
         candidate_ref: str | None = None,
         parent_ref: str | None = None,
         context_sha256: str | None = None,
+        seed: int | None = None,
     ) -> ParameterApplicationReceipt | None:
         result = self._result(response)
         if result is None:
@@ -341,7 +376,8 @@ class EccCandidateRerunAdapter:
         try:
             if (
                 not isinstance(normalized, Mapping)
-                or normalized.get("schema_version") != "tool.parameter_application_receipt.v1"
+                or normalized.get("schema_version")
+                != "tool.parameter_application_receipt.v1"
             ):
                 raise ValueError("legacy application receipt is read-only")
             receipt = ParameterApplicationReceipt.model_validate(normalized)
@@ -351,9 +387,23 @@ class EccCandidateRerunAdapter:
             receipt.requested.get("knob_id") != requested.knob_id.value
             or receipt.requested.get("value") != requested.value
         ):
-            raise OptimizationEccAdapterError("application receipt written value does not match")
-        if context_sha256 is None or receipt.context.get("context_sha256") != context_sha256:
-            raise OptimizationEccAdapterError("application receipt context does not match")
+            raise OptimizationEccAdapterError(
+                "application receipt written value does not match"
+            )
+        if (
+            context_sha256 is None
+            or receipt.context.get("context_sha256") != context_sha256
+        ):
+            raise OptimizationEccAdapterError(
+                "application receipt context does not match"
+            )
+        if seed is None or receipt.context.get("seed") != seed:
+            raise OptimizationEccAdapterError("application receipt seed does not match")
+        if receipt.context.get("ecc_revision") != self.ecc_revision():
+            raise OptimizationEccAdapterError(
+                "application receipt ECC revision does not match"
+            )
+        self._validate_receipt_result_binding(result, raw, candidate_ref)
         cards = load_parameter_cards()
         try:
             validate_application_receipt(receipt, cards)
@@ -377,6 +427,63 @@ class EccCandidateRerunAdapter:
             config_json_path=cards[requested.knob_id].surface.json_path,
         )
         return receipt
+
+    def ecc_revision(self) -> str:
+        if self._ecc_revision is not None:
+            return self._ecc_revision
+        result = self._rpc.call("rpc.hello", {"version": 1})
+        revision = result.get("eccVersion")
+        if not _valid_revision(revision):
+            raise OptimizationEccAdapterError("ECC revision is invalid")
+        self._ecc_revision = revision.strip()
+        return self._ecc_revision
+
+    def _validate_receipt_result_binding(
+        self,
+        result: Mapping[str, object],
+        embedded: object,
+        candidate_ref: str | None,
+    ) -> None:
+        ref = result.get("parameterApplicationReceiptRef")
+        digest = result.get("parameterApplicationReceiptSha256")
+        if (
+            not isinstance(ref, str)
+            or not isinstance(digest, str)
+            or not _SHA256.fullmatch(digest)
+        ):
+            raise OptimizationEccAdapterError(
+                "application receipt reference is invalid"
+            )
+        if (
+            candidate_ref is None
+            or ref != f"{candidate_ref}/analysis/parameter_application_receipt.v1.json"
+        ):
+            raise OptimizationEccAdapterError(
+                "application receipt reference does not match"
+            )
+        if self._workspace_root is None:
+            raise OptimizationEccAdapterError(
+                "application receipt workspace is unavailable"
+            )
+        path = self._workspace_root / ref
+        try:
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(self._workspace_root)
+            if path.is_symlink() or not resolved.is_file():
+                raise ValueError("receipt path is invalid")
+            payload = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise OptimizationEccAdapterError(
+                "application receipt reference is unavailable"
+            ) from exc
+        if file_sha256(resolved) != digest:
+            raise OptimizationEccAdapterError(
+                "application receipt reference hash does not match"
+            )
+        if payload != embedded:
+            raise OptimizationEccAdapterError(
+                "application receipt payload does not match"
+            )
 
     def _materialize_patch(
         self, request: CandidateExecutionRequest
@@ -434,6 +541,10 @@ def _normalize_receipt_payload(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return [_normalize_receipt_payload(item) for item in value]
     return value
+
+
+def _valid_revision(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and value.strip() != "unknown"
 
 
 class EccContentLengthRpcClient:
@@ -509,8 +620,17 @@ class EccContentLengthRpcClient:
         if not isinstance(workspace_id, str) or not _ID.fullmatch(workspace_id):
             raise OptimizationEccAdapterError("workspace session id is invalid")
         if result.get("directory") != str(directory.resolve()):
-            raise OptimizationEccAdapterError("workspace session directory does not match")
+            raise OptimizationEccAdapterError(
+                "workspace session directory does not match"
+            )
         return workspace_id
+
+    def ecc_revision(self) -> str:
+        result = self.call("rpc.hello", {"version": 1})
+        revision = result.get("eccVersion")
+        if not _valid_revision(revision):
+            raise OptimizationEccAdapterError("ECC revision is invalid")
+        return revision.strip()
 
     def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method not in _ALLOWED_METHODS - {"operation.ack_step_rendered"}:

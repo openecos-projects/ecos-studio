@@ -147,7 +147,9 @@ class OptimizationInterventionStart(_LedgerModel):
     end_step: str = "Harden"
     execution_scope: str = "full_flow"
 
-    @field_validator("intervention_id", "parent_checkpoint_id", "candidate_checkpoint_id")
+    @field_validator(
+        "intervention_id", "parent_checkpoint_id", "candidate_checkpoint_id"
+    )
     @classmethod
     def validate_id(cls, value: str) -> str:
         if not _ID.fullmatch(value):
@@ -174,11 +176,17 @@ class OptimizationInterventionStart(_LedgerModel):
         if self.parent_checkpoint_id == self.candidate_checkpoint_id:
             raise ValueError("parent and candidate checkpoints must be different")
         if (self.proposal_action is None) != (self.requested is None):
-            raise ValueError("ledger proposal action and requested value must be paired")
+            raise ValueError(
+                "ledger proposal action and requested value must be paired"
+            )
         if self.proposal_action is not None and self.requested is not None:
             if self.proposal_action.knob_id != self.requested.knob_id:
                 raise ValueError("ledger proposal action and requested knob must match")
-        if not self.target_step or self.end_step != "Harden" or self.execution_scope != "full_flow":
+        if (
+            not self.target_step
+            or self.end_step != "Harden"
+            or self.execution_scope != "full_flow"
+        ):
             raise ValueError("ledger execution contract is invalid")
         return self
 
@@ -208,20 +216,70 @@ class OptimizationTerminalOutcome(_LedgerModel):
     @model_validator(mode="after")
     def validate_terminal_observation_hash(self) -> "OptimizationTerminalOutcome":
         if self.terminal_observation is not None:
-            expected = canonical_sha256(self.terminal_observation.model_dump(mode="json"))
+            expected = canonical_sha256(
+                self.terminal_observation.model_dump(mode="json")
+            )
             if self.terminal_observation_sha256 != expected:
                 raise ValueError("terminal observation hash is invalid")
         if self.incumbent_decision is None and self.decisive_metric is not None:
             raise ValueError("decisive metric requires an incumbent decision")
+        allowed_decisions = {
+            OptimizationOutcomeKind.EXECUTION_SUCCEEDED: {
+                IncumbentDecision.INITIALIZED
+            },
+            OptimizationOutcomeKind.IMPROVED: {IncumbentDecision.CANDIDATE_BETTER},
+            OptimizationOutcomeKind.DEGRADED: {
+                IncumbentDecision.INCUMBENT_RETAINED,
+                IncumbentDecision.CANDIDATE_INELIGIBLE,
+            },
+            OptimizationOutcomeKind.TRADEOFF: {
+                IncumbentDecision.NOISE_TIE,
+                IncumbentDecision.CANDIDATE_INELIGIBLE,
+            },
+            OptimizationOutcomeKind.INFEASIBLE: {
+                IncumbentDecision.CANDIDATE_INELIGIBLE
+            },
+            OptimizationOutcomeKind.CANDIDATE_INELIGIBLE: {
+                IncumbentDecision.CANDIDATE_INELIGIBLE
+            },
+            OptimizationOutcomeKind.EXECUTION_FAILED: {
+                IncumbentDecision.CANDIDATE_INELIGIBLE
+            },
+            OptimizationOutcomeKind.EVIDENCE_INVALID: {
+                IncumbentDecision.CANDIDATE_INELIGIBLE
+            },
+            OptimizationOutcomeKind.TIMED_OUT_CANCELLED: {
+                IncumbentDecision.CANDIDATE_INELIGIBLE
+            },
+            OptimizationOutcomeKind.INDETERMINATE: {
+                IncumbentDecision.CANDIDATE_INELIGIBLE
+            },
+        }.get(self.outcome)
+        if (
+            self.incumbent_decision is not None
+            and allowed_decisions is not None
+            and self.incumbent_decision not in allowed_decisions
+        ):
+            raise ValueError("incumbent decision does not match outcome")
         if self.parameter_application_receipt is not None:
             requested = self.parameter_application_receipt.requested.get("knob_id")
             if self.application_receipt is not None or requested is None:
                 raise ValueError("terminal receipt fields are ambiguous")
-            if self.parameter_application_receipt_id != self.parameter_application_receipt.receipt_id:
+            if (
+                self.parameter_application_receipt_id
+                != self.parameter_application_receipt.receipt_id
+            ):
                 raise ValueError("terminal parameter receipt id does not match")
-            if self.materialization_receipt_sha256 != self.parameter_application_receipt.materialization.receipt_sha256:
+            if (
+                self.materialization_receipt_sha256
+                != self.parameter_application_receipt.materialization.receipt_sha256
+            ):
                 raise ValueError("terminal materialization receipt hash does not match")
-        if not self.target_step or self.end_step != "Harden" or self.execution_scope != "full_flow":
+        if (
+            not self.target_step
+            or self.end_step != "Harden"
+            or self.execution_scope != "full_flow"
+        ):
             raise ValueError("terminal execution contract is invalid")
         return self
 
@@ -261,7 +319,9 @@ OptimizationLedgerPayload = Annotated[
 
 
 class OptimizationLedgerEntry(_LedgerModel):
-    schema_version: Literal["ecos.optimization_ledger_entry.v1"] = "ecos.optimization_ledger_entry.v1"
+    schema_version: Literal["ecos.optimization_ledger_entry.v1"] = (
+        "ecos.optimization_ledger_entry.v1"
+    )
     sequence: StrictInt = Field(ge=1)
     previous_entry_sha256: str | None = None
     payload: OptimizationLedgerPayload
@@ -364,7 +424,8 @@ class OptimizationPlanningAuditEntry(_LedgerModel):
             self.sequence,
             self.previous_entry_sha256,
             self.model_dump(
-                mode="json", exclude={"entry_sha256", "sequence", "previous_entry_sha256"}
+                mode="json",
+                exclude={"entry_sha256", "sequence", "previous_entry_sha256"},
             ),
         )
         if self.entry_sha256 != expected:
@@ -409,7 +470,9 @@ class OptimizationPlanningAudit:
                 "history_refs": [item.model_dump(mode="json") for item in history_refs],
                 "history_outcomes": [item.value for item in history_outcomes],
                 "history_count": len(history_refs),
-                "budget_snapshot_sha256": canonical_sha256(budget_snapshot.model_dump(mode="json")),
+                "budget_snapshot_sha256": canonical_sha256(
+                    budget_snapshot.model_dump(mode="json")
+                ),
                 "incumbent_sha256": (
                     canonical_sha256(incumbent.model_dump(mode="json"))
                     if incumbent is not None
@@ -418,7 +481,9 @@ class OptimizationPlanningAudit:
                 "planner_payload_sha256": planner_payload_sha256,
             }
             if task_memory_snapshot_sha256 is not None:
-                entry_payload["task_memory_snapshot_sha256"] = task_memory_snapshot_sha256
+                entry_payload["task_memory_snapshot_sha256"] = (
+                    task_memory_snapshot_sha256
+                )
             if task_memory_refs:
                 entry_payload["task_memory_refs"] = [
                     item.model_dump(mode="json") for item in task_memory_refs
@@ -456,7 +521,9 @@ class OptimizationPlanningAudit:
             return OptimizationPlanningAuditReplay((), None)
         payload = self.audit_path.read_bytes()
         if payload and not payload.endswith(b"\n"):
-            raise OptimizationPlanningAuditIntegrityError("planning audit has a torn final record")
+            raise OptimizationPlanningAuditIntegrityError(
+                "planning audit has a torn final record"
+            )
         entries: list[OptimizationPlanningAuditEntry] = []
         previous_hash = None
         for line_number, raw_line in enumerate(payload.splitlines(), start=1):
@@ -466,8 +533,13 @@ class OptimizationPlanningAudit:
                 raise OptimizationPlanningAuditIntegrityError(
                     f"planning audit record {line_number} has an invalid hash or schema"
                 ) from exc
-            if entry.sequence != line_number or entry.previous_entry_sha256 != previous_hash:
-                raise OptimizationPlanningAuditIntegrityError("planning audit hash chain is broken")
+            if (
+                entry.sequence != line_number
+                or entry.previous_entry_sha256 != previous_hash
+            ):
+                raise OptimizationPlanningAuditIntegrityError(
+                    "planning audit hash chain is broken"
+                )
             entries.append(entry)
             previous_hash = entry.entry_sha256
         return OptimizationPlanningAuditReplay(tuple(entries), previous_hash)
@@ -505,7 +577,8 @@ class OptimizationPlanningProviderEvidenceEntry(_LedgerModel):
             self.sequence,
             self.previous_entry_sha256,
             self.model_dump(
-                mode="json", exclude={"entry_sha256", "sequence", "previous_entry_sha256"}
+                mode="json",
+                exclude={"entry_sha256", "sequence", "previous_entry_sha256"},
             ),
         )
         if self.entry_sha256 != expected:
@@ -577,12 +650,17 @@ class OptimizationPlanningProviderEvidenceAudit:
         previous_hash = None
         for line_number, raw_line in enumerate(payload.splitlines(), start=1):
             try:
-                entry = OptimizationPlanningProviderEvidenceEntry.model_validate_json(raw_line)
+                entry = OptimizationPlanningProviderEvidenceEntry.model_validate_json(
+                    raw_line
+                )
             except ValueError as exc:
                 raise OptimizationPlanningProviderAuditIntegrityError(
                     f"planning provider audit record {line_number} has an invalid hash or schema"
                 ) from exc
-            if entry.sequence != line_number or entry.previous_entry_sha256 != previous_hash:
+            if (
+                entry.sequence != line_number
+                or entry.previous_entry_sha256 != previous_hash
+            ):
                 raise OptimizationPlanningProviderAuditIntegrityError(
                     "planning provider audit hash chain is broken"
                 )
@@ -610,7 +688,9 @@ class OptimizationLedger:
         self.manifest_path = self.root / "optimization-ledger-manifest.v1.json"
         self._lock_path = self.root / ".optimization-ledger.lock"
 
-    def append_start(self, start: OptimizationInterventionStart) -> OptimizationLedgerEntry:
+    def append_start(
+        self, start: OptimizationInterventionStart
+    ) -> OptimizationLedgerEntry:
         with self._exclusive_lock():
             replay = self._verify_locked()
             known_ids = {
@@ -619,16 +699,24 @@ class OptimizationLedger:
                 if isinstance(entry.payload, OptimizationInterventionStart)
             }
             if start.intervention_id in known_ids:
-                raise OptimizationLedgerStateError("intervention already exists in the outcome ledger")
+                raise OptimizationLedgerStateError(
+                    "intervention already exists in the outcome ledger"
+                )
             return self._append_locked(replay, start)
 
-    def append_terminal(self, outcome: OptimizationTerminalOutcome) -> OptimizationLedgerEntry:
+    def append_terminal(
+        self, outcome: OptimizationTerminalOutcome
+    ) -> OptimizationLedgerEntry:
         if outcome.application_receipt is not None:
-            raise OptimizationLedgerStateError("legacy application receipt is read-only")
+            raise OptimizationLedgerStateError(
+                "legacy application receipt is read-only"
+            )
         with self._exclusive_lock():
             replay = self._verify_locked()
             if outcome.intervention_id not in replay.pending_intervention_ids:
-                raise OptimizationLedgerStateError("intervention is not pending in the outcome ledger")
+                raise OptimizationLedgerStateError(
+                    "intervention is not pending in the outcome ledger"
+                )
             return self._append_locked(replay, outcome)
 
     def verify(self) -> OptimizationLedgerReplay:
@@ -657,7 +745,9 @@ class OptimizationLedger:
     def verify_manifest(self, manifest: OptimizationLedgerManifest) -> None:
         with self._exclusive_lock():
             if manifest != self._manifest_locked(self._verify_locked()):
-                raise OptimizationLedgerIntegrityError("ledger manifest does not match the retained chain")
+                raise OptimizationLedgerIntegrityError(
+                    "ledger manifest does not match the retained chain"
+                )
 
     def _append_locked(
         self,
@@ -676,7 +766,9 @@ class OptimizationLedger:
     def _verify_locked(self) -> OptimizationLedgerReplay:
         return _replay_entries(self._read_entries())
 
-    def _manifest_locked(self, replay: OptimizationLedgerReplay) -> OptimizationLedgerManifest:
+    def _manifest_locked(
+        self, replay: OptimizationLedgerReplay
+    ) -> OptimizationLedgerManifest:
         if not self.ledger_path.exists():
             with self.ledger_path.open("wb") as stream:
                 stream.flush()
@@ -693,7 +785,9 @@ class OptimizationLedger:
             return ()
         payload = self.ledger_path.read_bytes()
         if payload and not payload.endswith(b"\n"):
-            raise OptimizationLedgerRecoveryRequired("ledger has a torn final record; call recover")
+            raise OptimizationLedgerRecoveryRequired(
+                "ledger has a torn final record; call recover"
+            )
         return _parse_entries(payload)
 
     def _recover_final_record(self, payload: bytes) -> None:
@@ -747,7 +841,9 @@ def build_optimization_artifact_manifest(
 ) -> OptimizationArtifactManifest:
     root = workspace_root.resolve()
     if not root.is_dir():
-        raise OptimizationArtifactManifestError("artifact workspace root is unavailable")
+        raise OptimizationArtifactManifestError(
+            "artifact workspace root is unavailable"
+        )
     entries = []
     for relative_path in relative_paths:
         path = _resolve_artifact_path(root, relative_path)
@@ -772,13 +868,19 @@ def verify_optimization_artifact_manifest(
 ) -> None:
     root = workspace_root.resolve()
     if not root.is_dir():
-        raise OptimizationArtifactManifestError("artifact workspace root is unavailable")
+        raise OptimizationArtifactManifestError(
+            "artifact workspace root is unavailable"
+        )
     for entry in manifest.entries:
         path = _resolve_artifact_path(root, entry.relative_path)
         if file_sha256(path) != entry.sha256:
-            raise OptimizationArtifactManifestError("artifact hash does not match the manifest")
+            raise OptimizationArtifactManifestError(
+                "artifact hash does not match the manifest"
+            )
         if path.stat().st_size != entry.size_bytes:
-            raise OptimizationArtifactManifestError("artifact size does not match the manifest")
+            raise OptimizationArtifactManifestError(
+                "artifact size does not match the manifest"
+            )
 
 
 def write_optimization_artifact_manifest(
@@ -788,14 +890,20 @@ def write_optimization_artifact_manifest(
     _write_json_atomic(destination, manifest.model_dump(mode="json"))
 
 
-def load_optimization_artifact_manifest(destination: Path) -> OptimizationArtifactManifest:
+def load_optimization_artifact_manifest(
+    destination: Path,
+) -> OptimizationArtifactManifest:
     try:
-        return OptimizationArtifactManifest.model_validate_json(destination.read_bytes())
+        return OptimizationArtifactManifest.model_validate_json(
+            destination.read_bytes()
+        )
     except (OSError, ValueError) as exc:
         raise OptimizationArtifactManifestError("artifact manifest is invalid") from exc
 
 
-def _replay_entries(entries: tuple[OptimizationLedgerEntry, ...]) -> OptimizationLedgerReplay:
+def _replay_entries(
+    entries: tuple[OptimizationLedgerEntry, ...],
+) -> OptimizationLedgerReplay:
     previous_hash = None
     starts: dict[str, OptimizationInterventionStart] = {}
     terminal_by_id: dict[str, OptimizationTerminalOutcome] = {}
@@ -808,11 +916,18 @@ def _replay_entries(entries: tuple[OptimizationLedgerEntry, ...]) -> Optimizatio
         payload = entry.payload
         if isinstance(payload, OptimizationInterventionStart):
             if payload.intervention_id in starts:
-                raise OptimizationLedgerIntegrityError("ledger contains a duplicate intervention")
+                raise OptimizationLedgerIntegrityError(
+                    "ledger contains a duplicate intervention"
+                )
             starts[payload.intervention_id] = payload
         else:
-            if payload.intervention_id not in starts or payload.intervention_id in terminal_by_id:
-                raise OptimizationLedgerIntegrityError("terminal outcome does not match one pending intervention")
+            if (
+                payload.intervention_id not in starts
+                or payload.intervention_id in terminal_by_id
+            ):
+                raise OptimizationLedgerIntegrityError(
+                    "terminal outcome does not match one pending intervention"
+                )
             start = starts[payload.intervention_id]
             if payload.application_receipt is not None and (
                 start.requested is None
@@ -842,7 +957,11 @@ def _replay_entries(entries: tuple[OptimizationLedgerEntry, ...]) -> Optimizatio
             terminal_by_id[payload.intervention_id] = payload
             outcomes.append(payload)
         previous_hash = entry.entry_sha256
-    pending = tuple(intervention_id for intervention_id in starts if intervention_id not in terminal_by_id)
+    pending = tuple(
+        intervention_id
+        for intervention_id in starts
+        if intervention_id not in terminal_by_id
+    )
     return OptimizationLedgerReplay(entries, pending, tuple(outcomes), previous_hash)
 
 
@@ -911,7 +1030,9 @@ def _resolve_artifact_path(root: Path, relative_path: str) -> Path:
     current = path
     while current != root:
         if current.is_symlink():
-            raise OptimizationArtifactManifestError("artifact path must not contain a symlink")
+            raise OptimizationArtifactManifestError(
+                "artifact path must not contain a symlink"
+            )
         current = current.parent
     if not path.is_file() or not path.resolve().is_relative_to(root):
         raise OptimizationArtifactManifestError("artifact path is unavailable")
@@ -920,8 +1041,16 @@ def _resolve_artifact_path(root: Path, relative_path: str) -> Path:
 
 def _validate_relative_path(value: str) -> None:
     path = PurePosixPath(value)
-    if not value or "\\" in value or path.is_absolute() or "." in path.parts or ".." in path.parts:
-        raise OptimizationArtifactManifestError("artifact path must be relative and normalized")
+    if (
+        not value
+        or "\\" in value
+        or path.is_absolute()
+        or "." in path.parts
+        or ".." in path.parts
+    ):
+        raise OptimizationArtifactManifestError(
+            "artifact path must be relative and normalized"
+        )
 
 
 def _validate_sha256(value: str) -> None:

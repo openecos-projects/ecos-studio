@@ -10,7 +10,16 @@ import math
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
@@ -176,7 +185,9 @@ class CardRuntimeSemantics(_Model):
 
 
 class ParameterSemanticsCard(_Model):
-    schema_version: Literal["ecos.parameter_semantics_card.v1"] = "ecos.parameter_semantics_card.v1"
+    schema_version: Literal["ecos.parameter_semantics_card.v1"] = (
+        "ecos.parameter_semantics_card.v1"
+    )
     knob_id: OptimizationKnob
     tool: ToolRef
     stage: str
@@ -207,7 +218,9 @@ class ParameterSemanticsCard(_Model):
 
     @model_validator(mode="after")
     def source_references_exist(self) -> "ParameterSemanticsCard":
-        span_ids = [span.span_id for span in self.source_spans if span.span_id is not None]
+        span_ids = [
+            span.span_id for span in self.source_spans if span.span_id is not None
+        ]
         if len(span_ids) != len(set(span_ids)):
             raise ValueError("parameter card source span ids must be unique")
         references = {
@@ -229,16 +242,22 @@ class ParameterSemanticsCard(_Model):
 
 
 class CardManifest(_Model):
-    schema_version: Literal["ecos.parameter_semantics_manifest.v1"] = "ecos.parameter_semantics_manifest.v1"
+    schema_version: Literal["ecos.parameter_semantics_manifest.v1"] = (
+        "ecos.parameter_semantics_manifest.v1"
+    )
     lattice_version: str
     cards: tuple[dict[str, str], ...] = Field(min_length=8, max_length=8)
     manifest_sha256: str
 
     @field_validator("cards")
     @classmethod
-    def unique_cards(cls, value: tuple[dict[str, str], ...]) -> tuple[dict[str, str], ...]:
+    def unique_cards(
+        cls, value: tuple[dict[str, str], ...]
+    ) -> tuple[dict[str, str], ...]:
         ids = [item.get("knob_id") for item in value]
-        if len(set(ids)) != len(ids) or any(not isinstance(item.get("path"), str) for item in value):
+        if len(set(ids)) != len(ids) or any(
+            not isinstance(item.get("path"), str) for item in value
+        ):
             raise ValueError("manifest cards must be unique and path-bound")
         return value
 
@@ -258,7 +277,9 @@ class CardManifest(_Model):
 
     @model_validator(mode="after")
     def verify_hash(self) -> "CardManifest":
-        expected = canonical_sha256(self.model_dump(mode="json", exclude={"manifest_sha256"}))
+        expected = canonical_sha256(
+            self.model_dump(mode="json", exclude={"manifest_sha256"})
+        )
         if expected != self.manifest_sha256:
             raise ValueError("manifest hash does not match")
         return self
@@ -287,7 +308,11 @@ class MaterializationRef(_Model):
     parent_state_sha256: str | None = None
 
     @field_validator(
-        "receipt_sha256", "registry_sha256", "patch_sha256", "config_before_sha256", "config_after_sha256"
+        "receipt_sha256",
+        "registry_sha256",
+        "patch_sha256",
+        "config_before_sha256",
+        "config_after_sha256",
     )
     @classmethod
     def hashes(cls, value: str) -> str:
@@ -319,7 +344,9 @@ class MaterializationRef(_Model):
     )
     @classmethod
     def refs(cls, value: str | None) -> str | None:
-        if value is not None and (not value or value.startswith("/") or ".." in value.split("/")):
+        if value is not None and (
+            not value or value.startswith("/") or ".." in value.split("/")
+        ):
             raise ValueError("materialization reference must be relative")
         return value
 
@@ -345,7 +372,9 @@ class MaterializationRef(_Model):
         ):
             raise ValueError("materialization config binding is incomplete")
         parent_manifest = (self.parent_manifest_ref, self.parent_manifest_sha256)
-        if self.parent_ref is None and any(value is not None for value in parent_manifest):
+        if self.parent_ref is None and any(
+            value is not None for value in parent_manifest
+        ):
             raise ValueError("materialization parent binding is unexpected")
         if self.parent_ref is not None and (
             any(value is None for value in parent_manifest)
@@ -358,7 +387,18 @@ class MaterializationRef(_Model):
 class RuntimeTransition(_Model):
     sequence: StrictInt = Field(ge=0)
     from_state: str = Field(alias="from")
-    to: Literal["accepted", "materialized", "normalized", "clamped", "overridden", "applied", "adjusted", "superseded", "restored", "unknown"]
+    to: Literal[
+        "accepted",
+        "materialized",
+        "normalized",
+        "clamped",
+        "overridden",
+        "applied",
+        "adjusted",
+        "superseded",
+        "restored",
+        "unknown",
+    ]
     value: Scalar | None = None
     reason: str
     rule_id: str | None = None
@@ -419,7 +459,9 @@ class EffectiveValue(_Model):
 
 
 class ParameterApplicationReceipt(_Model):
-    schema_version: Literal["tool.parameter_application_receipt.v1"] = "tool.parameter_application_receipt.v1"
+    schema_version: Literal["tool.parameter_application_receipt.v1"] = (
+        "tool.parameter_application_receipt.v1"
+    )
     receipt_id: str
     tool: ToolRef
     context: dict[str, Any]
@@ -427,7 +469,9 @@ class ParameterApplicationReceipt(_Model):
     materialization: MaterializationRef
     effective_initial: EffectiveValue
     transitions: tuple[RuntimeTransition, ...] = ()
-    application_status: Literal["rejected", "unsupported", "ignored", "applied", "unknown"]
+    application_status: Literal[
+        "rejected", "unsupported", "ignored", "applied", "unknown"
+    ]
     activation: ActivationEvidence
     consumer_observation: dict[str, Any] | None = None
     effective_final: EffectiveValue
@@ -458,18 +502,33 @@ class ParameterApplicationReceipt(_Model):
             RequestedKnobValue(knob_id=knob, value=self.requested.get("value"))
         except (TypeError, ValueError):
             raise ValueError("receipt requested value is outside the frozen lattice")
-        if not isinstance(self.requested.get("unit"), str) or not self.requested.get("unit"):
+        if not isinstance(self.requested.get("unit"), str) or not self.requested.get(
+            "unit"
+        ):
             raise ValueError("receipt requested unit is invalid")
-        if self.materialization.written_value != self.requested.get("value") and knob != OptimizationKnob.CELL_PADDING_X.value:
+        if (
+            self.materialization.written_value != self.requested.get("value")
+            and knob != OptimizationKnob.CELL_PADDING_X.value
+        ):
             raise ValueError("materialization written value does not match request")
         sequences = [item.sequence for item in self.transitions]
         if sequences != list(range(len(sequences))):
             raise ValueError("runtime transition sequence is not contiguous")
-        hash_payload = self.model_dump(mode="json", exclude={"evidence_sha256"})
+        hash_payloads = (
+            self.model_dump(mode="json", exclude={"evidence_sha256"}),
+            self.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_unset=True,
+                exclude={"evidence_sha256"},
+            ),
+        )
         if self.consumer_observation is None:
-            hash_payload.pop("consumer_observation")
-        expected_hash = canonical_sha256(hash_payload)
-        if self.evidence_sha256 != expected_hash:
+            for payload in hash_payloads:
+                payload.pop("consumer_observation", None)
+        if self.evidence_sha256 not in {
+            canonical_sha256(payload) for payload in hash_payloads
+        }:
             raise ValueError("receipt evidence hash does not match content")
         return self
 
@@ -497,22 +556,32 @@ class NumericProposalActionV2(_Model):
     @model_validator(mode="after")
     def direction_matches_knob(self) -> "NumericProposalActionV2":
         if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
-            if self.direction not in {StrategyDirection.ENABLE, StrategyDirection.DISABLE}:
+            if self.direction not in {
+                StrategyDirection.ENABLE,
+                StrategyDirection.DISABLE,
+            }:
                 raise ValueError("boolean knob requires enable or disable")
             if type(self.requested_value) is not bool:
                 raise ValueError("boolean knob requires a boolean value")
-        elif self.direction not in {StrategyDirection.INCREASE, StrategyDirection.DECREASE}:
+        elif self.direction not in {
+            StrategyDirection.INCREASE,
+            StrategyDirection.DECREASE,
+        }:
             raise ValueError("numeric knob requires increase or decrease")
         return self
 
 
 class OptimizationProposalV2(_Model):
-    schema_version: Literal["ecos.optimization_proposal.v2"] = "ecos.optimization_proposal.v2"
+    schema_version: Literal["ecos.optimization_proposal.v2"] = (
+        "ecos.optimization_proposal.v2"
+    )
     context_ref: ProposalContextRef
     decision: Literal["continue", "propose", "stop", "escalate"]
     reason_code: str
     rationale_summary: str
-    observation_refs: tuple[ObservationReference, ...] = Field(min_length=1, max_length=13)
+    observation_refs: tuple[ObservationReference, ...] = Field(
+        min_length=1, max_length=13
+    )
     history_refs: tuple[HistoryReference, ...] = ()
     knowledge_refs: tuple[KnowledgeReference, ...] = ()
     task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = ()

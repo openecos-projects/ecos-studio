@@ -30,13 +30,28 @@ class _Model(BaseModel):
 
 
 _EXECUTION_CONTEXT_KEYS = {
-    "design_sha256", "rtl_sha256", "filelist_sha256", "sdc_sha256", "pdk_sha256",
-    "parent_lineage_sha256", "stage", "backend", "tool_revision", "lattice_version",
-    "unit", "site_width_dbu", "seed",
+    "design_sha256",
+    "rtl_sha256",
+    "filelist_sha256",
+    "sdc_sha256",
+    "pdk_sha256",
+    "parent_lineage_sha256",
+    "stage",
+    "backend",
+    "ecc_revision",
+    "tool_revision",
+    "lattice_version",
+    "unit",
+    "site_width_dbu",
+    "seed",
 }
 _DOMAIN_CONTEXT_KEYS = _EXECUTION_CONTEXT_KEYS | {
-    "incumbent_state_sha256", "parameter_card_sha256", "parent_manifest_sha256",
-    "terminal_execution_contract_sha256", "current_values", "tool_source_sha256",
+    "incumbent_state_sha256",
+    "parameter_card_sha256",
+    "parent_manifest_sha256",
+    "terminal_execution_contract_sha256",
+    "current_values",
+    "tool_source_sha256",
 }
 
 
@@ -70,10 +85,14 @@ class EffectiveDomainSnapshot(_Model):
 
     @model_validator(mode="after")
     def verify(self) -> "EffectiveDomainSnapshot":
-        expected = canonical_sha256(self.model_dump(mode="json", exclude={"snapshot_sha256"}))
+        expected = canonical_sha256(
+            self.model_dump(mode="json", exclude={"snapshot_sha256"})
+        )
         if expected != self.snapshot_sha256:
             raise ValueError("effective domain snapshot hash does not match")
-        if any(value not in self.surface_values for value in self.allowed_requested_values):
+        if any(
+            value not in self.surface_values for value in self.allowed_requested_values
+        ):
             raise ValueError("effective domain contains a value outside the lattice")
         if set(self.allowed_requested_values) & set(self.excluded_aliases):
             raise ValueError("effective domain aliases are still allowed")
@@ -85,7 +104,9 @@ def build_context_fingerprint(context: Mapping[str, Any]) -> str:
     if not isinstance(context, Mapping) or not context:
         raise EffectiveDomainError("effective-domain context is empty")
     missing = sorted(
-        key for key in _DOMAIN_CONTEXT_KEYS if key not in context or context[key] is None
+        key
+        for key in _DOMAIN_CONTEXT_KEYS
+        if key not in context or context[key] is None
     )
     if missing:
         raise EffectiveDomainError(
@@ -102,7 +123,10 @@ def _receipt_matches_context(
     context: Mapping[str, Any],
     context_sha256: str,
 ) -> bool:
-    if any(key not in receipt.context or key not in context for key in _EXECUTION_CONTEXT_KEYS):
+    if any(
+        key not in receipt.context or key not in context
+        for key in _EXECUTION_CONTEXT_KEYS
+    ):
         return False
     if any(receipt.context[key] != context[key] for key in _EXECUTION_CONTEXT_KEYS):
         return False
@@ -113,21 +137,28 @@ def _receipt_matches_context(
 
 
 def application_signature(receipt: ParameterApplicationReceipt) -> str:
-    return canonical_sha256({
-        "requested": receipt.requested,
-        "written": receipt.materialization.written_value,
-        "effective_initial": receipt.effective_initial.model_dump(mode="json"),
-        "context": receipt.context,
-    })
+    return canonical_sha256(
+        {
+            "requested": receipt.requested,
+            "written": receipt.materialization.written_value,
+            "effective_initial": receipt.effective_initial.model_dump(mode="json"),
+            "context": receipt.context,
+        }
+    )
 
 
 def response_signature(receipt: ParameterApplicationReceipt) -> str:
-    return canonical_sha256({
-        "application": application_signature(receipt),
-        "transitions": [item.model_dump(mode="json", by_alias=True) for item in receipt.transitions],
-        "activation": receipt.activation.model_dump(mode="json"),
-        "effective_final": receipt.effective_final.model_dump(mode="json"),
-    })
+    return canonical_sha256(
+        {
+            "application": application_signature(receipt),
+            "transitions": [
+                item.model_dump(mode="json", by_alias=True)
+                for item in receipt.transitions
+            ],
+            "activation": receipt.activation.model_dump(mode="json"),
+            "effective_final": receipt.effective_final.model_dump(mode="json"),
+        }
+    )
 
 
 def compile_effective_domain(
@@ -135,6 +166,7 @@ def compile_effective_domain(
     *,
     context: Mapping[str, Any],
     receipts: Iterable[ParameterApplicationReceipt] = (),
+    current_receipts: Iterable[ParameterApplicationReceipt] = (),
     attempted: Iterable[RequestedKnobValue] = (),
     baseline_surface_value: bool | int | float | None = None,
 ) -> EffectiveDomainSnapshot:
@@ -145,7 +177,9 @@ def compile_effective_domain(
     }
     for key, expected in card_bindings.items():
         if key in bound_context and bound_context[key] != expected:
-            raise EffectiveDomainError(f"effective-domain {key} does not match parameter card")
+            raise EffectiveDomainError(
+                f"effective-domain {key} does not match parameter card"
+            )
         bound_context[key] = expected
     context_sha = build_context_fingerprint(bound_context)
     lattice = tuple(item.value for item in requested_lattice(card))
@@ -156,6 +190,9 @@ def compile_effective_domain(
         if not _receipt_matches_context(receipt, bound_context, context_sha):
             continue
         matching.append(receipt)
+    current_receipt_keys = {
+        (receipt.receipt_id, receipt.evidence_sha256) for receipt in current_receipts
+    }
     aliases: set[Any] = set()
     thresholds: list[DomainThreshold] = []
     for receipt in matching:
@@ -186,19 +223,38 @@ def compile_effective_domain(
                 and trigger is not None
             ):
                 matched_rule = True
-                thresholds.append(DomainThreshold(
-                    threshold_id=f"{card.knob_id.value.replace('.', '-')}-{rule_id}",
-                    kind="admission_floor", value=float(effective), rule_id=rule_id,
-                    evidence_refs=({"kind": "application_receipt", "ref": receipt.receipt_id, "sha256": receipt.evidence_sha256},),
-                ))
-                aliases.update(value for value in lattice if isinstance(value, (int, float)) and value <= effective)
+                thresholds.append(
+                    DomainThreshold(
+                        threshold_id=f"{card.knob_id.value.replace('.', '-')}-{rule_id}",
+                        kind="admission_floor",
+                        value=float(effective),
+                        rule_id=rule_id,
+                        evidence_refs=(
+                            {
+                                "kind": "application_receipt",
+                                "ref": receipt.receipt_id,
+                                "sha256": receipt.evidence_sha256,
+                            },
+                        ),
+                    )
+                )
+                aliases.update(
+                    value
+                    for value in lattice
+                    if isinstance(value, (int, float)) and value <= effective
+                )
         if not matched_rule and requested != effective:
             aliases.add(requested)
     aliases.update(item.value for item in attempted if item.knob_id == card.knob_id)
     allowed = tuple(value for value in lattice if value not in aliases)
     coordinate = None
-    if matching:
-        latest = matching[-1]
+    current_matching = [
+        receipt
+        for receipt in matching
+        if (receipt.receipt_id, receipt.evidence_sha256) in current_receipt_keys
+    ]
+    if current_matching:
+        latest = current_matching[-1]
         coordinate = {
             "surface_value": latest.requested.get("value"),
             "effective_anchor": latest.effective_initial.value,
@@ -209,11 +265,17 @@ def compile_effective_domain(
     elif baseline_surface_value is not None:
         coordinate = {"surface_value": baseline_surface_value, "effective_anchor": None}
     payload = {
-        "schema_version": "ecos.effective_domain.v1", "knob_id": card.knob_id,
-        "context_sha256": context_sha, "current_coordinate": coordinate,
-        "surface_values": lattice, "excluded_aliases": tuple(sorted(aliases, key=str)),
-        "allowed_requested_values": allowed, "thresholds": [item.model_dump(mode="json") for item in thresholds],
-        "observed_application_signatures": tuple(application_signature(r) for r in matching),
+        "schema_version": "ecos.effective_domain.v1",
+        "knob_id": card.knob_id,
+        "context_sha256": context_sha,
+        "current_coordinate": coordinate,
+        "surface_values": lattice,
+        "excluded_aliases": tuple(sorted(aliases, key=str)),
+        "allowed_requested_values": allowed,
+        "thresholds": [item.model_dump(mode="json") for item in thresholds],
+        "observed_application_signatures": tuple(
+            application_signature(r) for r in matching
+        ),
         "observed_response_signatures": tuple(response_signature(r) for r in matching),
     }
     return EffectiveDomainSnapshot(**payload, snapshot_sha256=canonical_sha256(payload))
@@ -228,22 +290,52 @@ def validate_numeric_proposal(
     action = getattr(proposal, "action", None)
     if action is None:
         raise EffectiveDomainError("proposal action is missing")
-    if action.knob_id != domain.knob_id or action.effective_domain_sha256 != domain.snapshot_sha256:
+    if (
+        action.knob_id != domain.knob_id
+        or action.effective_domain_sha256 != domain.snapshot_sha256
+    ):
         raise EffectiveDomainError("proposal domain does not match current context")
     if action.requested_value not in domain.allowed_requested_values:
         raise EffectiveDomainError("proposal value is not in the allowlist")
-    if any(item.knob_id == domain.knob_id and item.value == action.requested_value for item in attempted):
+    if any(
+        item.knob_id == domain.knob_id and item.value == action.requested_value
+        for item in attempted
+    ):
         raise EffectiveDomainError("proposal value was already attempted")
     for ref in action.threshold_refs:
         if ref not in {threshold.threshold_id for threshold in domain.thresholds}:
             raise EffectiveDomainError("proposal threshold reference is stale")
     current = domain.current_coordinate
+    if type(action.requested_value) is bool:
+        if action.direction not in {
+            StrategyDirection.ENABLE,
+            StrategyDirection.DISABLE,
+        }:
+            raise EffectiveDomainError("boolean proposal direction is invalid")
+        expected = action.direction == StrategyDirection.ENABLE
+        if action.requested_value is not expected:
+            raise EffectiveDomainError(
+                "boolean proposal value does not match direction"
+            )
+        if current and action.requested_value is current.get("surface_value"):
+            raise EffectiveDomainError("boolean proposal is a no-op")
+        return
+    if action.direction in {StrategyDirection.ENABLE, StrategyDirection.DISABLE}:
+        raise EffectiveDomainError(
+            "boolean proposal direction requires a boolean value"
+        )
     if current and current.get("surface_value") is not None:
         anchor = current.get("effective_anchor")
         baseline = anchor if anchor is not None else current["surface_value"]
-        if action.direction == StrategyDirection.INCREASE and action.requested_value <= baseline:
+        if (
+            action.direction == StrategyDirection.INCREASE
+            and action.requested_value <= baseline
+        ):
             raise EffectiveDomainError("increase proposal is not increasing")
-        if action.direction == StrategyDirection.DECREASE and action.requested_value >= baseline:
+        if (
+            action.direction == StrategyDirection.DECREASE
+            and action.requested_value >= baseline
+        ):
             raise EffectiveDomainError("decrease proposal is not decreasing")
 
 
