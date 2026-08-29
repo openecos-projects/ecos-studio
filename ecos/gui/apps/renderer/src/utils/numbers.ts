@@ -7,6 +7,26 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
   return prototype === Object.prototype || prototype === null
 }
 
+export function hasCanonicalDieDimensions(dieArea: Record<string, unknown>): boolean {
+  return dieArea.width != null && dieArea.height != null
+}
+
+/**
+ * Wizard/baseline geometry is a single scalar. An asymmetric core.margin
+ * array cannot round-trip through that slot, so fail loud instead of keeping
+ * only the first component.
+ */
+export function scalarMarginFromCore(coreMargin: number[], label: string): number | null {
+  if (coreMargin.length === 0) return null
+  if (!coreMargin.every((item) => Object.is(item, coreMargin[0]))) {
+    throw new Error(
+      `Parameter ${label} coreMargin cannot be represented as a single scalar; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  return coreMargin[0] ?? null
+}
+
 function assertLosslessShape(value: unknown, label: string): void {
   if (value instanceof Date) {
     throw new Error(

@@ -183,6 +183,23 @@ describe('App workspace reconfiguration wizard wiring', () => {
       normalizeSource.indexOf('parametersJson?.die_height', heightLine),
     )
     expect(normalizeSource).toContain('parametersJson?.die_area')
+    expect(normalizeSource).toContain('hasCanonicalDieSize')
+    expect(normalizeSource).toContain(
+      "hasCanonicalDieSize || hasDieSize ? 'width_height'",
+    )
+    expect(normalizeSource).toContain('scalarMarginFromCore(coreMargin')
+  })
+
+  it('prefers canonical die_area dimensions when inferring reconfigure die_area_mode', () => {
+    const normalizeStart = appSource.indexOf('function normalizeWorkspaceParameters')
+    const normalizeEnd = appSource.indexOf(
+      'function normalizeWorkspaceFlowConfig',
+      normalizeStart,
+    )
+    const normalizeSource = appSource.slice(normalizeStart, normalizeEnd)
+    expect(normalizeSource).toContain(
+      "hasCanonicalDieSize || hasDieSize ? 'width_height'",
+    )
   })
 
   it('records project-managed workspaces into project.json after wizard create and reconfigure', () => {

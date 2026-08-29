@@ -419,6 +419,7 @@ function normalizedBaselineParameters(
     recordValue(parameters['Die Area']) ?? recordValue(parameters.die_area) ?? {}
   const dieSize = numberArray(die.Size ?? die.size)
   const margins = numberArray(core.Margin ?? core.margin)
+  const hasCanonicalDieSize = dieArea.width != null && dieArea.height != null
   const normalized: Record<string, unknown> = {
     design: firstString(parameters.Design, parameters.design),
     top_module: firstString(
@@ -432,7 +433,9 @@ function normalizedBaselineParameters(
       parameters.frequency_max,
     ),
     max_fanout: firstValue(parameters['Max fanout'], parameters.max_fanout),
-    die_area_mode: firstString(dieArea.mode, parameters.die_area_mode),
+    die_area_mode:
+      firstString(dieArea.mode, parameters.die_area_mode) ||
+      (hasCanonicalDieSize || dieSize.length >= 2 ? 'width_height' : ''),
     die_width: firstValue(dieArea.width, dieSize[0], parameters.die_width),
     die_height: firstValue(dieArea.height, dieSize[1], parameters.die_height),
     utilitization: firstValue(
@@ -441,7 +444,7 @@ function normalizedBaselineParameters(
       core.utilitization,
       parameters.utilitization,
     ),
-    margin: firstValue(dieArea.margin, margins[0], parameters.margin),
+    margin: firstValue(scalarMarginFromCore(margins), dieArea.margin, parameters.margin),
   }
   assertBaselineScalarsSafe(normalized)
   return Object.fromEntries(
@@ -487,6 +490,18 @@ function stringArray(...values: unknown[]): string[] {
     if (entries.length > 0) return entries
   }
   return []
+}
+
+function scalarMarginFromCore(margins: number[]): number | undefined {
+  if (margins.length === 0) return undefined
+  if (!margins.every((item) => Object.is(item, margins[0]))) {
+    throw new Error(
+      'Baseline workspace snapshot holds an asymmetric core.margin that the ' +
+        'manifest cannot represent as a single scalar; edit the workspace ' +
+        'configuration manually',
+    )
+  }
+  return margins[0]
 }
 
 function numberArray(value: unknown): number[] {

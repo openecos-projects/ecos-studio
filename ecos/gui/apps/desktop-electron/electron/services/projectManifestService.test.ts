@@ -469,6 +469,84 @@ describe('ProjectManifestService', () => {
     )
   })
 
+  it('infers width_height when canonical die_area has dimensions but no mode', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspacePath = join(projectRoot, 'ws_0001')
+    const service = createService(projectRoot, undefined, {
+      loadBaselineSnapshot: async () => ({
+        parameters: {
+          pdk: 'ics55',
+          pdk_root: '/pdks/ics55',
+          design: 'gcd',
+          top_module: 'gcd',
+          clock: 'clk',
+          die_area: { width: 120, height: 80, utilitization: 0.5, margin: 4 },
+        },
+        pdk: {},
+        db: { INPUT: {} },
+      }),
+    })
+
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'project label', designName: 'project_design' },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'register-workspace', input: { projectRoot, workspacePath } },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
+    })
+
+    const manifest = parseProjectManifest(
+      await readFile(join(projectRoot, 'project.json'), 'utf8'),
+    )
+    expect(manifest.base_design.parameters).toEqual(
+      expect.objectContaining({
+        die_width: 120,
+        die_height: 80,
+        die_area_mode: 'width_height',
+      }),
+    )
+  })
+
+  it('refuses an asymmetric core.margin that the baseline scalar cannot represent', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspacePath = join(projectRoot, 'ws_0001')
+    const service = createService(projectRoot, undefined, {
+      loadBaselineSnapshot: async () => ({
+        parameters: {
+          pdk: 'ics55',
+          pdk_root: '/pdks/ics55',
+          design: 'gcd',
+          top_module: 'gcd',
+          clock: 'clk',
+          die_area: { width: 120, height: 80, utilitization: 0.5, margin: 2 },
+          core: { margin: [5, 7] },
+        },
+        pdk: {},
+        db: { INPUT: {} },
+      }),
+    })
+
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'project label', designName: 'project_design' },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'register-workspace', input: { projectRoot, workspacePath } },
+    })
+    await expect(
+      service.mutate({
+        projectRoot,
+        mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
+      }),
+    ).rejects.toThrow(/asymmetric core.margin/i)
+  })
+
   it('does not write a partial baseline mutation when its snapshot is incomplete', async () => {
     const projectRoot = await createTemporaryProject()
     const workspacePath = join(projectRoot, 'ws_0001')

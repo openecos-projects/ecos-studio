@@ -6,6 +6,7 @@ import {
   losslessOptionalNumber,
   losslessOptionalRecord,
   losslessOptionalString,
+  scalarMarginFromCore,
 } from './numbers'
 
 describe('losslessOptionalRecord', () => {
@@ -91,5 +92,17 @@ describe('losslessNumberList', () => {
     expect(() => losslessNumberList([null, 4], 'Core.Margin')).toThrow(/must be a number/)
     expect(() => losslessNumberList([true, 4], 'Core.Margin')).toThrow(/must be a number/)
     expect(() => losslessNumberList([false, 200], 'Die.Size')).toThrow(/must be a number/)
+  })
+})
+
+describe('scalarMarginFromCore', () => {
+  it('returns the shared value for a symmetric margin', () => {
+    expect(scalarMarginFromCore([4, 4], 'workspace parameter')).toBe(4)
+  })
+
+  it('rejects an asymmetric margin instead of keeping only the first component', () => {
+    expect(() => scalarMarginFromCore([5, 7], 'workspace parameter')).toThrow(
+      /coreMargin cannot be represented/,
+    )
   })
 })

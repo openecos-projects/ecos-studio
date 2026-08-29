@@ -226,10 +226,12 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
 import {
+  hasCanonicalDieDimensions,
   losslessNumberList,
   losslessOptionalNumber,
   losslessOptionalString,
   losslessOptionalRecord,
+  scalarMarginFromCore,
 } from '@/utils/numbers'
 import {
   getOptionalDesktopApi,
@@ -750,6 +752,9 @@ function normalizeWorkspaceParameters(
   const dieSize = numberList(die.Size ?? die.size)
   const coreMargin = numberList(core.Margin ?? core.margin)
   const hasDieSize = dieSize.length >= 2
+  const hasCanonicalDieSize = hasCanonicalDieDimensions(dieArea)
+  const inferredDieAreaMode: NonNullable<WorkspaceConfig['parameters']['die_area_mode']> =
+    hasCanonicalDieSize || hasDieSize ? 'width_height' : 'utilitization_margin'
 
   return {
     design:
@@ -771,7 +776,7 @@ function normalizeWorkspaceParameters(
     ),
     die_area_mode: normalizeDieAreaMode(
       dieArea.mode ?? parametersJson?.die_area_mode,
-      hasDieSize ? 'width_height' : 'utilitization_margin',
+      inferredDieAreaMode,
     ),
     die_width: optionalNumber(
       dieArea.width ?? dieSize[0] ?? parametersJson?.die_width,
@@ -788,7 +793,12 @@ function normalizeWorkspaceParameters(
         parametersJson?.utilitization,
       0.6,
     ),
-    margin: optionalNumber(dieArea.margin ?? coreMargin[0] ?? parametersJson?.margin, 0),
+    margin: optionalNumber(
+      scalarMarginFromCore(coreMargin, 'workspace parameter') ??
+        dieArea.margin ??
+        parametersJson?.margin,
+      0,
+    ),
   }
 }
 

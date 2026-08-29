@@ -211,10 +211,12 @@ import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
 import { waitForDesktopApi } from '@/platform/desktop'
 import {
+  hasCanonicalDieDimensions,
   losslessNumberList,
   losslessOptionalNumber,
   losslessOptionalString,
   losslessOptionalRecord,
+  scalarMarginFromCore,
 } from '@/utils/numbers'
 import {
   readOptionalProjectTextFile,
@@ -481,6 +483,7 @@ function normalizeSourceParameters(
     optionalRecord(parametersJson.Core) ?? optionalRecord(parametersJson.core) ?? {}
   const dieSize = numberList(die.Size ?? die.size)
   const coreMargin = numberList(core.Margin ?? core.margin)
+  const hasCanonicalDieSize = hasCanonicalDieDimensions(dieAreaRecord)
 
   return {
     design:
@@ -498,7 +501,9 @@ function normalizeSourceParameters(
       32,
     ),
     die_area_mode:
-      optionalString(dieAreaRecord.mode) || optionalString(parametersJson.die_area_mode),
+      optionalString(dieAreaRecord.mode) ||
+      optionalString(parametersJson.die_area_mode) ||
+      (hasCanonicalDieSize ? 'width_height' : ''),
     die_width: optionalNumber(
       dieAreaRecord.width ?? dieSize[0] ?? parametersJson.die_width,
       100,
@@ -515,7 +520,9 @@ function normalizeSourceParameters(
       0.6,
     ),
     margin: optionalNumber(
-      dieAreaRecord.margin ?? coreMargin[0] ?? parametersJson.margin,
+      scalarMarginFromCore(coreMargin, 'workspace parameter') ??
+        dieAreaRecord.margin ??
+        parametersJson.margin,
       0,
     ),
   }
