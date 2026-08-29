@@ -262,17 +262,27 @@ class OptimizationTerminalOutcome(_LedgerModel):
         ):
             raise ValueError("incumbent decision does not match outcome")
         if self.parameter_application_receipt is not None:
-            requested = self.parameter_application_receipt.requested.get("knob_id")
+            receipt = self.parameter_application_receipt
+            requested = receipt.requested.get("knob_id")
             if self.application_receipt is not None or requested is None:
                 raise ValueError("terminal receipt fields are ambiguous")
+            if self.receipt_sha256 != receipt.evidence_sha256:
+                raise ValueError("terminal parameter receipt hash does not match")
+            if self.parameter_card_sha256 is None:
+                raise ValueError("terminal parameter card binding is missing")
+            context_card_sha256 = receipt.context.get("parameter_card_sha256")
+            if context_card_sha256 is None:
+                raise ValueError("terminal embedded parameter card binding is missing")
+            if context_card_sha256 != self.parameter_card_sha256:
+                raise ValueError("terminal parameter card hash does not match")
             if (
                 self.parameter_application_receipt_id
-                != self.parameter_application_receipt.receipt_id
+                != receipt.receipt_id
             ):
                 raise ValueError("terminal parameter receipt id does not match")
             if (
                 self.materialization_receipt_sha256
-                != self.parameter_application_receipt.materialization.receipt_sha256
+                != receipt.materialization.receipt_sha256
             ):
                 raise ValueError("terminal materialization receipt hash does not match")
         if (

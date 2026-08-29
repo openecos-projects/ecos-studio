@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     GateResult,
     ObjectiveMetric,
@@ -23,6 +24,7 @@ from ecos_agent.optimization_runtime import (
     _current_values,
     _design_id,
     _incumbent_workspace,
+    _optimization_execution_context,
     _optimization_objective,
     _optimization_rerun_runtime_seconds,
     _parent_manifest_sha256,
@@ -198,6 +200,52 @@ def test_parent_manifest_binds_terminal_evidence(
 
     assert _parent_manifest_sha256(tmp_path, baseline) != _parent_manifest_sha256(
         tmp_path, changed_terminal
+    )
+
+
+def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
+    tmp_path: Path,
+) -> None:
+    origin = tmp_path / "origin"
+    rtl = origin / "rtl"
+    rtl.mkdir(parents=True)
+    (rtl / "a.v").write_text("module a; endmodule\n", encoding="utf-8")
+    (rtl / "b.v").write_text("module b; endmodule\n", encoding="utf-8")
+    (origin / "a.sdc").write_text("create_clock -period 10 clk\n", encoding="utf-8")
+    (origin / "b.sdc").write_text("set_false_path -from rst\n", encoding="utf-8")
+    filelist = origin / "filelist.f"
+    filelist.write_text("rtl/a.v\nrtl/b.v\n", encoding="utf-8")
+    pdk = tmp_path / "pdk"
+    tech_lef = pdk / "prtech" / "techLEF" / "N551P6M_ecos.lef"
+    tech_lef.parent.mkdir(parents=True)
+    tech_lef.write_text("VERSION 5.8 ;\n", encoding="utf-8")
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "parameters.json").write_text(
+        json.dumps({"PDK Root": str(pdk)}), encoding="utf-8"
+    )
+    (tmp_path / "home" / "flow.json").write_text("{}\n", encoding="utf-8")
+
+    context = _optimization_execution_context(
+        tmp_path, 200, 17, _HASH, "ecc-test-revision"
+    )
+
+    assert context["rtl_sha256"] == canonical_sha256(
+        {"files": [file_sha256(rtl / "a.v"), file_sha256(rtl / "b.v")]}
+    )
+    assert context["sdc_sha256"] == canonical_sha256(
+        {
+            "files": [
+                file_sha256(origin / "a.sdc"),
+                file_sha256(origin / "b.sdc"),
+            ]
+        }
+    )
+    assert context["design_sha256"] == canonical_sha256(
+        {
+            "rtl_sha256": context["rtl_sha256"],
+            "filelist_sha256": file_sha256(filelist),
+            "sdc_sha256": context["sdc_sha256"],
+        }
     )
 
 

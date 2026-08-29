@@ -149,6 +149,7 @@ def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
         "context": {
             "stage": "place",
             "lattice_version": "ecos.optimization_lattice.v1",
+            "parameter_card_sha256": card_hash(card),
         },
         "requested": {
             "knob_id": "place.cell_padding_x",
@@ -549,14 +550,13 @@ def test_task_memory_rejects_terminal_with_foreign_receipt_hash(tmp_path: Path) 
     source_scope = _scope("episode-source")
     root = store.root / source_scope.episode_id
     store.ensure_episode_scope(root, source_scope)
-    _append_intervention(
-        root,
-        source_scope,
-        index=1,
-        terminal_receipt_sha256=WORKSPACE_HASH,
-    )
-
-    assert store.synchronize().entries == ()
+    with pytest.raises(ValueError, match="receipt hash"):
+        _append_intervention(
+            root,
+            source_scope,
+            index=1,
+            terminal_receipt_sha256=WORKSPACE_HASH,
+        )
 
 
 @pytest.mark.parametrize(
@@ -620,7 +620,14 @@ def test_task_memory_requires_eligible_v3_terminal_observation(tmp_path: Path) -
 @pytest.mark.parametrize(
     "updates",
     (
-        {"context": {"stage": "route"}},
+        {
+            "context": {
+                "stage": "route",
+                "parameter_card_sha256": card_hash(
+                    load_parameter_cards()["place.cell_padding_x"]
+                ),
+            }
+        },
         {
             "application_status": "ignored",
             "activation": ActivationEvidence(status="unknown"),

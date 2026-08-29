@@ -423,7 +423,7 @@ class RuntimeTransition(_Model):
 
 class ConsumerEvidence(_Model):
     consumer_id: str
-    outcome: Literal["entered", "evaluated", "updated"]
+    outcome: Literal["entered", "evaluated", "geometry_constructed", "updated"]
     evidence_ref: str
     evidence_sha256: str
 

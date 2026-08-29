@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import subprocess
 from pathlib import Path
+from typing import Mapping
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue
@@ -32,20 +35,8 @@ from ecos_agent.parameter_semantics import (
     validate_application_receipt,
 )
 
-CANDIDATES = {
-    "floorplan.core_util": "candidate-fb53a8688a8318c2-candidate-accept-core-util-v3-20260827",
-    "floorplan.aspect_ratio": (
-        "candidate-91962560dc60ce20-candidate-accept-aspect-ratio-v3b-20260827"
-    ),
-    "synth.max_fanout": "candidate-native-max-fanout-v9-20260827",
-    "place.target_density": "candidate-accept-rerun-smoke2-20260827",
-    "place.target_overflow": "candidate-accept-target-overflow-v3-20260827",
-    "place.cell_padding_x": "candidate-accept-cell-padding-v3-20260827",
-    "place.routability_opt": "candidate-routability-false-parent-v3b-20260827",
-    "place.density_weight": "candidate-accept-density-weight-v3-20260827",
-}
-
 IGNORED_KNOBS: tuple[str, ...] = ()
+_CANDIDATE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$")
 _SUCCESSFUL_TRACE_OUTCOMES = frozenset(
     {
         OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
@@ -258,6 +249,36 @@ def _verified_episode_replays(
     return tuple(verified)
 
 
+def _current_revisions() -> dict[str, str]:
+    source = Path(__file__).resolve()
+    try:
+        root = subprocess.run(
+            ["git", "-C", str(source.parent), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        ecos_revision = subprocess.run(
+            ["git", "-C", root, "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        ecc_gitlink_revision = subprocess.run(
+            ["git", "-C", root, "rev-parse", "HEAD:ecc"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("acceptance source revisions are unavailable") from exc
+    return {
+        "ecos_revision": ecos_revision,
+        "ecc_gitlink_revision": ecc_gitlink_revision,
+        "validator_sha256": file_sha256(source),
+    }
+
+
 def _matching_trace_episode(
     replays: tuple[dict, ...],
     *,
@@ -266,7 +287,8 @@ def _matching_trace_episode(
     receipt_sha256: str | None,
     terminal_observation_sha256: str,
     card_sha256: str,
-) -> Path | None:
+) -> tuple[Path | None, bool]:
+    context_mismatch = False
     for replay in replays:
         starts = {
             entry.payload.intervention_id: entry.payload
@@ -286,18 +308,25 @@ def _matching_trace_episode(
                 card_sha256,
             ):
                 continue
-            if any(
-                _memory_matches(
+            for entry in replay["memory_entries"]:
+                if not _memory_matches(
                     entry,
                     replay,
                     ledger_entry.entry_sha256,
                     starts.get(terminal.intervention_id),
                     terminal,
-                )
-                for entry in replay["memory_entries"]
-            ):
-                return replay["root"]
-    return None
+                    require_domain_context=False,
+                ):
+                    continue
+                if _planning_domain_matches(
+                    entry,
+                    replay,
+                    starts.get(terminal.intervention_id),
+                    terminal.parameter_application_receipt,
+                ):
+                    return replay["root"], context_mismatch
+                context_mismatch = True
+    return None, context_mismatch
 
 
 def _terminal_matches(
@@ -325,7 +354,15 @@ def _terminal_matches(
     )
 
 
-def _memory_matches(entry, replay, ledger_entry_sha256, start, terminal) -> bool:
+def _memory_matches(
+    entry,
+    replay,
+    ledger_entry_sha256,
+    start,
+    terminal,
+    *,
+    require_domain_context: bool = True,
+) -> bool:
     evidence = entry.evidence
     decision = replay["decisions"].get(evidence.decision_entry_sha256)
     receipt = entry.parameter_application_receipt
@@ -349,21 +386,78 @@ def _memory_matches(entry, replay, ledger_entry_sha256, start, terminal) -> bool
         and entry.terminal_observation.eligible_for_incumbent
         and receipt is not None
         and receipt.evidence_sha256 == terminal.receipt_sha256
+        and (
+            not require_domain_context
+            or _planning_domain_matches(entry, replay, start, receipt)
+        )
     )
+
+
+def _planning_domain_matches(entry, replay, start, receipt) -> bool:
+    if start is None or start.requested is None or receipt is None:
+        return False
+    planning = replay["planning"].get(entry.evidence.planning_entry_sha256)
+    if planning is None:
+        return False
+    selected = tuple(
+        domain
+        for domain in planning.effective_domains
+        if domain.knob_id == start.requested.knob_id
+    )
+    return (
+        len(selected) == 1
+        and receipt.context.get("context_sha256") == selected[0].context_sha256
+    )
+
+
+def _validate_inputs(
+    workspace: Path,
+    candidates: Mapping[str, str],
+    episode_roots: tuple[Path, ...],
+    expected_ecos_revision: str,
+    expected_ecc_revision: str,
+    card_ids: set[str],
+) -> None:
+    if not episode_roots:
+        raise ValueError("at least one episode root is required")
+    if set(candidates) != card_ids or len(set(candidates.values())) != len(candidates):
+        raise ValueError("candidate mapping must bind each target knob exactly once")
+    if any(
+        not isinstance(value, str) or not _CANDIDATE_ID.fullmatch(value)
+        for value in candidates.values()
+    ):
+        raise ValueError("candidate mapping contains an invalid candidate id")
+    optimization_root = (workspace / ".agent/optimization").resolve()
+    if any(root.resolve().parent != optimization_root for root in episode_roots):
+        raise ValueError("episode root must be a direct child of .agent/optimization")
+    if not expected_ecos_revision.strip() or not expected_ecc_revision.strip():
+        raise ValueError("expected ECOS and ECC revisions are required")
 
 
 def build_acceptance(
     workspace: Path,
     output: Path,
     *,
-    episode_roots: tuple[Path, ...] = (),
+    candidates: Mapping[str, str],
+    episode_roots: tuple[Path, ...],
+    expected_ecos_revision: str,
+    expected_ecc_revision: str,
 ) -> dict:
     cards = load_parameter_cards()
     card_by_id = {card.knob_id.value: card for card in cards.values()}
+    _validate_inputs(
+        workspace,
+        candidates,
+        episode_roots,
+        expected_ecos_revision,
+        expected_ecc_revision,
+        set(card_by_id),
+    )
+    revisions = _current_revisions()
     episode_replays = _verified_episode_replays(workspace, episode_roots)
     entries = []
     observation_dir = output / "terminal-observations"
-    for knob_id, candidate_id in CANDIDATES.items():
+    for knob_id, candidate_id in sorted(candidates.items()):
         candidate_root = workspace / ".agent" / "candidates" / candidate_id
         candidate_manifest = candidate_root / "analysis" / "candidate_workspace.v1.json"
         materialization = (
@@ -437,6 +531,11 @@ def build_acceptance(
             cards,
         )
         issues.extend(receipt_issues)
+        if (
+            receipt_payload.get("context", {}).get("ecc_revision")
+            != expected_ecc_revision
+        ):
+            issues.append("candidate ECC revision does not match expected revision")
         if native_receipt is None or not _receipt_is_effective(receipt_payload):
             issues.append("native receipt is not effective")
         elif binding_issue := _validate_candidate_artifact_binding(
@@ -506,7 +605,7 @@ def build_acceptance(
             issues.append("effective initial does not match requested value")
         card_sha256 = canonical_sha256(card_by_id[knob_id].model_dump(mode="json"))
         terminal_sha256 = canonical_sha256(observation.model_dump(mode="json"))
-        trace_episode = _matching_trace_episode(
+        trace_episode, planning_context_mismatch = _matching_trace_episode(
             episode_replays,
             candidate_root_ref=evidence.candidate_root_ref,
             candidate_manifest_sha256=evidence.candidate_manifest_sha256,
@@ -517,7 +616,11 @@ def build_acceptance(
             card_sha256=card_sha256,
         )
         if trace_episode is None:
-            issues.append("optimization trace replay is missing, invalid, or unmatched")
+            issues.append(
+                "planning domain context does not match receipt context"
+                if planning_context_mismatch
+                else "optimization trace replay is missing, invalid, or unmatched"
+            )
         entries.append(
             {
                 "knob_id": knob_id,
@@ -560,11 +663,42 @@ def build_acceptance(
                 },
             }
         )
+    observed_ecc_revisions = sorted(
+        {
+            revision
+            for entry in entries
+            if isinstance(
+                (
+                    revision := _read_json_artifact(
+                        workspace / entry["native_receipt_ref"],
+                        "native receipt",
+                        [],
+                    ).get("context", {}).get("ecc_revision")
+                ),
+                str,
+            )
+        }
+    )
+    provenance = {
+        **revisions,
+        "expected_ecos_revision": expected_ecos_revision,
+        "expected_ecc_revision": expected_ecc_revision,
+        "observed_ecc_revisions": observed_ecc_revisions,
+        "candidate_mapping_sha256": canonical_sha256(dict(sorted(candidates.items()))),
+        "episode_roots": [
+            root.resolve().relative_to(workspace.resolve()).as_posix()
+            for root in episode_roots
+        ],
+        "current": revisions["ecos_revision"] == expected_ecos_revision
+        and revisions["ecc_gitlink_revision"] == expected_ecc_revision
+        and observed_ecc_revisions == [expected_ecc_revision],
+    }
     manifest = {
         "schema_version": "ecos.parameter_acceptance_manifest.v1",
         "workspace": str(workspace),
         "candidate_count": len(entries),
         "ignored_knobs": list(IGNORED_KNOBS),
+        "provenance": provenance,
         "entries": entries,
     }
     manifest["manifest_sha256"] = canonical_sha256(manifest)
@@ -576,7 +710,7 @@ def build_acceptance(
         "ignored_knobs": list(IGNORED_KNOBS),
         "classification": (
             "Engineering Complete"
-            if all(not entry["issues"] for entry in entries)
+            if provenance["current"] and all(not entry["issues"] for entry in entries)
             else "Engineering Incomplete"
         ),
         "research_claim": "not_assessed",
@@ -593,6 +727,7 @@ def build_acceptance(
             )
         ],
         "entries": entries,
+        "provenance": provenance,
         "manifest_sha256": manifest["manifest_sha256"],
     }
     (output / "acceptance-report.v1.json").write_text(
@@ -605,13 +740,38 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--episode-root", type=Path, action="append", default=[])
+    parser.add_argument("--candidate", action="append", required=True)
+    parser.add_argument("--episode-root", type=Path, action="append", required=True)
+    parser.add_argument("--expected-ecos-revision", required=True)
+    parser.add_argument("--expected-ecc-revision", required=True)
     args = parser.parse_args()
+    candidates = _parse_candidates(args.candidate)
     build_acceptance(
         args.workspace,
         args.output,
+        candidates=candidates,
         episode_roots=tuple(args.episode_root),
+        expected_ecos_revision=args.expected_ecos_revision,
+        expected_ecc_revision=args.expected_ecc_revision,
     )
+
+
+def _parse_candidates(specs: list[str]) -> dict[str, str]:
+    candidates: dict[str, str] = {}
+    for spec in specs:
+        knob_id, separator, candidate_id = spec.partition("=")
+        if (
+            separator != "="
+            or knob_id not in {knob.value for knob in OptimizationKnob}
+            or not candidate_id
+            or knob_id in candidates
+        ):
+            raise ValueError("candidate must be a unique KNOB_ID=CANDIDATE_ID binding")
+        candidates[knob_id] = candidate_id
+    expected = {knob.value for knob in OptimizationKnob}
+    if set(candidates) != expected or len(set(candidates.values())) != len(candidates):
+        raise ValueError("exactly eight unique candidate bindings are required")
+    return candidates
 
 
 if __name__ == "__main__":

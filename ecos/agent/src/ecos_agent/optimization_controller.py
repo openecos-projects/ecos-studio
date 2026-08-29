@@ -809,7 +809,10 @@ class OptimizationEpisodeController:
             request.requested,
         )
         self.ledger.append_start(self._ledger_start(request))
-        if receipt.outcome is None:
+        if receipt.outcome in {
+            None,
+            OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+        }:
             self._state = OptimizationEpisodeState.EXECUTING
             self._persist()
             return self._result()
@@ -1332,7 +1335,7 @@ class OptimizationEpisodeController:
             if isinstance(configured, bool)
             else os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1") == "1"
         )
-        return enabled and callable(getattr(self.planner, "propose_v2", None))
+        return enabled
 
     @staticmethod
     def _v2_domains(
@@ -1364,7 +1367,13 @@ class OptimizationEpisodeController:
         domains = self._v2_domains(context)
         if not domains:
             raise EffectiveDomainError("v2 planning domain is unavailable")
-        raw = self.planner.propose_v2(context, domains)
+        propose_v2 = getattr(self.planner, "propose_v2", None)
+        if not callable(propose_v2):
+            raise CodexProviderError(
+                "optimization v2 planner does not implement propose_v2",
+                failure_class="unsupported",
+            )
+        raw = propose_v2(context, domains)
         try:
             parsed = OptimizationProposalV2.model_validate(raw)
         except (TypeError, ValueError) as exc:

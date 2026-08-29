@@ -33,6 +33,13 @@ from ecos_agent.optimization_ledger import (
     write_optimization_artifact_manifest,
 )
 from ecos_agent.optimization_legacy_reader import KnobApplicationReceipt
+from ecos_agent.parameter_evidence_contracts import (
+    ActivationEvidence,
+    EffectiveValue,
+    MaterializationRef,
+    ParameterApplicationReceipt,
+    ToolRef,
+)
 
 HASH = "sha256:" + "a" * 64
 
@@ -76,6 +83,45 @@ def _application_receipt() -> KnobApplicationReceipt:
     )
 
 
+def _native_application_receipt() -> ParameterApplicationReceipt:
+    payload = {
+        "receipt_id": "parameter-receipt-1",
+        "tool": ToolRef(name="DREAMPlace", revision="test", source_sha256=HASH),
+        "context": {"parameter_card_sha256": HASH},
+        "requested": {
+            "knob_id": "place.target_density",
+            "value": 0.65,
+            "unit": "ratio",
+        },
+        "materialization": MaterializationRef(
+            receipt_ref="analysis/candidate_materialization.v1.json",
+            receipt_sha256=HASH,
+            registry_sha256=HASH,
+            patch_sha256=HASH,
+            candidate_ref="candidate-1",
+            workspace_ref="candidate-1",
+            config_before_sha256=HASH,
+            config_after_sha256=HASH,
+            written_value=0.65,
+            unit="ratio",
+        ),
+        "effective_initial": EffectiveValue(value=0.65, unit="ratio"),
+        "transitions": (),
+        "application_status": "applied",
+        "activation": ActivationEvidence(status="not_activated"),
+        "effective_final": EffectiveValue(value=0.65, unit="ratio"),
+    }
+    draft = ParameterApplicationReceipt.model_construct(
+        **payload, evidence_sha256=HASH
+    )
+    hash_payload = draft.model_dump(mode="json", exclude={"evidence_sha256"})
+    hash_payload.pop("consumer_observation", None)
+    return ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(hash_payload),
+    )
+
+
 def test_ledger_retains_a_degraded_outcome_and_replays_it_deterministically(
     tmp_path,
 ) -> None:
@@ -102,6 +148,58 @@ def test_terminal_outcome_rejects_conflicting_incumbent_decision() -> None:
     payload["incumbent_decision"] = "candidate_better"
 
     with pytest.raises(ValueError, match="does not match outcome"):
+        OptimizationTerminalOutcome.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    (
+        ({"receipt_sha256": HASH}, "receipt hash"),
+        ({"parameter_card_sha256": None}, "parameter card"),
+        ({"materialization_receipt_sha256": None}, "materialization"),
+    ),
+)
+def test_terminal_outcome_requires_native_receipt_bindings(
+    mutation: dict[str, str | None], message: str
+) -> None:
+    receipt = _native_application_receipt()
+    payload = _terminal().model_dump(mode="json")
+    payload.update(
+        {
+            "receipt_sha256": receipt.evidence_sha256,
+            "parameter_application_receipt": receipt.model_dump(mode="json"),
+            "parameter_application_receipt_id": receipt.receipt_id,
+            "parameter_card_sha256": HASH,
+            "materialization_receipt_sha256": receipt.materialization.receipt_sha256,
+            **mutation,
+        }
+    )
+
+    with pytest.raises(ValueError, match=message):
+        OptimizationTerminalOutcome.model_validate(payload)
+
+
+def test_terminal_outcome_requires_embedded_parameter_card_binding() -> None:
+    receipt_payload = _native_application_receipt().model_dump(mode="json")
+    receipt_payload["context"].pop("parameter_card_sha256")
+    hash_payload = {
+        key: value for key, value in receipt_payload.items() if key != "evidence_sha256"
+    }
+    hash_payload.pop("consumer_observation", None)
+    receipt_payload["evidence_sha256"] = canonical_sha256(hash_payload)
+    receipt = ParameterApplicationReceipt.model_validate(receipt_payload)
+    payload = _terminal().model_dump(mode="json")
+    payload.update(
+        {
+            "receipt_sha256": receipt.evidence_sha256,
+            "parameter_application_receipt": receipt.model_dump(mode="json"),
+            "parameter_application_receipt_id": receipt.receipt_id,
+            "parameter_card_sha256": HASH,
+            "materialization_receipt_sha256": receipt.materialization.receipt_sha256,
+        }
+    )
+
+    with pytest.raises(ValueError, match="parameter card binding is missing"):
         OptimizationTerminalOutcome.model_validate(payload)
 
 

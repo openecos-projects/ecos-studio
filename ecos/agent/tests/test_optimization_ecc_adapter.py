@@ -1191,6 +1191,32 @@ def test_adapter_classifies_an_immediate_execution_failure() -> None:
     assert receipt.outcome == OptimizationOutcomeKind.EXECUTION_FAILED
 
 
+def test_adapter_preserves_immediate_success_for_controller_validation(tmp_path: Path) -> None:
+    native, evidence, _ = _write_candidate_evidence(tmp_path)
+    terminal = {
+        "operationId": "operation-1",
+        "workspaceId": "workspace-1",
+        "state": "succeeded",
+        "result": {**evidence, "parameterApplicationReceipt": native},
+    }
+    rpc = _FakeEccRpc(terminal, terminal_response=terminal)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+
+    started = adapter.start(
+        _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+    )
+    completed = adapter.wait_for_terminal(started.execution_id)
+
+    assert started.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+    assert started.evidence is not None
+    assert started.parameter_application_receipt is not None
+    assert completed.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+    assert completed.evidence is not None
+    assert completed.parameter_application_receipt is not None
+
+
 def test_step_completed_event_has_one_fixed_render_ack() -> None:
     assert _step_render_ack(
         {

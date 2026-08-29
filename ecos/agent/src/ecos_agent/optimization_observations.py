@@ -229,6 +229,20 @@ def build_candidate_terminal_observation(
     artifacts = payload.get("artifacts", {})
     if not isinstance(artifacts, dict):
         raise OptimizationObservationError("candidate artifact manifest is invalid")
+    parameters = _read_json(candidate_root, "home/parameters.json")
+    harden_refs = dict(
+        zip(
+            ("harden_gds", "harden_lef", "harden_lib"),
+            _harden_output_paths(parameters),
+            strict=True,
+        )
+    )
+    if any(
+        not isinstance(artifacts.get(key), dict)
+        or artifacts[key].get("ref") != ref
+        for key, ref in harden_refs.items()
+    ):
+        raise OptimizationObservationError("candidate Harden artifact manifest is incomplete")
     for item in artifacts.values():
         if not isinstance(item, dict) or not isinstance(item.get("ref"), str):
             raise OptimizationObservationError("candidate artifact manifest is invalid")

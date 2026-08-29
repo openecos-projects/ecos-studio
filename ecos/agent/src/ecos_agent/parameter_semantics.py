@@ -154,25 +154,24 @@ def load_parameter_cards(
         consumer_ids = {item.consumer_id for item in card.consumers}
         if not consumer_ids or not consumer_ids <= _REGISTERED_PROBES:
             raise ParameterSemanticsError("parameter card consumer is not registered")
-        if card.tool.name == "DREAMPlace":
-            roles = {span.role for span in card.source_spans}
-            if card.runtime_semantics is None or any(
-                span.span_id is None for span in card.source_spans
-            ):
-                raise ParameterSemanticsError(
-                    "DREAMPlace parameter card runtime semantics are incomplete"
-                )
-            if (
-                card.tool.source_sha256 is None
-                or "runtime_report_producer" not in roles
-            ):
-                raise ParameterSemanticsError(
-                    "DREAMPlace parameter card runtime report producer is missing"
-                )
-            if "native_consumer" not in roles:
-                raise ParameterSemanticsError(
-                    "DREAMPlace parameter card native consumer source is missing"
-                )
+        roles = {span.role for span in card.source_spans}
+        if card.runtime_semantics is None or any(
+            span.span_id is None for span in card.source_spans
+        ):
+            raise ParameterSemanticsError(
+                "parameter card runtime semantics are incomplete"
+            )
+        if (
+            card.tool.source_sha256 is None
+            or "runtime_report_producer" not in roles
+        ):
+            raise ParameterSemanticsError(
+                "parameter card runtime report producer is missing"
+            )
+        if "native_consumer" not in roles:
+            raise ParameterSemanticsError(
+                "parameter card native consumer source is missing"
+            )
         _validate_source_spans(card, base)
         if (
             tool_revisions is not None
@@ -214,9 +213,9 @@ def validate_application_receipt(
         )
     if receipt.requested.get("unit") != card.surface.unit:
         raise ParameterSemanticsError("application receipt unit does not match card")
-    if receipt.context.get("stage") not in {None, card.stage}:
+    if receipt.context.get("stage") != card.stage:
         raise ParameterSemanticsError("application receipt stage does not match card")
-    if receipt.context.get("lattice_version") not in {None, LATTICE_VERSION}:
+    if receipt.context.get("lattice_version") != LATTICE_VERSION:
         raise ParameterSemanticsError(
             "application receipt lattice version does not match"
         )
@@ -236,9 +235,9 @@ def validate_application_receipt(
         )
     if receipt.activation.status == "used" and receipt.application_status != "applied":
         raise ParameterSemanticsError("used activation requires an applied receipt")
-    allowed = {item.consumer_id for item in card.consumers}
+    allowed = {item.consumer_id: item.event for item in card.consumers}
     if _is_routability_false_arm(receipt):
-        _validate_routability_false_arm(receipt, allowed)
+        _validate_routability_false_arm(receipt, set(allowed))
     if card.tool.name == "DREAMPlace" and receipt.activation.status in {
         "used",
         "not_activated",
@@ -256,6 +255,15 @@ def validate_application_receipt(
         if consumer.consumer_id not in allowed:
             raise ParameterSemanticsError(
                 "application receipt consumer is not registered"
+            )
+        expected_event = (
+            allowed[consumer.consumer_id]
+            if receipt.activation.status == "used"
+            else "evaluated"
+        )
+        if consumer.outcome != expected_event:
+            raise ParameterSemanticsError(
+                "application receipt consumer event does not match card"
             )
 
 

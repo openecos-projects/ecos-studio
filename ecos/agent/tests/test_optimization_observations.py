@@ -55,6 +55,18 @@ def _checklist(*items: tuple[str, str]) -> dict[str, object]:
     }
 
 
+def _harden_manifest_artifacts(candidate_root: Path) -> dict[str, dict[str, str]]:
+    return {
+        f"harden_{suffix}": {
+            "ref": f"Harden_ecc/output/tiny_Harden.{suffix}",
+            "sha256": file_sha256(
+                candidate_root / f"Harden_ecc/output/tiny_Harden.{suffix}"
+            ),
+        }
+        for suffix in ("gds", "lef", "lib")
+    }
+
+
 @pytest.fixture
 def frozen_workspace(tmp_path: Path) -> Path:
     root = tmp_path / "workspace"
@@ -590,6 +602,7 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
             "candidate_root_ref": ".agent/candidates/candidate-1",
             "parent_flow_sha256": parent_flow_hash,
             "candidate_flow_sha256": file_sha256(candidate_root / "home/flow.json"),
+            "artifacts": _harden_manifest_artifacts(candidate_root),
         },
     )
     evidence = CandidateExecutionEvidence(
@@ -623,6 +636,7 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
             "parent_candidate_root_ref": ".agent/candidates/candidate-1",
             "parent_flow_sha256": file_sha256(candidate_flow),
             "candidate_flow_sha256": file_sha256(candidate_2_root / "home/flow.json"),
+            "artifacts": _harden_manifest_artifacts(candidate_2_root),
         },
     )
     evidence_2 = CandidateExecutionEvidence(
@@ -634,6 +648,38 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
     assert build_candidate_terminal_observation(
         frozen_workspace, evidence_2
     ).observation_id == ("terminal-Harden")
+
+
+def test_candidate_terminal_observation_requires_harden_artifact_manifest_entries(
+    frozen_workspace: Path, tmp_path: Path
+) -> None:
+    source_copy = tmp_path / "candidate-source"
+    shutil.copytree(frozen_workspace, source_copy)
+    candidate_root = frozen_workspace / ".agent/candidates/candidate-1"
+    shutil.copytree(source_copy, candidate_root)
+    manifest_ref = ".agent/candidates/candidate-1/analysis/candidate_workspace.v1.json"
+    manifest_path = frozen_workspace / manifest_ref
+    _write_json(
+        manifest_path,
+        {
+            "schema": "ecc.workspace.candidate_workspace.v1",
+            "schema_version": 1,
+            "candidate_id": "candidate-1",
+            "candidate_root_ref": ".agent/candidates/candidate-1",
+            "parent_candidate_root_ref": None,
+            "parent_flow_sha256": file_sha256(frozen_workspace / "home/flow.json"),
+            "candidate_flow_sha256": file_sha256(candidate_root / "home/flow.json"),
+            "artifacts": {},
+        },
+    )
+    evidence = CandidateExecutionEvidence(
+        candidate_root_ref=".agent/candidates/candidate-1",
+        candidate_manifest_ref=manifest_ref,
+        candidate_manifest_sha256=file_sha256(manifest_path),
+    )
+
+    with pytest.raises(OptimizationObservationError, match="Harden artifact"):
+        build_candidate_terminal_observation(frozen_workspace, evidence)
 
 
 def test_candidate_terminal_observation_rejects_tampered_candidate_flow_hash(
@@ -690,6 +736,7 @@ def test_candidate_terminal_observation_rejects_tampered_artifact_hash(
             "parent_flow_sha256": file_sha256(frozen_workspace / "home/flow.json"),
             "candidate_flow_sha256": file_sha256(candidate_root / "home/flow.json"),
             "artifacts": {
+                **_harden_manifest_artifacts(candidate_root),
                 "parameter_runtime_report": {
                     "ref": "analysis/parameter_runtime_report.v1.json",
                     "sha256": "sha256:" + "0" * 64,

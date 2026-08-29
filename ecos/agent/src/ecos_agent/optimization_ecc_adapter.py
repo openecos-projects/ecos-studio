@@ -185,7 +185,6 @@ class EccCandidateRerunAdapter:
                 parameter_application_receipt=application_receipt,
             )
         if state == "succeeded":
-            self._binding_by_execution_id.pop(operation_id, None)
             return CandidateExecutionReceipt(
                 execution_id=operation_id,
                 started=True,

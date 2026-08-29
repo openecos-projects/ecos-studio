@@ -13,6 +13,7 @@ from ecos_agent.optimization_contracts import (
     RequestedKnobValue,
     StrategyDirection,
 )
+from ecos_agent.optimization_rules import coordinate_value_from_native_receipt
 from ecos_agent.parameter_evidence_contracts import (
     OptimizationProposalV2,
     ParameterApplicationReceipt,
@@ -118,10 +119,9 @@ def build_context_fingerprint(context: Mapping[str, Any]) -> str:
     return canonical_sha256(dict(sorted(stable.items(), key=lambda item: item[0])))
 
 
-def _receipt_matches_context(
+def _receipt_matches_execution_context(
     receipt: ParameterApplicationReceipt,
     context: Mapping[str, Any],
-    context_sha256: str,
 ) -> bool:
     if any(
         key not in receipt.context or key not in context
@@ -131,6 +131,16 @@ def _receipt_matches_context(
     if any(receipt.context[key] != context[key] for key in _EXECUTION_CONTEXT_KEYS):
         return False
     if receipt.tool.source_sha256 != context["tool_source_sha256"]:
+        return False
+    return True
+
+
+def _receipt_matches_context(
+    receipt: ParameterApplicationReceipt,
+    context: Mapping[str, Any],
+    context_sha256: str,
+) -> bool:
+    if not _receipt_matches_execution_context(receipt, context):
         return False
     receipt_sha = receipt.context.get("context_sha256")
     return receipt_sha == context_sha256
@@ -190,9 +200,30 @@ def compile_effective_domain(
         if not _receipt_matches_context(receipt, bound_context, context_sha):
             continue
         matching.append(receipt)
-    current_receipt_keys = {
-        (receipt.receipt_id, receipt.evidence_sha256) for receipt in current_receipts
+    matching_keys = {
+        (receipt.receipt_id, receipt.evidence_sha256) for receipt in matching
     }
+    current_matching = []
+    current_value = bound_context["current_values"].get(card.knob_id.value)
+    for receipt in current_receipts:
+        try:
+            receipt_coordinate = coordinate_value_from_native_receipt(
+                receipt, site_width_dbu=bound_context["site_width_dbu"]
+            )
+        except ValueError:
+            continue
+        if (
+            receipt.requested.get("knob_id") != card.knob_id.value
+            or current_value
+            not in (receipt.requested.get("value"), receipt_coordinate)
+            or not _receipt_matches_execution_context(receipt, bound_context)
+        ):
+            continue
+        current_matching.append(receipt)
+        key = (receipt.receipt_id, receipt.evidence_sha256)
+        if key not in matching_keys:
+            matching.append(receipt)
+            matching_keys.add(key)
     aliases: set[Any] = set()
     thresholds: list[DomainThreshold] = []
     for receipt in matching:
@@ -231,6 +262,14 @@ def compile_effective_domain(
                         rule_id=rule_id,
                         evidence_refs=(
                             {
+                                "kind": "parameter_card",
+                                "ref": (
+                                    "optimization/parameter-effectiveness/cards/"
+                                    f"{card.knob_id.value}.json"
+                                ),
+                                "sha256": card_hash(card),
+                            },
+                            {
                                 "kind": "application_receipt",
                                 "ref": receipt.receipt_id,
                                 "sha256": receipt.evidence_sha256,
@@ -248,11 +287,6 @@ def compile_effective_domain(
     aliases.update(item.value for item in attempted if item.knob_id == card.knob_id)
     allowed = tuple(value for value in lattice if value not in aliases)
     coordinate = None
-    current_matching = [
-        receipt
-        for receipt in matching
-        if (receipt.receipt_id, receipt.evidence_sha256) in current_receipt_keys
-    ]
     if current_matching:
         latest = current_matching[-1]
         coordinate = {
@@ -302,9 +336,12 @@ def validate_numeric_proposal(
         for item in attempted
     ):
         raise EffectiveDomainError("proposal value was already attempted")
-    for ref in action.threshold_refs:
-        if ref not in {threshold.threshold_id for threshold in domain.thresholds}:
-            raise EffectiveDomainError("proposal threshold reference is stale")
+    threshold_ids = {threshold.threshold_id for threshold in domain.thresholds}
+    if (
+        set(action.threshold_refs) != threshold_ids
+        or len(action.threshold_refs) != len(threshold_ids)
+    ):
+        raise EffectiveDomainError("proposal threshold references do not match domain")
     current = domain.current_coordinate
     if type(action.requested_value) is bool:
         if action.direction not in {

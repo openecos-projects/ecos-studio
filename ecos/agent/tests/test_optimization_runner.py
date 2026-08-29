@@ -17,6 +17,7 @@ from ecos_agent.optimization_contracts import (
     ObjectiveMetric,
     OptimizationDecision,
     OptimizationEpisodeState,
+    OptimizationKnob,
     ProposalReason,
     SignoffGates,
     StageObservation,
@@ -64,6 +65,7 @@ from ecos_agent.parameter_evidence_contracts import (
     ParameterApplicationReceipt,
     ToolRef,
 )
+from ecos_agent.parameter_semantics import card_hash, load_parameter_cards
 
 _HASH = "sha256:" + "a" * 64
 _CHUNK_HASH = "b" * 64
@@ -105,6 +107,8 @@ class _Clock:
 
 
 class _FakePlanner:
+    optimization_proposal_v2_enabled = False
+
     def __init__(self) -> None:
         self.contexts: list[OptimizationPlanningContext] = []
 
@@ -206,6 +210,20 @@ class _SuccessfulExecutor(_FakeExecutor):
         )
 
 
+class _ImmediateSuccessfulExecutor(_SuccessfulExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_receipts = iter(
+            (
+                CandidateExecutionReceipt(
+                    execution_id="execution-1",
+                    started=True,
+                    outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+                ),
+            )
+        )
+
+
 class _RoutabilityFalseExecutor(_SuccessfulExecutor):
     def __init__(self) -> None:
         super().__init__()
@@ -281,7 +299,12 @@ def _native_receipt(
     payload = {
         "receipt_id": f"parameter-receipt-{knob_id.replace('.', '-')}-{value}",
         "tool": ToolRef(name="DREAMPlace", revision="bound"),
-        "context": {"stage": "place"},
+        "context": {
+            "stage": "place",
+            "parameter_card_sha256": card_hash(
+                load_parameter_cards()[OptimizationKnob(knob_id)]
+            ),
+        },
         "requested": {"knob_id": knob_id, "value": value, "unit": unit},
         "materialization": MaterializationRef(
             receipt_ref="analysis/candidate_materialization.v1.json",
@@ -542,6 +565,41 @@ def test_runner_accepts_false_routability_candidate_with_not_activated_branch(
         OptimizationOutcomeKind.EXECUTION_SUCCEEDED
     )
     runner.close()
+
+
+def test_runner_validates_immediate_success_before_completing(tmp_path: Path) -> None:
+    executor = _ImmediateSuccessfulExecutor()
+    controller = OptimizationEpisodeController(
+        episode_id="episode-immediate-success",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=_FakePlanner(),
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+        incumbent=None,
+    )
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=executor.wait_for_terminal,
+        terminal_observation_supplier=_terminal_observation,
+        objective=_objective(),
+    )
+
+    turn = runner.run_turn()
+
+    assert turn.terminal_observation is not None
+    assert turn.incumbent_comparison is not None
+    assert turn.incumbent_comparison.decision == IncumbentDecision.INITIALIZED
+    assert controller.incumbent is not None
+    assert controller.ledger.replay().terminal_outcomes[0].outcome == (
+        OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+    )
 
 
 def test_fake_runner_completes_two_replanning_turns_with_bounded_history(

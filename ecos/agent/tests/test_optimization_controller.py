@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -119,6 +120,8 @@ class _Clock:
 
 
 class _FakeCodex:
+    optimization_proposal_v2_enabled = False
+
     def __init__(self, *responses: object) -> None:
         self.responses = list(responses)
         self.contexts = []
@@ -393,6 +396,7 @@ def _native_receipt(
             "stage": card.stage,
             "backend": "ecc",
             "tool_revision": card.tool.revision,
+            "parameter_card_sha256": card_hash(card),
             "lattice_version": "ecos.optimization_lattice.v1",
             "unit": unit,
             "context_sha256": build_context_fingerprint(domain_context),
@@ -963,6 +967,10 @@ def test_controller_uses_local_fallback_after_codex_parse_error(tmp_path: Path) 
 
 
 class _V2FakeCodex(_FakeCodex):
+    @property
+    def optimization_proposal_v2_enabled(self) -> bool:
+        return os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1") == "1"
+
     def __init__(self, *responses: object) -> None:
         super().__init__()
         self.v2_responses = list(responses)
@@ -1055,6 +1063,21 @@ def test_controller_v1_requires_explicit_compatibility_flag(
     controller = _controller(tmp_path, _V2FakeCodex(_v2_proposal), _FakeEcc())
 
     assert controller._v2_enabled() is False
+
+
+def test_controller_fails_closed_when_default_v2_planner_lacks_interface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", raising=False)
+
+    class MissingV2Planner:
+        def propose(self, context: object) -> object:
+            raise AssertionError("v1 planner must not be used by default")
+
+    controller = _controller(tmp_path, MissingV2Planner(), _FakeEcc())
+
+    with pytest.raises(CodexProviderError, match="does not implement propose_v2"):
+        controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
 
 def test_controller_accepts_llm_selected_non_first_knob(
@@ -1683,7 +1706,7 @@ def test_promoted_receipt_is_current_only_for_its_bound_incumbent(
     )
     controller = _controller(
         tmp_path,
-        _FakeCodex(_density_proposal),
+        _FakeCodex(_density_proposal, _density_proposal),
         _FakeEcc(_started()),
     )
     planned = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
@@ -1695,7 +1718,9 @@ def test_promoted_receipt_is_current_only_for_its_bound_incumbent(
             started=True,
             outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
             evidence=evidence,
-            parameter_application_receipt=_native_receipt(planned.requested),
+            parameter_application_receipt=_native_receipt(
+                planned.requested, effective_value=0.8
+            ),
         ),
         _eligible_terminal(),
         outcome=OptimizationOutcomeKind.IMPROVED,
@@ -1705,6 +1730,21 @@ def test_promoted_receipt_is_current_only_for_its_bound_incumbent(
     assert controller._native_receipts(promoted_only=True) == ()
     controller.promote_incumbent(_eligible_terminal(), evidence)
     assert len(controller._native_receipts(promoted_only=True)) == 1
+
+    next_values = {
+        **CURRENT_VALUES,
+        planned.requested.knob_id.value: 0.8,
+    }
+    controller.plan(_observation(), _retrieval(), next_values)
+    density_domain = next(
+        item
+        for item in controller.planner.contexts[1].effective_domains
+        if item.knob_id == OptimizationKnob.TARGET_DENSITY
+    )
+    assert density_domain.current_coordinate is not None
+    assert density_domain.current_coordinate["surface_value"] == planned.requested.value
+    assert density_domain.current_coordinate["effective_anchor"] == 0.8
+    assert density_domain.observed_response_signatures
 
 
 def test_episode_identity_does_not_change_execution_contract_fingerprint(

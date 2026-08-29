@@ -142,11 +142,11 @@ def build_candidate_trace(
     peak_memory_mb: float,
 ) -> CandidateTrace:
     """Project one verified terminal ledger record into the Phase 8 trace."""
-    terminal_success = terminal_observation is not None and outcome not in {
-        OptimizationOutcomeKind.EXECUTION_FAILED,
-        OptimizationOutcomeKind.EVIDENCE_INVALID,
-        OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
-        OptimizationOutcomeKind.INDETERMINATE,
+    terminal_success = terminal_observation is not None and outcome in {
+        OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+        OptimizationOutcomeKind.IMPROVED,
+        OptimizationOutcomeKind.DEGRADED,
+        OptimizationOutcomeKind.TRADEOFF,
     }
     evaluation = terminal_observation.evaluation_metrics if terminal_observation else ()
     transition_status = None

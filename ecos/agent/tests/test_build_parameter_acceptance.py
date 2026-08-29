@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from ecos_agent import optimization_memory
 from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
@@ -193,6 +194,9 @@ def _write_candidate(
             "stage": "place",
             "lattice_version": "ecos.optimization_lattice.v1",
             "site_width_dbu": 2000,
+            "ecc_revision": "ecc-test-revision",
+            "parameter_card_sha256": card_hash(card),
+            "context_sha256": HASH,
         },
         "requested": {
             "knob_id": knob.value,
@@ -339,6 +343,8 @@ def _write_trace(
     workspace: Path,
     paths: dict[str, Path],
     observation: TerminalObservation,
+    *,
+    domain_context_sha256: str | None = None,
 ) -> Path:
     optimization_root = workspace / ".agent/optimization"
     episode_root = optimization_root / "episode-acceptance-test"
@@ -387,6 +393,12 @@ def _write_trace(
         budget_snapshot=BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(1)),
         incumbent=None,
         planner_payload_sha256=HASH,
+        effective_domains=(
+            _domain_for(
+                knob,
+                domain_context_sha256 or native.context["context_sha256"],
+            ),
+        ),
     )
     OptimizationDecisionAudit(episode_root).append(
         planning_entry_sha256=planning.entry_sha256,
@@ -459,6 +471,46 @@ def _write_trace(
     return episode_root
 
 
+def _domain_for(knob: OptimizationKnob, context_sha256: str) -> EffectiveDomainSnapshot:
+    payload = {
+        "schema_version": "ecos.effective_domain.v1",
+        "knob_id": knob,
+        "context_sha256": context_sha256,
+        "current_coordinate": None,
+        "surface_values": (0.2, 0.65),
+        "excluded_aliases": (),
+        "allowed_requested_values": (0.2, 0.65),
+        "thresholds": (),
+        "observed_application_signatures": (),
+        "observed_response_signatures": (),
+    }
+    return EffectiveDomainSnapshot(
+        **payload, snapshot_sha256=canonical_sha256(payload)
+    )
+
+
+def _build_acceptance(
+    workspace: Path,
+    output: Path,
+    episode_roots: tuple[Path, ...],
+) -> dict:
+    receipt = json.loads(
+        (
+            workspace
+            / ".agent/candidates/candidate-acceptance-test/analysis"
+            / "parameter_application_receipt.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    return acceptance.build_acceptance(
+        workspace,
+        output,
+        candidates={receipt["requested"]["knob_id"]: "candidate-acceptance-test"},
+        episode_roots=episode_roots,
+        expected_ecos_revision=acceptance._current_revisions()["ecos_revision"],
+        expected_ecc_revision="ecc-test-revision",
+    )
+
+
 def _rewrite_receipt(paths: dict[str, Path], mutate) -> None:
     receipt = json.loads(paths["receipt"].read_text(encoding="utf-8"))
     mutate(receipt)
@@ -485,7 +537,6 @@ def _rewrite_receipt(paths: dict[str, Path], mutate) -> None:
         ("missing_runtime", "Engineering Incomplete", "runtime report"),
         ("missing_card_source", "Engineering Incomplete", "tool source"),
         ("unbound_replay", "Engineering Incomplete", "replay candidate manifest"),
-        ("missing_episode", "Engineering Incomplete", "optimization trace replay"),
         ("tampered_chain", "Engineering Incomplete", "optimization trace replay"),
     ],
 )
@@ -501,11 +552,6 @@ def test_acceptance_fails_closed_on_unbound_evidence(
     paths = _write_candidate(workspace)
     monkeypatch.setattr(
         acceptance,
-        "CANDIDATES",
-        {"place.target_density": "candidate-acceptance-test"},
-    )
-    monkeypatch.setattr(
-        acceptance,
         "load_parameter_cards",
         lambda: {OptimizationKnob.TARGET_DENSITY: _card()},
     )
@@ -515,11 +561,15 @@ def test_acceptance_fails_closed_on_unbound_evidence(
         lambda: {OptimizationKnob.TARGET_DENSITY: _card()},
     )
     monkeypatch.setattr(acceptance, "_state_sha256", lambda _: HASH)
+    revisions = acceptance._current_revisions()
+    monkeypatch.setattr(
+        acceptance,
+        "_current_revisions",
+        lambda: {**revisions, "ecc_gitlink_revision": "ecc-test-revision"},
+    )
     eligible = case != "ineligible_terminal"
     observation = _terminal(eligible=eligible)
-    episode_root = None
-    if case != "missing_episode":
-        episode_root = _write_trace(workspace, paths, observation)
+    episode_root = _write_trace(workspace, paths, observation)
     monkeypatch.setattr(
         acceptance,
         "build_candidate_terminal_observation",
@@ -563,11 +613,7 @@ def test_acceptance_fails_closed_on_unbound_evidence(
             encoding="utf-8",
         )
 
-    acceptance.build_acceptance(
-        workspace,
-        output,
-        episode_roots=(() if episode_root is None else (episode_root,)),
-    )
+    _build_acceptance(workspace, output, (episode_root,))
 
     report = json.loads(
         (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
@@ -577,9 +623,116 @@ def test_acceptance_fails_closed_on_unbound_evidence(
     if issue is None:
         assert issues == []
         assert report["terminal_closed_knobs"] == ["place.target_density"]
+        assert report["provenance"]["current"] is True
+        assert report["provenance"]["expected_ecc_revision"] == "ecc-test-revision"
+        assert report["provenance"]["observed_ecc_revisions"] == [
+            "ecc-test-revision"
+        ]
     else:
         assert any(issue in item for item in issues)
         assert report["terminal_closed_knobs"] == []
+
+
+def test_acceptance_requires_explicit_episode_roots_and_candidate_mapping(
+    tmp_path: Path,
+) -> None:
+    revisions = acceptance._current_revisions()
+    with pytest.raises(ValueError, match="episode root"):
+        acceptance.build_acceptance(
+            tmp_path,
+            tmp_path / "output",
+            candidates={"place.target_density": "candidate-1"},
+            episode_roots=(),
+            expected_ecos_revision=revisions["ecos_revision"],
+            expected_ecc_revision="ecc-test-revision",
+        )
+
+    with pytest.raises(ValueError, match="candidate mapping"):
+        acceptance.build_acceptance(
+            tmp_path,
+            tmp_path / "output",
+            candidates={},
+            episode_roots=(tmp_path / "episode",),
+            expected_ecos_revision=revisions["ecos_revision"],
+            expected_ecc_revision="ecc-test-revision",
+        )
+
+    with pytest.raises(ValueError, match="candidate id"):
+        acceptance._validate_inputs(
+            tmp_path,
+            {"place.target_density": "../candidate-1"},
+            (tmp_path / ".agent/optimization/episode-1",),
+            revisions["ecos_revision"],
+            "ecc-test-revision",
+            {"place.target_density"},
+        )
+
+
+def test_acceptance_cli_requires_exactly_eight_unique_candidate_bindings() -> None:
+    specs = [
+        f"{knob.value}=candidate-{index}"
+        for index, knob in enumerate(OptimizationKnob)
+    ]
+
+    assert acceptance._parse_candidates(specs) == {
+        knob.value: f"candidate-{index}"
+        for index, knob in enumerate(OptimizationKnob)
+    }
+    with pytest.raises(ValueError, match="eight unique"):
+        acceptance._parse_candidates(specs[:-1])
+
+
+def test_acceptance_rejects_planning_domain_receipt_context_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    output = tmp_path / "output"
+    paths = _write_candidate(workspace)
+    observation = _terminal()
+    episode_root = _write_trace(
+        workspace,
+        paths,
+        observation,
+        domain_context_sha256="sha256:" + "b" * 64,
+    )
+    _patch_acceptance_for_single_density(monkeypatch, observation)
+
+    _build_acceptance(workspace, output, (episode_root,))
+
+    report = json.loads(
+        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+    )
+    assert report["classification"] == "Engineering Incomplete"
+    assert any(
+        "planning domain context" in issue for issue in report["entries"][0]["issues"]
+    )
+
+
+def test_acceptance_is_not_current_when_ecc_gitlink_differs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    output = tmp_path / "output"
+    paths = _write_candidate(workspace)
+    observation = _terminal()
+    episode_root = _write_trace(workspace, paths, observation)
+    _patch_acceptance_for_single_density(monkeypatch, observation)
+    revisions = acceptance._current_revisions()
+    monkeypatch.setattr(
+        acceptance,
+        "_current_revisions",
+        lambda: {**revisions, "ecc_gitlink_revision": "ecc-other-revision"},
+    )
+
+    _build_acceptance(workspace, output, (episode_root,))
+
+    report = json.loads(
+        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+    )
+    assert report["classification"] == "Engineering Incomplete"
+    assert report["provenance"]["current"] is False
 
 
 def _patch_acceptance_for_single_density(
@@ -588,10 +741,14 @@ def _patch_acceptance_for_single_density(
     *,
     knob: OptimizationKnob = OptimizationKnob.TARGET_DENSITY,
 ) -> None:
+    revisions = acceptance._current_revisions()
     monkeypatch.setattr(
         acceptance,
-        "CANDIDATES",
-        {knob.value: "candidate-acceptance-test"},
+        "_current_revisions",
+        lambda: {
+            **revisions,
+            "ecc_gitlink_revision": "ecc-test-revision",
+        },
     )
     monkeypatch.setattr(
         acceptance,
@@ -651,7 +808,7 @@ def test_acceptance_allows_evidenced_target_density_override(
     episode_root = _write_trace(workspace, paths, observation)
     _patch_acceptance_for_single_density(monkeypatch, observation)
 
-    acceptance.build_acceptance(workspace, output, episode_roots=(episode_root,))
+    _build_acceptance(workspace, output, (episode_root,))
 
     report = json.loads(
         (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
@@ -687,7 +844,7 @@ def test_acceptance_requires_l1_materialization_binding(
     episode_root = _write_trace(workspace, paths, observation)
     _patch_acceptance_for_single_density(monkeypatch, observation)
 
-    acceptance.build_acceptance(workspace, output, episode_roots=(episode_root,))
+    _build_acceptance(workspace, output, (episode_root,))
 
     report = json.loads(
         (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
@@ -749,7 +906,7 @@ def test_acceptance_validates_cell_padding_site_to_dbu_materialization(
         knob=OptimizationKnob.CELL_PADDING_X,
     )
 
-    acceptance.build_acceptance(workspace, output, episode_roots=(episode_root,))
+    _build_acceptance(workspace, output, (episode_root,))
 
     report = json.loads(
         (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
@@ -785,7 +942,7 @@ def test_acceptance_rejects_unavailable_or_tampered_l1_files(
     episode_root = _write_trace(workspace, paths, observation)
     _patch_acceptance_for_single_density(monkeypatch, observation)
 
-    acceptance.build_acceptance(workspace, output, episode_roots=(episode_root,))
+    _build_acceptance(workspace, output, (episode_root,))
 
     report = json.loads(
         (output / "acceptance-report.v1.json").read_text(encoding="utf-8")

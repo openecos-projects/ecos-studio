@@ -113,6 +113,23 @@ def test_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> No
         assert referenced <= span_ids
 
 
+def test_non_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> None:
+    cards = load_parameter_cards()
+    native_cards = [
+        card for card in cards.values() if card.tool.name != "DREAMPlace"
+    ]
+
+    assert len(native_cards) == 3
+    for card in native_cards:
+        assert card.runtime_semantics is not None
+        assert card.runtime_semantics.mechanism
+        assert all(span.span_id is not None for span in card.source_spans)
+        assert {span.role for span in card.source_spans} >= {
+            "runtime_report_producer",
+            "native_consumer",
+        }
+
+
 def test_loader_rejects_dreamplace_card_without_native_consumer_span(tmp_path) -> None:
     root = tmp_path / "cards"
     shutil.copytree(CARD_ROOT, root)
@@ -350,6 +367,60 @@ def test_density_floor_excludes_only_values_supported_by_typed_rule() -> None:
     )
     assert domain.allowed_requested_values == (0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
     assert domain.current_coordinate["effective_anchor"] == 0.8
+    assert domain.thresholds[0].evidence_refs == (
+        {
+            "kind": "parameter_card",
+            "ref": (
+                "optimization/parameter-effectiveness/cards/"
+                "place.target_density.json"
+            ),
+            "sha256": card_hash(card),
+        },
+        {
+            "kind": "application_receipt",
+            "ref": receipt.receipt_id,
+            "sha256": receipt.evidence_sha256,
+        },
+    )
+
+
+def test_v2_proposal_must_bind_every_effective_domain_threshold() -> None:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    context = _domain_context()
+    receipt = _density_receipt(context)
+    domain = compile_effective_domain(card, context=context, receipts=(receipt,))
+    proposal = OptimizationProposalV2(
+        context_ref={
+            "episode_id": "episode-1",
+            "checkpoint_id": "place",
+            "input_sha256": HASH,
+        },
+        decision="propose",
+        reason_code="observation",
+        rationale_summary="bounded proposal",
+        observation_refs=({"observation_id": "obs-1", "sha256": HASH},),
+        action=NumericProposalActionV2(
+            knob_id=card.knob_id,
+            direction="increase",
+            requested_value=0.85,
+            effective_domain_sha256=domain.snapshot_sha256,
+            expected_effects=(
+                {"metric_id": "route_wirelength", "direction": "decrease"},
+            ),
+        ),
+    )
+
+    with pytest.raises(EffectiveDomainError, match="threshold references do not match"):
+        validate_numeric_proposal(proposal, domain)
+
+    bound = proposal.model_copy(
+        update={
+            "action": proposal.action.model_copy(
+                update={"threshold_refs": (domain.thresholds[0].threshold_id,)}
+            )
+        }
+    )
+    validate_numeric_proposal(bound, domain)
 
 
 def test_dreamplace_used_receipt_requires_consumer_observation() -> None:
@@ -418,6 +489,46 @@ def test_application_receipt_requires_card_bound_tool_source() -> None:
     )
 
     with pytest.raises(ParameterSemanticsError, match="tool source"):
+        validate_application_receipt(receipt, cards)
+
+
+@pytest.mark.parametrize("missing", ("stage", "lattice_version"))
+def test_application_receipt_requires_stage_and_lattice_context(missing: str) -> None:
+    cards = load_parameter_cards()
+    payload = _density_receipt(_domain_context()).model_dump(
+        mode="json", exclude={"evidence_sha256"}
+    )
+    del payload["context"][missing]
+    receipt = ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(payload),
+    )
+
+    with pytest.raises(ParameterSemanticsError, match=missing.replace("_", " ")):
+        validate_application_receipt(receipt, cards)
+
+
+def test_application_receipt_consumer_event_matches_card() -> None:
+    cards = load_parameter_cards()
+    payload = _density_receipt(_domain_context()).model_dump(
+        mode="json", exclude={"evidence_sha256"}
+    )
+    consumer = payload["activation"]["consumers"][0]
+    consumer["outcome"] = "evaluated"
+    consumer["evidence_sha256"] = canonical_sha256(
+        {
+            "consumer_id": consumer["consumer_id"],
+            "outcome": consumer["outcome"],
+            "consumer_observation": payload["consumer_observation"],
+        }
+    )
+    payload["transitions"][0]["evidence_sha256"] = consumer["evidence_sha256"]
+    receipt = ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(payload),
+    )
+
+    with pytest.raises(ParameterSemanticsError, match="consumer event"):
         validate_application_receipt(receipt, cards)
 
 
