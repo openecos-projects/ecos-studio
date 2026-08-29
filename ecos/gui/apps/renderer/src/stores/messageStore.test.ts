@@ -195,7 +195,9 @@ describe('messageStore', () => {
       },
       'operation-interaction',
     )
-    expect(store.messages[store.messages.length - 1]?.interactionCompanionId).toBeUndefined()
+    expect(
+      store.messages[store.messages.length - 1]?.interactionCompanionId,
+    ).toBeUndefined()
   })
 
   it('rewinds messages to the restored interaction after undo', () => {
@@ -280,5 +282,77 @@ describe('messageStore', () => {
     expect(store.messages).toHaveLength(1)
     expect(store.messages[0]?.status).toBe('done')
     expect(store.messages[0]?.content).toContain('Running place.')
+  })
+
+  it('upserts structured activity by turn and item identity', () => {
+    const store = useMessageStore()
+    const activity = {
+      itemId: 'reasoning-1',
+      kind: 'reasoning_summary' as const,
+      schema_version: 'flow-agent.activity.v1' as const,
+      startedAt: 1000,
+      status: 'running' as const,
+      summary: ['Inspecting'],
+      turnId: 'turn-1',
+      turnStartedAt: 900,
+    }
+
+    store.upsertAgentEvent({ activity, sessionId: 'session-test', type: 'activity' })
+    store.upsertAgentEvent({
+      activity: {
+        ...activity,
+        status: 'completed',
+        summary: ['Inspecting the flow.'],
+      },
+      sessionId: 'session-test',
+      type: 'activity',
+    })
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      activity: {
+        items: [
+          {
+            itemId: 'reasoning-1',
+            status: 'completed',
+            summary: ['Inspecting the flow.'],
+          },
+        ],
+        turnId: 'turn-1',
+      },
+      status: 'loading',
+      type: 'activity',
+    })
+
+    store.finishStreamingMessages()
+    expect(store.messages[0]).toMatchObject({
+      activity: { completedAt: expect.any(Number) },
+      status: 'done',
+    })
+  })
+
+  it('keeps background-tab activity isolated by session', () => {
+    const store = useMessageStore()
+    store.upsertAgentEvent({
+      activity: {
+        itemId: 'search-1',
+        kind: 'web_search',
+        schema_version: 'flow-agent.activity.v1',
+        startedAt: 1000,
+        status: 'running',
+        actions: [],
+        query: 'CTS',
+        turnId: 'turn-b',
+        turnStartedAt: 900,
+      },
+      sessionId: 'session-b',
+      type: 'activity',
+    })
+
+    expect(store.messages).toEqual([])
+    store.setActiveSessionId('session-b')
+    expect(store.messages).toMatchObject([
+      { activity: { turnId: 'turn-b' }, type: 'activity' },
+    ])
   })
 })

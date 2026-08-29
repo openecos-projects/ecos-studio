@@ -29,7 +29,6 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
   knownProjects?: DesktopAgentKnownProject[]
   mode?: DesktopAgentSessionMode
   projectRoot?: string
-  quickRunProjectRoot?: string
   sessionId?: string
   workspaceId?: string
 }
@@ -49,6 +48,31 @@ export interface DesktopAgentSendMessageResponse {
   sessionId: string
   text?: string
   turnId?: string
+}
+
+export type DesktopAgentReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+export interface DesktopAgentModelOption {
+  defaultReasoningEffort: DesktopAgentReasoningEffort
+  displayName: string
+  model: string
+  supportedReasoningEfforts: DesktopAgentReasoningEffort[]
+}
+
+export interface DesktopAgentModelSettingsRequest extends DesktopAgentProviderRequest {
+  sessionId: string
+}
+
+export interface DesktopAgentSetModelSettingsRequest extends DesktopAgentModelSettingsRequest {
+  model?: string
+  reasoningEffort?: DesktopAgentReasoningEffort
+}
+
+export interface DesktopAgentModelSettings {
+  displayName: string
+  model: string
+  models: DesktopAgentModelOption[]
+  reasoningEffort: DesktopAgentReasoningEffort
 }
 
 export type DesktopAgentInteractionPurpose = 'execution' | 'clarification'
@@ -385,6 +409,7 @@ export type DesktopAgentEventType =
   | 'session'
   | 'message'
   | 'tool'
+  | 'activity'
   | 'interaction'
   | 'unsupported_interaction'
   | 'contract'
@@ -424,7 +449,79 @@ export interface DesktopAgentOptimizationPayload {
   turn?: number
   workspace?: string
 }
+
+export type DesktopAgentActivityStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'declined'
+  | 'interrupted'
+
+interface DesktopAgentActivityBase {
+  durationMs?: number
+  itemId: string
+  schema_version: 'flow-agent.activity.v1'
+  startedAt: number
+  status: DesktopAgentActivityStatus
+  turnId: string
+  turnStartedAt: number
+}
+
+export interface DesktopAgentReasoningActivity extends DesktopAgentActivityBase {
+  kind: 'reasoning_summary'
+  summary: string[]
+}
+
+export interface DesktopAgentWebSearchAction {
+  kind: 'search' | 'open_page' | 'find_in_page'
+  query?: string
+  title?: string
+  url?: string
+}
+
+export interface DesktopAgentWebSearchActivity extends DesktopAgentActivityBase {
+  actions: DesktopAgentWebSearchAction[]
+  kind: 'web_search'
+  query?: string
+}
+
+export interface DesktopAgentCommandActivity extends DesktopAgentActivityBase {
+  command: string
+  cwd?: string
+  exitCode?: number
+  kind: 'command_execution'
+  label: string
+  output?: string
+  truncated?: boolean
+}
+
+export interface DesktopAgentToolCallActivity extends DesktopAgentActivityBase {
+  arguments?: string
+  error?: string
+  kind: 'tool_call'
+  progress?: string
+  result?: string
+  server?: string
+  tool: string
+  truncated?: boolean
+}
+
+export type DesktopAgentActivity =
+  | DesktopAgentReasoningActivity
+  | DesktopAgentWebSearchActivity
+  | DesktopAgentCommandActivity
+  | DesktopAgentToolCallActivity
+
+export interface DesktopAgentActivityNotice {
+  message: string
+  schema_version: 'flow-agent.activity_notice.v1'
+  turnId?: string
+}
+
 export interface DesktopAgentEvent {
+  activity?: DesktopAgentActivity
+  activityNotice?: DesktopAgentActivityNotice
   contract?: DesktopAgentExecutionContract
   delta?: string
   interaction?: DesktopAgentInteractionRequest

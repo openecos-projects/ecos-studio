@@ -275,7 +275,11 @@ def _propose_gui_workspace_rerun_patch(
 
 def _gui_workspace_request_context(
     context: Mapping[str, Any],
-) -> tuple[Callable[[str], None] | None, Callable[[Callable[[], None] | None], None], dict[str, Any]]:
+) -> tuple[
+    Callable[[str | dict[str, Any]], None] | None,
+    Callable[[Callable[[], None] | None], None],
+    dict[str, Any],
+]:
     callback = context.get("_progress_callback")
     register_interrupt = context.get("_register_interrupt")
     return (
@@ -286,7 +290,8 @@ def _gui_workspace_request_context(
 
 
 def _gui_workspace_codex_provider(
-    context: Mapping[str, Any], progress_callback: Callable[[str], None] | None
+    context: Mapping[str, Any],
+    progress_callback: Callable[[str | dict[str, Any]], None] | None,
 ):
     workspace_inputs = context.get("workspace_inputs")
     project_root = (

@@ -43,3 +43,114 @@ describe('agent workspace creation', () => {
     expect(createSource).not.toContain('requestOpenStepConfigAfterCreate')
   })
 })
+
+describe('quick start resources', () => {
+  it('renders the Quick Start cursor without a circular backing', () => {
+    const start = source.indexOf('.quick-start-cursor {')
+    const end = source.indexOf('@media (prefers-reduced-motion', start)
+    const cursorStyle = source.slice(start, end)
+
+    expect(cursorStyle).not.toContain('border-radius')
+    expect(cursorStyle).not.toContain('background:')
+  })
+
+  it('hides the cursor when Quick Start is idle', () => {
+    expect(source).toContain('v-if="quickStartCursor.visible"')
+  })
+
+  it('mounts the cursor before moving it to the first target', () => {
+    const start = source.indexOf('async function moveQuickStartCursor')
+    const end = source.indexOf('function joinLocalPath', start)
+    const moveSource = source.slice(start, end)
+
+    expect(moveSource).toContain('quickStartCursor.visible = true')
+    expect(moveSource).toContain('await nextTick()')
+    expect(moveSource).toContain('quickStartCursor.left = left')
+    expect(moveSource).toContain('quickStartCursor.top = top')
+    expect(moveSource).toContain('await delay(120, signal)')
+  })
+
+  it('uses the visible Project Management entry instead of routing around it', () => {
+    const navigateStart = source.indexOf("if (surface === 'project-management')")
+    const navigateEnd = source.indexOf('createProject: async', navigateStart)
+    const navigateSource = source.slice(navigateStart, navigateEnd)
+
+    expect(navigateSource).toContain("'.project-management-entry'")
+    expect(navigateSource).toContain(
+      'Quick Start could not find the Project Management button.',
+    )
+    expect(navigateSource).toContain('offsetX: 96')
+    expect(navigateSource).toContain('offsetY: 96')
+    expect(navigateSource).toContain('homeProjectButton.click()')
+    expect(navigateSource).not.toContain("router.push('/projects')")
+  })
+
+  it('resolves ICS55 through the inventory-aware resource lookup', () => {
+    const start = source.indexOf('async function resolveQuickStartResources')
+    const end = source.indexOf('function resourceHealth', start)
+
+    expect(source.slice(start, end)).toContain("api.resources.get('pdk:ics55')")
+  })
+
+  it('fills and closes the existing New Project dialog', () => {
+    const createStart = source.indexOf('createProject: async')
+    const createEnd = source.indexOf('createWorkspace: async', createStart)
+    const createSource = source.slice(createStart, createEnd)
+
+    expect(createSource).toContain('showQuickStartProjectDialog')
+    expect(createSource).toContain('projectName,')
+    expect(createSource).toContain("designName: 'gcd'")
+    expect(createSource).toContain('projectRoot,')
+    expect(createSource).toContain('mpcId: input.mpc?.id')
+    expect(createSource).toContain('registerProjectRoot(projectRoot)')
+    expect(source).toContain('createButton.click()')
+    expect(source).toContain(
+      'clickQuickStartProjectWorkspaceButton(input.projectName, signal)',
+    )
+    expect(source).toContain('Loading MPC design specification')
+    expect(source).toContain(
+      "createButton.scrollIntoView({ behavior: 'smooth', block: 'center' })",
+    )
+    expect(source).toContain('typeQuickStartInput(field, value, signal)')
+    expect(source).toContain("await showQuickStartInput('top', 'gcd', signal)")
+    expect(source).toContain("await showQuickStartInput('clk', 'clk', signal)")
+  })
+
+  it('types visible Quick Start values instead of only showing the cursor', () => {
+    expect(source).toContain('getPathLeafName(config.directory)')
+    expect(source).not.toContain("await showQuickStartInput('gcd', 'gcd', signal)")
+    expect(source).toContain("await showQuickStartInput('top', 'gcd', signal)")
+    expect(source).toContain("await showQuickStartInput('clk', 'clk', signal)")
+    const workspaceStart = source.indexOf('const config: WorkspaceConfig =')
+    const workspaceEnd = source.indexOf('const createdConfig', workspaceStart)
+    const workspaceSource = source.slice(workspaceStart, workspaceEnd)
+    expect(workspaceSource).toContain("design: 'gcd'")
+    expect(workspaceSource).toContain("top_module: ''")
+    expect(workspaceSource).toContain("clock: ''")
+    expect(source).toContain('input.value += character')
+    expect(source).toContain("new Event('input', { bubbles: true })")
+  })
+
+  it('forwards cancellation through the workflow and wizard driver', () => {
+    expect(source).toContain(
+      'const runQuickStart: QuickStartRunner = async (onEvent, signal) =>',
+    )
+    expect(source).toContain('runQuickStartWorkflow(host, onEvent, signal)')
+    expect(source).toContain('signal?.throwIfAborted()')
+  })
+
+  it('keeps one Project-scoped run record and no dead handoff query', () => {
+    const createWorkspaceStart = source.indexOf('createWorkspace: async')
+    const handoffStart = source.indexOf('handoff: async', createWorkspaceStart)
+    const startFlowStart = source.indexOf('startFlow: async', handoffStart)
+    const hostEnd = source.indexOf('await runQuickStartWorkflow', startFlowStart)
+
+    expect(source.slice(createWorkspaceStart, handoffStart)).toContain(
+      'writeQuickStartRunRecord(api, workspacePath',
+    )
+    expect(source.slice(startFlowStart, hostEnd)).toContain(
+      'writeQuickStartRunRecord(api, input.workspace.path',
+    )
+    expect(source.slice(handoffStart, startFlowStart)).not.toContain("quickStart: '1'")
+  })
+})

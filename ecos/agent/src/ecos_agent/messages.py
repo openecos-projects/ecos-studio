@@ -508,8 +508,8 @@ def home_ready_choice(language: str, prompt_id: str) -> dict[str, Any]:
             (
                 _prompt(
                     language,
-                    "从 RTL 快速运行 Flow",
-                    "Run a flow from RTL (quick setup)",
+                    "Quick Start：创建 Workspace 并运行完整 RTL 到 GDS 流程",
+                    "Quick Start: create a Workspace and run a full RTL-to-GDS flow",
                 ),
                 "3",
             ),

@@ -66,7 +66,7 @@ class CodexAppServerProposalProvider:
         env: Mapping[str, str] | None = None,
         timeout_seconds: int | None = None,
         runtime_workspace_roots: Iterable[str | Path] | None = None,
-        progress_callback: Callable[[str], None] | None = None,
+        progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
         web_search_enabled: bool | None = None,
         diagnostics_path: Path | None = None,
         ephemeral: bool = True,
@@ -91,6 +91,7 @@ class CodexAppServerProposalProvider:
         self._client: _JsonLineRpcProcessClient | None = None
         self._thread_id: str | None = None
         self._model: str | None = None
+        self._reasoning_effort: str | None = None
         self._active_turn_id: str | None = None
         self._completed_turn: tuple[str, str, str] | None = None
         self._planning_evidence: PlanningProviderEvidence | None = None
@@ -150,7 +151,14 @@ class CodexAppServerProposalProvider:
     def list_models(self) -> list[dict[str, Any]]:
         response = self._ensure_client().request("model/list", {"includeHidden": False})
         models = response.get("data")
-        if not isinstance(models, list) or not all(isinstance(item, dict) for item in models):
+        if (
+            not isinstance(models, list)
+            or not models
+            or not all(
+                isinstance(item, dict) and isinstance(item.get("model"), str)
+                for item in models
+            )
+        ):
             raise CodexProviderError(
                 "Codex model/list response is invalid", failure_class="tool_error"
             )
@@ -170,7 +178,61 @@ class CodexAppServerProposalProvider:
                 f"Unknown Codex model: {requested}", failure_class="missing_input"
             )
         self._model = model["model"]
+        efforts = _model_reasoning_efforts(model)
+        if self._reasoning_effort not in efforts:
+            default = model.get("defaultReasoningEffort")
+            self._reasoning_effort = default if default in efforts else efforts[0]
         return model
+
+    def get_model_settings(self) -> dict[str, Any]:
+        models = self.list_models()
+        current = next(
+            (item for item in models if self._model in {item.get("id"), item.get("model")}),
+            next((item for item in models if item.get("isDefault") is True), models[0]),
+        )
+        efforts = _model_reasoning_efforts(current)
+        default = current.get("defaultReasoningEffort")
+        effort = self._reasoning_effort or (default if default in efforts else efforts[0])
+        return {
+            "model": current["model"],
+            "displayName": current.get("displayName") or current["model"],
+            "reasoningEffort": effort,
+            "models": [
+                {
+                    "model": item["model"],
+                    "displayName": item.get("displayName") or item["model"],
+                    "defaultReasoningEffort": (
+                        item.get("defaultReasoningEffort")
+                        if item.get("defaultReasoningEffort")
+                        in _model_reasoning_efforts(item)
+                        else _model_reasoning_efforts(item)[0]
+                    ),
+                    "supportedReasoningEfforts": _model_reasoning_efforts(item),
+                }
+                for item in models
+                if isinstance(item.get("model"), str)
+            ],
+        }
+
+    def set_model_settings(
+        self, *, model: str | None = None, reasoning_effort: str | None = None
+    ) -> dict[str, Any]:
+        if model is not None:
+            self.select_model(model)
+        settings = self.get_model_settings()
+        if reasoning_effort is not None:
+            current = next(
+                item for item in settings["models"] if item["model"] == settings["model"]
+            )
+            if reasoning_effort not in current["supportedReasoningEfforts"]:
+                raise CodexProviderError(
+                    f"Unsupported reasoning effort: {reasoning_effort}",
+                    failure_class="missing_input",
+                )
+            self._model = settings["model"]
+            self._reasoning_effort = reasoning_effort
+            settings["reasoningEffort"] = reasoning_effort
+        return settings
 
     def get_goal(self) -> dict[str, Any] | None:
         response = self._thread_request("thread/goal/get")
@@ -617,9 +679,6 @@ class CodexAppServerProposalProvider:
                 raise CodexProviderError(
                     "Codex turn interrupted", failure_class="interrupted"
                 )
-        # One lifecycle line only; observable Codex actions still stream via
-        # activity_callback (web search, workspace reads, retries).
-        self._report_progress("Thinking…")
         client = self._ensure_client()
         thread_id = self._ensure_thread(client)
         response = client.request(
@@ -646,7 +705,7 @@ class CodexAppServerProposalProvider:
                 "permissions": None,
                 "model": self._model,
                 "serviceTier": None,
-                "effort": None,
+                "effort": self._reasoning_effort,
                 "summary": "detailed",
                 "personality": None,
                 "outputSchema": output_schema,
@@ -792,9 +851,30 @@ class CodexAppServerProposalProvider:
                 )
         return self._thread_id
 
-    def _report_progress(self, text: str) -> None:
+    def _report_progress(self, activity: str | dict[str, Any]) -> None:
         if self.progress_callback is not None:
-            self.progress_callback(text)
+            self.progress_callback(activity)
+
+
+_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+
+
+def _model_reasoning_efforts(model: Mapping[str, Any]) -> list[str]:
+    raw = model.get("supportedReasoningEfforts")
+    efforts: list[str] = []
+    if isinstance(raw, list):
+        for item in raw:
+            value = (
+                item.get("reasoningEffort", item.get("effort"))
+                if isinstance(item, Mapping)
+                else item
+            )
+            if value in _REASONING_EFFORTS and value not in efforts:
+                efforts.append(value)
+    default = model.get("defaultReasoningEffort")
+    if default in _REASONING_EFFORTS and default not in efforts:
+        efforts.append(default)
+    return efforts or ["medium"]
 
 
 def _allowed_operation_ids(value: object) -> list[str]:
@@ -892,7 +972,7 @@ def create_required_codex_provider(
     *,
     cwd: Path | None = None,
     runtime_workspace_roots: Iterable[str | Path] | None = None,
-    progress_callback: Callable[[str], None] | None = None,
+    progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
     web_search_enabled: bool | None = None,
     diagnostics_path: Path | None = None,
     ephemeral: bool = True,

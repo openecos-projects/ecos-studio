@@ -55,6 +55,15 @@
         </div>
       </div>
       <div v-else class="messages-container w-full max-w-full min-w-0 py-2">
+        <button
+          v-if="quickStartRunning"
+          type="button"
+          class="quick-start-stop"
+          @click="stopQuickStart"
+        >
+          <i class="ri-stop-fill" aria-hidden="true"></i>
+          <span>Stop Quick Start</span>
+        </button>
         <section
           v-for="(turn, turnIndex) in conversationTurns"
           :key="turn.id"
@@ -73,8 +82,12 @@
                 :aria-label="`${msg.interaction?.title}: ${msg.interactionAnswer}`"
               >
                 <i class="ri-check-line" aria-hidden="true"></i>
-                <span class="interaction-receipt__question">{{ msg.interaction?.title }}</span>
-                <strong class="interaction-receipt__answer">{{ msg.interactionAnswer }}</strong>
+                <span class="interaction-receipt__question">{{
+                  msg.interaction?.title
+                }}</span>
+                <strong class="interaction-receipt__answer">{{
+                  msg.interactionAnswer
+                }}</strong>
               </div>
               <MessageItem
                 v-else-if="isVisibleResponse(msg)"
@@ -90,17 +103,12 @@
                 @create-workspace="createWorkspaceFromAgent"
               />
             </template>
-            <div
+            <AgentActivityStream
               v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
               class="agent-pending"
-              role="status"
-              aria-live="polite"
-              :aria-label="isInterruptPending ? 'Stopping' : 'Waiting for reply'"
-            >
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-            </div>
+              :activity="pendingActivity"
+              status="loading"
+            />
             <!-- Awaiting confirmation stays after Q&A, at the end of the latest turn -->
             <AgentSessionContractPanels
               v-if="turnIndex === conversationTurns.length - 1"
@@ -196,6 +204,13 @@
         ></textarea>
 
         <div class="composer-actions">
+          <AgentModelSettingsMenu
+            :settings="activeUi.modelSettings"
+            :busy="activeUi.modelSettingsBusy"
+            :disabled="isRunning || isAgentConnecting"
+            :error="activeUi.modelSettingsError"
+            @update="updateAgentModelSettings"
+          />
           <button
             v-if="isRunning"
             type="button"
@@ -241,12 +256,15 @@ import { storeToRefs } from 'pinia'
 import type {
   DesktopAgentEvent,
   DesktopAgentInteractionRequest,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import AgentModelSettingsMenu from './AgentModelSettingsMenu.vue'
+import AgentActivityStream from './AgentActivityStream.vue'
 import AgentInteractionCard from './AgentInteractionCard.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
@@ -261,6 +279,7 @@ import {
   type PendingGuiAction,
 } from './agentSessionUi'
 import { displayAgentContractTitle } from './agentContractDisplay'
+import { agentActivityUpdateKey } from './agentActivityPresentation'
 import {
   describeInteractionAnswer,
   groupMessagesIntoTurns,
@@ -273,6 +292,7 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import { quickStartRunnerKey, type QuickStartRunner } from '@/composables/quickStartUi'
 import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import {
@@ -299,6 +319,7 @@ const props = withDefaults(
 )
 
 const AGENT_PROVIDER_ID = 'ecos_agent'
+const QUICK_START_OPTION_ID = 'quick_start'
 const messageStore = useMessageStore()
 const agentShell = useAgentShellStore()
 const { messages } = storeToRefs(messageStore)
@@ -319,6 +340,9 @@ const interactionCompanionIds = computed(
     ),
 )
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
+const quickStartRunner = inject<QuickStartRunner>(quickStartRunnerKey)
+const quickStartRunning = ref(false)
+let quickStartAbortController: AbortController | null = null
 const router = useRouter()
 const route = useRoute()
 const {
@@ -484,18 +508,14 @@ const workspaceSignoffRows = computed<[string, string][]>(() => {
   if (!review) return []
   return [
     ['Overall', review.status],
-    ...review.groups.map(
-      (group): [string, string] => [
-        group.label,
-        `${group.available}/${group.expected} · ${group.summary}`,
-      ],
-    ),
-    ...review.risks.map(
-      (risk): [string, string] => [
-        `${risk.severity === 'blocked' ? 'Blocked' : 'Warning'}: ${risk.title}`,
-        risk.summary,
-      ],
-    ),
+    ...review.groups.map((group): [string, string] => [
+      group.label,
+      `${group.available}/${group.expected} · ${group.summary}`,
+    ]),
+    ...review.risks.map((risk): [string, string] => [
+      `${risk.severity === 'blocked' ? 'Blocked' : 'Warning'}: ${risk.title}`,
+      risk.summary,
+    ]),
   ]
 })
 const workspaceRerunExecutionState = computed(() =>
@@ -577,7 +597,41 @@ const isRunning = computed(
     isWorkspaceSignoffPending.value ||
     agentRunStatus.value === 'running',
 )
-const pendingInteraction = computed(() => interactionPresentation.value.interaction)
+const pendingInteraction = computed(() => {
+  const interaction = interactionPresentation.value.interaction
+  if (
+    props.shell !== 'home' ||
+    !quickStartRunner ||
+    interaction?.interaction.kind !== 'choice' ||
+    interaction.title !== 'Get started'
+  ) {
+    return interaction
+  }
+  return {
+    ...interaction,
+    interaction: {
+      ...interaction.interaction,
+      options:
+        interaction.interaction.options.length >= 3
+          ? interaction.interaction.options.map((option, index) =>
+              index === 2
+                ? {
+                    ...option,
+                    label:
+                      'Quick Start: create a Workspace and run a full RTL-to-GDS flow',
+                  }
+                : option,
+            )
+          : [
+              ...interaction.interaction.options,
+              {
+                id: QUICK_START_OPTION_ID,
+                label: 'Quick Start: create a Workspace and run a full RTL-to-GDS flow',
+              },
+            ],
+    },
+  }
+})
 const undoInteraction = computed(() => activeUi.value.undoInteraction)
 const interactionCardRef = ref<{
   setFieldValue(fieldId: string, value: string): void
@@ -660,6 +714,11 @@ const showPendingPlaceholder = computed(() => {
   if (!last?.user) return false
   return last.responses.length === 0
 })
+const pendingActivity = computed(() => ({
+  items: [],
+  startedAt: activeUi.value.runStartedAt ?? Date.now(),
+  turnId: agentSessionId.value ?? 'pending',
+}))
 const emptyStateSuggestions = computed(() => {
   const tabMode = activeTab.value?.mode ?? (props.shell === 'home' ? 'home' : 'workspace')
   if (tabMode === 'home') {
@@ -754,6 +813,8 @@ async function connectAgent(): Promise<void> {
   const active = agentShell.activeTab
   if (active && !active.started) {
     await startProviderSession(active.id)
+  } else if (active) {
+    await loadAgentModelSettings(active.id)
   }
 }
 
@@ -767,6 +828,7 @@ async function createChatTab(): Promise<void> {
 function selectChatTab(id: string): void {
   if (!agentShell.activateTab(id)) return
   messageStore.setActiveSessionId(id)
+  void loadAgentModelSettings(id)
 }
 
 async function closeChatTab(id: string): Promise<void> {
@@ -857,6 +919,7 @@ async function startProviderSession(sessionId: string): Promise<void> {
       messageStore.addInteraction(response.pendingInteraction, undefined, sessionId)
     }
     agentShell.markTabStarted(sessionId)
+    await loadAgentModelSettings(sessionId)
     codexSetupStatus.value = null
   } catch (error) {
     ui.runStatus = 'error'
@@ -869,6 +932,46 @@ async function startProviderSession(sessionId: string): Promise<void> {
     messageStore.addAssistantMessage(reason, 'error', sessionId)
   } finally {
     ui.isConnecting = false
+  }
+}
+
+async function loadAgentModelSettings(sessionId: string): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const ui = sessionUi(sessionId)
+  if (!agent || ui.modelSettingsBusy) return
+  ui.modelSettingsBusy = true
+  ui.modelSettingsError = ''
+  try {
+    ui.modelSettings = await agent.getModelSettings({
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+    })
+  } catch (error) {
+    ui.modelSettingsError = agentErrorMessage(error)
+  } finally {
+    ui.modelSettingsBusy = false
+  }
+}
+
+async function updateAgentModelSettings(
+  patch: Pick<DesktopAgentSetModelSettingsRequest, 'model' | 'reasoningEffort'>,
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const sessionId = agentSessionId.value
+  if (!agent || !sessionId || isRunning.value || activeUi.value.modelSettingsBusy) return
+  const ui = sessionUi(sessionId)
+  ui.modelSettingsBusy = true
+  ui.modelSettingsError = ''
+  try {
+    ui.modelSettings = await agent.setModelSettings({
+      ...patch,
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+    })
+  } catch (error) {
+    ui.modelSettingsError = agentErrorMessage(error)
+  } finally {
+    ui.modelSettingsBusy = false
   }
 }
 
@@ -1279,7 +1382,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     messageStore.upsertAgentEvent(event)
     return
   }
-  if (event.type === 'message' || event.type === 'tool') {
+  if (event.type === 'message' || event.type === 'tool' || event.type === 'activity') {
     messageStore.upsertAgentEvent(event)
   }
 }
@@ -1407,6 +1510,7 @@ watch(
       last?.content.length ?? 0,
       last?.status ?? '',
       last?.type ?? '',
+      last?.activity?.items.map(agentActivityUpdateKey).join('|') ?? '',
     ].join(':')
   },
   (signature, previous) => {
@@ -1491,6 +1595,18 @@ async function handleInteraction(
     )
   )
     return
+  if (
+    props.shell === 'home' &&
+    quickStartRunner &&
+    kind === 'choice' &&
+    'optionId' in answer &&
+    interaction.interaction.kind === 'choice' &&
+    (interaction.interaction.options[2]?.id === answer.optionId ||
+      answer.optionId === QUICK_START_OPTION_ID)
+  ) {
+    await startQuickStart()
+    return
+  }
   if (textMessage) messageStore.addMessage(textMessage)
   isAgentRequestPending.value = true
   try {
@@ -1592,6 +1708,74 @@ function sendSuggestion(suggestion: { label: string; value: string }): void {
   void sendAgentMessage(suggestion.value, false)
 }
 
+async function startQuickStart(): Promise<void> {
+  if (!quickStartRunner || quickStartRunning.value) return
+  const sessionId = agentSessionId.value
+  quickStartRunning.value = true
+  quickStartAbortController = new AbortController()
+  if (sessionId) messageStore.addMessage('Quick Start · GCD backend flow')
+  const startedAtByStep = new Map<string, number>()
+  const turnId = `quick-start-${Date.now()}`
+  try {
+    await quickStartRunner((event) => {
+      if (!sessionId) return
+      const now = Date.now()
+      const startedAt = startedAtByStep.get(event.stepId) ?? now
+      if (event.status === 'running') startedAtByStep.set(event.stepId, startedAt)
+      messageStore.upsertAgentEvent({
+        activity: {
+          arguments: JSON.stringify({
+            capability: event.capability,
+            surface: event.surface,
+          }),
+          durationMs:
+            event.status === 'running' ? undefined : Math.max(0, now - startedAt),
+          itemId: `quick-start-${event.stepId}`,
+          kind: 'tool_call',
+          progress: event.status === 'running' ? event.labelKey : undefined,
+          result: event.status === 'completed' ? event.detailKey : undefined,
+          schema_version: 'flow-agent.activity.v1',
+          startedAt,
+          status: event.status,
+          tool: event.labelKey,
+          turnId,
+          turnStartedAt: startedAt,
+        },
+        messageId: `quick-start-${event.stepId}`,
+        providerId: AGENT_PROVIDER_ID,
+        sessionId,
+        type: 'activity',
+      })
+    }, quickStartAbortController.signal)
+    if (sessionId) {
+      messageStore.addAssistantMessage(
+        'Quick Start completed. Run All Flow is running.',
+        'done',
+        sessionId,
+      )
+    }
+  } catch (error) {
+    if (!sessionId) return
+    if (isQuickStartAbort(error)) {
+      messageStore.addAssistantMessage('Quick Start stopped.', 'done', sessionId)
+    } else {
+      messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+    }
+  } finally {
+    messageStore.finishStreamingMessages(sessionId ?? undefined)
+    quickStartRunning.value = false
+    quickStartAbortController = null
+  }
+}
+
+function stopQuickStart(): void {
+  quickStartAbortController?.abort()
+}
+
+function isQuickStartAbort(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 function cancelQueuedMessage(): void {
   queuedMessage.value = ''
 }
@@ -1618,7 +1802,12 @@ async function interruptAgent(): Promise<void> {
 }
 
 watch(isRunning, (running) => {
-  if (!running) void flushQueuedMessage()
+  if (running) {
+    activeUi.value.runStartedAt ??= Date.now()
+    return
+  }
+  activeUi.value.runStartedAt = undefined
+  void flushQueuedMessage()
 })
 
 async function createWorkspaceFromAgent(
@@ -2431,48 +2620,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 .agent-pending {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.28rem;
   margin: 0.25rem 0 0.35rem;
-  min-height: 1.25rem;
-  padding-left: 0.125rem;
-}
-
-.agent-pending__dot {
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-secondary) 70%, transparent);
-  animation: agent-pending-dot 1.05s ease-in-out infinite;
-}
-
-.agent-pending__dot:nth-child(2) {
-  animation-delay: 0.14s;
-}
-
-.agent-pending__dot:nth-child(3) {
-  animation-delay: 0.28s;
-}
-
-@keyframes agent-pending-dot {
-  0%,
-  80%,
-  100% {
-    opacity: 0.28;
-    transform: translateY(0);
-  }
-  40% {
-    opacity: 0.95;
-    transform: translateY(-0.12rem);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-pending__dot {
-    animation: none;
-    opacity: 0.55;
-  }
 }
 
 .message-item {
@@ -2509,6 +2657,26 @@ const handleKeyDown = (e: KeyboardEvent) => {
 .empty-suggestion:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.quick-start-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.4rem;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.quick-start-stop:hover,
+.quick-start-stop:focus-visible {
+  border-color: var(--accent-color);
+  color: var(--text-primary);
 }
 
 .empty-suggestion:focus-visible,
@@ -2734,6 +2902,8 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 .composer-actions {
   display: flex;
+  align-items: center;
+  gap: 0.25rem;
   justify-content: flex-end;
   padding: 0 0.625rem 0.625rem;
 }
@@ -2851,6 +3021,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
 @media (prefers-reduced-motion: reduce) {
   .composer-shell,
   .empty-suggestion,
+  .quick-start-stop,
   .stop-btn,
   .send-btn {
     transition: none;

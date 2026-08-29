@@ -497,6 +497,7 @@
           <span>Project Name</span>
           <input
             v-model="projectRootDraft.name"
+            name="project-name"
             type="text"
             placeholder="project_name"
             data-dialog-initial-focus
@@ -505,7 +506,12 @@
 
         <label class="form-field">
           <span>Design Name</span>
-          <input v-model="projectRootDraft.designName" type="text" placeholder="gcd" />
+          <input
+            v-model="projectRootDraft.designName"
+            name="design-name"
+            type="text"
+            placeholder="gcd"
+          />
         </label>
 
         <label class="form-field">
@@ -513,6 +519,7 @@
           <div class="path-picker">
             <input
               v-model="projectRootDraft.directory"
+              name="project-storage-location"
               type="text"
               readonly
               placeholder="/path/to/project_root"
@@ -524,7 +531,11 @@
 
         <label class="form-field">
           <span>Managed MPC</span>
-          <select v-model="projectRootDraft.mpcId" :disabled="isLoadingProjectMpcs">
+          <select
+            v-model="projectRootDraft.mpcId"
+            name="managed-mpc"
+            :disabled="isLoadingProjectMpcs"
+          >
             <option value="">No MPC</option>
             <option
               v-for="mpc in projectMpcs"
@@ -1632,6 +1643,9 @@ async function createWorkspaceForProject(project: ProjectManagementProject) {
       designName: project.designName,
       workspacePath: joinProjectPath(project.path, workspaceId),
       workspaceId,
+      ...(queryString(route.query.quickStart)
+        ? { quickStart: queryString(route.query.quickStart) }
+        : {}),
     },
   })
 }

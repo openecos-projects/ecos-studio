@@ -1,6 +1,6 @@
 import type {
   DesignTool,
-  DesktopAgentChoice,
+  DesktopAgentActivity,
   DesktopAgentInteractionRequest,
   PdkReadiness,
   WorkspaceConfig as SharedWorkspaceConfig,
@@ -46,7 +46,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'info' | 'map' | 'interaction' | 'tool'
+  type?: 'text' | 'image' | 'info' | 'map' | 'interaction' | 'tool' | 'activity'
   /** Ephemeral report/layout content rendered by the workspace GUI. */
   isGuiArtifact?: boolean
   status?: 'loading' | 'done' | 'error'
@@ -63,6 +63,13 @@ export interface Message {
   interactionAnswered?: boolean
   interactionAnswer?: string
   interactionCompanionId?: string
+  activity?: {
+    completedAt?: number
+    items: DesktopAgentActivity[]
+    notice?: string
+    startedAt: number
+    turnId: string
+  }
 }
 
 export interface Thumbnail {

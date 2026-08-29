@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import type {
   DesktopAgentEvent,
   DesktopAgentInteractionRequest,
+  DesktopAgentModelSettings,
   DesktopAgentRunStatus,
   EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
@@ -34,6 +35,7 @@ export type PendingGuiAction =
 
 export interface AgentSessionUiState {
   runStatus: DesktopAgentRunStatus
+  runStartedAt?: number
   inputValue: string
   inputHistoryIndex?: number
   inputHistoryDraft: string
@@ -46,6 +48,9 @@ export interface AgentSessionUiState {
   isWorkspaceContinuePending: boolean
   isWorkspaceParameterPending: boolean
   isWorkspaceSignoffPending: boolean
+  modelSettings?: DesktopAgentModelSettings
+  modelSettingsBusy: boolean
+  modelSettingsError: string
   undoInteraction?: Pick<DesktopAgentInteractionRequest, 'kind' | 'requestId'>
   workspaceSetupContract?: DesktopAgentEvent['workspaceSetup']
   workspaceSetupMessage: string
@@ -88,6 +93,8 @@ export function createAgentSessionUiState(): AgentSessionUiState {
     isWorkspaceContinuePending: false,
     isWorkspaceParameterPending: false,
     isWorkspaceSignoffPending: false,
+    modelSettingsBusy: false,
+    modelSettingsError: '',
     workspaceSetupMessage: '',
     workspaceSetupAnsweredOptionId: '',
     workspaceRerunMessage: '',

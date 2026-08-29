@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 from pathlib import Path
 
@@ -232,7 +233,22 @@ def test_codex_chat_controls_use_allowlisted_thread_rpc(tmp_path: Path) -> None:
         def request(self, method: str, params: dict[str, object]) -> dict[str, object]:
             self.requests.append((method, params))
             if method == "model/list":
-                return {"data": [{"id": "gpt-test", "model": "gpt-test"}]}
+                return {
+                    "data": [
+                        {
+                            "id": "gpt-test",
+                            "model": "gpt-test",
+                            "displayName": "GPT Test",
+                            "defaultReasoningEffort": "medium",
+                            "supportedReasoningEfforts": [
+                                {"reasoningEffort": "low"},
+                                {"reasoningEffort": "medium"},
+                                {"reasoningEffort": "high"},
+                            ],
+                            "isDefault": True,
+                        }
+                    ]
+                }
             if method == "thread/goal/set":
                 return {
                     "goal": {
@@ -253,7 +269,20 @@ def test_codex_chat_controls_use_allowlisted_thread_rpc(tmp_path: Path) -> None:
     provider._client = client
     provider._thread_id = "thread-1"
 
-    provider.select_model("gpt-test")
+    provider.set_model_settings(model="gpt-test", reasoning_effort="high")
+    assert provider.get_model_settings() == {
+        "model": "gpt-test",
+        "displayName": "GPT Test",
+        "reasoningEffort": "high",
+        "models": [
+            {
+                "model": "gpt-test",
+                "displayName": "GPT Test",
+                "defaultReasoningEffort": "medium",
+                "supportedReasoningEfforts": ["low", "medium", "high"],
+            }
+        ],
+    }
     provider.set_goal(objective="Ship it")
     assert provider.get_goal() == {"objective": "Ship it", "status": "active"}
     provider.compact()
@@ -263,6 +292,8 @@ def test_codex_chat_controls_use_allowlisted_thread_rpc(tmp_path: Path) -> None:
     provider.clear_interrupted()
 
     assert [method for method, _params in client.requests] == [
+        "model/list",
+        "model/list",
         "model/list",
         "thread/goal/set",
         "thread/goal/get",
@@ -277,6 +308,49 @@ def test_codex_chat_controls_use_allowlisted_thread_rpc(tmp_path: Path) -> None:
     )
     assert provider.thread_id == "thread-1"
     assert provider._interrupted is False
+
+
+def test_codex_turn_uses_selected_model_and_reasoning_effort(
+    tmp_path: Path, monkeypatch
+) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.turn: dict[str, object] | None = None
+
+        def request(self, method: str, params: dict[str, object]) -> dict[str, object]:
+            if method == "model/list":
+                return {
+                    "data": [
+                        {
+                            "id": "gpt-test",
+                            "model": "gpt-test",
+                            "defaultReasoningEffort": "medium",
+                            "supportedReasoningEfforts": ["low", "high"],
+                            "isDefault": True,
+                        }
+                    ]
+                }
+            if method == "turn/start":
+                self.turn = params
+                return {"turn": {"id": "turn-1"}}
+            return {}
+
+    client = FakeClient()
+    provider._client = client
+    provider._thread_id = "thread-1"
+    provider.set_model_settings(model="gpt-test", reasoning_effort="high")
+    monkeypatch.setattr(provider, "_wait_for_turn", lambda *_args: "{}")
+
+    provider._run_turn("prompt", {"type": "object"})
+
+    assert client.turn is not None
+    assert client.turn["model"] == "gpt-test"
+    assert client.turn["effort"] == "high"
 
 
 def test_session_chat_and_slash_commands_share_one_codex_provider(
@@ -371,6 +445,47 @@ def test_session_chat_and_slash_commands_share_one_codex_provider(
     ]
     assert provider.sessions[session_id].codex_provider is fake
     assert _last_event(events, "message")["text"] == "Review finding."
+
+
+def test_session_model_settings_use_dedicated_provider_methods(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeCodexProvider:
+        def get_model_settings(self) -> dict[str, object]:
+            return {
+                "model": "gpt-test",
+                "displayName": "GPT Test",
+                "reasoningEffort": "medium",
+                "models": [],
+            }
+
+        def set_model_settings(self, **settings: object) -> dict[str, object]:
+            return {**self.get_model_settings(), **settings}
+
+        def clear_interrupted(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    fake = FakeCodexProvider()
+    monkeypatch.setattr(
+        "ecos_agent.provider.create_required_codex_provider", lambda **_kwargs: fake
+    )
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session(
+        {"mode": "home", "directory": str(tmp_path)}
+    )["sessionId"]
+
+    assert provider.get_model_settings({"sessionId": session_id})["model"] == "gpt-test"
+    updated = provider.set_model_settings(
+        {"sessionId": session_id, "reasoningEffort": "high"}
+    )
+    assert updated["reasoning_effort"] == "high"
+
+    provider.sessions[session_id].running = True
+    with pytest.raises(ValueError, match="cannot change"):
+        provider.set_model_settings({"sessionId": session_id, "model": "gpt-test"})
 
 
 def test_slash_commands_fail_closed_without_shell_fallback(tmp_path: Path, monkeypatch) -> None:
@@ -606,59 +721,6 @@ def test_interaction_undo_history_clears_at_an_execution_boundary() -> None:
     assert session.interaction_undo == []
 
 
-def test_interaction_undo_restores_a_choice_before_a_free_text_step(tmp_path: Path) -> None:
-    quick_run_project = tmp_path / "quick_run"
-    quick_run_project.mkdir()
-    provider = EcosAgentProvider(emit=lambda _event: None)
-    session_id = provider.start_session(
-        {"mode": "home", "quickRunProjectRoot": str(quick_run_project)}
-    )["sessionId"]
-    session = provider.sessions[session_id]
-    original = session.pending_interaction["request"]
-    quick_run = next(
-        option
-        for option in original["interaction"]["options"]
-        if option["label"] == "Run a flow from RTL (quick setup)"
-    )
-
-    answer = provider.answer_interaction(
-        {
-            "sessionId": session_id,
-            "requestId": original["requestId"],
-            "kind": original["kind"],
-            "optionId": quick_run["id"],
-        }
-    )
-
-    assert answer["canUndo"] is True
-    assert session.phase == "workspace_rtl"
-    assert session.pending_interaction is not None
-    rtl_request = session.pending_interaction["request"]
-    assert rtl_request["kind"] == "form"
-    assert rtl_request["interaction"]["fields"] == [
-        {
-            "extensions": ["v", "sv"],
-            "id": "value",
-            "kind": "path",
-            "label": "RTL path",
-            "required": True,
-        }
-    ]
-
-    result = provider.answer_interaction(
-        {
-            "sessionId": session_id,
-            "requestId": rtl_request["requestId"],
-            "kind": rtl_request["kind"],
-            "undo": True,
-        }
-    )
-
-    assert result["undoneRequestId"] == original["requestId"]
-    assert session.phase == "home_ready"
-    assert session.pending_interaction["request"]["requestId"] == original["requestId"]
-
-
 def test_free_text_answer_does_not_create_undo_history() -> None:
     provider = EcosAgentProvider(emit=lambda _event: None)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
@@ -677,48 +739,6 @@ def test_free_text_answer_does_not_create_undo_history() -> None:
     assert result.get("canUndo") is not True
     assert session.interaction_undo == []
     assert session.pending_interaction["request"].get("canUndo") is not True
-
-
-def test_form_answer_preserves_previous_selection_without_becoming_undoable(
-    tmp_path: Path,
-) -> None:
-    quick_run_project = tmp_path / "quick_run"
-    quick_run_project.mkdir()
-    rtl = tmp_path / "gcd.v"
-    rtl.write_text("module gcd; endmodule\n", encoding="utf-8")
-    provider = EcosAgentProvider(emit=lambda _event: None)
-    session_id = provider.start_session(
-        {"mode": "home", "quickRunProjectRoot": str(quick_run_project)}
-    )["sessionId"]
-    session = provider.sessions[session_id]
-    request = session.pending_interaction["request"]
-    quick_run = next(
-        option
-        for option in request["interaction"]["options"]
-        if option["label"] == "Run a flow from RTL (quick setup)"
-    )
-    provider.answer_interaction(
-        {
-            "sessionId": session_id,
-            "requestId": request["requestId"],
-            "kind": request["kind"],
-            "optionId": quick_run["id"],
-        }
-    )
-    rtl_request = session.pending_interaction["request"]
-
-    result = provider.answer_interaction(
-        {
-            "sessionId": session_id,
-            "requestId": rtl_request["requestId"],
-            "kind": rtl_request["kind"],
-            "values": {"value": str(rtl)},
-        }
-    )
-
-    assert result.get("canUndo") is not True
-    assert len(session.interaction_undo) == 1
-    assert session.pending_interaction["request"]["canUndo"] is True
 
 
 def test_interaction_answers_are_one_time_and_resume_reuses_the_pending_request() -> None:
@@ -1028,9 +1048,10 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
     assert choice["title"] == "Get started"
     assert choice["kind"] == "choice"
     assert choice["options"][0]["id"]
-    assert "Start creating a Workspace" in choice["options"][0]["label"]
+    assert "Quick Start" in choice["options"][0]["label"]
     assert "bounded optimization episode" in choice["options"][1]["label"]
-    assert "Run a flow from RTL" in choice["options"][2]["label"]
+    assert len(choice["options"]) == 3
+    assert "Quick Start" in choice["options"][2]["label"]
     welcome = next(event["text"] for event in events if event["type"] == "message")
     assert "state-controlled, PPA-oriented design-flow agent" in str(welcome)
     assert "Choose quick RTL setup" not in str(welcome)
@@ -1046,58 +1067,6 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
     assert provider.sessions[session_id].rerun_workspace_path == str(workspace)
     assert provider.sessions[session_id].phase == "optimization_objective"
     assert "Describe the optimization goal" in str(_last_event(events, "message")["text"])
-
-
-def test_home_quick_setup_only_asks_for_rtl_steps_and_contract_review(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    quick_project = tmp_path / "run_1234"
-    quick_project.mkdir()
-    rtl, _filelist, _sdc, pdk = _write_workspace_inputs(tmp_path)
-    monkeypatch.setenv("ICS55_PDK_ROOT", str(pdk))
-    events: list[dict[str, object]] = []
-    provider = EcosAgentProvider(emit=events.append)
-    session_id = provider.start_session(
-        {"mode": "home", "quickRunProjectRoot": str(quick_project)}
-    )["sessionId"]
-
-    _send(provider, session_id, "3")
-    session = provider.sessions[session_id]
-    assert session.phase == "workspace_rtl"
-    assert session.workspace_setup.workspace_name == "ws_0001"
-    assert session.workspace_setup.design_name is None
-
-    _send(provider, session_id, str(rtl))
-    assert session.phase == "workspace_flow_end"
-    assert session.workspace_setup.design_name == "gcd"
-    assert session.workspace_setup.top_module == "gcd"
-
-    _send(provider, session_id, "0")
-    assert session.phase == "workspace_confirmation"
-    contract = _last_event(events, "workspace_setup")["workspaceSetup"]
-    assert contract["directory"] == str(quick_project / "ws_0001")
-    assert contract["project_context"]["project_root"] == str(quick_project)
-    assert contract["flow_config"]["end_step"] == "Harden"
-    assert contract["mpc_enabled"] is True
-    assert contract["parameters"]["design"] == "gcd"
-    assert {
-        key: contract["parameters"][key]
-        for key in (
-            "frequency_max",
-            "max_fanout",
-            "utilitization",
-            "margin",
-            "target_density",
-            "target_overflow",
-        )
-    } == {
-        "frequency_max": 50,
-        "max_fanout": 32,
-        "utilitization": 0.3,
-        "margin": 2,
-        "target_density": 0.2,
-        "target_overflow": 0.1,
-    }
 
 
 @pytest.mark.parametrize(
@@ -2583,6 +2552,137 @@ def test_tool_streaming_reuses_one_message_id_for_all_turn_deltas(tmp_path: Path
         "Validating the structured proposal.\n",
     ]
     assert len({event["messageId"] for event in tool_events}) == 1
+
+
+def test_structured_codex_activity_uses_the_activity_event() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({})["sessionId"]
+    session = provider.sessions[session_id]
+
+    provider._progress(
+        session,
+        {
+            "itemId": "reasoning-1",
+            "kind": "reasoning_summary",
+            "schema_version": "flow-agent.activity.v1",
+            "startedAt": 1000,
+            "status": "running",
+            "summary": ["Inspecting the flow."],
+            "turnId": "turn-1",
+            "turnStartedAt": 900,
+        },
+    )
+
+    assert events[-1]["type"] == "activity"
+    assert events[-1]["activity"] == {
+        "itemId": "reasoning-1",
+        "kind": "reasoning_summary",
+        "schema_version": "flow-agent.activity.v1",
+        "startedAt": 1000,
+        "status": "running",
+        "summary": ["Inspecting the flow."],
+        "turnId": "turn-1",
+        "turnStartedAt": 900,
+    }
+
+
+def test_structured_codex_activity_groups_provider_subturns_into_one_agent_turn() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({})["sessionId"]
+    session = provider.sessions[session_id]
+    session.active_turn_id = "agent-turn"
+    session.active_turn_started_at = 800
+
+    for turn_id in ("routing-turn", "answer-turn"):
+        provider._progress(
+            session,
+            {
+                "itemId": "reasoning-1",
+                "kind": "reasoning_summary",
+                "schema_version": "flow-agent.activity.v1",
+                "startedAt": 1000,
+                "status": "completed",
+                "summary": [turn_id],
+                "turnId": turn_id,
+                "turnStartedAt": 900,
+            },
+        )
+
+    activities = [event["activity"] for event in events if event["type"] == "activity"]
+    assert [activity["turnId"] for activity in activities] == [
+        "agent-turn",
+        "agent-turn",
+    ]
+    assert [activity["itemId"] for activity in activities] == [
+        "routing-turn-reasoning-1",
+        "answer-turn-reasoning-1",
+    ]
+    assert [activity["turnStartedAt"] for activity in activities] == [800, 800]
+
+
+def test_knowledge_question_reports_local_observable_work_in_one_turn(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "ecos-studio"
+    source = repository / "ecc" / "cts.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class ClockTreeSynthesis:\n    pass  # CTS implementation\n",
+        encoding="utf-8",
+    )
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=lambda _context: _chat_response(
+            answer="CTS builds the clock distribution network.",
+            evidence_ids=["source-1"],
+        ),
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [{"root_id": "ecc", "query": "ClockTreeSynthesis"}],
+            "rationale": "Check the CTS implementation.",
+        },
+        source_retriever=SourceCodeRetriever(repository),
+    )
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "什么是 CTS")
+
+    activities = [event["activity"] for event in events if event["type"] == "activity"]
+    first_seen = list(dict.fromkeys(activity["itemId"] for activity in activities))
+    assert first_seen == [
+        "local-stage-identification",
+        "local-knowledge-search",
+        "local-source-search",
+        "local-answer-validation",
+    ]
+    assert all(
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", item_id)
+        for item_id in first_seen
+    )
+    assert len({activity["turnId"] for activity in activities}) == 1
+    terminal = {activity["itemId"]: activity for activity in activities}
+    assert all(item["status"] == "completed" for item in terminal.values())
+    assert json.loads(terminal["local-stage-identification"]["result"])[
+        "candidate_stages"
+    ] == ["cts"]
+    knowledge = json.loads(terminal["local-knowledge-search"]["result"])
+    assert knowledge["match_count"] == 3
+    assert "parameter.cts.cap_steps" in knowledge["entity_ids"]
+    source_result = json.loads(terminal["local-source-search"]["result"])
+    assert source_result == {
+        "evidence_count": 1,
+        "paths": ["ecc/cts.py"],
+        "result_limit_reached": False,
+    }
+    validation = json.loads(terminal["local-answer-validation"]["result"])
+    assert validation == {
+        "evidence_reference_count": 1,
+        "route": "answer",
+        "schema": "flow-agent.gui_chat_response.v1",
+    }
 
 
 def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> None:

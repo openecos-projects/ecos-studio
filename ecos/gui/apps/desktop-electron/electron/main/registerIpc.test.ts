@@ -743,6 +743,12 @@ describe('registerIpc', () => {
         }) => void)
       | undefined
     const agentRuntimeService = {
+      getModelSettings: vi.fn(async () => ({
+        displayName: 'GPT Test',
+        model: 'gpt-test',
+        models: [],
+        reasoningEffort: 'medium',
+      })),
       interrupt: vi.fn(async () => {}),
       onEvent: vi.fn((listener) => {
         emitAgentEvent = listener
@@ -751,6 +757,12 @@ describe('registerIpc', () => {
       sendMessage: vi.fn(async (request) => ({
         messageId: 'message-1',
         sessionId: request.sessionId,
+      })),
+      setModelSettings: vi.fn(async (request) => ({
+        displayName: 'GPT Test',
+        model: request.model ?? 'gpt-test',
+        models: [],
+        reasoningEffort: request.reasoningEffort ?? 'medium',
       })),
       answerInteraction: vi.fn(async (request) => ({
         accepted: true,
@@ -796,6 +808,24 @@ describe('registerIpc', () => {
     ).resolves.toEqual({
       messageId: 'message-1',
       sessionId: session.sessionId,
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentGetModelSettings)?.(event, session),
+    ).resolves.toMatchObject({ model: 'gpt-test' })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentSetModelSettings)?.(event, {
+        ...session,
+        reasoningEffort: 'high',
+      }),
+    ).resolves.toMatchObject({ reasoningEffort: 'high' })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentSetModelSettings)?.(event, {
+        ...session,
+        reasoningEffort: 'unbounded',
+      }),
+    ).resolves.toMatchObject({
+      error: { message: 'Invalid Agent model settings request.' },
+      ok: false,
     })
     await expect(
       handlers.get(desktopApiIpcChannels.agentAnswerInteraction)?.(event, {
@@ -866,32 +896,6 @@ describe('registerIpc', () => {
       undo: true,
     })
     expect(agentRuntimeService?.interrupt).toHaveBeenCalledWith(session)
-  })
-
-  it('owns the quick-run project path in the main process', async () => {
-    const agentRuntimeService = {
-      onEvent: vi.fn(() => () => undefined),
-      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
-    } as unknown as DesktopBridgeServices['agentRuntimeService']
-    const { handlers } = registerHandlers(agentRuntimeService, '/managed/quick-runs')
-    const event = {
-      sender: { id: 101, isDestroyed: vi.fn(() => false), once: vi.fn() },
-    }
-
-    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(event, {
-      mode: 'home',
-      providerId: 'ecos_agent',
-      quickRunProjectRoot: '/renderer/cannot/choose/this',
-      sessionId: 'home-session',
-    })
-
-    const request = vi.mocked(agentRuntimeService!.startSession).mock.calls[0]?.[0]
-    expect(request?.quickRunProjectRoot).toMatch(
-      /^\/managed\/quick-runs\/run_[a-f0-9]{32}$/,
-    )
-    expect(mkdirMock).toHaveBeenCalledWith(request?.quickRunProjectRoot, {
-      recursive: true,
-    })
   })
 
   it('returns version information from the app info service', async () => {

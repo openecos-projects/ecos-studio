@@ -28,6 +28,15 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('initialConfig')
     expect(source).toContain('defineProps')
     expect(source).toContain('props.initialConfig')
+    expect(source).not.toContain('suggestedWorkspaceName')
+  })
+
+  it('uses the project design name as the workspace spec default', () => {
+    const defaultsStart = source.indexOf('function applyProjectManifestDefaults')
+    const defaultsEnd = source.indexOf('function applyProjectFlowDefaults', defaultsStart)
+    const defaultsSource = source.slice(defaultsStart, defaultsEnd)
+    expect(defaultsSource).toContain('projectDesignName.value = manifest.design_name')
+    expect(defaultsSource).toContain('designNameTouched.value = true')
   })
 
   it('can derive a project-managed workspace path from project root plus workspace name', () => {

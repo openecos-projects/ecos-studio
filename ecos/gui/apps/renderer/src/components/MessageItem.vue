@@ -1,7 +1,12 @@
 <template>
   <div class="flex w-full min-w-0 justify-start">
+    <AgentActivityStream
+      v-if="message.type === 'activity' && message.activity"
+      :activity="message.activity"
+      :status="message.status"
+    />
     <AgentToolCard
-      v-if="message.type === 'tool'"
+      v-else-if="message.type === 'tool'"
       :content="message.content"
       :status="message.status"
     />
@@ -331,6 +336,7 @@
         <div
           v-if="message.status === 'loading' && !message.content"
           class="flex items-center gap-2"
+          aria-label="Waiting for response"
         >
           <div class="loading-dots flex gap-1">
             <span
@@ -346,8 +352,29 @@
               style="animation-delay: 300ms"
             ></span>
           </div>
-          <span class="text-xs opacity-70">Thinking...</span>
         </div>
+
+        <section
+          v-else-if="isQuickStartPreflightError"
+          class="quick-start-preflight-error"
+        >
+          <header class="quick-start-preflight-error__header">
+            <span class="quick-start-preflight-error__icon" aria-hidden="true">
+              <i class="ri-error-warning-line"></i>
+            </span>
+            <div>
+              <strong>Quick Start 未启动</strong>
+              <span>资源预检失败</span>
+            </div>
+          </header>
+          <p class="quick-start-preflight-error__detail">
+            {{ quickStartPreflightDetail }}
+          </p>
+          <p class="quick-start-preflight-error__hint">
+            请在 Resource Management 中确认 PDK 和 MPC 已安装且 Ready，然后重新点击 Quick
+            Start。
+          </p>
+        </section>
 
         <!-- 错误状态 -->
         <div
@@ -427,6 +454,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
 import type { Message } from '../types'
+import AgentActivityStream from './AgentActivityStream.vue'
 import AgentToolCard from './AgentToolCard.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
@@ -457,6 +485,16 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 const renderedContent = computed(() => {
   return sanitizeHtml(md.render(props.message.content))
 })
+
+const quickStartPreflightPrefix = 'Quick Start step preflight failed: '
+const isQuickStartPreflightError = computed(
+  () =>
+    props.message.status === 'error' &&
+    props.message.content.startsWith(quickStartPreflightPrefix),
+)
+const quickStartPreflightDetail = computed(() =>
+  props.message.content.slice(quickStartPreflightPrefix.length),
+)
 
 const handleImageLoad = () => {
   emit('img-load')
@@ -696,6 +734,66 @@ function csvRows(content: string): string[][] {
   font-weight: 400;
   line-height: 1.65;
   letter-spacing: 0;
+}
+
+.quick-start-preflight-error {
+  margin: 0.25rem 0;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--danger-color) 34%, var(--border-color));
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--danger-bg) 44%, var(--bg-secondary));
+  color: var(--text-primary);
+}
+
+.quick-start-preflight-error__header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.quick-start-preflight-error__icon {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger-color) 16%, transparent);
+  color: var(--danger-color);
+  font-size: 1rem;
+}
+
+.quick-start-preflight-error__header div {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.quick-start-preflight-error__header strong {
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.quick-start-preflight-error__header span:not(.quick-start-preflight-error__icon) {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+}
+
+.quick-start-preflight-error__detail {
+  margin: 0.7rem 0 0;
+  padding: 0.55rem 0.625rem;
+  border-left: 2px solid var(--danger-color);
+  background: color-mix(in srgb, var(--bg-primary) 54%, transparent);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.quick-start-preflight-error__hint {
+  margin: 0.625rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1.45;
 }
 
 .markdown-body {

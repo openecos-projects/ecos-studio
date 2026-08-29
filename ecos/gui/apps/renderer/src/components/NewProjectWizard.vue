@@ -5,6 +5,7 @@
   >
     <div
       class="new-workspace-wizard-panel relative flex h-[88vh] max-h-[900px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-(--border-color) bg-(--bg-primary) shadow-[0_28px_70px_-24px_rgba(0,0,0,0.55)]"
+      :data-current-step="currentStep"
     >
       <button
         @click="closeWizard"
@@ -1610,7 +1611,6 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   deriveDirectoryFromDesign?: boolean
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
-  suggestedWorkspaceName?: string
 }
 
 interface Props {
@@ -1981,10 +1981,7 @@ function initialWorkspaceName(initialConfig?: WorkspaceWizardInitialConfig) {
   if (initialConfig?.directory) {
     return getFileName(initialConfig.directory)
   }
-  return (
-    initialConfig?.suggestedWorkspaceName ??
-    String(initialConfig?.parameters?.design ?? '').trim()
-  )
+  return String(initialConfig?.parameters?.design ?? '').trim()
 }
 
 function defaultWorkspaceName() {

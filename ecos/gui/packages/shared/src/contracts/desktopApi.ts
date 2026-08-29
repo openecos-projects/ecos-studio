@@ -48,11 +48,14 @@ import type {
   DesktopAgentInteractionAnswerRequest,
   DesktopAgentInteractionAnswerResponse,
   DesktopAgentInterruptRequest,
+  DesktopAgentModelSettings,
+  DesktopAgentModelSettingsRequest,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
   DesktopAgentWorkspaceRerunPrepareResult,
   DesktopAgentSendMessageRequest,
   DesktopAgentSendMessageResponse,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentStartRequest,
   DesktopAgentStartSessionRequest,
   DesktopAgentStartSessionResponse,
@@ -216,6 +219,8 @@ export type WorkspaceOpenOrFocusResult =
 export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
+    getQuickStartRoot?(): Promise<string>
+    prepareQuickStartProject?(name: string): Promise<string>
   }
   window: {
     minimize(): Promise<void>
@@ -375,6 +380,12 @@ export interface DesktopApi {
     sendMessage(
       request: DesktopAgentSendMessageRequest,
     ): Promise<DesktopAgentSendMessageResponse>
+    getModelSettings(
+      request: DesktopAgentModelSettingsRequest,
+    ): Promise<DesktopAgentModelSettings>
+    setModelSettings(
+      request: DesktopAgentSetModelSettingsRequest,
+    ): Promise<DesktopAgentModelSettings>
     answerInteraction(
       request: DesktopAgentInteractionAnswerRequest,
     ): Promise<DesktopAgentInteractionAnswerResponse>

@@ -17,6 +17,23 @@ function createProvider(providerId = 'codex'): AgentProviderRuntime {
 
   return {
     getStatus: vi.fn(async () => status),
+    getModelSettings: vi.fn(async () => ({
+      displayName: 'GPT Test',
+      model: 'gpt-test',
+      models: [
+        {
+          defaultReasoningEffort: 'medium' as const,
+          displayName: 'GPT Test',
+          model: 'gpt-test',
+          supportedReasoningEfforts: ['low', 'medium', 'high'] as (
+            | 'low'
+            | 'medium'
+            | 'high'
+          )[],
+        },
+      ],
+      reasoningEffort: 'medium' as const,
+    })),
     interrupt: vi.fn(async () => {}),
     listSessions: vi.fn(async () => ({ sessions: [] })),
     onEvent: vi.fn((nextListener) => {
@@ -38,6 +55,23 @@ function createProvider(providerId = 'codex'): AgentProviderRuntime {
       sessionId: request.sessionId,
     })),
     setMode: vi.fn(async () => status),
+    setModelSettings: vi.fn(async () => ({
+      displayName: 'GPT Test',
+      model: 'gpt-test',
+      models: [
+        {
+          defaultReasoningEffort: 'medium' as const,
+          displayName: 'GPT Test',
+          model: 'gpt-test',
+          supportedReasoningEfforts: ['low', 'medium', 'high'] as (
+            | 'low'
+            | 'medium'
+            | 'high'
+          )[],
+        },
+      ],
+      reasoningEffort: 'high' as const,
+    })),
     start: vi.fn(async () => {}),
     startSession: vi.fn(async () => ({
       sessionId: 'session-1',

@@ -4,11 +4,14 @@ import type {
   DesktopAgentInteractionAnswerResponse,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
+  DesktopAgentModelSettings,
+  DesktopAgentModelSettingsRequest,
   DesktopAgentProviderRequest,
   DesktopAgentResumeSessionRequest,
   DesktopAgentResumeSessionResponse,
   DesktopAgentSendMessageRequest,
   DesktopAgentSendMessageResponse,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentSetModeRequest,
   DesktopAgentStartRequest,
   DesktopAgentStartSessionRequest,
@@ -87,6 +90,18 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     request: DesktopAgentSendMessageRequest,
   ): Promise<DesktopAgentSendMessageResponse> {
     return await this.providerForRequest(request).sendMessage(request)
+  }
+
+  async getModelSettings(
+    request: DesktopAgentModelSettingsRequest,
+  ): Promise<DesktopAgentModelSettings> {
+    return await this.providerForRequest(request).getModelSettings(request)
+  }
+
+  async setModelSettings(
+    request: DesktopAgentSetModelSettingsRequest,
+  ): Promise<DesktopAgentModelSettings> {
+    return await this.providerForRequest(request).setModelSettings(request)
   }
 
   async answerInteraction(

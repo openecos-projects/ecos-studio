@@ -61,6 +61,8 @@ class EcosAgentProtocolServer:
             "start": self.provider.start,
             "startSession": self.provider.start_session,
             "sendMessage": self.provider.send_message,
+            "getModelSettings": self.provider.get_model_settings,
+            "setModelSettings": self.provider.set_model_settings,
             "answerInteraction": self.provider.answer_interaction,
             "interrupt": self.provider.interrupt,
             "getStatus": self.provider.get_status,

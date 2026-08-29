@@ -129,6 +129,10 @@ export type {
 } from './contracts/desktopCodex.ts'
 export { DESKTOP_CODEX_BIN_SETTING_KEY } from './contracts/desktopCodex.ts'
 export type {
+  DesktopAgentActivity,
+  DesktopAgentActivityNotice,
+  DesktopAgentActivityStatus,
+  DesktopAgentCommandActivity,
   DesktopAgentEvent,
   DesktopAgentChoiceInteraction,
   DesktopAgentConfirmInteraction,
@@ -165,7 +169,12 @@ export type {
   DesktopAgentWorkspaceSetupParameters,
   DesktopAgentEventType,
   DesktopAgentOptimizationPayload,
+  DesktopAgentReasoningActivity,
   DesktopAgentInterruptRequest,
+  DesktopAgentModelOption,
+  DesktopAgentModelSettings,
+  DesktopAgentModelSettingsRequest,
+  DesktopAgentReasoningEffort,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
   DesktopAgentProviderRequest,
@@ -181,8 +190,12 @@ export type {
   DesktopAgentSessionMode,
   DesktopAgentStartSessionRequest,
   DesktopAgentStartSessionResponse,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentStatus,
   DesktopAgentStatusState,
+  DesktopAgentToolCallActivity,
+  DesktopAgentWebSearchAction,
+  DesktopAgentWebSearchActivity,
 } from './contracts/desktopAgent.ts'
 export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
 export {
