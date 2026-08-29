@@ -112,6 +112,7 @@ import {
   executeWorkspaceRerun,
   prepareWorkspaceRerun,
 } from '../services/eccRpc/workspaceRerun'
+import type { QuickStartBuiltinResources } from '../services/quickStartResourceService'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -132,6 +133,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export interface DesktopBridgeServices {
   agentQuickRunRoot?: string
+  quickStartResourceService?: {
+    getResources(): QuickStartBuiltinResources
+  }
   agentRuntimeService?: AgentProviderRuntime & {
     syncEnvironmentOverrides?(
       overrides: Record<string, string | undefined>,
@@ -1101,6 +1105,13 @@ export function registerIpc(
       throw new Error('Quick Start storage is unavailable.')
     await mkdir(services.agentQuickRunRoot, { recursive: true })
     return services.agentQuickRunRoot
+  })
+
+  handle(desktopApiIpcChannels.appGetQuickStartResources, async () => {
+    if (!services.quickStartResourceService) {
+      throw new Error('Quick Start resources are unavailable.')
+    }
+    return services.quickStartResourceService.getResources()
   })
 
   handle(desktopApiIpcChannels.appPrepareQuickStartProject, async (_event, name) => {

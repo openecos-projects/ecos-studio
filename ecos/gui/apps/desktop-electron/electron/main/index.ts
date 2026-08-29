@@ -32,6 +32,7 @@ import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectReadGrantStore } from '../services/projectReadGrantStore'
 import { ProjectManifestService } from '../services/projectManifestService'
 import { ProjectManagementReadService } from '../services/projectManagementReadService'
+import { QuickStartResourceService } from '../services/quickStartResourceService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { SettingsStore } from '../services/settingsStore'
@@ -64,6 +65,7 @@ let services: {
   frontendRpcRuntimeService: FrontendRpcRuntimeService
   projectManagementReadService: ProjectManagementReadService
   projectManifestService: ProjectManifestService
+  quickStartResourceService: QuickStartResourceService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
   pdkInventoryService: PdkInventoryService
@@ -213,6 +215,11 @@ function getDesktopServices() {
     workspaceService,
   )
   const projectManagementReadService = new ProjectManagementReadService()
+  const quickStartResourceService = new QuickStartResourceService({
+    appPath: app.getAppPath(),
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+  })
   const shellService = new ShellPtyService({
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
@@ -257,6 +264,7 @@ function getDesktopServices() {
     eccRuntimeService,
     projectManagementReadService,
     projectManifestService,
+    quickStartResourceService,
     pdkInventoryService,
     resourceManagerService,
     settingsStore,
@@ -307,6 +315,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
       projectManagementReadService: desktopServices.projectManagementReadService,
       projectManifestService: desktopServices.projectManifestService,
+      quickStartResourceService: desktopServices.quickStartResourceService,
       resourceManagerService: desktopServices.resourceManagerService,
       pdkInventoryService: desktopServices.pdkInventoryService,
       chipViewerService: desktopServices.chipViewerService,
