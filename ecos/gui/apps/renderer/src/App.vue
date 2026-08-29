@@ -792,9 +792,9 @@ async function resolveQuickStartResources(
   let pdkImportError: string | undefined
   if (!pdk && builtin?.pdk?.path) {
     try {
-      await api.resources.importPdkPath({ path: builtin.pdk.path })
+      const imported = await api.resources.importPdkPath({ path: builtin.pdk.path })
       pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
-      pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+      pdk = ready(pdkCandidate) ? pdkCandidate : ready(imported) ? imported : undefined
     } catch (error) {
       pdkImportError = error instanceof Error ? error.message : String(error)
     }
