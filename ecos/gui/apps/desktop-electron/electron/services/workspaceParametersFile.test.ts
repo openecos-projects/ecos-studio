@@ -105,6 +105,14 @@ describe('locateWorkspaceParametersFile', () => {
     const root = createWorkspace()
     expect(await locateWorkspaceParametersFile(root)).toBeNull()
   })
+
+  it('refuses a broken ecc.toml symlink instead of falling back to parameters.json', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    symlinkSync(join(root, 'home', 'missing.toml'), join(root, 'home', 'ecc.toml'))
+    await expect(locateWorkspaceParametersFile(root)).rejects.toThrow(/symlink|ecc.toml/i)
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/symlink|ecc.toml/i)
+  })
 })
 
 describe('mergeTomlSections', () => {
@@ -200,6 +208,52 @@ describe('readWorkspaceParameters', () => {
     const root = createWorkspace()
     writeHomeFile(root, 'parameters.json', '{not json')
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/json/i)
+  })
+
+  it('rejects a GUI-known scalar that a section mirror presents as an array', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'ecc.toml',
+      `
+[design]
+name = "gcd"
+frequency_mhz = [100]
+
+[params]
+pdk = "ics55"
+design = "gcd"
+`,
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
+  })
+
+  it('rejects an array in a GUI-known nested scalar such as die_area.width', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'ecc.toml',
+      `
+[params]
+design = "gcd"
+pdk = "ics55"
+
+[params.die_area]
+width = [120]
+height = 80
+`,
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
+  })
+
+  it('rejects a JSON GUI-known scalar that is already a nested table', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      JSON.stringify({ Design: { extra: 'keep' }, PDK: 'ics55' }),
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
   })
 })
 
@@ -639,6 +693,18 @@ future = "keep"
     },
   )
 
+  it('rejects a nested Map payload instead of serializing it as an empty table', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    await expect(
+      writeWorkspaceParameters(root, {
+        design: 'gcd',
+        core: new Map([['utilitization', 0.5]]) as unknown as Record<string, unknown>,
+      }),
+    ).rejects.toThrow(/plain record|not a scalar|not representable/i)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
   it('rejects undefined payload leaves instead of silently deleting them', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'ecc.toml', ECC_TOML)
@@ -757,7 +823,7 @@ future = "keep"
     writeFileSync(outside, '[params]\ndesign = "gcd"\n')
     symlinkSync(outside, join(root, 'home', 'ecc.toml'))
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
-      /no longer resolves/i,
+      /symlink|no longer resolves/i,
     )
     expect(readFileSync(outside, 'utf8')).toBe('[params]\ndesign = "gcd"\n')
   })

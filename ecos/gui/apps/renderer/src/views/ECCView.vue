@@ -503,7 +503,7 @@ function normalizeSourceParameters(
     die_area_mode:
       optionalString(dieAreaRecord.mode) ||
       optionalString(parametersJson.die_area_mode) ||
-      (hasCanonicalDieSize ? 'width_height' : ''),
+      (hasCanonicalDieSize || dieSize.length >= 2 ? 'width_height' : ''),
     die_width: optionalNumber(
       dieAreaRecord.width ?? dieSize[0] ?? parametersJson.die_width,
       100,

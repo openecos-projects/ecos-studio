@@ -1,4 +1,13 @@
-import { open, realpath, rename, rm, stat, writeFile, chmod } from 'node:fs/promises'
+import {
+  lstat,
+  open,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+  chmod,
+} from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { randomInt } from 'node:crypto'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -51,6 +60,31 @@ function isErrno(error: unknown, code: string): boolean {
 async function isFile(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile()
+  } catch (error) {
+    if (isErrno(error, 'ENOENT')) return false
+    throw error
+  }
+}
+
+/**
+ * Distinguish a missing preferred config from a dangling symlink or other
+ * non-regular entry. `stat()` follows links, so a broken `home/ecc.toml`
+ * would otherwise look absent and fall through to `parameters.json`.
+ */
+async function assertPreferredConfigIsRegularFile(path: string): Promise<boolean> {
+  try {
+    const info = await lstat(path)
+    if (info.isSymbolicLink()) {
+      throw new Error(
+        `Refusing to use ${path}: the preferred workspace configuration is a symlink`,
+      )
+    }
+    if (!info.isFile()) {
+      throw new Error(
+        `Refusing to use ${path}: the preferred workspace configuration is not a regular file`,
+      )
+    }
+    return true
   } catch (error) {
     if (isErrno(error, 'ENOENT')) return false
     throw error
@@ -150,7 +184,7 @@ export async function locateWorkspaceParametersFile(
   root: string,
 ): Promise<WorkspaceParametersFileLocation | null> {
   const tomlPath = join(root, 'home', WORKSPACE_CONFIG_BASENAME)
-  if (await isFile(tomlPath)) {
+  if (await assertPreferredConfigIsRegularFile(tomlPath)) {
     return { format: 'toml', path: tomlPath }
   }
   const jsonPath = join(root, 'home', LEGACY_PARAMETERS_BASENAME)
@@ -332,16 +366,27 @@ export function parseWorkspaceParametersText(
         'Invalid workspace configuration: parameters JSON must contain a JSON object',
       )
     }
+    assertGuiKnownLeavesLossless(
+      parsed,
+      join(workspaceRoot, 'home', LEGACY_PARAMETERS_BASENAME),
+      GUI_KNOWN_JSON_SCALAR_KEYS,
+      GUI_KNOWN_JSON_TABLE_KEYS,
+      GUI_KNOWN_JSON_ARRAY_LEAVES,
+    )
     return parsed
   }
   const document = parseTomlDocument(
     text,
     join(workspaceRoot, 'home', WORKSPACE_CONFIG_BASENAME),
   )
-  return reviveSafeTomlIntegers(mergeTomlSections(document, workspaceRoot)) as Record<
-    string,
-    unknown
-  >
+  const flattened = reviveSafeTomlIntegers(
+    mergeTomlSections(document, workspaceRoot),
+  ) as Record<string, unknown>
+  assertGuiKnownTomlLeavesLossless(
+    flattened,
+    join(workspaceRoot, 'home', WORKSPACE_CONFIG_BASENAME),
+  )
+  return flattened
 }
 
 /**
@@ -543,6 +588,92 @@ const GUI_KNOWN_TOML_TABLE_KEYS: Record<string, ReadonlySet<string>> = {
   die_area: new Set(['width', 'height', 'utilitization', 'margin', 'mode']),
 }
 
+const GUI_KNOWN_ARRAY_LEAVES = new Set(['die.size', 'core.size', 'core.margin'])
+
+const GUI_KNOWN_JSON_SCALAR_KEYS = new Set([
+  'PDK',
+  'pdk',
+  'Design',
+  'design',
+  'description',
+  'Design Tool',
+  'design_tool',
+  'Top module',
+  'top_module',
+  'Clock',
+  'clock',
+  'Frequency max [MHz]',
+  'frequency_max',
+  'Max fanout',
+  'max_fanout',
+  'Target density',
+  'target_density',
+  'Target overflow',
+  'target_overflow',
+  'Global right padding',
+  'global_right_padding',
+  'Cell padding x',
+  'cell_padding_x',
+  'Routability opt flag',
+  'routability_opt_flag',
+  'Bottom layer',
+  'bottom_layer',
+  'Top layer',
+  'top_layer',
+  'PDK Root',
+  'pdk_root',
+])
+
+const GUI_KNOWN_JSON_TABLE_KEYS: Record<string, ReadonlySet<string>> = {
+  Die: new Set(['Size', 'size', 'Area', 'area']),
+  die: new Set(['Size', 'size', 'Area', 'area']),
+  Core: new Set([
+    'Size',
+    'size',
+    'Area',
+    'area',
+    'Bounding box',
+    'bounding_box',
+    'Utilitization',
+    'utilitization',
+    'Margin',
+    'margin',
+    'Aspect ratio',
+    'aspect_ratio',
+  ]),
+  core: new Set([
+    'Size',
+    'size',
+    'Area',
+    'area',
+    'Bounding box',
+    'bounding_box',
+    'Utilitization',
+    'utilitization',
+    'Margin',
+    'margin',
+    'Aspect ratio',
+    'aspect_ratio',
+  ]),
+  'Die Area': new Set(['width', 'height', 'utilitization', 'margin', 'mode']),
+  die_area: new Set(['width', 'height', 'utilitization', 'margin', 'mode']),
+}
+
+const GUI_KNOWN_JSON_ARRAY_LEAVES = new Set([
+  'Die.Size',
+  'Die.size',
+  'die.Size',
+  'die.size',
+  'Core.Size',
+  'Core.size',
+  'core.Size',
+  'core.size',
+  'Core.Margin',
+  'Core.margin',
+  'core.Margin',
+  'core.margin',
+])
+
 /**
  * Agent/rerun TOML edits stringify the whole flattened document. A Date,
  * bigint, table, or array already sitting in a GUI-known scalar leaf would
@@ -561,7 +692,11 @@ function assertGuiKnownTomlLeavesLossless(
       if (isPlainRecord(value)) {
         for (const [nestedKey, nested] of Object.entries(value)) {
           if (!nestedKeys.has(nestedKey)) continue
-          assertGuiKnownNestedLossless(nested, `${label}:${key}.${nestedKey}`)
+          assertGuiKnownNestedLossless(
+            nested,
+            `${label}:${key}.${nestedKey}`,
+            GUI_KNOWN_ARRAY_LEAVES.has(`${key}.${nestedKey}`),
+          )
         }
       } else {
         assertGuiKnownScalarLossless(value, `${label}:${key}`)
@@ -573,12 +708,48 @@ function assertGuiKnownTomlLeavesLossless(
   }
 }
 
-function assertGuiKnownNestedLossless(value: unknown, label: string): void {
+function assertGuiKnownNestedLossless(
+  value: unknown,
+  label: string,
+  allowArray: boolean,
+): void {
   if (Array.isArray(value)) {
+    if (!allowArray) {
+      throw new Error(`Refusing to rewrite ${label}: existing value is not a scalar`)
+    }
     for (const item of value) assertGuiKnownScalarLossless(item, label)
     return
   }
   assertGuiKnownScalarLossless(value, label)
+}
+
+function assertGuiKnownLeavesLossless(
+  parameters: Record<string, unknown>,
+  label: string,
+  scalarKeys: ReadonlySet<string>,
+  tableKeys: Record<string, ReadonlySet<string>>,
+  arrayLeaves: ReadonlySet<string>,
+): void {
+  for (const [key, value] of Object.entries(parameters)) {
+    const nestedKeys = tableKeys[key]
+    if (nestedKeys) {
+      if (isPlainRecord(value)) {
+        for (const [nestedKey, nested] of Object.entries(value)) {
+          if (!nestedKeys.has(nestedKey)) continue
+          assertGuiKnownNestedLossless(
+            nested,
+            `${label}:${key}.${nestedKey}`,
+            arrayLeaves.has(`${key}.${nestedKey}`),
+          )
+        }
+      } else {
+        assertGuiKnownScalarLossless(value, `${label}:${key}`)
+      }
+      continue
+    }
+    if (!scalarKeys.has(key)) continue
+    assertGuiKnownScalarLossless(value, `${label}:${key}`)
+  }
 }
 
 function assertGuiKnownScalarLossless(value: unknown, label: string): void {
@@ -655,6 +826,12 @@ function assertFiniteNumbers(value: unknown, label: string): void {
   }
   if (isPlainRecord(value)) {
     for (const item of Object.values(value)) assertFiniteNumbers(item, label)
+    return
+  }
+  if (typeof value === 'object') {
+    throw new Error(
+      `Refusing to write ${label}: value must be a plain record, array, or scalar`,
+    )
   }
 }
 
@@ -1381,7 +1558,10 @@ export async function prepareWorkspaceParameterEdits(
   }
   assertNoSubMillisecondDatetimes(raw, onDisk.path)
   const document = parseTomlDocument(raw, onDisk.path)
-  const parameters = mergeTomlSections(document, root)
+  const parameters = reviveSafeTomlIntegers(mergeTomlSections(document, root)) as Record<
+    string,
+    unknown
+  >
   assertGuiKnownTomlLeavesLossless(parameters, onDisk.path)
   for (const edit of edits) {
     const normalizedPath = edit.json_path.map((segment) =>

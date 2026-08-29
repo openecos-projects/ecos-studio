@@ -239,7 +239,9 @@ describe('branch prefill canonical parameters', () => {
     expect(normalizeSource).toContain('dieSize[0]')
     expect(normalizeSource).toContain('dieSize[1]')
     expect(normalizeSource).toContain('hasCanonicalDieSize')
-    expect(normalizeSource).toContain("hasCanonicalDieSize ? 'width_height'")
+    expect(normalizeSource).toContain(
+      "hasCanonicalDieSize || dieSize.length >= 2 ? 'width_height'",
+    )
     expect(normalizeSource).toContain('scalarMarginFromCore(coreMargin')
   })
 })
