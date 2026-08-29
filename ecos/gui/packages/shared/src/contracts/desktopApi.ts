@@ -80,6 +80,18 @@ export interface DesktopDirectoryDialogOptions {
   title?: string
 }
 
+export interface QuickStartBuiltinResource {
+  id: string
+  path: string
+  version: string
+}
+
+export interface QuickStartBuiltinResources {
+  design: QuickStartBuiltinResource | null
+  diagnostics: string[]
+  pdk: QuickStartBuiltinResource | null
+}
+
 export interface DesktopFileDialogFilter {
   name: string
   extensions: string[]
@@ -219,6 +231,7 @@ export type WorkspaceOpenOrFocusResult =
 export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
+    getQuickStartResources?(): Promise<QuickStartBuiltinResources>
     getQuickStartRoot?(): Promise<string>
     prepareQuickStartProject?(name: string): Promise<string>
   }

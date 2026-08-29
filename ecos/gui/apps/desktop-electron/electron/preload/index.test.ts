@@ -32,6 +32,7 @@ async function loadDesktopBridge() {
   return contextBridgeExposeInMainWorld.mock.calls.at(-1)?.[1] as {
     app: {
       getVersions(): Promise<unknown>
+      getQuickStartResources(): Promise<unknown>
     }
     ecc: {
       events: {
@@ -100,6 +101,7 @@ describe('preload desktop bridge contract', () => {
       expect.objectContaining({
         app: expect.objectContaining({
           getVersions: expect.any(Function),
+          getQuickStartResources: expect.any(Function),
         }),
         ecc: expect.objectContaining({
           events: expect.objectContaining({
@@ -119,6 +121,11 @@ describe('preload desktop bridge contract', () => {
   it('routes bridge calls through shared IPC channel constants', async () => {
     const bridge = await loadDesktopBridge()
     ipcRenderer.invoke.mockResolvedValueOnce({ gui: '0.1.0-test' })
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      design: null,
+      diagnostics: [],
+      pdk: null,
+    })
     ipcRenderer.invoke.mockResolvedValueOnce('module top; endmodule')
     ipcRenderer.invoke.mockResolvedValueOnce([
       { name: 'top.v', path: '/work/demo/origin/top.v', type: 'file' },
@@ -132,6 +139,11 @@ describe('preload desktop bridge contract', () => {
     ipcRenderer.invoke.mockResolvedValueOnce(undefined)
 
     await expect(bridge.app.getVersions()).resolves.toEqual({ gui: '0.1.0-test' })
+    await expect(bridge.app.getQuickStartResources()).resolves.toEqual({
+      design: null,
+      diagnostics: [],
+      pdk: null,
+    })
     await expect(bridge.workspace.readProjectTextFile('rtl/top.sv')).resolves.toBe(
       'module top; endmodule',
     )
@@ -162,31 +174,35 @@ describe('preload desktop bridge contract', () => {
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       2,
+      desktopApiIpcChannels.appGetQuickStartResources,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
       desktopApiIpcChannels.workspaceReadProjectTextFile,
       'rtl/top.sv',
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      3,
+      4,
       desktopApiIpcChannels.workspaceListProjectDirectory,
       '/work/demo/origin',
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      4,
+      5,
       desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
       '/work/demo',
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      5,
+      6,
       desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
       replacement.id,
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      6,
+      7,
       desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
       replacement.id,
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      7,
+      8,
       desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
       replacement.id,
     )

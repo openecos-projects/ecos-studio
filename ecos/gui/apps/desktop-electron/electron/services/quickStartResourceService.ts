@@ -56,19 +56,11 @@ export function resolveQuickStartResources(
   const pdkReady = isDirectory(pdkPath, stat)
 
   return {
-    design: designReady
-      ? { ...GCD_RESOURCE, path: designPath }
-      : null,
-    pdk: pdkReady
-      ? { ...PDK_RESOURCE, path: pdkPath }
-      : null,
+    design: designReady ? { ...GCD_RESOURCE, path: designPath } : null,
+    pdk: pdkReady ? { ...PDK_RESOURCE, path: pdkPath } : null,
     diagnostics: [
-      ...(!designReady
-        ? [`Built-in GCD example is unavailable at ${designPath}.`]
-        : []),
-      ...(!pdkReady
-        ? [`Built-in ICS55 PDK is unavailable at ${pdkPath}.`]
-        : []),
+      ...(!designReady ? [`Built-in GCD example is unavailable at ${designPath}.`] : []),
+      ...(!pdkReady ? [`Built-in ICS55 PDK is unavailable at ${pdkPath}.`] : []),
     ],
   }
 }

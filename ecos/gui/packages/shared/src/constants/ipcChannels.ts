@@ -1,5 +1,6 @@
 export const desktopApiIpcChannels = {
   appGetVersions: 'app:get-versions',
+  appGetQuickStartResources: 'app:get-quick-start-resources',
   appGetQuickStartRoot: 'app:get-quick-start-root',
   appPrepareQuickStartProject: 'app:prepare-quick-start-project',
   windowMinimize: 'window:minimize',

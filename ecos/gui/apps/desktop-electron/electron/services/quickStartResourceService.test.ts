@@ -66,7 +66,9 @@ describe('resolveQuickStartResources', () => {
   it('rejects a directory used as the design and a file used as the PDK', () => {
     const repoRoot = createRoot()
     const appPath = join(repoRoot, 'ecos', 'gui', 'apps', 'desktop-electron')
-    mkdirSync(join(repoRoot, 'ecc', 'docs', 'examples', 'gcd', 'gcd.v'), { recursive: true })
+    mkdirSync(join(repoRoot, 'ecc', 'docs', 'examples', 'gcd', 'gcd.v'), {
+      recursive: true,
+    })
     mkdirSync(join(repoRoot, 'pdk'), { recursive: true })
     writeFileSync(join(repoRoot, 'pdk', 'icsprout55-pdk'), 'not a directory')
 

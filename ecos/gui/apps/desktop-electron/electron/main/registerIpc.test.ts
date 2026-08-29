@@ -96,10 +96,12 @@ type RegisteredHandler = (event: { sender: unknown }, ...args: unknown[]) => unk
 function registerHandlers(
   agentRuntimeService?: DesktopBridgeServices['agentRuntimeService'],
   agentQuickRunRoot?: string,
+  quickStartResourceService?: DesktopBridgeServices['quickStartResourceService'],
 ) {
   const handlers = new Map<string, RegisteredHandler>()
   const services = {
     agentQuickRunRoot,
+    quickStartResourceService,
     agentRuntimeService,
     settingsStore: {
       delete: vi.fn(),
@@ -913,6 +915,29 @@ describe('registerIpc', () => {
     expect(handler).toBeDefined()
     await expect(handler?.({ sender: { id: 'web-contents' } })).resolves.toEqual(versions)
     expect(services.appInfoService.getVersions).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns fixed Quick Start resources from the main process service', async () => {
+    const resources = {
+      design: {
+        id: 'local:gcd',
+        path: '/repo/ecc/docs/examples/gcd/gcd.v',
+        version: 'local',
+      },
+      diagnostics: [],
+      pdk: { id: 'pdk:ics55', path: '/repo/pdk/icsprout55-pdk', version: 'local' },
+    }
+    const quickStartResourceService = {
+      getResources: vi.fn(() => resources),
+    }
+    const { handlers } = registerHandlers(undefined, undefined, quickStartResourceService)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.appGetQuickStartResources)?.({
+        sender: { id: 'web-contents' },
+      }),
+    ).resolves.toEqual(resources)
+    expect(quickStartResourceService.getResources).toHaveBeenCalledTimes(1)
   })
 
   it('lists typed PDK Installation snapshots', async () => {

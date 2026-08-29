@@ -35,6 +35,8 @@ export type {
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,
+  QuickStartBuiltinResource,
+  QuickStartBuiltinResources,
   ChipViewerOpenRequest,
   ChipViewerOpenResult,
   ChipViewerOpenStatus,
