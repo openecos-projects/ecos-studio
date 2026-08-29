@@ -4,3 +4,10 @@ __pycache__/
 .venv/
 dist/
 experiments/pilot/results/
+docs/experiments/
+experiments/**/workspaces/
+experiments/**/workspace/
+experiments/**/calibration/
+experiments/**/codex-diagnostics.jsonl
+experiments/**/*-input.jsonl
+experiments/**/runs/*-partial/
