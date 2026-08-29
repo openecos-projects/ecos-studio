@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
 import pytest
+from optimization_test_support import support_catalog
 
 from ecos_agent.codex_rpc import CodexProviderError
 from ecos_agent.effective_domain import build_context_fingerprint
@@ -27,16 +29,16 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEvidence,
     ProposalReason,
     RequestedKnobValue,
-    StageObservation,
     SignoffGates,
+    StageObservation,
     StrategyDirection,
     TerminalObservation,
     TimingMetric,
 )
 from ecos_agent.optimization_controller import (
     CandidateExecutionEvidence,
-    CandidateExecutionRequest,
     CandidateExecutionReceipt,
+    CandidateExecutionRequest,
     OptimizationAgentMode,
     OptimizationEpisodeController,
     OptimizationEpisodeControllerError,
@@ -46,6 +48,7 @@ from ecos_agent.optimization_decision_audit import (
     OptimizationDecisionAudit,
     OptimizationDecisionAuditIntegrityError,
 )
+from ecos_agent.optimization_knowledge_compiler import BoundKnowledgeAction
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
@@ -229,6 +232,7 @@ def _retrieval() -> OptimizationRetrievalResult:
         request=request,
         channels=(channel,),
         knowledge_refs=(reference,),
+        support_catalog=support_catalog(reference),
     )
 
 
@@ -522,7 +526,8 @@ def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(
     assert planned.proposal is not None
     assert planned.requested is not None
     assert planned.requested.value == 3
-    assert codex.contexts[0].knowledge_chunks == ("Audited congestion strategy.",)
+    assert codex.contexts[0].knowledge_chunks == ()
+    assert codex.contexts[0].supported_action_view is not None
     completed = controller.execute()
     assert completed.state == OptimizationEpisodeState.PLANNING
     assert controller.budget.consumed_planning_calls == 1
@@ -532,6 +537,44 @@ def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(
         controller.ledger.replay().terminal_outcomes[0].outcome
         == OptimizationOutcomeKind.DEGRADED
     )
+
+
+def test_full_agent_rejects_retrieved_claim_that_does_not_support_action(
+    tmp_path: Path,
+) -> None:
+    retrieval = _retrieval()
+    binding = retrieval.support_catalog.bindings[0].model_copy(
+        update={
+            "actions": (
+                BoundKnowledgeAction(
+                    knob_id="place.cell_padding_x",
+                    direction=StrategyDirection.INCREASE,
+                ),
+            )
+        }
+    )
+    retrieval = replace(
+        retrieval,
+        support_catalog=retrieval.support_catalog.model_copy(
+            update={"bindings": (binding,)}
+        ),
+    )
+    codex = _FakeCodex(
+        lambda context: _proposal(
+            context,
+            knob_id="place.cell_padding_x",
+            direction=StrategyDirection.DECREASE,
+        )
+    )
+    ecc = _FakeEcc()
+
+    rejected = _controller(tmp_path, codex, ecc).plan(
+        _observation(), retrieval, CURRENT_VALUES
+    )
+
+    assert rejected.rejection_reason == "knowledge_action_support"
+    assert rejected.proposal is None
+    assert ecc.start_calls == []
 
 
 def test_controller_binds_codex_turn_evidence_to_the_planning_audit(
@@ -652,6 +695,14 @@ def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
     assert set(context.current_values) == set(CURRENT_VALUES)
     assert all(
         item.snapshot_sha256.startswith("sha256:") for item in context.effective_domains
+    )
+    supported = context.supported_action_view.actions[0]
+    domain = next(
+        item for item in context.effective_domains if item.knob_id == supported.knob_id
+    )
+    assert supported.effective_domain_sha256 == domain.snapshot_sha256
+    assert set(supported.allowed_requested_values) <= set(
+        domain.allowed_requested_values
     )
     payload = planning_context_payload(context)
     assert len(payload["effective_domains"]) == 8

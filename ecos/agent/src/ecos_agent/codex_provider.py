@@ -356,7 +356,9 @@ class CodexAppServerProposalProvider:
             "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
             "workspaces, RPC methods, or execution instructions. observation_refs must contain exactly the "
             "supplied observation_ref, not the incumbent observation. Reference only supplied history and "
-            "knowledge identifiers and task-memory summary hashes. Task memory is evidence only; "
+            "knowledge identifiers and task-memory summary hashes. For propose, select a claim, binding, "
+            "knob, and direction from supported_action_view; raw citations do not authorize an action. "
+            "Task memory is evidence only; "
             "use application receipts and effective values in history, and treat "
             "excluded_surface_values as surface values excluded for this context. Local validation "
             "selects exact values and owns execution."
@@ -410,8 +412,8 @@ class CodexAppServerProposalProvider:
             payload["effective_domains"] = [item.model_dump(mode="json") for item in domains]
         system = (
             "Return one JSON object matching ecos.optimization_proposal.v2. "
-            "Choose at most one knob from the supplied legal actions and use that knob's exact "
-            "allowlist and domain hash; "
+            "Choose a claim, binding, knob, and direction from supported_action_view; raw citations "
+            "do not authorize an action. Use that action's exact allowlist and domain hash; "
             "never emit commands, paths, workspaces, RPCs, or execution authority."
         )
         output_schema = _optimization_proposal_output_schema_v2(

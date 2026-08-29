@@ -8,14 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.provider import EcosAgentProvider
 from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, RetrievalConfig
+from ecos_agent.provider import EcosAgentProvider
 from ecos_agent.step_knowledge import (
     STEP_KNOWLEDGE_SPECS,
     StepKnowledge,
     StepKnowledgeError,
 )
-
 
 AGENT_ROOT = Path(__file__).parents[1]
 KNOWLEDGE_ROOT = AGENT_ROOT / "knowledge"
@@ -67,7 +66,7 @@ def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path:
     place_catalog = json.loads((output / "tool" / "place" / "catalog.json").read_text(encoding="utf-8"))
     assert place_catalog["schema_version"] == "ecos-place-catalog.v3"
     general_catalog = json.loads((output / "general" / "congestion" / "catalog.json").read_text(encoding="utf-8"))
-    assert general_catalog["schema_version"] == "ecos-general-catalog.v1"
+    assert general_catalog["schema_version"] == "ecos-general-catalog.v2"
     assert "strategy" in {entity["kind"] for entity in general_catalog["entities"]}
     assert "strategy" not in {entity["kind"] for entity in place_catalog["entities"]}
     assert not (AGENT_ROOT / "scripts" / "knowledge" / "place.py").exists()

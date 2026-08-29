@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from ecos_agent.codex_provider import (
     CodexAppServerProposalProvider,
     CodexProviderError,
@@ -258,6 +259,7 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
         "history",
         "knowledge_refs",
         "knowledge_chunks",
+        "supported_action_view",
         "legal_actions",
         "excluded_surface_values",
         "objective",
@@ -408,6 +410,7 @@ def test_optimization_planner_v2_binds_domain_and_planning_evidence(
     result = provider.propose_v2(context, domain)
 
     assert result["schema_version"] == "ecos.optimization_proposal.v2"
+    assert "raw citations do not authorize an action" in captured["system"]
     assert captured["user"]["effective_domain"] == domain.model_dump(mode="json")
     schema = captured["output_schema"]
     assert schema["$defs"]["OptimizationKnob"]["enum"] == [

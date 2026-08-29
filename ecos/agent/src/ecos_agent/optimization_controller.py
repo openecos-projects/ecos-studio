@@ -54,6 +54,11 @@ from ecos_agent.optimization_decision_audit import (
     OptimizationDecisionAudit,
     OptimizationDecisionAuditReplay,
 )
+from ecos_agent.optimization_knowledge_compiler import (
+    SupportedActionView,
+    build_state_evidence_request,
+    compile_supported_action_view,
+)
 from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
@@ -67,7 +72,10 @@ from ecos_agent.optimization_ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
-from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
+from ecos_agent.optimization_retrieval import (
+    KnowledgeChannel,
+    OptimizationRetrievalResult,
+)
 from ecos_agent.optimization_rules import (
     ACTIVE_OPTIMIZATION_KNOBS,
     IncumbentDecision,
@@ -185,6 +193,7 @@ class OptimizationPlanningContext:
     task_memory: OptimizationTaskMemorySnapshot | None = None
     excluded_surface_values: tuple[RequestedKnobValue, ...] = ()
     effective_domains: tuple[EffectiveDomainSnapshot, ...] = ()
+    supported_action_view: SupportedActionView | None = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +242,14 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
             item.model_dump(mode="json") for item in context.knowledge_refs
         ],
         "knowledge_chunks": list(context.knowledge_chunks),
+        "supported_action_view": (
+            {
+                **context.supported_action_view.model_dump(mode="json"),
+                "view_sha256": context.supported_action_view.view_sha256,
+            }
+            if context.supported_action_view is not None
+            else None
+        ),
         "objective": (
             context.objective.model_dump(mode="json")
             if context.objective is not None
@@ -1035,12 +1052,62 @@ class OptimizationEpisodeController:
         if self.mode == OptimizationAgentMode.LLM_NO_KNOWLEDGE:
             knowledge_refs: tuple[KnowledgeReference, ...] = ()
             knowledge_chunks: tuple[str, ...] = ()
+            supported_action_view = None
         else:
-            knowledge_refs = retrieval.knowledge_refs
+            supported_action_view = compile_supported_action_view(
+                state=build_state_evidence_request(
+                    task_id=retrieval.request.task_id,
+                    retrieval_request_sha256=retrieval.request_sha256,
+                    observation=observation,
+                    current_values=current_values,
+                    primary_metric=(
+                        self._objective.primary_metric
+                        if self._objective is not None
+                        else None
+                    ),
+                    preserve_metrics=(
+                        self._objective.preserve_metrics
+                        if self._objective is not None
+                        else ()
+                    ),
+                    incumbent=self._incumbent,
+                    historical_metrics=tuple(
+                        {
+                            metric.value: value
+                            for metric, value in item.terminal_observation.metrics.items()
+                        }
+                        for item in history
+                        if item.terminal_observation is not None
+                    ),
+                    history_sha256=tuple(
+                        canonical_sha256(_history_payload(item)) for item in history
+                    ),
+                ),
+                catalog=retrieval.support_catalog,
+                retrieved_refs=retrieval.knowledge_refs,
+                legal_actions=available_actions,
+                effective_domains=effective_domains,
+            )
+            supported_claims = {
+                (item.claim_ref.entity_id, item.claim_ref.chunk_sha256)
+                for item in supported_action_view.actions
+            }
+            tool_refs = {
+                (item.entity_id, item.chunk_sha256)
+                for channel in retrieval.channels
+                if channel.channel == KnowledgeChannel.TOOL
+                for item in channel.knowledge_refs
+            }
+            knowledge_refs = tuple(
+                item
+                for item in retrieval.knowledge_refs
+                if (item.entity_id, item.chunk_sha256) in supported_claims | tool_refs
+            )
             knowledge_chunks = tuple(
                 channel.answer_text
                 for channel in retrieval.channels
-                if channel.answer_text is not None
+                if channel.channel == KnowledgeChannel.TOOL
+                and channel.answer_text is not None
             )
         context_ref = ProposalContextRef(
             episode_id=self.episode_id,
@@ -1054,6 +1121,11 @@ class OptimizationEpisodeController:
                         else None
                     ),
                     "retrieval": retrieval.contract,
+                    "supported_action_view": (
+                        supported_action_view.model_dump(mode="json")
+                        if supported_action_view is not None
+                        else None
+                    ),
                     "objective": (
                         self._objective.model_dump(mode="json")
                         if self._objective is not None
@@ -1095,6 +1167,7 @@ class OptimizationEpisodeController:
             task_memory,
             ineffective_requests,
             effective_domains,
+            supported_action_view,
         )
 
     def _effective_domain_context(
@@ -1382,6 +1455,21 @@ class OptimizationEpisodeController:
                 return "knowledge_reference"
             if proposal.action is None:
                 return "proposal_action"
+            if self.mode == OptimizationAgentMode.FULL_AGENT and not any(
+                item.knob_id == proposal.action.knob_id
+                and item.direction == proposal.action.direction
+                and (
+                    item.claim_ref.entity_id,
+                    item.claim_ref.chunk_sha256,
+                )
+                in proposed_knowledge
+                for item in (
+                    context.supported_action_view.actions
+                    if context.supported_action_view is not None
+                    else ()
+                )
+            ):
+                return "knowledge_action_support"
         return None
 
     def _history_refs_are_current(

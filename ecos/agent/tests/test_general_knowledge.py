@@ -2,6 +2,9 @@ import json
 from pathlib import Path
 
 from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever
+from ecos_agent.optimization_knowledge_compiler import (
+    knowledge_support_catalog_from_bundles,
+)
 from ecos_agent.provider import EcosAgentProvider
 from ecos_agent.step_knowledge import (
     GENERAL_KNOWLEDGE_METRICS,
@@ -11,7 +14,6 @@ from ecos_agent.step_knowledge import (
     load_default_general_knowledge_bundles,
     load_default_step_knowledge,
 )
-
 
 AGENT_ROOT = Path(__file__).parents[1]
 CONGESTION_ROOT = AGENT_ROOT / "knowledge" / "general" / "congestion"
@@ -30,7 +32,7 @@ def test_general_is_not_a_flow_stage() -> None:
     assert len(STEP_KNOWLEDGE_SPECS) == 12
     assert GENERAL_KNOWLEDGE_METRICS == ("congestion", "wirelength")
     assert GENERAL_KNOWLEDGE_SPEC.slug == "general"
-    assert GENERAL_KNOWLEDGE_SPEC.catalog_schema == "ecos-general-catalog.v1"
+    assert GENERAL_KNOWLEDGE_SPEC.catalog_schema == "ecos-general-catalog.v2"
 
 
 def test_place_bundle_stays_tool_specific() -> None:
@@ -71,6 +73,31 @@ def test_general_bundles_keep_congestion_and_wirelength_separate() -> None:
     assert entity.stages == ("place", "floorplan")
     assert "No authorized knob" in congestion_strategies
     assert "spread_local_movable_cells" in congestion_strategies
+
+
+def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
+    catalog = knowledge_support_catalog_from_bundles(
+        load_default_general_knowledge_bundles()
+    )
+    spreading = next(
+        claim
+        for claim in catalog.claims
+        if claim.claim_ref.entity_id
+        == "strategy.congestion.lower_packing_when_overflow_persists.v1"
+    )
+    binding = next(
+        item for item in catalog.bindings if item.claim_id == spreading.claim_ref.entity_id
+    )
+
+    assert len(catalog.claims) == 24
+    assert spreading.claim_sha256.startswith("sha256:")
+    assert {predicate.feature_id for predicate in spreading.state_predicates} == {
+        "overflow_map",
+        "cell_density_map",
+    }
+    assert ("place.target_density", "decrease") in {
+        (action.knob_id, action.direction.value) for action in binding.actions
+    }
 
 
 def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:

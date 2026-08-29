@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from optimization_test_support import support_catalog
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
@@ -421,7 +422,9 @@ def _retrieval(
         answer_text="Audited congestion strategy.",
         knowledge_refs=(reference,),
     )
-    return OptimizationRetrievalResult(request, (channel,), (reference,))
+    return OptimizationRetrievalResult(
+        request, (channel,), (reference,), support_catalog(reference)
+    )
 
 
 def _terminal_observation(

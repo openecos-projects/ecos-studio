@@ -148,6 +148,19 @@ Codex CLI 仅用于生成**只读、带类型约束的建议**，不会取得流
 - Codex 的建议必须经过本地校验并展示给用户确认。它不能执行 shell/ECC 命令、
   不能自行选择没有证据的阶段、不能创建或覆盖 workspace，也不能宣称流程成功。
 
+优化规划中的知识使用采用两阶段本地门禁。`ecos.optimization_retrieval_request.v2`
+继续作为 value-free、metric-ID-only baseline；目标路径另外生成
+`ecos.optimization_state_evidence_request.v1`，用 observation hash 绑定当前指标、相对
+reference/incumbent 的 delta、历史 trend、current values 和可用的 spatial evidence。
+确定性 compiler 将召回 claim、hash-locked tool binding 与当轮 legal actions 求交，
+只把 `ecos.supported_action_view.v1` 中 `pass` / `weak` 的 claim-action 关系交给 planner。
+缺观测、anti-condition、stale binding 或 unsupported action 均 fail closed。
+
+默认 `ecos.optimization_proposal.v2` 从 compiled view 支持的 knob/direction 及匹配的
+effective-domain allowlist 中选择 exact value；validator 同时检查知识支持关系、domain hash、
+方向和 frozen lattice。兼容的 v1 lane 仍由本地 controller 选择数值。两个 lane 的执行权都
+保留在 controller，知识模块只消费 Parameter Effectiveness 的公开合同，不复制其能力。
+
 项目根目录和重跑 source workspace 是 Codex 可读取建议的边界。Codex 不可用、
 超时或返回不符合合同的内容时，不会生成可执行合同或调用 ECC；Agent 会保留当前
 输入步骤，供用户修正输入后重试。
