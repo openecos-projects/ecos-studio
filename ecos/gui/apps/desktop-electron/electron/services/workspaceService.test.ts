@@ -1136,4 +1136,47 @@ describe('applyWorkspaceParameterWrites', () => {
     expect(finalDocument.extra).toBe(true)
     expect(finalDocument.density_weight).toBe(0.1)
   })
+
+  it('refuses a queued config-editor save after the active workspace changes', async () => {
+    const workspaceA = await createTempDir('ecos-workspace-service-editor-root-a-')
+    const workspaceB = await createTempDir('ecos-workspace-service-editor-root-b-')
+    await mkdir(join(workspaceA, 'home'), { recursive: true })
+    await mkdir(join(workspaceA, 'config'), { recursive: true })
+    const stepPath = join(workspaceA, 'config', 'dreamplace_ecc.json')
+    const original = '{\n    "density_weight": 0.2\n}\n'
+    await writeFile(stepPath, original, 'utf8')
+
+    const projectScopeProvider = createProjectScopeProvider(workspaceA, workspaceA)
+    projectScopeProvider.requestWritableProjectPathAccess = vi.fn(
+      async (path: string) => path,
+    )
+    let activeRoot = workspaceA
+    projectScopeProvider.getProjectRoot = vi.fn(async () => activeRoot)
+    const service = new WorkspaceService({
+      projectScopeProvider,
+      replacementJournalDirectory: join(workspaceA, '.workspace-replacement-journals'),
+    })
+
+    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
+      await import('./workspaceParametersFile')
+    const queueKey = await workspaceParameterWriteQueueKey(workspaceA)
+    let release!: () => void
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate
+    })
+    const hold = enqueueParameterWrite(queueKey, async () => {
+      await gate
+    })
+
+    const editor = service.writeProjectTextFile(
+      stepPath,
+      '{\n    "density_weight": 0.8\n}\n',
+    )
+    await delay(20)
+    activeRoot = workspaceB
+    release()
+    await hold
+    await expect(editor).rejects.toThrow(/active workspace/)
+    await expect(readFile(stepPath, 'utf8')).resolves.toBe(original)
+  })
 })

@@ -208,6 +208,20 @@ describe('useParameters helpers', () => {
     expect(parsed.Core.Margin).toEqual([3, 3])
   })
 
+  it('prefers canonical die_area over retained legacy die/core geometry', () => {
+    const parsed = parseParametersRecord({
+      pdk: 'ics55',
+      design: 'demo',
+      die: { size: [10, 20], area: 200 },
+      core: { utilitization: 0.2, margin: [2, 2] },
+      die_area: { width: 120, height: 80, utilitization: 0.5, margin: 3 },
+    })
+    expect(parsed.Die.Size).toEqual([120, 80])
+    expect(parsed.Die.Area).toBe(200)
+    expect(parsed.Core.Utilitization).toBe(0.5)
+    expect(parsed.Core.Margin).toEqual([2, 2])
+  })
+
   it('rejects bigint parameters instead of rounding them silently', () => {
     expect(() =>
       parseParametersRecord({

@@ -255,6 +255,23 @@ height = 80
     )
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
   })
+
+  it('keeps a legacy JSON workspace whose canonical duplicate is an inert table', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      JSON.stringify({
+        PDK: 'ics55',
+        Design: 'gcd',
+        'Max fanout': 20,
+        max_fanout: { future: true },
+      }),
+    )
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.['Max fanout']).toBe(20)
+    expect(parameters?.max_fanout).toEqual({ future: true })
+  })
 })
 
 describe('mergePayloadIntoTomlDocument', () => {

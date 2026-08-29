@@ -366,12 +366,13 @@ export function parseWorkspaceParametersText(
         'Invalid workspace configuration: parameters JSON must contain a JSON object',
       )
     }
-    assertGuiKnownLeavesLossless(
-      parsed,
+    // Collision parity with ecc: a long display key wins over its already-
+    // canonical duplicate. Validate the normalized semantic copy so an inert
+    // `max_fanout` table cannot reject a usable `Max fanout` workspace, then
+    // return the original JSON shape to frontend consumers.
+    assertGuiKnownTomlLeavesLossless(
+      normalizeParameterKeys(parsed) as Record<string, unknown>,
       join(workspaceRoot, 'home', LEGACY_PARAMETERS_BASENAME),
-      GUI_KNOWN_JSON_SCALAR_KEYS,
-      GUI_KNOWN_JSON_TABLE_KEYS,
-      GUI_KNOWN_JSON_ARRAY_LEAVES,
     )
     return parsed
   }
@@ -590,90 +591,6 @@ const GUI_KNOWN_TOML_TABLE_KEYS: Record<string, ReadonlySet<string>> = {
 
 const GUI_KNOWN_ARRAY_LEAVES = new Set(['die.size', 'core.size', 'core.margin'])
 
-const GUI_KNOWN_JSON_SCALAR_KEYS = new Set([
-  'PDK',
-  'pdk',
-  'Design',
-  'design',
-  'description',
-  'Design Tool',
-  'design_tool',
-  'Top module',
-  'top_module',
-  'Clock',
-  'clock',
-  'Frequency max [MHz]',
-  'frequency_max',
-  'Max fanout',
-  'max_fanout',
-  'Target density',
-  'target_density',
-  'Target overflow',
-  'target_overflow',
-  'Global right padding',
-  'global_right_padding',
-  'Cell padding x',
-  'cell_padding_x',
-  'Routability opt flag',
-  'routability_opt_flag',
-  'Bottom layer',
-  'bottom_layer',
-  'Top layer',
-  'top_layer',
-  'PDK Root',
-  'pdk_root',
-])
-
-const GUI_KNOWN_JSON_TABLE_KEYS: Record<string, ReadonlySet<string>> = {
-  Die: new Set(['Size', 'size', 'Area', 'area']),
-  die: new Set(['Size', 'size', 'Area', 'area']),
-  Core: new Set([
-    'Size',
-    'size',
-    'Area',
-    'area',
-    'Bounding box',
-    'bounding_box',
-    'Utilitization',
-    'utilitization',
-    'Margin',
-    'margin',
-    'Aspect ratio',
-    'aspect_ratio',
-  ]),
-  core: new Set([
-    'Size',
-    'size',
-    'Area',
-    'area',
-    'Bounding box',
-    'bounding_box',
-    'Utilitization',
-    'utilitization',
-    'Margin',
-    'margin',
-    'Aspect ratio',
-    'aspect_ratio',
-  ]),
-  'Die Area': new Set(['width', 'height', 'utilitization', 'margin', 'mode']),
-  die_area: new Set(['width', 'height', 'utilitization', 'margin', 'mode']),
-}
-
-const GUI_KNOWN_JSON_ARRAY_LEAVES = new Set([
-  'Die.Size',
-  'Die.size',
-  'die.Size',
-  'die.size',
-  'Core.Size',
-  'Core.size',
-  'core.Size',
-  'core.size',
-  'Core.Margin',
-  'Core.margin',
-  'core.Margin',
-  'core.margin',
-])
-
 /**
  * Agent/rerun TOML edits stringify the whole flattened document. A Date,
  * bigint, table, or array already sitting in a GUI-known scalar leaf would
@@ -721,35 +638,6 @@ function assertGuiKnownNestedLossless(
     return
   }
   assertGuiKnownScalarLossless(value, label)
-}
-
-function assertGuiKnownLeavesLossless(
-  parameters: Record<string, unknown>,
-  label: string,
-  scalarKeys: ReadonlySet<string>,
-  tableKeys: Record<string, ReadonlySet<string>>,
-  arrayLeaves: ReadonlySet<string>,
-): void {
-  for (const [key, value] of Object.entries(parameters)) {
-    const nestedKeys = tableKeys[key]
-    if (nestedKeys) {
-      if (isPlainRecord(value)) {
-        for (const [nestedKey, nested] of Object.entries(value)) {
-          if (!nestedKeys.has(nestedKey)) continue
-          assertGuiKnownNestedLossless(
-            nested,
-            `${label}:${key}.${nestedKey}`,
-            arrayLeaves.has(`${key}.${nestedKey}`),
-          )
-        }
-      } else {
-        assertGuiKnownScalarLossless(value, `${label}:${key}`)
-      }
-      continue
-    }
-    if (!scalarKeys.has(key)) continue
-    assertGuiKnownScalarLossless(value, `${label}:${key}`)
-  }
 }
 
 function assertGuiKnownScalarLossless(value: unknown, label: string): void {

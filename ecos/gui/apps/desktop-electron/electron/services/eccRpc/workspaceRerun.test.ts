@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   executeWorkspaceRerun,
   prepareWorkspaceRerun,
+  rewriteHomeJsonSourcePaths,
   rewriteJsonSourcePathStrings,
   rewriteSourceRootedPath,
 } from './workspaceRerun'
@@ -669,6 +670,36 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     expect(written).not.toContain(`${source}/place_dreamplace/output`)
     // Prose that merely shares the prefix is never rewritten.
     expect(written).toContain(`compare ${source}-old against this run`)
+  })
+
+  it('refuses to rewrite through a home directory swapped for a symlink', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-workspace-rerun-home-swap-'))
+    temporaryRoots.push(root)
+    const home = join(root, 'home')
+    const outside = join(root, 'outside')
+    await mkdir(home)
+    await mkdir(outside)
+    const original = [
+      '[params]',
+      'design = "gcd"',
+      'source_output_path = "/src/ws/place_dreamplace/output"',
+      '',
+    ].join('\n')
+    await writeFile(join(home, 'ecc.toml'), original)
+    await writeFile(join(outside, 'ecc.toml'), original)
+    const authorizedHome = home
+
+    await rm(home, { recursive: true })
+    await symlink(outside, home)
+
+    await expect(
+      rewriteHomeJsonSourcePaths(authorizedHome, {
+        sourceWorkspace: '/src/ws',
+        sourceWorkspaceRaw: '/src/ws',
+        targetWorkspace: '/src/ws_rerun',
+      }),
+    ).rejects.toThrow(/authorized|no longer resolves|parent directory changed|symlink/i)
+    await expect(readFile(join(outside, 'ecc.toml'), 'utf8')).resolves.toBe(original)
   })
 
   it('refuses to rewrite home/ecc.toml when an untouched float cannot round-trip', async () => {

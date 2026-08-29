@@ -14,6 +14,7 @@ import { refreshConfigApi } from '@/api/flow'
 import { CMDEnum, ResponseEnum } from '@/api/type'
 import {
   assertScalarNotContainer,
+  hasCanonicalDieDimensions,
   losslessNumber,
   losslessNumberList,
   isPlainRecord,
@@ -217,9 +218,13 @@ function normalizeDie(d: unknown, dieArea?: unknown): ParametersData['Die'] {
   const size = d.Size ?? d.size
   const area = d.Area ?? d.area
   const listed = losslessNumberList(size, 'Die.Size')
-  const fromDieArea = listed.length >= 2 ? listed : dieSizeFromDieArea(dieArea)
+  const dieAreaTable = dieArea == null ? null : isPlainRecord(dieArea) ? dieArea : null
+  const canonical =
+    dieAreaTable && hasCanonicalDieDimensions(dieAreaTable)
+      ? dieSizeFromDieArea(dieArea)
+      : []
   return {
-    Size: fromDieArea,
+    Size: canonical.length >= 2 ? canonical : listed,
     Area: area != null ? losslessNumber(area, 'Die.Area') : 0,
   }
 }
@@ -274,7 +279,7 @@ function normalizeCore(c: unknown, dieArea?: unknown): ParametersData['Core'] {
       'Bounding box',
     ),
     Utilitization: losslessNumber(
-      c.Utilitization ?? c.utilitization ?? dieAreaTable?.utilitization ?? 0.4,
+      dieAreaTable?.utilitization ?? c.Utilitization ?? c.utilitization ?? 0.4,
       'Core.Utilitization',
     ),
     Margin: m,

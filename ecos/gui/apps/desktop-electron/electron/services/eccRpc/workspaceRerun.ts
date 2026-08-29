@@ -25,7 +25,7 @@ import {
   editWorkspaceParameters,
   locateWorkspaceParametersFile,
   parseTomlDocument,
-  readFileNoFollow,
+  readWorkspaceConfigContained,
   stringifyTomlDocument,
   WORKSPACE_CONFIG_BASENAME,
   writeTextAtomically,
@@ -937,7 +937,7 @@ function rewriteTomlSourcePathLeaves(
   return visit(node)
 }
 
-async function rewriteHomeJsonSourcePaths(
+export async function rewriteHomeJsonSourcePaths(
   homeDirectory: string,
   options: {
     sourceWorkspace: string
@@ -951,6 +951,20 @@ async function rewriteHomeJsonSourcePaths(
   ])
   if (prefixes.length === 0) return
 
+  let authorizedParent: string
+  try {
+    const homeStats = await lstat(homeDirectory)
+    if (homeStats.isSymbolicLink() || !homeStats.isDirectory()) {
+      throw new Error(
+        `Refusing to rewrite ${homeDirectory}: the home directory is a symlink or not a regular directory`,
+      )
+    }
+    authorizedParent = await realpath(homeDirectory)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+
   let entries: string[]
   try {
     entries = await readdir(homeDirectory)
@@ -963,12 +977,15 @@ async function rewriteHomeJsonSourcePaths(
     if (entry !== WORKSPACE_CONFIG_BASENAME && !entry.endsWith('.json')) continue
     if (entry === 'flow_agent_workspace_rerun_contract.v1.json') continue
     const filePath = join(homeDirectory, entry)
+    const canonicalPath = join(authorizedParent, entry)
     // Skip anything that is not a regular file: a symlinked config (the
     // clone preserves it) would otherwise redirect the rewrite outside the
-    // workspace, and the read must not follow it either.
+    // workspace, and the read must not follow it either. Parent revalidation
+    // uses the already-authorized home directory so a swapped ancestor
+    // cannot retarget the rewrite.
     const entryStats = await lstat(filePath)
     if (!entryStats.isFile() || entryStats.isSymbolicLink()) continue
-    const original = await readFileNoFollow(filePath)
+    const original = await readWorkspaceConfigContained(filePath, canonicalPath)
     if (entry === WORKSPACE_CONFIG_BASENAME) {
       // Parse and rewrite only string scalars whose value is the source
       // prefix or lives under it: prose is untouched and TOML escaping
@@ -977,7 +994,9 @@ async function rewriteHomeJsonSourcePaths(
       assertNoSubMillisecondDatetimes(original, filePath)
       const document = parseTomlDocument(original, filePath)
       if (rewriteTomlSourcePathLeaves(document, prefixes, options.targetWorkspace)) {
-        await writeTextAtomically(filePath, stringifyTomlDocument(document))
+        await writeTextAtomically(filePath, stringifyTomlDocument(document), {
+          authorizedParent,
+        })
       }
       continue
     }
@@ -987,7 +1006,7 @@ async function rewriteHomeJsonSourcePaths(
       options.targetWorkspace,
     )
     if (rewritten !== original) {
-      await writeTextAtomically(filePath, rewritten)
+      await writeTextAtomically(filePath, rewritten, { authorizedParent })
     }
   }
 }

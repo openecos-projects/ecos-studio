@@ -826,11 +826,11 @@ export class WorkspaceService {
   }
 
   async writeProjectTextFile(path: string, content: string): Promise<void> {
+    const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
     const canonicalPath =
       await this.projectScopeProvider.requestWritableProjectPathAccess(path)
-    await this.assertCanWriteProjectTextFile(canonicalPath)
-    const projectRoot = await this.projectScopeProvider.getProjectRoot()
-    if (!isRuntimeProtectedProjectPath(canonicalPath, projectRoot)) {
+    await this.assertCanWriteProjectTextFile(canonicalPath, authorizingRoot)
+    if (!isRuntimeProtectedProjectPath(canonicalPath, authorizingRoot)) {
       await writeFile(canonicalPath, content, 'utf8')
       return
     }
@@ -838,9 +838,20 @@ export class WorkspaceService {
     // an editor save that lands between an agent read and rename would
     // otherwise be clobbered, and CAS rollback only runs on failure.
     await enqueueParameterWrite(
-      await workspaceParameterWriteQueueKey(projectRoot),
+      await workspaceParameterWriteQueueKey(authorizingRoot),
       async () => {
-        await this.assertCanWriteProjectTextFile(canonicalPath)
+        const activeRoot = await this.projectScopeProvider.getProjectRoot()
+        const [expected, active] = await Promise.all([
+          realpath(authorizingRoot),
+          realpath(activeRoot),
+        ])
+        if (expected !== active) {
+          throw new Error(
+            'Refusing to write project text file: the active workspace ' +
+              'changed before the write completed',
+          )
+        }
+        await this.assertCanWriteProjectTextFile(canonicalPath, authorizingRoot)
         await writeTextAtomically(canonicalPath, content, {
           authorizedParent: dirname(canonicalPath),
         })
@@ -1343,10 +1354,14 @@ export class WorkspaceService {
     this.projectFileWatchers.clear()
   }
 
-  private async assertCanWriteProjectTextFile(canonicalPath: string): Promise<void> {
+  private async assertCanWriteProjectTextFile(
+    canonicalPath: string,
+    authorizingRoot?: string,
+  ): Promise<void> {
     if (!this.runtimeMutationGuard) return
 
-    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    const projectRoot =
+      authorizingRoot ?? (await this.projectScopeProvider.getProjectRoot())
     if (!isRuntimeProtectedProjectPath(canonicalPath, projectRoot)) return
 
     if (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(projectRoot)) {
