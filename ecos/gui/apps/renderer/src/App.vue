@@ -778,14 +778,16 @@ async function resolveQuickStartResources(
       ready(resource)
     )
   })
-  const design = builtin?.design ?? (legacyDesign
-    ? {
-        id: legacyDesign.id,
-        path: legacyDesign.path!,
-        version:
-          (legacyDesign as ResourceInfo & { version?: string }).version ?? '1.0.0',
-      }
-    : null)
+  const design =
+    builtin?.design ??
+    (legacyDesign
+      ? {
+          id: legacyDesign.id,
+          path: legacyDesign.path!,
+          version:
+            (legacyDesign as ResourceInfo & { version?: string }).version ?? '1.0.0',
+        }
+      : null)
   let pdk = ready(pdkCandidate) ? pdkCandidate : undefined
   let pdkImportError: string | undefined
   if (!pdk && builtin?.pdk?.path) {
