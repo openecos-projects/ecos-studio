@@ -234,6 +234,7 @@ import {
   type AppMenuAction,
   type DesktopAgentWorkspaceSetupContract,
   type DesktopApi,
+  type QuickStartBuiltinResources,
   type ResourceInfo,
 } from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
@@ -741,31 +742,25 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
 
 provide(quickStartRunnerKey, runQuickStart)
 
-type QuickStartBuiltinResources = {
-  design: QuickStartResourceSnapshot['design']
-  diagnostics?: string[]
-  pdk: QuickStartResourceSnapshot['pdk']
-}
-
-type QuickStartDesktopApi = DesktopApi & {
-  app: DesktopApi['app'] & {
-    getQuickStartResources?: () => Promise<QuickStartBuiltinResources>
-  }
-}
-
 async function resolveQuickStartResources(
   api: DesktopApi,
 ): Promise<QuickStartResourceSnapshot> {
-  const quickStartApi = api as QuickStartDesktopApi
-  const builtin = await quickStartApi.app.getQuickStartResources?.().catch((error) => ({
-    design: null,
-    diagnostics: [
-      `Built-in Quick Start resources are unavailable: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    ],
-    pdk: null,
-  }))
+  let builtin: QuickStartBuiltinResources | undefined
+  if (api.app.getQuickStartResources) {
+    try {
+      builtin = await api.app.getQuickStartResources()
+    } catch (error) {
+      builtin = {
+        design: null,
+        diagnostics: [
+          `Built-in Quick Start resources are unavailable: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ],
+        pdk: null,
+      }
+    }
+  }
   const listed = (await api.resources.list()).resources
   let pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
   const ready = (resource: ResourceInfo | undefined) =>

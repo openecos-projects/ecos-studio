@@ -90,7 +90,8 @@ describe('quick start resources', () => {
     const end = source.indexOf('function resourceHealth', start)
 
     const resolverSource = source.slice(start, end)
-    expect(resolverSource).toContain("getQuickStartResources?.()")
+    expect(resolverSource).toContain('api.app.getQuickStartResources')
+    expect(resolverSource).toContain('await api.app.getQuickStartResources()')
     expect(resolverSource).toContain("api.resources.get('pdk:ics55')")
     expect(resolverSource).toContain('api.resources.importPdkPath')
     expect(resolverSource).not.toContain('/home/ekko/Desktop/ECOS/gcd.v')
