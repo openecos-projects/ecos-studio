@@ -1049,4 +1049,91 @@ describe('applyWorkspaceParameterWrites', () => {
     await expect(readFile(tomlPath, 'utf8')).resolves.toContain('max_fanout = 64')
     await expect(readFile(stepPath, 'utf8')).resolves.toContain('"density_weight": 0.1')
   })
+
+  it('serializes step-config editor saves behind the parameter write queue', async () => {
+    const directory = await createTempDir('ecos-workspace-service-step-config-queue-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await mkdir(join(directory, 'config'), { recursive: true })
+    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
+    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
+
+    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
+      await import('./workspaceParametersFile')
+    const queueKey = await workspaceParameterWriteQueueKey(directory)
+    let release!: () => void
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate
+    })
+    const hold = enqueueParameterWrite(queueKey, async () => {
+      await gate
+    })
+
+    const service = createApplyService(directory)
+    const editorContent = '{\n    "density_weight": 0.8,\n    "extra": true\n}\n'
+    const editor = service.writeProjectTextFile(stepPath, editorContent)
+
+    let editorDone = false
+    void editor.then(() => {
+      editorDone = true
+    })
+    await delay(50)
+    expect(editorDone).toBe(false)
+    await expect(readFile(stepPath, 'utf8')).resolves.toBe(
+      '{\n    "density_weight": 0.2\n}\n',
+    )
+
+    release()
+    await hold
+    await editor
+    await expect(readFile(stepPath, 'utf8')).resolves.toBe(editorContent)
+  })
+
+  it('lets a later agent step-config RMW observe a queued editor save', async () => {
+    const directory = await createTempDir('ecos-workspace-service-step-config-overlap-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await mkdir(join(directory, 'config'), { recursive: true })
+    const tomlPath = join(directory, 'home', 'ecc.toml')
+    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
+    await writeFile(tomlPath, '[params]\ndesign = "gcd"\nmax_fanout = 20\n', 'utf8')
+    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
+
+    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
+      await import('./workspaceParametersFile')
+    const queueKey = await workspaceParameterWriteQueueKey(directory)
+    let release!: () => void
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate
+    })
+    const hold = enqueueParameterWrite(queueKey, async () => {
+      await gate
+    })
+
+    const service = createApplyService(directory)
+    const editorContent = '{\n    "density_weight": 0.8,\n    "extra": true\n}\n'
+    const editor = service.writeProjectTextFile(stepPath, editorContent)
+    await delay(20)
+    const agent = service.applyWorkspaceParameterWrites(directory, [
+      {
+        file: 'config/dreamplace_ecc.json',
+        json_path: ['density_weight'],
+        knob_id: 'place.density_weight',
+        surface: 'step_config',
+        value: 0.1,
+      },
+    ])
+
+    release()
+    await hold
+    await Promise.all([agent, editor])
+
+    const finalDocument = JSON.parse(await readFile(stepPath, 'utf8')) as {
+      density_weight: number
+      extra?: boolean
+    }
+    // Without the shared queue the agent can read 0.2, the editor can land
+    // `extra`, and the agent rename then drops it. Serialized, the agent
+    // RMW sees the editor document and keeps unknown leaves.
+    expect(finalDocument.extra).toBe(true)
+    expect(finalDocument.density_weight).toBe(0.1)
+  })
 })

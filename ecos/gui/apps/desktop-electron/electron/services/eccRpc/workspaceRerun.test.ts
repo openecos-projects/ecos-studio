@@ -714,6 +714,29 @@ describe('rewriteJsonSourcePathStrings', () => {
       origin: String.raw`C:\runs\gcd_rerun_place\origin\gcd.v`,
     })
   })
+
+  it('does not rewrite object keys that look like workspace paths', () => {
+    const rewritten = rewriteJsonSourcePathStrings(
+      '{"/src/ws/cache":"metadata","origin":"/src/ws/origin/gcd.v"}',
+      ['/src/ws'],
+      '/src/ws_rerun',
+    )
+    expect(JSON.parse(rewritten)).toEqual({
+      '/src/ws/cache': 'metadata',
+      origin: '/src/ws_rerun/origin/gcd.v',
+    })
+  })
+
+  it('rewrites string values inside arrays', () => {
+    const rewritten = rewriteJsonSourcePathStrings(
+      '{"files":["/src/ws/origin/gcd.v"]}',
+      ['/src/ws'],
+      '/src/ws_rerun',
+    )
+    expect(JSON.parse(rewritten)).toEqual({
+      files: ['/src/ws_rerun/origin/gcd.v'],
+    })
+  })
 })
 
 describe('rewriteSourceRootedPath', () => {

@@ -781,11 +781,23 @@ function normalizePathSeparators(value: string): string {
   return value.replace(/\\/g, '/')
 }
 
+function isJsonWhitespace(char: string): boolean {
+  return char === ' ' || char === '\t' || char === '\n' || char === '\r'
+}
+
+function nextNonWhitespaceChar(raw: string, index: number): string | undefined {
+  while (index < raw.length && isJsonWhitespace(raw[index]!)) {
+    index += 1
+  }
+  return raw[index]
+}
+
 /**
- * Rewrite decoded JSON string tokens with rewriteSourceRootedPath, then
- * re-escape only those tokens. Raw-text replacement misses JSON-escaped
- * Windows paths (`C:\\runs\\gcd`) and can insert unescaped native
- * separators into otherwise slash-based JSON.
+ * Rewrite decoded JSON string values with rewriteSourceRootedPath, then
+ * re-escape only those tokens. Object keys are left untouched even when they
+ * look like workspace paths (`{"/src/ws/cache":"metadata"}`). Raw-text
+ * replacement misses JSON-escaped Windows paths (`C:\\runs\\gcd`) and can
+ * insert unescaped native separators into otherwise slash-based JSON.
  */
 export function rewriteJsonSourcePathStrings(
   raw: string,
@@ -831,6 +843,12 @@ export function rewriteJsonSourcePathStrings(
       }
       decoded += current
       index += 1
+    }
+    // In JSON, a string is an object key iff the next non-whitespace token is
+    // `:`. Keys are identity, not workspace-rooted values.
+    if (nextNonWhitespaceChar(raw, index) === ':') {
+      output += raw.slice(start, index)
+      continue
     }
     const rewritten = rewriteSourceRootedPath(decoded, prefixes, targetWorkspace)
     output += rewritten === decoded ? raw.slice(start, index) : JSON.stringify(rewritten)

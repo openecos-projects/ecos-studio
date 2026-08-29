@@ -41,9 +41,12 @@ import {
 import {
   applyQueuedWorkspaceParameterWrites,
   editWorkspaceParameters as editWorkspaceParametersFile,
+  enqueueParameterWrite,
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
   readWorkspaceConfigContained,
+  workspaceParameterWriteQueueKey,
+  writeTextAtomically,
   type PreparedStepConfigWrite,
 } from './workspaceParametersFile'
 
@@ -826,7 +829,23 @@ export class WorkspaceService {
     const canonicalPath =
       await this.projectScopeProvider.requestWritableProjectPathAccess(path)
     await this.assertCanWriteProjectTextFile(canonicalPath)
-    await writeFile(canonicalPath, content, 'utf8')
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    if (!isRuntimeProtectedProjectPath(canonicalPath, projectRoot)) {
+      await writeFile(canonicalPath, content, 'utf8')
+      return
+    }
+    // Step-config and workspace-parameter files share the agent RMW queue:
+    // an editor save that lands between an agent read and rename would
+    // otherwise be clobbered, and CAS rollback only runs on failure.
+    await enqueueParameterWrite(
+      await workspaceParameterWriteQueueKey(projectRoot),
+      async () => {
+        await this.assertCanWriteProjectTextFile(canonicalPath)
+        await writeTextAtomically(canonicalPath, content, {
+          authorizedParent: dirname(canonicalPath),
+        })
+      },
+    )
   }
 
   async listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]> {
