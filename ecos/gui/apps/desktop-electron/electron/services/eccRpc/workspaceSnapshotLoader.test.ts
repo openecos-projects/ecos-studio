@@ -1,7 +1,40 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const growAfterStat = vi.hoisted(() => ({
+  path: null as string | null,
+}))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    open: async (
+      path: Parameters<typeof actual.open>[0],
+      flags?: Parameters<typeof actual.open>[1],
+    ) => {
+      const handle = await actual.open(path, flags)
+      if (growAfterStat.path && String(path) === growAfterStat.path) {
+        const originalStat = handle.stat.bind(handle)
+        handle.stat = (async () => {
+          const info = await originalStat()
+          appendFileSync(growAfterStat.path!, 'x'.repeat(512 * 1024))
+          return info
+        }) as typeof handle.stat
+      }
+      return handle
+    },
+  }
+})
 
 import { WorkspaceSnapshotLoader } from './workspaceSnapshotLoader'
 
@@ -63,6 +96,23 @@ describe('WorkspaceSnapshotLoader', () => {
     await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
       'Workspace snapshot resource exceeds',
     )
+  })
+
+  it('rejects a file that grows past the cap after the opened handle is statted', async () => {
+    const directory = createWorkspace()
+    const flowPath = join(directory, 'home', 'flow.json')
+    writeFileSync(join(directory, 'home', 'home.json'), '{}')
+    writeFileSync(join(directory, 'home', 'parameters.json'), '{}')
+    writeFileSync(flowPath, '{}')
+
+    growAfterStat.path = flowPath
+    try {
+      await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
+        'Workspace snapshot resource exceeds',
+      )
+    } finally {
+      growAfterStat.path = null
+    }
   })
 
   it('rejects a symlinked parameters file instead of reading its target', async () => {
