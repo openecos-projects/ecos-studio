@@ -218,6 +218,23 @@ def _is_greeting(message: str) -> bool:
     return bool(_GREETING_PATTERN.fullmatch(message))
 
 
+def _scope_response(message: str, scope: str) -> tuple[str, str]:
+    is_chinese = language_for_text(message) == "zh"
+    if scope == "out_of_scope":
+        return (
+            "该问题与 IC/EDA 或 ECOS Studio 无关。ECOS Agent 仅协助芯片设计流程、工程配置、结果分析及相关工具问题。"
+            if is_chinese
+            else "This request is outside IC/EDA and ECOS Studio. ECOS Agent only assists with chip-design flows, engineering configuration, result analysis, and related tools.",
+            "scope_refusal",
+        )
+    return (
+        "请说明该问题与当前 IC/EDA 或 ECOS Studio 任务的关系。"
+        if is_chinese
+        else "Please explain how this request relates to the current IC/EDA or ECOS Studio task.",
+        "scope_clarification",
+    )
+
+
 def _proposal_sha256(proposal: StageRoutingProposal) -> str:
     payload = json.dumps(proposal.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -949,7 +966,26 @@ class EcosAgentProvider:
     def _answer_non_state_input(
         self, session: _Session, message: str, *, allow_operations: bool
     ) -> None:
-        answer = self._knowledge_answer(session, message)
+        answer, scope = self._knowledge_answer(session, message)
+        if scope != "in_scope":
+            text, intent = _scope_response(message, scope)
+            self._emit(
+                session,
+                "message",
+                text,
+                contract={
+                    "schema_version": "flow-agent.gui_chat_response.v1",
+                    "intent": intent,
+                    "scope": scope,
+                    "operation": None,
+                    "evidence_ids": [],
+                    "read_only": True,
+                    "backend": "local_policy",
+                },
+            )
+            if session.phase in {"home_ready", "operation"}:
+                self._emit_phase_choice(session)
+            return
         source_result = self._source_code_evidence(session, message, answer)
         self._answer_with_codex(
             session,
@@ -959,9 +995,11 @@ class EcosAgentProvider:
             source_result=source_result,
         )
 
-    def _knowledge_answer(self, session: _Session, message: str) -> KnowledgeAnswer | None:
+    def _knowledge_answer(
+        self, session: _Session, message: str
+    ) -> tuple[KnowledgeAnswer | None, str]:
         if _is_greeting(message):
-            return None
+            return None, "in_scope"
         self._local_activity(
             session,
             "stage-identification",
@@ -974,13 +1012,16 @@ class EcosAgentProvider:
         routing: dict[str, object] = {
             "status": "not_requested",
             "reason": "deterministic_stage_scope",
+            "scope": "in_scope",
         }
-        if not deterministic_scope.candidate_stages and (
-            self._started or not self._uses_default_stage_routing
-        ):
+        if self._started or not self._uses_default_stage_routing:
             stages, routing = self._propose_knowledge_stages(session, message)
         elif not deterministic_scope.candidate_stages:
-            routing = {"status": "not_requested", "reason": "provider_not_started"}
+            routing = {
+                "status": "not_requested",
+                "reason": "provider_not_started",
+                "scope": "in_scope",
+            }
         candidate_stages = list(
             dict.fromkeys((*deterministic_scope.candidate_stages, *stages))
         )
@@ -989,6 +1030,7 @@ class EcosAgentProvider:
             if candidate_stages
             else "Checked design stage"
         )
+        scope = str(routing.get("scope", "in_scope"))
         self._local_activity(
             session,
             "stage-identification",
@@ -998,8 +1040,12 @@ class EcosAgentProvider:
                 "candidate_stages": candidate_stages,
                 "reason": deterministic_scope.reason,
                 "routing_status": routing.get("status"),
+                "scope": scope,
             },
         )
+        if scope != "in_scope":
+            return None, scope
+        retrieval_routing = {key: value for key, value in routing.items() if key != "scope"}
         self._local_activity(
             session,
             "knowledge-search",
@@ -1014,7 +1060,7 @@ class EcosAgentProvider:
                 message,
                 candidate_stages=stages,
                 deterministic_scope=deterministic_scope,
-                routing=routing,
+                routing=retrieval_routing,
             )
         except Exception as exc:
             self._local_activity(
@@ -1034,7 +1080,7 @@ class EcosAgentProvider:
             "completed",
             result={"match_count": len(entity_ids), "entity_ids": entity_ids},
         )
-        return selected
+        return selected, scope
 
     def _propose_knowledge_stages(
         self, session: _Session, message: str
@@ -1050,14 +1096,23 @@ class EcosAgentProvider:
             proposal = StageRoutingProposal.model_validate(self.stage_routing_parser(context))
             stages = proposal.candidate_stages
             if any(stage not in self.knowledge_retriever.stage_ids for stage in stages):
-                return (), {"status": "rejected", "reason": "unknown_stage"}
+                return (), {
+                    "status": "rejected",
+                    "reason": "unknown_stage",
+                    "scope": proposal.scope,
+                }
             return stages, {
                 "status": "accepted" if stages else "abstained",
+                "scope": proposal.scope,
                 "candidate_stages": list(stages),
                 "proposal_sha256": _proposal_sha256(proposal),
             }
         except (CodexProviderError, ValueError):
-            return (), {"status": "fallback", "reason": "proposal_unavailable"}
+            return (), {
+                "status": "fallback",
+                "reason": "proposal_unavailable",
+                "scope": "ambiguous",
+            }
 
     def _source_code_evidence(
         self, session: _Session, message: str, knowledge_answer: KnowledgeAnswer | None

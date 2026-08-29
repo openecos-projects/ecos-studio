@@ -232,11 +232,12 @@ class GuiChatResponseProposal(BaseModel):
 
 
 class StageRoutingProposal(BaseModel):
-    """Untrusted read-only stage hints for knowledge retrieval only."""
+    """Untrusted read-only scope and stage hints for knowledge retrieval."""
 
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["flow-agent.stage_routing_proposal.v1"]
+    scope: Literal["in_scope", "out_of_scope", "ambiguous"]
     candidate_stages: tuple[str, ...]
     rationale: str
 
@@ -259,6 +260,12 @@ class StageRoutingProposal(BaseModel):
         if not value or len(value) > 512:
             raise ValueError("stage routing rationale is invalid")
         return value
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "StageRoutingProposal":
+        if self.scope != "in_scope" and self.candidate_stages:
+            raise ValueError("out-of-scope or ambiguous routing cannot select stages")
+        return self
 
 
 class SourceSearchQuery(BaseModel):

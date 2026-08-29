@@ -1306,6 +1306,7 @@ def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypat
         return json.dumps(
             {
                 "schema_version": "flow-agent.stage_routing_slots.v1",
+                "scope": "in_scope",
                 "primary_stage": "place",
                 "secondary_stage": None,
                 "tertiary_stage": None,
@@ -1328,18 +1329,25 @@ def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypat
     assert "Return stage candidates only" in str(captured["prompt"])
     assert captured["schema"]["required"] == [
         "schema_version",
+        "scope",
         "primary_stage",
         "secondary_stage",
         "tertiary_stage",
         "rationale",
     ]
     assert "candidate_stages" not in captured["schema"]["properties"]
+    assert captured["schema"]["properties"]["scope"]["enum"] == [
+        "in_scope",
+        "out_of_scope",
+        "ambiguous",
+    ]
     assert captured["schema"]["properties"]["primary_stage"]["enum"] == ["place", "route", None]
 
 
 def test_stage_routing_contract_rejects_too_many_or_duplicate_candidates() -> None:
     base = {
         "schema_version": "flow-agent.stage_routing_proposal.v1",
+        "scope": "in_scope",
         "rationale": "bounded local routing",
     }
 
@@ -1349,6 +1357,146 @@ def test_stage_routing_contract_rejects_too_many_or_duplicate_candidates() -> No
         )
     with pytest.raises(ValueError, match="candidates are invalid"):
         StageRoutingProposal.model_validate({**base, "candidate_stages": ["place", "place"]})
+    with pytest.raises(ValueError, match="cannot select stages"):
+        StageRoutingProposal.model_validate(
+            {**base, "scope": "out_of_scope", "candidate_stages": ["place"]}
+        )
+    with pytest.raises(ValueError, match="scope"):
+        StageRoutingProposal.model_validate(
+            {
+                "schema_version": "flow-agent.stage_routing_proposal.v1",
+                "candidate_stages": [],
+                "rationale": "missing scope",
+            }
+        )
+
+
+def test_out_of_scope_chat_is_refused_before_retrieval_and_preserves_phase(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    classified_requests: list[str] = []
+
+    def classify_scope(context: dict[str, object]) -> dict[str, object]:
+        classified_requests.append(str(context["natural_language_request"]))
+        return {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "out_of_scope",
+            "candidate_stages": [],
+            "rationale": "The question is unrelated to IC, EDA, or ECOS Studio.",
+        }
+
+    def unexpected_call(_context: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("out-of-scope chat must stop before retrieval and answer generation")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        stage_routing_parser=classify_scope,
+        source_retrieval_parser=unexpected_call,
+        chat_response_parser=unexpected_call,
+    )
+    session_id = provider.start_session({"directory": str(workspace), "mode": "workspace"})[
+        "sessionId"
+    ]
+    original_operations = set(provider.sessions[session_id].pending_interaction["values"].values())
+
+    _send(provider, session_id, "What does CTS stand for in New York transit?")
+    _send(provider, session_id, "帝国大厦多高？")
+
+    message = _last_event(events, "message")
+    assert classified_requests == [
+        "What does CTS stand for in New York transit?",
+        "帝国大厦多高？",
+    ]
+    assert provider.sessions[session_id].phase == "operation"
+    assert set(provider.sessions[session_id].pending_interaction["values"].values()) == (
+        original_operations
+    )
+    assert message["contract"] == {
+        "schema_version": "flow-agent.gui_chat_response.v1",
+        "intent": "scope_refusal",
+        "scope": "out_of_scope",
+        "operation": None,
+        "evidence_ids": [],
+        "read_only": True,
+        "backend": "local_policy",
+    }
+    assert "IC/EDA" in str(message["text"])
+    activity_ids = {
+        event["activity"]["itemId"] for event in events if event["type"] == "activity"
+    }
+    assert "local-knowledge-search" not in activity_ids
+    assert "local-source-search" not in activity_ids
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_in_scope_ecos_engineering_chat_continues_without_stage_match(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    answer_contexts: list[dict[str, object]] = []
+
+    def classify_scope(_context: dict[str, object]) -> dict[str, object]:
+        return {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "in_scope",
+            "candidate_stages": [],
+            "rationale": "The Python failure is tied to the ECOS workspace.",
+        }
+
+    def answer(context: dict[str, object]) -> dict[str, object]:
+        answer_contexts.append(context)
+        return _chat_response(answer="Check the ECOS workspace Python environment.")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        stage_routing_parser=classify_scope,
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [],
+            "rationale": "No source lookup is required.",
+        },
+        chat_response_parser=answer,
+    )
+    session_id = provider.start_session({"directory": str(workspace), "mode": "workspace"})[
+        "sessionId"
+    ]
+
+    _send(provider, session_id, "How should I diagnose this ECOS Studio Python import failure?")
+
+    assert answer_contexts
+    assert _last_event(events, "message")["text"] == "Check the ECOS workspace Python environment."
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_unclassified_chat_fails_closed_before_retrieval(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+
+    def unavailable_scope(_context: dict[str, object]) -> dict[str, object]:
+        raise CodexProviderError("scope classification timed out", failure_class="timeout")
+
+    def unexpected_call(_context: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("unclassified chat must stop before retrieval and answer generation")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        stage_routing_parser=unavailable_scope,
+        source_retrieval_parser=unexpected_call,
+        chat_response_parser=unexpected_call,
+    )
+    session_id = provider.start_session({"directory": str(workspace), "mode": "workspace"})[
+        "sessionId"
+    ]
+
+    _send(provider, session_id, "Could you help with this?")
+
+    message = _last_event(events, "message")
+    assert message["contract"]["intent"] == "scope_clarification"
+    assert message["contract"]["scope"] == "ambiguous"
+    assert "relates to" in str(message["text"])
+    assert not any(event["type"] == "error" for event in events)
 
 
 def test_unknown_stage_routing_proposal_falls_back_without_excluding_bm25() -> None:
@@ -1358,6 +1506,7 @@ def test_unknown_stage_routing_proposal_falls_back_without_excluding_bm25() -> N
     def invalid_stage(_context: dict[str, object]) -> dict[str, object]:
         return {
             "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "in_scope",
             "candidate_stages": ["not_a_published_stage"],
             "rationale": "untrusted stage",
         }
@@ -1400,6 +1549,7 @@ def test_started_provider_enables_default_stage_routing(monkeypatch) -> None:
         stage_contexts.append(context)
         return {
             "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "in_scope",
             "candidate_stages": ["cts"],
             "rationale": "Clock-tree terms map to CTS.",
         }
@@ -2739,6 +2889,7 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
         chat_response_parser=answer_with_retrieved_knowledge,
         stage_routing_parser=lambda _context: {
             "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "in_scope",
             "candidate_stages": ["place"],
             "rationale": "The question concerns placer behavior.",
         },

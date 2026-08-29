@@ -227,6 +227,7 @@ def test_stage_routing_collector_uses_only_query_and_audited_catalog() -> None:
             contexts.append(context)
             return {
                 "schema_version": "flow-agent.stage_routing_proposal.v1",
+                "scope": "in_scope",
                 "candidate_stages": ["place"],
                 "rationale": "test routing",
             }
@@ -275,9 +276,19 @@ def test_stage_routing_collector_counts_only_consecutive_failures() -> None:
     collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
     responses: list[object] = [
         ValueError("first failure"),
-        {"schema_version": "flow-agent.stage_routing_proposal.v1", "candidate_stages": [], "rationale": "abstain"},
+        {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "in_scope",
+            "candidate_stages": [],
+            "rationale": "abstain",
+        },
         ValueError("second failure"),
-        {"schema_version": "flow-agent.stage_routing_proposal.v1", "candidate_stages": [], "rationale": "abstain"},
+        {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "in_scope",
+            "candidate_stages": [],
+            "rationale": "abstain",
+        },
     ]
 
     class FakeProvider:
@@ -308,6 +319,7 @@ def test_stage_routing_collector_retries_a_transient_case_failure() -> None:
         ValueError("transient failure"),
         {
             "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "in_scope",
             "candidate_stages": ["place"],
             "rationale": "placement question",
         },

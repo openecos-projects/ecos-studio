@@ -49,6 +49,7 @@ class _StageRoutingSlotsProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["flow-agent.stage_routing_slots.v1"]
+    scope: Literal["in_scope", "out_of_scope", "ambiguous"]
     primary_stage: str | None
     secondary_stage: str | None
     tertiary_stage: str | None
@@ -551,6 +552,8 @@ class CodexAppServerProposalProvider:
                 "Return one JSON object matching flow-agent.gui_chat_response.v1. "
                 + route_instruction
                 + "Otherwise return null operation and either a concise helpful answer or a bounded clarification object. "
+                "Answer only IC, EDA, ECOS Studio, or technical questions tied to the current ECOS task. For a clearly "
+                "unrelated request, return null operation and a concise scope refusal without answering the requested fact. "
                 "A clarification may contain only a title, optional description, and one to eight labeled options; it "
                 "must not contain an action, handler, command, path, or execution value. Respond in the language specified by "
                 "response_language unless the request explicitly requires a different output language. "
@@ -602,9 +605,12 @@ class CodexAppServerProposalProvider:
                     },
                     (
                         "Return one JSON object matching flow-agent.stage_routing_slots.v1. "
+                        "Classify scope as in_scope for IC, EDA, ECOS Studio, or technical questions tied to the "
+                        "current ECOS task; out_of_scope for clearly unrelated requests; otherwise ambiguous. "
                         "Return stage candidates only (zero to three) for read-only knowledge retrieval, "
                         "including conceptual questions. Use only stage names in stage_catalog and each stage "
-                        "at most once. Do not answer the question, return operations, commands, paths, workspace "
+                        "at most once, and return no stages unless scope is in_scope. Do not answer the question, "
+                        "return operations, commands, paths, workspace "
                         "data, tool calls, or execution instructions."
                     ),
                     _stage_routing_slots_output_schema(
@@ -616,6 +622,7 @@ class CodexAppServerProposalProvider:
             return StageRoutingProposal.model_validate(
                 {
                     "schema_version": "flow-agent.stage_routing_proposal.v1",
+                    "scope": slots.scope,
                     "candidate_stages": [
                         stage
                         for stage in (
@@ -1414,6 +1421,7 @@ def _stage_routing_slots_output_schema(stages: tuple[str, ...]) -> dict[str, Any
         "additionalProperties": False,
         "required": [
             "schema_version",
+            "scope",
             "primary_stage",
             "secondary_stage",
             "tertiary_stage",
@@ -1423,6 +1431,10 @@ def _stage_routing_slots_output_schema(stages: tuple[str, ...]) -> dict[str, Any
             "schema_version": {
                 "type": "string",
                 "const": "flow-agent.stage_routing_slots.v1",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["in_scope", "out_of_scope", "ambiguous"],
             },
             "primary_stage": stage_slot,
             "secondary_stage": stage_slot,
