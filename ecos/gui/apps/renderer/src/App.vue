@@ -789,6 +789,13 @@ async function resolveQuickStartResources(
         }
       : null)
   let pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+  if (!pdk) {
+    pdkCandidate = listed.find(
+      (resource) =>
+        resource.type === 'pdk' && resource.id.startsWith('pdk:ics55') && ready(resource),
+    )
+    pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+  }
   let pdkImportError: string | undefined
   if (!pdk && builtin?.pdk?.path) {
     try {
