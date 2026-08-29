@@ -29,6 +29,26 @@ function assertLosslessShape(value: unknown, label: string): void {
 }
 
 /**
+ * GUI-known scalar fields: a table would stringify to "[object Object]" and an
+ * array to a comma-joined list (or Number([]) === 0). Callers must handle Date
+ * first so TOML dates keep their own error.
+ */
+export function assertScalarNotContainer(value: unknown, label: string): void {
+  if (Array.isArray(value)) {
+    throw new Error(
+      `Parameter ${label} must be a scalar, not an array; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'object' && value !== null) {
+    throw new Error(
+      `Parameter ${label} must be a scalar, not a table; ` +
+        'edit the workspace configuration manually',
+    )
+  }
+}
+
+/**
  * optionalRecord for GUI-known table fields: a TOML date, bigint, or
  * non-finite scalar where a table is expected would otherwise flatten into
  * defaults that a save then persists over the original value, so fail loud.
@@ -66,9 +86,9 @@ export function losslessNumberList(value: unknown, label: string): number[] {
 }
 
 /**
- * optionalString for GUI-known fields: a TOML date or bigint would fall
- * through to a default and be written back over the original value on the
- * next save, so fail loud instead of falling back.
+ * optionalString for GUI-known fields: a TOML date, bigint, table, or array
+ * would fall through to a default and be written back over the original value
+ * on the next save, so fail loud instead of falling back.
  */
 export function losslessOptionalString(value: unknown, label: string): string {
   if (value instanceof Date || typeof value === 'bigint') {
@@ -83,6 +103,7 @@ export function losslessOptionalString(value: unknown, label: string): string {
         'edit the workspace configuration manually',
     )
   }
+  assertScalarNotContainer(value, label)
   return typeof value === 'string' && value.trim() ? value.trim() : ''
 }
 
@@ -136,6 +157,7 @@ export function losslessNumber(value: unknown, label: string): number {
         'edit the workspace configuration manually',
     )
   }
+  assertScalarNotContainer(value, label)
   if (typeof value === 'string') {
     const trimmed = value.trim()
     const parsed = Number(trimmed)

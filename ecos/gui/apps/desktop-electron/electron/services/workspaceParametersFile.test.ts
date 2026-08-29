@@ -725,6 +725,35 @@ describe('editWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
   })
 
+  it('rejects TOML edits when a GUI-known scalar already holds a table or array', async () => {
+    const tableContent = `
+[params]
+pdk = "ics55"
+top_module = "gcd"
+max_fanout = 20
+
+[params.design]
+extra = "keep-me"
+`
+    const arrayRoot = createWorkspace()
+    const arrayContent = ECC_TOML.replace('name = "gcd"', 'name = ""').replace(
+      'design = "gcd"',
+      'design = ["gcd"]',
+    )
+    writeHomeFile(arrayRoot, 'ecc.toml', arrayContent)
+    await expect(
+      editWorkspaceParameters(arrayRoot, [{ json_path: ['top_module'], value: 'aes' }]),
+    ).rejects.toThrow(/not a scalar/)
+    expect(readFileSync(join(arrayRoot, 'home', 'ecc.toml'), 'utf8')).toBe(arrayContent)
+
+    const tableRoot = createWorkspace()
+    writeHomeFile(tableRoot, 'ecc.toml', tableContent)
+    await expect(
+      editWorkspaceParameters(tableRoot, [{ json_path: ['top_module'], value: 'aes' }]),
+    ).rejects.toThrow(/not a scalar/)
+    expect(readFileSync(join(tableRoot, 'home', 'ecc.toml'), 'utf8')).toBe(tableContent)
+  })
+
   it('still allows TOML edits when an unknown leaf holds a Date', async () => {
     const root = createWorkspace()
     writeHomeFile(

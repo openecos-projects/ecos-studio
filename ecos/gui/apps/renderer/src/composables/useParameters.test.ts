@@ -250,6 +250,25 @@ describe('useParameters helpers', () => {
     ).toThrow(/table or array was expected/)
   })
 
+  it('rejects tables and arrays in GUI-known scalar fields instead of stringifying them', () => {
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: { extra: 'keep-me' } }),
+    ).toThrow(/must be a scalar, not a table/)
+    expect(() => parseParametersRecord({ pdk: 'ics55', design: ['gcd'] })).toThrow(
+      /must be a scalar, not an array/,
+    )
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', clock: { port: 'clk' } }),
+    ).toThrow(/must be a scalar, not a table/)
+    expect(() =>
+      parseParametersRecord({
+        pdk: 'ics55',
+        design: 'demo',
+        sim_program_names: [{ name: 'cpu-tests' }],
+      }),
+    ).toThrow(/must be a scalar, not a table/)
+  })
+
   it('treats empty snapshots as missing chip identity', () => {
     expect(parametersHaveChipIdentity({})).toBe(false)
     expect(parametersHaveChipIdentity({ Die: { Size: [], Area: 0 } })).toBe(false)

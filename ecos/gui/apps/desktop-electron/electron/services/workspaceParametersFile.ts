@@ -474,10 +474,12 @@ const GUI_KNOWN_TOML_TABLE_KEYS: Record<string, ReadonlySet<string>> = {
 }
 
 /**
- * Agent/rerun TOML edits stringify the whole flattened document. A Date or
- * bigint already sitting in a GUI-known leaf would otherwise be rewritten
- * successfully here, then fail when the renderer reloads it. Unknown leaves
- * stay untouched so non-GUI knobs can still hold those scalars.
+ * Agent/rerun TOML edits stringify the whole flattened document. A Date,
+ * bigint, table, or array already sitting in a GUI-known scalar leaf would
+ * otherwise be rewritten successfully here, then fail or corrupt when the
+ * renderer reloads it. Nested GUI-known arrays (`die.size`, `core.margin`)
+ * are walked item-wise. Unknown leaves stay untouched so non-GUI knobs can
+ * still hold those scalars.
  */
 function assertGuiKnownTomlLeavesLossless(
   parameters: Record<string, unknown>,
@@ -489,7 +491,7 @@ function assertGuiKnownTomlLeavesLossless(
       if (isPlainRecord(value)) {
         for (const [nestedKey, nested] of Object.entries(value)) {
           if (!nestedKeys.has(nestedKey)) continue
-          assertGuiKnownScalarLossless(nested, `${label}:${key}.${nestedKey}`)
+          assertGuiKnownNestedLossless(nested, `${label}:${key}.${nestedKey}`)
         }
       } else {
         assertGuiKnownScalarLossless(value, `${label}:${key}`)
@@ -501,20 +503,23 @@ function assertGuiKnownTomlLeavesLossless(
   }
 }
 
-function assertGuiKnownScalarLossless(value: unknown, label: string): void {
-  if (value == null) return
+function assertGuiKnownNestedLossless(value: unknown, label: string): void {
   if (Array.isArray(value)) {
     for (const item of value) assertGuiKnownScalarLossless(item, label)
     return
   }
-  if (isPlainRecord(value)) {
-    for (const item of Object.values(value)) assertGuiKnownScalarLossless(item, label)
-    return
-  }
+  assertGuiKnownScalarLossless(value, label)
+}
+
+function assertGuiKnownScalarLossless(value: unknown, label: string): void {
+  if (value == null) return
   if (value instanceof Date || typeof value === 'bigint') {
     throw new Error(
       `Refusing to rewrite ${label}: existing value cannot be represented losslessly`,
     )
+  }
+  if (Array.isArray(value) || typeof value === 'object') {
+    throw new Error(`Refusing to rewrite ${label}: existing value is not a scalar`)
   }
   if (typeof value === 'number' && !Number.isFinite(value)) {
     throw new Error(`Refusing to rewrite ${label}: existing value is not a finite number`)

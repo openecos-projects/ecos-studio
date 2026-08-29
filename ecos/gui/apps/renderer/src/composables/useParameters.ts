@@ -12,7 +12,12 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { refreshConfigApi } from '@/api/flow'
 import { CMDEnum, ResponseEnum } from '@/api/type'
-import { losslessNumber, losslessNumberList, isPlainRecord } from '@/utils/numbers'
+import {
+  assertScalarNotContainer,
+  losslessNumber,
+  losslessNumberList,
+  isPlainRecord,
+} from '@/utils/numbers'
 
 // ============ 类型定义 ============
 // 与 ecc/chipcompiler/data/parameter.py 中 ICS55_PARAMETERS_TEMPLATE 及 workspace 写入的 PDK Root 对齐
@@ -314,6 +319,7 @@ function losslessBoolean(value: unknown, label: string): boolean {
         'edit the workspace configuration manually',
     )
   }
+  assertScalarNotContainer(value, label)
   return Boolean(value)
 }
 
@@ -347,7 +353,8 @@ export function parametersHaveChipIdentity(
 /**
  * String conversion for GUI-known fields: a TOML date under one would
  * otherwise be written back as a locale-dependent string on the next save,
- * and a bigint or non-finite number would change type (integer -> string).
+ * a bigint or non-finite number would change type (integer -> string), and a
+ * table or array would stringify to "[object Object]" or a comma-joined list.
  */
 function losslessString(value: unknown, label: string): string {
   if (value instanceof Date) {
@@ -368,6 +375,7 @@ function losslessString(value: unknown, label: string): string {
         'edit the workspace configuration manually',
     )
   }
+  assertScalarNotContainer(value, label)
   return String(value)
 }
 

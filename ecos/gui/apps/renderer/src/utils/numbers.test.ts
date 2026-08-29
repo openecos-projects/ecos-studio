@@ -5,6 +5,7 @@ import {
   losslessNumberList,
   losslessOptionalNumber,
   losslessOptionalRecord,
+  losslessOptionalString,
 } from './numbers'
 
 describe('losslessOptionalRecord', () => {
@@ -43,6 +44,38 @@ describe('losslessNumber', () => {
   it('rejects numeric strings that cannot round-trip exactly', () => {
     expect(() => losslessNumber('9007199254740993', 'Area')).toThrow(
       /safe integer range|round-trip/,
+    )
+  })
+
+  it('rejects tables and arrays instead of coercing them to numbers', () => {
+    expect(() => losslessNumber([], 'max_fanout')).toThrow(
+      /must be a scalar, not an array/,
+    )
+    expect(() => losslessNumber([20], 'max_fanout')).toThrow(
+      /must be a scalar, not an array/,
+    )
+    expect(() => losslessNumber({ n: 1 }, 'max_fanout')).toThrow(
+      /must be a scalar, not a table/,
+    )
+  })
+})
+
+describe('losslessOptionalString', () => {
+  it('returns an empty string for omitted values', () => {
+    expect(losslessOptionalString(undefined, 'design')).toBe('')
+    expect(losslessOptionalString(null, 'design')).toBe('')
+  })
+
+  it('keeps a defined non-empty string', () => {
+    expect(losslessOptionalString(' gcd ', 'design')).toBe('gcd')
+  })
+
+  it('rejects tables and arrays instead of converting them to empty strings', () => {
+    expect(() => losslessOptionalString({ extra: 'keep-me' }, 'design')).toThrow(
+      /must be a scalar, not a table/,
+    )
+    expect(() => losslessOptionalString(['gcd'], 'design')).toThrow(
+      /must be a scalar, not an array/,
     )
   })
 })
