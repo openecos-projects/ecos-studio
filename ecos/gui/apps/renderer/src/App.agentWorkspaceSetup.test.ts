@@ -89,7 +89,21 @@ describe('quick start resources', () => {
     const start = source.indexOf('async function resolveQuickStartResources')
     const end = source.indexOf('function resourceHealth', start)
 
-    expect(source.slice(start, end)).toContain("api.resources.get('pdk:ics55')")
+    const resolverSource = source.slice(start, end)
+    expect(resolverSource).toContain("getQuickStartResources?.()")
+    expect(resolverSource).toContain("api.resources.get('pdk:ics55')")
+    expect(resolverSource).toContain('api.resources.importPdkPath')
+    expect(resolverSource).not.toContain('/home/ekko/Desktop/ECOS/gcd.v')
+  })
+
+  it('passes the resolved PDK installation and requirement into the workspace wizard', () => {
+    const start = source.indexOf('const config: WorkspaceConfig =')
+    const end = source.indexOf('const createdConfig', start)
+    const workspaceSource = source.slice(start, end)
+
+    expect(workspaceSource).toContain('pdk_installation_id: input.resources.pdk?.id')
+    expect(workspaceSource).toContain("familyId: 'ics55'")
+    expect(workspaceSource).toContain('manualConfig: null')
   })
 
   it('fills and closes the existing New Project dialog', () => {

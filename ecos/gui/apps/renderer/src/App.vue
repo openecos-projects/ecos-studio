@@ -614,6 +614,14 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
           designTool: 'backend',
           pdk: 'ics55',
           pdk_root: input.resources.pdk?.path ?? '',
+          pdk_installation_id: input.resources.pdk?.id,
+          pdk_requirement: input.resources.pdk
+            ? {
+                familyId: 'ics55',
+                version: input.resources.pdk.version || null,
+                manualConfig: null,
+              }
+            : undefined,
           parameters: {
             design: 'gcd',
             description: 'Created by Quick Start',
@@ -733,13 +741,33 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal) => {
 
 provide(quickStartRunnerKey, runQuickStart)
 
-const LOCAL_QUICK_START_GCD_PATH = '/home/ekko/Desktop/ECOS/gcd.v'
+type QuickStartBuiltinResources = {
+  design: QuickStartResourceSnapshot['design']
+  diagnostics?: string[]
+  pdk: QuickStartResourceSnapshot['pdk']
+}
+
+type QuickStartDesktopApi = DesktopApi & {
+  app: DesktopApi['app'] & {
+    getQuickStartResources?: () => Promise<QuickStartBuiltinResources>
+  }
+}
 
 async function resolveQuickStartResources(
   api: DesktopApi,
 ): Promise<QuickStartResourceSnapshot> {
+  const quickStartApi = api as QuickStartDesktopApi
+  const builtin = await quickStartApi.app.getQuickStartResources?.().catch((error) => ({
+    design: null,
+    diagnostics: [
+      `Built-in Quick Start resources are unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ],
+    pdk: null,
+  }))
   const listed = (await api.resources.list()).resources
-  const pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
+  let pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
   const ready = (resource: ResourceInfo | undefined) =>
     Boolean(
       resource &&
@@ -747,7 +775,7 @@ async function resolveQuickStartResources(
       (resource.status === 'installed' || resource.status === 'update_available') &&
       resource.health.status === 'ok',
     )
-  const design = listed.find((resource) => {
+  const legacyDesign = listed.find((resource) => {
     const candidate = resource as ResourceInfo & { type?: string; version?: string }
     return (
       candidate.id === 'example:gcd' &&
@@ -755,15 +783,24 @@ async function resolveQuickStartResources(
       ready(resource)
     )
   })
-  const localDesign =
-    !design && (await api.workspace.pathExists(LOCAL_QUICK_START_GCD_PATH))
-      ? {
-          id: 'local:gcd',
-          path: LOCAL_QUICK_START_GCD_PATH,
-          version: 'local',
-        }
-      : null
-  const pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+  const design = builtin?.design ?? (legacyDesign
+    ? {
+        id: legacyDesign.id,
+        path: legacyDesign.path!,
+        version:
+          (legacyDesign as ResourceInfo & { version?: string }).version ?? '1.0.0',
+      }
+    : null)
+  let pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+  if (!pdk && builtin?.pdk?.path) {
+    try {
+      await api.resources.importPdkPath({ path: builtin.pdk.path })
+      pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
+      pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+    } catch {
+      // Keep the inventory diagnostic below; importing is best-effort.
+    }
+  }
   const mpcCandidates = listed.filter(
     (resource) =>
       resource.type === 'mpc' &&
@@ -775,12 +812,12 @@ async function resolveQuickStartResources(
   )
   const mpc = mpcCandidates.find((resource) => resource.active) ?? mpcCandidates[0]
   const diagnostics: string[] = []
-  if (!design && !localDesign) {
+  if (!design) {
     const candidate = listed.find((resource) => resource.id === 'example:gcd')
     diagnostics.push(
       candidate
-        ? `GCD design example:gcd is not Ready (status=${candidate.status}, path=${candidate.path ?? 'none'}, health=${resourceHealth(candidate)}); local fallback ${LOCAL_QUICK_START_GCD_PATH} was not found.`
-        : `GCD design example:gcd is not installed; local fallback ${LOCAL_QUICK_START_GCD_PATH} was not found.`,
+        ? `GCD design example:gcd is not Ready (status=${candidate.status}, path=${candidate.path ?? 'none'}, health=${resourceHealth(candidate)}).`
+        : 'GCD built-in example is unavailable.',
     )
   }
   if (!pdk) {
@@ -806,14 +843,8 @@ async function resolveQuickStartResources(
     )
   }
   return {
-    design: design
-      ? {
-          id: design.id,
-          path: design.path!,
-          version: (design as ResourceInfo & { version?: string }).version ?? '1.0.0',
-        }
-      : localDesign,
-    diagnostics,
+    design,
+    diagnostics: [...(builtin?.diagnostics ?? []), ...diagnostics],
     pdk: pdk
       ? { id: pdk.id, path: pdk.path!, version: pdk.installed_version ?? '' }
       : null,
