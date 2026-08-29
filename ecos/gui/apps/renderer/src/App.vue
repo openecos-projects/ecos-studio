@@ -787,13 +787,14 @@ async function resolveQuickStartResources(
       }
     : null)
   let pdk = ready(pdkCandidate) ? pdkCandidate : undefined
+  let pdkImportError: string | undefined
   if (!pdk && builtin?.pdk?.path) {
     try {
       await api.resources.importPdkPath({ path: builtin.pdk.path })
       pdkCandidate = await api.resources.get('pdk:ics55').catch(() => undefined)
       pdk = ready(pdkCandidate) ? pdkCandidate : undefined
-    } catch {
-      // Keep the inventory diagnostic below; importing is best-effort.
+    } catch (error) {
+      pdkImportError = error instanceof Error ? error.message : String(error)
     }
   }
   const mpcCandidates = listed.filter(
@@ -826,6 +827,9 @@ async function resolveQuickStartResources(
         ? `PDK pdk:ics55 is not Ready (status=${candidate.status}, version=${candidate.installed_version ?? 'none'}, path=${candidate.path ?? 'none'}, health=${resourceHealth(candidate)}).`
         : 'PDK pdk:ics55 is not installed (no matching Resource Management identity).',
     )
+    if (pdkImportError) {
+      diagnostics.push(`Built-in ICS55 PDK import failed: ${pdkImportError}`)
+    }
   }
   if (!mpc) {
     const candidate = listed.find(
