@@ -26,10 +26,10 @@ import {
   locateWorkspaceParametersFile,
   parseTomlDocument,
   readFileNoFollow,
+  stringifyTomlDocument,
   WORKSPACE_CONFIG_BASENAME,
   writeTextAtomically,
 } from '../workspaceParametersFile'
-import { stringify as stringifyToml } from 'smol-toml'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
@@ -959,7 +959,7 @@ async function rewriteHomeJsonSourcePaths(
       assertNoSubMillisecondDatetimes(original, filePath)
       const document = parseTomlDocument(original, filePath)
       if (rewriteTomlSourcePathLeaves(document, prefixes, options.targetWorkspace)) {
-        await writeTextAtomically(filePath, stringifyToml(document))
+        await writeTextAtomically(filePath, stringifyTomlDocument(document))
       }
       continue
     }

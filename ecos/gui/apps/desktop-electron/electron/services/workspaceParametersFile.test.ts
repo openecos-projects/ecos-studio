@@ -368,8 +368,27 @@ describe('writeWorkspaceParameters', () => {
     const text = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
     expect(text).toContain('[flow]')
     expect(text).toContain('preset = "rtl2gds"')
-    expect(text).toContain('frequency_mhz = 250')
+    expect(text).toContain('frequency_mhz = 250.0')
     expect(text).not.toContain('parameters.json')
+  })
+
+  it('preserves integral float tokens and integer tokens through a rewrite', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'ecc.toml',
+      ECC_TOML.replace(
+        'preset = "rtl2gds"',
+        'preset = "rtl2gds"\nthreshold = 1.0\ncount = 2',
+      ),
+    )
+    await writeWorkspaceParameters(root, { design: 'gcd' })
+    const text = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    expect(text).toMatch(/threshold\s*=\s*1\.0\b/)
+    expect(text).toMatch(/count\s*=\s*2\b/)
+    expect(text).not.toMatch(/count\s*=\s*2\.0\b/)
+    expect(text).toContain('frequency_mhz = 100.0')
+    expect(text).toContain('max_fanout = 20')
   })
 
   it('writes legacy parameters.json merging the payload into the existing document', async () => {
@@ -503,6 +522,22 @@ describe('writeWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(
       'params = 2026-08-27\n',
     )
+  })
+
+  it('rejects invalid calendar dates instead of normalizing them on save', async () => {
+    const root = createWorkspace()
+    const content = ECC_TOML.replace(
+      'preset = "rtl2gds"',
+      'preset = "rtl2gds"\ncheckpoint = 2023-02-30',
+    )
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /invalid calendar date/i,
+    )
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['design'], value: 'aes' }]),
+    ).rejects.toThrow(/invalid calendar date/i)
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
   })
 
   it('rejects sub-millisecond datetimes instead of truncating them on save', async () => {

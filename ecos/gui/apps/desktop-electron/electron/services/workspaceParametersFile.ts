@@ -82,9 +82,57 @@ function mergeRecordsPreservingUnknown(
     merged[key] =
       isPlainRecord(existing) && isPlainRecord(value)
         ? mergeRecordsPreservingUnknown(existing, value)
-        : value
+        : preserveTomlNumericKind(existing, value)
   }
   return merged
+}
+
+/**
+ * smol-toml stringify({ numbersAsFloat: true }) writes Number as a float
+ * (`1.0`) and BigInt as an integer (`1`). GUI/agent payloads arrive as
+ * Number, so an integer overlay on a BigInt leaf must stay BigInt or a
+ * rewrite would change `max_fanout = 20` into `max_fanout = 20.0`.
+ */
+function preserveTomlNumericKind(existing: unknown, overlay: unknown): unknown {
+  if (Array.isArray(overlay)) {
+    const existingItems = Array.isArray(existing) ? existing : []
+    return overlay.map((item, index) =>
+      preserveTomlNumericKind(existingItems[index], item),
+    )
+  }
+  if (
+    typeof overlay !== 'number' ||
+    !Number.isInteger(overlay) ||
+    !Number.isSafeInteger(overlay)
+  ) {
+    return overlay
+  }
+  if (typeof existing === 'bigint') return BigInt(overlay)
+  return overlay
+}
+
+function reviveSafeTomlIntegers(value: unknown): unknown {
+  if (typeof value === 'bigint') {
+    if (
+      value > BigInt(Number.MAX_SAFE_INTEGER) ||
+      value < BigInt(Number.MIN_SAFE_INTEGER)
+    ) {
+      return value
+    }
+    return Number(value)
+  }
+  if (Array.isArray(value)) return value.map((item) => reviveSafeTomlIntegers(item))
+  if (!isPlainRecord(value)) return value
+  const revived: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value)) {
+    Object.defineProperty(revived, key, {
+      value: reviveSafeTomlIntegers(item),
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    })
+  }
+  return revived
 }
 
 function hasValue(value: unknown): boolean {
@@ -236,13 +284,22 @@ export function assertNoSubMillisecondDatetimes(text: string, label: string): vo
  */
 export function parseTomlDocument(text: string, label: string): Record<string, unknown> {
   assertTomlNumbersSafe(text, label)
-  const document: unknown = parse(text, { integersAsBigInt: 'asNeeded' })
+  const document: unknown = parse(text, { integersAsBigInt: true })
   if (!isPlainRecord(document)) {
     throw new Error(
       `Invalid workspace configuration: ${label} must contain a TOML table at the root`,
     )
   }
   return document
+}
+
+/**
+ * Integers stay BigInt and floats stay Number so a rewrite can emit `1`
+ * vs `1.0`. Callers that return parameters over IPC must revive safe
+ * integers first.
+ */
+export function stringifyTomlDocument(document: Record<string, unknown>): string {
+  return stringify(document, { numbersAsFloat: true })
 }
 
 /**
@@ -271,7 +328,10 @@ export function parseWorkspaceParametersText(
     text,
     join(workspaceRoot, 'home', WORKSPACE_CONFIG_BASENAME),
   )
-  return mergeTomlSections(document, workspaceRoot)
+  return reviveSafeTomlIntegers(mergeTomlSections(document, workspaceRoot)) as Record<
+    string,
+    unknown
+  >
 }
 
 /**
@@ -513,10 +573,21 @@ function assertGuiKnownNestedLossless(value: unknown, label: string): void {
 
 function assertGuiKnownScalarLossless(value: unknown, label: string): void {
   if (value == null) return
-  if (value instanceof Date || typeof value === 'bigint') {
+  if (value instanceof Date) {
     throw new Error(
       `Refusing to rewrite ${label}: existing value cannot be represented losslessly`,
     )
+  }
+  if (typeof value === 'bigint') {
+    if (
+      value > BigInt(Number.MAX_SAFE_INTEGER) ||
+      value < BigInt(Number.MIN_SAFE_INTEGER)
+    ) {
+      throw new Error(
+        `Refusing to rewrite ${label}: existing integer exceeds Number.MAX_SAFE_INTEGER`,
+      )
+    }
+    return
   }
   if (Array.isArray(value) || typeof value === 'object') {
     throw new Error(`Refusing to rewrite ${label}: existing value is not a scalar`)
@@ -774,7 +845,7 @@ export async function writeWorkspaceParameters(
       const document = parseTomlDocument(raw, onDisk.path)
       const merged = mergePayloadIntoTomlDocument(document, payload, root)
       await assertWritable?.()
-      await writeTextAtomically(spelledPath, stringify(merged), {
+      await writeTextAtomically(spelledPath, stringifyTomlDocument(merged), {
         authorizedParent: dirname(canonicalPath),
       })
       return onDisk
@@ -951,6 +1022,15 @@ function assertTomlNumbersSafe(text: string, label: string): void {
       index += 1
       continue
     }
+    if (expectingValue && char >= '0' && char <= '9') {
+      const dateToken = matchTomlCalendarDateToken(text, index)
+      if (dateToken) {
+        assertTomlCalendarDateValid(dateToken, label)
+        index += dateToken.length
+        expectingValue = false
+        continue
+      }
+    }
     if (
       expectingValue &&
       (char === '+' || char === '-' || (char >= '0' && char <= '9'))
@@ -986,6 +1066,31 @@ function matchTomlNumberToken(text: string, index: number): string | null {
   // Dates (`1979-05-27`) and times (`07:32:00`) also start with digits.
   if (next === '-' || next === ':') return null
   return token
+}
+
+function matchTomlCalendarDateToken(text: string, index: number): string | null {
+  return /^\d{4}-\d{2}-\d{2}/.exec(text.slice(index))?.[0] ?? null
+}
+
+function assertTomlCalendarDateValid(token: string, label: string): void {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(token)
+  if (!match) return
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  // setUTCFullYear, not Date.UTC: years 0–99 must stay as-is instead of
+  // mapping onto 1900–1999.
+  const date = new Date(0)
+  date.setUTCFullYear(year, month - 1, day)
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw new Error(
+      `Invalid calendar date ${token} in ${label}: smol-toml would normalize it on rewrite`,
+    )
+  }
 }
 
 /**
@@ -1072,11 +1177,22 @@ function setJsonPathValue(
   const resolvedPath = resolveDisplayKeys
     ? resolveExistingJsonPath(document, jsonPath)
     : jsonPath
-  assignOwnJsonPathValue(document, resolvedPath, value, () => {
-    throw new Error(
-      `Parameter path ${JSON.stringify(jsonPath)} does not exist in ${label}.`,
-    )
-  })
+  let node: unknown = document
+  for (const segment of resolvedPath.slice(0, -1)) {
+    node = readOwnJsonPathSegment(node, segment)
+  }
+  const last = resolvedPath[resolvedPath.length - 1]
+  const existing = last === undefined ? undefined : readOwnJsonPathSegment(node, last)
+  assignOwnJsonPathValue(
+    document,
+    resolvedPath,
+    preserveTomlNumericKind(existing, value),
+    () => {
+      throw new Error(
+        `Parameter path ${JSON.stringify(jsonPath)} does not exist in ${label}.`,
+      )
+    },
+  )
 }
 
 /**
@@ -1240,7 +1356,7 @@ export async function prepareWorkspaceParameterEdits(
     format: onDisk.format,
     previousContent: raw,
     spelledPath,
-    writtenContent: stringify(merged),
+    writtenContent: stringifyTomlDocument(merged),
   }
 }
 
