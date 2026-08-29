@@ -290,6 +290,16 @@ export function parseTomlDocument(text: string, label: string): Record<string, u
       `Invalid workspace configuration: ${label} must contain a TOML table at the root`,
     )
   }
+  // Check [params] before [design]/[pdk] mirrors overwrite a nested table
+  // with a scalar. `[params.design] future = "keep"` plus `[design] name`
+  // would otherwise load as the design name and the next save would delete
+  // `future`.
+  if (isPlainRecord(document.params)) {
+    assertGuiKnownTomlLeavesLossless(
+      normalizeParameterKeys(document.params) as Record<string, unknown>,
+      label,
+    )
+  }
   return document
 }
 
@@ -674,14 +684,24 @@ function foldLegacyGeometryIntoDieArea(
   if (core && Object.prototype.hasOwnProperty.call(core, 'utilitization')) {
     overlay.utilitization = core.utilitization
   }
-  if (Array.isArray(core?.margin) && core.margin.length > 0) {
+  const foldMargin = isSymmetricMargin(core?.margin)
+  if (foldMargin && Array.isArray(core?.margin) && core.margin.length > 0) {
     overlay.margin = core.margin[0]
   }
   payload.die_area = mergeRecordsPreservingUnknown(existingDieArea, overlay)
+  const coreGeometryKeys = foldMargin
+    ? (['utilitization', 'margin'] as const)
+    : (['utilitization'] as const)
   stripMigratedGeometryTable(payload, 'die', ['size'])
-  stripMigratedGeometryTable(payload, 'core', ['utilitization', 'margin'])
+  stripMigratedGeometryTable(payload, 'core', coreGeometryKeys)
   stripMigratedGeometryTable(existingParams, 'die', ['size'])
-  stripMigratedGeometryTable(existingParams, 'core', ['utilitization', 'margin'])
+  stripMigratedGeometryTable(existingParams, 'core', coreGeometryKeys)
+}
+
+function isSymmetricMargin(margin: unknown): boolean {
+  if (!Array.isArray(margin) || margin.length === 0) return false
+  const first = margin[0]
+  return margin.every((item) => Object.is(item, first))
 }
 
 function stripMigratedGeometryTable(
@@ -968,6 +988,7 @@ function parseJsonPreservingIntegers(text: string, label: string): unknown {
 function assertTomlNumbersSafe(text: string, label: string): void {
   let index = 0
   let expectingValue = false
+  let arrayDepth = 0
   while (index < text.length) {
     const char = text[index]
     if (char === '#') {
@@ -1012,13 +1033,31 @@ function assertTomlNumbersSafe(text: string, label: string): void {
       continue
     }
     if (char === '[') {
-      // Inline arrays keep the value position (`margin = [2, 2]`). A table
-      // header starts a key, so only scan digits after `=` / `,`.
+      // A `[` in value position (or inside an array) starts an array and
+      // keeps the next token as a value, including after newlines. A table
+      // header is not in value position.
+      if (expectingValue || arrayDepth > 0) {
+        arrayDepth += 1
+        expectingValue = true
+      } else {
+        expectingValue = false
+      }
       index += 1
       continue
     }
-    if (char === ']' || char === '{' || char === '}' || char === '\n') {
+    if (char === ']') {
+      if (arrayDepth > 0) arrayDepth -= 1
       expectingValue = false
+      index += 1
+      continue
+    }
+    if (char === '{' || char === '}') {
+      expectingValue = false
+      index += 1
+      continue
+    }
+    if (char === '\n') {
+      if (arrayDepth === 0) expectingValue = false
       index += 1
       continue
     }

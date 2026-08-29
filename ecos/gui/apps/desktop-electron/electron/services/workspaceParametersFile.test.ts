@@ -321,6 +321,23 @@ describe('mergePayloadIntoTomlDocument', () => {
     expect(merged.params.core).toEqual({ size: [96, 72], area: 6912 })
   })
 
+  it('keeps an asymmetric core.margin that die_area cannot represent', () => {
+    const document = {
+      params: {
+        design: 'gcd',
+        die_area: { width: 100, height: 80, utilitization: 0.4, margin: 2 },
+        core: { utilitization: 0.4, margin: [2, 2] },
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { Core: { Utilitization: 0.55, Margin: [5, 7] } },
+      '/ws',
+    )
+    expect(merged.params.die_area).toMatchObject({ utilitization: 0.55, margin: 2 })
+    expect(merged.params.core).toEqual({ margin: [5, 7] })
+  })
+
   it('keeps unknown nested die/core leaves when folding geometry into die_area', () => {
     const document = {
       params: {
@@ -432,6 +449,19 @@ describe('writeWorkspaceParameters', () => {
     },
   )
 
+  it('rejects a high-precision float in a multiline array that a rewrite would silently round', async () => {
+    const root = createWorkspace()
+    const content = ECC_TOML.replace(
+      'preset = "rtl2gds"',
+      'preset = "rtl2gds"\nweights = [\n  0.12345678901234567,\n]',
+    )
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /cannot round-trip/,
+    )
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+  })
+
   it('does not treat identifier-embedded digits as numeric values', async () => {
     const root = createWorkspace()
     const content = `${ECC_TOML}\ncorner1e20 = "slow"\n`
@@ -501,6 +531,26 @@ describe('writeWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toBe(
       '[1, 2, 3]\n',
     )
+  })
+
+  it('rejects a GUI-known scalar that is already a nested table in [params]', async () => {
+    const root = createWorkspace()
+    const content = `
+[design]
+name = "gcd"
+
+[params]
+pdk = "ics55"
+top_module = "gcd"
+
+[params.design]
+future = "keep"
+`
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /not a scalar/,
+    )
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
   })
 
   it('rejects a non-table TOML section on save instead of replacing it', async () => {
