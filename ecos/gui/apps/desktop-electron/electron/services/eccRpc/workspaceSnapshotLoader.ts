@@ -63,20 +63,26 @@ async function readSnapshotText(
     }
     // Bound the actual read, not just the pre-read size: another process
     // can append after stat() and handle.readFile() would otherwise consume
-    // the expanded file into the renderer snapshot.
+    // the expanded file into the renderer snapshot. Loop until EOF or the
+    // cap: a single FileHandle.read() may return a short count.
     const buffer = Buffer.allocUnsafe(MAX_SNAPSHOT_FILE_BYTES + 1)
-    const { bytesRead } = await handle.read({
-      buffer,
-      length: buffer.length,
-      offset: 0,
-      position: 0,
-    })
-    if (bytesRead > MAX_SNAPSHOT_FILE_BYTES) {
+    let total = 0
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read({
+        buffer,
+        length: buffer.length - total,
+        offset: total,
+        position: total,
+      })
+      if (bytesRead === 0) break
+      total += bytesRead
+    }
+    if (total > MAX_SNAPSHOT_FILE_BYTES) {
       throw new Error(
         `Workspace snapshot resource exceeds ${MAX_SNAPSHOT_FILE_BYTES} bytes: ${path}`,
       )
     }
-    const text = buffer.subarray(0, bytesRead).toString('utf8')
+    const text = buffer.subarray(0, total).toString('utf8')
     await assertContained()
     return text
   } catch (error) {

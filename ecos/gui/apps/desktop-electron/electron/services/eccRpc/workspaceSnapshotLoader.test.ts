@@ -14,6 +14,10 @@ const growAfterStat = vi.hoisted(() => ({
   path: null as string | null,
 }))
 
+const shortReadPath = vi.hoisted(() => ({
+  path: null as string | null,
+}))
+
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
@@ -30,6 +34,18 @@ vi.mock('node:fs/promises', async (importOriginal) => {
           appendFileSync(growAfterStat.path!, 'x'.repeat(512 * 1024))
           return info
         }) as typeof handle.stat
+      }
+      if (shortReadPath.path && String(path) === shortReadPath.path) {
+        const originalRead = handle.read.bind(handle)
+        let first = true
+        handle.read = (async (options?: Parameters<typeof handle.read>[0]) => {
+          if (first && options && typeof options === 'object' && 'length' in options) {
+            first = false
+            const length = Math.min(1, Number(options.length) || 0)
+            return await originalRead({ ...options, length })
+          }
+          return await originalRead(options)
+        }) as typeof handle.read
       }
       return handle
     },
@@ -112,6 +128,28 @@ describe('WorkspaceSnapshotLoader', () => {
       )
     } finally {
       growAfterStat.path = null
+    }
+  })
+
+  it('reassembles a snapshot file that arrives in short reads', async () => {
+    const directory = createWorkspace()
+    const flowPath = join(directory, 'home', 'flow.json')
+    writeFileSync(join(directory, 'home', 'home.json'), '{}')
+    writeFileSync(join(directory, 'home', 'parameters.json'), '{}')
+    writeFileSync(
+      flowPath,
+      JSON.stringify({
+        steps: [{ name: 'Synthesis', runtime: '1s', state: 'Success', tool: 'yosys' }],
+      }),
+    )
+
+    shortReadPath.path = flowPath
+    try {
+      await expect(new WorkspaceSnapshotLoader().load(directory)).resolves.toMatchObject({
+        flow: { steps: [{ name: 'Synthesis', state: 'Success', tool: 'yosys' }] },
+      })
+    } finally {
+      shortReadPath.path = null
     }
   })
 

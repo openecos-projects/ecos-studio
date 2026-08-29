@@ -624,6 +624,41 @@ future = "keep"
     expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
   })
 
+  it('rejects a JSON GUI-known scalar that became a table before the queued save', async () => {
+    const root = createWorkspace()
+    const content = JSON.stringify({
+      PDK: 'ics55',
+      Design: 'gcd',
+      'Max fanout': { future: true },
+    })
+    writeHomeFile(root, 'parameters.json', content)
+    await expect(writeWorkspaceParameters(root, { 'Max fanout': 48 })).rejects.toThrow(
+      /not a scalar/,
+    )
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toBe(content)
+  })
+
+  it('rejects a [pdk] scalar that would overwrite a nested [params.pdk_config] table', async () => {
+    const root = createWorkspace()
+    const content = `
+[pdk]
+config = "home/pdk.json"
+
+[params]
+pdk = "ics55"
+design = "gcd"
+
+[params.pdk_config]
+future = "keep"
+`
+    writeHomeFile(root, 'ecc.toml', content)
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /not a scalar/,
+    )
+    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+  })
+
   it('rejects a non-table TOML section on save instead of replacing it', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'ecc.toml', 'params = [1]\n')

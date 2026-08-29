@@ -574,6 +574,7 @@ const GUI_KNOWN_TOML_SCALAR_KEYS = new Set([
   'bottom_layer',
   'top_layer',
   'pdk_root',
+  'pdk_config',
 ])
 
 const GUI_KNOWN_TOML_TABLE_KEYS: Record<string, ReadonlySet<string>> = {
@@ -816,6 +817,14 @@ export function mergePayloadIntoTomlDocument(
   // a section-only value like [pdk] config is a live parameter that must
   // survive the mirror re-sync instead of being deleted as a stale mirror.
   const existingParams = mergeTomlSections(document, workspaceRoot)
+  // Flattened semantic record after [design]/[pdk] mirrors: a table that
+  // only appears once a section scalar overwrites [params] (or a section
+  // table that landed after the GUI loaded) must fail here, before the
+  // payload replaces it and deletes the subtree.
+  assertGuiKnownTomlLeavesLossless(
+    existingParams,
+    join(workspaceRoot, 'home', WORKSPACE_CONFIG_BASENAME),
+  )
   foldLegacyGeometryIntoDieArea(existingParams, flatPayload)
   // Leaf-wise merge: unknown nested members (e.g. a future ecc knob under
   // [params.core]) survive a save that only rewrites known fields; arrays,
@@ -914,6 +923,13 @@ export async function writeWorkspaceParameters(
             `Invalid workspace configuration: ${onDisk.path} must contain a JSON object`,
           )
         }
+        // Re-validate after the contained queue-time read: a scalar that
+        // became a table since the GUI loaded must fail instead of being
+        // replaced by the save payload.
+        assertGuiKnownTomlLeavesLossless(
+          normalizeParameterKeys(existing) as Record<string, unknown>,
+          onDisk.path,
+        )
         const merged = mergeRecordsPreservingUnknown(existing, payload)
         // One more guard pass between the merge and the rename: a flow that
         // started while this operation read and merged must still block the
@@ -1433,6 +1449,10 @@ export async function prepareWorkspaceParameterEdits(
       )
     }
     const document = parsed
+    assertGuiKnownTomlLeavesLossless(
+      normalizeParameterKeys(document) as Record<string, unknown>,
+      onDisk.path,
+    )
     for (const edit of edits) {
       setJsonPathValue(document, edit.json_path, edit.value, onDisk.path, true)
     }
