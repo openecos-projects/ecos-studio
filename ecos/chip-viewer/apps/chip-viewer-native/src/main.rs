@@ -181,6 +181,7 @@ fn main() -> Result<()> {
             let msg = format!(
                 "Chip Viewer failed to start.\n\n\
                  Error: {err}\n\n\
+                "
             );
             eprintln!("{msg}");
             std::process::exit(1);
