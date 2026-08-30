@@ -17,10 +17,9 @@ eframe = { workspace = true, features = ["wgpu"] }
 egui.workspace = true
 egui-wgpu.workspace = true
 image.workspace = true
+log = "0.4"
+pollster = "0.4"
 rstar.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
-
-[dev-dependencies]
-pollster = "0.4"

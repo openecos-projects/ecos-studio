@@ -2056,6 +2056,9 @@ impl LoadedViewer {
             .map(|category| BTreeSet::from([category.id.clone()]))
             .unwrap_or_default();
         let map_thumbnail_worker = map_catalog.as_ref().map(|_| spawn_map_thumbnail_worker());
+        if !has_wgpu {
+            log::info!("GPU canvas disabled, using CPU software renderer");
+        }
         Self {
             color_theme,
             start_time: Instant::now(),
@@ -2659,23 +2662,28 @@ impl LoadedViewer {
         });
         ui.horizontal(|ui| {
             for (mode, label) in [(ViewMode::TwoD, "2D"), (ViewMode::ThreeD, "3D")] {
-                if ui
-                    .selectable_label(self.view_mode == mode, label)
-                    .on_hover_text(if mode == ViewMode::ThreeD {
-                        "Orbit the extruded metal stack"
-                    } else {
-                        "Plan-view layout canvas"
-                    })
-                    .clicked()
-                {
-                    if self.view_mode != mode {
-                        if mode == ViewMode::ThreeD {
-                            self.switch_to_3d_mode();
+                let enabled = mode == ViewMode::TwoD || self.gpu_canvas.enabled;
+                ui.add_enabled_ui(enabled, |ui| {
+                    if ui
+                        .selectable_label(self.view_mode == mode, label)
+                        .on_hover_text(if !enabled && mode == ViewMode::ThreeD {
+                            "3D view requires GPU acceleration (running in CPU fallback)"
+                        } else if mode == ViewMode::ThreeD {
+                            "Orbit the extruded metal stack"
                         } else {
-                            self.switch_to_2d_mode();
+                            "Plan-view layout canvas"
+                        })
+                        .clicked()
+                    {
+                        if self.view_mode != mode {
+                            if mode == ViewMode::ThreeD {
+                                self.switch_to_3d_mode();
+                            } else {
+                                self.switch_to_2d_mode();
+                            }
                         }
                     }
-                }
+                });
             }
             ui.separator();
             if ui.button("⛶").on_hover_text("Fit layout to view").clicked() {
@@ -4545,6 +4553,17 @@ impl LoadedViewer {
         drag_started_in_canvas: bool,
         world: Rect32,
     ) {
+        if !self.gpu_canvas.enabled || self.gpu_canvas.failed {
+            painter.text(
+                canvas.center(),
+                egui::Align2::CENTER_CENTER,
+                "3D view requires GPU acceleration.\nRunning in CPU fallback mode — switch to 2D view.",
+                egui::FontId::proportional(14.0),
+                ecos_text_secondary(),
+            );
+            return;
+        }
+
         self.ensure_3d_view(world, canvas);
 
         let dt = ui.input(|i| i.stable_dt);

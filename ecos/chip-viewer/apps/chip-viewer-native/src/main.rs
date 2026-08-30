@@ -47,25 +47,72 @@ struct Args {
     force_cpu: bool,
 }
 
+fn probe_gpu_backends(preferred: wgpu::Backends) -> wgpu::Backends {
+    if try_adapter(wgpu::InstanceDescriptor {
+        backends: preferred,
+        ..Default::default()
+    }) {
+        return preferred;
+    }
+
+    let lvp = std::path::Path::new("/usr/share/vulkan/icd.d/lvp_icd.json");
+    let lvp64 = std::path::Path::new("/usr/share/vulkan/icd.d/lvp_icd.x86_64.json");
+    if lvp.exists() || lvp64.exists() {
+        let path = if lvp.exists() { lvp } else { lvp64 };
+        std::env::set_var("VK_ICD_FILENAMES", path);
+        std::env::set_var("VK_DRIVER_FILES", path);
+        if try_adapter(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..Default::default()
+        }) {
+            return wgpu::Backends::VULKAN;
+        }
+    }
+
+    if try_adapter(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::GL,
+        ..Default::default()
+    }) {
+        return wgpu::Backends::GL;
+    }
+
+    wgpu::Backends::empty()
+}
+
+fn try_adapter(desc: wgpu::InstanceDescriptor) -> bool {
+    let instance = wgpu::Instance::new(&desc);
+    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::None,
+        force_fallback_adapter: false,
+        compatible_surface: None,
+    }))
+    .is_some()
+}
+
 fn main() -> Result<()> {
-    let mut args = Args::parse();
-    let mut wgpu_backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
-    if std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
+    let args = Args::parse();
+
+    if cfg!(target_os = "linux") {
         let is_wsl = std::env::var_os("WSL_DISTRO_NAME").is_some()
             || std::env::var_os("WSL_INTEROP").is_some()
             || std::path::Path::new("/dev/dxg").exists();
-        if is_wsl && !std::path::Path::new("/dev/dri").exists() {
+
+        if is_wsl && std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
             std::env::set_var("WINIT_UNIX_BACKEND", "x11");
-            if std::env::var_os("VK_ICD_FILENAMES").is_none()
-                && std::path::Path::new("/usr/share/vulkan/icd.d/lvp_icd.json").exists()
-            {
-                std::env::set_var("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/lvp_icd.json");
-            } else {
-                wgpu_backends = wgpu::Backends::GL;
-                args.force_cpu = true;
-            }
         }
     }
+
+    let force_cpu_env = std::env::var("ECOS_FORCE_CPU")
+        .ok()
+        .map(|v| canvas_gpu::env_flag_requested(Some(&v)))
+        .unwrap_or(false);
+
+    let resolved_backends = if force_cpu_env || args.force_cpu {
+        wgpu::Backends::empty()
+    } else {
+        let env_backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
+        probe_gpu_backends(env_backends)
+    };
 
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -76,7 +123,7 @@ fn main() -> Result<()> {
         wgpu_options: egui_wgpu::WgpuConfiguration {
             wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
                 instance_descriptor: wgpu::InstanceDescriptor {
-                    backends: wgpu_backends,
+                    backends: resolved_backends,
                     ..Default::default()
                 },
                 power_preference: wgpu::PowerPreference::None,
@@ -99,17 +146,17 @@ fn main() -> Result<()> {
         },
         ..Default::default()
     };
-    eframe::run_native(
+
+    match eframe::run_native(
         "Chip Viewer",
         native_options,
         Box::new(move |_cc| {
-            let has_wgpu = if let Some(render_state) = _cc.wgpu_render_state.as_ref() {
-                let limits = render_state.device.limits();
-                let supports_storage_buffers = limits.max_storage_buffers_per_shader_stage >= 1;
-                supports_storage_buffers && !args.force_cpu
-            } else {
-                false
-            };
+            let has_wgpu = _cc
+                .wgpu_render_state
+                .as_ref()
+                .is_some_and(|rs| rs.device.limits().max_storage_buffers_per_shader_stage >= 1)
+                && !args.force_cpu;
+
             Ok(Box::new(ChipViewerApp::open(
                 args.manifest.clone(),
                 args.mode.clone(),
@@ -128,6 +175,15 @@ fn main() -> Result<()> {
                 has_wgpu,
             )))
         }),
-    )
-    .map_err(|err| anyhow::anyhow!(err.to_string()))
+    ) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let msg = format!(
+                "Chip Viewer failed to start.\n\n\
+                 Error: {err}\n\n\
+            );
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+    }
 }

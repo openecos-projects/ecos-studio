@@ -546,7 +546,12 @@ pub struct CanvasGpuResources {
 }
 
 impl CanvasGpuResources {
-    pub fn new(device: &wgpu::Device, render_format: wgpu::TextureFormat) -> Self {
+    pub fn new(device: &wgpu::Device, render_format: wgpu::TextureFormat) -> Option<Self> {
+        if device.limits().max_storage_buffers_per_shader_stage < 1 {
+            log::warn!("GPU device lacks storage buffers; GPU canvas disabled");
+            return None;
+        }
+
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Canvas Uniform Buffer"),
             size: std::mem::size_of::<CanvasUniform>() as u64,
@@ -629,12 +634,12 @@ impl CanvasGpuResources {
             cache: None,
         });
 
-        Self {
+        Some(Self {
             pipeline,
             bind_group_layout,
             uniform_buffer,
             instance_buffers: std::collections::HashMap::new(),
-        }
+        })
     }
 }
 
@@ -663,8 +668,9 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
             return Vec::new();
         }
         if callback_resources.get::<CanvasGpuResources>().is_none() {
-            let res = CanvasGpuResources::new(device, self.target_format);
-            callback_resources.insert(res);
+            if let Some(res) = CanvasGpuResources::new(device, self.target_format) {
+                callback_resources.insert(res);
+            }
         }
         let Some(resources) = callback_resources.get_mut::<CanvasGpuResources>() else {
             return Vec::new();
@@ -827,10 +833,9 @@ impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
             return Vec::new();
         }
         if callback_resources.get::<HeatmapGpuResources>().is_none() {
-            callback_resources.insert(HeatmapGpuResources(CanvasGpuResources::new(
-                device,
-                self.target_format,
-            )));
+            if let Some(res) = CanvasGpuResources::new(device, self.target_format) {
+                callback_resources.insert(HeatmapGpuResources(res));
+            }
         }
         let Some(resources_wrapper) = callback_resources.get_mut::<HeatmapGpuResources>() else {
             return Vec::new();
