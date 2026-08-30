@@ -30,7 +30,7 @@ vi.mock('./useDesktopRuntime', () => ({
   }),
 }))
 
-vi.mock('./useHomeData', () => ({
+vi.mock('./useBackendFlowLogs', () => ({
   convertRemoteToLocalPath: (path: string) => path,
 }))
 

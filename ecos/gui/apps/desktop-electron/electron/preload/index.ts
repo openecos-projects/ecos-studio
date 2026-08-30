@@ -129,6 +129,36 @@ const desktopApi: DesktopApi = {
     mutate: (request: ProjectManifestMutationRequest) =>
       invokeDesktop(desktopApiIpcChannels.projectManifestMutate, request),
   },
+  backendWorkspace: {
+    getOverview: () => invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetOverview),
+    refreshOverview: () =>
+      invokeDesktop(desktopApiIpcChannels.backendWorkspaceRefreshOverview),
+    onInvalidated: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.backendWorkspaceInvalidated,
+        (_event, payload: unknown) => {
+          listener(payload as Parameters<typeof listener>[0])
+        },
+      ),
+  },
+  backendProjectComparison: {
+    selectProject: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendProjectComparisonSelectProject, request),
+    getComparison: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendProjectComparisonGetComparison, request),
+    refreshComparison: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.backendProjectComparisonRefreshComparison,
+        request,
+      ),
+    onInvalidated: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.backendProjectComparisonInvalidated,
+        (_event, payload: unknown) => {
+          listener(payload as Parameters<typeof listener>[0])
+        },
+      ),
+  },
   projectManagement: {
     readManifest: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementReadManifest, projectRoot),

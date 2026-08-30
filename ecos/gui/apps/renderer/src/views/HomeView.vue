@@ -18,8 +18,8 @@
             <dl class="dashboard-parameter-grid chip-info-grid">
               <div>
                 <dt>Project</dt>
-                <dd :title="valueOrNA(qorComparisonState.projectName)">
-                  {{ valueOrNA(qorComparisonState.projectName) }}
+                <dd :title="valueOrNA(workspaceIdentity?.projectName)">
+                  {{ valueOrNA(workspaceIdentity?.projectName) }}
                 </dd>
               </div>
               <div>
@@ -565,7 +565,6 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
-  reconcileFlowChecklistItems,
 } from '@/components/home/dashboardData'
 import {
   buildHomeQorDetailModel,
@@ -573,35 +572,52 @@ import {
   summarizeHomeQorComparison,
 } from '@/components/home/qorComparisonData'
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
-import { useFlowStages } from '@/composables/useFlowStages'
-import { useHomeData } from '@/composables/useHomeData'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
+import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
 import {
   useHomeSnapshots,
   type HomeLayoutThumbnail,
 } from '@/composables/useHomeSnapshots'
 import { useFlowInsights } from '@/composables/useFlowInsights'
-import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
-import { useParameters } from '@/composables/useParameters'
+import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { getDesktopApi } from '@/platform/desktop'
-import { QOR_SCORE_THRESHOLD } from '@/utils/projectQorTrend'
 import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
 } from '@/components/drawingAreaChipViewer'
 
-const { config } = useParameters()
 const router = useRouter()
 const route = useRoute()
 const { currentProject } = useWorkspace()
+const backendWorkspaceSession = useBackendWorkspaceSession()
+const workspaceOverview = computed(() => backendWorkspaceSession.projection.data)
+const workspaceIdentity = computed(() => workspaceOverview.value?.identity)
+const workspaceConfiguration = computed(() => {
+  const section = workspaceOverview.value?.configuration
+  return section?.status === 'ready' || section?.status === 'partial'
+    ? section.data
+    : null
+})
+const config = computed(() => ({
+  clock: workspaceConfiguration.value?.clock ?? '',
+  design: workspaceConfiguration.value?.design ?? '',
+  die: { area: workspaceConfiguration.value?.dieArea ?? 0 },
+  frequencyMax: workspaceConfiguration.value?.frequencyMaxMhz ?? 0,
+  pdk: workspaceConfiguration.value?.pdk ?? '',
+  topModule: workspaceConfiguration.value?.topModule ?? '',
+}))
 const currentWorkspaceName = computed(() => {
+  if (workspaceIdentity.value?.workspaceName) {
+    return workspaceIdentity.value.workspaceName
+  }
   const pathName = currentProject.value?.path?.split(/[/\\]/).filter(Boolean).pop()
   return pathName || currentProject.value?.name || null
 })
-const { flowStages, isLoading: flowLoading } = useFlowStages()
+const { flowStages, isLoading: flowLoading } = useBackendFlowStages()
 const {
-  checklistItems,
   currentWorkspaceFlowExecutionActive,
   ensureFlowLogSegmentContentLoaded,
   flowLogContentByKey,
@@ -610,7 +626,13 @@ const {
   flowLogRerunAffectedSteps,
   flowLogSegments,
   flowLogStepName,
-} = useHomeData()
+} = useBackendFlowLogs()
+const checklistItems = computed(() => {
+  const section = workspaceOverview.value?.checklist
+  return section?.status === 'ready' || section?.status === 'partial'
+    ? section.data.findings
+    : []
+})
 const { layoutThumbnails } = useHomeSnapshots()
 const {
   stepResources: flowInsightResources,
@@ -628,7 +650,7 @@ const flowInsightSteps = computed(() => flowInsightResources.value?.steps ?? [])
 const { keyMetrics, maxFanout, mpcDisplayName, mpcConstraints, qorSteps } =
   useDashboardOverview()
 const { state: qorComparisonState, refresh: refreshQorComparison } =
-  useHomeQorComparison()
+  useBackendWorkspaceQor()
 
 const showPorts = ref(false)
 const showChecklist = ref(false)
@@ -656,9 +678,7 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
         : null,
     })),
 )
-const resolvedChecklistItems = computed(() =>
-  reconcileFlowChecklistItems(checklistItems.value, flowStages.value),
-)
+const resolvedChecklistItems = checklistItems
 const checklistSlices = computed(() => checklistPieSlices(resolvedChecklistItems.value))
 const checklistSummary = computed(() =>
   checklistStatusSummary(resolvedChecklistItems.value),
@@ -739,20 +759,22 @@ const qorBaselineScoreValue = computed(() =>
   formatQorScore(qorComparisonState.value.comparison?.baselineScore),
 )
 const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
-  const score = qorComparisonState.value.comparison?.score
-  if (score === null || score === undefined) return 'unrated'
-  return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
+  const gate = qorComparisonState.value.comparison?.scoreGate
+  if (gate === 'pass') return 'pass'
+  if (gate === 'blocked') return 'fail'
+  return 'unrated'
 })
 const qorBaselineScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
-  const score = qorComparisonState.value.comparison?.baselineScore
-  if (score === null || score === undefined) return 'unrated'
-  return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
+  const gate = qorComparisonState.value.comparison?.baselineScoreGate
+  if (gate === 'pass') return 'pass'
+  if (gate === 'blocked') return 'fail'
+  return 'unrated'
 })
 const qorScoreStatusLabel = computed(() => {
   if (qorScoreTone.value === 'unrated') return 'Not rated'
-  return qorScoreTone.value === 'pass'
-    ? `PASS >= ${QOR_SCORE_THRESHOLD}`
-    : `FAIL < ${QOR_SCORE_THRESHOLD}`
+  const threshold = qorComparisonState.value.comparison?.scoreThreshold
+  if (threshold === undefined) return 'Not rated'
+  return qorScoreTone.value === 'pass' ? `PASS >= ${threshold}` : `FAIL < ${threshold}`
 })
 const qorSummaryLabel = computed(() => {
   const state = qorComparisonState.value
@@ -763,8 +785,7 @@ const qorSummaryLabel = computed(() => {
     )} / 100`
   }
   if (state.status === 'available') {
-    const label = state.baselineSource === 'default' ? 'Default baseline' : 'Baseline'
-    return `${label}: ${state.baselineWorkspaceName ?? '--'} · ${formatQorScore(
+    return `Baseline: ${state.baselineWorkspaceName ?? '--'} · ${formatQorScore(
       state.comparison?.baselineScore,
     )} / 100`
   }

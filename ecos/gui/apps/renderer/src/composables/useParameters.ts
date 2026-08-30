@@ -1,7 +1,6 @@
 import { ref, reactive, watch, computed, getCurrentScope, onScopeDispose } from 'vue'
 import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime } from './useDesktopRuntime'
-import { fetchSharedHomeData, convertRemoteToLocalPath } from './useHomeData'
 import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { readProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
@@ -465,11 +464,6 @@ export function useParameters() {
     activeSaveRequestId = 0
   }
 
-  function convertToLocalPath(remotePath: string): string {
-    const projectPath = currentProject.value?.path
-    return projectPath ? convertRemoteToLocalPath(remotePath, projectPath) : remotePath
-  }
-
   function keepLastParametersDuringFlowReload(): boolean {
     if (!currentProject.value?.path) return false
     return (
@@ -627,6 +621,7 @@ export function useParameters() {
       resetParametersState()
       return
     }
+    if (originalConfig && (await reloadParametersFromKnownPathIfRunning())) return
 
     const sessionId = workspaceLifecycle.currentSessionId.value
     if (savingSessionId && savingSessionId !== sessionId) {
@@ -640,35 +635,7 @@ export function useParameters() {
 
     try {
       const projectPath = currentProject.value.path
-      const homeData = await workspaceLifecycle.runForSession(sessionId, () =>
-        fetchSharedHomeData(
-          projectPath,
-          isDesktopRuntimeAvailable,
-          workspaceSession?.value?.workspaceId ?? '',
-          currentProject.value?.designTool ?? 'backend',
-        ),
-      )
-      if (homeData === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
-        return
-      if (!homeData) {
-        console.warn('Failed to get home data')
-        if (keepLastParametersDuringFlowReload()) return
-      }
-
-      if (!homeData?.parameters && keepLastParametersDuringFlowReload()) {
-        console.warn('No parameters field found in home.json')
-        return
-      }
-
-      const parametersPath = homeData?.parameters
-        ? convertToLocalPath(homeData.parameters)
-        : fallbackParametersPath(projectPath)
-      if (!homeData?.parameters) {
-        console.warn(
-          'No parameters field found in home.json; falling back to',
-          parametersPath,
-        )
-      }
+      const parametersPath = fallbackParametersPath(projectPath)
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
       if (workspaceHandle && currentProject.value?.designTool !== 'frontend') {
         const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>

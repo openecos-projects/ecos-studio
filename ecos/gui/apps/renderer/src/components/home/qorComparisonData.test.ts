@@ -4,14 +4,10 @@ import {
   homeQorFlowStepForLabel,
   summarizeHomeQorComparison,
 } from './qorComparisonData'
-import type { ProjectQorWorkspaceComparison } from '@/utils/projectQorTrend'
+import type { BackendWorkspaceQorComparison } from '@/composables/useBackendWorkspaceQor'
 
-const directionalMetrics: ProjectQorWorkspaceComparison['deltas'] = [
+const directionalMetrics: BackendWorkspaceQorComparison['deltas'] = [
   {
-    workspaceId: 'ws_0004',
-    workspaceName: 'ws_0004',
-    baselineWorkspaceId: 'ws_0001',
-    baselineWorkspaceName: 'baseline-run',
     step: 'Route',
     metricName: 'route_wirelength',
     displayName: 'Route Wirelength',
@@ -20,12 +16,11 @@ const directionalMetrics: ProjectQorWorkspaceComparison['deltas'] = [
     absoluteDelta: -200,
     relativeDeltaPct: -3.8,
     state: 'improvement',
+    polarity: 'lower_is_better',
+    baselinePolarity: 'lower_is_better',
+    isDirectional: true,
   },
   {
-    workspaceId: 'ws_0004',
-    workspaceName: 'ws_0004',
-    baselineWorkspaceId: 'ws_0001',
-    baselineWorkspaceName: 'baseline-run',
     step: 'Route',
     metricName: 'route_via_count',
     displayName: 'Route Via Count',
@@ -34,12 +29,11 @@ const directionalMetrics: ProjectQorWorkspaceComparison['deltas'] = [
     absoluteDelta: 0,
     relativeDeltaPct: 0,
     state: 'neutral',
+    polarity: 'lower_is_better',
+    baselinePolarity: 'lower_is_better',
+    isDirectional: true,
   },
   {
-    workspaceId: 'ws_0004',
-    workspaceName: 'ws_0004',
-    baselineWorkspaceId: 'ws_0001',
-    baselineWorkspaceName: 'baseline-run',
     step: 'DRC',
     metricName: 'drc_count',
     displayName: 'DRC Count',
@@ -48,30 +42,27 @@ const directionalMetrics: ProjectQorWorkspaceComparison['deltas'] = [
     absoluteDelta: 1,
     relativeDeltaPct: null,
     state: 'regression',
+    polarity: 'lower_is_better',
+    baselinePolarity: 'lower_is_better',
+    isDirectional: true,
   },
 ]
 
-const comparison: ProjectQorWorkspaceComparison = {
+const comparison: BackendWorkspaceQorComparison = {
   workspaceId: 'ws_0004',
   workspaceName: 'ws_0004',
   score: 78.4,
+  scoreGate: 'pass',
+  scoreThreshold: 60,
   baselineWorkspaceId: 'ws_0001',
   baselineWorkspaceName: 'baseline-run',
   baselineScore: 72.5,
+  baselineScoreGate: 'pass',
   isBaselineWorkspace: false,
   available: true,
   metrics: [
-    ...directionalMetrics.map((metric) => ({
-      ...metric,
-      polarity: 'lower_is_better' as const,
-      baselinePolarity: 'lower_is_better' as const,
-      isDirectional: true,
-    })),
+    ...directionalMetrics,
     {
-      workspaceId: 'ws_0004',
-      workspaceName: 'ws_0004',
-      baselineWorkspaceId: 'ws_0001',
-      baselineWorkspaceName: 'baseline-run',
       step: 'Route',
       metricName: 'runtime_seconds',
       displayName: 'Runtime',

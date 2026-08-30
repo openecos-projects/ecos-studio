@@ -51,7 +51,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ChecklistItem } from '@/composables/useHomeData'
+import type { ChecklistFinding as ChecklistItem } from '@ecos-studio/shared'
 import {
   checklistStateClass,
   checklistStateIcon,

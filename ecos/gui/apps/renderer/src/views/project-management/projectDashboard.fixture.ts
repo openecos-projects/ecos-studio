@@ -13,7 +13,7 @@ import type {
   ProjectStepStatus,
   ProjectWorkspace,
 } from '@/utils/projectManagement'
-import type { ProjectQorTrendSummary } from '@/utils/projectQorTrend'
+import type { ProjectQorTrendSummary } from '@ecos-studio/shared'
 
 export function metricPointFixture(
   workspaceId: string,
@@ -120,6 +120,12 @@ export function trendSummaryWithScoresFixture(): ProjectQorTrendSummary {
     workspaces: summary.workspaces.map((workspace) => ({
       ...workspace,
       overallScore: scores[workspace.workspaceId] ?? null,
+      gateStatus:
+        workspace.workspaceId === 'ws_a'
+          ? 'blocked'
+          : workspace.workspaceId === 'ws_b'
+            ? 'pass'
+            : 'unavailable',
       signoffReadiness: {
         ...workspace.signoffReadiness,
         status: workspace.workspaceId === 'ws_c' ? 'incomplete' : 'pass',

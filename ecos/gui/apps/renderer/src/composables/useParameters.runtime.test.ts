@@ -66,7 +66,7 @@ vi.mock('./useDesktopRuntime', () => ({
   }),
 }))
 
-vi.mock('./useHomeData', () => ({
+vi.mock('./useBackendFlowLogs', () => ({
   fetchSharedHomeData,
   convertRemoteToLocalPath: (path: string) => path,
 }))
@@ -433,8 +433,8 @@ describe('useParameters desktop bridge integration', () => {
     expect(parameters.config.design).toBe('demo')
     expect(parameters.config.topModule).toBe('chip_top')
     expect(parameters.config.clock).toBe('clk')
-    expect(parameters.config.die.Size).toEqual([])
-    expect(parameters.config.core.Size).toEqual([])
+    expect(parameters.config.die.Size).toEqual([100, 100])
+    expect(parameters.config.core.Size).toEqual([80, 80])
     expect(parameters.hasChanges.value).toBe(false)
 
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
@@ -510,7 +510,6 @@ describe('useParameters desktop bridge integration', () => {
       expect(parameters.config.design).toBe('demo')
     })
     expect(parameters.config.die.Size).toEqual([100, 100])
-    expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
 
     markFlowExecutionActiveForWorkspace('/workspace/demo')
     await parameters.refreshParameters()
@@ -520,7 +519,6 @@ describe('useParameters desktop bridge integration', () => {
     expect(parameters.config.clock).toBe('clk')
     expect(parameters.config.die.Size).toEqual([100, 100])
     expect(parameters.config.core.Size).toEqual([80, 80])
-    expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
     expect(readProjectTextFile).toHaveBeenCalledTimes(1)
 
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
@@ -546,7 +544,6 @@ describe('useParameters desktop bridge integration', () => {
 
     expect(parameters.config.die).toBe(dieRef)
     expect(parameters.config.core).toBe(coreRef)
-    expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
 
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
@@ -577,20 +574,17 @@ describe('useParameters desktop bridge integration', () => {
       await vi.waitFor(() => {
         expect(parameters.config.die.Size).toEqual([100, 100])
       })
-      expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
 
       markFlowExecutionActiveForWorkspace('/workspace/demo')
       await vi.advanceTimersByTimeAsync(1600)
 
       expect(parameters.config.die.Size).toEqual([100, 100])
       expect(parameters.config.core.Size).toEqual([80, 80])
-      expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
 
       clearFlowExecutionActiveForWorkspace('/workspace/demo')
       await vi.advanceTimersByTimeAsync(1600)
 
       expect(readProjectTextFile).toHaveBeenCalledTimes(1)
-      expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
     } finally {
       scope.stop()
     }

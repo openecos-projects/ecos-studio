@@ -5,7 +5,7 @@ import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
 import { getStepMetadata } from '@/api/type'
-import { useHomeData } from '@/composables/useHomeData'
+import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
 import { useSubflow } from '@/composables/useSubflow'
 import { useRoute } from 'vue-router'
 
@@ -19,7 +19,7 @@ const {
   flowLogLoading,
   flowLogSegments,
   flowLogStepName,
-} = useHomeData()
+} = useBackendFlowLogs()
 
 let isResizing = false
 

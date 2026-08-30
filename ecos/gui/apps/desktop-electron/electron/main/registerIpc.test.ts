@@ -112,9 +112,26 @@ function registerHandlers(
       listProjectEntries: vi.fn(),
       readWorkspaceTexts: vi.fn(),
     },
+    backendWorkspaceService: {
+      clearWindow: vi.fn(),
+      getOverview: vi.fn(),
+      invalidateWindow: vi.fn(),
+      onInvalidated: vi.fn(),
+      refreshOverview: vi.fn(),
+    },
+    backendProjectComparisonService: {
+      disposeWindow: vi.fn(),
+      getComparison: vi.fn(),
+      refreshComparison: vi.fn(),
+      selectProject: vi.fn(),
+      invalidateProject: vi.fn(),
+      invalidateWorkspace: vi.fn(),
+      onInvalidated: vi.fn(),
+    },
     workspaceService: {
       approvePendingExternalReadRoots: vi.fn(),
       clearProjectRoot: vi.fn(),
+      getProjectRoot: vi.fn().mockResolvedValue('/work/demo'),
       isProjectDirectory: vi.fn(),
       listPendingExternalReadRoots: vi.fn(),
       readProjectBinaryFile: vi.fn(),
@@ -138,6 +155,12 @@ function registerHandlers(
       prepareProjectDirectoryReplacement: vi.fn(),
       restoreProjectDirectoryReplacement: vi.fn(),
       finalizeProjectDirectoryReplacement: vi.fn(),
+      getProjectDirectoryReplacement: vi.fn(() => ({
+        id: 'replacement-1',
+        targetPath: '/work/demo',
+        backupPath: '/work/.demo.backup',
+        projectRoot: '/work',
+      })),
       retainProjectDirectoryReplacement: vi.fn(),
       subscribeProjectLogTail: vi.fn(),
       unwatchProjectFile: vi.fn(),
@@ -1926,6 +1949,54 @@ describe('registerIpc', () => {
     })
   })
 
+  it('delegates Backend Workspace queries to the scenario service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 41 } }
+    const result = {
+      generation: 0,
+      overview: { identity: { workspaceName: 'Workspace A' } },
+      workspaceContextId: 'workspace-context-1',
+    }
+    services.backendWorkspaceService.getOverview.mockResolvedValue(result)
+    services.backendWorkspaceService.refreshOverview.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendWorkspaceGetOverview)?.(event),
+    ).resolves.toEqual(result)
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendWorkspaceRefreshOverview)?.(event),
+    ).resolves.toEqual(result)
+
+    expect(services.backendWorkspaceService.getOverview).toHaveBeenCalledTimes(1)
+    expect(services.backendWorkspaceService.refreshOverview).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards Backend Workspace invalidation only to its owning window', () => {
+    const send = vi.fn()
+    getAllWindows.mockReturnValue([
+      {
+        isDestroyed: () => false,
+        webContents: { id: 41, send },
+      } as unknown as MockBrowserWindow,
+    ])
+    const { services } = registerHandlers()
+    const listener = services.backendWorkspaceService.onInvalidated.mock.calls[0]?.[0]
+
+    listener?.({
+      generation: 2,
+      windowId: 41,
+      workspaceContextId: 'workspace-context-1',
+    })
+
+    expect(send).toHaveBeenCalledWith(
+      desktopApiEventChannels.backendWorkspaceInvalidated,
+      {
+        generation: 2,
+        workspaceContextId: 'workspace-context-1',
+      },
+    )
+  })
+
   it('runs ECC flow steps through the runtime service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
@@ -2244,6 +2315,51 @@ describe('registerIpc', () => {
     )
     expect(otherSend).not.toHaveBeenCalled()
     expect(getAllWindows).not.toHaveBeenCalled()
+  })
+
+  it('invalidates Backend Workspace before forwarding a committed step event', async () => {
+    const { handlers, services } = registerHandlers()
+    const send = vi.fn()
+    const sender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send,
+    })
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+      { sender },
+      { directory: '/work/demo' },
+    )
+
+    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
+    listener?.({
+      event: {
+        eventId: 'workspace-1:3',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'Success' },
+        sequence: 3,
+        timestamp: 1,
+        type: 'step.completed',
+        workspaceId: 'workspace-1',
+      },
+      type: 'runtime.protocol',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(services.backendWorkspaceService.invalidateWindow).toHaveBeenCalledWith(11)
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledOnce()
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/work/demo')
+    expect(
+      services.backendWorkspaceService.invalidateWindow.mock.invocationCallOrder[0],
+    ).toBeLessThan(send.mock.invocationCallOrder[0]!)
   })
 
   it('streams frontend subflow progress to its subscribed workspace window', async () => {

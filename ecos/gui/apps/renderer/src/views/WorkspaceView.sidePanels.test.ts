@@ -37,7 +37,7 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).toContain(
       "import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'",
     )
-    expect(source).toContain('useHomeData()')
+    expect(source).toContain('useBackendFlowLogs()')
     expect(source).toContain('const currentStepLogNode')
     expect(source).toContain('const stepKey = typeof route.params.step')
     expect(source).toContain('getStepMetadata(stepKey)')

@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { open, readdir, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type {
   WorkspaceResourceFile,
@@ -16,6 +16,8 @@ type WorkspaceResourceFileKind = WorkspaceResourceFile['kind']
 type ResourceBucketName = keyof WorkspaceStepResource['resources']
 type StepFileBuckets = WorkspaceStepResource['resources']
 
+const WORKSPACE_INDEX_JSON_MAX_BYTES = 4 * 1024 * 1024
+
 interface WorkspaceResourceServiceOptions {
   projectScopeProvider: Pick<
     ProjectScopeProvider,
@@ -28,6 +30,7 @@ interface FlowStepInput {
   tool: string
   state: string
   runtime: string
+  peakMemoryMb?: number
   info: Record<string, unknown>
 }
 
@@ -239,6 +242,7 @@ export class WorkspaceResourceService {
       tool,
       state: step.state,
       runtime: step.runtime,
+      ...(step.peakMemoryMb === undefined ? {} : { peakMemoryMb: step.peakMemoryMb }),
       directory,
       info: step.info,
       resources,
@@ -442,7 +446,20 @@ export class WorkspaceResourceService {
   private async readJsonOrNull(path: string): Promise<Record<string, unknown> | null> {
     try {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-      const raw = await readFile(canonicalPath, 'utf8')
+      const handle = await open(canonicalPath, 'r')
+      let raw: string
+      try {
+        const buffer = Buffer.alloc(WORKSPACE_INDEX_JSON_MAX_BYTES + 1)
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+        if (bytesRead > WORKSPACE_INDEX_JSON_MAX_BYTES) {
+          throw new Error(
+            `Workspace JSON exceeds ${WORKSPACE_INDEX_JSON_MAX_BYTES} bytes: ${path}`,
+          )
+        }
+        raw = buffer.subarray(0, bytesRead).toString('utf8')
+      } finally {
+        await handle.close()
+      }
       const parsed: unknown = JSON.parse(raw)
       return isRecord(parsed) ? parsed : {}
     } catch (error) {
@@ -974,6 +991,10 @@ function readFlowStep(value: unknown): FlowStepInput | null {
     tool: typeof value.tool === 'string' ? value.tool : 'unknown',
     state: typeof value.state === 'string' ? value.state : '',
     runtime: typeof value.runtime === 'string' ? value.runtime : '',
+    ...(typeof value['peak memory (mb)'] === 'number' &&
+    Number.isFinite(value['peak memory (mb)'])
+      ? { peakMemoryMb: value['peak memory (mb)'] }
+      : {}),
     info: isRecord(value.info) ? value.info : {},
   }
 }

@@ -1,14 +1,6 @@
 import type {
   ProjectAnalysisSnapshot,
   ProjectAnalysisStepSnapshot,
-} from '@/utils/projectAnalysisSnapshot'
-import type {
-  FlowStep,
-  ProjectStepCompareMetric,
-  ProjectStepCompareSummary,
-  ProjectWorkspaceSummary,
-} from '@/utils/projectManagement'
-import type {
   ProjectQorFindingEvidence,
   ProjectQorMetricRecord,
   ProjectQorSignoffReadiness,
@@ -16,7 +8,13 @@ import type {
   ProjectQorTrendSummary,
   ProjectQorTrendWorkspaceSummary,
   QorStatus,
-} from '@/utils/projectQorTrend'
+} from '@ecos-studio/shared'
+import type {
+  FlowStep,
+  ProjectStepCompareMetric,
+  ProjectStepCompareSummary,
+  ProjectWorkspaceSummary,
+} from '@/utils/projectManagement'
 
 const TIMING_CONSTRAINTS: ProjectQorTimingConstraints = {
   status: 'consistent',
@@ -44,7 +42,6 @@ export function metricRecordFixture(
 ): ProjectQorMetricRecord {
   return {
     workspaceId: 'ws_a',
-    workspacePath: '/projects/demo/ws_a',
     step: 'Route',
     displayName: overrides.metricName,
     value: 0,
@@ -121,12 +118,100 @@ export function workspaceSummaryFixture(
     deltaSummaries: [],
     analysis: {
       workspaceId,
-      workspacePath,
       steps,
       signoffReadiness,
       timingConstraints: TIMING_CONSTRAINTS,
     },
   }
+}
+
+export function withBaselineComparisons(
+  summaries: ProjectWorkspaceSummary[],
+  baselineWorkspaceId: string | null,
+): ProjectWorkspaceSummary[] {
+  const baseline = summaries.find(
+    (summary) => summary.workspaceId === baselineWorkspaceId,
+  )
+  for (const summary of summaries) {
+    for (const [step, snapshot] of Object.entries(summary.analysis.steps)) {
+      if (!snapshot) continue
+      const baselineMetrics = new Map(
+        (baseline?.analysis.steps[step as FlowStep]?.metrics ?? []).map((metric) => [
+          metric.metricName,
+          metric,
+        ]),
+      )
+      for (const metric of snapshot.metrics) {
+        const baselineMetric = baselineMetrics.get(metric.metricName)
+        if (summary.workspaceId === baselineWorkspaceId) {
+          metric.baselineComparison = {
+            baselineValue: metric.value,
+            absoluteDelta: 0,
+            relativeDeltaPct: 0,
+            verdict: 'baseline',
+          }
+          continue
+        }
+        if (metric.value === null || baselineMetric?.value === null || !baselineMetric) {
+          metric.baselineComparison = {
+            baselineValue: baselineMetric?.value ?? null,
+            absoluteDelta: null,
+            relativeDeltaPct: null,
+            verdict: 'not-comparable',
+          }
+          continue
+        }
+        const absoluteDelta = metric.value - baselineMetric.value
+        const directional =
+          metric.polarity === 'lower_is_better' || metric.polarity === 'higher_is_better'
+        const improvement =
+          metric.polarity === 'lower_is_better' ? absoluteDelta < 0 : absoluteDelta > 0
+        metric.baselineComparison = {
+          baselineValue: baselineMetric.value,
+          absoluteDelta,
+          relativeDeltaPct:
+            baselineMetric.value === 0
+              ? null
+              : Number(
+                  ((absoluteDelta / Math.abs(baselineMetric.value)) * 100).toFixed(6),
+                ),
+          verdict: !directional
+            ? 'not-comparable'
+            : absoluteDelta === 0
+              ? 'unchanged'
+              : improvement
+                ? 'improvement'
+                : 'regression',
+        }
+      }
+    }
+  }
+  for (const step of Object.keys(baseline?.analysis.steps ?? {}) as FlowStep[]) {
+    const metricNames = new Set(
+      summaries.flatMap((summary) =>
+        (summary.analysis.steps[step]?.metrics ?? []).map((metric) => metric.metricName),
+      ),
+    )
+    for (const metricName of metricNames) {
+      const metrics = summaries.flatMap((summary) =>
+        (summary.analysis.steps[step]?.metrics ?? []).filter(
+          (metric) => metric.metricName === metricName && metric.value !== null,
+        ),
+      )
+      const polarity = metrics[0]?.polarity
+      const values = metrics.map((metric) => metric.value as number)
+      if (
+        values.length < 2 ||
+        new Set(values).size < 2 ||
+        (polarity !== 'lower_is_better' && polarity !== 'higher_is_better')
+      )
+        continue
+      const leading =
+        polarity === 'lower_is_better' ? Math.min(...values) : Math.max(...values)
+      for (const metric of metrics) metric.leads = metric.value === leading
+    }
+  }
+  return summaries
 }
 
 function trendWorkspaceFixture(
@@ -136,7 +221,6 @@ function trendWorkspaceFixture(
   return {
     workspaceId,
     workspaceName: workspaceId,
-    workspacePath: `/projects/demo/${workspaceId}`,
     status,
     overallScore: null,
     gateStatus: 'pass',
@@ -175,12 +259,12 @@ export function trendSummaryFixture(
     trendPoints: [],
     baselineWorkspaceId,
     baselineLabel: baselineWorkspaceId ?? 'none',
+    scoreThreshold: 60,
     regressions: [],
     improvements: [],
     risks: [],
     timingClosure: {
       issues: [],
-      artifactPaths: [],
       coverage: [],
       triage: [],
       criticalCount: 0,
@@ -195,7 +279,7 @@ export function trendSummaryFixture(
 }
 
 export function compareSummaryFixture(
-  step: FlowStep,
+  step: string,
   metrics: ProjectStepCompareMetric[] = [],
 ): ProjectStepCompareSummary {
   return {

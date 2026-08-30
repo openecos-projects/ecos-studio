@@ -8,6 +8,7 @@ import {
   metricRecordFixture,
   stepSnapshotFixture,
   trendSummaryFixture,
+  withBaselineComparisons,
   workspaceSummaryFixture,
 } from './projectStepAnalysis.fixture'
 import type { ProjectWorkspaceSummary } from '@/utils/projectManagement'
@@ -54,20 +55,25 @@ function routeWorkspace(workspaceId: string, wirelength = 1000): ProjectWorkspac
 function mountPanel(overrides: Record<string, unknown> = {}) {
   // ws_b is the baseline and routes 100 um longer, so the panel has a real delta to show.
   const workspaceSummaries = [routeWorkspace('ws_a'), routeWorkspace('ws_b', 1100)]
+  const qorTrendSummary =
+    (overrides.qorTrendSummary as ReturnType<typeof trendSummaryFixture> | undefined) ??
+    trendSummaryFixture([{ workspaceId: 'ws_a' }, { workspaceId: 'ws_b' }], 'ws_b')
+  const comparedWorkspaces = withBaselineComparisons(
+    (overrides.workspaceSummaries as ProjectWorkspaceSummary[] | undefined) ??
+      workspaceSummaries,
+    qorTrendSummary.baselineWorkspaceId,
+  )
   return mount(ProjectStepAnalysisPanel, {
     props: {
       steps: [compareSummaryFixture('Route'), compareSummaryFixture('DRC')],
-      workspaceSummaries,
-      qorTrendSummary: trendSummaryFixture(
-        [{ workspaceId: 'ws_a' }, { workspaceId: 'ws_b' }],
-        'ws_b',
-      ),
       projectName: 'demo',
       projectObjective: 'QoR comparison',
       bestWorkspaceId: 'ws_b',
       selectedStep: 'Route' as const,
       selectedWorkspaceId: 'ws_a',
       ...overrides,
+      workspaceSummaries: comparedWorkspaces,
+      qorTrendSummary,
     },
   })
 }
@@ -110,6 +116,18 @@ async function openCompare(wrapper: ReturnType<typeof mountPanel>) {
 }
 
 describe('ProjectStepAnalysisPanel', () => {
+  it('renders a backend-defined step even when the renderer does not know it', () => {
+    const wrapper = mountPanel({
+      steps: [compareSummaryFixture('CustomSignoff')],
+      selectedStep: 'CustomSignoff',
+    })
+
+    expect(wrapper.find('.step-rail-name').text()).toBe('CustomSignoff')
+    expect(wrapper.find('.verdict-summary').text()).toContain(
+      'has no V3 analysis artifacts',
+    )
+  })
+
   it('badges every flow step with the selected workspace issue count and switches step', async () => {
     const wrapper = mountPanel()
 

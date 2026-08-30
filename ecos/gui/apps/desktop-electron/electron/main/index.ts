@@ -10,6 +10,8 @@ import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
+import { BackendWorkspaceService } from '../services/backendWorkspaceService'
+import { BackendProjectComparisonService } from '../services/backendProjectComparisonService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
@@ -59,6 +61,8 @@ let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
+  backendWorkspaceService: BackendWorkspaceService
+  backendProjectComparisonService: BackendProjectComparisonService
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
@@ -213,6 +217,13 @@ function getDesktopServices() {
     workspaceService,
   )
   const projectManagementReadService = new ProjectManagementReadService()
+  const backendProjectComparisonService = new BackendProjectComparisonService(
+    projectManagementReadService,
+  )
+  const backendWorkspaceService = new BackendWorkspaceService({
+    projectManagementReadService,
+    workspaceResourceService,
+  })
   const shellService = new ShellPtyService({
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
@@ -251,6 +262,8 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
+    backendWorkspaceService,
+    backendProjectComparisonService,
     frontendRpcRuntimeService,
     chipViewerService,
     codexDependencyService,
@@ -291,6 +304,8 @@ async function ensureDesktopBridgeReady(): Promise<void> {
     registerIpc(undefined, {
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
+      backendWorkspaceService: desktopServices.backendWorkspaceService,
+      backendProjectComparisonService: desktopServices.backendProjectComparisonService,
       codexDependencyService: desktopServices.codexDependencyService,
       createWindow: async (options) => {
         await launchWindow({
@@ -327,6 +342,8 @@ async function launchWindow(
   bindWindowEvents(mainWindow)
   mainWindow.on('closed', () => {
     workspaceWindowRegistry.unregisterByWindow(mainWindow as WorkspaceWindowLike)
+    services?.backendWorkspaceService.clearWindow(windowId)
+    services?.backendProjectComparisonService.disposeWindow(windowId)
     projectScopeService?.clearWindow(windowId)
     clearWindowMenuState(windowId)
   })

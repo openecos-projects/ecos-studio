@@ -1,14 +1,11 @@
 import { ref, computed, getCurrentInstance, onUnmounted, watch } from 'vue'
 import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime, isDesktopRuntime } from './useDesktopRuntime'
-import { convertRemoteToLocalPath } from './useHomeData'
+import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { STEP_METADATA, getStepMetadata } from '@/api/type'
 import { readProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
-import {
-  getWorkspaceRuntimeSnapshotApi,
-  readWorkspaceFlowResourceApi,
-} from '@/api/workspaceResources'
+import { readWorkspaceFlowResourceApi } from '@/api/workspaceResources'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
   consumePendingHomeRunArtifactReset,
@@ -427,25 +424,8 @@ export function useFlowStages() {
     error.value = null
 
     try {
-      const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
       const flowData = await workspaceLifecycle.runForSession(sessionId, async () => {
-        // ECC-FE owns its workspace handle through DesignRuntime. The shared
-        // ECC snapshot API only understands backend workspace handles, so
-        // frontend projects must continue to read their complete flow.json.
-        if (!workspaceHandle || currentProject.value?.designTool === 'frontend') {
-          return await readFrontendFlowWithRetry(isCurrent)
-        }
-        const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
-        return {
-          steps: snapshot.flow.steps.map((step) => ({
-            'peak memory (mb)': step.peakMemory,
-            info: {},
-            name: step.name,
-            runtime: step.runtime,
-            state: step.state,
-            tool: step.tool,
-          })),
-        } satisfies FlowData
+        return await readFrontendFlowWithRetry(isCurrent)
       })
       if (!isCurrent()) return
       if (!flowData) {

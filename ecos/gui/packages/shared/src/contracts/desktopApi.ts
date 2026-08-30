@@ -1,4 +1,6 @@
 import type { DesignRuntimeApi } from './designRuntime.ts'
+import type { BackendWorkspaceApi } from './backendWorkspace.ts'
+import type { BackendProjectComparisonApi } from './backendProjectComparison.ts'
 import type {
   WorkspaceResourceIndex,
   WorkspaceStepInfoRequest,
@@ -247,6 +249,8 @@ export interface DesktopApi {
       request: ProjectManifestMutationRequest,
     ): Promise<ProjectManifestMutationResult>
   }
+  backendWorkspace: BackendWorkspaceApi
+  backendProjectComparison: BackendProjectComparisonApi
   projectManagement?: {
     readManifest(projectRoot: string): Promise<string | null>
     listProjectEntries(projectRoot: string): Promise<string[]>

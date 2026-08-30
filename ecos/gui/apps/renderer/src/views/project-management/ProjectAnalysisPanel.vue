@@ -491,11 +491,10 @@ import { computed, nextTick, ref, watch } from 'vue'
 import ProjectQorScoreChart from '@/components/ProjectQorScoreChart.vue'
 import ProjectStepAnalysisPanel from '@/components/ProjectStepAnalysisPanel.vue'
 import {
-  type FlowStep,
   type ProjectManagementProject,
   type ProjectMetricPoint,
 } from '@/utils/projectManagement'
-import type { QorGateStatus } from '@/utils/projectQorTrend'
+import type { QorGateStatus } from '@ecos-studio/shared'
 import {
   buildBestWorkspacePpaMetrics,
   buildDashboardMetricRows,
@@ -546,14 +545,14 @@ const SIGNOFF_DISPLAY: Record<QorGateStatus, { label: string; tone: string }> = 
 const props = defineProps<{
   project: ProjectManagementProject
   selectedAnalysisTab: AnalysisTab
-  selectedStep: FlowStep
+  selectedStep: string
   selectedWorkspaceId: string
   selectedIssueMetric?: string | null
 }>()
 
 const emit = defineEmits<{
   'select-analysis-tab': [tab: AnalysisTab]
-  'select-step': [step: FlowStep]
+  'select-step': [step: string]
   'select-workspace': [workspaceId: string]
   'select-issue-metric': [metric: string | null]
   'set-baseline': [{ workspaceId: string }]
@@ -815,7 +814,7 @@ function resetDashboardWorkspaceFilters(): void {
 /** Hands the user from the overview to the detail view already pointed at the finding. */
 function drillDown(
   workspaceId: string,
-  step: FlowStep | null,
+  step: string | null,
   metric: string | null = null,
 ): void {
   emit('select-workspace', workspaceId)
@@ -846,7 +845,7 @@ function handleAnalysisTabKeydown(event: KeyboardEvent, currentTab: AnalysisTab)
   document.getElementById(`analysis-tab-${nextTab}`)?.focus()
 }
 
-function selectStep(step: FlowStep): void {
+function selectStep(step: string): void {
   emit('select-step', step)
 }
 

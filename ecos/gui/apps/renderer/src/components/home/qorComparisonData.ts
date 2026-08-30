@@ -1,5 +1,8 @@
-import { FLOW_STEPS, type FlowStep } from '@/utils/projectManagement'
-import type { ProjectQorWorkspaceComparison } from '@/utils/projectQorTrend'
+import {
+  projectManifestFlowSteps as FLOW_STEPS,
+  type ProjectManifestFlowStep as FlowStep,
+} from '@ecos-studio/shared'
+import type { BackendWorkspaceQorComparison } from '@/composables/useBackendWorkspaceQor'
 
 export interface HomeQorComparisonStep {
   step: FlowStep
@@ -26,7 +29,7 @@ export interface HomeQorDetailStep {
   improvedCount: number
   regressedCount: number
   unchangedCount: number
-  metrics: ProjectQorWorkspaceComparison['metrics']
+  metrics: BackendWorkspaceQorComparison['metrics']
 }
 
 export interface HomeQorDetailModel {
@@ -86,7 +89,7 @@ export function homeQorFlowStepForLabel(label: string): FlowStep | null {
 }
 
 export function summarizeHomeQorComparison(
-  comparison: ProjectQorWorkspaceComparison | null,
+  comparison: BackendWorkspaceQorComparison | null,
 ): HomeQorComparisonSummary {
   const countsByStep = new Map<FlowStep, HomeQorComparisonStep>(
     FLOW_STEPS.map((step) => [
@@ -130,12 +133,12 @@ export function summarizeHomeQorComparison(
 }
 
 export function buildHomeQorDetailModel(
-  comparison: ProjectQorWorkspaceComparison | null,
+  comparison: BackendWorkspaceQorComparison | null,
 ): HomeQorDetailModel | null {
   if (!comparison) return null
 
   const summary = summarizeHomeQorComparison(comparison)
-  const metricsByStep = new Map<FlowStep, ProjectQorWorkspaceComparison['metrics']>()
+  const metricsByStep = new Map<FlowStep, BackendWorkspaceQorComparison['metrics']>()
   for (const metric of comparison.metrics) {
     const metrics = metricsByStep.get(metric.step) ?? []
     metrics.push(metric)

@@ -357,6 +357,10 @@ export class WorkspaceService {
     return await this.projectScopeProvider.isProjectDirectory(path)
   }
 
+  async getProjectRoot(): Promise<string> {
+    return await this.projectScopeProvider.getProjectRoot()
+  }
+
   async pathExists(path: string): Promise<boolean> {
     return await pathExists(resolve(path))
   }

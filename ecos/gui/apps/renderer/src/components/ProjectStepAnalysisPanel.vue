@@ -587,11 +587,10 @@ import {
   type StepCompareSort,
 } from './projectStepComparisonScope'
 import type {
-  FlowStep,
   ProjectStepCompareSummary,
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
-import type { ProjectQorTrendSummary } from '@/utils/projectQorTrend'
+import type { ProjectQorTrendSummary } from '@ecos-studio/shared'
 
 const props = defineProps<{
   steps: ProjectStepCompareSummary[]
@@ -601,13 +600,13 @@ const props = defineProps<{
   projectObjective: string
   bestWorkspaceId: string
   bestWorkspaceReason?: string
-  selectedStep: FlowStep
+  selectedStep: string
   selectedWorkspaceId: string
   selectedIssueMetric?: string | null
 }>()
 
 const emit = defineEmits<{
-  'select-step': [step: FlowStep]
+  'select-step': [step: string]
   'select-workspace': [workspaceId: string]
 }>()
 

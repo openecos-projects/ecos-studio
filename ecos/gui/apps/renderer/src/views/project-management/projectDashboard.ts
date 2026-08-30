@@ -1,7 +1,11 @@
 import { buildStepIssues, countStepIssues } from '@/components/projectStepAnalysis'
-import { stepAnalysisAvailability } from '@/utils/projectAnalysisSnapshot'
+import { stepAnalysisAvailability } from '@/utils/projectAnalysisAvailability'
 import type {
-  FlowStep,
+  ProjectQorTrendSummary,
+  QorGateStatus,
+  QorStatus,
+} from '@ecos-studio/shared'
+import type {
   ProjectDashboardSummary,
   ProjectManagementProject,
   ProjectMetricRow,
@@ -10,12 +14,6 @@ import type {
   ProjectWorkspace,
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
-import {
-  QOR_SCORE_THRESHOLD,
-  type ProjectQorTrendSummary,
-  QorGateStatus,
-  QorStatus,
-} from '@/utils/projectQorTrend'
 import {
   metricHasComparableData,
   metricPointForWorkspace,
@@ -107,7 +105,7 @@ export interface DashboardAttentionItem {
   kind: string
   workspaceId: string
   workspaceName: string
-  step: FlowStep | null
+  step: string | null
   title: string
   /** Null when the reporting artifact gave no description for the finding. */
   detail: string | null
@@ -246,24 +244,32 @@ export function buildDashboardRecommendation(
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
     score,
-    scoreTone: scoreTone(workspace.overallScore),
-    scoreNote: buildScoreNote(workspace.overallScore, signoff),
+    scoreTone: scoreTone(workspace.gateStatus),
+    scoreNote: buildScoreNote(
+      workspace.overallScore,
+      workspace.gateStatus,
+      signoff,
+      qorTrendSummary.scoreThreshold,
+    ),
     status: workspace.status,
     signoff,
     reason: bestReason.includes(score) ? null : bestReason,
   }
 }
 
-function buildScoreNote(score: number | null, signoff: QorGateStatus): string {
+function buildScoreNote(
+  score: number | null,
+  scoreGate: QorGateStatus,
+  signoff: QorGateStatus,
+  threshold: number,
+): string {
   if (score === null) return 'Not rated: the QoR score needs a complete analysis run'
-  if (score >= QOR_SCORE_THRESHOLD) {
-    return `Meets the ${QOR_SCORE_THRESHOLD} analysis threshold`
-  }
+  if (scoreGate === 'pass') return `Meets the ${threshold} analysis threshold`
   // A sub-threshold score next to a passing signoff tag reads as a contradiction.
   if (signoff === 'pass') {
-    return `Below the ${QOR_SCORE_THRESHOLD} analysis threshold, which does not gate signoff`
+    return `Below the ${threshold} analysis threshold, which does not gate signoff`
   }
-  return `Below the ${QOR_SCORE_THRESHOLD} analysis threshold`
+  return `Below the ${threshold} analysis threshold`
 }
 
 export function buildDashboardWorkspaceRows(
@@ -305,7 +311,7 @@ export function buildDashboardWorkspaceRows(
       stepsLabel: `${stepsDone}/${stepsTotal}`,
       stepsPercent: stepsTotal === 0 ? 0 : Math.round((stepsDone / stepsTotal) * 100),
       score: formatScore(trend?.overallScore ?? null),
-      scoreTone: scoreTone(trend?.overallScore ?? null),
+      scoreTone: scoreTone(trend?.gateStatus ?? 'unavailable'),
       blockingCount: counts.blocking,
       findingCount: counts.total,
       analysisState,
@@ -452,7 +458,7 @@ export function sortDashboardWorkspaceRows(
 
 function countWorkspaceIssues(
   summary: ProjectWorkspaceSummary | undefined,
-  steps: readonly FlowStep[],
+  steps: readonly string[],
 ): { blocking: number; total: number } {
   return steps.reduce(
     (totals, step) => {
@@ -485,9 +491,9 @@ function coverageTone(covered: number, total: number): DashboardTone {
   return 'warn'
 }
 
-function scoreTone(score: number | null): DashboardTone {
-  if (score === null) return 'neutral'
-  return score >= QOR_SCORE_THRESHOLD ? 'good' : 'warn'
+function scoreTone(gate: QorGateStatus): DashboardTone {
+  if (gate === 'unavailable' || gate === 'incomplete') return 'neutral'
+  return gate === 'pass' ? 'good' : 'warn'
 }
 
 export function formatScore(score: number | null): string {

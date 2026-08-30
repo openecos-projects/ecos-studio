@@ -33,6 +33,17 @@ async function loadDesktopBridge() {
     app: {
       getVersions(): Promise<unknown>
     }
+    backendWorkspace: {
+      getOverview(): Promise<unknown>
+      refreshOverview(): Promise<unknown>
+      onInvalidated(listener: (event: unknown) => void): () => void
+    }
+    backendProjectComparison: {
+      selectProject(request: unknown): Promise<unknown>
+      getComparison(request: unknown): Promise<unknown>
+      refreshComparison(request: unknown): Promise<unknown>
+      onInvalidated(listener: (event: unknown) => void): () => void
+    }
     ecc: {
       events: {
         onEvent(listener: (event: unknown) => void): () => void
@@ -106,6 +117,11 @@ describe('preload desktop bridge contract', () => {
           flow: expect.objectContaining({
             runStep: expect.any(Function),
           }),
+        }),
+        backendProjectComparison: expect.objectContaining({
+          selectProject: expect.any(Function),
+          getComparison: expect.any(Function),
+          refreshComparison: expect.any(Function),
         }),
         workspace: expect.objectContaining({
           readProjectTextFile: expect.any(Function),
@@ -187,6 +203,46 @@ describe('preload desktop bridge contract', () => {
       7,
       desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
       replacement.id,
+    )
+  })
+
+  it('routes Backend Workspace queries and invalidation through typed channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const overview = {
+      generation: 0,
+      overview: { identity: { workspaceName: 'Workspace A' } },
+      workspaceContextId: 'workspace-context-1',
+    }
+    ipcRenderer.invoke.mockResolvedValue(overview)
+
+    await expect(bridge.backendWorkspace.getOverview()).resolves.toEqual(overview)
+    await expect(bridge.backendWorkspace.refreshOverview()).resolves.toEqual(overview)
+
+    const listener = vi.fn()
+    const unsubscribe = bridge.backendWorkspace.onInvalidated(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
+    eventListener?.({}, { generation: 1, workspaceContextId: 'workspace-context-1' })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.backendWorkspaceGetOverview,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.backendWorkspaceRefreshOverview,
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.backendWorkspaceInvalidated,
+      eventListener,
+    )
+    expect(listener).toHaveBeenCalledWith({
+      generation: 1,
+      workspaceContextId: 'workspace-context-1',
+    })
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.backendWorkspaceInvalidated,
+      eventListener,
     )
   })
 

@@ -51,7 +51,7 @@ import Dialog from 'primevue/dialog'
 import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
 import { useFlowRunner } from '@/composables/useFlowRunner'
-import { useFlowStages } from '@/composables/useFlowStages'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
@@ -67,7 +67,7 @@ const {
   refreshFlowStages,
   setFirstRunStepOngoing,
   setRunStepOngoingByPath,
-} = useFlowStages()
+} = useBackendFlowStages()
 const { overallStatus } = useSubflow()
 const { currentProject, ensureApiReady, showToast } = useWorkspace()
 

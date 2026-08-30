@@ -1088,8 +1088,8 @@ import {
   type StepDashboardReport,
 } from '@/composables/useStepDashboardData'
 import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
-import { useFlowStages } from '@/composables/useFlowStages'
-import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
+import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
 import CongestionPanel from './flow-insights/CongestionPanel.vue'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
@@ -1122,8 +1122,8 @@ import {
 
 const { currentStep, data, error, loading, refresh } = useStepDashboardData()
 const { currentProject } = useWorkspace()
-const { flowStages } = useFlowStages()
-const { state: qorComparisonState } = useHomeQorComparison()
+const { flowStages } = useBackendFlowStages()
+const { state: qorComparisonState } = useBackendWorkspaceQor()
 const {
   loading: configLoading,
   stepConfigParsed,

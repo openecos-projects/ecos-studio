@@ -1,8 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type Ref } from 'vue'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
+  getWorkspaceResourceIndexApi: vi.fn<() => Promise<any>>(async () => ({
+    flow: { steps: [] },
+  })),
   readWorkspaceHomeResourceApi: vi.fn(async () => ({
     flow: '',
     layout: '',
@@ -41,7 +44,7 @@ vi.mock('./useFlowRunner', () => ({
 }))
 
 vi.mock('@/api/workspaceResources', () => ({
-  getWorkspaceResourceIndexApi: vi.fn(),
+  getWorkspaceResourceIndexApi: testState.getWorkspaceResourceIndexApi,
   getWorkspaceRuntimeSnapshotApi: vi.fn(),
   readWorkspaceHomeResourceApi: testState.readWorkspaceHomeResourceApi,
 }))
@@ -67,13 +70,20 @@ async function waitForLiveLogFrame(): Promise<void> {
   await nextTick()
 }
 
-describe('useHomeData runtime updates', () => {
+describe('useBackendFlowLogs runtime updates', () => {
+  beforeEach(async () => {
+    const { resetSharedHomeDataProjectState } = await import('./useBackendFlowLogs')
+    resetSharedHomeDataProjectState()
+    testState.getWorkspaceResourceIndexApi.mockReset()
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue({ flow: { steps: [] } })
+  })
+
   it('does not attach NFS file or log subscriptions while a GUI flow is active', async () => {
     testState.currentProject = ref(null)
     testState.runtimeEvents = ref([])
-    const { useHomeData } = await import('./useHomeData')
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
     const scope = effectScope()
-    scope.run(() => useHomeData())
+    scope.run(() => useBackendFlowLogs())
 
     await Promise.resolve()
     expect(testState.watchProjectFile).not.toHaveBeenCalled()
@@ -84,9 +94,9 @@ describe('useHomeData runtime updates', () => {
   it('uses ECC log cursors for live output without replacing prior step logs', async () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.runtimeEvents = ref([])
-    const { useHomeData } = await import('./useHomeData')
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
     const scope = effectScope()
-    const home = scope.run(() => useHomeData())!
+    const home = scope.run(() => useBackendFlowLogs())!
 
     testState.runtimeEvents.value.push({
       data: {
@@ -157,9 +167,9 @@ describe('useHomeData runtime updates', () => {
   it('consumes every live log chunk delivered in one reactive batch', async () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.runtimeEvents = ref([])
-    const { useHomeData } = await import('./useHomeData')
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
     const scope = effectScope()
-    const home = scope.run(() => useHomeData())!
+    const home = scope.run(() => useBackendFlowLogs())!
 
     testState.runtimeEvents.value.push({
       data: {
@@ -207,9 +217,9 @@ describe('useHomeData runtime updates', () => {
   it('flushes queued live log chunks before a step completion boundary', async () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.runtimeEvents = ref([])
-    const { useHomeData } = await import('./useHomeData')
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
     const scope = effectScope()
-    const home = scope.run(() => useHomeData())!
+    const home = scope.run(() => useBackendFlowLogs())!
 
     testState.runtimeEvents.value.push({
       data: {
@@ -274,9 +284,30 @@ describe('useHomeData runtime updates', () => {
               sizeBytes: 12,
             },
     )
-    const { resetSharedHomeDataProjectState, useHomeData } = await import('./useHomeData')
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue({
+      flow: {
+        steps: [
+          {
+            info: {},
+            name: 'fixFanout',
+            resources: {
+              log: {
+                file: {
+                  path: '/workspace/demo/fixFanout_ecc/log/fixFanout.log',
+                },
+              },
+            },
+            runtime: '',
+            state: 'Success',
+            tool: 'ecc',
+          },
+        ],
+      },
+    })
+    const { resetSharedHomeDataProjectState, useBackendFlowLogs } =
+      await import('./useBackendFlowLogs')
     const scope = effectScope()
-    const home = scope.run(() => useHomeData())!
+    const home = scope.run(() => useBackendFlowLogs())!
 
     testState.runtimeEvents.value.push({
       data: {
@@ -318,9 +349,9 @@ describe('useHomeData runtime updates', () => {
   it('keeps upstream logs but clears affected segments after a GUI single-step rerun', async () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.runtimeEvents = ref([])
-    const { useHomeData } = await import('./useHomeData')
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
     const scope = effectScope()
-    const home = scope.run(() => useHomeData())!
+    const home = scope.run(() => useBackendFlowLogs())!
 
     for (const [step, tool] of [
       ['Synthesis', 'yosys'],

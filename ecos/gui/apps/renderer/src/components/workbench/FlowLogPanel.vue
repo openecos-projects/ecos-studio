@@ -114,7 +114,7 @@ import FlowLogCodeViewer from '@/components/FlowLogCodeViewer.vue'
 import { copyFlowLogText } from '@/components/flowLogCopy'
 import { formatFlowLogTitle } from './flowLogTitle'
 import type { FlowStatusNode } from './flowStatus'
-import type { FlowLogSegment } from '@/composables/useHomeData'
+import type { FlowLogSegment } from '@/composables/useBackendFlowLogs'
 
 const props = defineProps<{
   activeStepName: string

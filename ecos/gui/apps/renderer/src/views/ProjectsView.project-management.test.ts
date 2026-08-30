@@ -1,13 +1,8 @@
 import { readFileSync } from 'node:fs'
-import {
-  projectManagementStaTimingIssuesPath,
-  projectManagementWorkspaceStepAnalysisSpecs,
-} from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import source from './ProjectsView.vue?raw'
 import analysisSource from './project-management/ProjectAnalysisPanel.vue?raw'
 import presentationSource from './project-management/projectAnalysisPresentation.ts?raw'
-import analysisDataSource from './project-management/projectWorkspaceAnalysisData.ts?raw'
 
 const normalizedSource = source.replace(/\s+/g, ' ')
 const projectStyles = readFileSync(
@@ -466,34 +461,13 @@ describe('ProjectsView project management surface', () => {
     expect(source).not.toContain('Not Started')
   })
 
-  it('loads V3 analysis artifacts and flow states for project analysis', () => {
+  it('loads project analysis from the Backend Project Comparison session', () => {
     expect(source).toContain('workspaceFlowStates')
-    expect(analysisDataSource).toContain('readProjectManagementWorkspaceTexts')
-    expect(analysisDataSource).toContain('parseWorkspaceFlowStateMap')
-    expect(source).toContain('workspaceAnalysisInputs')
-    expect(source).toContain('readProjectManagementWorkspaceData')
-    expect(source).toContain('ProjectWorkspaceAnalysisInputsById')
-    expect(analysisDataSource).toContain('projectManagementWorkspaceStepAnalysisSpecs')
-    expect(analysisDataSource).toContain('WORKSPACE_STEP_ANALYSIS_SPECS')
-    expect(projectManagementWorkspaceStepAnalysisSpecs).toContainEqual(
-      expect.objectContaining({
-        metricsPath: 'Synthesis_yosys/analysis/qor_metrics.json',
-        summaryPath: 'Synthesis_yosys/analysis/qor_summary.json',
-        hotspotsPath: 'Synthesis_yosys/analysis/qor_hotspots.json',
-      }),
-    )
-    expect(projectManagementWorkspaceStepAnalysisSpecs).toContainEqual(
-      expect.objectContaining({ metricsPath: 'route_ecc/analysis/qor_metrics.json' }),
-    )
-    expect(projectManagementStaTimingIssuesPath).toBe(
-      'sta_ecc/analysis/sta_timing_issues.json',
-    )
-    expect(analysisDataSource).toContain('stepMetricTexts')
-    expect(analysisDataSource).toContain('stepSummaryTexts')
-    expect(analysisDataSource).toContain('stepHotspotTexts')
-    expect(analysisDataSource).not.toContain('/feature/')
-    expect(analysisDataSource).not.toContain('sta_ecc/output')
-    expect(analysisDataSource).not.toContain('Synthesis_metrics.json')
+    expect(source).toContain('useBackendProjectComparisonSession')
+    expect(source).toContain('projectComparisonSession.selectProject(project.path)')
+    expect(source).toContain('comparison.workspaceSnapshots.data.flowStates')
+    expect(source).not.toContain('workspaceAnalysisInputs')
+    expect(source).not.toContain('readProjectManagementWorkspaceData')
   })
 
   it('wires the analysis panel to the shared project snapshot', () => {
@@ -569,7 +543,7 @@ describe('ProjectsView project management surface', () => {
 
   it('uses the dedicated read-only Project Management API for historical projects', () => {
     expect(source).toContain('readProjectManagementManifest')
-    expect(source).toContain('readProjectManagementWorkspaceData')
+    expect(source).toContain('projectComparisonSession.selectProject(project.path)')
     expect(source).toContain('listProjectManagementEntries')
     expect(source).not.toContain('registerProjectRootForProjectManagement')
     expect(source).not.toContain('registerProjectReadRootForProjectManagement')

@@ -144,7 +144,7 @@ describe('StepDashboard', () => {
   })
 
   it('uses flow data and the existing editor for the Overview configuration surface', () => {
-    expect(componentSource).toContain('useFlowStages')
+    expect(componentSource).toContain('useBackendFlowStages')
     expect(componentSource).toContain('useStepConfigInfo')
     expect(componentSource).toContain('StepConfigPanel')
     expect(componentSource).toContain('<h3>Basic Info</h3>')
@@ -195,7 +195,7 @@ describe('StepDashboard', () => {
   it('uses Home baseline comparisons in a prioritized two-column QoR metric grid', () => {
     expect(componentSource).toContain('step-status-card-content')
     expect(componentSource).toContain('status-summary-title')
-    expect(componentSource).toContain('useHomeQorComparison')
+    expect(componentSource).toContain('useBackendWorkspaceQor')
     expect(componentSource).toContain('prioritizeQorMetricComparisons')
     expect(componentSource).toContain('visibleQorMetrics')
     expect(componentSource).toContain('qorMetricComparisonState')

@@ -1,22 +1,20 @@
-import {
-  stepAnalysisAvailability,
-  type ProjectAnalysisArtifactStatus,
-  type ProjectAnalysisAvailability,
-  type ProjectAnalysisStepSnapshot,
-} from '@/utils/projectAnalysisSnapshot'
+import { stepAnalysisAvailability } from '@/utils/projectAnalysisAvailability'
 import type {
-  FlowStep,
-  ProjectStepCompareSummary,
-  ProjectWorkspaceSummary,
-} from '@/utils/projectManagement'
-import type {
+  ProjectAnalysisArtifactStatus,
+  ProjectAnalysisAvailability,
+  ProjectAnalysisStepSnapshot,
   ProjectQorDetailDescriptor,
   ProjectQorFindingEvidence,
+  ProjectQorMetricBaselineComparison,
   ProjectQorMetricRecord,
   ProjectQorTimingIssue,
   ProjectQorTrendSummary,
   QorGateStatus,
-} from '@/utils/projectQorTrend'
+} from '@ecos-studio/shared'
+import type {
+  ProjectStepCompareSummary,
+  ProjectWorkspaceSummary,
+} from '@/utils/projectManagement'
 
 export type StepIssueSeverity = 'critical' | 'warning' | 'info'
 export type StepTone = 'good' | 'warn' | 'bad' | 'neutral'
@@ -251,7 +249,7 @@ export interface StepWorkspaceChip {
 }
 
 export interface StepTab {
-  step: FlowStep
+  step: string
   blockingCount: number
   findingCount: number
   analysisAvailability: ProjectAnalysisAvailability
@@ -421,9 +419,12 @@ const ARTIFACTS = [
 
 export function stepSnapshot(
   summary: ProjectWorkspaceSummary | null | undefined,
-  step: FlowStep,
+  step: string,
 ): ProjectAnalysisStepSnapshot | null {
-  return summary?.analysis.steps[step] ?? null
+  const steps = summary?.analysis.steps as
+    | Partial<Record<string, ProjectAnalysisStepSnapshot>>
+    | undefined
+  return steps?.[step] ?? null
 }
 
 /**
@@ -432,7 +433,7 @@ export function stepSnapshot(
  */
 export function buildStepIssues(
   summary: ProjectWorkspaceSummary | null | undefined,
-  step: FlowStep,
+  step: string,
 ): StepIssue[] {
   const snapshot = stepSnapshot(summary, step)
   if (!summary || !snapshot) return []
@@ -773,7 +774,7 @@ export function matchesStepIssueFilter(issue: StepIssue, filterId: string): bool
 
 export function buildStepVerdict(
   summary: ProjectWorkspaceSummary | null | undefined,
-  step: FlowStep,
+  step: string,
   issues: readonly StepIssue[],
 ): StepVerdict {
   const snapshot = stepSnapshot(summary, step)
@@ -875,7 +876,7 @@ export function buildStepWorkspaceChips(
   workspaceSummaries: readonly ProjectWorkspaceSummary[],
   qorTrendSummary: ProjectQorTrendSummary,
   bestWorkspaceId: string,
-  step: FlowStep,
+  step: string,
 ): StepWorkspaceChip[] {
   return workspaceSummaries.map((summary) => {
     const snapshot = stepSnapshot(summary, step)
@@ -898,26 +899,17 @@ export function buildStepWorkspaceChips(
 export function buildStepMetricGroups(
   summary: ProjectWorkspaceSummary | null | undefined,
   baseline: ProjectWorkspaceSummary | null | undefined,
-  step: FlowStep,
+  step: string,
 ): StepMetricGroup[] {
   const records = (stepSnapshot(summary, step)?.metrics ?? []).filter(
     (record) => record.stepRole !== 'hidden',
   )
-  const baselineRecords = stepSnapshot(baseline, step)?.metrics ?? []
   const isBaselineWorkspace =
     Boolean(baseline) && summary?.workspaceId === baseline?.workspaceId
 
   const groups = new Map<string, StepMetricGroup>()
   for (const record of records) {
-    const baselineRecord = baselineRecords.find(
-      (item) => item.metricName === record.metricName,
-    )
-    const row = buildMetricRow(
-      record,
-      baselineRecord ?? null,
-      isBaselineWorkspace,
-      Boolean(baseline),
-    )
+    const row = buildMetricRow(record, isBaselineWorkspace, Boolean(baseline))
     const group = groups.get(record.dimension)
     if (group) {
       group.rows.push(row)
@@ -939,7 +931,7 @@ export function buildStepMetricGroups(
 
 export function buildStepDetailTables(
   summary: ProjectWorkspaceSummary | null | undefined,
-  step: FlowStep,
+  step: string,
 ): StepDetailTable[] {
   const snapshot = stepSnapshot(summary, step)
   if (!snapshot) return []
@@ -996,7 +988,7 @@ export function buildStepDetailTables(
 export function buildStepCompareCandidates(
   workspaceSummaries: readonly ProjectWorkspaceSummary[],
   qorTrendSummary: ProjectQorTrendSummary,
-  step: FlowStep,
+  step: string,
 ): StepCompareCandidate[] {
   const baselineId = qorTrendSummary.baselineWorkspaceId
   const valuesByWorkspace = new Map<string, Map<string, number>>(
@@ -1047,7 +1039,7 @@ export function buildStepCompareMatrix(
   workspaceSummaries: readonly ProjectWorkspaceSummary[],
   qorTrendSummary: ProjectQorTrendSummary,
   bestWorkspaceId: string,
-  step: FlowStep,
+  step: string,
 ): StepCompareMatrix {
   const baselineId = qorTrendSummary.baselineWorkspaceId
   const columns: StepCompareColumn[] = workspaceSummaries.map((summary) => ({
@@ -1096,13 +1088,6 @@ export function buildStepCompareMatrix(
       : null
     const directional =
       meta.polarity === 'lower_is_better' || meta.polarity === 'higher_is_better'
-    const leadingValue = leadingValueOf(
-      columns.map(
-        (column) =>
-          recordsByWorkspace.get(column.workspaceId)?.get(meta.metricName)?.value ?? null,
-      ),
-      directional ? meta.polarity : undefined,
-    )
 
     let differs = false
     const cells = columns.map((column) => {
@@ -1111,11 +1096,9 @@ export function buildStepCompareMatrix(
       const snapshot = snapshotsByWorkspace.get(column.workspaceId) ?? null
       const availability = compareCellAvailability(record, value, snapshot?.flowStatus)
       const delta = deltaAgainst({
-        value,
-        baselineValue,
+        comparison: record?.baselineComparison,
         isBaseline: column.isBaseline,
         hasBaseline,
-        polarity: meta.polarity,
         unit: meta.unit,
       })
       if (!column.isBaseline && value !== null && baselineValue !== null) {
@@ -1149,7 +1132,7 @@ export function buildStepCompareMatrix(
         deltaNote: delta.note,
         barRatio: delta.barRatio,
         outcome: delta.outcome,
-        leads: leadingValue !== null && value === leadingValue,
+        leads: Boolean(record?.leads),
       }
     })
 
@@ -1226,24 +1209,6 @@ interface StepCompareTally {
   uncomparable: number
 }
 
-/**
- * The value a reader would call best, taken only from the direction the metric reports.
- * Nothing leads when fewer than two workspaces reported the metric, or when every
- * reported value is the same, since calling one of a set of equals the winner is a
- * claim the numbers do not make.
- */
-function leadingValueOf(
-  values: readonly (number | null)[],
-  polarity: string | undefined,
-): number | null {
-  if (polarity !== 'lower_is_better' && polarity !== 'higher_is_better') return null
-  const reported = values.filter((value): value is number => value !== null)
-  if (reported.length < 2) return null
-  const leading =
-    polarity === 'lower_is_better' ? Math.min(...reported) : Math.max(...reported)
-  return reported.every((value) => value === leading) ? null : leading
-}
-
 function buildVerdict(
   column: StepCompareColumn,
   tallies: ReadonlyMap<string, StepCompareTally>,
@@ -1311,16 +1276,13 @@ export function filterStepCompareGroups(
 
 function buildMetricRow(
   record: ProjectQorMetricRecord,
-  baselineRecord: ProjectQorMetricRecord | null,
   isBaselineWorkspace: boolean,
   hasBaseline: boolean,
 ): StepMetricRow {
   const delta = deltaAgainst({
-    value: record.value,
-    baselineValue: baselineRecord?.value ?? null,
+    comparison: record.baselineComparison,
     isBaseline: isBaselineWorkspace,
     hasBaseline,
-    polarity: record.polarity,
     unit: record.unit,
   })
   return {
@@ -1350,14 +1312,12 @@ interface StepDelta {
 }
 
 function deltaAgainst(options: {
-  value: number | null
-  baselineValue: number | null
+  comparison: ProjectQorMetricBaselineComparison | undefined
   isBaseline: boolean
   hasBaseline: boolean
-  polarity: string | undefined
   unit: string | undefined
 }): StepDelta {
-  const { value, baselineValue, isBaseline, hasBaseline, polarity, unit } = options
+  const { comparison, isBaseline, hasBaseline, unit } = options
   const blank: StepDelta = {
     label: null,
     percent: null,
@@ -1369,62 +1329,57 @@ function deltaAgainst(options: {
 
   // A zero-length bar on the baseline draws the line every other bar is measured from.
   if (isBaseline) {
-    return value === null ? blank : { ...blank, label: 'base', barRatio: 0 }
+    return comparison?.baselineValue === null
+      ? blank
+      : { ...blank, label: 'base', barRatio: 0 }
   }
-  // The value cell already explains absent or inapplicable metrics, so repeat neither here.
-  if (value === null) return blank
-  // Without this the cell looks identical whether the baseline lacks the metric or no
-  // baseline is set at all, and "the baseline never reported it" is itself an answer.
-  if (baselineValue === null) {
+  if (!comparison || comparison.absoluteDelta === null) {
     return hasBaseline ? { ...blank, note: 'base n/a' } : blank
   }
-
-  const delta = value - baselineValue
-  const directional = polarity === 'lower_is_better' || polarity === 'higher_is_better'
+  const delta = comparison.absoluteDelta
   if (delta === 0) {
-    return { ...blank, label: '±0', barRatio: 0, outcome: directional ? 'same' : null }
+    return {
+      ...blank,
+      label: '±0',
+      barRatio: 0,
+      outcome: comparison.verdict === 'unchanged' ? 'same' : null,
+    }
   }
 
   // The surrounding header already names the baseline, so the sign carries the meaning.
   const label = `${delta > 0 ? '+' : '-'}${formatScalar(Math.abs(delta), unit)}`
-  const percent = formatDeltaPercent(delta, baselineValue)
-  const improves = polarity === 'lower_is_better' ? delta < 0 : delta > 0
-  const barRatio = compareBarRatio(delta, baselineValue, polarity)
-  if (!directional) {
+  const percent =
+    comparison.relativeDeltaPct === null
+      ? null
+      : formatComparisonPercent(comparison.relativeDeltaPct)
+  const barRatio =
+    comparison.relativeDeltaPct === null
+      ? null
+      : Math.max(
+          -1,
+          Math.min(
+            1,
+            ((comparison.verdict === 'improvement' ? 1 : -1) *
+              Math.abs(comparison.relativeDeltaPct)) /
+              COMPARE_BAR_FULL_SCALE_PERCENT,
+          ),
+        )
+  if (comparison.verdict !== 'improvement' && comparison.verdict !== 'regression') {
     return { label, percent, tone: 'neutral', note: null, barRatio, outcome: null }
   }
   return {
     label,
     percent,
-    tone: improves ? 'good' : 'bad',
+    tone: comparison.verdict === 'improvement' ? 'good' : 'bad',
     note: null,
     barRatio,
-    outcome: improves ? 'better' : 'worse',
+    outcome: comparison.verdict === 'improvement' ? 'better' : 'worse',
   }
 }
 
-/**
- * Points the bar at the better side when the metric reports a direction, and at an
- * increase when it does not. Null when the baseline is zero, where a relative change has
- * no value to be relative to; the cell still prints the absolute delta.
- */
-function compareBarRatio(
-  delta: number,
-  baselineValue: number,
-  polarity: string | undefined,
-): number | null {
-  if (baselineValue === 0) return null
-  const relative = (delta / Math.abs(baselineValue)) * 100
-  const oriented = polarity === 'lower_is_better' ? -relative : relative
-  const ratio = oriented / COMPARE_BAR_FULL_SCALE_PERCENT
-  return Math.max(-1, Math.min(1, ratio))
-}
-
-function formatDeltaPercent(delta: number, baselineValue: number): string | null {
-  if (baselineValue === 0) return null
-  const percent = (delta / Math.abs(baselineValue)) * 100
-  const digits = Math.abs(percent) < 10 ? 1 : 0
-  return `${percent > 0 ? '+' : '-'}${Math.abs(percent).toFixed(digits)}%`
+function formatComparisonPercent(value: number): string {
+  const digits = Math.abs(value) < 10 ? 1 : 0
+  return `${value > 0 ? '+' : ''}${value.toFixed(digits)}%`
 }
 
 function descriptorFor(
@@ -1438,7 +1393,7 @@ function descriptorFor(
 
 function cornerCoverage(
   snapshot: ProjectAnalysisStepSnapshot,
-  step: FlowStep,
+  step: string,
 ): { available: number | string; expected: number | string } | null {
   const prefix = step === 'RCX' ? 'rcx_' : step === 'STA' ? 'sta_' : null
   if (!prefix) return null
@@ -1462,7 +1417,7 @@ function cornerCoverage(
 
 function signoffStatus(
   summary: ProjectWorkspaceSummary,
-  step: FlowStep,
+  step: string,
 ): QorGateStatus | null {
   if (step !== 'RCX' && step !== 'STA') return null
   const statuses = summary.analysis.signoffReadiness.groups
@@ -1572,7 +1527,7 @@ function stepWorkspaceTone(
 }
 
 function stepWorkspaceStatusLabel(
-  step: FlowStep,
+  step: string,
   counts: StepIssueCounts,
   availability: ProjectAnalysisAvailability,
 ): string {

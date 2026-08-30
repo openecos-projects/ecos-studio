@@ -30,6 +30,7 @@ export interface WorkspaceStepResource {
   tool: string
   state: string
   runtime: string
+  peakMemoryMb?: number
   directory: string
   info: Record<string, unknown>
   resources: {

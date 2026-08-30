@@ -146,6 +146,7 @@ which files changed.
 
 - [ECOS package README](../README.md) — overall quick start and release notes for ECOS Studio
 - [ECOS Studio user guide](../docs/user-guide.md) — product usage
+- [Backend GUI refactor standard](../docs/gui-backend-refactor-standard.md) — confirmed data-flow and domain-module rules
 - [Repository root README](../../README.md) — monorepo overview
 - [ECC development](../../ecc/docs/development.md), [ECC architecture](../../ecc/docs/architecture.md) — ECC toolchain docs
 

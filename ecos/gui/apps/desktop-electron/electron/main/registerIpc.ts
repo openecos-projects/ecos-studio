@@ -167,12 +167,49 @@ export interface DesktopBridgeServices {
       request: DesktopProjectManagementWorkspaceTextsRequest,
     ): Promise<DesktopProjectManagementWorkspaceTextsResult>
   }
+  backendWorkspaceService: {
+    clearWindow(windowId: number): void
+    getOverview(): Promise<import('@ecos-studio/shared').BackendWorkspaceOverviewResult>
+    invalidateWindow(windowId: number): void
+    onInvalidated(
+      listener: (
+        event: import('../services/backendWorkspaceService').BackendWorkspaceInvalidation,
+      ) => void,
+    ): () => void
+    refreshOverview(): Promise<
+      import('@ecos-studio/shared').BackendWorkspaceOverviewResult
+    >
+  }
+  backendProjectComparisonService: {
+    disposeWindow(windowId: number): void
+    getComparison(
+      windowId: number,
+      contextId: string,
+    ): Promise<import('@ecos-studio/shared').BackendProjectComparisonQueryResult>
+    refreshComparison(
+      windowId: number,
+      contextId: string,
+    ): Promise<import('@ecos-studio/shared').BackendProjectComparisonQueryResult>
+    selectProject(
+      windowId: number,
+      request: { projectRootLocator: string },
+    ): Promise<import('@ecos-studio/shared').BackendProjectComparisonSelectResult>
+    invalidateProject(projectRoot: string): void
+    invalidateWorkspace(workspaceRoot: string): void
+    onInvalidated(
+      listener: (
+        windowId: number,
+        event: import('@ecos-studio/shared').BackendProjectComparisonInvalidatedEvent,
+      ) => void,
+    ): () => void
+  }
   workspaceService: {
     approvePendingExternalReadRoots?(
       expectedProjectRoot: string,
       expectedRoots: string[],
     ): Promise<string[]>
     clearProjectRoot(): Promise<void>
+    getProjectRoot(): Promise<string>
     isProjectDirectory(path: string): Promise<boolean>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     readOptionalProjectTextFile(path: string): Promise<string | null>
@@ -217,6 +254,9 @@ export interface DesktopBridgeServices {
     prepareProjectDirectoryReplacement(
       path: string,
     ): Promise<WorkspaceDirectoryReplacement | null>
+    getProjectDirectoryReplacement(
+      replacementId: string,
+    ): WorkspaceDirectoryReplacement & { projectRoot: string }
     restoreProjectDirectoryReplacement(replacementId: string): Promise<void>
     finalizeProjectDirectoryReplacement(replacementId: string): Promise<void>
     retainProjectDirectoryReplacement(replacementId: string): Promise<void>
@@ -691,6 +731,27 @@ export function registerIpc(
     target.handle(channel, wrapIpcHandler(channel, handler))
   }
 
+  services.backendWorkspaceService.onInvalidated((event) => {
+    const targetWindow = BrowserWindow.getAllWindows().find(
+      (window) => window.webContents.id === event.windowId,
+    )
+    if (!targetWindow || targetWindow.isDestroyed()) return
+    targetWindow.webContents.send(desktopApiEventChannels.backendWorkspaceInvalidated, {
+      generation: event.generation,
+      workspaceContextId: event.workspaceContextId,
+    })
+  })
+  services.backendProjectComparisonService.onInvalidated((windowId, event) => {
+    const targetWindow = BrowserWindow.getAllWindows().find(
+      (window) => window.webContents.id === windowId,
+    )
+    if (!targetWindow || targetWindow.isDestroyed()) return
+    targetWindow.webContents.send(
+      desktopApiEventChannels.backendProjectComparisonInvalidated,
+      event,
+    )
+  })
+
   const projectFileWatchSubscriptions = new Map<
     string,
     {
@@ -768,6 +829,32 @@ export function registerIpc(
     sender.send(desktopApiEventChannels.designRuntimeEvent, { ...payload, designTool })
   }
 
+  const invalidateBackendWorkspaceForSender = (
+    sender: IpcMainInvokeEvent['sender'],
+  ): void => {
+    if (typeof sender.id === 'number') {
+      services.backendWorkspaceService.invalidateWindow(sender.id)
+    }
+  }
+
+  const runtimeEventCommitsWorkspaceFacts = (payload: EccRuntimeEvent): boolean => {
+    if (
+      payload.type === 'operation.completed' ||
+      payload.type === 'operation.failed' ||
+      payload.type === 'operation.cancelled'
+    ) {
+      return true
+    }
+    if (payload.type !== 'runtime.protocol') return false
+    return [
+      'step.completed',
+      'operation.completed',
+      'operation.failed',
+      'operation.cancelled',
+      'operation.rerun_prepared',
+    ].includes(payload.event.type)
+  }
+
   const agentSessionKey = (providerId: string, sessionId: string): string =>
     `${providerId}:${sessionId}`
 
@@ -834,6 +921,10 @@ export function registerIpc(
       lastReadyByDirectory.delete(readyKey(designTool, normalizedDirectory))
     }
 
+    if (designTool === 'backend' && runtimeEventCommitsWorkspaceFacts(payload)) {
+      services.backendProjectComparisonService.invalidateWorkspace(normalizedDirectory)
+    }
+
     const deliveredSenders = new Set<IpcMainInvokeEvent['sender']>()
     for (const subscription of workspaceHandleSubscriptions.values()) {
       if (subscription.designTool !== designTool) continue
@@ -843,6 +934,9 @@ export function registerIpc(
       const scopedPayload = {
         ...payload,
         workspaceDirectory: normalizedDirectory,
+      }
+      if (designTool === 'backend' && runtimeEventCommitsWorkspaceFacts(payload)) {
+        invalidateBackendWorkspaceForSender(subscription.sender)
       }
       if (designTool === 'backend')
         sendEccEventToSender(subscription.sender, scopedPayload)
@@ -884,6 +978,14 @@ export function registerIpc(
     if (workspaceHandle) {
       const subscription = workspaceHandleSubscriptions.get(workspaceHandle)
       if (subscription && subscription.designTool === designTool) {
+        if (designTool === 'backend' && runtimeEventCommitsWorkspaceFacts(payload)) {
+          invalidateBackendWorkspaceForSender(subscription.sender)
+          const directory =
+            readWorkspaceDirectoryFromEvent(payload) ??
+            subscription.directories.values().next().value
+          if (directory)
+            services.backendProjectComparisonService.invalidateWorkspace(directory)
+        }
         if (designTool === 'backend') sendEccEventToSender(subscription.sender, payload)
         sendDesignRuntimeEventToSender(subscription.sender, designTool, payload)
         return
@@ -1296,7 +1398,7 @@ export function registerIpc(
     await services.settingsStore.delete(key as string)
   })
 
-  handle(desktopApiIpcChannels.projectManifestMutate, async (_event, request) => {
+  handle(desktopApiIpcChannels.projectManifestMutate, async (event, request) => {
     if (!isRecord(request))
       throw new Error('Project manifest mutation request must be an object')
     if (typeof request.projectRoot !== 'string') {
@@ -1305,10 +1407,54 @@ export function registerIpc(
     if (!isRecord(request.mutation) || typeof request.mutation.type !== 'string') {
       throw new Error('Project manifest mutation must include a type')
     }
-    return await services.projectManifestService.mutate(
+    const result = await services.projectManifestService.mutate(
       request as unknown as ProjectManifestMutationRequest,
     )
+    invalidateBackendWorkspaceForSender(event.sender)
+    services.backendProjectComparisonService.invalidateProject(request.projectRoot)
+    return result
   })
+
+  handle(
+    desktopApiIpcChannels.backendProjectComparisonSelectProject,
+    async (event, request) => {
+      if (!isRecord(request) || typeof request.projectRootLocator !== 'string') {
+        throw new Error('Backend project comparison selection is invalid.')
+      }
+      return await services.backendProjectComparisonService.selectProject(
+        event.sender.id,
+        {
+          projectRootLocator: request.projectRootLocator,
+        },
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.backendProjectComparisonGetComparison,
+    async (event, request) => {
+      if (!isRecord(request) || typeof request.projectComparisonContextId !== 'string') {
+        throw new Error('Backend project comparison query is invalid.')
+      }
+      return await services.backendProjectComparisonService.getComparison(
+        event.sender.id,
+        request.projectComparisonContextId,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.backendProjectComparisonRefreshComparison,
+    async (event, request) => {
+      if (!isRecord(request) || typeof request.projectComparisonContextId !== 'string') {
+        throw new Error('Backend project comparison refresh is invalid.')
+      }
+      return await services.backendProjectComparisonService.refreshComparison(
+        event.sender.id,
+        request.projectComparisonContextId,
+      )
+    },
+  )
 
   handle(
     desktopApiIpcChannels.projectManagementReadManifest,
@@ -1381,6 +1527,9 @@ export function registerIpc(
     const projectRoot = await services.workspaceService.registerProjectRoot(
       path as string,
     )
+    if (typeof _event.sender.id === 'number') {
+      services.backendWorkspaceService.clearWindow(_event.sender.id)
+    }
     const pendingRoots =
       (await services.workspaceService.listPendingExternalReadRoots?.()) ?? []
     if (pendingRoots.length === 0) return projectRoot
@@ -1441,6 +1590,9 @@ export function registerIpc(
       }
     }
     await services.workspaceService.clearProjectRoot()
+    if (typeof sender.id === 'number') {
+      services.backendWorkspaceService.clearWindow(sender.id)
+    }
   })
 
   handle(
@@ -1563,11 +1715,13 @@ export function registerIpc(
 
   handle(
     desktopApiIpcChannels.workspaceWriteProjectTextFile,
-    async (_event, path, content) => {
+    async (event, path, content) => {
       await services.workspaceService.writeProjectTextFile(
         path as string,
         content as string,
       )
+      invalidateBackendWorkspaceForSender(event.sender)
+      services.backendProjectComparisonService.invalidateWorkspace(path as string)
     },
   )
 
@@ -1603,31 +1757,43 @@ export function registerIpc(
 
   handle(
     desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
-    async (_event, replacementId) => {
+    async (event, replacementId) => {
       if (typeof replacementId !== 'string') {
         throw new Error('Workspace replacement id must be a string')
       }
+      const replacement =
+        services.workspaceService.getProjectDirectoryReplacement(replacementId)
       await services.workspaceService.restoreProjectDirectoryReplacement(replacementId)
+      invalidateBackendWorkspaceForSender(event.sender)
+      services.backendProjectComparisonService.invalidateWorkspace(replacement.targetPath)
     },
   )
 
   handle(
     desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
-    async (_event, replacementId) => {
+    async (event, replacementId) => {
       if (typeof replacementId !== 'string') {
         throw new Error('Workspace replacement id must be a string')
       }
+      const replacement =
+        services.workspaceService.getProjectDirectoryReplacement(replacementId)
       await services.workspaceService.finalizeProjectDirectoryReplacement(replacementId)
+      invalidateBackendWorkspaceForSender(event.sender)
+      services.backendProjectComparisonService.invalidateWorkspace(replacement.targetPath)
     },
   )
 
   handle(
     desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
-    async (_event, replacementId) => {
+    async (event, replacementId) => {
       if (typeof replacementId !== 'string') {
         throw new Error('Workspace replacement id must be a string')
       }
+      const replacement =
+        services.workspaceService.getProjectDirectoryReplacement(replacementId)
       await services.workspaceService.retainProjectDirectoryReplacement(replacementId)
+      invalidateBackendWorkspaceForSender(event.sender)
+      services.backendProjectComparisonService.invalidateWorkspace(replacement.targetPath)
     },
   )
 
@@ -1643,14 +1809,24 @@ export function registerIpc(
     return await services.workspaceService.listDesignFiles()
   })
 
-  handle(desktopApiIpcChannels.workspaceAddDesignFiles, async (_event, sourcePaths) => {
-    return await services.workspaceService.addDesignFiles(sourcePaths as string[])
+  handle(desktopApiIpcChannels.workspaceAddDesignFiles, async (event, sourcePaths) => {
+    const result = await services.workspaceService.addDesignFiles(sourcePaths as string[])
+    const workspaceRoot = await services.workspaceService.getProjectRoot()
+    invalidateBackendWorkspaceForSender(event.sender)
+    services.backendProjectComparisonService.invalidateWorkspace(workspaceRoot)
+    return result
   })
 
   handle(
     desktopApiIpcChannels.workspaceRemoveDesignFile,
-    async (_event, filelistEntry) => {
-      return await services.workspaceService.removeDesignFile(filelistEntry as string)
+    async (event, filelistEntry) => {
+      const result = await services.workspaceService.removeDesignFile(
+        filelistEntry as string,
+      )
+      const workspaceRoot = await services.workspaceService.getProjectRoot()
+      invalidateBackendWorkspaceForSender(event.sender)
+      services.backendProjectComparisonService.invalidateWorkspace(workspaceRoot)
+      return result
     },
   )
 
@@ -1710,6 +1886,14 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.workspaceResourcesGetIndex, async () => {
     return await services.workspaceResourceService.getIndex()
+  })
+
+  handle(desktopApiIpcChannels.backendWorkspaceGetOverview, async () => {
+    return await services.backendWorkspaceService.getOverview()
+  })
+
+  handle(desktopApiIpcChannels.backendWorkspaceRefreshOverview, async () => {
+    return await services.backendWorkspaceService.refreshOverview()
   })
 
   handle(desktopApiIpcChannels.workspaceResourcesReadHome, async () => {

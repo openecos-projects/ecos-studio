@@ -1,8 +1,15 @@
 import type {
-  FlowStep,
-  ProjectStepStatus,
-  ProjectWorkspaceStatus,
-} from './projectManagement'
+  ProjectManifestFlowStep as FlowStep,
+  ProjectManifestWorkspaceStatus as ProjectWorkspaceStatus,
+} from '@ecos-studio/shared'
+
+type ProjectStepStatus =
+  | 'success'
+  | 'reused'
+  | 'skipped'
+  | 'unstart'
+  | 'running'
+  | 'failed'
 
 export type QorDimension =
   | 'timing'
@@ -24,7 +31,7 @@ export type QorGateStatus = 'pass' | 'blocked' | 'incomplete' | 'unavailable'
 export interface ProjectQorWorkspaceInput {
   workspaceId: string
   workspaceName: string
-  workspacePath: string
+  workspaceKey: string
   createdAt: string
   status: ProjectWorkspaceStatus
   branchFrom: {
@@ -35,19 +42,19 @@ export interface ProjectQorWorkspaceInput {
   stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   staTimingIssuesText?: string | null
-  stepStatuses: Partial<Record<FlowStep, ProjectStepStatus>>
+  stepStatuses: Record<string, ProjectStepStatus>
 }
 
 export interface QorStepMetricInput {
   workspaceId: string
-  workspacePath: string
+  workspaceKey: string
   step: FlowStep
   text: string | null | undefined
 }
 
 export interface ProjectQorMetricRecord {
   workspaceId: string
-  workspacePath: string
+  workspaceKey: string
   step: FlowStep
   metricName: string
   displayName: string
@@ -64,6 +71,16 @@ export interface ProjectQorMetricRecord {
   stepRole: 'primary' | 'secondary' | 'detail' | 'hidden'
   sourceFile: string
   confidence: 'high' | 'medium' | 'low'
+  verdict?: 'pass' | 'warning' | 'fail' | 'unavailable'
+  baselineComparison?: ProjectQorMetricBaselineComparison
+  leads?: boolean
+}
+
+export interface ProjectQorMetricBaselineComparison {
+  baselineValue: number | null
+  absoluteDelta: number | null
+  relativeDeltaPct: number | null
+  verdict: 'baseline' | 'improvement' | 'regression' | 'unchanged' | 'not-comparable'
 }
 
 export interface ProjectQorCornerContext {
@@ -194,7 +211,7 @@ export interface ProjectQorDataQuality {
 export interface ProjectQorTrendWorkspaceSummary {
   workspaceId: string
   workspaceName: string
-  workspacePath: string
+  workspaceKey: string
   status: QorStatus
   overallScore: number | null
   gateStatus: QorGateStatus
@@ -219,6 +236,7 @@ export interface ProjectQorTrendSummary {
   trendPoints: ProjectQorTrendPoint[]
   baselineWorkspaceId: string | null
   baselineLabel: string
+  scoreThreshold: number
   regressions: ProjectQorRegression[]
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]
@@ -1098,7 +1116,7 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
     return [
       {
         workspaceId: input.workspaceId,
-        workspacePath: input.workspacePath,
+        workspaceKey: input.workspaceKey,
         step: input.step,
         metricName,
         displayName:
@@ -1116,9 +1134,29 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
         stepRole,
         sourceFile,
         confidence: qorConfidenceValue(metric.confidence),
+        verdict: metricVerdict(metricName, value),
       },
     ]
   })
+}
+
+function metricVerdict(
+  metricName: string,
+  value: number,
+): NonNullable<ProjectQorMetricRecord['verdict']> {
+  if (
+    metricName.includes('drc') ||
+    metricName.includes('lvs') ||
+    metricName.includes('violation') ||
+    metricName.includes('missing_corner') ||
+    metricName.includes('parse_failure')
+  ) {
+    return value === 0 ? 'pass' : value <= 3 ? 'warning' : 'fail'
+  }
+  if (metricName.includes('wns') || metricName.includes('tns')) {
+    return value >= 0 ? 'pass' : 'fail'
+  }
+  return 'pass'
 }
 
 function qorMetricRatingValue(value: unknown): ProjectQorMetricRating | null {
@@ -1152,11 +1190,20 @@ export function buildProjectQorTrendSummary(
   options: ProjectQorTrendOptions = {},
 ): ProjectQorTrendSummary {
   const sortedInputs = [...workspaces].sort(compareWorkspaceInput)
-  const workspaceSummaries = sortedInputs.map(buildWorkspaceSummary)
-  const baselineWorkspace = resolveExplicitBaselineWorkspace(
-    workspaceSummaries,
+  const rawWorkspaceSummaries = sortedInputs.map(buildWorkspaceSummary)
+  const rawBaselineWorkspace = resolveExplicitBaselineWorkspace(
+    rawWorkspaceSummaries,
     options.baselineWorkspaceId,
   )
+  const workspaceSummaries = annotateMetricComparisons(
+    rawWorkspaceSummaries,
+    rawBaselineWorkspace,
+  )
+  const baselineWorkspace = rawBaselineWorkspace
+    ? (workspaceSummaries.find(
+        (workspace) => workspace.workspaceId === rawBaselineWorkspace.workspaceId,
+      ) ?? null)
+    : null
   const { regressions, improvements } = buildWorkspaceDeltas(
     workspaceSummaries,
     baselineWorkspace?.workspaceId ?? null,
@@ -1184,6 +1231,7 @@ export function buildProjectQorTrendSummary(
     baselineLabel: baselineWorkspace
       ? baselineWorkspace.workspaceName || baselineWorkspace.workspaceId
       : 'Sequential workspace baseline',
+    scoreThreshold: QOR_SCORE_THRESHOLD,
     regressions,
     improvements,
     risks,
@@ -1360,7 +1408,7 @@ export function buildProjectQorTrendReport(
     workspaces: summary.workspaces.map((workspace) => ({
       workspace_id: workspace.workspaceId,
       workspace_name: workspace.workspaceName,
-      workspace_path: workspace.workspacePath,
+      workspace_path: workspace.workspaceKey,
       status: workspace.status,
       overall_score: workspace.overallScore,
       gate_status: workspace.gateStatus,
@@ -1618,7 +1666,7 @@ function buildWorkspaceSummary(
   const records = QOR_FLOW_STEPS.flatMap((step) =>
     normalizeQorMetrics({
       workspaceId: workspace.workspaceId,
-      workspacePath: workspace.workspacePath,
+      workspaceKey: workspace.workspaceKey,
       step,
       text: workspace.stepMetricTexts[step],
     }),
@@ -1677,7 +1725,7 @@ function buildWorkspaceSummary(
   return {
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
-    workspacePath: workspace.workspacePath,
+    workspaceKey: workspace.workspaceKey,
     status: workspaceStatus(workspace.status, overallScore, effectiveGateStatus),
     overallScore,
     gateStatus: effectiveGateStatus,
@@ -2787,6 +2835,106 @@ function cornerContextIdentity(context: ProjectQorCornerContext | null): string 
   ].join('|')
 }
 
+function annotateMetricComparisons(
+  workspaces: ProjectQorTrendWorkspaceSummary[],
+  baseline: ProjectQorTrendWorkspaceSummary | null,
+): ProjectQorTrendWorkspaceSummary[] {
+  const baselineRecords = baseline
+    ? recordsByComparisonKey(baseline.comparisonRecords ?? baseline.records)
+    : new Map<string, ProjectQorMetricRecord>()
+  const leadingByKey = new Map<string, number>()
+  const recordsByKey = new Map<string, ProjectQorMetricRecord[]>()
+  for (const workspace of workspaces) {
+    for (const record of workspace.comparisonRecords ?? workspace.records) {
+      if (record.value === null) continue
+      const key = comparisonRecordKey(record)
+      const records = recordsByKey.get(key) ?? []
+      records.push(record)
+      recordsByKey.set(key, records)
+    }
+  }
+  for (const [key, records] of recordsByKey) {
+    const polarity = records[0]?.polarity
+    const values = records
+      .map((record) => record.value)
+      .filter((value): value is number => value !== null)
+    if (
+      values.length < 2 ||
+      new Set(values).size < 2 ||
+      (polarity !== 'lower_is_better' && polarity !== 'higher_is_better')
+    ) {
+      continue
+    }
+    leadingByKey.set(
+      key,
+      polarity === 'lower_is_better' ? Math.min(...values) : Math.max(...values),
+    )
+  }
+
+  const annotate = (
+    record: ProjectQorMetricRecord,
+    workspace: ProjectQorTrendWorkspaceSummary,
+  ): ProjectQorMetricRecord => {
+    const key = comparisonRecordKey(record)
+    const baselineRecord = baselineRecords.get(key)
+    let comparison: ProjectQorMetricBaselineComparison
+    if (baseline && workspace.workspaceId === baseline.workspaceId) {
+      comparison = {
+        baselineValue: record.value,
+        absoluteDelta: 0,
+        relativeDeltaPct: 0,
+        verdict: 'baseline',
+      }
+    } else if (
+      !baselineRecord ||
+      record.value === null ||
+      baselineRecord.value === null
+    ) {
+      comparison = {
+        baselineValue: baselineRecord?.value ?? null,
+        absoluteDelta: null,
+        relativeDeltaPct: null,
+        verdict: 'not-comparable',
+      }
+    } else {
+      const delta = buildDelta(
+        record,
+        baselineRecord,
+        workspace.workspaceName,
+        baseline?.workspaceName ?? '',
+      )
+      comparison = {
+        baselineValue: delta.baselineValue,
+        absoluteDelta: delta.absoluteDelta,
+        relativeDeltaPct: delta.relativeDeltaPct,
+        verdict:
+          record.polarity === 'lower_is_better' || record.polarity === 'higher_is_better'
+            ? delta.state === 'neutral'
+              ? 'unchanged'
+              : delta.state
+            : 'not-comparable',
+      }
+    }
+    return {
+      ...record,
+      baselineComparison: comparison,
+      leads: leadingByKey.get(key) === record.value,
+    }
+  }
+
+  return workspaces.map((workspace) => ({
+    ...workspace,
+    records: workspace.records.map((record) => annotate(record, workspace)),
+    ...(workspace.comparisonRecords
+      ? {
+          comparisonRecords: workspace.comparisonRecords.map((record) =>
+            annotate(record, workspace),
+          ),
+        }
+      : {}),
+  }))
+}
+
 function buildDelta(
   record: ProjectQorMetricRecord,
   baseline: ProjectQorMetricRecord,
@@ -2950,7 +3098,7 @@ export function resolveWorkspaceTimingConstraints(
   const entries = QOR_FLOW_STEPS.flatMap((step) => {
     const context = normalizeTimingConstraintContext({
       workspaceId: workspace.workspaceId,
-      workspacePath: workspace.workspacePath,
+      workspaceKey: workspace.workspaceKey,
       step,
       text: workspace.stepMetricTexts[step],
     })

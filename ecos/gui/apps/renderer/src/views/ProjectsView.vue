@@ -763,7 +763,6 @@ import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
-import { readProjectManagementWorkspaceData } from './project-management/projectWorkspaceAnalysisData'
 import { mapWithConcurrency } from './project-management/asyncConcurrency'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
@@ -784,10 +783,10 @@ import {
   type ProjectManagementProject,
   type ProjectStepStatus,
   type ProjectWorkspace,
-  type ProjectWorkspaceAnalysisInputsById,
   type ProjectWorkspaceFlowStatesById,
   type WorkspaceBranchDraft,
 } from '@/utils/projectManagement'
+import { useBackendProjectComparisonSession } from '@/stores/backendProjectComparisonSession'
 import {
   createProjectManifestMpcSnapshot,
   parseMpcSpecDesigns,
@@ -814,6 +813,7 @@ const PROJECT_MANIFEST_READ_CONCURRENCY = 2
 const route = useRoute()
 const router = useRouter()
 const { openProject, showToast } = useWorkspace()
+const projectComparisonSession = useBackendProjectComparisonSession()
 
 const searchQuery = ref('')
 const selectedProjectId = ref<string | null>(null)
@@ -821,7 +821,7 @@ const selectedWorkspaceId = ref('')
 const collapsedProjectIds = ref<Set<string>>(new Set())
 const workspacePreviewProjectIds = ref<Set<string>>(new Set())
 const projectPreviewShowsAll = ref(false)
-const selectedStep = ref<FlowStep>('DRC')
+const selectedStep = ref<string>('DRC')
 const selectedIssueMetric = ref<string | null>(null)
 const selectedAnalysisTab = ref<'dashboard' | 'step'>('dashboard')
 const hasOpenedStepAnalysis = ref(false)
@@ -838,9 +838,7 @@ const isDialogMaximized = ref(false)
 const projectHistory = ref<Project[]>([])
 const projectManifests = ref<Record<string, ProjectManifest>>({})
 const workspaceFlowStates = ref<Record<string, ProjectWorkspaceFlowStatesById>>({})
-const workspaceAnalysisInputs = ref<Record<string, ProjectWorkspaceAnalysisInputsById>>(
-  {},
-)
+const comparisonProjectRoot = ref<string | null>(null)
 const showNewProjectDialog = ref(false)
 const projectRootError = ref('')
 const projectRootDraft = ref({
@@ -876,6 +874,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  projectComparisonSession.dispose()
   document.removeEventListener('pointerdown', handleWorkspacePopoverPointerDown)
   document.removeEventListener('keydown', handleWorkspacePopoverKeydown)
   window.removeEventListener('resize', updateWorkspaceFlowPopoverPosition)
@@ -929,13 +928,42 @@ const projectCards = computed<ProjectCard[]>(() => {
         project,
         projectManifests.value[project.path] ?? null,
         workspaceFlowStates.value[project.path] ?? {},
-        workspaceAnalysisInputs.value[project.path] ?? {},
+        comparisonAnalysisForProject(project.path),
       ),
     }))
 
   if (!query) return cards
   return cards.filter((project) => projectCardMatchesSearch(project, query))
 })
+
+function comparisonAnalysisForProject(projectRoot: string) {
+  const comparison = projectComparisonSession.projection.data
+  if (
+    comparisonProjectRoot.value !== projectRoot ||
+    !comparison ||
+    (comparison.trend.status !== 'ready' && comparison.trend.status !== 'partial')
+  ) {
+    return null
+  }
+  const snapshots = comparison.workspaceSnapshots
+  const recommendation = comparison.recommendation
+  return {
+    qorTrendSummary: comparison.trend.data,
+    snapshots:
+      snapshots.status === 'ready' || snapshots.status === 'partial'
+        ? snapshots.data.items
+        : [],
+    recommendation:
+      recommendation.status === 'ready' || recommendation.status === 'partial'
+        ? recommendation.data
+        : null,
+    stepComparisons:
+      comparison.stepComparisons.status === 'ready' ||
+      comparison.stepComparisons.status === 'partial'
+        ? comparison.stepComparisons.data.steps
+        : [],
+  }
+}
 
 const searchShowsAll = computed(() => Boolean(searchQuery.value.trim()))
 const visibleProjectCards = computed(() =>
@@ -1206,7 +1234,7 @@ function cssEscape(value: string): string {
   return value.replace(/["\\]/g, '\\$&')
 }
 
-function selectStep(step: FlowStep) {
+function selectStep(step: string) {
   selectedStep.value = step
   selectedIssueMetric.value = null
   hasOpenedStepAnalysis.value = true
@@ -1508,9 +1536,6 @@ async function refreshProjectManifestsNow() {
   workspaceFlowStates.value = Object.fromEntries(
     entries.map(([path]) => [path, workspaceFlowStates.value[path] ?? {}]),
   )
-  workspaceAnalysisInputs.value = Object.fromEntries(
-    entries.map(([path]) => [path, workspaceAnalysisInputs.value[path] ?? {}]),
-  )
   void loadSelectedProjectWorkspaceData()
 }
 
@@ -1522,7 +1547,8 @@ async function loadSelectedProjectWorkspaceData() {
   const projectId = project.id
   const loadGeneration = ++selectedProjectSummaryLoadGeneration
   try {
-    const summary = await readProjectManagementWorkspaceData(project.path, manifest)
+    comparisonProjectRoot.value = project.path
+    await projectComparisonSession.selectProject(project.path)
     if (
       selectedProjectSummaryLoadGeneration !== loadGeneration ||
       selectedProjectId.value !== projectId ||
@@ -1530,13 +1556,16 @@ async function loadSelectedProjectWorkspaceData() {
     ) {
       return
     }
-    workspaceFlowStates.value = {
-      ...workspaceFlowStates.value,
-      [project.path]: summary.flowStates,
-    }
-    workspaceAnalysisInputs.value = {
-      ...workspaceAnalysisInputs.value,
-      [project.path]: summary.analysisInputs,
+    const comparison = projectComparisonSession.projection.data
+    if (
+      comparison &&
+      (comparison.workspaceSnapshots.status === 'ready' ||
+        comparison.workspaceSnapshots.status === 'partial')
+    ) {
+      workspaceFlowStates.value = {
+        ...workspaceFlowStates.value,
+        [project.path]: comparison.workspaceSnapshots.data.flowStates,
+      }
     }
   } catch (error) {
     if (
@@ -1568,10 +1597,6 @@ async function importProject() {
     }
     workspaceFlowStates.value = {
       ...workspaceFlowStates.value,
-      [project.path]: {},
-    }
-    workspaceAnalysisInputs.value = {
-      ...workspaceAnalysisInputs.value,
       [project.path]: {},
     }
     const wasSelected = selectedProjectId.value === project.id
@@ -1741,9 +1766,6 @@ async function removeProjectFromHistory(project: Project) {
   const nextWorkspaceFlowStates = { ...workspaceFlowStates.value }
   delete nextWorkspaceFlowStates[project.path]
   workspaceFlowStates.value = nextWorkspaceFlowStates
-  const nextWorkspaceAnalysisInputs = { ...workspaceAnalysisInputs.value }
-  delete nextWorkspaceAnalysisInputs[project.path]
-  workspaceAnalysisInputs.value = nextWorkspaceAnalysisInputs
   if (selectedProjectId.value === project.id) {
     selectedProjectId.value = projectCards.value[0]?.model.id ?? null
   }
@@ -1950,11 +1972,6 @@ async function applyProjectManifestForProject(
   }
   workspaceFlowStates.value = {
     ...workspaceFlowStates.value,
-    [projectRoot]: {},
-    [normalizedRoot]: {},
-  }
-  workspaceAnalysisInputs.value = {
-    ...workspaceAnalysisInputs.value,
     [projectRoot]: {},
     [normalizedRoot]: {},
   }

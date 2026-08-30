@@ -1,4 +1,4 @@
-import type { FlowLogSegment } from '@/composables/useHomeData'
+import type { FlowLogSegment } from '@/composables/useBackendFlowLogs'
 
 export interface FlowLogListItem {
   key: string

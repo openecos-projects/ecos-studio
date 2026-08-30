@@ -50,9 +50,9 @@
 import { computed, ref, watch } from 'vue'
 import { formatStepToolName, StepEnum } from '@/api/type'
 import StepConfigPanel from '@/components/StepConfigPanel.vue'
-import { useFlowStages } from '@/composables/useFlowStages'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 
-const { dynamicFlowStages, error, isLoading: loading } = useFlowStages()
+const { dynamicFlowStages, error, isLoading: loading } = useBackendFlowStages()
 const selectedStep = ref<StepEnum | undefined>()
 const stepConfigPanel = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const hasUnsavedChanges = computed(

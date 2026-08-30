@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FlowLogSegment } from '@/composables/useHomeData'
+import type { FlowLogSegment } from '@/composables/useBackendFlowLogs'
 import {
   flowLogStepKey,
   getDefaultSelectedFlowLogKey,

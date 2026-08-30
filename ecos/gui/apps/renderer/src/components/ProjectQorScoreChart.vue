@@ -180,7 +180,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { ProjectQorTrendPoint } from '@/utils/projectQorTrend'
+import type { ProjectQorTrendPoint } from '@ecos-studio/shared'
 
 const SCORE_TICKS = [0, 20, 40, 60, 80, 100] as const
 const SCORE_THRESHOLD = 60

@@ -3,7 +3,7 @@ import source from './WorkspaceStepConfigDialog.vue?raw'
 
 describe('WorkspaceStepConfigDialog', () => {
   it('lists only steps from the active workspace flow and edits the selected one', () => {
-    expect(source).toContain('useFlowStages()')
+    expect(source).toContain('useBackendFlowStages()')
     expect(source).toContain('dynamicFlowStages.value.flatMap')
     expect(source).toContain('<StepConfigPanel')
     expect(source).toContain(':step="selectedStep"')

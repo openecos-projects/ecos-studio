@@ -22,6 +22,12 @@ export const desktopApiIpcChannels = {
   projectManagementReadManifest: 'project-management:read-manifest',
   projectManagementListEntries: 'project-management:list-entries',
   projectManagementReadWorkspaceTexts: 'project-management:read-workspace-texts',
+  backendWorkspaceGetOverview: 'backend-workspace:get-overview',
+  backendWorkspaceRefreshOverview: 'backend-workspace:refresh-overview',
+  backendProjectComparisonSelectProject: 'backend-project-comparison:select-project',
+  backendProjectComparisonGetComparison: 'backend-project-comparison:get-comparison',
+  backendProjectComparisonRefreshComparison:
+    'backend-project-comparison:refresh-comparison',
   dialogPickDirectory: 'dialog:pick-directory',
   dialogPickFiles: 'dialog:pick-files',
   dialogPickRtlSources: 'dialog:pick-rtl-sources',
@@ -144,6 +150,8 @@ export const desktopApiIpcChannels = {
 } as const
 
 export const desktopApiEventChannels = {
+  backendWorkspaceInvalidated: 'backend-workspace:invalidated',
+  backendProjectComparisonInvalidated: 'backend-project-comparison:invalidated',
   menuAction: 'menu:action',
   windowCloseRequested: 'window:close-requested',
   windowResized: 'window:resized',

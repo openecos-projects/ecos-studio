@@ -140,7 +140,7 @@ import { readProjectTextFile } from '@/utils/projectFiles'
 import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import MapsGallery from './MapsGallery.vue'
 import ChecklistTable from './ChecklistTable.vue'
-import type { ChecklistItem } from '@/composables/useHomeData'
+import type { ChecklistFinding as ChecklistItem } from '@ecos-studio/shared'
 import type { MapInfo as MapInfoType } from '../types'
 import { clearStepTabCache } from './thumbnailGalleryCache'
 

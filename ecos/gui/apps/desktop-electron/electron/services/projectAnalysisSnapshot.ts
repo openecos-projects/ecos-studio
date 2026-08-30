@@ -1,4 +1,10 @@
-import type { FlowStep, ProjectStepStatus } from './projectManagement'
+import type {
+  ProjectAnalysisAvailability,
+  ProjectAnalysisArtifactStatus,
+  ProjectAnalysisSnapshot,
+  ProjectAnalysisStepSnapshot,
+  ProjectManifestFlowStep as FlowStep,
+} from '@ecos-studio/shared'
 import {
   hasCurrentQorHotspotText,
   hasCurrentQorMetricsText,
@@ -14,49 +20,8 @@ import {
   qorSummaryStatus,
   resolveWorkspaceSignoffReadiness,
   resolveWorkspaceTimingConstraints,
-  type ProjectQorAnalysisIntegrityIssue,
-  type ProjectQorBlockingIssue,
-  type ProjectQorDetailDescriptor,
-  type ProjectQorHardGateFailure,
-  type ProjectQorHotspot,
-  type ProjectQorMetricRecord,
-  type ProjectQorMissingMetric,
-  type ProjectQorSignoffReadiness,
-  type ProjectQorTimingCoverage,
-  type ProjectQorTimingConstraints,
-  type ProjectQorTimingIssue,
   type ProjectQorWorkspaceInput,
-  type QorGateStatus,
-} from './projectQorTrend'
-
-export type ProjectAnalysisArtifactStatus = 'available' | 'missing' | 'invalid'
-export type ProjectAnalysisAvailability = 'available' | 'incomplete' | 'unavailable'
-
-export interface ProjectAnalysisStepSnapshot {
-  step: FlowStep
-  flowStatus: ProjectStepStatus | undefined
-  artifactStatus: ProjectAnalysisArtifactStatus
-  summaryArtifactStatus: ProjectAnalysisArtifactStatus
-  hotspotArtifactStatus: ProjectAnalysisArtifactStatus
-  metrics: ProjectQorMetricRecord[]
-  summaryStatus: QorGateStatus | null
-  blockingIssues: ProjectQorBlockingIssue[]
-  missingMetrics: ProjectQorMissingMetric[]
-  hardGateFailures: ProjectQorHardGateFailure[]
-  hotspots: ProjectQorHotspot[]
-  details: ProjectQorDetailDescriptor[]
-  integrityIssues: ProjectQorAnalysisIntegrityIssue[]
-  timingIssues: ProjectQorTimingIssue[]
-  timingCoverage: ProjectQorTimingCoverage | null
-}
-
-export interface ProjectAnalysisSnapshot {
-  workspaceId: string
-  workspacePath: string
-  steps: Partial<Record<FlowStep, ProjectAnalysisStepSnapshot>>
-  signoffReadiness: ProjectQorSignoffReadiness
-  timingConstraints: ProjectQorTimingConstraints
-}
+} from './qorAnalysis'
 
 /**
  * A snapshot exists for every flow step, including ones with no analysis files. Keep
@@ -86,7 +51,6 @@ export function buildProjectAnalysisSnapshot(
 
   return {
     workspaceId: input.workspaceId,
-    workspacePath: input.workspacePath,
     steps,
     signoffReadiness: resolveWorkspaceSignoffReadiness(input),
     timingConstraints: resolveWorkspaceTimingConstraints(input),
@@ -110,7 +74,7 @@ function buildStepSnapshot(
     hotspotArtifactStatus: hotspotArtifactStatus(hotspotText),
     metrics: normalizeQorMetrics({
       workspaceId: input.workspaceId,
-      workspacePath: input.workspacePath,
+      workspaceKey: input.workspaceKey,
       step,
       text: metricsText,
     }),

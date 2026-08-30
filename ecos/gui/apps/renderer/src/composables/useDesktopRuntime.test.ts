@@ -85,6 +85,8 @@ const desktopBridge = {
   projectManifest: {
     mutate: async () => ({ content: '' }),
   },
+  backendWorkspace: {} as DesktopApi['backendWorkspace'],
+  backendProjectComparison: {} as DesktopApi['backendProjectComparison'],
   dialog: {
     pickDirectory: async () => null,
     pickFiles: async () => null,

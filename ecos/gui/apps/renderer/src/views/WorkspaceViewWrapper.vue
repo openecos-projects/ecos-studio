@@ -17,20 +17,27 @@ import { computed, onMounted, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import FrontendLeftSidebar from '../components/FrontendLeftSidebar.vue'
 import LeftSidebar from '../components/LeftSidebar.vue'
-import { clearHomeQorComparisonCache } from '../composables/useHomeQorComparison'
 import { clearBaselineStepConfigCache } from '../composables/useBaselineStepConfig'
 import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'
 import { clearStepDashboardDataCache } from '../composables/useStepDashboardData'
 import { useWorkspace } from '../composables/useWorkspace'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
 const { currentProject } = useWorkspace()
 const agentShell = useAgentShellStore()
+const backendWorkspaceSession = useBackendWorkspaceSession()
 const workspaceViewKey = computed(() => currentProject.value?.path ?? '')
 
 watch(
   () => currentProject.value?.path,
   (path, previousPath) => {
+    if (path !== previousPath) {
+      backendWorkspaceSession.clear()
+      if (path && currentProject.value?.designTool !== 'frontend') {
+        void backendWorkspaceSession.start()
+      }
+    }
     if (!path || !previousPath || path === previousPath) return
     // Agent chat tabs keep their frozen context across workspace switches.
     if (agentShell.shouldPreserveSession()) {
@@ -42,11 +49,14 @@ watch(
 onMounted(() => {
   agentShell.setMode('workspace')
   agentShell.closeHomeAgent()
+  if (currentProject.value?.designTool !== 'frontend') {
+    void backendWorkspaceSession.start()
+  }
 })
 
 onBeforeRouteLeave(() => {
+  backendWorkspaceSession.dispose()
   clearStepDashboardDataCache()
-  clearHomeQorComparisonCache()
   clearBaselineStepConfigCache()
   clearHomeSnapshotCache()
   // Keep Agent tabs across workspace navigation.
