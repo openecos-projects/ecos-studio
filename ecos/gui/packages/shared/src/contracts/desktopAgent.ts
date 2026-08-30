@@ -106,8 +106,9 @@ export interface DesktopAgentWorkspaceContinueContract {
 
 /**
  * Workspace files the Agent may write a parameter into. The workspace
- * configuration (`home/ecc.toml`, or legacy `home/parameters.json`) is
- * authoritative; ECC regenerates the `config/*.json` step configs from it.
+ * configuration (`home/ecc.toml`, or `home/parameters.json` when that is
+ * the on-disk format) is authoritative; ECC regenerates the `config/*.json`
+ * step configs from it.
  */
 export const desktopAgentParameterWriteFiles = [
   'home/ecc.toml',

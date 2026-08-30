@@ -467,7 +467,7 @@ export class WorkspaceService {
   }
 
   /**
-   * Read a workspace's persisted parameters (home/ecc.toml preferred, legacy
+   * Read a workspace's persisted parameters (home/ecc.toml preferred,
    * home/parameters.json fallback) for callers that only know the workspace
    * directory — e.g. wizard prefill before the workspace is opened.
    */

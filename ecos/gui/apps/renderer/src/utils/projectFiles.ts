@@ -108,7 +108,7 @@ export async function readOptionalProjectTextFile(
 }
 
 /**
- * Read a workspace's persisted parameters (home/ecc.toml preferred, legacy
+ * Read a workspace's persisted parameters (home/ecc.toml preferred,
  * home/parameters.json fallback) by workspace directory. The main process
  * owns the on-disk format; the renderer always gets a JSON object.
  */

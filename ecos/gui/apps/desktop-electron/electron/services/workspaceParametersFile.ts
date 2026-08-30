@@ -22,7 +22,7 @@ import {
 } from '@ecos-studio/shared'
 
 export const WORKSPACE_CONFIG_BASENAME = 'ecc.toml'
-export const LEGACY_PARAMETERS_BASENAME = 'parameters.json'
+export const JSON_PARAMETERS_BASENAME = 'parameters.json'
 
 export type WorkspaceParametersFormat = 'toml' | 'json'
 
@@ -176,9 +176,9 @@ function hasValue(value: unknown): boolean {
 }
 
 /**
- * Locate the workspace's persisted parameters: `home/ecc.toml` (canonical)
- * first, legacy `home/parameters.json` (older backend workspaces and all
- * frontend ecc-fe workspaces) as fallback.
+ * Locate the workspace's persisted parameters: `home/ecc.toml` (preferred)
+ * first, `home/parameters.json` (JSON workspaces, including ecc-fe) as
+ * fallback when the preferred file is absent.
  */
 export async function locateWorkspaceParametersFile(
   root: string,
@@ -187,7 +187,7 @@ export async function locateWorkspaceParametersFile(
   if (await assertPreferredConfigIsRegularFile(tomlPath)) {
     return { format: 'toml', path: tomlPath }
   }
-  const jsonPath = join(root, 'home', LEGACY_PARAMETERS_BASENAME)
+  const jsonPath = join(root, 'home', JSON_PARAMETERS_BASENAME)
   if (await isFile(jsonPath)) {
     return { format: 'json', path: jsonPath }
   }
@@ -359,7 +359,7 @@ export function parseWorkspaceParametersText(
   if (format === 'json') {
     const parsed: unknown = parseJsonPreservingIntegers(
       text,
-      join(workspaceRoot, 'home', LEGACY_PARAMETERS_BASENAME),
+      join(workspaceRoot, 'home', JSON_PARAMETERS_BASENAME),
     )
     if (!isRecord(parsed)) {
       throw new Error(
@@ -372,7 +372,7 @@ export function parseWorkspaceParametersText(
     // return the original JSON shape to frontend consumers.
     assertGuiKnownTomlLeavesLossless(
       normalizeParameterKeys(parsed) as Record<string, unknown>,
-      join(workspaceRoot, 'home', LEGACY_PARAMETERS_BASENAME),
+      join(workspaceRoot, 'home', JSON_PARAMETERS_BASENAME),
     )
     return parsed
   }
@@ -725,13 +725,13 @@ function assertFiniteNumbers(value: unknown, label: string): void {
 }
 
 /**
- * GUI Configure saves emit legacy Die/Core tables. On a TOML workspace whose
+ * GUI Configure saves emit Die/Core tables. On a TOML workspace whose
  * canonical geometry already lives under `die_area`, fold the overlapping
  * leaves into that table and drop only those mapped keys so a save cannot
  * leave two disagreeing representations. Fields with no `die_area`
  * equivalent (`die.area`, `core.size`, `core.area`) stay on Die/Core.
  */
-function foldLegacyGeometryIntoDieArea(
+function foldConfigureGeometryIntoDieArea(
   existingParams: Record<string, unknown>,
   payload: Record<string, unknown>,
 ): void {
@@ -825,7 +825,7 @@ export function mergePayloadIntoTomlDocument(
     existingParams,
     join(workspaceRoot, 'home', WORKSPACE_CONFIG_BASENAME),
   )
-  foldLegacyGeometryIntoDieArea(existingParams, flatPayload)
+  foldConfigureGeometryIntoDieArea(existingParams, flatPayload)
   // Leaf-wise merge: unknown nested members (e.g. a future ecc knob under
   // [params.core]) survive a save that only rewrites known fields; arrays,
   // scalars, and date values replace wholesale.
@@ -868,8 +868,8 @@ export function mergePayloadIntoTomlDocument(
 
 /**
  * Persist workspace parameters. On a TOML workspace the payload is merged
- * into `home/ecc.toml`; on a legacy/frontend (parameters.json) workspace
- * the JSON file is rewritten as-is. Throws when neither file exists.
+ * into `home/ecc.toml`; on a JSON workspace (`parameters.json`, including
+ * ecc-fe) the JSON file is rewritten as-is. Throws when neither file exists.
  *
  * When `authorizedLocation` is provided (a path already authorized and
  * canonicalized by the caller's path scope), the write uses exactly that
@@ -885,13 +885,13 @@ export async function writeWorkspaceParameters(
   const location = authorizedLocation ?? (await locateWorkspaceParametersFile(root))
   if (!location) {
     throw new Error(
-      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', JSON_PARAMETERS_BASENAME)}`,
     )
   }
   // Serialize per canonical config slot, not per raw root spelling or file:
   // equivalent roots ("/ws" vs "/ws/.", native vs slash-normalized) must
   // share one queue, and two operations must never interleave across the
-  // two formats (a legacy JSON can migrate to TOML mid-queue).
+  // two formats (a JSON workspace can grow an ecc.toml mid-queue).
   return await enqueueParameterWrite(
     await workspaceParameterWriteQueueKey(root, authorizedLocation),
     async () => {
@@ -905,7 +905,7 @@ export async function writeWorkspaceParameters(
       const onDisk = await locateWorkspaceParametersFile(root)
       if (!onDisk) {
         throw new Error(
-          `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+          `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', JSON_PARAMETERS_BASENAME)}`,
         )
       }
       const spelledPath = onDisk.path
@@ -1316,10 +1316,10 @@ function setJsonPathValue(
 }
 
 /**
- * Legacy JSON stores display keys (`Target density`). Agent/rerun contracts
- * may spell the canonical leaf (`target_density`). Match existing own keys
- * by the ecc mechanical rule; when a long key and its canonical duplicate
- * both exist, the long key wins.
+ * JSON workspaces store display keys (`Target density`). Agent/rerun
+ * contracts may spell the canonical leaf (`target_density`). Match existing
+ * own keys by the ecc mechanical rule; when a long key and its canonical
+ * duplicate both exist, the long key wins.
  */
 function resolveExistingJsonPath(
   document: Record<string, unknown>,
@@ -1361,11 +1361,11 @@ function resolveExistingJsonPathSegment(
 
 /**
  * Apply existing-path-only edits to the workspace configuration that
- * actually exists on disk (`home/ecc.toml` preferred, legacy
- * `home/parameters.json` fallback). Edit paths are interpreted in the
- * on-disk file's vocabulary: display keys for JSON, and for TOML every
- * string segment is canonicalized through the ecc mechanical rule, so an
- * agent emitting display-key paths keeps working after the migration.
+ * actually exists on disk (`home/ecc.toml` preferred, `home/parameters.json`
+ * fallback). Edit paths are interpreted in the on-disk file's vocabulary:
+ * display keys for JSON, and for TOML every string segment is canonicalized
+ * through the ecc mechanical rule, so an agent emitting display-key paths
+ * keeps working on both formats.
  *
  * When `authorizedLocation` is provided (a path already authorized and
  * canonicalized by the caller's path scope), the operation uses exactly
@@ -1381,7 +1381,7 @@ export async function editWorkspaceParameters(
   const location = authorizedLocation ?? (await locateWorkspaceParametersFile(root))
   if (!location) {
     throw new Error(
-      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', JSON_PARAMETERS_BASENAME)}`,
     )
   }
   return await enqueueParameterWrite(
@@ -1418,7 +1418,7 @@ export async function prepareWorkspaceParameterEdits(
   const location = authorizedLocation ?? (await locateWorkspaceParametersFile(root))
   if (!location) {
     throw new Error(
-      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', JSON_PARAMETERS_BASENAME)}`,
     )
   }
   await assertWritable?.()
@@ -1433,7 +1433,7 @@ export async function prepareWorkspaceParameterEdits(
   const onDisk = await locateWorkspaceParametersFile(root)
   if (!onDisk) {
     throw new Error(
-      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+      `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', JSON_PARAMETERS_BASENAME)}`,
     )
   }
   const spelledPath = onDisk.path

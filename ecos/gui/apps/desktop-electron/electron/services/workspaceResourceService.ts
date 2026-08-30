@@ -14,7 +14,7 @@ import { WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE } from './workspaceService'
 import { migrateWorkspaceConfigFilenames } from './eccRpc/workspaceConfigMigration'
 import {
   locateWorkspaceParametersFile,
-  LEGACY_PARAMETERS_BASENAME,
+  JSON_PARAMETERS_BASENAME,
   parseWorkspaceParametersText,
   readWorkspaceConfigContained,
   WORKSPACE_CONFIG_BASENAME,
@@ -99,7 +99,7 @@ export class WorkspaceResourceService {
 
   /**
    * Persist workspace parameters in the workspace's own format
-   * (home/ecc.toml preferred, legacy parameters.json fallback). Refused
+   * (home/ecc.toml preferred, home/parameters.json fallback). Refused
    * while the workspace runtime is active, mirroring the mutation guard on
    * direct config file writes.
    */
@@ -137,7 +137,7 @@ export class WorkspaceResourceService {
     const location = await locateWorkspaceParametersFile(root)
     if (!location) {
       throw new Error(
-        `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', LEGACY_PARAMETERS_BASENAME)}`,
+        `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', JSON_PARAMETERS_BASENAME)}`,
       )
     }
     const locationStats = await lstat(location.path)
@@ -249,7 +249,7 @@ export class WorkspaceResourceService {
     const flowPath = join(root, 'home', 'flow.json')
     const parametersLocation = await locateWorkspaceParametersFile(root)
     const parametersPath =
-      parametersLocation?.path ?? join(root, 'home', LEGACY_PARAMETERS_BASENAME)
+      parametersLocation?.path ?? join(root, 'home', JSON_PARAMETERS_BASENAME)
     const checklistPath = join(root, 'home', 'checklist.json')
 
     const [homeJson, flowJson, parametersJson, checklistJson] = await Promise.all([

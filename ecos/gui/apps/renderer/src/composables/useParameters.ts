@@ -23,7 +23,7 @@ import {
 // ============ 类型定义 ============
 // 与 ecc/chipcompiler/data/parameter.py 中 ICS55_PARAMETERS_TEMPLATE 及 workspace 写入的 PDK Root 对齐
 
-/** parameters.json 磁盘结构（ICS55 扁平模板 + 可选 PDK Root） */
+/** Configure/renderer parameter shape (ICS55 扁平模板 + 可选 PDK Root). */
 export interface ParametersData {
   PDK: string
   Design: string
@@ -386,8 +386,8 @@ function losslessString(value: unknown, label: string): string {
 
 /**
  * Normalize a raw parameters record into ParametersData. Accepts both the
- * legacy display-key shape (home/parameters.json) and the canonical flat
- * snake_case shape (home/ecc.toml / workspace.snapshot).
+ * display-key JSON shape (home/parameters.json) and the canonical flat
+ * snake_case shape (home/ecc.toml / workspace snapshot).
  */
 export function parseParametersRecord(raw: Record<string, unknown>): ParametersData {
   return {
@@ -631,8 +631,8 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
 // ============ Composable ============
 
 /**
- * 参数配置管理 Hook
- * 负责从 parameters.json 加载配置参数并管理状态
+ * 参数配置管理 Hook。
+ * 通过主进程按工作区现有格式读取参数（ecc.toml 优先，parameters.json 回退）。
  */
 export function useParameters() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
@@ -661,7 +661,11 @@ export function useParameters() {
   let parametersResourceToken = 0
   let saveWriteQueue: Promise<void> = Promise.resolve()
 
-  function fallbackParametersPath(projectPath: string): string {
+  /**
+   * Session-scoped token used to bind in-flight saves. Not the on-disk locate
+   * path: reads still go through the format-aware main-process helper.
+   */
+  function parametersSessionPath(projectPath: string): string {
     return `${projectPath}/home/parameters.json`
   }
 
@@ -756,7 +760,7 @@ export function useParameters() {
   /**
    * resolveProjectPathAccess without the failure mode: a stale or
    * out-of-scope metadata pointer (e.g. home.json still naming a missing
-   * parameters.json) must not gate the format-aware read — the main-process
+   * config path) must not gate the format-aware read — the main-process
    * helper locates and authorizes the actual config itself.
    */
   async function resolveParametersPathOrNull(
@@ -808,7 +812,7 @@ export function useParameters() {
       // event rather than adding foreground file I/O to the render path.
       if (keepLastParametersDuringFlowReload()) return true
 
-      const knownPath = resolvedParametersPath || fallbackParametersPath(projectPath)
+      const knownPath = resolvedParametersPath || parametersSessionPath(projectPath)
       const resolvedPath = await resolveParametersPathOrNull(sessionId, knownPath)
       if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
         return true
@@ -825,7 +829,7 @@ export function useParameters() {
       if (loadResourceToken !== parametersResourceToken) return true
 
       // The format-aware read locates the actual config (home/ecc.toml
-      // preferred), so a stale legacy pointer never gates the reload.
+      // preferred), so a stale home.json pointer never gates the reload.
       resolvedParametersPath = resolvedPath ?? (parametersRecord ? knownPath : '')
       if (parametersRecord) {
         applyParametersData(parseParametersRecord(parametersRecord))
@@ -901,7 +905,7 @@ export function useParameters() {
 
       const parametersPath = homeData?.parameters
         ? convertToLocalPath(homeData.parameters)
-        : fallbackParametersPath(projectPath)
+        : parametersSessionPath(projectPath)
       if (!homeData?.parameters) {
         console.warn(
           'No parameters field found in home.json; falling back to',
@@ -956,8 +960,8 @@ export function useParameters() {
 
       if (loadResourceToken !== parametersResourceToken) return
       // The main-process helper locates the actual config (home/ecc.toml
-      // preferred, legacy parameters.json fallback), so a TOML-only
-      // workspace loads even when the legacy fallback path did not resolve.
+      // preferred, home/parameters.json fallback), so a TOML-only
+      // workspace loads even when home.json did not resolve a config path.
       resolvedParametersPath = resolvedPath ?? (parametersRecord ? parametersPath : '')
 
       if (parametersRecord) {

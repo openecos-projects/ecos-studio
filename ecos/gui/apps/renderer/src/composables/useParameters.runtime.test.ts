@@ -459,7 +459,7 @@ describe('useParameters desktop bridge integration', () => {
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
-  it('loads chip identity from parameters.json when post-rerun home.json omits the path', async () => {
+  it('loads chip identity when post-rerun home.json omits the config path', async () => {
     fetchSharedHomeData.mockResolvedValue({
       parameters: '',
     })
@@ -477,7 +477,7 @@ describe('useParameters desktop bridge integration', () => {
     expect(readWorkspaceParametersFile).toHaveBeenCalledWith('/workspace/demo')
   })
 
-  it('loads a TOML-only workspace when the legacy parameters.json fallback does not resolve', async () => {
+  it('loads a TOML-only workspace when home.json does not resolve a config path', async () => {
     fetchSharedHomeData.mockResolvedValue({
       parameters: '',
     })
@@ -493,7 +493,7 @@ describe('useParameters desktop bridge integration', () => {
     expect(readWorkspaceParametersFile).toHaveBeenCalledWith('/workspace/demo')
   })
 
-  it('ignores an empty runtime snapshot after harden and reloads parameters.json', async () => {
+  it('ignores an empty runtime snapshot after harden and reloads workspace parameters', async () => {
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     fetchSharedHomeData.mockResolvedValue({
       parameters: '/workspace/demo/home/parameters.json',

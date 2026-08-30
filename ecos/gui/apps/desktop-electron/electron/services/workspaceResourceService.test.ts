@@ -1036,7 +1036,7 @@ describe('writeParameters', () => {
     expect(parameters).toMatchObject({ design: 'gcd', frequency_max: 150 })
   })
 
-  it('writes legacy parameters.json workspaces as JSON', async () => {
+  it('writes home/parameters.json workspaces as JSON', async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })
     await writeJson(join(root, 'home', 'parameters.json'), { Design: 'gcd' })

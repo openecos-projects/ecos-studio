@@ -1,5 +1,5 @@
 /**
- * Mechanical normalization between legacy display parameter keys and the
+ * Mechanical normalization between display parameter keys and the
  * canonical flat snake_case vocabulary used by `home/ecc.toml`.
  *
  * Mirrors `ecc/chipcompiler/data/parameter_keys.py` (normalize_key /
@@ -12,7 +12,7 @@ const UNIT_SUFFIX = /\[[^\]]*\]/g
 const NON_ALNUM = /[^a-z0-9]+/g
 const EDGE_UNDERSCORES = /^_+|_+$/g
 
-/** Map one legacy/display key to its canonical snake_case form. */
+/** Map one display key to its canonical snake_case form. */
 export function normalizeParameterKey(key: string): string {
   const withoutUnits = String(key).replace(UNIT_SUFFIX, '')
   return withoutUnits

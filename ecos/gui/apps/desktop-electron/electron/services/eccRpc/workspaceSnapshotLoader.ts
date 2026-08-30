@@ -114,7 +114,7 @@ async function readJsonObject(
 
 /**
  * Parameters companion of readJsonObject: same size cap and ENOENT-tolerance,
- * but format-aware (home/ecc.toml preferred, legacy parameters.json fallback).
+ * but format-aware (home/ecc.toml preferred, home/parameters.json fallback).
  */
 async function readParametersObject(directory: string): Promise<Record<string, unknown>> {
   const location = await locateWorkspaceParametersFile(directory)

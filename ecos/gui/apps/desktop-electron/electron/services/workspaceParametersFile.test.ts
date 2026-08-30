@@ -66,7 +66,7 @@ utilitization = 0.2
 margin = [ 2, 2 ]
 `
 
-const LEGACY_PARAMETERS = JSON.stringify(
+const JSON_PARAMETERS = JSON.stringify(
   {
     PDK: 'ICS55',
     Design: 'gcd',
@@ -86,16 +86,16 @@ afterEach(() => {
 describe('locateWorkspaceParametersFile', () => {
   it('prefers home/ecc.toml over home/parameters.json', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     writeHomeFile(root, 'ecc.toml', ECC_TOML)
     const location = await locateWorkspaceParametersFile(root)
     expect(location?.format).toBe('toml')
     expect(location?.path).toBe(join(root, 'home', 'ecc.toml'))
   })
 
-  it('falls back to legacy parameters.json', async () => {
+  it('falls back to home/parameters.json', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     const location = await locateWorkspaceParametersFile(root)
     expect(location?.format).toBe('json')
     expect(location?.path).toBe(join(root, 'home', 'parameters.json'))
@@ -108,7 +108,7 @@ describe('locateWorkspaceParametersFile', () => {
 
   it('refuses a broken ecc.toml symlink instead of falling back to parameters.json', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     symlinkSync(join(root, 'home', 'missing.toml'), join(root, 'home', 'ecc.toml'))
     await expect(locateWorkspaceParametersFile(root)).rejects.toThrow(/symlink|ecc.toml/i)
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/symlink|ecc.toml/i)
@@ -181,9 +181,9 @@ describe('readWorkspaceParameters', () => {
     expect(parameters?.pdk_config).toBe(join(root, 'home/pdk.json'))
   })
 
-  it('reads legacy parameters.json unchanged', async () => {
+  it('reads home/parameters.json unchanged', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     const parameters = await readWorkspaceParameters(root)
     expect(parameters).toEqual({
       PDK: 'ICS55',
@@ -256,7 +256,7 @@ height = 80
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
   })
 
-  it('keeps a legacy JSON workspace whose canonical duplicate is an inert table', async () => {
+  it('keeps a JSON workspace whose canonical duplicate is an inert table', async () => {
     const root = createWorkspace()
     writeHomeFile(
       root,
@@ -479,9 +479,9 @@ describe('writeWorkspaceParameters', () => {
     expect(text).toContain('max_fanout = 20')
   })
 
-  it('writes legacy parameters.json merging the payload into the existing document', async () => {
+  it('writes home/parameters.json merging the payload into the existing document', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     const location = await writeWorkspaceParameters(root, {
       PDK: 'ICS55',
       Design: 'gcd',
@@ -563,7 +563,7 @@ describe('writeWorkspaceParameters', () => {
     expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toBe(content)
   })
 
-  it('rejects a legacy parameters.json holding an unsafe integer instead of rounding it', async () => {
+  it('rejects a home/parameters.json holding an unsafe integer instead of rounding it', async () => {
     const root = createWorkspace()
     writeHomeFile(
       root,
@@ -579,7 +579,7 @@ describe('writeWorkspaceParameters', () => {
     )
   })
 
-  it('preserves unknown nested keys in legacy parameters.json saves', async () => {
+  it('preserves unknown nested keys in home/parameters.json saves', async () => {
     const root = createWorkspace()
     writeHomeFile(
       root,
@@ -835,7 +835,7 @@ future = "keep"
 
   it('lands the save on the newly preferred config when the format migrates mid-queue', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     const location = await writeWorkspaceParameters(
       root,
       { 'Max fanout': 48 },
@@ -1008,9 +1008,9 @@ extra = "keep-me"
     expect(parameters?.max_fanout).toBe(32)
   })
 
-  it('applies display-key paths to a legacy parameters.json workspace', async () => {
+  it('applies display-key paths to a home/parameters.json workspace', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     await editWorkspaceParameters(root, [
       { json_path: ['Frequency max [MHz]'], value: 200 },
     ])
@@ -1020,7 +1020,7 @@ extra = "keep-me"
     expect(written['Frequency max [MHz]']).toBe(200)
   })
 
-  it('applies canonical agent paths to a legacy parameters.json workspace', async () => {
+  it('applies canonical agent paths to a home/parameters.json workspace', async () => {
     const root = createWorkspace()
     writeHomeFile(
       root,
@@ -1163,7 +1163,7 @@ describe('editWorkspaceParameters with an authorized location', () => {
 describe('json_path hardening', () => {
   it('rejects prototype-related segments instead of mutating Object.prototype', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['__proto__', 'toString'], value: 1 }]),
     ).rejects.toThrow(/not allowed/i)
@@ -1172,7 +1172,7 @@ describe('json_path hardening', () => {
 
   it('rejects a constructor segment on a legacy workspace', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'parameters.json', LEGACY_PARAMETERS)
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['constructor'], value: {} }]),
     ).rejects.toThrow(/not allowed/i)

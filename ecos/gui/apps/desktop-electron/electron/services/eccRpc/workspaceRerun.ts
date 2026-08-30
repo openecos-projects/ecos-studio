@@ -584,11 +584,11 @@ async function materializeWorkspaceRerunParameterWrites(
 
 /**
  * Apply `surface: 'parameters'` writes to the workspace configuration that
- * actually exists on disk: `home/ecc.toml` when present, legacy
- * `home/parameters.json` otherwise. The contract's `file` field names the
- * format the Agent saw; disk reality wins when the two disagree, and the
- * `json_path` keys are interpreted in the on-disk file's vocabulary
- * (display keys for JSON, flat snake_case for TOML).
+ * actually exists on disk: `home/ecc.toml` when present, `home/parameters.json`
+ * otherwise. The contract's `file` field names the format the Agent saw; disk
+ * reality wins when the two disagree, and the `json_path` keys are interpreted
+ * in the on-disk file's vocabulary (display keys for JSON, flat snake_case
+ * for TOML).
  */
 async function materializeParameterSurfaceWrites(
   workspace: string,

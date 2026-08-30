@@ -16,7 +16,7 @@ const STEP_CONFIG_FILE_BY_KNOB_PREFIX: Record<string, string> = {
 
 /**
  * Extra canonical parameter-surface paths beyond the flat knob leaf.
- * `floorplan.utilitization` is stored under Core in legacy JSON.
+ * `floorplan.utilitization` is stored under Core in JSON workspaces.
  */
 const NESTED_PARAMETER_KNOB_PATHS: Record<string, readonly (readonly string[])[]> = {
   'floorplan.utilitization': [
