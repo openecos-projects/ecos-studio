@@ -449,7 +449,6 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'Clock Signal Name',
       'Die Area',
       'Origin Core Utilization',
-      'Core Margin',
       'Frequency max [MHz]',
       'Max Fanout',
     ]) {
@@ -457,6 +456,7 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     }
 
     expect(source).toContain('dieAreaMode')
+    expect(source).not.toContain('Core Margin')
     expect(source).not.toContain('Floorplan mode')
     expect(source).not.toContain('Placement Defaults')
     expect(source).not.toContain('Target Density')
