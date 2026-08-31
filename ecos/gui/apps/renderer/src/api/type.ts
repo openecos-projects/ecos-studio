@@ -123,6 +123,13 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     showInSidebar: true,
     group: 'run',
   },
+  [StepEnum.TIMING_OPT.toLowerCase()]: {
+    label: 'Timing Opt',
+    icon: 'ri-timer-flash-line',
+    path: StepEnum.TIMING_OPT,
+    showInSidebar: true,
+    group: 'run',
+  },
   [StepEnum.LEGALIZATION.toLowerCase()]: {
     label: 'Legalization',
     icon: 'ri-check-double-line',
@@ -250,6 +257,7 @@ const STEP_TOOL_LABELS: Record<string, string> = {
   dreamplace: 'DreamPlace',
   yosys: 'Yosys',
   klayout: 'KLayout',
+  sizer: 'Sizer',
 }
 
 /** Display name for a flow step tool from flow.json. */
