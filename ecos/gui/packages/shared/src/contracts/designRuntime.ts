@@ -72,6 +72,7 @@ export interface DesignRuntimeApi {
   cancel(request: DesignRuntimeCancelRequest): Promise<DesignRuntimeCancelResult>
   events: {
     onEvent(listener: (event: DesignRuntimeEvent) => void): DesktopEventUnsubscribe
+    replay(request: DesignRuntimeWorkspaceHandleRequest): Promise<void>
   }
   flow: {
     run(request: DesignRuntimeFlowRunRequest): Promise<EccFlowRunResult>

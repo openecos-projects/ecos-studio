@@ -93,6 +93,7 @@ export const desktopApiIpcChannels = {
   designRuntimeRpcShutdown: 'design-runtime:rpc-shutdown',
   designRuntimeFrontendCatalog: 'design-runtime:frontend-catalog',
   designRuntimeFrontendValidateConfig: 'design-runtime:frontend-validate-config',
+  designRuntimeEventsReplay: 'design-runtime:events-replay',
   designRuntimeWorkspaceCreate: 'design-runtime:workspace-create',
   designRuntimeWorkspaceOpen: 'design-runtime:workspace-open',
   designRuntimeWorkspaceClose: 'design-runtime:workspace-close',

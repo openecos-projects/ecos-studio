@@ -2650,6 +2650,7 @@ describe('useWorkspace openProject', () => {
       designTool: 'frontend',
       workspaceDirectory: '/work/frontend-project',
     })
+    expect(desktopApi.ecc.runtime?.snapshot).not.toHaveBeenCalled()
 
     await workspace.closeProject()
     expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-frontend', 'frontend')

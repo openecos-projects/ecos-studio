@@ -90,7 +90,10 @@ function createService(
   directory = '/work/demo',
   options: Pick<
     ConstructorParameters<typeof EccWorkspaceRuntime>[0],
-    'diagnosticIdleTimeoutMs' | 'lazyWorkspaceOpen' | 'snapshotLoader'
+    | 'diagnosticIdleTimeoutMs'
+    | 'forwardLegacyFlowOperationId'
+    | 'lazyWorkspaceOpen'
+    | 'snapshotLoader'
   > = {},
 ) {
   const client = new FakeRpcClient()
@@ -416,6 +419,65 @@ describe('EccWorkspaceRuntime', () => {
 
     flowResult.resolve({ rerun: false })
     await expect(running).resolves.toEqual({ rerun: false })
+  })
+
+  it('forwards the GUI operation id to frontend legacy flow calls', async () => {
+    const { client, events, service } = createService('/work/frontend', {
+      forwardLegacyFlowOperationId: true,
+    })
+    client.responses.push(
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccFeVersion: '0.1.0',
+        version: 1,
+      },
+      { directory: '/work/frontend', workspaceId: 'frontend-1' },
+      { rerun: false },
+      { state: 'Success', step: 'sim' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/frontend' })
+
+    await service.runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
+    await service.runStepPayload(workspace.workspaceHandle, {
+      rerun: false,
+      step: 'sim',
+    })
+
+    const starts = events.filter(
+      (event): event is Extract<EccRuntimeEvent, { type: 'operation.started' }> =>
+        event.type === 'operation.started' &&
+        (event.method === 'flow.run' || event.method === 'flow.run_step'),
+    )
+    expect(client.calls.find((call) => call.method === 'flow.run')?.params).toEqual({
+      operationId: starts[0]?.operationId,
+      rerun: false,
+      workspaceId: 'frontend-1',
+    })
+    expect(client.calls.find((call) => call.method === 'flow.run_step')?.params).toEqual({
+      operationId: starts[1]?.operationId,
+      rerun: false,
+      step: 'sim',
+      workspaceId: 'frontend-1',
+    })
+  })
+
+  it('does not forward the GUI operation id to an older frontend sidecar', async () => {
+    const { client, service } = createService('/work/frontend', {
+      forwardLegacyFlowOperationId: true,
+    })
+    client.responses.push(
+      { capabilities: [], eccFeVersion: '0.1.0', version: 1 },
+      { directory: '/work/frontend', workspaceId: 'frontend-1' },
+      { rerun: false },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/frontend' })
+
+    await service.runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
+
+    expect(client.calls.find((call) => call.method === 'flow.run')?.params).toEqual({
+      rerun: false,
+      workspaceId: 'frontend-1',
+    })
   })
 
   it('binds a late sidecar progress event to the active workspace session', async () => {
@@ -1249,12 +1311,101 @@ describe('EccWorkspaceRuntime', () => {
     await expect(flow).resolves.toEqual({ rerun: false })
   })
 
+  it('finishes legacy frontend crash recovery before running the next command', async () => {
+    const { client, events, service, sidecarEvent } = createService('/work/frontend', {
+      forwardLegacyFlowOperationId: true,
+    })
+    const blockedFlow = deferred<{ rerun: boolean }>()
+    const blockedRecovery = deferred<{
+      recovered: Array<{
+        logFile: string
+        operationId: string
+        step: string
+        tool: string
+      }>
+    }>()
+    client.responses.push(
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccFeVersion: '0.1.0',
+        version: 1,
+      },
+      { directory: '/work/frontend', workspaceId: 'frontend-1' },
+      blockedFlow.promise,
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccFeVersion: '0.1.0',
+        version: 1,
+      },
+      { directory: '/work/frontend', workspaceId: 'frontend-2' },
+      blockedRecovery.promise,
+      { path: '/work/frontend/home/home.json' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/frontend' })
+    const running = service.runFlow({
+      rerun: false,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+    const started = events.find(
+      (event): event is Extract<EccRuntimeEvent, { type: 'operation.started' }> =>
+        event.type === 'operation.started' && event.method === 'flow.run',
+    )
+    sidecarEvent({ code: 1, reason: 'unexpected', signal: null, type: 'runtime.exited' })
+    blockedFlow.reject(new Error('RPC sidecar exited.'))
+    const queuedHome = service.workspaceHome({
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    await vi.waitFor(() => {
+      expect(client.calls).toContainEqual({
+        method: 'workspace.recover_interrupted',
+        params: {
+          operationId: started?.operationId,
+          workspaceId: 'frontend-2',
+        },
+      })
+    })
+    expect(client.calls.some((call) => call.method === 'workspace.home')).toBe(false)
+
+    blockedRecovery.resolve({
+      recovered: [
+        {
+          logFile: '/work/frontend/prepare_fe/log/log.txt',
+          operationId: started!.operationId,
+          step: 'prepare',
+          tool: 'fe',
+        },
+      ],
+    })
+    await expect(running).rejects.toThrow('RPC sidecar exited.')
+    await expect(queuedHome).resolves.toEqual({
+      path: '/work/frontend/home/home.json',
+    })
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        code: 'interrupted',
+        operationId: started?.operationId,
+        step: 'prepare',
+        type: 'operation.failed',
+      }),
+    )
+  })
+
   it('restarts and reopens the active workspace on the next call after exit', async () => {
     const { client, service, sidecar, sidecarEvent } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       { recovered: [] },
       { rerun: false },
@@ -1301,9 +1452,17 @@ describe('EccWorkspaceRuntime', () => {
   it('recovers a persisted interruption when the start notification was lost', async () => {
     const { client, service, sidecarEvent } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       { recovered: [] },
     )
@@ -1328,9 +1487,17 @@ describe('EccWorkspaceRuntime', () => {
   it('retries crash recovery on the next workspace snapshot after a transient failure', async () => {
     const { client, service, sidecarEvent } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       new Error('temporary recovery failure'),
       {
@@ -1380,13 +1547,21 @@ describe('EccWorkspaceRuntime', () => {
     const { client, events, service, sidecar, sidecarEvent, sidecarNotification } =
       createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         operationId: 'operation-place',
         state: 'running',
       },
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       {
         recovered: [
@@ -1468,7 +1643,11 @@ describe('EccWorkspaceRuntime', () => {
   it('replays previous-run recovery after the workspace snapshot is requested', async () => {
     const { client, events, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted', 'workspace.snapshot'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         recovered: [
@@ -1506,10 +1685,51 @@ describe('EccWorkspaceRuntime', () => {
     )
   })
 
+  it('replays previous frontend recovery after open without a snapshot capability', async () => {
+    const { client, events, service } = createService('/work/frontend')
+    client.responses.push(
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccFeVersion: '0.1.0',
+        version: 1,
+      },
+      { directory: '/work/frontend', workspaceId: 'frontend-1' },
+      {
+        recovered: [
+          {
+            logFile: '/work/frontend/prepare_fe/log/log.txt',
+            operationId: 'operation-previous',
+            step: 'prepare',
+            tool: 'fe',
+          },
+        ],
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/frontend' })
+
+    await service.recoverInterrupted(workspace.workspaceHandle)
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ operationId: 'operation-previous' }),
+    )
+    service.replayPendingRecoveryEvents(workspace.workspaceHandle)
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        message: 'Previous prepare run was interrupted.',
+        operationId: 'operation-previous',
+        type: 'operation.failed',
+      }),
+    )
+  })
+
   it('invalidates a cached snapshot after recovering an interrupted step', async () => {
     const { client, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      {
+        capabilities: ['workspace.recover_interrupted'],
+        eccVersion: '0.1.0',
+        version: 1,
+      },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         directory: '/work/demo',

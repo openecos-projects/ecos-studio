@@ -195,6 +195,7 @@ function getDesktopServices() {
             : [process.cwd(), app.getAppPath()],
         }),
       }),
+    forwardLegacyFlowOperationId: true,
   })
   const frontendRpcRuntimeService = new FrontendRpcRuntimeService({
     runtime: frontendRpcCore,
