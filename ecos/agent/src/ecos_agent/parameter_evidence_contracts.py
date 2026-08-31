@@ -301,7 +301,9 @@ class MaterializationRef(_Model):
     before_snapshot_sha256: str | None = None
     after_snapshot_ref: str | None = None
     after_snapshot_sha256: str | None = None
-    written_value: Scalar
+    written_value: Scalar = Field(
+        description="The value actually written to the tool input, after unit mapping."
+    )
     unit: str
     parent_manifest_ref: str | None = None
     parent_manifest_sha256: str | None = None
@@ -443,7 +445,11 @@ class ConsumerEvidence(_Model):
 
 
 class ActivationEvidence(_Model):
-    status: Literal["used", "not_activated", "unknown"]
+    status: Literal["used", "not_activated", "unknown"] = Field(
+        description=(
+            "Whether an allowlisted runtime branch, operator, or consumer used the parameter."
+        )
+    )
     consumers: tuple[ConsumerEvidence, ...] = ()
 
     @model_validator(mode="after")
@@ -459,22 +465,34 @@ class EffectiveValue(_Model):
 
 
 class ParameterApplicationReceipt(_Model):
+    """Tool-observed parameter evidence; this alone does not prove QoR improvement."""
+
     schema_version: Literal["tool.parameter_application_receipt.v1"] = (
         "tool.parameter_application_receipt.v1"
     )
     receipt_id: str
     tool: ToolRef
     context: dict[str, Any]
-    requested: dict[str, Any]
+    requested: dict[str, Any] = Field(
+        description=(
+            "The proposal intent before materialization; it does not prove what the tool used."
+        )
+    )
     materialization: MaterializationRef
-    effective_initial: EffectiveValue
+    effective_initial: EffectiveValue = Field(
+        description=(
+            "The value the tool accepted after admission, normalization, clamping, or override."
+        )
+    )
     transitions: tuple[RuntimeTransition, ...] = ()
     application_status: Literal[
         "rejected", "unsupported", "ignored", "applied", "unknown"
     ]
     activation: ActivationEvidence
     consumer_observation: dict[str, Any] | None = None
-    effective_final: EffectiveValue
+    effective_final: EffectiveValue = Field(
+        description="The value remaining after all recorded runtime adjustments."
+    )
     evidence_sha256: str
 
     @field_validator("receipt_id")

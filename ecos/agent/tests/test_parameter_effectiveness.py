@@ -39,6 +39,29 @@ from ecos_agent.parameter_semantics import (
 HASH = "sha256:" + "a" * 64
 
 
+def test_parameter_receipt_schema_explains_evidence_boundaries() -> None:
+    schema = ParameterApplicationReceipt.model_json_schema()
+
+    assert schema["properties"]["requested"]["description"] == (
+        "The proposal intent before materialization; it does not prove what the tool used."
+    )
+    assert schema["$defs"]["MaterializationRef"]["properties"]["written_value"][
+        "description"
+    ] == "The value actually written to the tool input, after unit mapping."
+    assert schema["properties"]["effective_initial"]["description"] == (
+        "The value the tool accepted after admission, normalization, clamping, or override."
+    )
+    assert schema["properties"]["effective_final"]["description"] == (
+        "The value remaining after all recorded runtime adjustments."
+    )
+    assert schema["$defs"]["ActivationEvidence"]["properties"]["status"][
+        "description"
+    ] == "Whether an allowlisted runtime branch, operator, or consumer used the parameter."
+    assert schema["description"] == (
+        "Tool-observed parameter evidence; this alone does not prove QoR improvement."
+    )
+
+
 def _domain_context(**updates: object) -> dict[str, object]:
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     context: dict[str, object] = {

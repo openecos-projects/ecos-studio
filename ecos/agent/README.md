@@ -161,6 +161,27 @@ effective-domain allowlist 中选择 exact value；validator 同时检查知识�
 方向和 frozen lattice。兼容的 v1 lane 仍由本地 controller 选择数值。两个 lane 的执行权都
 保留在 controller，知识模块只消费 Parameter Effectiveness 的公开合同，不复制其能力。
 
+### 如何阅读参数和结果证据
+
+实现保留四类参数证据字段，但它们不是四个并列功能：
+
+| 字段 | 含义 |
+|---|---|
+| `requested` | Agent 提议的请求值，只代表动作意图 |
+| `materialization.written_value` | L1 实际写入工具输入的值，包含单位映射 |
+| `effective_initial/final` | 工具经过准入、归一化、裁剪、覆盖或运行期调整后采用的值 |
+| `activation.status` | 参数是否进入真实 branch、operator 或 consumer |
+
+`tool.parameter_application_receipt.v1` 是 ECC/tool adapter 基于原生运行观测生成的参数应用回执；
+Agent 不从配置文本或日志推断缺失事实。L3 terminal observation 则证明候选是否完整到达 `Harden`
+并留下可验证的 signoff、manifest 和产物。前者回答参数实际发生了什么，后者回答完整候选最终得到
+什么；二者均不单独证明 QoR 改善。
+
+`ecos.supported_action_view.v1` 的 `pass/weak/blocked/unknown` 是机器可检查的动作支持关系：它只
+说明当前状态、工具版本、知识 binding 和有效参数域是否允许某个动作，不代表知识正确或有收益。
+equal-budget artifact 中的 `terminal_utility` 只是冻结 objective metric 的相反数（越大越好），不是
+综合 QoR；研究判断必须同时检查可行性、`success@k`、PPA/DRC/timing/congestion、runtime 和 memory。
+
 项目根目录和重跑 source workspace 是 Codex 可读取建议的边界。Codex 不可用、
 超时或返回不符合合同的内容时，不会生成可执行合同或调用 ECC；Agent 会保留当前
 输入步骤，供用户修正输入后重试。

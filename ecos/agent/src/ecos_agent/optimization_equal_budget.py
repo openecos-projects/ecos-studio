@@ -55,6 +55,7 @@ class CandidateTrace:
     started: bool
     terminal_success: bool
     planning_mode: Mode | None = None
+    # Higher-is-better negated frozen objective, not an aggregate QoR score.
     terminal_utility: float | None = None
     reference_utility: float | None = None
     ppa: float | None = None
