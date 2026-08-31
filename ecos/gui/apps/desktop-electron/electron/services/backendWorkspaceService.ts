@@ -519,13 +519,14 @@ export class BackendWorkspaceService {
     qor: ReadSection<WorkspaceQorSummary>
     baselineComparison: ReadSection<WorkspaceBaselineComparison>
   }> {
-    const reader = this.options.projectManagementReadService?.readWorkspaceTexts
+    const reader = this.options.projectManagementReadService
     const currentWorkspace = manifest?.workspaces.find((workspace) =>
       pathsEqual(workspace.workspace_path, index.root),
     )
-    if (!manifest || !currentWorkspace || !reader) {
+    if (!manifest || !currentWorkspace || !reader?.readWorkspaceTexts) {
       return { qor: unavailable(), baselineComparison: unavailable() }
     }
+    const readWorkspaceTexts = reader.readWorkspaceTexts.bind(reader)
 
     const baselineWorkspaceId = manifest.qor_baseline?.workspace_id
     const requestedIds = [
@@ -546,7 +547,7 @@ export class BackendWorkspaceService {
           return
         }
         try {
-          const result = await reader({
+          const result = await readWorkspaceTexts({
             projectRoot: dirname(index.root),
             workspacePath: workspace.workspace_path,
             paths: [...projectManagementWorkspaceSummaryPaths],

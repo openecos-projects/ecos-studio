@@ -73,8 +73,15 @@ describe('BackendWorkspaceService', () => {
         ],
       }),
     )
+    const projectManagementReadService = {
+      readManifest,
+      async readWorkspaceTexts() {
+        expect(this).toBe(projectManagementReadService)
+        return { texts: {}, unavailablePaths: [] }
+      },
+    }
     const service = new BackendWorkspaceService({
-      projectManagementReadService: { readManifest },
+      projectManagementReadService,
       workspaceResourceService: { getIndex },
     })
 
@@ -106,6 +113,7 @@ describe('BackendWorkspaceService', () => {
       },
     })
     expect(result.workspaceContextId).toEqual(expect.any(String))
+    expect(result.overview.qor.status).toBe('ready')
     expect(getIndex).toHaveBeenCalledTimes(1)
     expect(readManifest).toHaveBeenCalledWith('/project')
   })
