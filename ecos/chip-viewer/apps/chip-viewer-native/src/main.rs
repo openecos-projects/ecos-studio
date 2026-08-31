@@ -3,6 +3,7 @@ mod camera3d;
 mod canvas_gpu;
 mod canvas_gpu3d;
 mod map_data;
+mod nav3d;
 
 use std::path::PathBuf;
 

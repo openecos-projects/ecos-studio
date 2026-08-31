@@ -76,13 +76,12 @@ struct GpuCachedLabel {
 }
 
 struct GpuTileData {
-    /// Instances are stored in an Arc so CanvasGpuCallback can cheaply clone
-    /// the refcount each frame without copying the underlying Vec.
     instances: std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>>,
     labels: Vec<GpuCachedLabel>,
 }
 
 pub struct ChipViewerApp {
+    pub color_theme: chip_display::ColorTheme,
     state: ViewerState,
     theme_initialized: bool,
     startup_focus_requested: bool,
@@ -105,6 +104,8 @@ struct LoadingViewer {
 }
 
 struct LoadedViewer {
+    color_theme: chip_display::ColorTheme,
+    start_time: Instant,
     db: ChipViewDb,
     stats: SnapshotStats,
     grid_bounds: Option<Rect32>,
@@ -157,7 +158,11 @@ struct LoadedViewer {
     object_visibility: ObjectVisibility,
     coordinate_unit: CoordinateUnit,
     view_mode: ViewMode,
-    camera3d: crate::camera3d::OrbitCamera,
+    camera_ctrl_3d: crate::nav3d::CameraController3d,
+    show_3d_grid: bool,
+    shading_style_3d: crate::canvas_gpu3d::ShadingStyle,
+    lighting_preset_3d: chip_display::LightingPreset,
+    z_cut_ratio_3d: f32,
     layer_stack: LayerStack,
     view3d_fitted: bool,
     view3d_bootstrapped: bool,
@@ -169,16 +174,40 @@ struct LoadedViewer {
     gpu_frame_counter: u64,
     gpu_tile_instances:
         std::collections::HashMap<crate::canvas_gpu::GpuBufferKey, std::sync::Arc<GpuTileData>>,
+    gpu_3d_instances_cache: Option<(
+        u64,
+        Rect32,
+        std::sync::Arc<Vec<crate::canvas_gpu3d::GpuShapeInstance3d>>,
+    )>,
+    last_3d_query_rect: Option<Rect32>,
+    perf_3d: Perf3dState,
     label_collector: ShapeLabelCollector,
-    /// Persistent scratch buffer for shape geometry + style pairs, cleared each tile.
-    /// Avoids per-tile Vec::new() allocations in the GPU tile build loop.
     frame_valid_shapes: Vec<(chip_view_db::ShapeGeometry, chip_display::LayerStyle)>,
-    /// Persistent scratch buffer for cached labels, cleared each tile.
     frame_valid_labels: Vec<GpuCachedLabel>,
-    /// Pre-allocated string buffer for canvas/hover status lines.
-    /// Re-used every frame via fmt::Write to avoid String heap allocations.
     status_line_buffer: String,
     shortcuts_overlay_visible: bool,
+    loading_3d_start: Option<std::time::Instant>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Perf3dState {
+    pub render_scale: f32,
+    pub target_scale: f32,
+    pub settle_at: Option<std::time::Instant>,
+    pub last_camera: Option<crate::camera3d::OrbitCamera>,
+    pub last_overview_mode: Option<bool>,
+}
+
+impl Default for Perf3dState {
+    fn default() -> Self {
+        Self {
+            render_scale: 1.0,
+            target_scale: 1.0,
+            settle_at: None,
+            last_camera: None,
+            last_overview_mode: None,
+        }
+    }
 }
 
 struct LayerUiState {
@@ -273,9 +302,6 @@ fn build_heatmap_instances(
         let Some(norm) = data.normalized_value(row, col) else {
             continue;
         };
-        // Transparent filtering:
-        // When not inverted: hide sub-threshold cells (norm < threshold)
-        // When inverted: hide above-threshold cells (norm > threshold) to focus on coldspots
         let hidden = if !invert {
             norm < threshold
         } else {
@@ -824,7 +850,7 @@ impl Default for ObjectVisibility {
             gcells: false,
             obstructions: false,
             boundaries: true,
-            fill: false,
+            fill: true,
             regions: false,
         }
     }
@@ -920,7 +946,10 @@ impl DrawingCategory {
             Self::GCells => owner_type == OwnerType::GCellGrid,
             Self::Obstructions => matches!(owner_type, OwnerType::Blockage | OwnerType::Obs),
             Self::Boundaries => matches!(owner_type, OwnerType::Die | OwnerType::Core),
-            Self::Fill => owner_type == OwnerType::Fill,
+            Self::Fill => matches!(
+                owner_type,
+                OwnerType::Fill | OwnerType::InstanceBBox | OwnerType::InstanceHalo
+            ),
             Self::Regions => matches!(owner_type, OwnerType::Region | OwnerType::Slot),
         }
     }
@@ -930,6 +959,12 @@ impl ObjectVisibility {
     fn includes_owner_type(self, owner_type: u8) -> bool {
         if OwnerType::from_raw(owner_type) == Some(OwnerType::NetWireSegment) {
             return self.net_signal || self.net_clock || self.net_other;
+        }
+        if matches!(
+            OwnerType::from_raw(owner_type),
+            Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo)
+        ) {
+            return self.instances || self.fill;
         }
         OwnerType::from_raw(owner_type)
             .and_then(|owner_type| {
@@ -1005,6 +1040,40 @@ fn drawing_category_counts(db: &ChipViewDb) -> BTreeMap<DrawingCategory, usize> 
     counts
 }
 
+fn is_filler_instance(inst_name: Option<&str>, master_name: Option<&str>) -> bool {
+    let is_filler_str = |s: &str| -> bool {
+        let s = s.trim();
+        if s.is_empty() {
+            return false;
+        }
+        let lower = s.to_ascii_lowercase();
+        lower.contains("fill")
+            || lower.contains("decap")
+            || lower.contains("tapcell")
+            || lower.contains("welltap")
+            || lower.contains("tapvpwr")
+            || lower.contains("tapvgnd")
+            || lower.contains("endcap")
+            || lower.starts_with("tap_")
+            || (lower.starts_with("tap") && lower.contains('_'))
+            || lower.ends_with("_tap")
+            || lower.contains("__tap")
+            || lower.starts_with("phy_")
+            || lower.starts_with("filler")
+    };
+    if let Some(master) = master_name {
+        if is_filler_str(master) {
+            return true;
+        }
+    }
+    if let Some(inst) = inst_name {
+        if is_filler_str(inst) {
+            return true;
+        }
+    }
+    false
+}
+
 fn drawing_category_for_shape(db: &ChipViewDb, shape: &ShapeRecord) -> Option<DrawingCategory> {
     db.owner_for_shape(shape)
         .and_then(|owner| drawing_category_for_owner(db, owner))
@@ -1013,7 +1082,15 @@ fn drawing_category_for_shape(db: &ChipViewDb, shape: &ShapeRecord) -> Option<Dr
 fn drawing_category_for_owner(db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
     let owner_type = OwnerType::from_raw(owner.owner_type)?;
     Some(match owner_type {
-        OwnerType::InstanceBBox | OwnerType::InstanceHalo => DrawingCategory::Instances,
+        OwnerType::InstanceBBox | OwnerType::InstanceHalo => {
+            let inst_name = db.owner_name(owner);
+            let master_name = db.owner_local_name(owner);
+            if is_filler_instance(inst_name, master_name) {
+                DrawingCategory::Fill
+            } else {
+                DrawingCategory::Instances
+            }
+        }
         OwnerType::NetWireSegment => net_kind_drawing_category(
             db.owner_name(owner)
                 .and_then(|net_name| db.net_kind_for_name(net_name)),
@@ -1050,27 +1127,22 @@ fn net_kind_drawing_category(kind: Option<&str>) -> DrawingCategory {
 #[derive(Clone, Debug, Default)]
 struct OwnerCategoryCache {
     epoch: u64,
-    net_categories: std::collections::HashMap<u64, Option<DrawingCategory>>,
+    categories: std::collections::HashMap<(u8, u64, u32), Option<DrawingCategory>>,
 }
 
 impl OwnerCategoryCache {
     fn get(&mut self, epoch: u64, db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
         if self.epoch != epoch {
             self.epoch = epoch;
-            self.net_categories.clear();
+            self.categories.clear();
         }
-        let owner_type = OwnerType::from_raw(owner.owner_type)?;
-        if owner_type == OwnerType::NetWireSegment {
-            let owner_id = owner.owner_id;
-            if let Some(cat) = self.net_categories.get(&owner_id) {
-                return *cat;
-            }
-            let cat = drawing_category_for_owner(db, owner);
-            self.net_categories.insert(owner_id, cat);
-            cat
-        } else {
-            drawing_category_for_owner(db, owner)
+        let key = (owner.owner_type, owner.owner_id, owner.name_id);
+        if let Some(cat) = self.categories.get(&key) {
+            return *cat;
         }
+        let cat = drawing_category_for_owner(db, owner);
+        self.categories.insert(key, cat);
+        cat
     }
 }
 
@@ -1299,6 +1371,7 @@ impl ChipViewerApp {
             let _ = sender.send(result);
         });
         Self {
+            color_theme: chip_display::ColorTheme::Vivid,
             state: ViewerState::Loading(LoadingViewer {
                 manifest,
                 started_at: Instant::now(),
@@ -1376,6 +1449,7 @@ impl ChipViewerApp {
         let next_state = match &mut self.state {
             ViewerState::Loading(loading) => match loading.receiver.try_recv() {
                 Ok(Ok(db)) => Some(ViewerState::Loaded(LoadedViewer::new(
+                    chip_display::ColorTheme::Vivid,
                     db,
                     loading.edit_enabled,
                     loading.initial_session_dirty,
@@ -1935,6 +2009,7 @@ fn json_string_vec(value: Option<&serde_json::Value>) -> Vec<String> {
 
 impl LoadedViewer {
     fn new(
+        color_theme: chip_display::ColorTheme,
         db: ChipViewDb,
         edit_enabled: bool,
         initial_session_dirty: bool,
@@ -1951,7 +2026,7 @@ impl LoadedViewer {
         let grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
         let snapshot_signature = snapshot_signature_for_db(&db);
         let drawing_category_counts = drawing_category_counts(&db);
-        let layers = layer_ui_states(&db, &BTreeMap::new());
+        let layers = layer_ui_states(&db, &BTreeMap::new(), color_theme);
         let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
         let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
         let (map_catalog, map_catalog_error) = match map_root_path.as_deref() {
@@ -1976,6 +2051,8 @@ impl LoadedViewer {
             .unwrap_or_default();
         let map_thumbnail_worker = map_catalog.as_ref().map(|_| spawn_map_thumbnail_worker());
         Self {
+            color_theme,
+            start_time: Instant::now(),
             db,
             stats,
             grid_bounds,
@@ -2028,7 +2105,11 @@ impl LoadedViewer {
             object_visibility: ObjectVisibility::default(),
             coordinate_unit: CoordinateUnit::Dbu,
             view_mode: ViewMode::TwoD,
-            camera3d: crate::camera3d::OrbitCamera::default(),
+            camera_ctrl_3d: crate::nav3d::CameraController3d::default(),
+            show_3d_grid: true,
+            shading_style_3d: crate::canvas_gpu3d::ShadingStyle::Normal,
+            lighting_preset_3d: chip_display::LightingPreset::Studio,
+            z_cut_ratio_3d: 0.0,
             layer_stack: LayerStack::default(),
             view3d_fitted: false,
             view3d_bootstrapped: false,
@@ -2038,12 +2119,16 @@ impl LoadedViewer {
             visibility_rules_cache: VisibilityRulesCache::default(),
             gpu_canvas: crate::canvas_gpu::GpuCanvasState::new_from_env(target_format),
             gpu_tile_instances: std::collections::HashMap::new(),
+            gpu_3d_instances_cache: None,
+            last_3d_query_rect: None,
+            perf_3d: Perf3dState::default(),
             gpu_frame_counter: 0,
             label_collector: ShapeLabelCollector::default(),
             frame_valid_shapes: Vec::new(),
             frame_valid_labels: Vec::new(),
             status_line_buffer: String::with_capacity(128),
             shortcuts_overlay_visible: false,
+            loading_3d_start: None,
         }
     }
 
@@ -2578,11 +2663,10 @@ impl LoadedViewer {
                     .clicked()
                 {
                     if self.view_mode != mode {
-                        self.view_mode = mode;
-                        self.pan_drag.reset();
-                        self.focus_animation = None;
                         if mode == ViewMode::ThreeD {
-                            self.view3d_fitted = false;
+                            self.switch_to_3d_mode();
+                        } else {
+                            self.switch_to_2d_mode();
                         }
                     }
                 }
@@ -2649,35 +2733,191 @@ impl LoadedViewer {
                 self.shortcuts_overlay_visible = !self.shortcuts_overlay_visible;
             }
         });
+
         if self.view_mode == ViewMode::ThreeD {
+            ui.add_space(3.0);
             ui.horizontal(|ui| {
                 if ui
                     .small_button("Iso")
-                    .on_hover_text("Isometric camera")
+                    .on_hover_text("Isometric camera (Key: 2 / I)")
                     .clicked()
                 {
-                    self.camera3d.set_iso();
+                    self.camera_ctrl_3d.set_iso();
                 }
                 if ui
                     .small_button("Top")
-                    .on_hover_text("Look down from +Z")
+                    .on_hover_text("Look down from +Z (Key: 1 / T)")
                     .clicked()
                 {
-                    self.camera3d.set_top();
+                    self.camera_ctrl_3d.set_top();
                 }
                 if ui
                     .small_button("Front")
-                    .on_hover_text("Look across the stack")
+                    .on_hover_text("Look across the stack (Key: 3)")
                     .clicked()
                 {
-                    self.camera3d.set_front();
+                    self.camera_ctrl_3d.set_front();
+                }
+                ui.separator();
+                if ui
+                    .selectable_label(self.show_3d_grid, "Grid")
+                    .on_hover_text("Toggle floor grid (Key: G)")
+                    .clicked()
+                {
+                    self.show_3d_grid = !self.show_3d_grid;
                 }
             });
-            ui.add(
-                egui::Slider::new(&mut self.camera3d.z_scale, 0.05..=6.0)
-                    .logarithmic(true)
-                    .text("Z-scale"),
-            );
+
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Shading:")
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+                let mut shading = self.shading_style_3d;
+                egui::ComboBox::from_id_source("shading_style_combo")
+                    .selected_text(shading.label())
+                    .show_ui(ui, |ui| {
+                        for s in crate::canvas_gpu3d::ShadingStyle::ALL {
+                            ui.selectable_value(&mut shading, *s, s.label());
+                        }
+                    });
+                if shading != self.shading_style_3d {
+                    self.shading_style_3d = shading;
+                    ui.ctx().request_repaint();
+                }
+            });
+
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Lighting:")
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+                let mut lighting = self.lighting_preset_3d;
+                egui::ComboBox::from_id_source("lighting_preset_combo")
+                    .selected_text(lighting.label())
+                    .show_ui(ui, |ui| {
+                        for l in chip_display::LightingPreset::ALL {
+                            ui.selectable_value(&mut lighting, *l, l.label());
+                        }
+                    });
+                if lighting != self.lighting_preset_3d {
+                    self.lighting_preset_3d = lighting;
+                    ui.ctx().request_repaint();
+                }
+            });
+
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Theme:")
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+                let mut theme = self.color_theme;
+                egui::ComboBox::from_id_source("single_app_color_theme")
+                    .selected_text(theme.label())
+                    .show_ui(ui, |ui| {
+                        for t in [
+                            chip_display::ColorTheme::Foundry,
+                            chip_display::ColorTheme::Classic,
+                            chip_display::ColorTheme::Vivid,
+                            chip_display::ColorTheme::DieShot,
+                            chip_display::ColorTheme::Playful,
+                            chip_display::ColorTheme::Cyber,
+                        ] {
+                            ui.selectable_value(&mut theme, t, t.label());
+                        }
+                    });
+                if theme != self.color_theme {
+                    self.color_theme = theme;
+                    let visibility = self
+                        .layers
+                        .iter()
+                        .map(|l| (l.layer_id, l.visible))
+                        .collect();
+                    self.layers = layer_ui_states(&self.db, &visibility, self.color_theme);
+                    self.view_tile_cache.clear();
+                    self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
+                }
+            });
+
+            ui.add_space(2.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Presets:").small().color(ecos_text_secondary()));
+                if ui.small_button("Engineering").on_hover_text("Foundry Palette + PBR Normal + Studio Lighting").clicked() {
+                    self.color_theme = chip_display::ColorTheme::Foundry;
+                    self.shading_style_3d = crate::canvas_gpu3d::ShadingStyle::Normal;
+                    self.lighting_preset_3d = chip_display::LightingPreset::Studio;
+                    let visibility = self.layers.iter().map(|l| (l.layer_id, l.visible)).collect();
+                    self.layers = layer_ui_states(&self.db, &visibility, self.color_theme);
+                    self.view_tile_cache.clear();
+                    self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
+                    ui.ctx().request_repaint();
+                }
+                if ui.small_button("EDA Classic").on_hover_text("Classic Rainbow + PBR Normal + Laboratory Neutral Light").clicked() {
+                    self.color_theme = chip_display::ColorTheme::Classic;
+                    self.shading_style_3d = crate::canvas_gpu3d::ShadingStyle::Normal;
+                    self.lighting_preset_3d = chip_display::LightingPreset::Laboratory;
+                    let visibility = self.layers.iter().map(|l| (l.layer_id, l.visible)).collect();
+                    self.layers = layer_ui_states(&self.db, &visibility, self.color_theme);
+                    self.view_tile_cache.clear();
+                    self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
+                    ui.ctx().request_repaint();
+                }
+                if ui.small_button("Die Shot").on_hover_text("DieShot Realistic Metals + Optical Thin-Film Iridescence + Studio Lighting").clicked() {
+                    self.color_theme = chip_display::ColorTheme::DieShot;
+                    self.shading_style_3d = crate::canvas_gpu3d::ShadingStyle::Iridescent;
+                    self.lighting_preset_3d = chip_display::LightingPreset::Studio;
+                    let visibility = self.layers.iter().map(|l| (l.layer_id, l.visible)).collect();
+                    self.layers = layer_ui_states(&self.db, &visibility, self.color_theme);
+                    self.view_tile_cache.clear();
+                    self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
+                    ui.ctx().request_repaint();
+                }
+                if ui.small_button("Diorama").on_hover_text("Playful Palette + Cartoon Cel-Shading + Softbox Lighting").clicked() {
+                    self.color_theme = chip_display::ColorTheme::Playful;
+                    self.shading_style_3d = crate::canvas_gpu3d::ShadingStyle::Cartoon;
+                    self.lighting_preset_3d = chip_display::LightingPreset::Softbox;
+                    let visibility = self.layers.iter().map(|l| (l.layer_id, l.visible)).collect();
+                    self.layers = layer_ui_states(&self.db, &visibility, self.color_theme);
+                    self.view_tile_cache.clear();
+                    self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
+                    ui.ctx().request_repaint();
+                }
+                if ui.small_button("Cyber").on_hover_text("Cyber Palette + Tech Wireframe + Blueprint Light").clicked() {
+                    self.color_theme = chip_display::ColorTheme::Cyber;
+                    self.shading_style_3d = crate::canvas_gpu3d::ShadingStyle::Tech;
+                    self.lighting_preset_3d = chip_display::LightingPreset::Blueprint;
+                    let visibility = self.layers.iter().map(|l| (l.layer_id, l.visible)).collect();
+                    self.layers = layer_ui_states(&self.db, &visibility, self.color_theme);
+                    self.view_tile_cache.clear();
+                    self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
+                    ui.ctx().request_repaint();
+                }
+            });
+
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::Slider::new(&mut self.camera_ctrl_3d.target.z_scale, 0.05..=6.0)
+                        .logarithmic(true)
+                        .text("Z-scale"),
+                )
+                .on_hover_text("Vertical elevation scale (0.05 = flat, 1.0 = standard 3D depth, 6.0 = exaggerated)");
+            });
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::Slider::new(&mut self.z_cut_ratio_3d, 0.0..=1.0)
+                        .custom_formatter(|n, _| format!("{:.0}%", n * 100.0))
+                        .text("Z-Cut"),
+                )
+                .on_hover_text("Top-down cross-section cut (0% = Full Stack, 30-50% = Slice top power roof to see routing, 100% = Base only)");
+            });
         }
     }
 
@@ -3144,7 +3384,14 @@ impl LoadedViewer {
         let (response, frame_painter) =
             ui.allocate_painter(available, egui::Sense::click_and_drag());
         let frame = response.rect;
-        frame_painter.rect_filled(frame, 0.0, ecos_canvas());
+        let bg_rgba = self.color_theme.background_rgba();
+        let bg_color = egui::Color32::from_rgba_premultiplied(
+            (bg_rgba[0] * 255.0).round() as u8,
+            (bg_rgba[1] * 255.0).round() as u8,
+            (bg_rgba[2] * 255.0).round() as u8,
+            255,
+        );
+        frame_painter.rect_filled(frame, 0.0, bg_color);
         let canvas = layout_canvas_rect(frame);
         let ruler_painter = frame_painter.clone();
         let painter = frame_painter.with_clip_rect(canvas);
@@ -3174,6 +3421,8 @@ impl LoadedViewer {
             );
             return;
         };
+
+        self.handle_canvas_keyboard_shortcuts(ui, world, canvas);
 
         if self.view_mode == ViewMode::ThreeD {
             self.canvas_3d(
@@ -3285,101 +3534,6 @@ impl LoadedViewer {
             self.pan_drag.reset();
         }
 
-        if !ui.ctx().wants_keyboard_input() {
-            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                if self.shortcuts_overlay_visible {
-                    self.shortcuts_overlay_visible = false;
-                } else if self.ruler_tool.enabled {
-                    self.ruler_tool.clear();
-                } else if self.selected.is_some()
-                    || !self.highlighted.is_empty()
-                    || self.selected_drc.is_some()
-                    || self.selected_antenna.is_some()
-                    || self.selected_map_bbox.is_some()
-                {
-                    self.selected = None;
-                    self.highlighted.clear();
-                    self.selected_drc = None;
-                    self.selected_antenna = None;
-                    self.selected_map_bbox = None;
-                }
-            }
-            if ui.input(|input| {
-                input.key_pressed(egui::Key::F) || input.key_pressed(egui::Key::Home)
-            }) {
-                self.focus_animation = None;
-                self.zoom = 1.0;
-                self.pan = egui::Vec2::ZERO;
-                self.pan_drag.reset();
-            }
-            if ui.input(|input| input.key_pressed(egui::Key::Z)) {
-                if let Some(shape_id) = self.selected {
-                    if let Some(shape) = self.db.find_shape(shape_id) {
-                        self.pending_focus = Some(PendingFocus {
-                            bbox: shape.bbox,
-                            select_shape_id: Some(shape_id),
-                            transition: FocusTransition::Animated,
-                        });
-                    }
-                } else if let Some(bbox) = self.selected_map_bbox {
-                    self.pending_focus = Some(PendingFocus {
-                        bbox: contextual_map_focus_bbox(bbox),
-                        select_shape_id: None,
-                        transition: FocusTransition::Animated,
-                    });
-                } else if let Some(drc_id) = self.selected_drc {
-                    if let Some(overlay) = &self.drc_overlay {
-                        if let Some(v) = overlay.violations.iter().find(|v| v.id == drc_id) {
-                            self.pending_focus = Some(PendingFocus {
-                                bbox: contextual_map_focus_bbox(v.bbox),
-                                select_shape_id: None,
-                                transition: FocusTransition::Animated,
-                            });
-                        }
-                    }
-                } else if !self.highlighted.is_empty() {
-                    self.focus_highlighted_shapes();
-                }
-            }
-            if ui.input(|input| input.key_pressed(egui::Key::K) || input.key_pressed(egui::Key::R))
-            {
-                self.ruler_tool.toggle();
-                self.pan_drag.reset();
-            }
-            if ui.input(|input| input.key_pressed(egui::Key::Space)) {
-                if self.analysis_tab == AnalysisTab::Map || self.active_heatmap.is_some() {
-                    self.toggle_previous_map_item();
-                }
-            }
-            if ui.input(|input| {
-                input.key_pressed(egui::Key::Questionmark) || input.key_pressed(egui::Key::F1)
-            }) {
-                self.shortcuts_overlay_visible = !self.shortcuts_overlay_visible;
-            }
-            if ui.input(|input| {
-                (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(egui::Key::F)
-            }) || ui.input(|input| input.key_pressed(egui::Key::Slash))
-            {
-                self.sidebar_info_panel = None;
-                self.query_input_mode = QueryInputMode::Search;
-            }
-            if ui.input(|input| {
-                input.key_pressed(egui::Key::Plus) || input.key_pressed(egui::Key::Equals)
-            }) {
-                let center = canvas.center();
-                let (new_zoom, new_pan) =
-                    zoom_at_screen_pos(world, canvas, self.zoom, self.pan, 1.25, center);
-                self.zoom = new_zoom;
-                self.pan = new_pan;
-            }
-            if ui.input(|input| input.key_pressed(egui::Key::Minus)) {
-                let center = canvas.center();
-                let (new_zoom, new_pan) =
-                    zoom_at_screen_pos(world, canvas, self.zoom, self.pan, 0.8, center);
-                self.zoom = new_zoom;
-                self.pan = new_pan;
-            }
-        }
         let interaction_point = response
             .interact_pointer_pos()
             .filter(|pos| canvas.contains(*pos) && !pointer_over_heatmap)
@@ -3974,7 +4128,6 @@ impl LoadedViewer {
             self.db.snapshot().manifest().dbu_per_micron,
         );
 
-        // Action 4.2: write into the pre-allocated buffer instead of allocating a new String.
         self.status_line_buffer.clear();
         canvas_status_line_into(
             &mut self.status_line_buffer,
@@ -4356,10 +4509,18 @@ impl LoadedViewer {
     ) {
         self.ensure_3d_view(world, canvas);
 
+        let dt = ui.input(|i| i.stable_dt);
+        let animating_3d = self.camera_ctrl_3d.update(dt);
+        if animating_3d {
+            ui.ctx().request_repaint();
+        }
+
+        let current_camera = self.camera_ctrl_3d.current;
+
         if let Some(focus) = self.pending_focus.take() {
             let span = ((focus.bbox.hx - focus.bbox.lx).max(focus.bbox.hy - focus.bbox.ly) as f32)
                 .max(1.0);
-            self.camera3d.focus_xy(
+            self.camera_ctrl_3d.focus_xy(
                 (focus.bbox.lx + focus.bbox.hx) as f32 * 0.5,
                 (focus.bbox.ly + focus.bbox.hy) as f32 * 0.5,
                 span,
@@ -4385,29 +4546,26 @@ impl LoadedViewer {
                 };
                 (scroll_y, input.zoom_delta())
             });
-            let zoom_factor = if scroll_y.abs() > f32::EPSILON {
-                scroll_zoom_factor(scroll_y)
-            } else {
-                pinch_zoom
-            };
-            if (zoom_factor - 1.0).abs() > f32::EPSILON {
+            if scroll_y.abs() > f32::EPSILON || (pinch_zoom - 1.0).abs() > f32::EPSILON {
                 let pivot = ui
                     .ctx()
                     .input(|input| input.pointer.hover_pos())
                     .and_then(|pos| {
-                        self.camera3d
-                            .ray_from_screen(
-                                [pos.x, pos.y],
-                                [canvas.left(), canvas.top()],
-                                [canvas.width(), canvas.height()],
-                            )
-                            .and_then(|ray| {
-                                ray.intersect_z_plane(self.camera3d.target.z)
-                                    .or_else(|| ray.intersect_z_plane(0.0))
-                            })
+                        current_camera.cursor_pivot(
+                            [pos.x, pos.y],
+                            [canvas.left(), canvas.top()],
+                            [canvas.width(), canvas.height()],
+                            world,
+                            self.layer_stack.height(),
+                        )
                     });
-                self.camera3d
-                    .zoom_toward(1.0 / zoom_factor.max(0.05), pivot);
+                let steps = if scroll_y.abs() > f32::EPSILON {
+                    scroll_y / 50.0
+                } else {
+                    (pinch_zoom - 1.0) * 10.0
+                };
+                let fine = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+                self.camera_ctrl_3d.dolly_steps(steps, pivot, fine);
                 ui.ctx().input_mut(|input| {
                     input.raw_scroll_delta.y = 0.0;
                     input.smooth_scroll_delta.y = 0.0;
@@ -4417,17 +4575,26 @@ impl LoadedViewer {
             }
         }
 
+        let modifier_scale = if ui.input(|i| i.modifiers.shift) {
+            0.25
+        } else if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
+            4.0
+        } else {
+            1.0
+        };
+
         if response.drag_started() && drag_started_in_canvas && !pointer_over_heatmap {
             let mode = if response.drag_started_by(egui::PointerButton::Middle)
                 || response.drag_started_by(egui::PointerButton::Secondary)
             {
-                Some(CanvasDragMode::Edit)
-            } else if response.drag_started_by(egui::PointerButton::Primary) {
                 Some(CanvasDragMode::Pan)
+            } else if response.drag_started_by(egui::PointerButton::Primary) {
+                Some(CanvasDragMode::Edit)
             } else {
                 None
             };
             if let Some(mode) = mode {
+                self.camera_ctrl_3d.start_drag();
                 self.pan_drag.start(mode);
             }
         }
@@ -4435,18 +4602,34 @@ impl LoadedViewer {
             let delta = response.drag_delta();
             match self.pan_drag.mode() {
                 Some(CanvasDragMode::Edit) => {
-                    self.camera3d.orbit(delta.x * 0.008, -delta.y * 0.008);
+                    self.camera_ctrl_3d.orbit(delta.x, delta.y, modifier_scale);
                     ui.ctx().request_repaint();
                 }
                 Some(CanvasDragMode::Pan) => {
-                    self.camera3d.pan(delta.x, delta.y);
+                    self.camera_ctrl_3d.pan(delta.x, delta.y, modifier_scale);
                     ui.ctx().request_repaint();
                 }
                 _ => {}
             }
         }
         if response.drag_stopped() {
+            self.camera_ctrl_3d.stop_drag();
             self.pan_drag.reset();
+        }
+
+        if response.double_clicked_by(egui::PointerButton::Primary) && pointer_over_layout {
+            if let Some(pos) = response.interact_pointer_pos() {
+                if let Some(point) = self.hover_world_point_3d(pos, canvas) {
+                    let span = (current_camera.distance * 0.35).max(100.0);
+                    self.camera_ctrl_3d.focus_xy(
+                        point.x as f32,
+                        point.y as f32,
+                        span,
+                        self.layer_stack.height(),
+                    );
+                    ui.ctx().request_repaint();
+                }
+            }
         }
 
         let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
@@ -4461,10 +4644,129 @@ impl LoadedViewer {
         }
 
         let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
-        let viewport = crate::canvas_gpu3d::query_rect_for_camera(self.camera3d, world, aspect);
-        let instances =
-            std::sync::Arc::new(self.build_3d_instances(world, viewport, &query_layer_ids));
+        let die_diag = crate::canvas_gpu3d::die_diagonal(world);
+        let is_zoomed_out = current_camera.distance >= die_diag * 0.7;
+        let ground_viewport =
+            current_camera.visible_ground_rect(aspect, self.layer_stack.height(), world);
+        let covers_majority = (ground_viewport.hx - ground_viewport.lx)
+            >= (world.hx - world.lx) * 2 / 3
+            || (ground_viewport.hy - ground_viewport.ly) >= (world.hy - world.ly) * 2 / 3;
+        let stable_viewport = if is_zoomed_out || covers_majority {
+            world
+        } else {
+            ground_viewport
+        };
+
+        let visibility_hash = layers_visibility_hash(&self.layers);
+        let using_overview_tiles = false;
+        let overview_lod = 0;
+        let pixels_per_point = ui.ctx().pixels_per_point();
+
+        // Base key for cached 3D instance buffer (state that invalidates the whole cache)
+        let base_key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            self.geometry_epoch.hash(&mut hasher);
+            visibility_hash.hash(&mut hasher);
+            self.color_theme.hash(&mut hasher);
+            self.layer_stack.height().to_bits().hash(&mut hasher);
+            self.object_visibility.bits().hash(&mut hasher);
+            using_overview_tiles.hash(&mut hasher);
+            overview_lod.hash(&mut hasher);
+            self.selected.hash(&mut hasher);
+            self.highlighted.len().hash(&mut hasher);
+            for id in &self.highlighted {
+                id.hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+
+        let is_dragging = self.pan_drag.mode().is_some() || animating_3d;
+
+        let instances = if let Some((cached_key, cached_envelope, cached_instances)) =
+            &self.gpu_3d_instances_cache
+        {
+            let is_contained = using_overview_tiles
+                || (cached_envelope.lx == world.lx
+                    && cached_envelope.ly == world.ly
+                    && cached_envelope.hx == world.hx
+                    && cached_envelope.hy == world.hy
+                    && (is_zoomed_out || covers_majority))
+                || (cached_envelope.lx <= stable_viewport.lx
+                    && cached_envelope.ly <= stable_viewport.ly
+                    && cached_envelope.hx >= stable_viewport.hx
+                    && cached_envelope.hy >= stable_viewport.hy);
+
+            let needs_expansion = (is_zoomed_out || covers_majority) && *cached_envelope != world;
+            if *cached_key == base_key && is_contained && (!needs_expansion || is_dragging) {
+                cached_instances.clone()
+            } else {
+                let vp_w = (stable_viewport.hx - stable_viewport.lx).max(1);
+                let vp_h = (stable_viewport.hy - stable_viewport.ly).max(1);
+                let pad_x = (vp_w as f32 * 0.80) as i32;
+                let pad_y = (vp_h as f32 * 0.80) as i32;
+                let envelope = if using_overview_tiles || is_zoomed_out || covers_majority {
+                    world
+                } else {
+                    Rect32 {
+                        lx: (stable_viewport.lx - pad_x).max(world.lx),
+                        ly: (stable_viewport.ly - pad_y).max(world.ly),
+                        hx: (stable_viewport.hx + pad_x).min(world.hx),
+                        hy: (stable_viewport.hy + pad_y).min(world.hy),
+                    }
+                };
+
+                let new_instances = std::sync::Arc::new(self.build_3d_instances(
+                    world,
+                    envelope,
+                    &query_layer_ids,
+                    using_overview_tiles,
+                ));
+                self.gpu_3d_instances_cache = Some((base_key, envelope, new_instances.clone()));
+                new_instances
+            }
+        } else {
+            let vp_w = (stable_viewport.hx - stable_viewport.lx).max(1);
+            let vp_h = (stable_viewport.hy - stable_viewport.ly).max(1);
+            let pad_x = (vp_w as f32 * 0.80) as i32;
+            let pad_y = (vp_h as f32 * 0.80) as i32;
+            let envelope = if using_overview_tiles || is_zoomed_out || covers_majority {
+                world
+            } else {
+                Rect32 {
+                    lx: (stable_viewport.lx - pad_x).max(world.lx),
+                    ly: (stable_viewport.ly - pad_y).max(world.ly),
+                    hx: (stable_viewport.hx + pad_x).min(world.hx),
+                    hy: (stable_viewport.hy + pad_y).min(world.hy),
+                }
+            };
+
+            let new_instances = std::sync::Arc::new(self.build_3d_instances(
+                world,
+                envelope,
+                &query_layer_ids,
+                using_overview_tiles,
+            ));
+            self.gpu_3d_instances_cache = Some((base_key, envelope, new_instances.clone()));
+            new_instances
+        };
         let drawn = instances.len();
+
+        // Moving vs settled state tracking
+        let is_camera_moving = animating_3d
+            || self.pan_drag.mode().is_some()
+            || self.perf_3d.last_camera.is_some_and(|last| {
+                (last.yaw - current_camera.yaw).abs() > 1e-4
+                    || (last.pitch - current_camera.pitch).abs() > 1e-4
+                    || (last.distance - current_camera.distance).abs() > 1e-2
+                    || (last.target.x - current_camera.target.x).abs() > 1e-2
+                    || (last.target.y - current_camera.target.y).abs() > 1e-2
+            });
+        self.perf_3d.last_camera = Some(current_camera);
+
+        if is_camera_moving {
+            ui.ctx().request_repaint();
+        }
 
         if !self.gpu_canvas.enabled || self.gpu_canvas.failed {
             painter.text(
@@ -4475,14 +4777,41 @@ impl LoadedViewer {
                 ecos_text_secondary(),
             );
         } else {
-            let pixels_per_point = ui.ctx().pixels_per_point();
+            let target_w = ((canvas.width() * pixels_per_point).round() as u32).max(1);
+            let target_h = ((canvas.height() * pixels_per_point).round() as u32).max(1);
+            let bg = self.color_theme.background_rgba();
+            let z_cut_dbu = if self.z_cut_ratio_3d > 0.001 {
+                (self.layer_stack.height() * (1.0 - self.z_cut_ratio_3d)).max(1.0)
+            } else {
+                1.0e9
+            };
+            let elapsed_time = self.start_time.elapsed().as_secs_f32();
+            if is_camera_moving {
+                ui.ctx().request_repaint();
+            }
+            let instances_key = {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                base_key.hash(&mut hasher);
+                (instances.as_ptr() as usize).hash(&mut hasher);
+                instances.len().hash(&mut hasher);
+                hasher.finish()
+            };
             let callback = crate::canvas_gpu3d::CanvasGpu3dCallback {
-                uniform: crate::canvas_gpu3d::CanvasUniform3d::from_camera(self.camera3d, aspect),
+                uniform: crate::canvas_gpu3d::CanvasUniform3d::from_camera(
+                    current_camera,
+                    aspect,
+                    bg,
+                    self.show_3d_grid,
+                    true,
+                    z_cut_dbu,
+                    self.shading_style_3d,
+                    self.lighting_preset_3d,
+                    elapsed_time,
+                ),
                 instances,
-                target_pixels: [
-                    (canvas.width() * pixels_per_point).round().max(1.0) as u32,
-                    (canvas.height() * pixels_per_point).round().max(1.0) as u32,
-                ],
+                instances_key,
+                target_pixels: [target_w, target_h],
                 target_format: self.gpu_canvas.target_format,
             };
             ui.painter()
@@ -4491,21 +4820,19 @@ impl LoadedViewer {
 
         self.status_line_buffer.clear();
         use std::fmt::Write as _;
-        let using_overview_tiles = crate::canvas_gpu3d::use_overview_slabs(self.camera3d, world)
-            && self.db.view_tile_count() > 0
-            && drawn > 0;
         let _ = write!(
             self.status_line_buffer,
-            "3D  {} {}  yaw {:.0}°  pitch {:.0}°  z×{:.1}",
+            "3D  {}/{} {}  yaw {:.0}°  pitch {:.0}°  z×{:.1}",
             drawn,
+            crate::canvas_gpu3d::MAX_3D_INSTANCES,
             if using_overview_tiles {
                 "tiles"
             } else {
                 "shapes"
             },
-            self.camera3d.yaw.to_degrees(),
-            self.camera3d.pitch.to_degrees(),
-            self.camera3d.z_scale
+            current_camera.yaw.to_degrees(),
+            current_camera.pitch.to_degrees(),
+            current_camera.z_scale
         );
         painter.text(
             canvas.left_top() + egui::vec2(10.0, 10.0),
@@ -4539,10 +4866,645 @@ impl LoadedViewer {
             }
         }
 
+        if let Some(start) = self.loading_3d_start {
+            let elapsed = start.elapsed().as_secs_f32();
+            const ANIM_DURATION: f32 = 0.70;
+            if elapsed < ANIM_DURATION {
+                ui.ctx().request_repaint();
+                let alpha = if elapsed < 0.12 {
+                    elapsed / 0.12
+                } else if elapsed > 0.48 {
+                    ((ANIM_DURATION - elapsed) / 0.22).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                let pill_w = 236.0;
+                let pill_h = 36.0;
+                let center = egui::pos2(canvas.center().x, canvas.top() + 38.0);
+                let pill_rect = egui::Rect::from_center_size(center, egui::vec2(pill_w, pill_h));
+
+                let bg_color =
+                    egui::Color32::from_rgba_unmultiplied(18, 22, 28, (235.0 * alpha) as u8);
+                let stroke_color =
+                    egui::Color32::from_rgba_unmultiplied(0, 180, 255, (220.0 * alpha) as u8);
+                painter.rect_filled(pill_rect, 18.0_f32, bg_color);
+                painter.rect_stroke(
+                    pill_rect,
+                    18.0_f32,
+                    egui::Stroke::new(1.5_f32, stroke_color),
+                    egui::StrokeKind::Inside,
+                );
+
+                let spinner_center = egui::pos2(pill_rect.left() + 22.0, pill_rect.center().y);
+                let spin_angle = elapsed * 9.0;
+                let radius = 7.5;
+                let num_segments = 16;
+                let points: Vec<egui::Pos2> = (0..=num_segments)
+                    .map(|i| {
+                        let a = spin_angle
+                            + (i as f32 / num_segments as f32) * std::f32::consts::PI * 1.5;
+                        egui::pos2(
+                            spinner_center.x + radius * a.cos(),
+                            spinner_center.y + radius * a.sin(),
+                        )
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(
+                    points,
+                    egui::Stroke::new(
+                        2.0_f32,
+                        egui::Color32::from_rgba_unmultiplied(0, 220, 255, (255.0 * alpha) as u8),
+                    ),
+                ));
+
+                let text_color =
+                    egui::Color32::from_rgba_unmultiplied(240, 245, 255, (240.0 * alpha) as u8);
+                painter.text(
+                    egui::pos2(pill_rect.left() + 38.0, pill_rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    "Pre-rendering Full 3D Stack...",
+                    egui::FontId::proportional(13.0),
+                    text_color,
+                );
+            } else {
+                self.loading_3d_start = None;
+            }
+        }
+
         self.canvas_info_overlay(ui, canvas);
         self.drc_detail_overlay(ui, canvas);
         self.antenna_detail_overlay(ui, canvas);
         self.map_heatmap_overlay(ui, canvas);
+        self.direction_cube_3d_overlay(ui, canvas, painter);
+    }
+
+    fn direction_cube_3d_overlay(
+        &mut self,
+        ui: &mut egui::Ui,
+        canvas: egui::Rect,
+        painter: &egui::Painter,
+    ) {
+        let center = egui::pos2(canvas.right() - 56.0, canvas.top() + 56.0);
+        let radius = 22.0_f32;
+
+        let yaw = self.camera_ctrl_3d.current.yaw;
+        let pitch = self.camera_ctrl_3d.current.pitch;
+        let cos_y = yaw.cos();
+        let sin_y = yaw.sin();
+        let cos_p = pitch.cos();
+        let sin_p = pitch.sin();
+
+        // Camera basis vectors
+        let forward = [-cos_p * cos_y, -cos_p * sin_y, -sin_p];
+        let right = [-sin_y, cos_y, 0.0];
+        let up = [-sin_p * cos_y, -sin_p * sin_y, cos_p];
+
+        let project = |v: [f32; 3]| -> (egui::Pos2, f32) {
+            let dot_r = v[0] * right[0] + v[1] * right[1] + v[2] * right[2];
+            let dot_u = v[0] * up[0] + v[1] * up[1] + v[2] * up[2];
+            let dot_f = v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2];
+            (
+                egui::pos2(center.x + radius * dot_r, center.y - radius * dot_u),
+                -dot_f,
+            )
+        };
+
+        // Draw backdrop circle
+        painter.circle_filled(
+            center,
+            radius * 1.75,
+            egui::Color32::from_rgba_unmultiplied(16, 20, 26, 180),
+        );
+        painter.circle_stroke(
+            center,
+            radius * 1.75,
+            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(60, 80, 110, 140)),
+        );
+
+        struct CubeFaceDef {
+            normal: [f32; 3],
+            label: &'static str,
+            accent: egui::Color32,
+            target_yaw: f32,
+            target_pitch: f32,
+            verts: [[f32; 3]; 4],
+        }
+
+        let faces = [
+            CubeFaceDef {
+                normal: [0.0, 0.0, 1.0],
+                label: "TOP",
+                accent: egui::Color32::from_rgb(0, 220, 255),
+                target_yaw: -std::f32::consts::FRAC_PI_2,
+                target_pitch: std::f32::consts::FRAC_PI_2 * 0.98,
+                verts: [
+                    [-1.0, -1.0, 1.0],
+                    [1.0, -1.0, 1.0],
+                    [1.0, 1.0, 1.0],
+                    [-1.0, 1.0, 1.0],
+                ],
+            },
+            CubeFaceDef {
+                normal: [0.0, -1.0, 0.0],
+                label: "FRONT",
+                accent: egui::Color32::from_rgb(80, 220, 140),
+                target_yaw: -std::f32::consts::FRAC_PI_2,
+                target_pitch: 0.08,
+                verts: [
+                    [-1.0, -1.0, -1.0],
+                    [1.0, -1.0, -1.0],
+                    [1.0, -1.0, 1.0],
+                    [-1.0, -1.0, 1.0],
+                ],
+            },
+            CubeFaceDef {
+                normal: [1.0, 0.0, 0.0],
+                label: "RIGHT",
+                accent: egui::Color32::from_rgb(255, 180, 60),
+                target_yaw: std::f32::consts::PI,
+                target_pitch: 0.08,
+                verts: [
+                    [1.0, -1.0, -1.0],
+                    [1.0, 1.0, -1.0],
+                    [1.0, 1.0, 1.0],
+                    [1.0, -1.0, 1.0],
+                ],
+            },
+            CubeFaceDef {
+                normal: [0.0, 1.0, 0.0],
+                label: "BACK",
+                accent: egui::Color32::from_rgb(170, 130, 240),
+                target_yaw: std::f32::consts::FRAC_PI_2,
+                target_pitch: 0.08,
+                verts: [
+                    [-1.0, 1.0, -1.0],
+                    [-1.0, 1.0, 1.0],
+                    [1.0, 1.0, 1.0],
+                    [1.0, 1.0, -1.0],
+                ],
+            },
+            CubeFaceDef {
+                normal: [-1.0, 0.0, 0.0],
+                label: "LEFT",
+                accent: egui::Color32::from_rgb(255, 100, 140),
+                target_yaw: 0.0,
+                target_pitch: 0.08,
+                verts: [
+                    [-1.0, -1.0, -1.0],
+                    [-1.0, -1.0, 1.0],
+                    [-1.0, 1.0, 1.0],
+                    [-1.0, 1.0, -1.0],
+                ],
+            },
+            CubeFaceDef {
+                normal: [0.0, 0.0, -1.0],
+                label: "BOT",
+                accent: egui::Color32::from_rgb(120, 140, 160),
+                target_yaw: -std::f32::consts::FRAC_PI_2,
+                target_pitch: 0.08,
+                verts: [
+                    [-1.0, -1.0, -1.0],
+                    [-1.0, 1.0, -1.0],
+                    [1.0, 1.0, -1.0],
+                    [1.0, -1.0, -1.0],
+                ],
+            },
+        ];
+
+        let pointer_pos = ui.ctx().input(|input| input.pointer.hover_pos());
+        let pointer_clicked = ui.ctx().input(|input| input.pointer.primary_clicked());
+
+        let point_in_quad = |p: egui::Pos2, quad: &[egui::Pos2; 4]| -> bool {
+            let mut signs = [false, false];
+            for i in 0..4 {
+                let p1 = quad[i];
+                let p2 = quad[(i + 1) % 4];
+                let cross = (p2.x - p1.x) * (p.y - p1.y) - (p2.y - p1.y) * (p.x - p1.x);
+                if cross.abs() > 1e-4 {
+                    if cross > 0.0 {
+                        signs[0] = true;
+                    } else {
+                        signs[1] = true;
+                    }
+                }
+            }
+            !(signs[0] && signs[1])
+        };
+
+        // Gather and sort visible faces
+        let mut visible_faces = Vec::new();
+        for face in &faces {
+            let n_dot_v = -(face.normal[0] * forward[0]
+                + face.normal[1] * forward[1]
+                + face.normal[2] * forward[2]);
+            if n_dot_v > 0.01 {
+                let pts: [egui::Pos2; 4] = [
+                    project(face.verts[0]).0,
+                    project(face.verts[1]).0,
+                    project(face.verts[2]).0,
+                    project(face.verts[3]).0,
+                ];
+                let depths = [
+                    project(face.verts[0]).1,
+                    project(face.verts[1]).1,
+                    project(face.verts[2]).1,
+                    project(face.verts[3]).1,
+                ];
+                let avg_depth = (depths[0] + depths[1] + depths[2] + depths[3]) * 0.25;
+                visible_faces.push((avg_depth, face, pts));
+            }
+        }
+        visible_faces.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut face_action_taken = false;
+        // Check hover / click on the closest front-most faces first
+        for (_, face, pts) in visible_faces.iter().rev() {
+            if !face_action_taken && pointer_pos.is_some_and(|pos| point_in_quad(pos, pts)) {
+                if pointer_clicked {
+                    self.camera_ctrl_3d.target.yaw = face.target_yaw;
+                    self.camera_ctrl_3d.target.pitch = face.target_pitch;
+                    self.camera_ctrl_3d.cancel_inertia();
+                    face_action_taken = true;
+                }
+            }
+        }
+
+        // Draw visible faces back to front
+        for (_, face, pts) in &visible_faces {
+            let is_hovered = pointer_pos.is_some_and(|pos| point_in_quad(pos, pts));
+            let fill_color = if is_hovered {
+                egui::Color32::from_rgba_unmultiplied(35, 65, 95, 245)
+            } else {
+                egui::Color32::from_rgba_unmultiplied(22, 28, 38, 230)
+            };
+            let stroke_color = if is_hovered {
+                face.accent
+            } else {
+                egui::Color32::from_rgba_unmultiplied(85, 115, 150, 200)
+            };
+            painter.add(egui::Shape::convex_polygon(
+                pts.to_vec(),
+                fill_color,
+                egui::Stroke::new(if is_hovered { 1.6 } else { 1.1 }, stroke_color),
+            ));
+
+            let face_center = egui::pos2(
+                (pts[0].x + pts[1].x + pts[2].x + pts[3].x) * 0.25,
+                (pts[0].y + pts[1].y + pts[2].y + pts[3].y) * 0.25,
+            );
+            painter.text(
+                face_center,
+                egui::Align2::CENTER_CENTER,
+                face.label,
+                egui::FontId::proportional(9.0),
+                if is_hovered {
+                    egui::Color32::WHITE
+                } else {
+                    egui::Color32::from_rgb(210, 225, 245)
+                },
+            );
+        }
+
+        // Draw XYZ coordinate axis indicators
+        let axis_len = 1.45_f32;
+        let axes = [
+            (
+                [axis_len, 0.0, 0.0],
+                "X",
+                egui::Color32::from_rgb(255, 80, 80),
+            ),
+            (
+                [0.0, axis_len, 0.0],
+                "Y",
+                egui::Color32::from_rgb(80, 230, 110),
+            ),
+            (
+                [0.0, 0.0, axis_len],
+                "Z",
+                egui::Color32::from_rgb(0, 210, 255),
+            ),
+        ];
+        for (axis_pos, label, color) in axes {
+            let (screen_pos, depth) = project(axis_pos);
+            if depth > -0.2 {
+                painter.line_segment(
+                    [center, screen_pos],
+                    egui::Stroke::new(1.3, color.gamma_multiply(0.85)),
+                );
+                painter.circle_filled(screen_pos, 4.5, color);
+                painter.text(
+                    screen_pos,
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    egui::FontId::proportional(7.5),
+                    egui::Color32::BLACK,
+                );
+            }
+        }
+    }
+
+    fn handle_canvas_keyboard_shortcuts(
+        &mut self,
+        ui: &mut egui::Ui,
+        world: Rect32,
+        canvas: egui::Rect,
+    ) {
+        if !ui.ctx().wants_keyboard_input() {
+            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                if self.shortcuts_overlay_visible {
+                    self.shortcuts_overlay_visible = false;
+                } else if self.ruler_tool.enabled {
+                    self.ruler_tool.clear();
+                } else if self.selected.is_some()
+                    || !self.highlighted.is_empty()
+                    || self.selected_drc.is_some()
+                    || self.selected_antenna.is_some()
+                    || self.selected_map_bbox.is_some()
+                {
+                    self.selected = None;
+                    self.highlighted.clear();
+                    self.selected_drc = None;
+                    self.selected_antenna = None;
+                    self.selected_map_bbox = None;
+                }
+                self.pan_drag.reset();
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Q)) {
+                if self.view_mode == ViewMode::TwoD {
+                    self.switch_to_3d_mode();
+                } else {
+                    self.switch_to_2d_mode();
+                }
+            }
+            if ui.input(|input| {
+                input.key_pressed(egui::Key::F) || input.key_pressed(egui::Key::Home)
+            }) {
+                self.focus_animation = None;
+                if self.view_mode == ViewMode::ThreeD {
+                    let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
+                    self.camera_ctrl_3d.fit_world_with_aspect(
+                        crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
+                        crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
+                        self.layer_stack.height(),
+                        aspect,
+                    );
+                    self.camera_ctrl_3d.snap_to_target();
+                    self.view3d_fitted = true;
+                } else {
+                    self.zoom = 1.0;
+                    self.pan = egui::Vec2::ZERO;
+                }
+                self.pan_drag.reset();
+            }
+            if ui.input(|input| {
+                input.key_pressed(egui::Key::Num1) || input.key_pressed(egui::Key::T)
+            }) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.set_top();
+                }
+            }
+            if ui.input(|input| {
+                input.key_pressed(egui::Key::Num2) || input.key_pressed(egui::Key::I)
+            }) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.set_iso();
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Num3)) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.set_front();
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::G)) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.show_3d_grid = !self.show_3d_grid;
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::H)) {
+                if self.active_heatmap.is_some() {
+                    self.active_heatmap = None;
+                    self.selected_map_bbox = None;
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::N)) {
+                let shift = ui.input(|input| input.modifiers.shift);
+                if let Some(heatmap) = self.active_heatmap.as_ref() {
+                    let clicked_cell = if shift {
+                        let peaks = heatmap.data.top_peaks(heatmap.invert_threshold);
+                        if !peaks.is_empty() {
+                            let curr = heatmap.selected_cell.unwrap_or(peaks[0]);
+                            if let Some(idx) = peaks.iter().position(|&p| p == curr) {
+                                let prev_idx = if idx == 0 { peaks.len() - 1 } else { idx - 1 };
+                                Some(peaks[prev_idx])
+                            } else {
+                                Some(peaks[0])
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        heatmap
+                            .data
+                            .next_peak_cell(heatmap.selected_cell, heatmap.invert_threshold)
+                    };
+                    if let Some((row, column)) = clicked_cell {
+                        let bbox = heatmap.data.bbox(row, column);
+                        if let Some(heatmap) = self.active_heatmap.as_mut() {
+                            heatmap.selected_cell = Some((row, column));
+                        }
+                        if let Some(bbox) = bbox {
+                            let contextual = contextual_map_focus_bbox(bbox);
+                            self.selected_map_bbox = Some(bbox);
+                            if self.view_mode == ViewMode::ThreeD {
+                                let span =
+                                    ((bbox.hx - bbox.lx).max(bbox.hy - bbox.ly) as f32).max(1.0);
+                                self.camera_ctrl_3d.focus_xy(
+                                    (bbox.lx + bbox.hx) as f32 * 0.5,
+                                    (bbox.ly + bbox.hy) as f32 * 0.5,
+                                    span,
+                                    self.layer_stack.height(),
+                                );
+                            } else {
+                                self.pending_focus = Some(PendingFocus {
+                                    bbox: contextual,
+                                    select_shape_id: None,
+                                    transition: FocusTransition::Animated,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::OpenBracket)) {
+                if let Some(heatmap) = self.active_heatmap.as_mut() {
+                    heatmap.opacity = (heatmap.opacity - 0.05).max(0.05);
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::CloseBracket)) {
+                if let Some(heatmap) = self.active_heatmap.as_mut() {
+                    heatmap.opacity = (heatmap.opacity + 0.05).min(1.0);
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::ArrowLeft)) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.move_pivot(-1.0, 0.0);
+                } else {
+                    self.pan.x += canvas.width() * 0.10;
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::ArrowRight)) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.move_pivot(1.0, 0.0);
+                } else {
+                    self.pan.x -= canvas.width() * 0.10;
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::ArrowUp)) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.move_pivot(0.0, 1.0);
+                } else {
+                    self.pan.y += canvas.height() * 0.10;
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::ArrowDown)) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.move_pivot(0.0, -1.0);
+                } else {
+                    self.pan.y -= canvas.height() * 0.10;
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Z)) {
+                if let Some(shape_id) = self.selected {
+                    if let Some(shape) = self.db.find_shape(shape_id) {
+                        if self.view_mode == ViewMode::ThreeD {
+                            let bbox = shape.bbox;
+                            let span = ((bbox.hx - bbox.lx).max(bbox.hy - bbox.ly) as f32).max(1.0);
+                            self.camera_ctrl_3d.focus_xy(
+                                (bbox.lx + bbox.hx) as f32 * 0.5,
+                                (bbox.ly + bbox.hy) as f32 * 0.5,
+                                span * 3.0,
+                                self.layer_stack.height(),
+                            );
+                        } else {
+                            self.pending_focus = Some(PendingFocus {
+                                bbox: shape.bbox,
+                                select_shape_id: Some(shape_id),
+                                transition: FocusTransition::Animated,
+                            });
+                        }
+                    }
+                } else if let Some(bbox) = self.selected_map_bbox {
+                    if self.view_mode == ViewMode::ThreeD {
+                        let span = ((bbox.hx - bbox.lx).max(bbox.hy - bbox.ly) as f32).max(1.0);
+                        self.camera_ctrl_3d.focus_xy(
+                            (bbox.lx + bbox.hx) as f32 * 0.5,
+                            (bbox.ly + bbox.hy) as f32 * 0.5,
+                            span * 2.0,
+                            self.layer_stack.height(),
+                        );
+                    } else {
+                        self.pending_focus = Some(PendingFocus {
+                            bbox: contextual_map_focus_bbox(bbox),
+                            select_shape_id: None,
+                            transition: FocusTransition::Animated,
+                        });
+                    }
+                } else if let Some(drc_id) = self.selected_drc {
+                    if let Some(overlay) = &self.drc_overlay {
+                        if let Some(v) = overlay.violations.iter().find(|v| v.id == drc_id) {
+                            if self.view_mode == ViewMode::ThreeD {
+                                let bbox = v.bbox;
+                                let span =
+                                    ((bbox.hx - bbox.lx).max(bbox.hy - bbox.ly) as f32).max(1.0);
+                                self.camera_ctrl_3d.focus_xy(
+                                    (bbox.lx + bbox.hx) as f32 * 0.5,
+                                    (bbox.ly + bbox.hy) as f32 * 0.5,
+                                    span * 3.0,
+                                    self.layer_stack.height(),
+                                );
+                            } else {
+                                self.pending_focus = Some(PendingFocus {
+                                    bbox: contextual_map_focus_bbox(v.bbox),
+                                    select_shape_id: None,
+                                    transition: FocusTransition::Animated,
+                                });
+                            }
+                        }
+                    }
+                } else if !self.highlighted.is_empty() {
+                    self.focus_highlighted_shapes();
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::K) || input.key_pressed(egui::Key::R))
+            {
+                self.ruler_tool.toggle();
+                self.pan_drag.reset();
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Space)) {
+                if self.analysis_tab == AnalysisTab::Map || self.active_heatmap.is_some() {
+                    self.toggle_previous_map_item();
+                }
+            }
+            if ui.input(|input| {
+                input.key_pressed(egui::Key::Questionmark) || input.key_pressed(egui::Key::F1)
+            }) {
+                self.shortcuts_overlay_visible = !self.shortcuts_overlay_visible;
+            }
+            if ui.input(|input| {
+                (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(egui::Key::F)
+            }) || ui.input(|input| input.key_pressed(egui::Key::Slash))
+            {
+                self.sidebar_info_panel = None;
+                self.query_input_mode = QueryInputMode::Search;
+            }
+            if ui.input(|input| {
+                input.key_pressed(egui::Key::Plus) || input.key_pressed(egui::Key::Equals)
+            }) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.dolly_steps(1.0, None, false);
+                } else {
+                    let center = canvas.center();
+                    let (new_zoom, new_pan) =
+                        zoom_at_screen_pos(world, canvas, self.zoom, self.pan, 1.25, center);
+                    self.zoom = new_zoom;
+                    self.pan = new_pan;
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Minus)) {
+                if self.view_mode == ViewMode::ThreeD {
+                    self.camera_ctrl_3d.dolly_steps(-1.0, None, false);
+                } else {
+                    let center = canvas.center();
+                    let (new_zoom, new_pan) =
+                        zoom_at_screen_pos(world, canvas, self.zoom, self.pan, 0.8, center);
+                    self.zoom = new_zoom;
+                    self.pan = new_pan;
+                }
+            }
+        }
+    }
+
+    fn switch_to_3d_mode(&mut self) {
+        if self.view_mode != ViewMode::ThreeD {
+            self.view_mode = ViewMode::ThreeD;
+            self.pan_drag.reset();
+            self.focus_animation = None;
+            self.view3d_fitted = false;
+            self.object_visibility.set_all_visible(true);
+            self.apply_object_visibility();
+            set_layer_visibility(&mut self.layers, true);
+            self.gpu_3d_instances_cache = None;
+            self.loading_3d_start = Some(std::time::Instant::now());
+        }
+    }
+
+    fn switch_to_2d_mode(&mut self) {
+        if self.view_mode != ViewMode::TwoD {
+            self.view_mode = ViewMode::TwoD;
+            self.pan_drag.reset();
+            self.focus_animation = None;
+            self.loading_3d_start = None;
+        }
     }
 
     fn ensure_3d_view(&mut self, world: Rect32, canvas: egui::Rect) {
@@ -4552,24 +5514,18 @@ impl LoadedViewer {
             if visible_layer_count(&self.layers) == 0 {
                 set_layer_visibility(&mut self.layers, true);
             }
-            if !self.object_visibility.net_signal
-                && !self.object_visibility.net_clock
-                && !self.object_visibility.pdn
-                && !self.object_visibility.vias
-            {
-                self.object_visibility.net_signal = true;
-                self.object_visibility.vias = true;
-                self.apply_object_visibility();
-            }
+            self.object_visibility.set_all_visible(true);
+            self.apply_object_visibility();
         }
         if !self.view3d_fitted {
             let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
-            self.camera3d.fit_world_with_aspect(
+            self.camera_ctrl_3d.fit_world_with_aspect(
                 crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
                 crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
                 self.layer_stack.height(),
                 aspect,
             );
+            self.camera_ctrl_3d.snap_to_target();
             self.view3d_fitted = true;
         }
     }
@@ -4600,10 +5556,9 @@ impl LoadedViewer {
         world: Rect32,
         viewport: Rect32,
         query_layer_ids: &[LayerId],
+        using_overview_tiles: bool,
     ) -> Vec<crate::canvas_gpu3d::GpuShapeInstance3d> {
-        if crate::canvas_gpu3d::use_overview_slabs(self.camera3d, world)
-            && self.db.view_tile_count() > 0
-        {
+        if using_overview_tiles && self.db.view_tile_count() > 0 {
             let overview = self.build_3d_overview_instances(world, viewport);
             if !overview.is_empty() {
                 return overview;
@@ -4622,15 +5577,10 @@ impl LoadedViewer {
             .is_none()
             .then(|| LayerRenderIndex::new(&self.layers));
         let layer_index = layer_index.unwrap_or_else(|| fallback_index.as_ref().unwrap());
-        let zoom_rules = ZoomVisibilityRules::new(&self.db);
-
+        let total_budget = crate::canvas_gpu3d::MAX_3D_INSTANCES.saturating_sub(100);
         let mut prepared = Vec::new();
-        for shape_id in self
-            .db
-            .query_layers_intersect(query_layer_ids, viewport)
-            .into_iter()
-            .chain(overlay_shape_ids(self.selected, &self.highlighted))
-        {
+
+        for shape_id in overlay_shape_ids(self.selected, &self.highlighted) {
             let Some(shape) = self.db.find_shape(shape_id) else {
                 continue;
             };
@@ -4639,7 +5589,19 @@ impl LoadedViewer {
             }
             let owner = self.db.owner_for_shape(shape);
             let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
-            if !zoom_rules.is_drawn_at_zoom(owner_type, 8.0) {
+            if matches!(
+                owner_type,
+                Some(
+                    OwnerType::TrackGrid
+                        | OwnerType::GCellGrid
+                        | OwnerType::Die
+                        | OwnerType::Core
+                        | OwnerType::Row
+                        | OwnerType::InstanceHalo
+                        | OwnerType::Region
+                        | OwnerType::Slot
+                )
+            ) {
                 continue;
             }
             let owner_category =
@@ -4658,12 +5620,15 @@ impl LoadedViewer {
             else {
                 continue;
             };
+            let mut extra_flags = 0u32;
             if self.selected == Some(shape_id) {
                 style.rgba = [76, 196, 255, 230];
                 style.fill_alpha = 230;
+                extra_flags |= crate::canvas_gpu3d::FLAG_SELECTED;
             } else if self.highlighted.contains(&shape_id) {
                 style.rgba = [255, 214, 90, 210];
                 style.fill_alpha = 210;
+                extra_flags |= crate::canvas_gpu3d::FLAG_HIGHLIGHTED;
             }
             let band =
                 self.layer_stack
@@ -4673,12 +5638,128 @@ impl LoadedViewer {
                         z0: 0.0,
                         z1: 400.0,
                     });
-            prepared.push((self.db.shape_geometry(shape), style, band.z0, band.z1));
-            if prepared.len() >= crate::canvas_gpu3d::MAX_3D_INSTANCES {
-                break;
+            let layer_info = self.layers.iter().find(|l| l.layer_id == shape.layer_id);
+            let role = layer_info
+                .map(|l| chip_display::LayerRole::from_metadata(&l.name, &l.layer_type))
+                .unwrap_or(chip_display::LayerRole::Metal { level: 1 });
+            let material = chip_display::MaterialKind::from_role(role);
+            prepared.push((
+                self.db.shape_geometry(shape),
+                style,
+                role,
+                material,
+                band.z0,
+                band.z1,
+                extra_flags,
+            ));
+        }
+
+        let mut layers_with_bands: Vec<(LayerId, f32, f32)> = query_layer_ids
+            .iter()
+            .copied()
+            .map(|layer_id| {
+                let band =
+                    self.layer_stack
+                        .band(layer_id)
+                        .unwrap_or(chip_display::LayerStackBand {
+                            layer_id,
+                            z0: 0.0,
+                            z1: 400.0,
+                        });
+                (layer_id, band.z0, band.z1)
+            })
+            .collect();
+        layers_with_bands.sort_by(|a, b| a.1.total_cmp(&b.1));
+
+        let mut layer_queries: Vec<(LayerId, f32, f32, Vec<ShapeId>)> =
+            Vec::with_capacity(layers_with_bands.len());
+        let mut total_query_shapes = 0usize;
+        for &(layer_id, z0, z1) in &layers_with_bands {
+            let shape_ids = self.db.query_layer_intersect(layer_id, viewport);
+            total_query_shapes += shape_ids.len();
+            layer_queries.push((layer_id, z0, z1, shape_ids));
+        }
+
+        let remaining_budget = total_budget.saturating_sub(prepared.len());
+        let global_stride_needed = total_query_shapes > remaining_budget;
+
+        for (layer_id, z0, z1, shape_ids) in layer_queries {
+            if prepared.len() >= total_budget || shape_ids.is_empty() {
+                continue;
+            }
+
+            let stride = if global_stride_needed {
+                ((total_query_shapes + remaining_budget - 1) / remaining_budget).max(1)
+            } else {
+                1
+            };
+
+            let layer_info = self.layers.iter().find(|l| l.layer_id == layer_id);
+            let role = layer_info
+                .map(|l| chip_display::LayerRole::from_metadata(&l.name, &l.layer_type))
+                .unwrap_or(chip_display::LayerRole::Metal { level: 1 });
+            let material = chip_display::MaterialKind::from_role(role);
+
+            for &shape_id in shape_ids.iter().step_by(stride) {
+                if prepared.len() >= total_budget {
+                    break;
+                }
+                let Some(shape) = self.db.find_shape(shape_id) else {
+                    continue;
+                };
+                if !is_renderable_shape(shape) {
+                    continue;
+                }
+                let owner = self.db.owner_for_shape(shape);
+                let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+                if matches!(
+                    owner_type,
+                    Some(
+                        OwnerType::TrackGrid
+                            | OwnerType::GCellGrid
+                            | OwnerType::Die
+                            | OwnerType::Core
+                            | OwnerType::Row
+                            | OwnerType::InstanceHalo
+                            | OwnerType::Region
+                            | OwnerType::Slot
+                    )
+                ) {
+                    continue;
+                }
+                let owner_category =
+                    owner.and_then(|owner| drawing_category_for_owner(&self.db, owner));
+                if !shape_is_visible_fast(
+                    shape,
+                    owner_type,
+                    owner_category,
+                    layer_index,
+                    &self.object_visibility,
+                ) {
+                    continue;
+                }
+                let Some(style) =
+                    visible_style_for_shape_fast(shape, owner, owner_type, layer_index)
+                else {
+                    continue;
+                };
+
+                prepared.push((
+                    self.db.shape_geometry(shape),
+                    style,
+                    role,
+                    material,
+                    z0,
+                    z1,
+                    0,
+                ));
             }
         }
-        crate::canvas_gpu3d::build_gpu_instances_3d(prepared.into_iter())
+
+        let mut instances =
+            crate::canvas_gpu3d::build_gpu_instances_3d_with_flags(prepared.into_iter());
+        instances.push(crate::canvas_gpu3d::ground_grid_instance(world));
+        instances
     }
 
     fn build_3d_overview_instances(
@@ -4699,20 +5780,25 @@ impl LoadedViewer {
         layers.sort_by(|lhs, rhs| lhs.1.z0.total_cmp(&rhs.1.z0));
         let layer_ids: Vec<LayerId> = layers.iter().map(|(layer, _)| layer.layer_id).collect();
         let preferred_lod = select_overview_lod(&self.db, &layer_ids, viewport, world)
-            .unwrap_or_else(|| crate::canvas_gpu3d::overview_lod_level(self.camera3d, world));
+            .unwrap_or_else(|| {
+                crate::canvas_gpu3d::overview_lod_level(self.camera_ctrl_3d.current, world)
+            });
 
         let mut instances = Vec::new();
-        for (layer, band) in layers {
+        instances.push(crate::canvas_gpu3d::ground_grid_instance(world));
+        for layer in layers {
+            let role = chip_display::LayerRole::from_metadata(&layer.0.name, &layer.0.layer_type);
             for tile in
-                overview_tiles_for_layer(&self.db, preferred_lod, layer.layer_id, viewport, world)
+                overview_tiles_for_layer(&self.db, preferred_lod, layer.0.layer_id, viewport, world)
             {
                 crate::canvas_gpu3d::push_overview_tile_instance(
                     &mut instances,
                     tile.bbox,
                     tile.shape_count,
-                    band.z0,
-                    band.z1,
-                    &layer.style,
+                    layer.1.z0,
+                    layer.1.z1,
+                    &layer.0.style,
+                    role,
                 );
                 if instances.len() >= crate::canvas_gpu3d::MAX_3D_INSTANCES {
                     return instances;
@@ -4723,7 +5809,7 @@ impl LoadedViewer {
     }
 
     fn hover_world_point_3d(&self, pos: egui::Pos2, canvas: egui::Rect) -> Option<Point32> {
-        let ray = self.camera3d.ray_from_screen(
+        let ray = self.camera_ctrl_3d.current.ray_from_screen(
             [pos.x, pos.y],
             [canvas.left(), canvas.top()],
             [canvas.width(), canvas.height()],
@@ -4742,13 +5828,14 @@ impl LoadedViewer {
         world: Rect32,
         query_layer_ids: &[LayerId],
     ) -> Option<ShapeId> {
-        let ray = self.camera3d.ray_from_screen(
+        let ray = self.camera_ctrl_3d.current.ray_from_screen(
             [pos.x, pos.y],
             [canvas.left(), canvas.top()],
             [canvas.width(), canvas.height()],
         )?;
         let aspect = (canvas.width() / canvas.height().max(1.0)).max(0.2);
-        let viewport = crate::canvas_gpu3d::query_rect_for_camera(self.camera3d, world, aspect);
+        let viewport =
+            crate::canvas_gpu3d::query_rect_for_camera(self.camera_ctrl_3d.current, world, aspect);
         let mut best: Option<(f32, ShapeId)> = None;
         for shape_id in self.db.query_layers_intersect(query_layer_ids, viewport) {
             let Some(shape) = self.db.find_shape(shape_id) else {
@@ -4771,12 +5858,12 @@ impl LoadedViewer {
             let min = crate::camera3d::Vec3::new(
                 rect.lx as f32,
                 rect.ly as f32,
-                band.z0 * self.camera3d.z_scale,
+                band.z0 * self.camera_ctrl_3d.current.z_scale,
             );
             let max = crate::camera3d::Vec3::new(
                 rect.hx as f32,
                 rect.hy as f32,
-                band.z1 * self.camera3d.z_scale,
+                band.z1 * self.camera_ctrl_3d.current.z_scale,
             );
             if let Some(t) = ray.intersect_aabb(min, max) {
                 if best.is_none_or(|(best_t, _)| t < best_t) {
@@ -5280,7 +6367,7 @@ impl LoadedViewer {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.set_min_width(380.0);
+                ui.set_min_width(420.0);
                 ui.add_space(2.0);
 
                 let render_shortcut_row = |ui: &mut egui::Ui, key: &str, desc: &str| {
@@ -5310,16 +6397,33 @@ impl LoadedViewer {
                 };
 
                 ui.label(
-                    egui::RichText::new("NAVIGATION & VIEW")
+                    egui::RichText::new("2D / 3D NAVIGATION")
                         .small()
                         .strong()
                         .color(ecos_text_secondary()),
                 );
+                render_shortcut_row(ui, "Q", "Toggle 2D / 3D Layer Stack View");
                 render_shortcut_row(ui, "F  or  Home", "Fit entire design to viewport");
                 render_shortcut_row(ui, "Z", "Zoom / focus to selected object");
-                render_shortcut_row(ui, "+  /  -", "Zoom in / Zoom out");
-                render_shortcut_row(ui, "Scroll Wheel", "Zoom at cursor position");
-                render_shortcut_row(ui, "Middle / Right Drag", "Pan viewport");
+                render_shortcut_row(ui, "+  /  -", "Zoom in / Zoom out (Dolly in 3D)");
+                render_shortcut_row(ui, "Scroll Wheel", "Distance-proportional Zoom / Dolly");
+                render_shortcut_row(ui, "Shift + Drag", "Fine speed control (0.25×)");
+                render_shortcut_row(ui, "Ctrl + Drag", "Fast speed boost (4.0×)");
+                render_shortcut_row(ui, "Middle / Right Drag", "Pan viewport (2D & 3D)");
+                render_shortcut_row(ui, "Left Drag (3D)", "Orbit / Turntable rotate in 3D");
+                render_shortcut_row(ui, "Arrow Keys", "Pan 10% (2D) / Shift Pivot (3D)");
+
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("3D VIEW PRESETS")
+                        .small()
+                        .strong()
+                        .color(ecos_text_secondary()),
+                );
+                render_shortcut_row(ui, "1  or  T", "Top View (+Z look-down)");
+                render_shortcut_row(ui, "2  or  I", "Isometric View");
+                render_shortcut_row(ui, "3", "Front View (stack cross-section)");
+                render_shortcut_row(ui, "G", "Toggle Ground Grid floor plane");
 
                 ui.add_space(8.0);
                 ui.label(
@@ -5345,6 +6449,9 @@ impl LoadedViewer {
                     "Space",
                     "A/B Map Quick-Toggle (switch with previous map)",
                 );
+                render_shortcut_row(ui, "N  /  Shift + N", "Focus Next / Prev Peak hotspot");
+                render_shortcut_row(ui, "H", "Toggle active heatmap visibility");
+                render_shortcut_row(ui, "[  /  ]", "Decrease / Increase heatmap opacity");
                 render_shortcut_row(ui, "Drag on Legend", "Slide threshold cutoff in minimap");
                 ui.add_space(4.0);
             });
@@ -5413,7 +6520,7 @@ impl LoadedViewer {
         self.grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
         self.stats = stats;
         self.drawing_category_counts = drawing_category_counts(&db);
-        self.layers = layer_ui_states(&db, &visibility);
+        self.layers = layer_ui_states(&db, &visibility, self.color_theme);
         self.db = db;
         self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
         self.render_cache.clear();
@@ -6708,7 +7815,11 @@ fn context_style(mut style: LayerStyle, frame_alpha: u8, line_width_px: u8) -> L
     style
 }
 
-fn layer_ui_states(db: &ChipViewDb, visibility: &BTreeMap<LayerId, bool>) -> Vec<LayerUiState> {
+fn layer_ui_states(
+    db: &ChipViewDb,
+    visibility: &BTreeMap<LayerId, bool>,
+    color_theme: chip_display::ColorTheme,
+) -> Vec<LayerUiState> {
     db.layer_catalog()
         .into_iter()
         .enumerate()
@@ -6718,6 +7829,7 @@ fn layer_ui_states(db: &ChipViewDb, visibility: &BTreeMap<LayerId, bool>) -> Vec
                 &summary.name,
                 &summary.layer_type,
                 index,
+                color_theme,
             );
             let display_role = LayerRole::from_metadata(&summary.name, &summary.layer_type)
                 .label()
@@ -8647,25 +9759,17 @@ fn nice_ruler_interval(target: f64) -> f64 {
     nice * magnitude
 }
 
-/// Zoom multiplier applied per physical wheel notch, kept small so wheel zoom
-/// stays precise across the layout's wide zoom range.
-const WHEEL_ZOOM_PER_NOTCH: f32 = 1.2;
-/// Raw scroll delta (points) produced by one wheel notch: winit reports a
-/// notch as one scroll line and egui multiplies lines by its native
-/// line_scroll_speed (40), so a notch arrives as ~40 points on Linux and up to
-/// ~120 on Windows.
-const WHEEL_SCROLL_UNITS_PER_NOTCH: f32 = 40.0;
-/// Caps the notches applied per wheel event so fast flicks and inertial
-/// trackpad scrolls cannot jump several zoom levels at once.
-const WHEEL_MAX_NOTCHES_PER_EVENT: f32 = 3.0;
-
 fn scroll_zoom_factor(scroll: f32) -> f32 {
     if scroll.abs() < f32::EPSILON {
         return 1.0;
     }
-    let notches = (scroll / WHEEL_SCROLL_UNITS_PER_NOTCH)
-        .clamp(-WHEEL_MAX_NOTCHES_PER_EVENT, WHEEL_MAX_NOTCHES_PER_EVENT);
-    WHEEL_ZOOM_PER_NOTCH.powf(notches)
+    let steps = if scroll.abs() <= 5.0 {
+        scroll
+    } else {
+        scroll / 25.0
+    };
+    let base: f32 = 1.35;
+    base.powf(steps).clamp(0.05, 20.0)
 }
 
 fn zoom_at_screen_pos(
@@ -8704,6 +9808,34 @@ fn translate_rect(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
         ly: rect.ly.saturating_add(dy),
         hx: rect.hx.saturating_add(dx),
         hy: rect.hy.saturating_add(dy),
+    }
+}
+
+fn rect_contains_with_margin(outer: Rect32, inner: Rect32, margin: f32) -> bool {
+    let w = (outer.hx.saturating_sub(outer.lx)) as f32;
+    let h = (outer.hy.saturating_sub(outer.ly)) as f32;
+    let pad_x = (w * margin) as i32;
+    let pad_y = (h * margin) as i32;
+    inner.lx >= outer.lx.saturating_add(pad_x)
+        && inner.hx <= outer.hx.saturating_sub(pad_x)
+        && inner.ly >= outer.ly.saturating_add(pad_y)
+        && inner.hy <= outer.hy.saturating_sub(pad_y)
+}
+
+fn expand_rect(rect: Rect32, factor: f32, world: Rect32) -> Rect32 {
+    let cx = (rect.lx as f64 + rect.hx as f64) * 0.5;
+    let cy = (rect.ly as f64 + rect.hy as f64) * 0.5;
+    let half_w = ((rect.hx.saturating_sub(rect.lx)) as f64 * factor as f64 * 0.5).max(100.0);
+    let half_h = ((rect.hy.saturating_sub(rect.ly)) as f64 * factor as f64 * 0.5).max(100.0);
+    Rect32 {
+        lx: ((cx - half_w).floor() as i32).max(world.lx),
+        ly: ((cy - half_h).floor() as i32).max(world.ly),
+        hx: ((cx + half_w).ceil() as i32)
+            .min(world.hx)
+            .max(world.lx + 1),
+        hy: ((cy + half_h).ceil() as i32)
+            .min(world.hy)
+            .max(world.ly + 1),
     }
 }
 
@@ -9166,6 +10298,7 @@ fn shape_uses_layer_visibility(shape: &ShapeRecord, owner_type: Option<OwnerType
 
 fn object_visibility_needs_layout_layer(visibility: ObjectVisibility) -> bool {
     visibility.instances
+        || visibility.fill
         || visibility.boundaries
         || visibility.placement
         || visibility.tracks
@@ -10232,17 +11365,12 @@ mod tests {
     #[test]
     fn scroll_zoom_factor_keeps_directional_zoom() {
         assert_eq!(scroll_zoom_factor(0.0), 1.0);
-        // One physical wheel notch on Linux: winit reports a line and egui
-        // scales it by the native line_scroll_speed of 40.
-        assert!((scroll_zoom_factor(40.0) - 1.2).abs() < 1e-4);
-        assert!((scroll_zoom_factor(-40.0) - (1.0 / 1.2)).abs() < 1e-4);
-        assert!(scroll_zoom_factor(80.0) > scroll_zoom_factor(40.0));
-        assert!(scroll_zoom_factor(-80.0) < scroll_zoom_factor(-40.0));
-        // Fast flicks are capped so one event cannot jump several zoom levels.
-        assert!((scroll_zoom_factor(500.0) - 1.2f32.powf(3.0)).abs() < 1e-4);
-        assert!((scroll_zoom_factor(-500.0) - 1.2f32.powf(-3.0)).abs() < 1e-4);
-        // Trackpad-style pixel deltas scale proportionally, not a notch per event.
-        assert!((scroll_zoom_factor(8.0) - 1.2f32.powf(0.2)).abs() < 1e-4);
+        assert!((scroll_zoom_factor(1.0) - 1.35).abs() < 1e-4);
+        assert!((scroll_zoom_factor(-1.0) - (1.0 / 1.35)).abs() < 1e-4);
+        assert!(scroll_zoom_factor(2.0) > scroll_zoom_factor(1.0));
+        assert!(scroll_zoom_factor(-2.0) < scroll_zoom_factor(-1.0));
+        assert!(scroll_zoom_factor(50.0) > scroll_zoom_factor(25.0));
+        assert!(scroll_zoom_factor(-50.0) < scroll_zoom_factor(-25.0));
     }
 
     #[test]
@@ -10521,6 +11649,7 @@ mod tests {
         );
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
         let mut loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
             db,
             false,
             false,
@@ -10541,21 +11670,22 @@ mod tests {
             hx: 10_000,
             hy: 8_000,
         };
-        loaded.camera3d.fit_world(
+        loaded.camera_ctrl_3d.fit_world(
             crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
             crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
             loaded.layer_stack.height(),
         );
-        let instances = loaded.build_3d_instances(world, world, &[1]);
-        assert_eq!(instances.len(), 1);
+        loaded.camera_ctrl_3d.snap_to_target();
+        let instances = loaded.build_3d_instances(world, world, &[1], true);
+        let tile_inst = instances
+            .iter()
+            .find(|i| (i.flags & crate::canvas_gpu3d::FLAG_GROUND_GRID) == 0)
+            .unwrap();
         assert_eq!(
-            instances[0].rect_dbu,
+            tile_inst.rect_dbu,
             [tile.bbox.lx, tile.bbox.ly, tile.bbox.hx, tile.bbox.hy]
         );
-        assert_ne!(
-            instances[0].rect_dbu,
-            [world.lx, world.ly, world.hx, world.hy]
-        );
+        assert_ne!(tile_inst.rect_dbu, [world.lx, world.ly, world.hx, world.hy]);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -10599,6 +11729,7 @@ mod tests {
         );
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
         let mut loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
             db,
             false,
             false,
@@ -10613,15 +11744,19 @@ mod tests {
         );
         loaded.layers = vec![layer_state(1, true)];
         loaded.rebuild_layer_stack();
-        loaded.camera3d.fit_world_with_aspect(
+        loaded.camera_ctrl_3d.fit_world_with_aspect(
             crate::camera3d::Vec3::new(world.lx as f32, world.ly as f32, 0.0),
             crate::camera3d::Vec3::new(world.hx as f32, world.hy as f32, 0.0),
             loaded.layer_stack.height(),
             1.2,
         );
-        let instances = loaded.build_3d_instances(world, world, &[1]);
-        assert_eq!(instances.len(), 1);
-        assert_eq!(instances[0].rect_dbu, [200, 300, 900, 1_100]);
+        loaded.camera_ctrl_3d.snap_to_target();
+        let instances = loaded.build_3d_instances(world, world, &[1], true);
+        let tile_inst = instances
+            .iter()
+            .find(|i| (i.flags & crate::canvas_gpu3d::FLAG_GROUND_GRID) == 0)
+            .unwrap();
+        assert_eq!(tile_inst.rect_dbu, [200, 300, 900, 1_100]);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -11393,6 +12528,7 @@ mod tests {
                 DrawingCategory::Instances,
                 DrawingCategory::Placement,
                 DrawingCategory::Boundaries,
+                DrawingCategory::Fill,
             ]
         );
         assert!(!visibility.is_all_visible());
@@ -11402,6 +12538,7 @@ mod tests {
     fn object_visibility_hides_only_the_requested_owner_categories() {
         let visibility = ObjectVisibility {
             instances: false,
+            fill: false,
             io_pin: true,
             net_signal: false,
             net_clock: false,
@@ -11486,7 +12623,7 @@ mod tests {
 
     #[test]
     fn owner_styles_preserve_layer_color_and_use_distinct_textures() {
-        let base = LayerStyle::default_for_metadata(7, "MET1", 0);
+        let base = LayerStyle::default_for_metadata(7, "MET1", 0, chip_display::ColorTheme::Vivid);
         let assert_layer_color = |style: LayerStyle| {
             assert_eq!(&style.rgba[..3], &base.rgba[..3]);
             assert_eq!(&style.frame_rgba[..3], &base.rgba[..3]);
@@ -12127,6 +13264,66 @@ mod tests {
     }
 
     #[test]
+    fn filler_instance_detection_matches_standard_asic_filler_cells() {
+        // icsprout55-pdk standard cell fillers & caps
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER1H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER2H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER4H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER8H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER16H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER32H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER64H7H")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER1H7L")));
+        assert!(is_filler_instance(Some("inst_fill"), Some("FILLER16H7R")));
+        assert!(is_filler_instance(Some("inst_cap"), Some("FILLCAP4H7H")));
+        assert!(is_filler_instance(Some("inst_cap"), Some("FILLCAP8H7H")));
+        assert!(is_filler_instance(Some("inst_cap"), Some("FILLCAP16H7H")));
+        assert!(is_filler_instance(Some("inst_cap"), Some("FILLCAP32H7H")));
+        assert!(is_filler_instance(Some("inst_tap"), Some("FILLTAPH7H")));
+        assert!(is_filler_instance(Some("inst_tap"), Some("FILLTAPH7L")));
+        assert!(is_filler_instance(Some("inst_tap"), Some("FILLTAPH7R")));
+
+        // icsprout55-pdk IO fillers
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER0005")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER001")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER01")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER1")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER10")
+        ));
+        assert!(is_filler_instance(
+            Some("io_fill"),
+            Some("P65_1233_FILLER50")
+        ));
+
+        // Instance name matches
+        assert!(is_filler_instance(Some("FILLER_0_0"), None));
+        assert!(is_filler_instance(Some("fill_123"), None));
+        assert!(is_filler_instance(Some("PHY_EDGE_0"), None));
+        assert!(is_filler_instance(Some("PHY_TAP_1"), None));
+
+        // Logic instances should NOT match
+        assert!(!is_filler_instance(Some("_042_"), Some("AND2X1H7H")));
+        assert!(!is_filler_instance(Some("u_dff"), Some("SDFFQX1H7H")));
+        assert!(!is_filler_instance(Some("clk_buf"), Some("BUFX4H7H")));
+        assert!(!is_filler_instance(Some("inv_1"), Some("INVX1H7H")));
+        assert!(!is_filler_instance(Some("core_inst"), Some("alu_top")));
+    }
+
+    #[test]
     fn dashed_line_segments_split_screen_line_into_dashes() {
         let segments = dashed_line_segments(egui::pos2(0.0, 0.0), egui::pos2(30.0, 0.0), 8.0, 4.0);
 
@@ -12241,8 +13438,14 @@ mod tests {
     #[test]
     fn visible_layer_ids_for_render_query_are_sorted_from_visible_layer_map() {
         let visible_layers = BTreeMap::from([
-            (7, LayerStyle::default_for_layer(7)),
-            (3, LayerStyle::default_for_layer(3)),
+            (
+                7,
+                LayerStyle::default_for_layer(7, chip_display::ColorTheme::Vivid),
+            ),
+            (
+                3,
+                LayerStyle::default_for_layer(3, chip_display::ColorTheme::Vivid),
+            ),
         ]);
 
         assert_eq!(visible_layer_ids(&visible_layers), vec![3, 7]);
@@ -12250,10 +13453,19 @@ mod tests {
 
     #[test]
     fn visible_style_for_shape_skips_shapes_from_invisible_layers() {
-        let visible_layers = BTreeMap::from([(3, LayerStyle::default_for_layer(3))]);
+        let visible_layers = BTreeMap::from([(
+            3,
+            LayerStyle::default_for_layer(3, chip_display::ColorTheme::Vivid),
+        )]);
         let all_layers = BTreeMap::from([
-            (3, LayerStyle::default_for_layer(3)),
-            (4, LayerStyle::default_for_layer(4)),
+            (
+                3,
+                LayerStyle::default_for_layer(3, chip_display::ColorTheme::Vivid),
+            ),
+            (
+                4,
+                LayerStyle::default_for_layer(4, chip_display::ColorTheme::Vivid),
+            ),
         ]);
         let visible_shape = chipgeom_format::ShapeRecord {
             layer_id: 3,
@@ -12301,6 +13513,7 @@ mod tests {
         visibility.set_category_visible(DrawingCategory::Boundaries, false);
         visibility.set_category_visible(DrawingCategory::Placement, false);
         visibility.set_category_visible(DrawingCategory::Regions, false);
+        visibility.set_category_visible(DrawingCategory::Fill, false);
         assert_eq!(render_query_layer_ids(&layers, visibility), vec![7]);
 
         layers[0].visible = true;
@@ -12451,6 +13664,7 @@ mod tests {
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
         let mut loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
             db,
             false,
             false,
@@ -12490,6 +13704,7 @@ mod tests {
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
         let loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
             db,
             true,
             true,
@@ -12709,7 +13924,7 @@ mod tests {
             enclosure_above: String::new(),
             lef58_rule_count: 0,
             visible,
-            style: LayerStyle::default_for_layer(layer_id),
+            style: LayerStyle::default_for_layer(layer_id, chip_display::ColorTheme::Vivid),
         }
     }
 

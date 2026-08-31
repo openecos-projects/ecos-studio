@@ -12,6 +12,7 @@ import {
 } from './projectManifestRegistration'
 
 const registerProjectRoot = vi.fn()
+const registerProjectReadRoot = vi.fn()
 const mutateProjectManifest = vi.fn()
 const readOptionalProjectTextFile = vi.fn()
 
@@ -19,6 +20,7 @@ vi.mock('@/platform/desktop', () => ({
   waitForDesktopApi: vi.fn(async () => ({
     workspace: {
       registerProjectRoot,
+      registerProjectReadRoot,
     },
   })),
 }))
@@ -35,6 +37,7 @@ vi.mock('@/utils/projectFiles', () => ({
 describe('projectManifestRegistration', () => {
   beforeEach(() => {
     registerProjectRoot.mockReset()
+    registerProjectReadRoot.mockReset()
     mutateProjectManifest.mockReset()
     readOptionalProjectTextFile.mockReset()
     registerProjectRoot.mockImplementation(async (path: string) => path)
@@ -94,6 +97,7 @@ describe('projectManifestRegistration', () => {
     expect(warnings).toEqual([])
     expect(registerProjectRoot).toHaveBeenCalledWith('/projects/gcd')
     expect(registerProjectRoot).toHaveBeenCalledWith('/projects/gcd/ws_0001')
+    expect(registerProjectReadRoot).toHaveBeenCalledWith('/projects/gcd')
     expect(mutateProjectManifest).toHaveBeenCalledWith(
       '/projects/gcd',
       expect.objectContaining({

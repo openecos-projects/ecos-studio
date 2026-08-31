@@ -29,6 +29,8 @@
   />
 
   <div v-show="!isGlobalSrcView && !isGlobalWaveView" class="frontend-workspace">
+    <FrontendExperimentalBanner />
+
     <div class="frontend-header">
       <div>
         <p class="frontend-kicker">
@@ -1924,6 +1926,7 @@ import {
 } from '@/utils/simRunContext'
 import { getDesktopApi } from '@/platform/desktop'
 import FrontendDisassemblyViewer from '@/components/frontend/FrontendDisassemblyViewer.vue'
+import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
 import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
 import MonacoLogViewer from '@/components/MonacoLogViewer.vue'
@@ -3854,9 +3857,19 @@ async function loadDetail(context?: DetailLoadContext): Promise<void> {
       detail.value = null
       return
     }
-    detail.value = info as unknown as FrontendStepDetail
-    await hydrateWaveCasesFromWorkspaceResources()
-    if (!isCurrentRequest()) return
+    const loadedDetail = info as unknown as FrontendStepDetail
+    detail.value = loadedDetail
+    const loadedDetailState = detail.value
+    const isLoadedDetailCurrent = () =>
+      isCurrentRequest() && detail.value === loadedDetailState
+    const fallbackCases = await loadWaveCaseFallback(isLoadedDetailCurrent)
+    if (!isLoadedDetailCurrent()) return
+    if (fallbackCases) {
+      detail.value = {
+        ...loadedDetail,
+        cases: fallbackCases,
+      }
+    }
     const previousCaseName = selectedCase.value?.name || ''
     selectedCase.value =
       cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
@@ -3917,25 +3930,28 @@ async function loadSelectedLog(): Promise<void> {
   }
 }
 
-async function hydrateWaveCasesFromWorkspaceResources(): Promise<void> {
-  if (!isGlobalWaveView.value || detailWaveItems.value.length > 0) return
+async function loadWaveCaseFallback(
+  isCurrentRequest: () => boolean,
+): Promise<SimCase[] | null> {
+  if (!isCurrentRequest() || !isGlobalWaveView.value || detailWaveItems.value.length > 0)
+    return null
 
   try {
     const response = await resolveWorkspaceStepInfoApi({
       step: 'sim',
       id: InfoEnum.frontend_detail,
     })
-    if (response.response !== 'available') return
+    if (!isCurrentRequest() || !isGlobalWaveView.value) return null
+    if (response.response !== 'available') return null
     const fallbackCases = Array.isArray(response.info?.cases)
       ? (response.info.cases as SimCase[])
       : []
-    if (!fallbackCases.some((testCase) => Boolean(testCase.wave)) || !detail.value) return
-    detail.value = {
-      ...detail.value,
-      cases: fallbackCases,
-    }
+    return fallbackCases.some((testCase) => Boolean(testCase.wave)) ? fallbackCases : null
   } catch (err) {
-    console.warn('Failed to load waveform cases from workspace resources:', err)
+    if (isCurrentRequest() && isGlobalWaveView.value) {
+      console.warn('Failed to load waveform cases from workspace resources:', err)
+    }
+    return null
   }
 }
 
@@ -4501,7 +4517,7 @@ function waveRouteQuery(path: string, caseName?: string): Record<string, string>
 
 async function openWaveExternal(path: string): Promise<void> {
   try {
-    await getDesktopApi().system.openExternal(pathToFileUrl(path))
+    await getDesktopApi().workspace.openWaveformExternal(path)
   } catch {
     showToast({
       severity: 'error',
@@ -4510,11 +4526,6 @@ async function openWaveExternal(path: string): Promise<void> {
       life: 5000,
     })
   }
-}
-
-function pathToFileUrl(path: string): string {
-  const normalized = path.startsWith('/') ? path : `/${path}`
-  return `file://${normalized.split('/').map(encodeURIComponent).join('/')}`
 }
 
 function handleSurferFrameChange(frame: HTMLIFrameElement | null): void {

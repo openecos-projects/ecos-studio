@@ -12,6 +12,7 @@ import {
   buildStepResourcesModel,
   canonicalStepKey,
   buildDrcRelatedMetrics,
+  congestionCandidatePngPaths,
   parseCongestionCsv,
   parseDrcStatisCsv,
   parseFirstStaPathPreview,
@@ -87,33 +88,6 @@ async function readOptionalTextFrom(path: string): Promise<string | null> {
   const authorized = await resolveProjectPathAccess(path)
   return authorized ? readOptionalProjectTextFile(authorized) : null
 }
-
-const CONGESTION_MAP_SPECS: Array<{
-  directory: string
-  pattern: string
-  directions: string[]
-}> = [
-  {
-    directory: 'egr_congestion_map',
-    pattern: '{step}_egr_{direction}_overflow',
-    directions: ['horizontal', 'vertical', 'union'],
-  },
-  {
-    directory: 'RUDY_map',
-    pattern: '{step}_rudy_{direction}',
-    directions: ['horizontal', 'vertical', 'union'],
-  },
-  {
-    directory: 'RUDY_map',
-    pattern: '{step}_lut_rudy_{direction}',
-    directions: ['horizontal', 'vertical', 'union'],
-  },
-  {
-    directory: 'density_map',
-    pattern: '{step}_allcell_density',
-    directions: [''],
-  },
-]
 
 function numberOfMetric(source: Record<string, unknown>, id: string): number | null {
   const metrics = Array.isArray(source.metrics) ? source.metrics : []
@@ -228,13 +202,8 @@ async function buildFlowInsightsData(
   )
   const candidatePaths = new Set<string>()
   for (const step of congestionCandidateSteps) {
-    for (const spec of CONGESTION_MAP_SPECS) {
-      for (const direction of spec.directions) {
-        const stem = spec.pattern
-          .replace('{step}', step.name)
-          .replace('{direction}', direction)
-        candidatePaths.add(`${step.directory}/feature/${spec.directory}/${stem}.png`)
-      }
+    for (const pngPath of congestionCandidatePngPaths(step)) {
+      candidatePaths.add(pngPath)
     }
   }
 

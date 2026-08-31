@@ -3,7 +3,10 @@ import {
   projectManagementFrontendWorkspaceStepAnalysisSpecs,
   projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementStaTimingIssuesPath,
+  projectManagementWorkspaceReadablePaths,
+  projectManagementWorkspaceReadablePathsFor,
   projectManagementWorkspaceStepAnalysisSpecs,
+  projectManagementWorkspaceStepConfigPaths,
   projectManagementWorkspaceSummaryPaths,
   projectManagementWorkspaceSummaryPathsFor,
 } from './projectManagementSummary'
@@ -50,6 +53,59 @@ describe('frontend project management summary paths', () => {
     )
     expect(projectManagementWorkspaceSummaryPathsFor('backend')).toBe(
       projectManagementWorkspaceSummaryPaths,
+    )
+    expect(projectManagementWorkspaceReadablePathsFor('frontend')).toBe(
+      projectManagementFrontendWorkspaceSummaryPaths,
+    )
+  })
+})
+
+describe('projectManagementWorkspaceStepConfigPaths', () => {
+  it('lists the canonical step-config files plus their legacy pre-migration names', () => {
+    expect(projectManagementWorkspaceStepConfigPaths).toEqual([
+      'config/floorplan_ecc.json',
+      'config/cts_ecc.json',
+      'config/route_ecc.json',
+      'config/drc_ecc.json',
+      'config/fixfanout_ecc.json',
+      'config/filler_ecc.json',
+      'config/rcx_ecc.json',
+      'config/sta_ecc.json',
+      'config/db_ecc.json',
+      'config/dreamplace_ecc.json',
+      'config/fp_default_config.json',
+      'config/cts_default_config.json',
+      'config/rt_default_config.json',
+      'config/drc_default_config.json',
+      'config/no_default_config_fixfanout.json',
+      'config/pl_default_config.json',
+      'config/rcx.json',
+      'config/sta.json',
+      'config/db_default_config.json',
+      'config/dreamplace.json',
+    ])
+    expect(new Set(projectManagementWorkspaceStepConfigPaths).size).toBe(
+      projectManagementWorkspaceStepConfigPaths.length,
+    )
+  })
+
+  it('keeps the summary allowlist unchanged and merges it into the readable allowlist', () => {
+    expect(projectManagementWorkspaceSummaryPaths).not.toContain('config/cts_ecc.json')
+    expect(projectManagementWorkspaceReadablePaths).toHaveLength(
+      projectManagementWorkspaceSummaryPaths.length +
+        projectManagementWorkspaceStepConfigPaths.length,
+    )
+    expect(projectManagementWorkspaceReadablePaths).toEqual(
+      expect.arrayContaining([
+        ...projectManagementWorkspaceSummaryPaths,
+        ...projectManagementWorkspaceStepConfigPaths,
+      ]),
+    )
+    expect(new Set(projectManagementWorkspaceReadablePaths).size).toBe(
+      projectManagementWorkspaceReadablePaths.length,
+    )
+    expect(projectManagementWorkspaceReadablePathsFor('backend')).toBe(
+      projectManagementWorkspaceReadablePaths,
     )
   })
 })

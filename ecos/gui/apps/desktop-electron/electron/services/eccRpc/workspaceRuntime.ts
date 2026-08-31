@@ -41,6 +41,7 @@ import type {
 } from '@ecos-studio/shared'
 
 import { normalizeRuntimeError } from './errors'
+import { electronLogger } from '../logger'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 import {
   RuntimeOperationTracker,
@@ -83,6 +84,18 @@ interface InFlightOperation {
   workspaceHandle: string | undefined
 }
 
+interface RecoveredOperation {
+  logFile: string
+  operationId: string
+  step: string
+  tool: string
+}
+
+interface CrashRecoveryRequest {
+  operationId: string
+  workspaceHandle: string
+}
+
 export class EccWorkspaceRuntime {
   private readonly sessions: WorkspaceSessionRegistry
   private readonly sidecar: EccRpcRuntimeSidecar
@@ -94,6 +107,9 @@ export class EccWorkspaceRuntime {
   private inFlightOperation: InFlightOperation | null = null
   private inFlightCount = 0
   private readonly operationTracker = new RuntimeOperationTracker()
+  private readonly crashRecoveryAttempts = new Set<string>()
+  private readonly failedCrashRecoveries = new Map<string, CrashRecoveryRequest>()
+  private readonly pendingRecoveryEvents: EccRuntimeEvent[] = []
   private readonly sidecarLifecycle: RuntimeSidecarLifecycle
   private readonly snapshotCache = new WorkspaceSnapshotCache()
   private readonly commands: WorkspaceRuntimeCommands
@@ -296,20 +312,28 @@ export class EccWorkspaceRuntime {
     return this.commands.workspaceInfo(request)
   }
 
-  refreshConfig(
+  async refreshConfig(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
-    return this.commands.refreshConfig(request)
+    const result = await this.commands.refreshConfig(request)
+    this.snapshotCache.clear()
+    return result
   }
 
-  syncConfig(
+  async syncConfig(
     request: EccWorkspaceSyncConfigRequest,
   ): Promise<EccWorkspaceSyncConfigResult> {
-    return this.commands.syncConfig(request)
+    const result = await this.commands.syncConfig(request)
+    this.snapshotCache.clear()
+    return result
   }
 
-  resetFlow(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceResetFlowResult> {
-    return this.commands.resetFlow(request)
+  async resetFlow(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceResetFlowResult> {
+    const result = await this.commands.resetFlow(request)
+    this.snapshotCache.clear()
+    return result
   }
 
   exportSignoff(
@@ -375,6 +399,7 @@ export class EccWorkspaceRuntime {
   async startFlowOperation(
     request: EccRuntimeStartFlowRequest,
   ): Promise<EccRuntimeOperation> {
+    this.clearCrashRecoverySuppression(request.workspaceHandle)
     const client = await this.ensureStarted()
     if (request.rerun) {
       this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
@@ -391,6 +416,7 @@ export class EccWorkspaceRuntime {
   async startStepOperation(
     request: EccRuntimeStartStepRequest,
   ): Promise<EccRuntimeOperation> {
+    this.clearCrashRecoverySuppression(request.workspaceHandle)
     const client = await this.ensureStarted()
     if (request.rerun) {
       this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
@@ -471,6 +497,8 @@ export class EccWorkspaceRuntime {
   async workspaceSnapshot(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRuntimeSnapshot> {
+    const retry = this.retryFailedCrashRecovery(request.workspaceHandle)
+    if (retry) await retry
     // A route can mount after ECC publishes its terminal event but before the
     // final snapshot has been captured. Do not expose the preceding Ongoing
     // cache entry to that new renderer surface.
@@ -479,6 +507,7 @@ export class EccWorkspaceRuntime {
 
     const cachedSnapshot = this.snapshotCache.get()
     if (!this.isActive() && cachedSnapshot) {
+      this.flushPendingRecoveryEvents()
       return { ...cachedSnapshot, workspaceHandle: request.workspaceHandle }
     }
     const session = this.sessions.require(request.workspaceHandle)
@@ -487,6 +516,7 @@ export class EccWorkspaceRuntime {
         session.directory,
         this.options.snapshotLoader,
       )
+      this.flushPendingRecoveryEvents()
       return { ...snapshot, workspaceHandle: request.workspaceHandle }
     }
     const client = await this.ensureStarted()
@@ -495,7 +525,48 @@ export class EccWorkspaceRuntime {
       Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
     >('workspace.snapshot', { workspaceId })
     this.snapshotCache.set(snapshot)
+    this.flushPendingRecoveryEvents()
     return { ...snapshot, workspaceHandle: request.workspaceHandle }
+  }
+
+  async recoverInterrupted(
+    workspaceHandle: string,
+    operationId = '',
+  ): Promise<RecoveredOperation[]> {
+    const client = await this.ensureStarted()
+    const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
+    const result = await client.call<{ recovered: RecoveredOperation[] }>(
+      'workspace.recover_interrupted',
+      {
+        workspaceId,
+        ...(operationId ? { operationId } : {}),
+      },
+    )
+    if (result.recovered.length > 0) this.snapshotCache.clear()
+    for (const recovered of result.recovered) {
+      const step = recovered.step || 'Flow step'
+      const event: EccRuntimeEvent = {
+        code: 'interrupted',
+        details: {
+          previousRun: !operationId,
+          tool: recovered.tool,
+        },
+        executionScope: 'single_step',
+        logFile: recovered.logFile || undefined,
+        message: operationId
+          ? `${step} was interrupted when the ECC sidecar stopped.`
+          : `Previous ${step} run was interrupted.`,
+        method: 'flow.run_step',
+        operationId: recovered.operationId,
+        step: recovered.step,
+        type: 'operation.failed',
+        workspaceDirectory: this.runtimeDirectoryForHandle(workspaceHandle) ?? undefined,
+        workspaceHandle,
+      }
+      if (operationId) this.emit(event)
+      else this.pendingRecoveryEvents.push(event)
+    }
+    return result.recovered
   }
 
   async shutdown(): Promise<EccRpcShutdownResult> {
@@ -578,6 +649,9 @@ export class EccWorkspaceRuntime {
     operation: RuntimeOperation<T>,
     metadata: RuntimeOperationMetadata = {},
   ): Promise<T> {
+    if (workspaceHandle && (method === 'flow.run' || method === 'flow.run_step')) {
+      this.clearCrashRecoverySuppression(workspaceHandle)
+    }
     const run = async (): Promise<T> => {
       const operationId = `operation-${randomUUID()}`
       const runtimeDirectory =
@@ -627,6 +701,8 @@ export class EccWorkspaceRuntime {
           })
         } else {
           this.emit({
+            code: normalized.code,
+            details: normalized.details,
             logFile: normalized.logFile,
             message: normalized.message,
             method,
@@ -673,6 +749,10 @@ export class EccWorkspaceRuntime {
       return
     }
     if (event.type === 'runtime.exited') {
+      const interruptedOperationId = this.operationTracker.firstActiveOperationId()
+      const inFlight = this.inFlightOperation
+      const workspaceHandle =
+        inFlight?.workspaceHandle ?? this.sessions.active?.workspaceHandle
       this.client = null
       this.ready = false
       this.helloResult = null
@@ -680,23 +760,34 @@ export class EccWorkspaceRuntime {
       this.operationTracker.rejectAll(
         new Error('ECC sidecar exited before the operation completed.'),
       )
-      const inFlight = this.inFlightOperation
       this.emit(
-        inFlight
+        workspaceHandle
           ? {
               ...event,
-              interruptedOperationId: inFlight.operationId,
+              interruptedOperationId: interruptedOperationId ?? inFlight?.operationId,
               workspaceDirectory:
-                this.runtimeDirectoryForHandle(inFlight.workspaceHandle) ??
+                this.runtimeDirectoryForHandle(workspaceHandle) ??
                 this.boundDirectory ??
                 undefined,
-              workspaceHandle: inFlight.workspaceHandle,
+              workspaceHandle,
             }
           : {
               ...event,
               ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
             },
       )
+      if (
+        event.reason === 'unexpected' &&
+        workspaceHandle &&
+        (!inFlight || interruptedOperationId) &&
+        !this.crashRecoveryAttempts.has(
+          this.crashRecoveryKey(workspaceHandle, interruptedOperationId ?? ''),
+        )
+      ) {
+        const operationId = interruptedOperationId ?? ''
+        const recoveryKey = this.crashRecoveryKey(workspaceHandle, operationId)
+        void this.startCrashRecovery(recoveryKey, workspaceHandle, operationId)
+      }
       return
     }
     if (event.type === 'runtime.stderr') {
@@ -722,6 +813,27 @@ export class EccWorkspaceRuntime {
     )
     const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     const isTerminal = this.operationTracker.track(protocolEvent)
+    if (
+      protocolEvent.type === 'operation.failed' &&
+      isTerminal &&
+      !terminalAlreadyRecorded
+    ) {
+      const error = protocolEvent.payload.error
+      if (error && typeof error === 'object' && !Array.isArray(error)) {
+        const failure = error as Record<string, unknown>
+        const step = failure.step ?? protocolEvent.payload.step
+        const tool = failure.tool ?? protocolEvent.payload.tool
+        if (step || tool) {
+          electronLogger.error(
+            '[runtime] %s(%s) failed: %s; log=%s',
+            String(step ?? ''),
+            String(tool ?? ''),
+            String(failure.message ?? 'ECC tool failed.'),
+            String(failure.logFile ?? protocolEvent.payload.logFile ?? ''),
+          )
+        }
+      }
+    }
     if (
       protocolEvent.type === 'operation.completed' &&
       isTerminal &&
@@ -764,6 +876,55 @@ export class EccWorkspaceRuntime {
     } catch {
       return this.boundDirectory
     }
+  }
+
+  private flushPendingRecoveryEvents(): void {
+    for (const event of this.pendingRecoveryEvents.splice(0)) this.emit(event)
+  }
+
+  private crashRecoveryKey(workspaceHandle: string, operationId: string): string {
+    return `${workspaceHandle}:${operationId}`
+  }
+
+  private startCrashRecovery(
+    recoveryKey: string,
+    workspaceHandle: string,
+    operationId: string,
+  ): Promise<void> | null {
+    if (this.crashRecoveryAttempts.has(recoveryKey)) return null
+    this.crashRecoveryAttempts.add(recoveryKey)
+    return this.recoverInterrupted(workspaceHandle, operationId).then(
+      () => {
+        this.failedCrashRecoveries.delete(recoveryKey)
+        this.crashRecoveryAttempts.add(this.crashRecoveryKey(workspaceHandle, ''))
+      },
+      (error: unknown) => {
+        this.crashRecoveryAttempts.delete(recoveryKey)
+        this.failedCrashRecoveries.set(recoveryKey, { operationId, workspaceHandle })
+        electronLogger.error(
+          '[runtime] failed to recover interrupted operation %s: %s',
+          operationId || workspaceHandle,
+          error,
+        )
+      },
+    )
+  }
+
+  private retryFailedCrashRecovery(workspaceHandle: string): Promise<void> | null {
+    const failed = [...this.failedCrashRecoveries.entries()].find(
+      ([, request]) => request.workspaceHandle === workspaceHandle,
+    )
+    if (!failed) return null
+    const [recoveryKey, request] = failed
+    return this.startCrashRecovery(
+      recoveryKey,
+      request.workspaceHandle,
+      request.operationId,
+    )
+  }
+
+  private clearCrashRecoverySuppression(workspaceHandle: string): void {
+    this.crashRecoveryAttempts.delete(this.crashRecoveryKey(workspaceHandle, ''))
   }
 
   private emit(event: EccRuntimeEvent): void {

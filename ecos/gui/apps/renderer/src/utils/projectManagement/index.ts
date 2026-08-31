@@ -1,4 +1,11 @@
 export * from '../backendProjectManagement'
+export {
+  createProjectManifestDraft,
+  parseProjectManifest,
+  registerWorkspaceInManifest,
+  setQorBaselineInManifest,
+} from '@ecos-studio/shared'
+export type { ProjectManifest } from '@ecos-studio/shared'
 export type {
   ProjectFlowStatusHint,
   ProjectManagementProject,

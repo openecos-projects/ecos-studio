@@ -193,7 +193,11 @@ export class WorkspaceRuntimeCommands {
     return this.workspaceCall(
       'workspace.export_signoff',
       request,
-      (workspaceId) => ({ outputPath: request.outputPath, workspaceId }),
+      (workspaceId) => ({
+        additionalFiles: request.additionalFiles,
+        outputPath: request.outputPath,
+        workspaceId,
+      }),
       { timeoutMs: 0 },
     )
   }

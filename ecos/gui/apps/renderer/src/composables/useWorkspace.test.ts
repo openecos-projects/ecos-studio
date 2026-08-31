@@ -9,7 +9,6 @@ const {
   loadWorkspaceApiMock,
   clearMessagesMock,
   readWorkspaceFlowResourceApiMock,
-  readWorkspaceHomeResourceApiMock,
   readWorkspaceParametersResourceApiMock,
   settingsData,
   setDesktopWindowTitleMock,
@@ -23,6 +22,7 @@ const {
   clearFlowExecutionActiveForWorkspaceMock,
   isFlowExecutionActiveForWorkspaceMock,
   markFlowExecutionActiveForWorkspaceMock,
+  resolveProjectRouteContextForWorkspaceMock,
 } = vi.hoisted(() => ({
   createRuntimeEventClientMock: vi.fn(),
   closeWorkspaceApiMock: vi.fn(),
@@ -30,7 +30,6 @@ const {
   loadWorkspaceApiMock: vi.fn(),
   clearMessagesMock: vi.fn(),
   readWorkspaceFlowResourceApiMock: vi.fn(),
-  readWorkspaceHomeResourceApiMock: vi.fn(),
   readWorkspaceParametersResourceApiMock: vi.fn(),
   settingsData: new Map<string, unknown>(),
   setDesktopWindowTitleMock: vi.fn(),
@@ -44,6 +43,7 @@ const {
   clearFlowExecutionActiveForWorkspaceMock: vi.fn(),
   isFlowExecutionActiveForWorkspaceMock: vi.fn(() => false),
   markFlowExecutionActiveForWorkspaceMock: vi.fn(),
+  resolveProjectRouteContextForWorkspaceMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -77,7 +77,6 @@ vi.mock('@/api/runtimeEvents', () => ({
 
 vi.mock('@/api/workspaceResources', () => ({
   readWorkspaceFlowResourceApi: readWorkspaceFlowResourceApiMock,
-  readWorkspaceHomeResourceApi: readWorkspaceHomeResourceApiMock,
   readWorkspaceParametersResourceApi: readWorkspaceParametersResourceApiMock,
 }))
 
@@ -113,8 +112,13 @@ vi.mock('./flowExecutionState', () => ({
   markFlowExecutionActiveForWorkspace: markFlowExecutionActiveForWorkspaceMock,
 }))
 
+vi.mock('@/utils/projectManifestRegistration', () => ({
+  resolveProjectRouteContextForWorkspace: resolveProjectRouteContextForWorkspaceMock,
+}))
+
 import { useWorkspace } from './useWorkspace'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import { useNotificationStore } from '@/stores/notificationStore'
 
 type SerializedRecentProject = Omit<Project, 'lastOpened'> & { lastOpened: string }
 
@@ -166,6 +170,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       unbindWindow: vi.fn(async () => undefined),
       getBoundPath: vi.fn(async () => null),
       registerProjectRoot: vi.fn(async (path: string) => path),
+      registerProjectReadRoot: vi.fn(async (path: string) => path),
       clearProjectRoot: vi.fn(),
       requestProjectPathAccess: vi.fn(),
       readProjectTextFile: vi.fn(async () => {
@@ -230,7 +235,6 @@ describe('useWorkspace openProject', () => {
     loadWorkspaceApiMock.mockReset()
     clearMessagesMock.mockReset()
     readWorkspaceFlowResourceApiMock.mockReset()
-    readWorkspaceHomeResourceApiMock.mockReset()
     readWorkspaceParametersResourceApiMock.mockReset()
     setDesktopWindowTitleMock.mockReset()
     toastAddMock.mockReset()
@@ -240,7 +244,10 @@ describe('useWorkspace openProject', () => {
     requestHomeRunArtifactResetMock.mockReset()
     notifyWorkspaceRerunPreparedMock.mockReset()
     clearFlowExecutionActiveForWorkspaceMock.mockReset()
+    resolveProjectRouteContextForWorkspaceMock.mockReset()
+    resolveProjectRouteContextForWorkspaceMock.mockResolvedValue(null)
     settingsData.clear()
+    useNotificationStore().clear()
 
     desktopApi = createDesktopApiMock()
     activeProjectRoot = null
@@ -503,6 +510,33 @@ describe('useWorkspace openProject', () => {
     await workspace.closeProject()
 
     expect(desktopApi.workspace.unbindWindow).toHaveBeenCalledWith('/work/demo')
+  })
+
+  it('registers the managed parent as a read-only scope after opening a workspace', async () => {
+    const workspace = useWorkspace()
+    resolveProjectRouteContextForWorkspaceMock.mockResolvedValueOnce({
+      projectRoot: '/work',
+      projectName: 'work',
+    })
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_handle: 'workspace-demo',
+      },
+    })
+
+    await expect(
+      workspace.openProject({
+        id: '/work/demo',
+        name: 'demo',
+        path: '/work/demo',
+        lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(true)
+
+    expect(resolveProjectRouteContextForWorkspaceMock).toHaveBeenCalledWith('/work/demo')
+    expect(desktopApi.workspace.registerProjectReadRoot).toHaveBeenCalledWith('/work')
   })
 
   it('stops before loading when the selected directory is not an ECOS workspace', async () => {
@@ -786,18 +820,10 @@ describe('useWorkspace openProject', () => {
         Utilitization: 0.62,
       },
     })
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce({
-      monitor: {
-        instance: [10, 42],
-        frequency: [0, 118.5],
-      },
-    })
-
     await workspace.closeProject()
 
     expect(readWorkspaceFlowResourceApiMock).toHaveBeenCalledTimes(1)
     expect(readWorkspaceParametersResourceApiMock).toHaveBeenCalledTimes(1)
-    expect(readWorkspaceHomeResourceApiMock).toHaveBeenCalledTimes(1)
     expect(desktopApi.workspace.readProjectTextFile).not.toHaveBeenCalled()
     expect(settingsData.get('recent_projects')).toEqual([
       expect.objectContaining({
@@ -814,8 +840,6 @@ describe('useWorkspace openProject', () => {
         topModule: 'top',
         frequencyTarget: 125,
         coreUtilization: 0.62,
-        cellCount: 42,
-        frequency: 118.5,
       }),
     ])
   })
@@ -860,13 +884,6 @@ describe('useWorkspace openProject', () => {
         Utilitization: 0.5,
       },
     })
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce({
-      monitor: {
-        instance: [11],
-        frequency: [95],
-      },
-    })
-
     const closePromise = workspace.closeProject()
 
     await vi.waitFor(() => {
@@ -910,8 +927,6 @@ describe('useWorkspace openProject', () => {
         topModule: 'old_top',
         frequencyTarget: 100,
         coreUtilization: 0.5,
-        cellCount: 11,
-        frequency: 95,
       }),
     ])
   })
@@ -937,8 +952,6 @@ describe('useWorkspace openProject', () => {
         topModule: 'existing-top',
         frequencyTarget: 250,
         coreUtilization: 0.71,
-        cellCount: 12345,
-        frequency: 241.5,
       },
     ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
@@ -950,13 +963,6 @@ describe('useWorkspace openProject', () => {
       'Frequency max [MHz]': '250',
       Core: 'not-an-object',
     })
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce({
-      monitor: {
-        instance: ['not-a-cell-count'],
-        frequency: ['not-a-frequency'],
-      },
-    })
-
     await expect(workspace.closeProject()).resolves.toBeUndefined()
 
     expect(desktopApi.workspace.readProjectTextFile).not.toHaveBeenCalled()
@@ -975,8 +981,6 @@ describe('useWorkspace openProject', () => {
         topModule: 'existing-top',
         frequencyTarget: 250,
         coreUtilization: 0.71,
-        cellCount: 12345,
-        frequency: 241.5,
       }),
     ])
   })
@@ -1004,7 +1008,6 @@ describe('useWorkspace openProject', () => {
       steps: ['bad', { name: 'synthesis' }, { runtime: '00:01:05' }],
     })
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
 
     await workspace.closeProject()
 
@@ -1050,7 +1053,6 @@ describe('useWorkspace openProject', () => {
       ],
     })
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
 
     await workspace.closeProject()
 
@@ -1090,7 +1092,6 @@ describe('useWorkspace openProject', () => {
     ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({ steps: [] })
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
 
     await workspace.closeProject()
 
@@ -1135,7 +1136,6 @@ describe('useWorkspace openProject', () => {
       steps: [{ state: 'Success' }],
     })
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
 
     await workspace.closeProject()
 
@@ -1182,7 +1182,6 @@ describe('useWorkspace openProject', () => {
       ],
     })
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
 
     await workspace.closeProject()
 
@@ -1230,7 +1229,6 @@ describe('useWorkspace openProject', () => {
       ],
     })
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
 
     await workspace.closeProject()
 
@@ -1271,13 +1269,10 @@ describe('useWorkspace openProject', () => {
         topModule: 'top',
         frequencyTarget: 125,
         coreUtilization: 0.62,
-        cellCount: 42,
-        frequency: 118.5,
       },
     ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce(null)
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
 
     await expect(workspace.closeProject()).resolves.toBeUndefined()
 
@@ -1297,8 +1292,6 @@ describe('useWorkspace openProject', () => {
         topModule: 'top',
         frequencyTarget: 125,
         coreUtilization: 0.62,
-        cellCount: 42,
-        frequency: 118.5,
       }),
     ])
   })
@@ -1367,23 +1360,6 @@ describe('useWorkspace openProject', () => {
         },
       }
     })
-    readWorkspaceHomeResourceApiMock.mockImplementation(async () => {
-      if (activeResourceProject === 'old') {
-        return {
-          monitor: {
-            instance: [11],
-            frequency: [95],
-          },
-        }
-      }
-      return {
-        monitor: {
-          instance: [22],
-          frequency: [195],
-        },
-      }
-    })
-
     expect(await workspace.openProject(newProject)).toBe(true)
 
     expect(settingsData.get('recent_projects')).toEqual([
@@ -1405,8 +1381,6 @@ describe('useWorkspace openProject', () => {
         topModule: 'old_top',
         frequencyTarget: 100,
         coreUtilization: 0.5,
-        cellCount: 11,
-        frequency: 95,
       }),
     ])
   })
@@ -1458,7 +1432,6 @@ describe('useWorkspace openProject', () => {
     })
     readWorkspaceFlowResourceApiMock.mockResolvedValue(null)
     readWorkspaceParametersResourceApiMock.mockResolvedValue(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValue(null)
 
     const openProjectA = workspace.openProject(projectA)
     await vi.waitFor(() => {
@@ -1547,7 +1520,6 @@ describe('useWorkspace openProject', () => {
       )
       .mockResolvedValue(null)
     readWorkspaceParametersResourceApiMock.mockResolvedValue(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValue(null)
     loadWorkspaceApiMock.mockImplementation(async (path: string) => ({
       response: 'success',
       data: {
@@ -1604,8 +1576,6 @@ describe('useWorkspace openProject', () => {
       topModule: 'old_top',
       frequencyTarget: 100,
       coreUtilization: 0.5,
-      cellCount: 11,
-      frequency: 95,
     }
     const projectA: Project = {
       id: '/work/a',
@@ -1619,7 +1589,6 @@ describe('useWorkspace openProject', () => {
       path: '/work/b',
       lastOpened: new Date('2026-01-03T00:00:00.000Z'),
     }
-    let activeResourceProject: 'old' | 'b' = 'old'
     let flowReadCount = 0
     let parametersReadCount = 0
     let resolveProjectAParameters: ((value: Record<string, unknown>) => void) | undefined
@@ -1655,19 +1624,7 @@ describe('useWorkspace openProject', () => {
       }
       return Promise.resolve(null)
     })
-    readWorkspaceHomeResourceApiMock.mockImplementation(async () => {
-      if (activeResourceProject === 'b') {
-        return {
-          monitor: {
-            instance: [222],
-            frequency: [222.5],
-          },
-        }
-      }
-      return null
-    })
     loadWorkspaceApiMock.mockImplementation(async (path: string) => {
-      if (path === '/work/b') activeResourceProject = 'b'
       return {
         response: 'success',
         data: {
@@ -1720,8 +1677,6 @@ describe('useWorkspace openProject', () => {
         topModule: 'old_top',
         frequencyTarget: 100,
         coreUtilization: 0.5,
-        cellCount: 11,
-        frequency: 95,
       }),
     )
   })
@@ -1760,7 +1715,6 @@ describe('useWorkspace openProject', () => {
     settingsData.set('current_project_path', '/work/old')
     readWorkspaceFlowResourceApiMock.mockResolvedValue(null)
     readWorkspaceParametersResourceApiMock.mockResolvedValue(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValue(null)
     loadWorkspaceApiMock.mockImplementation(async (path: string) => ({
       response: 'success',
       data: {
@@ -1845,7 +1799,6 @@ describe('useWorkspace openProject', () => {
     }))
     readWorkspaceFlowResourceApiMock.mockResolvedValue(null)
     readWorkspaceParametersResourceApiMock.mockResolvedValue(null)
-    readWorkspaceHomeResourceApiMock.mockResolvedValue(null)
 
     await expect(workspace.openProject(oldProject)).resolves.toBe(true)
     let releaseProjectAPathWrite: (() => void) | undefined
@@ -2453,6 +2406,66 @@ describe('useWorkspace openProject', () => {
     })
 
     expect(clearFlowExecutionActiveForWorkspaceMock).toHaveBeenCalledWith('/work/demo')
+  })
+
+  it('updates a stopped sidecar notification after interruption recovery', async () => {
+    await openWorkspaceAndConnectRuntimeEvents()
+    const notifications = useNotificationStore()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        jobId: 'operation-place',
+        method: 'runtime.exited',
+        type: 'error',
+      },
+      message: ['ECC RPC sidecar exited unexpectedly.'],
+      response: 'error',
+    })
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        errorCode: 'interrupted',
+        jobId: 'operation-place',
+        logFile: '/work/demo/place_dreamplace/log/place.log',
+        method: 'flow.run_step',
+        step: 'place',
+        type: 'error',
+      },
+      message: ['place was interrupted when the ECC sidecar stopped.'],
+      response: 'error',
+    })
+
+    expect(notifications.notifications.value).toEqual([
+      expect.objectContaining({
+        key: 'operation-place',
+        logFile: '/work/demo/place_dreamplace/log/place.log',
+        title: 'Place interrupted',
+      }),
+    ])
+  })
+
+  it('labels an interruption recovered on a later workspace open', async () => {
+    await openWorkspaceAndConnectRuntimeEvents()
+    const notifications = useNotificationStore()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        errorCode: 'interrupted',
+        errorDetails: { previousRun: true },
+        jobId: 'operation-place',
+        method: 'flow.run_step',
+        step: 'place',
+        type: 'error',
+      },
+      message: ['Previous place run was interrupted.'],
+      response: 'error',
+    })
+
+    expect(notifications.notifications.value[0]?.title).toBe(
+      'Previous Place run was interrupted',
+    )
   })
 
   it('waits for the main-process terminal tracker when the renderer misses completion', async () => {

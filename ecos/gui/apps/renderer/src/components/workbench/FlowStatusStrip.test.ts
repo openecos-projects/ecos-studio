@@ -33,4 +33,13 @@ describe('FlowStatusStrip compact flow layout', () => {
     expect(source).toContain('lastRunningNodeId')
     expect(source).toContain('nextFlowNodeSelection')
   })
+
+  it('keeps a selected failed step red', () => {
+    expect(source).toMatch(
+      /\.flow-status-node\.is-failed \.flow-status-node-mark\s*{[^}]*color: var\(--danger-color\)/s,
+    )
+    expect(source).toMatch(
+      /\.flow-status-node\.is-failed \.flow-status-node-label\s*{[^}]*color: var\(--danger-color\)/s,
+    )
+  })
 })

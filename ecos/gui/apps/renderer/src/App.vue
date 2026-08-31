@@ -7,6 +7,7 @@
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
         :signoff-package-export-enabled="signoffPackageExportEnabled"
+        :design-report-export-enabled="designReportExportEnabled"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
       />
@@ -109,14 +110,73 @@
       @refresh="refreshSignoffPackageReview"
     />
 
+    <DesignReportExportDialog
+      :content="generatedDesignReportContent"
+      :error="designReportError"
+      :loading="designReportLoading"
+      :options="designReportExportOptions"
+      :report-data="designReportData"
+      :selected-format="selectedDesignReportFormat"
+      :visible="showDesignReportDialog"
+      @close="closeDesignReportExport"
+      @copy="copyDesignReport"
+      @refresh="refreshDesignReportData"
+      @save-all="exportAllDesignReportFormats"
+      @save-current="saveDesignReport"
+      @update:options="Object.assign(designReportExportOptions, $event)"
+      @update:selected-format="selectedDesignReportFormat = $event"
+    />
+
     <DesignFilesManageDialog v-model="showManageDialog" />
+
+    <Dialog
+      :visible="pdkNameDialogVisible"
+      modal
+      header="Import PDK"
+      :style="{ width: 'min(420px, calc(100vw - 32px))' }"
+      :draggable="false"
+      @update:visible="updatePdkNameDialogVisibility"
+    >
+      <label
+        for="pdk-name"
+        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+      >
+        PDK Name
+      </label>
+      <InputText
+        id="pdk-name"
+        v-model="pdkNameDraft"
+        autofocus
+        autocomplete="off"
+        spellcheck="false"
+        class="w-full"
+        @keydown.enter.prevent="confirmPdkName"
+      />
+      <div class="mt-6 flex justify-end gap-2">
+        <button
+          type="button"
+          class="rounded border border-(--border-color) px-3 py-1.5 text-sm text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
+          @click="cancelPdkName"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded bg-(--accent-color) px-3 py-1.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="!pdkNameDraft.trim()"
+          @click="confirmPdkName"
+        >
+          Import
+        </button>
+      </div>
+    </Dialog>
 
     <Dialog
       :visible="showStepConfigDialog"
       modal
       maximizable
       header="Step Configuration"
-      :style="{ width: 'min(1120px, calc(100vw - 32px))' }"
+      :style="{ width: 'min(1440px, calc(100vw - 32px))' }"
       :draggable="false"
       @update:visible="updateStepConfigDialogVisibility"
     >
@@ -126,15 +186,6 @@
           ref="stepConfigDialogRef"
         />
       </div>
-      <template #footer>
-        <button
-          type="button"
-          class="rounded border border-(--border-color) px-3 py-1.5 text-xs text-(--text-secondary) hover:bg-(--bg-secondary) hover:text-(--text-primary)"
-          @click="closeStepConfigDialog"
-        >
-          Cancel
-        </button>
-      </template>
     </Dialog>
 
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
@@ -172,6 +223,7 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
+import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
@@ -187,8 +239,10 @@ import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
 import SignoffPackageReviewDialog from '@/components/SignoffPackageReviewDialog.vue'
+import DesignReportExportDialog from '@/components/DesignReportExportDialog.vue'
 import Toast from 'primevue/toast'
 import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vue'
@@ -238,7 +292,8 @@ const {
   runtimeBackendTitle,
   runtimeBackendSubtitle,
 } = useWorkspace()
-const { loadPdks } = usePdkManager()
+const { loadPdks, pdkNameDialogVisible, pdkNameDraft, confirmPdkName, cancelPdkName } =
+  usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
 const { showManageDialog, openManageDialog } = useDesignFiles()
@@ -255,7 +310,30 @@ const {
   showToast,
   workspaceSession,
 })
+const {
+  closeDesignReportExport,
+  copyToClipboard: copyDesignReport,
+  designReportExportEnabled,
+  dialogVisible: showDesignReportDialog,
+  error: designReportError,
+  exportAllFormats: exportAllDesignReportFormats,
+  exportOptions: designReportExportOptions,
+  generatedContent: generatedDesignReportContent,
+  loadWorkspaceReportData: refreshDesignReportData,
+  loading: designReportLoading,
+  openDesignReportExport,
+  reportData: designReportData,
+  saveCurrentReport: saveDesignReport,
+  selectedFormat: selectedDesignReportFormat,
+} = useDesignReportExport({
+  currentProject,
+  showToast,
+})
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+
+function updatePdkNameDialogVisibility(visible: boolean): void {
+  if (!visible) cancelPdkName()
+}
 
 watch(
   () => Boolean(currentProject.value?.path),
@@ -267,6 +345,7 @@ watch(
         await Promise.all([
           api.menu.setActionEnabled(appMenuActionIds.reconfigureWorkspace, hasWorkspace),
           api.menu.setActionEnabled(appMenuActionIds.manageDesignFiles, hasWorkspace),
+          api.menu.setActionEnabled(appMenuActionIds.exportDesignMetrics, hasWorkspace),
         ])
       } catch (error) {
         console.warn('[App] Failed to sync workspace menu availability:', error)
@@ -975,6 +1054,8 @@ const { handleMenuAction } = useAppMenuActions({
   showNewProjectWizard: showCreateWorkspaceWizard,
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
   exportSignoffPackage,
+  exportDesignSummary: openDesignReportExport,
+  exportDesignMetrics: openDesignReportExport,
   manageDesignFiles: openManageDialog,
   adjustZoom,
 })
@@ -1371,6 +1452,12 @@ body.window-maximized .app-container {
 .step-config-dialog {
   height: min(72vh, 720px);
   min-height: 420px;
+}
+
+/* Maximized dialog: the config area fills the window (above the footer)
+   instead of stopping at the normal-mode height. */
+.p-dialog-maximized .step-config-dialog {
+  height: 100%;
 }
 
 .workspace-update-backup-overlay {

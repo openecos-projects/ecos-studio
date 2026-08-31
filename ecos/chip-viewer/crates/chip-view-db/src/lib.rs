@@ -161,9 +161,6 @@ pub enum ShapeGeometry {
 pub struct LayerShapeIndex {
     by_layer: BTreeMap<u16, Vec<usize>>,
     spatial_by_layer: BTreeMap<u16, RTree<LayerSpatialEntry>>,
-    /// Top-level R-Tree whose leaves are the bounding boxes of entire layers.
-    /// Used to skip layers that have no shapes anywhere near the query bbox,
-    /// eliminating per-layer R-Tree root descents for off-screen layers.
     layer_bboxes: RTree<LayerBBoxEntry>,
 }
 

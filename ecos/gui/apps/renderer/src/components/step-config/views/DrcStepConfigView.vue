@@ -2,9 +2,23 @@
 import { onMounted } from 'vue'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
+import { useStepConfigDiff } from '../stepConfigDiff'
 
 const draft = defineModel<Record<string, unknown>>({ required: true })
 const emit = defineEmits<{ initialized: [] }>()
+
+withDefaults(
+  defineProps<{
+    readonly?: boolean
+  }>(),
+  { readonly: false },
+)
+
+const diff = useStepConfigDiff()
+
+function isChanged(path: string): boolean {
+  return diff?.isChanged(path) ?? false
+}
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -24,7 +38,12 @@ onMounted(() => emit('initialized'))
 </script>
 
 <template>
-  <div class="sc-pro sc-cards" data-accent="emerald">
+  <div
+    class="sc-pro sc-cards"
+    :class="{ 'is-readonly': readonly }"
+    :inert="readonly"
+    data-accent="emerald"
+  >
     <section class="sc-pro-section">
       <div class="sc-pro-section__head">
         <div class="sc-pro-section__stripe" />
@@ -36,7 +55,10 @@ onMounted(() => emit('initialized'))
         </div>
       </div>
       <div class="sc-pro-section__body sc-pro-path-field space-y-3">
-        <div class="field max-w-full min-w-0">
+        <div
+          class="field max-w-full min-w-0"
+          :class="{ 'sc-diff': isChanged('INPUT.tech_lef_path') }"
+        >
           <label>tech_lef_path</label>
           <InputText
             v-model="(draft.INPUT as Record<string, string>).tech_lef_path"
@@ -45,7 +67,10 @@ onMounted(() => emit('initialized'))
             class="max-w-full min-w-0"
           />
         </div>
-        <div class="field max-w-full min-w-0">
+        <div
+          class="field max-w-full min-w-0"
+          :class="{ 'sc-diff': isChanged('INPUT.lef_paths') }"
+        >
           <label>lef_paths</label>
           <Textarea
             v-model="(draft.INPUT as Record<string, string>).lef_paths"
@@ -55,7 +80,10 @@ onMounted(() => emit('initialized'))
             class="w-full max-w-full min-w-0"
           />
         </div>
-        <div class="field max-w-full min-w-0">
+        <div
+          class="field max-w-full min-w-0"
+          :class="{ 'sc-diff': isChanged('INPUT.def_path') }"
+        >
           <label>def_path</label>
           <InputText
             v-model="(draft.INPUT as Record<string, string>).def_path"
@@ -75,7 +103,10 @@ onMounted(() => emit('initialized'))
         </div>
       </div>
       <div class="sc-pro-section__body sc-pro-path-field">
-        <div class="field max-w-full min-w-0">
+        <div
+          class="field max-w-full min-w-0"
+          :class="{ 'sc-diff': isChanged('OUTPUT.output_dir_path') }"
+        >
           <label>output_dir_path</label>
           <InputText
             v-model="(draft.OUTPUT as Record<string, string>).output_dir_path"

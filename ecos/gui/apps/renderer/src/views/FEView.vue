@@ -25,6 +25,10 @@
         </div>
       </div>
 
+      <div class="mb-12 w-full max-w-3xl px-4">
+        <FrontendExperimentalBanner />
+      </div>
+
       <div class="mb-16 flex gap-5">
         <button
           @click="handleOpenWorkspace"
@@ -200,6 +204,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import FrontendProjectWizard from '../components/FrontendProjectWizard.vue'
+import FrontendExperimentalBanner from '../components/frontend/FrontendExperimentalBanner.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 import { registerProjectManagedWorkspace } from '@/utils/projectManifestRegistration'
 

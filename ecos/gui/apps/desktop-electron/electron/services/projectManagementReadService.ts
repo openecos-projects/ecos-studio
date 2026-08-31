@@ -3,8 +3,8 @@ import { join, relative, resolve } from 'node:path'
 import {
   parseProjectManifest,
   projectManagementFrontendWorkspaceSummaryPaths,
-  projectManagementWorkspaceSummaryPaths,
-  projectManagementWorkspaceSummaryPathsFor,
+  projectManagementWorkspaceReadablePaths,
+  projectManagementWorkspaceReadablePathsFor,
 } from '@ecos-studio/shared'
 import type {
   DesktopProjectManagementWorkspaceTextsRequest,
@@ -17,7 +17,7 @@ const PROJECT_WORKSPACE_TEXT_MAX_BYTES = 256 * 1024
 const PROJECT_FRONTEND_WORKSPACE_TEXT_MAX_BYTES = 1024 * 1024
 const PROJECT_WORKSPACE_READ_CONCURRENCY = 4
 const PROJECT_WORKSPACE_READ_LIMIT = Math.max(
-  projectManagementWorkspaceSummaryPaths.length,
+  projectManagementWorkspaceReadablePaths.length,
   projectManagementFrontendWorkspaceSummaryPaths.length,
 )
 
@@ -225,7 +225,7 @@ function normalizeRequestedPaths(
   if (uniquePaths.length === 0 || uniquePaths.length > PROJECT_WORKSPACE_READ_LIMIT) {
     throw new Error('Project management workspace read has an invalid path count.')
   }
-  const allowedPaths = new Set(projectManagementWorkspaceSummaryPathsFor(projectType))
+  const allowedPaths = new Set(projectManagementWorkspaceReadablePathsFor(projectType))
   for (const path of uniquePaths) {
     if (!allowedPaths.has(path)) {
       throw new Error(`Project management workspace path is not allowed: ${path}`)

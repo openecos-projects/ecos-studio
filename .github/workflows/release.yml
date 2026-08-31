@@ -33,7 +33,7 @@ jobs:
           expected_tag: ${{ github.event.inputs.tag_name || github.ref_name }}
 
   build:
-    name: Build AppImage
+    name: Build Linux AppImage
     needs: check-version
     runs-on: ubuntu-22.04
     steps:
@@ -99,14 +99,116 @@ jobs:
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ecos-studio-release
+          name: ecos-studio-release-linux
           if-no-files-found: error
           path: |
             build/**/*.AppImage
 
+  build-macos:
+    name: Build macOS App
+    needs: check-version
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag_name || github.ref }}
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          workspaces: ecos/chip-viewer
+
+      - name: Build chip-viewer-native
+        working-directory: ecos/chip-viewer
+        run: cargo build --release -p chip-viewer-native
+
+      - name: Stage resources
+        run: |
+          mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
+          mkdir -p ecos/gui/apps/desktop-electron/resources/agent
+          cp ecos/chip-viewer/target/release/chip-viewer-native \
+             ecos/gui/apps/desktop-electron/resources/binaries/
+
+      - name: Install GUI dependencies
+        working-directory: ecos/gui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build renderer
+        working-directory: ecos/gui
+        run: pnpm --filter @ecos-studio/desktop-electron run build
+
+      - name: Package macOS app
+        working-directory: ecos/gui/apps/desktop-electron
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm exec electron-builder --config electron-builder.yml
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecos-studio-release-macos
+          if-no-files-found: error
+          path: ecos/gui/apps/desktop-electron/release/**/*.dmg
+
+  build-windows:
+    name: Build Windows App
+    needs: check-version
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag_name || github.ref }}
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          workspaces: ecos/chip-viewer
+
+      - name: Build chip-viewer-native
+        working-directory: ecos/chip-viewer
+        run: cargo build --release -p chip-viewer-native
+
+      - name: Stage resources
+        shell: bash
+        run: |
+          mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
+          mkdir -p ecos/gui/apps/desktop-electron/resources/agent
+          cp ecos/chip-viewer/target/release/chip-viewer-native.exe \
+             ecos/gui/apps/desktop-electron/resources/binaries/
+
+      - name: Install GUI dependencies
+        working-directory: ecos/gui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build renderer
+        working-directory: ecos/gui
+        run: pnpm --filter @ecos-studio/desktop-electron run build
+
+      - name: Package Windows app
+        working-directory: ecos/gui/apps/desktop-electron
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm exec electron-builder --config electron-builder.yml
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecos-studio-release-windows
+          if-no-files-found: error
+          path: ecos/gui/apps/desktop-electron/release/ECOS-Studio_*.exe
+
   release:
     name: Create Release
-    needs: [check-version, build]
+    needs: [check-version, build, build-macos, build-windows]
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -118,8 +220,9 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ecos-studio-release
+          pattern: ecos-studio-release-*
           path: build/release
+          merge-multiple: true
 
       - name: Determine tag version
         id: version
@@ -145,7 +248,7 @@ jobs:
         run: |
           {
             echo "> [!WARNING]"
-            echo "> **ECOS Studio** is still under rapid development. You can download the latest version from the [release page](https://github.com/openecos-projects/ecos-studio/releases) to try it out (The current release builds are produced on **Ubuntu 22.04**, so using an older Linux system may lead to compatibility issues. Additionally, ECOS Studio currently only supports the **x86_64** Linux platform.)."
+            echo "> **ECOS Studio** is still under rapid development. The EDA flow (Yosys, ECC-Tools, KLayout) runs on **Linux x86_64** only. macOS and Windows builds include the GUI and chip viewer; EDA tool execution is not yet supported on those platforms."
             echo ">"
             echo ""
             cat release-changelog.md
@@ -156,7 +259,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -t ASSETS < <(find build/release -type f -name '*.AppImage' | sort)
+          mapfile -t ASSETS < <(find build/release -type f \( -name 'ECOS-Studio_*.AppImage' -o -name 'ECOS-Studio_*.dmg' -o -name 'ECOS-Studio_*.exe' \) | sort)
           gh release create "${{ steps.version.outputs.full_tag }}" \
             --title "ECOS Studio ${{ steps.version.outputs.full_tag }}" \
             --notes-file release-notes.md \

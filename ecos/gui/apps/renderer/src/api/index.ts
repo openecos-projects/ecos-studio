@@ -35,7 +35,6 @@ export {
 } from './runtimeEvents'
 
 export {
-  activatePdkApi,
   checkResourceUpdatesApi,
   getToolStatusApi,
   importLocalResourcePathApi,

@@ -1,4 +1,4 @@
-import { readdirSync, rmSync } from 'node:fs'
+import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 
@@ -18,40 +18,21 @@ function createLogSessionId(date = new Date(), pid = process.pid): string {
 
 const logSessionId = createLogSessionId()
 
-export function getLogSessionId(): string {
-  return logSessionId
-}
+export function prepareDesktopLogs(keep = 20): {
+  mainLogFile: string
+  sessionDirectory: string
+} {
+  const logsDirectory = join(app.getPath('userData'), 'logs')
+  const sessionsDirectory = join(logsDirectory, 'sessions')
+  const sessionDirectory = join(sessionsDirectory, logSessionId)
+  rmSync(join(logsDirectory, 'main.log'), { force: true })
+  mkdirSync(sessionDirectory, { recursive: true })
 
-export function getLogsDirectory(): string {
-  return join(app.getPath('userData'), 'logs')
-}
-
-export function getLogSessionDirectory(): string {
-  return join(getLogsDirectory(), 'sessions', logSessionId)
-}
-
-export function getElectronLatestMainLogFile(): string {
-  return join(getLogsDirectory(), 'main.log')
-}
-
-export function getElectronMainLogFile(): string {
-  return join(getLogSessionDirectory(), 'main.log')
-}
-
-export function pruneOldLogSessions(keep = 20): void {
-  const directory = join(getLogsDirectory(), 'sessions')
-  let names: string[]
-  try {
-    names = readdirSync(directory)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return
-    }
-    throw error
-  }
-
+  const names = readdirSync(sessionsDirectory)
   const removable = names.filter((name) => name !== logSessionId).sort()
   for (const name of removable.slice(0, Math.max(0, names.length - keep))) {
-    rmSync(join(directory, name), { force: true, recursive: true })
+    rmSync(join(sessionsDirectory, name), { force: true, recursive: true })
   }
+
+  return { mainLogFile: join(sessionDirectory, 'main.log'), sessionDirectory }
 }

@@ -117,25 +117,33 @@ function createApi() {
   const setActionEnabled = vi.fn().mockResolvedValue(undefined)
   const readFlow = vi.fn().mockResolvedValue(successfulFlow())
   const readParameters = vi.fn().mockResolvedValue({ Design: 'chip_top' })
+  const readHome = vi.fn().mockResolvedValue({})
+  const getVersions = vi.fn().mockResolvedValue({})
+  const writeProjectTextFile = vi.fn().mockResolvedValue(undefined)
   const inspectSignoff = vi.fn().mockResolvedValue(readyReview())
   const saveFile = vi.fn().mockResolvedValue('/exports/chip_top_signoff_package.tar.gz')
   const exportSignoff = vi.fn(async (request: { outputPath: string }) => ({
     outputPath: request.outputPath,
   }))
   testState.api = {
+    app: { getVersions },
     menu: { setActionEnabled },
-    workspaceResources: { readFlow, readParameters },
+    workspace: { writeProjectTextFile },
+    workspaceResources: { readFlow, readParameters, readHome },
     dialog: { saveFile },
     ecc: { workspace: { exportSignoff, inspectSignoff } },
   } as unknown as DesktopApi
 
   return {
     exportSignoff,
+    getVersions,
     inspectSignoff,
     readFlow,
+    readHome,
     readParameters,
     saveFile,
     setActionEnabled,
+    writeProjectTextFile,
   }
 }
 
@@ -541,9 +549,35 @@ describe('useSignoffPackageExport export action', () => {
       filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
     })
     expect(api.exportSignoff).toHaveBeenCalledWith({
+      additionalFiles: expect.arrayContaining([
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.tex',
+          content: expect.stringContaining('\\begin{table}'),
+        }),
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.md',
+          content: expect.stringContaining('# Design Summary Report: rocket_core'),
+        }),
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.typ',
+          content: expect.stringContaining('#figure('),
+        }),
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.csv',
+          content: expect.stringContaining('Category,Metric,Value'),
+        }),
+        expect.objectContaining({
+          archivePath: 'design_summaries/rocket_core_design_summary.txt',
+          content: expect.stringContaining('ECOS STUDIO — DESIGN SUMMARY'),
+        }),
+      ]),
       outputPath: '/tmp/rocket package.tar.gz',
       workspaceHandle: 'workspace-handle-1',
     })
+    expect(
+      (api.exportSignoff.mock.calls[0]![0] as Record<string, unknown>).additionalFiles,
+    ).toHaveLength(5)
+    expect(api.writeProjectTextFile).not.toHaveBeenCalled()
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'success',
@@ -770,5 +804,32 @@ describe('useSignoffPackageExport export action', () => {
     await exportPromise
 
     expect(mounted.showToast).not.toHaveBeenCalled()
+  })
+
+  it('propagates archive append failure and shows error toast when exportSignoff rejects with additionalFiles', async () => {
+    const api = createApi()
+    api.exportSignoff.mockRejectedValueOnce(
+      new Error('Failed to append files to archive: permission denied'),
+    )
+    const mounted = mountComposable()
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    await openReviewAndConfirm(mounted)
+
+    expect(api.exportSignoff).toHaveBeenCalledWith(
+      expect.objectContaining({
+        additionalFiles: expect.any(Array),
+      }),
+    )
+    expect(mounted.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        summary: 'Failed to Export Signoff Package',
+        detail: expect.stringContaining(
+          'Failed to append files to archive: permission denied',
+        ),
+      }),
+    )
   })
 })

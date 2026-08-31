@@ -62,4 +62,10 @@ describe('FrontendWorkspaceView simulation layout', () => {
       '...liveRuntimeStepOverrides.get(step.name.trim().toLowerCase())',
     )
   })
+  it('opens waveform files through the scoped desktop path API', () => {
+    expect(frontendWorkspaceViewSource).toContain(
+      'getDesktopApi().workspace.openWaveformExternal(path)',
+    )
+    expect(frontendWorkspaceViewSource).not.toContain('pathToFileUrl')
+  })
 })

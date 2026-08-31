@@ -474,21 +474,28 @@ describe('EccRpcSidecarProcess', () => {
     )
   })
 
-  it('writes sidecar stderr into the desktop log when the process exits unexpectedly', async () => {
+  it('includes the sidecar log and last output in an unexpected exit', async () => {
     const child = new FakeChild()
+    const events: unknown[] = []
     const sidecar = new EccRpcSidecarProcess({
+      onEvent: (event) => events.push(event),
       spawn: () => child,
     })
-    const client = await sidecar.start()
-    const promise = client.call('rpc.ping')
-    child.stderr.write('CMake Error: missing evaluation/test directory\n')
+
+    await sidecar.start()
+    child.stderr.write('fatal: missing liberty file\n')
     child.emit('close', 1, null)
 
-    await expect(promise).rejects.toThrow(`See ${sidecar.logFile}`)
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining('fatal: missing liberty file'),
+        logFile: sidecar.logFile,
+        type: 'runtime.exited',
+      }),
+    )
     expect(electronLogger.error).toHaveBeenCalledWith(
-      '[runtime] %s\n%s',
-      `ECC RPC sidecar exited with code 1. See ${sidecar.logFile}`,
-      'CMake Error: missing evaluation/test directory',
+      '[runtime] %s',
+      expect.stringContaining('fatal: missing liberty file'),
     )
   })
 

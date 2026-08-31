@@ -9,7 +9,6 @@ const testState = vi.hoisted(() => ({
     parameters: '',
     checklist: '',
     metrics: {},
-    monitor: { step: [] },
   })),
   runtimeEvents: null as Ref<unknown[]> | null,
   readOptionalProjectTextFileChunk: vi.fn(),

@@ -1,8 +1,12 @@
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import {
   appMenuActionIds,
+  extractDesignReportData,
+  generateDesignReport,
   joinLocalPath,
+  type DesignReportFormat,
   type EccWorkspaceInspectSignoffResult,
+  type SignoffAdditionalFile,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 
@@ -355,7 +359,57 @@ export function useSignoffPackageExport({
         return
       }
 
+      const flow = await api.workspaceResources.readFlow().catch(() => null)
+      const home = await api.workspaceResources.readHome().catch(() => null)
+      const versions = await api.app
+        .getVersions()
+        .catch(() => ({ gui: '', ecc: '', eccTools: '' }))
+      const reportData = extractDesignReportData({
+        workspacePath: workspace.workspacePath,
+        parameters: isRecord(parameters) ? parameters : undefined,
+        flow,
+        homeData: isRecord(home) ? home : undefined,
+        versionInfo: isRecord(versions)
+          ? {
+              gui: typeof versions.gui === 'string' ? versions.gui : undefined,
+              ecc: typeof versions.ecc === 'string' ? versions.ecc : undefined,
+              eccTools:
+                typeof versions.eccTools === 'string' ? versions.eccTools : undefined,
+            }
+          : undefined,
+      })
+
+      const reportFormats: DesignReportFormat[] = [
+        'latex',
+        'markdown',
+        'typst',
+        'csv',
+        'text',
+      ]
+      const formatExtMap: Record<DesignReportFormat, string> = {
+        latex: 'tex',
+        markdown: 'md',
+        typst: 'typ',
+        csv: 'csv',
+        text: 'txt',
+      }
+      const additionalFiles: SignoffAdditionalFile[] = reportFormats.map((fmt) => {
+        const ext = formatExtMap[fmt]
+        const content = generateDesignReport(reportData, fmt, {
+          includeMultiCorner: true,
+          includeStageBreakdown: true,
+          includeVerificationBreakdown: true,
+          latexStandalone: true,
+          typstStandalone: true,
+        })
+        return {
+          archivePath: `design_summaries/${design}_design_summary.${ext}`,
+          content,
+        }
+      })
+
       const result = await api.ecc.workspace.exportSignoff({
+        additionalFiles,
         outputPath,
         workspaceHandle: workspace.workspaceHandle,
       })
@@ -364,7 +418,7 @@ export function useSignoffPackageExport({
       showToast({
         severity: 'success',
         summary: 'Signoff Package Exported',
-        detail: `Saved to ${result.outputPath}`,
+        detail: `Saved package and design summaries to ${result.outputPath}`,
       })
     } catch (error) {
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
 const resourcesBridge = vi.hoisted(() => ({
-  activatePdk: vi.fn(),
   cancel: vi.fn(),
   get: vi.fn(),
   importLocalPath: vi.fn(),
@@ -78,7 +77,7 @@ describe('Resource Manager tool API adapter', () => {
         size: null,
         source: 'local',
         homepage: '',
-        actions: ['validate' as const, 'activate' as const],
+        actions: ['validate' as const],
         health: { imported_at: '2026-05-13T00:00:00Z' },
         error: null,
       },
@@ -109,7 +108,7 @@ describe('Resource Manager tool API adapter', () => {
     expect(resources[1]).toMatchObject({
       id: 'pdk:ics55',
       type: 'pdk',
-      actions: ['validate', 'activate'],
+      actions: ['validate'],
       health: { imported_at: '2026-05-13T00:00:00Z' },
     })
   })
@@ -195,7 +194,7 @@ describe('Resource Manager tool API adapter', () => {
       size: null,
       source: 'local',
       homepage: '',
-      actions: ['validate', 'activate', 'remove_reference'],
+      actions: ['validate', 'remove_reference'],
       health: { managed: false },
       error: null,
     })
@@ -224,7 +223,7 @@ describe('Resource Manager tool API adapter', () => {
       size: null,
       source: 'local',
       homepage: '',
-      actions: ['validate' as const, 'activate' as const, 'remove_reference' as const],
+      actions: ['validate' as const, 'remove_reference' as const],
       health: { managed: false },
       error: null,
     }

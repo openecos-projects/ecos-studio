@@ -24,6 +24,8 @@ export interface EccRpcShutdownResult {
   }
 }
 
+import type { PdkRequirement } from './pdkInventory.ts'
+
 export interface EccWorkspaceCreateRequest {
   directory: string
   filelist?: string
@@ -34,6 +36,10 @@ export interface EccWorkspaceCreateRequest {
   pdk?: string
   pdkJson?: unknown
   pdkRoot?: string
+  pdkInstallationId?: string
+  pdkRequirement?: PdkRequirement
+  projectId?: string
+  projectRoot?: string
   rtlList?: string[]
   sdc?: string
 }
@@ -55,7 +61,13 @@ export interface EccWorkspaceSyncConfigRequest extends EccWorkspaceHandleRequest
   configPath: string
 }
 
+export interface SignoffAdditionalFile {
+  archivePath: string
+  content: string
+}
+
 export interface EccWorkspaceExportSignoffRequest extends EccWorkspaceHandleRequest {
+  additionalFiles?: SignoffAdditionalFile[]
   outputPath: string
 }
 
@@ -419,7 +431,9 @@ export type EccRuntimeEvent =
       workspaceHandle?: string
     }
   | {
+      code?: string
       executionScope?: 'single_step' | 'full_flow'
+      details?: unknown
       logFile?: string
       message: string
       method: string
