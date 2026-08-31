@@ -39,6 +39,7 @@ from ecos_agent.optimization_ledger import (
     OptimizationPlanningAudit,
     OptimizationPlanningAuditIntegrityError,
 )
+from ecos_agent.optimization_knowledge_cases import EmpiricalCaseAuditIntegrityError
 from ecos_agent.optimization_metric_contracts import (
     EvaluationMetricCategory,
     EvaluationMetricDirection,
@@ -728,6 +729,21 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(
     assert planning_mode == "receipt-aware"
     assert len(started_traces) == 2
     assert all(item.receipt_status == "ok" for item in started_traces)
+    case_audit_path = tmp_path / "episode" / "optimization-knowledge-cases.v1.jsonl"
+    case_audit = case_audit_path.read_text(encoding="utf-8")
+    case_audit_path.write_text(
+        case_audit.replace('"shot_count":0', '"shot_count":3', 1),
+        encoding="utf-8",
+    )
+    with pytest.raises(EmpiricalCaseAuditIntegrityError, match="invalid"):
+        export_episode_traces(
+            workspace=tmp_path,
+            episode_root=tmp_path / "episode",
+            design_id="gcd",
+            reference_observation=_incumbent(),
+            objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+        )
+    case_audit_path.write_text(case_audit, encoding="utf-8")
     audit_path = tmp_path / "episode" / "optimization-planning-audit.v1.jsonl"
     audit_path.write_text(
         audit_path.read_text(encoding="utf-8").replace(

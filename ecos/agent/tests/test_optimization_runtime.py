@@ -24,6 +24,7 @@ from ecos_agent.optimization_runtime import (
     _current_values,
     _design_id,
     _incumbent_workspace,
+    _knowledge_case_pool_root,
     _optimization_execution_context,
     _optimization_objective,
     _optimization_rerun_runtime_seconds,
@@ -185,6 +186,24 @@ def test_incumbent_workspace_resolves_only_registered_candidate_roots(
         _incumbent_workspace(workspace, "../outside")
 
 
+def test_knowledge_case_pool_root_accepts_only_real_absolute_directories(
+    tmp_path: Path,
+) -> None:
+    pool = tmp_path / "case-pool"
+    pool.mkdir()
+    assert _knowledge_case_pool_root(str(pool)) == pool.resolve()
+
+    with pytest.raises(OptimizationRuntimeError, match="knowledge case pool root"):
+        _knowledge_case_pool_root("relative/cases")
+    with pytest.raises(OptimizationRuntimeError, match="knowledge case pool root"):
+        _knowledge_case_pool_root(str(tmp_path / "missing"))
+
+    link = tmp_path / "pool-link"
+    link.symlink_to(pool, target_is_directory=True)
+    with pytest.raises(OptimizationRuntimeError, match="knowledge case pool root"):
+        _knowledge_case_pool_root(str(link))
+
+
 def test_parent_manifest_binds_terminal_evidence(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -221,7 +240,7 @@ def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
     tech_lef.write_text("VERSION 5.8 ;\n", encoding="utf-8")
     (tmp_path / "home").mkdir()
     (tmp_path / "home" / "parameters.json").write_text(
-        json.dumps({"PDK Root": str(pdk)}), encoding="utf-8"
+        json.dumps({"Design": "design-a", "PDK Root": str(pdk)}), encoding="utf-8"
     )
     (tmp_path / "home" / "flow.json").write_text("{}\n", encoding="utf-8")
 
@@ -229,6 +248,7 @@ def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
         tmp_path, 200, 17, _HASH, "ecc-test-revision"
     )
 
+    assert context["design_id"] == "design-a"
     assert context["rtl_sha256"] == canonical_sha256(
         {"files": [file_sha256(rtl / "a.v"), file_sha256(rtl / "b.v")]}
     )
@@ -390,6 +410,8 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
             "episode_id": "episode-new",
             "objective": _semantic_objective(),
             "reference_runtime_seconds": 12.0,
+            "agent_mode": "llm_no_knowledge",
+            "knowledge_case_shots": 0,
         },
         planner=object(),
     )
@@ -404,6 +426,8 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
         )
     )
     assert state["task_memory_scope_sha256"].startswith("sha256:")
+    assert state["mode"] == "llm_no_knowledge"
+    assert state.get("knowledge_case_shots", 0) == 0
     assert runner.budget.budget.wall_time_limit_seconds == 264.0
     runner.close()
     assert rpc.closed is True

@@ -23,7 +23,7 @@ def support_catalog(
             StatePredicate(
                 feature_id=feature_id,
                 op="present",
-                rule_ref="rules.test.present.v1",
+                rule_ref="rules.evidence.present.v1",
             ),
         ),
     )

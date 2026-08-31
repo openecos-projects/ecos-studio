@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from ecos_agent.hashing import file_sha256
+from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.knowledge_bundle import KnowledgeAnswer
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
@@ -265,6 +265,32 @@ def frozen_workspace(tmp_path: Path) -> Path:
 def test_stage_observation_reads_only_the_fixed_stage_artifacts(
     frozen_workspace: Path,
 ) -> None:
+    _write_json(
+        frozen_workspace / "place_dreamplace/analysis/qor_hotspots.json",
+        {
+            "schema_version": 3,
+            "analysis_revision": "quality-gates-v4",
+            "tool": "dreamplace",
+            "step": "place",
+            "design": "tiny",
+            "hotspots": [
+                {
+                    "kind": "congestion",
+                    "severity": "warning",
+                    "metric_id": "place_lutrudy_utilization_max",
+                    "value": 0.88,
+                    "unit": "ratio",
+                },
+                {
+                    "kind": "congestion",
+                    "severity": "critical",
+                    "metric_id": "place_lutrudy_utilization_max",
+                    "value": 0.91,
+                    "unit": "ratio",
+                },
+            ],
+        },
+    )
     observation = build_stage_observation(
         frozen_workspace,
         "place",
@@ -278,6 +304,51 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
         "runtime_seconds": 1.0,
         "peak_memory_mb": 100.0,
     }
+    artifact_sha256 = file_sha256(
+        frozen_workspace / "place_dreamplace/analysis/qor_hotspots.json"
+    )
+    expected_hotspots = [
+        {
+            "kind": "congestion",
+            "severity": "warning",
+            "metric_id": "place_lutrudy_utilization_max",
+            "value": 0.88,
+            "unit": "ratio",
+        },
+        {
+            "kind": "congestion",
+            "severity": "critical",
+            "metric_id": "place_lutrudy_utilization_max",
+            "value": 0.91,
+            "unit": "ratio",
+        },
+    ]
+    assert [item.model_dump(mode="json") for item in observation.state_evidence] == [
+        {
+            "feature_id": "place_lutrudy_utilization_max",
+            "value": 0.88,
+            "evidence_sha256": canonical_sha256(
+                {
+                    "artifact_sha256": artifact_sha256,
+                    "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/0",
+                    "hotspot": expected_hotspots[0],
+                }
+            ),
+            "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/0",
+        },
+        {
+            "feature_id": "place_lutrudy_utilization_max_hotspot_1",
+            "value": 0.91,
+            "evidence_sha256": canonical_sha256(
+                {
+                    "artifact_sha256": artifact_sha256,
+                    "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/1",
+                    "hotspot": expected_hotspots[1],
+                }
+            ),
+            "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/1",
+        },
+    ]
     assert observation.requested_knobs == ()
     assert observation.budget.remaining_candidates == 19
 

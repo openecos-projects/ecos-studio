@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ecos_agent.parameter_semantics import CARD_ROOT, card_hash, load_parameter_cards
+from ecos_agent.parameter_evidence_contracts import ParameterSemanticsCard
+
 from .steps import STAGES, _add, _json, _sha256, _source_inventory
 
 GENERAL_DIR = Path(__file__).resolve().parent / "general"
@@ -36,6 +39,13 @@ _CONTRACT_DIRECTION = {
     "set_true": "enable",
     "set_false": "disable",
 }
+_UNSUPPORTED_BOUND_KNOBS = frozenset(
+    {
+        "floorplan.global_right_padding",
+        "floorplan.utilitization",
+        "legalization.cell_padding_x",
+    }
+)
 
 
 def _load_jsonl(metric: str, name: str) -> list[dict[str, object]]:
@@ -63,6 +73,7 @@ def _strategy_entries(metric: str) -> tuple[list[dict[str, object]], dict[str, l
         str(item["action_intent"]): item for item in _load_jsonl(metric, "bindings.jsonl")
     }
     source_ids = tuple(GENERAL_SOURCE_PATHS[metric])
+    cards = {card.knob_id.value: card for card in load_parameter_cards().values()}
     entries: list[dict[str, object]] = []
     documents: dict[str, list[str]] = {}
     for statement in _load_jsonl(metric, "statements.jsonl"):
@@ -108,7 +119,9 @@ def _strategy_entries(metric: str) -> tuple[list[dict[str, object]], dict[str, l
             stages=stages,
         )
         entries[-1]["metric"] = statement_metric
-        entries[-1]["support"] = _support_contract(statement, bindings.get(intent), entries[-1])
+        entries[-1]["support"] = _support_contract(
+            statement, bindings.get(intent), entries[-1], cards
+        )
     return entries, documents
 
 
@@ -116,12 +129,50 @@ def _support_contract(
     statement: dict[str, object],
     binding: dict[str, object] | None,
     entry: dict[str, object],
+    cards: dict[str, ParameterSemanticsCard],
 ) -> dict[str, object]:
     diagnosis = statement["diagnosis"]
     if not isinstance(diagnosis, dict):
         raise ValueError(f"invalid diagnosis: {statement['id']}")
     claim_sha256 = "sha256:" + _sha256(_json(statement).encode("utf-8"))
-    claim = {
+    claim = _claim_contract(statement, entry, diagnosis, claim_sha256)
+    if binding is None or not binding.get("knobs"):
+        return {"claim": claim, "binding": None}
+    actions = _binding_actions(binding, cards)
+    if not actions:
+        return {"claim": claim, "binding": None}
+    binding_payload = {**binding, "actions": actions}
+    binding_sha256 = "sha256:" + _sha256(_json(binding_payload).encode("utf-8"))
+    toolchain_ref = "sha256:" + _sha256(
+        _json(
+            {"binding_sha256": binding_sha256, "source_paths": GENERAL_SOURCE_PATHS}
+        ).encode("utf-8")
+    )
+    return {
+        "claim": claim,
+        "binding": {
+            "schema_version": "ecos.version_bound_tool_binding.v1",
+            "binding_id": binding["id"],
+            "binding_sha256": binding_sha256,
+            "claim_id": statement["id"],
+            "claim_sha256": claim_sha256,
+            "toolchain_ref": toolchain_ref,
+            "actions": actions,
+            "consumer_ids": _action_ids(actions, "consumer_ids"),
+            "activation_predicate_ids": _action_ids(
+                actions, "activation_predicate_ids"
+            ),
+        },
+    }
+
+
+def _claim_contract(
+    statement: dict[str, object],
+    entry: dict[str, object],
+    diagnosis: dict[str, object],
+    claim_sha256: str,
+) -> dict[str, object]:
+    return {
         "schema_version": "ecos.general_domain_claim.v1",
         "claim_ref": {
             "entity_id": statement["id"],
@@ -147,6 +198,12 @@ def _support_contract(
             }
             for feature_id in statement["anti_conditions"]
         ],
+        "required_evidence": diagnosis["required_evidence"],
+        "action_intents": [statement["action_intent"]],
+        "evidence_refs": [
+            f"{item['source_id']}@sha256:{item['span_sha256']}"
+            for item in statement["evidence"]
+        ],
         "expected_effects": [
             f"{effect['metric']}:{effect['direction']}" for effect in statement["effects"]
         ],
@@ -156,34 +213,40 @@ def _support_contract(
             if effect["direction"] in {"may_increase", "unchanged"}
         ],
     }
-    if binding is None or not binding.get("knobs"):
-        return {"claim": claim, "binding": None}
-    binding_sha256 = "sha256:" + _sha256(_json(binding).encode("utf-8"))
-    toolchain_ref = "sha256:" + _sha256(
-        _json({"binding_sha256": binding_sha256, "source_paths": GENERAL_SOURCE_PATHS}).encode(
-            "utf-8"
+
+
+def _binding_actions(
+    binding: dict[str, object], cards: dict[str, ParameterSemanticsCard]
+) -> list[dict[str, object]]:
+    actions = []
+    for knob in binding["knobs"]:
+        card = cards.get(knob["knob_id"])
+        if card is None:
+            if knob["knob_id"] in _UNSUPPORTED_BOUND_KNOBS:
+                continue
+            raise ValueError(f"binding parameter card is unavailable: {knob['knob_id']}")
+        if str(knob.get("step", "")).casefold() != card.stage.casefold():
+            raise ValueError(f"binding stage does not match parameter card: {knob['knob_id']}")
+        card_ref = str(
+            (CARD_ROOT / "cards" / f"{card.knob_id.value}.json").relative_to(
+                Path(__file__).parents[2]
+            )
         )
-    )
-    return {
-        "claim": claim,
-        "binding": {
-            "schema_version": "ecos.version_bound_tool_binding.v1",
-            "binding_id": binding["id"],
-            "binding_sha256": binding_sha256,
-            "claim_id": statement["id"],
-            "claim_sha256": claim_sha256,
-            "toolchain_ref": toolchain_ref,
-            "actions": [
-                {
-                    "knob_id": knob["knob_id"],
-                    "direction": _CONTRACT_DIRECTION[knob["direction"]],
-                }
-                for knob in binding["knobs"]
-            ],
-            "consumer_ids": binding.get("consumer_ids", []),
-            "activation_predicate_id": binding.get("activation_predicate_id"),
-        },
-    }
+        actions.append(
+            {
+                "knob_id": knob["knob_id"],
+                "direction": _CONTRACT_DIRECTION[knob["direction"]],
+                "parameter_card_ref": card_ref,
+                "parameter_card_sha256": card_hash(card),
+                "consumer_ids": [item.consumer_id for item in card.consumers],
+                "activation_predicate_ids": list(card.runtime_probe_ids),
+            }
+        )
+    return actions
+
+
+def _action_ids(actions: list[dict[str, object]], key: str) -> list[str]:
+    return sorted({item for action in actions for item in action[key]})
 
 
 CONGESTION_REGRESSION_CASES = (

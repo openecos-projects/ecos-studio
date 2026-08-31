@@ -79,6 +79,18 @@ def create_optimization_runner(
     episode_id = _text(context.get("episode_id"), "episode_id")
     objective = _optimization_objective(context.get("objective"))
     checkpoint_id = "place"
+    try:
+        agent_mode = OptimizationAgentMode(
+            context.get("agent_mode", OptimizationAgentMode.FULL_AGENT)
+        )
+    except ValueError as exc:
+        raise OptimizationRuntimeError("optimization agent mode is invalid") from exc
+    knowledge_case_shots = context.get("knowledge_case_shots", 0)
+    if type(knowledge_case_shots) is not int or knowledge_case_shots not in {0, 3}:
+        raise OptimizationRuntimeError("knowledge case shots must be zero or three")
+    knowledge_case_pool_root = _knowledge_case_pool_root(
+        context.get("knowledge_case_pool_root")
+    )
     receipt_aware_planning = context.get("receipt_aware_planning", True)
     if type(receipt_aware_planning) is not bool:
         raise OptimizationRuntimeError("receipt-aware planning flag is invalid")
@@ -126,6 +138,7 @@ def create_optimization_runner(
                 context.get("seed", 0),
                 parent_manifest,
                 ecc_revision,
+                design_id=design_id,
             )
         except OptimizationRuntimeError:
             if (workspace / "origin").exists():
@@ -135,6 +148,7 @@ def create_optimization_runner(
             # Legacy unit fixtures have no materialized inputs; production workspaces do.
             execution_context = {
                 "design_sha256": parent_manifest,
+                "design_id": design_id,
                 "parent_lineage_sha256": parent_manifest,
                 "ecc_revision": ecc_revision,
                 "site_width_dbu": site_width_dbu,
@@ -165,6 +179,8 @@ def create_optimization_runner(
                 task_memory_supplier=memory_store.snapshot,
                 execution_context=execution_context,
                 receipt_aware_planning=receipt_aware_planning,
+                knowledge_case_shots=knowledge_case_shots,
+                knowledge_case_pool_root=knowledge_case_pool_root,
             )
             if controller.objective != objective:
                 raise OptimizationRuntimeError(
@@ -173,6 +189,13 @@ def create_optimization_runner(
             if controller.parent_manifest_sha256 != parent_manifest:
                 raise OptimizationRuntimeError(
                     "optimization workspace does not match the recovered episode"
+                )
+            if (
+                controller.mode != agent_mode
+                or controller.knowledge_case_shots != knowledge_case_shots
+            ):
+                raise OptimizationRuntimeError(
+                    "optimization treatment does not match the recovered episode"
                 )
         elif any(path.is_file() for path in legacy_state_paths):
             raise OptimizationRuntimeError(
@@ -185,7 +208,7 @@ def create_optimization_runner(
             controller = OptimizationEpisodeController(
                 episode_id=episode_id,
                 checkpoint_id=checkpoint_id,
-                mode=OptimizationAgentMode.FULL_AGENT,
+                mode=agent_mode,
                 budget=budget,
                 planner=planner,
                 executor=executor,
@@ -198,6 +221,8 @@ def create_optimization_runner(
                 task_memory_supplier=memory_store.snapshot,
                 execution_context=execution_context,
                 receipt_aware_planning=receipt_aware_planning,
+                knowledge_case_shots=knowledge_case_shots,
+                knowledge_case_pool_root=knowledge_case_pool_root,
             )
     except Exception:
         rpc.close()
@@ -311,12 +336,15 @@ def _optimization_execution_context(
     seed: object,
     parent_manifest: str,
     ecc_revision: str,
+    *,
+    design_id: str | None = None,
 ) -> dict[str, object]:
     """Return only immutable, reproducible inputs used by domain fingerprints."""
     if type(seed) is not int:
         raise OptimizationRuntimeError("optimization seed is invalid")
     if not isinstance(ecc_revision, str) or not ecc_revision.strip():
         raise OptimizationRuntimeError("ECC revision is invalid")
+    design_id = design_id or _design_id(workspace)
     origin = workspace / "origin"
     input_hashes: dict[str, str] = {}
     for key, relative in (
@@ -356,6 +384,7 @@ def _optimization_execution_context(
     )
     return {
         **input_hashes,
+        "design_id": design_id,
         "design_sha256": design_sha256,
         "pdk_sha256": pdk_sha256,
         "parent_lineage_sha256": file_sha256(workspace / "home" / "flow.json"),
@@ -372,6 +401,17 @@ def _workspace(value: object) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute() or path.is_symlink() or not path.is_dir():
         raise OptimizationRuntimeError("optimization workspace is unavailable")
+    return path.resolve()
+
+
+def _knowledge_case_pool_root(value: object) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise OptimizationRuntimeError("knowledge case pool root is invalid")
+    path = Path(value).expanduser()
+    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+        raise OptimizationRuntimeError("knowledge case pool root is unavailable")
     return path.resolve()
 
 

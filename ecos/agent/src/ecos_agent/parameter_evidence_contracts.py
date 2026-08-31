@@ -539,6 +539,10 @@ class ExpectedEffectV2(_Model):
 
 
 class NumericProposalActionV2(_Model):
+    claim_id: str | None = None
+    claim_sha256: str | None = None
+    binding_id: str | None = None
+    binding_sha256: str | None = None
     knob_id: OptimizationKnob
     direction: StrategyDirection
     requested_value: Scalar
@@ -546,15 +550,34 @@ class NumericProposalActionV2(_Model):
     threshold_refs: tuple[str, ...] = ()
     expected_effects: tuple[ExpectedEffectV2, ...] = Field(min_length=1, max_length=3)
 
-    @field_validator("effective_domain_sha256")
+    @field_validator("claim_id", "binding_id")
     @classmethod
-    def domain_hash(cls, value: str) -> str:
-        if not _SHA256.fullmatch(value):
-            raise ValueError("effective domain hash is invalid")
+    def knowledge_id(cls, value: str | None) -> str | None:
+        if value is not None and not _ID.fullmatch(value):
+            raise ValueError("proposal knowledge identifier is invalid")
+        return value
+
+    @field_validator(
+        "claim_sha256", "binding_sha256", "effective_domain_sha256"
+    )
+    @classmethod
+    def knowledge_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("proposal knowledge or domain hash is invalid")
         return value
 
     @model_validator(mode="after")
     def direction_matches_knob(self) -> "NumericProposalActionV2":
+        knowledge_binding = (
+            self.claim_id,
+            self.claim_sha256,
+            self.binding_id,
+            self.binding_sha256,
+        )
+        if any(value is not None for value in knowledge_binding) and any(
+            value is None for value in knowledge_binding
+        ):
+            raise ValueError("proposal knowledge binding is incomplete")
         if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
             if self.direction not in {
                 StrategyDirection.ENABLE,

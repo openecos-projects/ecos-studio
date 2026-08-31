@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ecos_agent.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
@@ -7,6 +9,7 @@ from ecos_agent.optimization_contracts import (
     EpisodeBudget,
     KnowledgeReference,
     LegalAction,
+    StageEvidenceFeature,
     StageObservation,
 )
 from ecos_agent.optimization_knowledge_compiler import (
@@ -17,6 +20,7 @@ from ecos_agent.optimization_knowledge_compiler import (
     StateEvidenceFeature,
     StatePredicate,
     VersionBoundToolBinding,
+    _validate_parameter_card_bindings,
     build_state_evidence_request,
     compile_supported_action_view,
 )
@@ -65,19 +69,19 @@ def _catalog(*, binding_claim_sha256: str = HASH) -> KnowledgeSupportCatalog:
             StatePredicate(
                 feature_id="route_la_total_overflow",
                 op="positive",
-                rule_ref="rules.congestion.positive_overflow.v1",
+                rule_ref="rules.numeric.positive.v1",
             ),
             StatePredicate(
                 feature_id="local_cell_density_hotspot",
                 op="present",
-                rule_ref="rules.congestion.local_hotspot.v1",
+                rule_ref="rules.evidence.present.v1",
             ),
         ),
         anti_predicates=(
             StatePredicate(
                 feature_id="long_net_pressure_dominant",
                 op="true",
-                rule_ref="rules.congestion.long_net_pressure.v1",
+                rule_ref="rules.boolean.true.v1",
             ),
         ),
         expected_effects=("route_la_total_overflow:decrease",),
@@ -215,3 +219,134 @@ def test_state_evidence_derives_reference_delta_and_history_trend() -> None:
 
     assert features["delta.route_la_total_overflow"] == 2.0
     assert features["trend.route_la_total_overflow"] == "increasing"
+
+
+def test_state_predicate_rejects_unknown_or_mismatched_frozen_rule() -> None:
+    with pytest.raises(ValueError, match="rule"):
+        StatePredicate(
+            feature_id="overflow_map",
+            op="present",
+            rule_ref="rules.unregistered.v1",
+        )
+    with pytest.raises(ValueError, match="rule"):
+        StatePredicate(
+            feature_id="overflow_map",
+            op="positive",
+            rule_ref="rules.evidence.present.v1",
+        )
+
+
+def test_claim_requires_predicates_for_all_required_evidence() -> None:
+    with pytest.raises(ValueError, match="required evidence"):
+        GeneralDomainClaim(
+            claim_ref=KnowledgeReference(entity_id="claim.test", chunk_sha256=CHUNK_HASH),
+            claim_sha256=HASH,
+            stages=("place",),
+            state_predicates=(
+                StatePredicate(
+                    feature_id="overflow_map",
+                    op="present",
+                    rule_ref="rules.evidence.present.v1",
+                ),
+            ),
+            required_evidence=("overflow_map", "cell_density_map"),
+        )
+
+
+def test_parameter_card_binding_rejects_tampered_hash() -> None:
+    action = BoundKnowledgeAction(
+        knob_id="place.target_density",
+        direction="decrease",
+        parameter_card_ref=(
+            "knowledge/optimization/parameter-effectiveness/cards/"
+            "place.target_density.json"
+        ),
+        parameter_card_sha256=HASH,
+        consumer_ids=("dreamplace.density_objective",),
+        activation_predicate_ids=("dreamplace.density_objective",),
+    )
+    binding = VersionBoundToolBinding(
+        binding_id="binding.test.v1",
+        binding_sha256=HASH,
+        claim_id="claim.test.v1",
+        claim_sha256=HASH,
+        toolchain_ref=HASH,
+        actions=(action,),
+        consumer_ids=action.consumer_ids,
+        activation_predicate_ids=action.activation_predicate_ids,
+    )
+
+    with pytest.raises(ValueError, match="parameter card"):
+        _validate_parameter_card_bindings(binding)
+
+
+def test_state_evidence_reference_must_be_safe_and_relative() -> None:
+    feature = StateEvidenceFeature(
+        feature_id="overflow_map",
+        value=True,
+        evidence_ref="artifacts/overflow-map.json",
+        evidence_sha256=HASH,
+    )
+    assert feature.evidence_ref == "artifacts/overflow-map.json"
+    with pytest.raises(ValueError, match="reference"):
+        StateEvidenceFeature(
+            feature_id="overflow_map",
+            value=True,
+            evidence_ref="../overflow-map.json",
+            evidence_sha256=HASH,
+        )
+
+
+def test_state_evidence_request_preserves_observation_feature_reference() -> None:
+    observation = _observation().model_copy(
+        update={
+            "state_evidence": (
+                StageEvidenceFeature(
+                    feature_id="local_cell_density_hotspot",
+                    value=True,
+                    evidence_ref="place/analysis/qor_hotspots.json#/hotspots/0",
+                    evidence_sha256="sha256:" + "7" * 64,
+                ),
+            )
+        }
+    )
+    state = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=observation,
+        current_values={"place.target_density": 0.85},
+    )
+    feature = next(
+        item for item in state.features if item.feature_id == "local_cell_density_hotspot"
+    )
+    assert feature.evidence_ref == "place/analysis/qor_hotspots.json#/hotspots/0"
+    assert feature.evidence_sha256 == "sha256:" + "7" * 64
+
+
+def test_compiler_keeps_multiple_bindings_for_one_claim() -> None:
+    base = _catalog()
+    second = base.bindings[0].model_copy(
+        update={
+            "binding_id": "ecos.place.target_density.decrease.alternate.v1",
+            "binding_sha256": "sha256:" + "8" * 64,
+        }
+    )
+    catalog = base.model_copy(update={"bindings": (*base.bindings, second)})
+    view = _compile(
+        StateEvidenceFeature(
+            feature_id="local_cell_density_hotspot",
+            value=True,
+            evidence_sha256="sha256:" + "f" * 64,
+        ),
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=False,
+            evidence_sha256="sha256:" + "1" * 64,
+        ),
+        catalog=catalog,
+    )
+
+    assert {action.binding_id for action in view.actions} == {
+        base.bindings[0].binding_id,
+        second.binding_id,
+    }

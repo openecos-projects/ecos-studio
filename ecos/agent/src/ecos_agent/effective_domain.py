@@ -382,6 +382,7 @@ def validate_optimization_proposal_v2(
     *,
     context_ref: Mapping[str, str],
     attempted: Iterable[RequestedKnobValue] = (),
+    supported_action: Mapping[str, Any] | None = None,
 ) -> OptimizationProposalV2:
     """Parse and validate one exact-value proposal without granting execution authority."""
     try:
@@ -391,4 +392,39 @@ def validate_optimization_proposal_v2(
     if proposal.context_ref.model_dump(mode="json") != dict(context_ref):
         raise EffectiveDomainError("proposal context does not match planning turn")
     validate_numeric_proposal(proposal, domain, attempted=attempted)
+    if supported_action is not None:
+        _validate_supported_action(proposal, supported_action)
     return proposal
+
+
+def _validate_supported_action(
+    proposal: OptimizationProposalV2, supported_action: Mapping[str, Any]
+) -> None:
+    action = proposal.action
+    if action is None:
+        raise EffectiveDomainError("proposal action is missing")
+    claim_ref = supported_action.get("claim_ref")
+    claim_id = claim_ref.get("entity_id") if isinstance(claim_ref, Mapping) else None
+    expected = {
+        "claim_id": claim_id,
+        "claim_sha256": supported_action.get("claim_sha256"),
+        "binding_id": supported_action.get("binding_id"),
+        "binding_sha256": supported_action.get("binding_sha256"),
+        "knob_id": supported_action.get("knob_id"),
+        "direction": supported_action.get("direction"),
+        "effective_domain_sha256": supported_action.get("effective_domain_sha256"),
+    }
+    actual = {
+        "claim_id": action.claim_id,
+        "claim_sha256": action.claim_sha256,
+        "binding_id": action.binding_id,
+        "binding_sha256": action.binding_sha256,
+        "knob_id": action.knob_id.value,
+        "direction": action.direction.value,
+        "effective_domain_sha256": action.effective_domain_sha256,
+    }
+    allowed = supported_action.get("allowed_requested_values")
+    if actual != expected or not isinstance(allowed, (tuple, list)):
+        raise EffectiveDomainError("proposal does not match compiled knowledge support")
+    if action.requested_value not in allowed:
+        raise EffectiveDomainError("proposal value is not supported by knowledge action")

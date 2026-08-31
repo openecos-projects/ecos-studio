@@ -17,6 +17,7 @@ from ecos_agent.optimization_contracts import (
     TimingMetric,
 )
 from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization_knowledge_cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
@@ -232,7 +233,8 @@ def export_episode_traces(
     planning = OptimizationPlanningAudit(episode_root).replay()
     provider = OptimizationPlanningProviderEvidenceAudit(episode_root).replay()
     decisions = OptimizationDecisionAudit(episode_root).replay()
-    _verify_episode_heads(state, ledger, planning, provider, decisions)
+    cases = EmpiricalCaseAuditStore(episode_root).replay()
+    _verify_episode_heads(state, ledger, planning, provider, decisions, cases)
     if ledger.pending_intervention_ids:
         raise ValueError("episode trace contains pending interventions")
     mode: Mode = (
@@ -306,7 +308,7 @@ def _verified_episode_state(episode_root: Path) -> dict[str, object]:
     return payload
 
 
-def _verify_episode_heads(state, ledger, planning, provider, decisions) -> None:
+def _verify_episode_heads(state, ledger, planning, provider, decisions, cases) -> None:
     expected = (
         ("ledger", len(ledger.entries), ledger.chain_head_sha256),
         ("planning_audit", len(planning.entries), planning.chain_head_sha256),
@@ -323,6 +325,11 @@ def _verify_episode_heads(state, ledger, planning, provider, decisions) -> None:
             or state.get(f"{prefix}_chain_head_sha256") != head
         ):
             raise ValueError("episode state does not match its audit chains")
+    if (
+        state.get("case_audit_event_count", 0) != cases.event_count
+        or state.get("case_audit_chain_head_sha256") != cases.chain_head_sha256
+    ):
+        raise ValueError("episode state does not match its empirical case audit")
 
 
 def _planning_event_traces(

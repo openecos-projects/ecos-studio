@@ -656,12 +656,53 @@ class BudgetSnapshot(_ContractModel):
         )
 
 
+class StageEvidenceFeature(_ContractModel):
+    feature_id: str
+    value: KnobScalar
+    evidence_sha256: str
+    evidence_ref: str
+
+    @field_validator("feature_id")
+    @classmethod
+    def validate_feature_id(cls, value: str) -> str:
+        if not _METRIC_ID.fullmatch(value):
+            raise ValueError("stage evidence feature id is invalid")
+        return value
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, value: KnobScalar) -> KnobScalar:
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("stage evidence feature value is invalid")
+        return value
+
+    @field_validator("evidence_sha256")
+    @classmethod
+    def validate_evidence_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("stage evidence hash is invalid")
+        return value
+
+    @field_validator("evidence_ref")
+    @classmethod
+    def validate_evidence_ref(cls, value: str) -> str:
+        path, separator, fragment = value.partition("#")
+        if (
+            not separator
+            or not fragment.startswith("/hotspots/")
+            or not safe_relative_ref(path)
+        ):
+            raise ValueError("stage evidence reference is invalid")
+        return value
+
+
 class StageObservation(_ContractModel):
     schema_version: Literal["ecos.stage_observation.v1"] = "ecos.stage_observation.v1"
     observation_id: str
     stage: ECCStepName
     evidence_manifest_sha256: str
     metrics: dict[str, float]
+    state_evidence: tuple[StageEvidenceFeature, ...] = Field(default=(), max_length=64)
     requested_knobs: tuple[RequestedKnobValue, ...] = Field(default=(), max_length=3)
     budget: BudgetSnapshot
 

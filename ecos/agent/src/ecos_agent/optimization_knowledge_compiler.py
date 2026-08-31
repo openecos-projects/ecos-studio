@@ -6,6 +6,7 @@ import math
 import re
 from collections.abc import Mapping
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Literal
 
 from pydantic import (
@@ -33,10 +34,25 @@ from ecos_agent.optimization_contracts import (
     StrategyDirection,
     TerminalObservation,
 )
+from ecos_agent.parameter_semantics import card_hash, load_parameter_cards
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 StateValue = StrictBool | StrictInt | StrictFloat | str
+_RULE_REGISTRY = MappingProxyType(
+    {
+        "rules.evidence.present.v1": "present",
+        "rules.anti_condition.absent.v1": "true",
+        "rules.boolean.true.v1": "true",
+        "rules.boolean.false.v1": "false",
+        "rules.numeric.positive.v1": "positive",
+        "rules.numeric.zero.v1": "zero",
+        "rules.numeric.negative.v1": "negative",
+        "rules.trend.increasing.v1": "increasing",
+        "rules.trend.decreasing.v1": "decreasing",
+        "rules.trend.stable.v1": "stable",
+    }
+)
 
 
 class _Model(BaseModel):
@@ -48,6 +64,16 @@ class KnowledgeApplicability(StrEnum):
     WEAK = "weak"
     BLOCKED = "blocked"
     UNKNOWN = "unknown"
+
+
+_APPLICABILITY_RANK = MappingProxyType(
+    {
+        KnowledgeApplicability.BLOCKED: 0,
+        KnowledgeApplicability.UNKNOWN: 1,
+        KnowledgeApplicability.WEAK: 2,
+        KnowledgeApplicability.PASS: 3,
+    }
+)
 
 
 class StatePredicate(_Model):
@@ -73,10 +99,17 @@ class StatePredicate(_Model):
             raise ValueError("state predicate identifier is invalid")
         return value
 
+    @model_validator(mode="after")
+    def validate_frozen_rule(self) -> StatePredicate:
+        if _RULE_REGISTRY.get(self.rule_ref) != self.op:
+            raise ValueError("state predicate rule is unknown or mismatched")
+        return self
+
 
 class StateEvidenceFeature(_Model):
     feature_id: str
     value: StateValue
+    evidence_ref: str | None = None
     evidence_sha256: str
 
     @field_validator("feature_id")
@@ -95,6 +128,15 @@ class StateEvidenceFeature(_Model):
             raise ValueError("state feature trend is invalid")
         return value
 
+    @field_validator("evidence_ref")
+    @classmethod
+    def validate_ref(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not value or value.startswith("/") or ".." in value.split("/")
+        ):
+            raise ValueError("state feature evidence reference is invalid")
+        return value
+
     @field_validator("evidence_sha256")
     @classmethod
     def validate_hash(cls, value: str) -> str:
@@ -110,6 +152,9 @@ class GeneralDomainClaim(_Model):
     stages: tuple[str, ...] = Field(min_length=1)
     state_predicates: tuple[StatePredicate, ...] = Field(min_length=1)
     anti_predicates: tuple[StatePredicate, ...] = ()
+    required_evidence: tuple[str, ...] = ()
+    action_intents: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
     expected_effects: tuple[str, ...] = ()
     guardrails: tuple[str, ...] = ()
 
@@ -127,17 +172,40 @@ class GeneralDomainClaim(_Model):
             raise ValueError("claim stages are invalid")
         return value
 
-    @field_validator("expected_effects", "guardrails")
+    @field_validator(
+        "required_evidence", "action_intents", "evidence_refs", "expected_effects", "guardrails"
+    )
     @classmethod
     def validate_labels(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(value)) != len(value) or any(not item or len(item) > 128 for item in value):
             raise ValueError("claim labels are invalid")
         return value
 
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(
+            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,127}@sha256:[0-9a-f]{64}", item)
+            for item in value
+        ):
+            raise ValueError("claim evidence references are invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_required_evidence(self) -> GeneralDomainClaim:
+        predicates = {item.feature_id for item in self.state_predicates if item.required}
+        if not set(self.required_evidence) <= predicates:
+            raise ValueError("claim required evidence lacks a required predicate")
+        return self
+
 
 class BoundKnowledgeAction(_Model):
     knob_id: str
     direction: StrategyDirection
+    parameter_card_ref: str | None = None
+    parameter_card_sha256: str | None = None
+    consumer_ids: tuple[str, ...] = ()
+    activation_predicate_ids: tuple[str, ...] = ()
 
     @field_validator("knob_id")
     @classmethod
@@ -145,6 +213,35 @@ class BoundKnowledgeAction(_Model):
         if not _ID.fullmatch(value):
             raise ValueError("bound knob identifier is invalid")
         return value
+
+    @field_validator("consumer_ids", "activation_predicate_ids")
+    @classmethod
+    def validate_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value) or any(not _ID.fullmatch(item) for item in value):
+            raise ValueError("bound action identifiers are invalid")
+        return value
+
+    @field_validator("parameter_card_ref")
+    @classmethod
+    def validate_card_ref(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not value or value.startswith("/") or ".." in value.split("/")
+        ):
+            raise ValueError("parameter card reference is invalid")
+        return value
+
+    @field_validator("parameter_card_sha256")
+    @classmethod
+    def validate_card_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("parameter card hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_card_binding(self) -> BoundKnowledgeAction:
+        if (self.parameter_card_ref is None) != (self.parameter_card_sha256 is None):
+            raise ValueError("parameter card binding is incomplete")
+        return self
 
 
 class VersionBoundToolBinding(_Model):
@@ -158,16 +255,16 @@ class VersionBoundToolBinding(_Model):
     toolchain_ref: str
     actions: tuple[BoundKnowledgeAction, ...] = Field(min_length=1)
     consumer_ids: tuple[str, ...] = ()
-    activation_predicate_id: str | None = None
+    activation_predicate_ids: tuple[str, ...] = ()
 
-    @field_validator("binding_id", "claim_id", "activation_predicate_id")
+    @field_validator("binding_id", "claim_id")
     @classmethod
     def validate_id(cls, value: str | None) -> str | None:
         if value is not None and not _ID.fullmatch(value):
             raise ValueError("binding identifier is invalid")
         return value
 
-    @field_validator("consumer_ids")
+    @field_validator("consumer_ids", "activation_predicate_ids")
     @classmethod
     def validate_consumers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(value)) != len(value) or any(not _ID.fullmatch(item) for item in value):
@@ -180,6 +277,22 @@ class VersionBoundToolBinding(_Model):
         if not _SHA256.fullmatch(value):
             raise ValueError("binding hash is invalid")
         return value
+
+    @model_validator(mode="after")
+    def validate_action_evidence(self) -> VersionBoundToolBinding:
+        action_consumers = {
+            consumer_id for action in self.actions for consumer_id in action.consumer_ids
+        }
+        action_predicates = {
+            predicate_id
+            for action in self.actions
+            for predicate_id in action.activation_predicate_ids
+        }
+        if action_consumers and action_consumers != set(self.consumer_ids):
+            raise ValueError("binding consumers do not match parameter cards")
+        if action_predicates and action_predicates != set(self.activation_predicate_ids):
+            raise ValueError("binding activation predicates do not match parameter cards")
+        return self
 
 
 class KnowledgeSupportCatalog(_Model):
@@ -262,6 +375,10 @@ class SupportedKnowledgeAction(KnowledgeMatch):
     toolchain_ref: str
     knob_id: OptimizationKnob
     direction: StrategyDirection
+    parameter_card_ref: str | None = None
+    parameter_card_sha256: str | None = None
+    consumer_ids: tuple[str, ...] = ()
+    activation_predicate_ids: tuple[str, ...] = ()
     effective_domain_sha256: str
     allowed_requested_values: tuple[StrictBool | StrictInt | StrictFloat, ...]
     expected_effects: tuple[str, ...]
@@ -288,6 +405,11 @@ class SupportedActionView(_Model):
     @property
     def view_sha256(self) -> str:
         return canonical_sha256(self.model_dump(mode="json"))
+
+
+BindingEvaluation = tuple[
+    VersionBoundToolBinding | None, KnowledgeApplicability, tuple[str, ...]
+]
 
 
 def build_state_evidence_request(
@@ -322,6 +444,13 @@ def build_state_evidence_request(
             feature_id=knob_id,
             value=value,
             evidence_sha256=observation_ref.sha256,
+        )
+    for feature in observation.state_evidence:
+        features[feature.feature_id] = StateEvidenceFeature(
+            feature_id=feature.feature_id,
+            value=feature.value,
+            evidence_ref=feature.evidence_ref,
+            evidence_sha256=feature.evidence_sha256,
         )
     if any(key.startswith("place.") for key in current_values):
         features["current_place_knob_values"] = StateEvidenceFeature(
@@ -375,7 +504,9 @@ def compile_supported_action_view(
 ) -> SupportedActionView:
     retrieved = {(item.entity_id, item.chunk_sha256) for item in retrieved_refs}
     legal = {(item.knob_id.value, item.direction) for item in legal_actions}
-    bindings = {item.claim_id: item for item in catalog.bindings}
+    bindings: dict[str, list[VersionBoundToolBinding]] = {}
+    for item in catalog.bindings:
+        bindings.setdefault(item.claim_id, []).append(item)
     domains = {item.knob_id.value: item for item in effective_domains}
     features = {item.feature_id: item.value for item in state.features}
     matches: list[KnowledgeMatch] = []
@@ -383,8 +514,13 @@ def compile_supported_action_view(
     for claim in catalog.claims:
         if (claim.claim_ref.entity_id, claim.claim_ref.chunk_sha256) not in retrieved:
             continue
-        binding = bindings.get(claim.claim_ref.entity_id)
-        applicability, reasons = _match_claim(claim, binding, state, features, legal)
+        evaluated = _evaluate_bindings(
+            claim, bindings.get(claim.claim_ref.entity_id, []), state, features, legal
+        )
+        binding, applicability, reasons = max(
+            evaluated,
+            key=lambda item: _APPLICABILITY_RANK[item[1]],
+        )
         matches.append(
             KnowledgeMatch(
                 claim_ref=claim.claim_ref,
@@ -393,41 +529,74 @@ def compile_supported_action_view(
                 reason_codes=reasons,
             )
         )
-        if binding is None or applicability not in {
-            KnowledgeApplicability.PASS,
-            KnowledgeApplicability.WEAK,
-        }:
-            continue
-        for action in binding.actions:
-            if (action.knob_id, action.direction) not in legal:
+        for binding, applicability, reasons in evaluated:
+            if binding is None or applicability not in {
+                KnowledgeApplicability.PASS,
+                KnowledgeApplicability.WEAK,
+            }:
                 continue
-            domain = domains.get(action.knob_id)
-            allowed_values = _directional_values(domain, action.direction)
-            if domain is None or not allowed_values:
-                continue
-            actions.append(
-                SupportedKnowledgeAction(
-                    claim_ref=claim.claim_ref,
-                    claim_sha256=claim.claim_sha256,
-                    applicability=applicability,
-                    reason_codes=reasons,
-                    binding_id=binding.binding_id,
-                    binding_sha256=binding.binding_sha256,
-                    toolchain_ref=binding.toolchain_ref,
-                    knob_id=OptimizationKnob(action.knob_id),
-                    direction=action.direction,
-                    effective_domain_sha256=domain.snapshot_sha256,
-                    allowed_requested_values=allowed_values,
-                    expected_effects=claim.expected_effects,
-                    guardrails=claim.guardrails,
-                    anti_conditions=tuple(item.feature_id for item in claim.anti_predicates),
+            for action in binding.actions:
+                _append_supported_action(
+                    actions, action, binding, claim, applicability, reasons, legal, domains
                 )
-            )
     return SupportedActionView(
         state=state,
         catalog_sha256=catalog.catalog_sha256,
         matches=tuple(matches),
         actions=tuple(actions),
+    )
+
+
+def _evaluate_bindings(
+    claim: GeneralDomainClaim,
+    bindings: list[VersionBoundToolBinding],
+    state: OptimizationStateEvidenceRequest,
+    features: Mapping[str, StateValue],
+    legal: set[tuple[str, StrategyDirection]],
+) -> tuple[BindingEvaluation, ...]:
+    return tuple(
+        (binding, *_match_claim(claim, binding, state, features, legal))
+        for binding in bindings
+    ) or ((None, *_match_claim(claim, None, state, features, legal)),)
+
+
+def _append_supported_action(
+    actions: list[SupportedKnowledgeAction],
+    action: BoundKnowledgeAction,
+    binding: VersionBoundToolBinding,
+    claim: GeneralDomainClaim,
+    applicability: KnowledgeApplicability,
+    reasons: tuple[str, ...],
+    legal: set[tuple[str, StrategyDirection]],
+    domains: Mapping[str, EffectiveDomainSnapshot],
+) -> None:
+    if (action.knob_id, action.direction) not in legal:
+        return
+    domain = domains.get(action.knob_id)
+    allowed_values = _directional_values(domain, action.direction)
+    if domain is None or not allowed_values:
+        return
+    actions.append(
+        SupportedKnowledgeAction(
+            claim_ref=claim.claim_ref,
+            claim_sha256=claim.claim_sha256,
+            applicability=applicability,
+            reason_codes=reasons,
+            binding_id=binding.binding_id,
+            binding_sha256=binding.binding_sha256,
+            toolchain_ref=binding.toolchain_ref,
+            knob_id=OptimizationKnob(action.knob_id),
+            direction=action.direction,
+            parameter_card_ref=action.parameter_card_ref,
+            parameter_card_sha256=action.parameter_card_sha256,
+            consumer_ids=action.consumer_ids,
+            activation_predicate_ids=action.activation_predicate_ids,
+            effective_domain_sha256=domain.snapshot_sha256,
+            allowed_requested_values=allowed_values,
+            expected_effects=claim.expected_effects,
+            guardrails=claim.guardrails,
+            anti_conditions=tuple(item.feature_id for item in claim.anti_predicates),
+        )
     )
 
 
@@ -508,6 +677,8 @@ def knowledge_support_catalog_from_bundles(
         for item in raw_support
         if item.get("binding") is not None
     )
+    for binding in bindings:
+        _validate_parameter_card_bindings(binding)
     return KnowledgeSupportCatalog(
         catalog_sha256=canonical_sha256(raw_support),
         claims=claims,
@@ -515,25 +686,49 @@ def knowledge_support_catalog_from_bundles(
     )
 
 
+def _validate_parameter_card_bindings(binding: VersionBoundToolBinding) -> None:
+    cards = load_parameter_cards()
+    for action in binding.actions:
+        try:
+            knob = OptimizationKnob(action.knob_id)
+            card = cards[knob]
+        except (KeyError, ValueError) as exc:
+            raise ValueError("binding parameter card is unavailable") from exc
+        expected_ref = (
+            "knowledge/optimization/parameter-effectiveness/cards/"
+            f"{action.knob_id}.json"
+        )
+        if (
+            action.parameter_card_ref != expected_ref
+            or action.parameter_card_sha256 != card_hash(card)
+            or action.consumer_ids != tuple(item.consumer_id for item in card.consumers)
+            or action.activation_predicate_ids != card.runtime_probe_ids
+        ):
+            raise ValueError("binding parameter card evidence does not match")
+
+
 def _evaluate(predicate: StatePredicate, features: Mapping[str, StateValue]) -> bool | None:
     if predicate.feature_id not in features:
         return None
     value = features[predicate.feature_id]
-    if predicate.op == "present":
+    op = _RULE_REGISTRY.get(predicate.rule_ref)
+    if op is None or op != predicate.op:
+        return False
+    if op == "present":
         return True
-    if predicate.op == "true":
+    if op == "true":
         return value is True
-    if predicate.op == "false":
+    if op == "false":
         return value is False
-    if predicate.op in {"positive", "zero", "negative"}:
+    if op in {"positive", "zero", "negative"}:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return False
         return {
             "positive": value > 0,
             "zero": value == 0,
             "negative": value < 0,
-        }[predicate.op]
-    return value == predicate.op
+        }[op]
+    return value == op
 
 
 def _add_delta_features(

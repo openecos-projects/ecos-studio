@@ -13,6 +13,7 @@ from ecos_agent.effective_domain import (
     build_context_fingerprint,
     compile_effective_domain,
     validate_numeric_proposal,
+    validate_optimization_proposal_v2,
 )
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import OptimizationKnob
@@ -421,6 +422,62 @@ def test_v2_proposal_must_bind_every_effective_domain_threshold() -> None:
         }
     )
     validate_numeric_proposal(bound, domain)
+
+
+def test_v2_validator_binds_action_to_compiled_knowledge_support() -> None:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    domain = compile_effective_domain(
+        card, context=_domain_context(), baseline_surface_value=0.2
+    )
+    context_ref = {
+        "episode_id": "episode-1",
+        "checkpoint_id": "place",
+        "input_sha256": HASH,
+    }
+    supported = {
+        "claim_ref": {"entity_id": "claim.one", "chunk_sha256": HASH},
+        "claim_sha256": "sha256:" + "b" * 64,
+        "binding_id": "binding.one",
+        "binding_sha256": "sha256:" + "c" * 64,
+        "knob_id": card.knob_id.value,
+        "direction": "increase",
+        "effective_domain_sha256": domain.snapshot_sha256,
+        "allowed_requested_values": list(domain.allowed_requested_values),
+    }
+    payload = {
+        "context_ref": context_ref,
+        "decision": "propose",
+        "reason_code": "observation",
+        "rationale_summary": "bounded proposal",
+        "observation_refs": [{"observation_id": "obs-1", "sha256": HASH}],
+        "action": {
+            "claim_id": "claim.one",
+            "claim_sha256": "sha256:" + "b" * 64,
+            "binding_id": "binding.one",
+            "binding_sha256": "sha256:" + "c" * 64,
+            "knob_id": card.knob_id.value,
+            "direction": "increase",
+            "requested_value": 0.85,
+            "effective_domain_sha256": domain.snapshot_sha256,
+            "expected_effects": [
+                {"metric_id": "route_wirelength", "direction": "decrease"}
+            ],
+        },
+    }
+
+    validate_optimization_proposal_v2(
+        payload, domain, context_ref=context_ref, supported_action=supported
+    )
+    payload["action"]["binding_id"] = "binding.other"
+    with pytest.raises(EffectiveDomainError, match="knowledge support"):
+        validate_optimization_proposal_v2(
+            payload, domain, context_ref=context_ref, supported_action=supported
+        )
+    payload["action"].pop("binding_sha256")
+    with pytest.raises(EffectiveDomainError, match="invalid"):
+        validate_optimization_proposal_v2(
+            payload, domain, context_ref=context_ref, supported_action=supported
+        )
 
 
 def test_dreamplace_used_receipt_requires_consumer_observation() -> None:

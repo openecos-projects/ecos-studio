@@ -59,6 +59,17 @@ from ecos_agent.optimization_knowledge_compiler import (
     build_state_evidence_request,
     compile_supported_action_view,
 )
+from ecos_agent.optimization_knowledge_cases import (
+    EmpiricalCaseAudit,
+    EmpiricalCaseAuditReplay,
+    EmpiricalCaseAuditStore,
+    EmpiricalCaseDiagnostic,
+    EmpiricalOutcome,
+    TerminalEmpiricalCase,
+    build_empirical_case_audit,
+    build_terminal_empirical_case,
+    select_empirical_cases,
+)
 from ecos_agent.optimization_ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
@@ -121,6 +132,7 @@ class OptimizationEpisodeControllerError(ValueError):
 class OptimizationAgentMode(StrEnum):
     FULL_AGENT = "full_agent"
     LLM_NO_KNOWLEDGE = "llm_no_knowledge"
+    RAW_RAG = "raw_rag"
 
 
 @dataclass(frozen=True)
@@ -194,6 +206,8 @@ class OptimizationPlanningContext:
     excluded_surface_values: tuple[RequestedKnobValue, ...] = ()
     effective_domains: tuple[EffectiveDomainSnapshot, ...] = ()
     supported_action_view: SupportedActionView | None = None
+    empirical_cases: tuple[TerminalEmpiricalCase, ...] = ()
+    empirical_case_audit: EmpiricalCaseAudit | None = None
 
 
 @dataclass(frozen=True)
@@ -274,6 +288,14 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         ]
     if context.task_memory is not None:
         payload["task_memory"] = context.task_memory.model_dump(mode="json")
+    payload["empirical_cases"] = [
+        item.model_dump(mode="json") for item in context.empirical_cases
+    ]
+    payload["empirical_case_audit"] = (
+        context.empirical_case_audit.model_dump(mode="json")
+        if context.empirical_case_audit is not None
+        else None
+    )
     return payload
 
 
@@ -316,6 +338,7 @@ class _PlannerTurn:
     proposal: OptimizationProposal
     requested: RequestedKnobValue | None = None
     provider_payload_sha256: str | None = None
+    proposal_v2: OptimizationProposalV2 | None = None
 
 
 class OptimizationProposalPlanner(Protocol):
@@ -342,6 +365,9 @@ class _PersistedEpisodeState(BaseModel):
     receipt_aware_planning: bool = Field(
         default=True, exclude_if=lambda value: value is True
     )
+    knowledge_case_shots: Literal[0, 3] = Field(
+        default=0, exclude_if=lambda value: value == 0
+    )
     state: OptimizationEpisodeState
     budget: BudgetSnapshot
     started_at: float
@@ -356,11 +382,29 @@ class _PersistedEpisodeState(BaseModel):
     planning_provider_audit_chain_head_sha256: str | None = None
     decision_audit_event_count: int = Field(default=0, ge=0)
     decision_audit_chain_head_sha256: str | None = None
+    case_audit_event_count: int = Field(
+        default=0, ge=0, exclude_if=lambda value: value == 0
+    )
+    case_audit_chain_head_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    external_case_pool: bool = Field(
+        default=False, exclude_if=lambda value: value is False
+    )
+    case_pool_event_count: int = Field(
+        default=0, ge=0, exclude_if=lambda value: value == 0
+    )
+    case_pool_chain_head_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     planning_only_turns: int = Field(default=0, ge=0)
     incumbent_candidate_root_ref: str | None = None
     incumbent_candidate_manifest_ref: str | None = None
     incumbent_candidate_manifest_sha256: str | None = None
     proposal: OptimizationProposal | None = None
+    pending_v2_proposal: OptimizationProposalV2 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     requested: RequestedKnobValue | None = None
     attempted_requests: tuple[RequestedKnobValue, ...] = ()
     pending_intervention_id: str | None = None
@@ -413,6 +457,8 @@ class OptimizationEpisodeController:
         | None = None,
         execution_context: Mapping[str, object] | None = None,
         receipt_aware_planning: bool = True,
+        knowledge_case_shots: Literal[0, 3] = 0,
+        knowledge_case_pool_root: Path | None = None,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -424,6 +470,15 @@ class OptimizationEpisodeController:
                 "receipt-aware planning flag is invalid"
             )
         self.receipt_aware_planning = receipt_aware_planning
+        if type(knowledge_case_shots) is not int or knowledge_case_shots not in {0, 3}:
+            raise OptimizationEpisodeControllerError(
+                "knowledge case shots must be zero or three"
+            )
+        if mode != OptimizationAgentMode.FULL_AGENT and knowledge_case_shots:
+            raise OptimizationEpisodeControllerError(
+                "knowledge cases require full-agent mode"
+            )
+        self.knowledge_case_shots = knowledge_case_shots
         self.planner = planner
         self.executor = executor
         self.ledger = ledger
@@ -432,6 +487,21 @@ class OptimizationEpisodeController:
             ledger.root
         )
         self._decision_audit = OptimizationDecisionAudit(ledger.root)
+        self._case_audit = EmpiricalCaseAuditStore(ledger.root)
+        self._external_case_pool = knowledge_case_pool_root is not None
+        self._case_pool = EmpiricalCaseAuditStore(
+            knowledge_case_pool_root
+            if knowledge_case_pool_root is not None
+            else ledger.root.parent / "knowledge-case-pool",
+            read_only=knowledge_case_pool_root is not None,
+        )
+        pool = self._case_pool.verify()
+        if self._external_case_pool and any(case.split != "train" for case in pool.cases):
+            raise OptimizationEpisodeControllerError(
+                "external knowledge case pool contains a non-training case"
+            )
+        self._case_pool_event_count = pool.event_count
+        self._case_pool_chain_head_sha256 = pool.chain_head_sha256
         self._clock = clock
         self._started_at = self._valid_clock()
         self._budget = budget
@@ -456,6 +526,7 @@ class OptimizationEpisodeController:
         self._execution_context = dict(execution_context or {})
         self._state = OptimizationEpisodeState.CREATED
         self._proposal: OptimizationProposal | None = None
+        self._pending_v2_proposal: OptimizationProposalV2 | None = None
         self._requested: RequestedKnobValue | None = None
         self._attempted_request_values: tuple[RequestedKnobValue, ...] = ()
         self._pending_intervention_id: str | None = None
@@ -539,6 +610,7 @@ class OptimizationEpisodeController:
         if self._budget.exhausted:
             self._state = OptimizationEpisodeState.STOPPED
             self._proposal = None
+            self._pending_v2_proposal = None
             self._requested = None
             self._persist()
             return self._result("budget_exhausted")
@@ -726,6 +798,7 @@ class OptimizationEpisodeController:
                 planner_source=planner_source,
             )
         self._proposal = proposal
+        self._pending_v2_proposal = planner_turn.proposal_v2
         self._requested = requested
         self._planning_only_turns = 0
         self._state = OptimizationEpisodeState.AWAITING_EXECUTION
@@ -750,6 +823,7 @@ class OptimizationEpisodeController:
         if self._budget.exhausted:
             self._state = OptimizationEpisodeState.STOPPED
             self._proposal = None
+            self._pending_v2_proposal = None
             self._requested = None
             self._persist()
             return self._result("budget_exhausted")
@@ -798,6 +872,7 @@ class OptimizationEpisodeController:
         if receipt is None:
             self._state = OptimizationEpisodeState.PLANNING
             self._proposal = None
+            self._pending_v2_proposal = None
             self._persist()
             return self._result("execution_not_started")
 
@@ -846,6 +921,7 @@ class OptimizationEpisodeController:
                 "episode has no unstarted execution to stop"
             )
         self._proposal = None
+        self._pending_v2_proposal = None
         self._requested = None
         self._state = OptimizationEpisodeState.STOPPED
         self._persist()
@@ -892,6 +968,8 @@ class OptimizationEpisodeController:
         | None = None,
         execution_context: Mapping[str, object] | None = None,
         receipt_aware_planning: bool = True,
+        knowledge_case_shots: Literal[0, 3] = 0,
+        knowledge_case_pool_root: Path | None = None,
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
         if not path.is_file() and any(
@@ -913,12 +991,15 @@ class OptimizationEpisodeController:
         provider_audit_replay = planning_provider_audit.verify()
         decision_audit = OptimizationDecisionAudit(ledger.root)
         decision_audit_replay = decision_audit.verify()
+        case_audit = EmpiricalCaseAuditStore(ledger.root)
+        case_audit_replay = case_audit.verify()
         cls._verify_snapshot_trace(
             snapshot,
             replay,
             audit_replay,
             provider_audit_replay,
             decision_audit_replay,
+            case_audit_replay,
         )
         if snapshot.task_memory_scope_sha256 != task_memory_scope_sha256:
             raise OptimizationEpisodeControllerError(
@@ -936,6 +1017,11 @@ class OptimizationEpisodeController:
         controller.episode_id = snapshot.episode_id
         controller.checkpoint_id = snapshot.checkpoint_id
         controller.mode = snapshot.mode
+        if snapshot.knowledge_case_shots != knowledge_case_shots:
+            raise OptimizationEpisodeControllerError(
+                "knowledge case shots do not match the recovered episode"
+            )
+        controller.knowledge_case_shots = snapshot.knowledge_case_shots
         if snapshot.receipt_aware_planning != receipt_aware_planning:
             raise OptimizationEpisodeControllerError(
                 "receipt-aware planning mode does not match the recovered episode"
@@ -956,8 +1042,34 @@ class OptimizationEpisodeController:
         controller._planning_audit = planning_audit
         controller._planning_provider_audit = planning_provider_audit
         controller._decision_audit = decision_audit
+        controller._case_audit = case_audit
+        controller._external_case_pool = knowledge_case_pool_root is not None
+        controller._case_pool = EmpiricalCaseAuditStore(
+            knowledge_case_pool_root
+            if knowledge_case_pool_root is not None
+            else ledger.root.parent / "knowledge-case-pool",
+            read_only=knowledge_case_pool_root is not None,
+        )
+        pool = controller._case_pool.verify()
+        if controller._external_case_pool and any(
+            case.split != "train" for case in pool.cases
+        ):
+            raise OptimizationEpisodeControllerError(
+                "external knowledge case pool contains a non-training case"
+            )
+        if (
+            snapshot.external_case_pool != controller._external_case_pool
+            or snapshot.case_pool_event_count != pool.event_count
+            or snapshot.case_pool_chain_head_sha256 != pool.chain_head_sha256
+        ):
+            raise OptimizationEpisodeControllerError(
+                "knowledge case pool does not match the recovered episode"
+            )
+        controller._case_pool_event_count = pool.event_count
+        controller._case_pool_chain_head_sha256 = pool.chain_head_sha256
         controller._state = snapshot.state
         controller._proposal = snapshot.proposal
+        controller._pending_v2_proposal = snapshot.pending_v2_proposal
         controller._requested = snapshot.requested
         controller._attempted_request_values = snapshot.attempted_requests
         controller._pending_intervention_id = snapshot.pending_intervention_id
@@ -978,6 +1090,7 @@ class OptimizationEpisodeController:
             )
             controller._state = OptimizationEpisodeState.QUARANTINED
             controller._proposal = None
+            controller._pending_v2_proposal = None
             controller._persist()
         return controller
 
@@ -1056,6 +1169,14 @@ class OptimizationEpisodeController:
             knowledge_refs: tuple[KnowledgeReference, ...] = ()
             knowledge_chunks: tuple[str, ...] = ()
             supported_action_view = None
+        elif self.mode == OptimizationAgentMode.RAW_RAG:
+            knowledge_refs = retrieval.knowledge_refs
+            knowledge_chunks = tuple(
+                channel.answer_text
+                for channel in retrieval.channels
+                if channel.answer_text is not None
+            )
+            supported_action_view = None
         else:
             supported_action_view = compile_supported_action_view(
                 state=build_state_evidence_request(
@@ -1112,6 +1233,31 @@ class OptimizationEpisodeController:
                 if channel.channel == KnowledgeChannel.TOOL
                 and channel.answer_text is not None
             )
+        if self.mode == OptimizationAgentMode.FULL_AGENT:
+            self._sync_case_pool()
+            case_replay = self._case_audit.verify()
+            selection, empirical_cases = select_empirical_cases(
+                case_replay.cases,
+                shot_count=self.knowledge_case_shots,
+                eligible_binding_ids=tuple(
+                    sorted(
+                        {item.binding_id for item in supported_action_view.actions}
+                    )
+                ),
+                eligible_toolchain_refs=tuple(
+                    sorted(
+                        {item.toolchain_ref for item in supported_action_view.actions}
+                    )
+                ),
+                held_out_design=self._design_id(),
+            )
+            empirical_case_audit = build_empirical_case_audit(
+                selection, empirical_cases
+            )
+            self._case_audit.append_selection(empirical_case_audit)
+        else:
+            empirical_cases = ()
+            empirical_case_audit = None
         context_ref = ProposalContextRef(
             episode_id=self.episode_id,
             checkpoint_id=self.checkpoint_id,
@@ -1127,6 +1273,14 @@ class OptimizationEpisodeController:
                     "supported_action_view": (
                         supported_action_view.model_dump(mode="json")
                         if supported_action_view is not None
+                        else None
+                    ),
+                    "empirical_cases": [
+                        item.model_dump(mode="json") for item in empirical_cases
+                    ],
+                    "empirical_case_audit": (
+                        empirical_case_audit.model_dump(mode="json")
+                        if empirical_case_audit is not None
                         else None
                     ),
                     "objective": (
@@ -1171,7 +1325,34 @@ class OptimizationEpisodeController:
             ineffective_requests,
             effective_domains,
             supported_action_view,
+            empirical_cases,
+            empirical_case_audit,
         )
+
+    def _design_id(self) -> str | None:
+        value = self._execution_context.get("design_id")
+        return value if isinstance(value, str) and _ID.fullmatch(value) else None
+
+    def _sync_case_pool(self) -> None:
+        pool = self._case_pool.verify()
+        if self._external_case_pool and (
+            pool.event_count != self._case_pool_event_count
+            or pool.chain_head_sha256 != self._case_pool_chain_head_sha256
+        ):
+            raise OptimizationEpisodeControllerError(
+                "frozen knowledge case pool changed during the episode"
+            )
+        local = {item.case_id: item for item in self._case_audit.verify().cases}
+        for case in pool.cases:
+            existing = local.get(case.case_id)
+            if existing is not None:
+                if existing != case:
+                    raise OptimizationEpisodeControllerError(
+                        "empirical case pool conflicts with episode audit"
+                    )
+                continue
+            self._case_audit.append_case(case)
+            local[case.case_id] = case
 
     def _effective_domain_context(
         self,
@@ -1395,6 +1576,11 @@ class OptimizationEpisodeController:
             domain,
             context_ref=context.context_ref.model_dump(mode="json"),
             attempted=self._attempted_requests(),
+            supported_action=(
+                self._supported_v2_action(context, parsed)
+                if self.mode == OptimizationAgentMode.FULL_AGENT
+                else None
+            ),
         )
         if proposal.action is not None and not any(
             item.knob_id == proposal.action.knob_id
@@ -1413,7 +1599,33 @@ class OptimizationEpisodeController:
                 else None
             ),
             self._v2_provider_payload_sha256(context),
+            proposal,
         )
+
+    @staticmethod
+    def _supported_v2_action(
+        context: OptimizationPlanningContext,
+        proposal: OptimizationProposalV2,
+    ) -> Mapping[str, object]:
+        action = proposal.action
+        if action is None or context.supported_action_view is None:
+            raise EffectiveDomainError("v2 proposal has no compiled knowledge support")
+        matches = tuple(
+            item
+            for item in context.supported_action_view.actions
+            if item.claim_ref.entity_id == action.claim_id
+            and item.claim_sha256 == action.claim_sha256
+            and item.binding_id == action.binding_id
+            and item.binding_sha256 == action.binding_sha256
+            and item.knob_id == action.knob_id
+            and item.direction == action.direction
+            and item.effective_domain_sha256 == action.effective_domain_sha256
+        )
+        if len(matches) != 1:
+            raise EffectiveDomainError(
+                "v2 proposal does not uniquely match compiled knowledge support"
+            )
+        return matches[0].model_dump(mode="json")
 
     @staticmethod
     def _v2_to_v1(proposal: OptimizationProposalV2) -> OptimizationProposal:
@@ -1599,6 +1811,7 @@ class OptimizationEpisodeController:
                 {
                     "mode": self.mode.value,
                     "receipt_aware_planning": self.receipt_aware_planning,
+                    "knowledge_case_shots": self.knowledge_case_shots,
                 }
             ),
             objective_contract_sha256=(
@@ -1678,67 +1891,73 @@ class OptimizationEpisodeController:
             details["incumbent_decision"] = incumbent_decision
         if decisive_metric is not None:
             details["decisive_metric"] = decisive_metric.value
-        self.ledger.append_terminal(
-            OptimizationTerminalOutcome(
-                intervention_id=self._pending_intervention_id,
-                outcome=outcome,
-                candidate_manifest_sha256=(
-                    receipt.evidence.candidate_manifest_sha256
-                    if receipt.evidence is not None
-                    else canonical_sha256(details)
-                ),
-                candidate_root_ref=(
-                    receipt.evidence.candidate_root_ref
-                    if receipt.evidence is not None
-                    else None
-                ),
-                candidate_manifest_ref=(
-                    receipt.evidence.candidate_manifest_ref
-                    if receipt.evidence is not None
-                    else None
-                ),
-                receipt_sha256=(
-                    receipt.parameter_application_receipt.evidence_sha256
-                    if receipt.parameter_application_receipt is not None
-                    else canonical_sha256(details)
-                ),
-                terminal_observation_sha256=(
-                    canonical_sha256(terminal_observation.model_dump(mode="json"))
-                    if terminal_observation is not None
-                    else None
-                ),
-                terminal_observation=terminal_observation,
-                parameter_application_receipt=receipt.parameter_application_receipt,
-                parameter_card_sha256=(
-                    card_hash(load_parameter_cards()[self._requested.knob_id])
-                    if receipt.parameter_application_receipt is not None
-                    and self._requested is not None
-                    else None
-                ),
-                materialization_receipt_sha256=(
-                    receipt.parameter_application_receipt.materialization.receipt_sha256
-                    if receipt.parameter_application_receipt is not None
-                    else None
-                ),
-                parameter_application_receipt_id=(
-                    receipt.parameter_application_receipt.receipt_id
-                    if receipt.parameter_application_receipt is not None
-                    else None
-                ),
-                incumbent_decision=incumbent_decision,
-                decisive_metric=decisive_metric,
-                outcome_details_sha256=canonical_sha256(details),
-                target_step=_TARGET_STEPS[self._requested.knob_id]
-                if self._requested
-                else "place",
-                end_step="Harden",
-                execution_scope="full_flow",
-            )
+        terminal_outcome = OptimizationTerminalOutcome(
+            intervention_id=self._pending_intervention_id,
+            outcome=outcome,
+            candidate_manifest_sha256=(
+                receipt.evidence.candidate_manifest_sha256
+                if receipt.evidence is not None
+                else canonical_sha256(details)
+            ),
+            candidate_root_ref=(
+                receipt.evidence.candidate_root_ref
+                if receipt.evidence is not None
+                else None
+            ),
+            candidate_manifest_ref=(
+                receipt.evidence.candidate_manifest_ref
+                if receipt.evidence is not None
+                else None
+            ),
+            receipt_sha256=(
+                receipt.parameter_application_receipt.evidence_sha256
+                if receipt.parameter_application_receipt is not None
+                else canonical_sha256(details)
+            ),
+            terminal_observation_sha256=(
+                canonical_sha256(terminal_observation.model_dump(mode="json"))
+                if terminal_observation is not None
+                else None
+            ),
+            terminal_observation=terminal_observation,
+            parameter_application_receipt=receipt.parameter_application_receipt,
+            parameter_card_sha256=(
+                card_hash(load_parameter_cards()[self._requested.knob_id])
+                if receipt.parameter_application_receipt is not None
+                and self._requested is not None
+                else None
+            ),
+            materialization_receipt_sha256=(
+                receipt.parameter_application_receipt.materialization.receipt_sha256
+                if receipt.parameter_application_receipt is not None
+                else None
+            ),
+            parameter_application_receipt_id=(
+                receipt.parameter_application_receipt.receipt_id
+                if receipt.parameter_application_receipt is not None
+                else None
+            ),
+            incumbent_decision=incumbent_decision,
+            decisive_metric=decisive_metric,
+            outcome_details_sha256=canonical_sha256(details),
+            target_step=_TARGET_STEPS[self._requested.knob_id]
+            if self._requested
+            else "place",
+            end_step="Harden",
+            execution_scope="full_flow",
         )
+        self.ledger.append_terminal(terminal_outcome)
+        if self.mode == OptimizationAgentMode.FULL_AGENT:
+            self._record_empirical_case(
+                terminal_outcome,
+                receipt.parameter_application_receipt,
+                terminal_observation,
+            )
         self._pending_intervention_id = None
         self._pending_execution_id = None
         self._cancel_requested = False
         self._proposal = None
+        self._pending_v2_proposal = None
         self._requested = None
         self._state = (
             OptimizationEpisodeState.QUARANTINED
@@ -1747,6 +1966,107 @@ class OptimizationEpisodeController:
         )
         self._persist()
         return self._result()
+
+    def _record_empirical_case(
+        self,
+        outcome: OptimizationTerminalOutcome,
+        receipt: ParameterApplicationReceipt | None,
+        terminal: TerminalObservation | None,
+    ) -> None:
+        proposal = self._pending_v2_proposal
+        if proposal is None or receipt is None or terminal is None:
+            self._append_case_diagnostic(
+                "missing_terminal_case_evidence", outcome, receipt, terminal
+            )
+            return
+        action = proposal.action
+        domain = next(
+            (
+                item
+                for item in self._planning_audit.replay().entries[-1].effective_domains
+                if action is not None
+                and item.snapshot_sha256 == action.effective_domain_sha256
+            ),
+            None,
+        )
+        if domain is None:
+            self._append_case_diagnostic(
+                "missing_effective_domain", outcome, receipt, terminal
+            )
+            return
+        try:
+            case = build_terminal_empirical_case(
+                case_id=f"case-{self.episode_id}-{outcome.intervention_id}",
+                proposal=proposal,
+                effective_domain=domain,
+                receipt=receipt,
+                terminal_outcome=outcome,
+                terminal=terminal,
+                outcome_class=self._empirical_outcome(outcome.outcome, receipt, terminal),
+                guardrail_status="pass" if terminal.eligible_for_incumbent else "fail",
+                design_id=self._design_id(),
+            )
+        except ValueError:
+            self._append_case_diagnostic(
+                "terminal_case_chain_invalid", outcome, receipt, terminal
+            )
+            return
+        if not self._external_case_pool:
+            self._case_pool.append_case(case)
+        self._case_audit.append_case(case)
+
+    @staticmethod
+    def _empirical_outcome(
+        outcome: OptimizationOutcomeKind,
+        receipt: ParameterApplicationReceipt,
+        terminal: TerminalObservation,
+    ) -> EmpiricalOutcome:
+        if not native_receipt_is_effective(receipt):
+            return EmpiricalOutcome.INEFFECTIVE
+        if not terminal.eligible_for_incumbent or outcome in {
+            OptimizationOutcomeKind.CANDIDATE_INELIGIBLE,
+            OptimizationOutcomeKind.INFEASIBLE,
+        }:
+            return EmpiricalOutcome.GUARDRAIL_FAILURE
+        if outcome in {
+            OptimizationOutcomeKind.IMPROVED,
+            OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+        }:
+            return EmpiricalOutcome.SUPPORTED
+        if outcome in {
+            OptimizationOutcomeKind.DEGRADED,
+            OptimizationOutcomeKind.TRADEOFF,
+        }:
+            return EmpiricalOutcome.CONTRADICTED
+        return EmpiricalOutcome.FAILURE
+
+    def _append_case_diagnostic(
+        self,
+        reason_code: str,
+        outcome: OptimizationTerminalOutcome,
+        receipt: ParameterApplicationReceipt | None,
+        terminal: TerminalObservation | None,
+    ) -> None:
+        self._case_audit.append_diagnostic(
+            EmpiricalCaseDiagnostic(
+                intervention_id=outcome.intervention_id,
+                reason_code=reason_code,
+                proposal_sha256=(
+                    canonical_sha256(self._pending_v2_proposal.model_dump(mode="json"))
+                    if self._pending_v2_proposal is not None
+                    else None
+                ),
+                receipt_sha256=(receipt.evidence_sha256 if receipt is not None else None),
+                terminal_outcome_sha256=canonical_sha256(
+                    outcome.model_dump(mode="json")
+                ),
+                terminal_observation_sha256=(
+                    canonical_sha256(terminal.model_dump(mode="json"))
+                    if terminal is not None
+                    else None
+                ),
+            )
+        )
 
     def _quarantine_indeterminate(self) -> OptimizationControlResult:
         receipt = CandidateExecutionReceipt(
@@ -1804,6 +2124,7 @@ class OptimizationEpisodeController:
     ) -> OptimizationControlResult:
         self._planning_only_turns += 1
         self._proposal = None
+        self._pending_v2_proposal = None
         self._requested = None
         if not context.legal_actions:
             self._state = OptimizationEpisodeState.STOPPED
@@ -1979,6 +2300,7 @@ class OptimizationEpisodeController:
         planning_audit = self._planning_audit.replay()
         planning_provider_audit = self._planning_provider_audit.replay()
         decision_audit = self._decision_audit.replay()
+        case_audit = self._case_audit.replay()
         value = {
             "schema_version": "ecos.optimization_episode_state.v6",
             "episode_id": self.episode_id,
@@ -2023,6 +2345,23 @@ class OptimizationEpisodeController:
         }
         if not self.receipt_aware_planning:
             value["receipt_aware_planning"] = False
+        if self.knowledge_case_shots:
+            value["knowledge_case_shots"] = self.knowledge_case_shots
+        if case_audit.event_count:
+            value["case_audit_event_count"] = case_audit.event_count
+            value["case_audit_chain_head_sha256"] = case_audit.chain_head_sha256
+        if self._external_case_pool:
+            value["external_case_pool"] = True
+            if self._case_pool_event_count:
+                value["case_pool_event_count"] = self._case_pool_event_count
+            if self._case_pool_chain_head_sha256 is not None:
+                value["case_pool_chain_head_sha256"] = (
+                    self._case_pool_chain_head_sha256
+                )
+        if self._pending_v2_proposal is not None:
+            value["pending_v2_proposal"] = self._pending_v2_proposal.model_dump(
+                mode="json"
+            )
         if self._task_memory_scope_sha256 is not None:
             value["task_memory_scope_sha256"] = self._task_memory_scope_sha256
         value["state_sha256"] = canonical_sha256(value)
@@ -2036,6 +2375,7 @@ class OptimizationEpisodeController:
         planning_audit: OptimizationPlanningAuditReplay,
         planning_provider_audit: OptimizationPlanningProviderEvidenceReplay,
         decision_audit: OptimizationDecisionAuditReplay,
+        case_audit: EmpiricalCaseAuditReplay,
     ) -> None:
         if (
             snapshot.ledger_event_count != len(replay.entries)
@@ -2068,6 +2408,13 @@ class OptimizationEpisodeController:
         ):
             raise OptimizationEpisodeControllerError(
                 "episode state does not match decision audit trace"
+            )
+        if (
+            snapshot.case_audit_event_count != case_audit.event_count
+            or snapshot.case_audit_chain_head_sha256 != case_audit.chain_head_sha256
+        ):
+            raise OptimizationEpisodeControllerError(
+                "episode state does not match empirical case audit trace"
             )
         known_planning_entries = {
             entry.entry_sha256 for entry in planning_audit.entries

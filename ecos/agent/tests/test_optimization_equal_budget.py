@@ -1040,7 +1040,7 @@ def test_phase8_calibration_uses_three_default_flow_replays(tmp_path, monkeypatc
     assert all(item["origin"] == "gui" for item in starts)
 
 
-def test_phase8_mode_explicitly_exempts_the_reference_baseline(
+def test_phase8_treatment_explicitly_sets_runtime_contract(
     tmp_path, monkeypatch
 ) -> None:
     module = _load_experiment_runner()
@@ -1075,13 +1075,14 @@ def test_phase8_mode_explicitly_exempts_the_reference_baseline(
     monkeypatch.setattr(
         module,
         "export_episode_traces",
-        lambda **_kwargs: ((), 2, "requested-only"),
+        lambda **_kwargs: ((), 2, "receipt-aware"),
     )
+    monkeypatch.setattr(module, "_episode_evidence", lambda *_args: {})
     design = module.DesignSpec(
         "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
     )
 
-    module._run_mode(
+    result = module._run_mode(
         design,
         tmp_path / "workspace",
         _terminal_observation(),
@@ -1090,10 +1091,80 @@ def test_phase8_mode_explicitly_exempts_the_reference_baseline(
         run_id="run",
         model="model",
         seed=1,
-        mode="requested-only",
+        treatment=module.KNOWLEDGE_TREATMENTS[0],
     )
 
     assert captured["baseline_eligibility_exempt"] is True
+    assert captured["receipt_aware_planning"] is True
+    assert captured["agent_mode"] == "llm_no_knowledge"
+    assert captured["knowledge_case_shots"] == 0
+    assert result["terminal_artifacts_complete"] is False
+    assert result["replay_chain_complete"] is False
+
+
+def test_phase8_case_pool_metadata_requires_a_frozen_directory(
+    tmp_path: Path,
+) -> None:
+    module = _load_experiment_runner()
+
+    with pytest.raises(ValueError, match="case pool"):
+        module._case_pool_metadata(tmp_path / "missing")
+    pool = tmp_path / "pool"
+    pool.mkdir()
+    link = tmp_path / "pool-link"
+    link.symlink_to(pool, target_is_directory=True)
+    with pytest.raises(ValueError, match="case pool"):
+        module._case_pool_metadata(link)
+
+    audit_target = tmp_path / "audit.jsonl"
+    audit_target.write_text("", encoding="utf-8")
+    (pool / "optimization-knowledge-cases.v1.jsonl").symlink_to(audit_target)
+    with pytest.raises(ValueError, match="symlink"):
+        module._case_pool_metadata(pool)
+    (pool / "optimization-knowledge-cases.v1.jsonl").unlink()
+
+    assert module._case_pool_metadata(pool) == {
+        "case_count": 0,
+        "event_count": 0,
+        "chain_head_sha256": None,
+        "audit_file_sha256": None,
+    }
+    assert list(pool.iterdir()) == []
+
+
+def test_phase8_snapshots_case_pool_into_the_run_artifact(tmp_path: Path) -> None:
+    module = _load_experiment_runner()
+    source = tmp_path / "source-pool"
+    source.mkdir()
+
+    snapshot, metadata = module._snapshot_case_pool(
+        source, tmp_path / "run/knowledge-case-pool"
+    )
+
+    assert snapshot == (tmp_path / "run/knowledge-case-pool").resolve()
+    assert metadata["artifact_ref"] == "knowledge-case-pool"
+    assert metadata["event_count"] == 0
+    assert list(source.iterdir()) == []
+
+
+def test_phase8_rejects_reusing_a_run_id(tmp_path: Path) -> None:
+    module = _load_experiment_runner()
+    output = tmp_path / "output"
+    (output / "runs/run").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="run id already exists"):
+        module.run_experiment(
+            object(),
+            tmp_path / "manifest.json",
+            output,
+            tmp_path / "workspaces",
+            run_id="run",
+            model="model",
+            seed=1,
+            tool_revision="tool",
+            max_workers=1,
+            terminal_timeout_seconds=1.0,
+        )
 
 
 def test_phase8_functional_smoke_finalizer_never_starts_eda(

@@ -16,6 +16,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     GateResult,
     SignoffGates,
+    StageEvidenceFeature,
     StageObservation,
     TerminalObservation,
 )
@@ -109,17 +110,71 @@ def build_stage_observation(
     metrics_path = f"{_STAGE_DIRECTORIES[canonical_stage]}/analysis/qor_metrics.json"
     metrics_payload = _read_json(root, metrics_path)
     metrics = _qor_metrics(metrics_payload)
+    hotspots_path = f"{_STAGE_DIRECTORIES[canonical_stage]}/analysis/qor_hotspots.json"
+    state_evidence = _hotspot_state_evidence(root, hotspots_path)
+    manifest_paths = (
+        "home/flow.json",
+        "home/parameters.json",
+        metrics_path,
+        *((hotspots_path,) if state_evidence else ()),
+    )
     manifest = build_optimization_artifact_manifest(
         root,
-        ("home/flow.json", "home/parameters.json", metrics_path),
+        manifest_paths,
     )
     return StageObservation(
         observation_id=f"stage-{canonical_stage.value}",
         stage=canonical_stage,
         evidence_manifest_sha256=manifest.manifest_sha256,
         metrics=metrics,
+        state_evidence=state_evidence,
         budget=budget,
     )
+
+
+def _hotspot_state_evidence(
+    root: Path, relative_path: str
+) -> tuple[StageEvidenceFeature, ...]:
+    if not _is_file(root, relative_path):
+        return ()
+    payload = _read_json(root, relative_path)
+    hotspots = payload.get("hotspots")
+    if payload.get("schema_version") != 3 or not isinstance(hotspots, list):
+        raise OptimizationObservationError("stage hotspot evidence is invalid")
+    artifact_sha256 = file_sha256(_workspace_path(root, relative_path))
+    features = []
+    seen_metrics: dict[str, int] = {}
+    for index, hotspot in enumerate(hotspots):
+        if not isinstance(hotspot, dict):
+            raise OptimizationObservationError("stage hotspot evidence is invalid")
+        try:
+            metric_id = hotspot.get("metric_id")
+            occurrence = seen_metrics.get(metric_id, 0)
+            seen_metrics[metric_id] = occurrence + 1
+            evidence_ref = f"{relative_path}#/hotspots/{index}"
+            features.append(
+                StageEvidenceFeature(
+                    feature_id=(
+                        metric_id
+                        if occurrence == 0
+                        else f"{metric_id}_hotspot_{occurrence}"
+                    ),
+                    value=hotspot.get("value"),
+                    evidence_sha256=canonical_sha256(
+                        {
+                            "artifact_sha256": artifact_sha256,
+                            "evidence_ref": evidence_ref,
+                            "hotspot": hotspot,
+                        }
+                    ),
+                    evidence_ref=evidence_ref,
+                )
+            )
+        except ValueError as exc:
+            raise OptimizationObservationError(
+                "stage hotspot evidence is invalid"
+            ) from exc
+    return tuple(features)
 
 
 def build_terminal_observation(workspace_root: Path) -> TerminalObservation:

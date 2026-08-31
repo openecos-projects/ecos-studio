@@ -50,6 +50,12 @@ from ecos_agent.optimization_decision_audit import (
     OptimizationDecisionAuditIntegrityError,
 )
 from ecos_agent.optimization_knowledge_compiler import BoundKnowledgeAction
+from ecos_agent.optimization_knowledge_cases import (
+    EmpiricalCaseAuditStore,
+    EmpiricalCaseDiagnostic,
+    EmpiricalOutcome,
+    TerminalEmpiricalCase,
+)
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
@@ -289,6 +295,8 @@ def _controller(
     objective: OptimizationObjectiveContract | None = None,
     task_memory=None,
     receipt_aware_planning: bool = True,
+    knowledge_case_shots: int = 0,
+    knowledge_case_pool_root: Path | None = None,
 ) -> OptimizationEpisodeController:
     return OptimizationEpisodeController(
         episode_id="episode-1",
@@ -306,6 +314,8 @@ def _controller(
         task_memory_supplier=(lambda: task_memory) if task_memory is not None else None,
         execution_context=_execution_context(),
         receipt_aware_planning=receipt_aware_planning,
+        knowledge_case_shots=knowledge_case_shots,
+        knowledge_case_pool_root=knowledge_case_pool_root,
     )
 
 
@@ -878,6 +888,184 @@ def test_no_knowledge_mode_hides_chunks_and_rejects_knowledge_references(
     assert rejected.proposal is None
 
 
+def test_raw_rag_mode_exposes_retrieval_without_state_conditioned_support(
+    tmp_path: Path,
+) -> None:
+    codex = _FakeCodex(
+        lambda context: _proposal(
+            context,
+            knob_id="synth.max_fanout",
+            direction=StrategyDirection.DECREASE,
+        )
+    )
+    controller = _controller(
+        tmp_path,
+        codex,
+        _FakeEcc(),
+        mode=OptimizationAgentMode.RAW_RAG,
+    )
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert codex.contexts[0].knowledge_refs == _retrieval().knowledge_refs
+    assert codex.contexts[0].supported_action_view is None
+    assert result.rejection_reason is None
+
+
+def test_knowledge_case_shots_are_validated_and_recovered(tmp_path: Path) -> None:
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(),
+        knowledge_case_shots=3,
+    )
+
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal),
+        executor=_FakeEcc(),
+        ledger=controller.ledger,
+        clock=_Clock(),
+        execution_context=_execution_context(),
+        knowledge_case_shots=3,
+    )
+
+    assert recovered.knowledge_case_shots == 3
+    with pytest.raises(ValueError, match="case shots"):
+        _controller(
+            tmp_path / "invalid",
+            _FakeCodex(_proposal),
+            _FakeEcc(),
+            knowledge_case_shots=1,
+        )
+
+
+def test_recovery_rejects_empirical_case_audit_added_after_snapshot(
+    tmp_path: Path,
+) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc())
+    EmpiricalCaseAuditStore(tmp_path / "episode").append_diagnostic(
+        EmpiricalCaseDiagnostic(
+            intervention_id="intervention-1",
+            reason_code="unexpected_external_event",
+        )
+    )
+
+    with pytest.raises(
+        OptimizationEpisodeControllerError, match="empirical case audit trace"
+    ):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(),
+            ledger=controller.ledger,
+            clock=_Clock(),
+            execution_context=_execution_context(),
+        )
+
+
+def test_recovery_rejects_changed_external_case_pool_head(tmp_path: Path) -> None:
+    pool_root = tmp_path / "external-pool"
+    pool = EmpiricalCaseAuditStore(pool_root)
+    pool.append_diagnostic(
+        EmpiricalCaseDiagnostic(
+            intervention_id="pool-event-1",
+            reason_code="initial_pool_head",
+        )
+    )
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(),
+        knowledge_case_pool_root=pool_root,
+    )
+    pool.append_diagnostic(
+        EmpiricalCaseDiagnostic(
+            intervention_id="pool-event-2",
+            reason_code="changed_pool_head",
+        )
+    )
+
+    with pytest.raises(
+        OptimizationEpisodeControllerError,
+        match="knowledge case pool does not match",
+    ):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(),
+            ledger=controller.ledger,
+            clock=_Clock(),
+            execution_context=_execution_context(),
+            knowledge_case_pool_root=pool_root,
+        )
+
+
+def test_external_case_pool_requires_explicit_training_split(tmp_path: Path) -> None:
+    pool_root = tmp_path / "external-pool"
+    EmpiricalCaseAuditStore(pool_root).append_case(
+        TerminalEmpiricalCase(
+            case_id="case.unlabeled",
+            context_fingerprint=HASH,
+            claim_id="claim.one",
+            binding_id="binding.one",
+            toolchain_ref=HASH,
+            requested_value=0.7,
+            activation_status="used",
+            proposal_sha256=HASH,
+            effective_domain_sha256=HASH,
+            parameter_card_sha256=HASH,
+            materialization_receipt_sha256=HASH,
+            receipt_sha256=HASH,
+            terminal_outcome_sha256=HASH,
+            terminal_observation_sha256=HASH,
+            guardrail_status="pass",
+            outcome_class=EmpiricalOutcome.SUPPORTED,
+            design_id="train-design",
+        )
+    )
+
+    with pytest.raises(
+        OptimizationEpisodeControllerError, match="non-training case"
+    ):
+        _controller(
+            tmp_path,
+            _FakeCodex(_proposal),
+            _FakeEcc(),
+            knowledge_case_pool_root=pool_root,
+        )
+
+
+def test_planning_rejects_external_case_pool_change_during_episode(
+    tmp_path: Path,
+) -> None:
+    pool_root = tmp_path / "external-pool"
+    pool = EmpiricalCaseAuditStore(pool_root)
+    pool.append_diagnostic(
+        EmpiricalCaseDiagnostic(
+            intervention_id="pool-event-1",
+            reason_code="initial_pool_head",
+        )
+    )
+    codex = _FakeCodex(_proposal)
+    controller = _controller(
+        tmp_path,
+        codex,
+        _FakeEcc(),
+        knowledge_case_pool_root=pool_root,
+    )
+    pool.append_diagnostic(
+        EmpiricalCaseDiagnostic(
+            intervention_id="pool-event-2",
+            reason_code="changed_pool_head",
+        )
+    )
+
+    with pytest.raises(
+        OptimizationEpisodeControllerError,
+        match="frozen knowledge case pool changed",
+    ):
+        controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert codex.contexts == []
+
+
 def test_budget_exhaustion_stops_without_calling_fake_codex(tmp_path: Path) -> None:
     codex = _FakeCodex(_proposal)
     controller = _controller(tmp_path, codex, _FakeEcc(), budget=_budget(candidates=20))
@@ -1004,6 +1192,13 @@ def _v2_proposal(
             value = next(
                 item for item in domain.allowed_requested_values if item < current
             )
+    supported = next(
+        item
+        for item in context.supported_action_view.actions
+        if item.knob_id == action.knob_id
+        and item.direction == action.direction
+        and item.effective_domain_sha256 == domain.snapshot_sha256
+    )
     return {
         "schema_version": "ecos.optimization_proposal.v2",
         "context_ref": context.context_ref.model_dump(mode="json"),
@@ -1015,6 +1210,10 @@ def _v2_proposal(
             item.model_dump(mode="json") for item in context.knowledge_refs
         ],
         "action": {
+            "claim_id": supported.claim_ref.entity_id,
+            "claim_sha256": supported.claim_sha256,
+            "binding_id": supported.binding_id,
+            "binding_sha256": supported.binding_sha256,
             "knob_id": action.knob_id.value,
             "direction": action.direction.value,
             "requested_value": value,
@@ -1024,6 +1223,27 @@ def _v2_proposal(
             ],
         },
     }
+
+
+def test_full_agent_v2_rejects_mismatched_compiled_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+
+    def mismatched(context: object, domains: object) -> dict[str, object]:
+        proposal = _v2_proposal(context, domains)
+        proposal["action"]["binding_id"] = "binding.stale.v1"
+        return proposal
+
+    controller = _controller(
+        tmp_path,
+        _V2FakeCodex(mismatched, mismatched),
+        _FakeEcc(),
+    )
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.rejection_reason == "v2_repair_failed"
 
 
 def test_controller_uses_exact_v2_value_by_default(
@@ -1054,6 +1274,52 @@ def test_controller_uses_exact_v2_value_by_default(
     )
     assert executor.start_calls[0].context_sha256 == selected_domain.context_sha256
     assert executor.start_calls[0].seed == 0
+
+
+def test_v2_terminal_case_is_persisted_and_injected_on_next_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
+    planner = _V2FakeCodex(_v2_proposal, _v2_proposal)
+    controller = _controller(
+        tmp_path,
+        planner,
+        _FakeEcc(_started()),
+        knowledge_case_shots=3,
+    )
+    retrieval = _retrieval()
+    card = load_parameter_cards()[OptimizationKnob.FLOORPLAN_CORE_UTIL]
+    binding = retrieval.support_catalog.bindings[0].model_copy(
+        update={"toolchain_ref": card.tool.source_sha256}
+    )
+    retrieval = replace(
+        retrieval,
+        support_catalog=retrieval.support_catalog.model_copy(
+            update={"bindings": (binding,)}
+        ),
+    )
+    planned = controller.plan(_observation(), retrieval, CURRENT_VALUES)
+    assert planned.requested is not None
+    controller.execute()
+    native = _native_receipt(planned.requested)
+
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+            parameter_application_receipt=native,
+        ),
+        _eligible_terminal(),
+        outcome=OptimizationOutcomeKind.IMPROVED,
+    )
+    replay = EmpiricalCaseAuditStore(tmp_path / "episode").verify()
+
+    assert len(replay.cases) == 1
+    assert replay.cases == controller._case_pool.verify().cases
+    controller.plan(_observation(), retrieval, CURRENT_VALUES)
+    assert planner.v2_calls[-1][0].empirical_cases == replay.cases
+    assert planner.v2_calls[-1][0].empirical_case_audit is not None
 
 
 def test_controller_v1_requires_explicit_compatibility_flag(

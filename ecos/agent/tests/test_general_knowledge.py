@@ -6,6 +6,7 @@ from ecos_agent.optimization_knowledge_compiler import (
     knowledge_support_catalog_from_bundles,
 )
 from ecos_agent.provider import EcosAgentProvider
+from ecos_agent.parameter_semantics import card_hash, load_parameter_cards
 from ecos_agent.step_knowledge import (
     GENERAL_KNOWLEDGE_METRICS,
     GENERAL_KNOWLEDGE_SPEC,
@@ -91,6 +92,9 @@ def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
 
     assert len(catalog.claims) == 24
     assert spreading.claim_sha256.startswith("sha256:")
+    assert spreading.required_evidence == ("overflow_map", "cell_density_map")
+    assert spreading.action_intents == ("decrease_packing_density",)
+    assert spreading.evidence_refs
     assert {predicate.feature_id for predicate in spreading.state_predicates} == {
         "overflow_map",
         "cell_density_map",
@@ -98,6 +102,16 @@ def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
     assert ("place.target_density", "decrease") in {
         (action.knob_id, action.direction.value) for action in binding.actions
     }
+    target_density = next(
+        action for action in binding.actions if action.knob_id == "place.target_density"
+    )
+    card = load_parameter_cards()["place.target_density"]
+    assert target_density.parameter_card_ref.endswith("place.target_density.json")
+    assert target_density.parameter_card_sha256 == card_hash(card)
+    assert target_density.consumer_ids == tuple(item.consumer_id for item in card.consumers)
+    assert target_density.activation_predicate_ids == card.runtime_probe_ids
+    assert binding.consumer_ids
+    assert binding.activation_predicate_ids
 
 
 def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:
