@@ -78,8 +78,13 @@ impl GraphicsEnvironment {
     }
 
     fn configure_wsl_windowing(&self) {
-        if self.is_wsl && std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
-            std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+        if self.is_wsl {
+            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                std::env::remove_var("WAYLAND_DISPLAY");
+            }
+            if std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
+                std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+            }
         }
     }
 }
@@ -233,10 +238,11 @@ fn main() -> Result<()> {
                 },
                 power_preference: wgpu::PowerPreference::None,
                 device_descriptor: std::sync::Arc::new(|adapter| {
+                    let adapter_limits = adapter.limits();
                     let base_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
-                        wgpu::Limits::downlevel_webgl2_defaults()
+                        wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter_limits)
                     } else {
-                        wgpu::Limits::default()
+                        wgpu::Limits::downlevel_defaults().using_resolution(adapter_limits)
                     };
                     wgpu::DeviceDescriptor {
                         label: Some("egui wgpu device"),
