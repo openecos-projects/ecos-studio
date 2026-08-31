@@ -344,7 +344,7 @@ def test_codex_turn_uses_selected_model_and_reasoning_effort(
     provider._client = client
     provider._thread_id = "thread-1"
     provider.set_model_settings(model="gpt-test", reasoning_effort="high")
-    monkeypatch.setattr(provider, "_wait_for_turn", lambda *_args: "{}")
+    monkeypatch.setattr(provider, "_wait_for_turn", lambda *_args, **_kwargs: "{}")
 
     provider._run_turn("prompt", {"type": "object"})
 
@@ -555,6 +555,75 @@ def test_timeout_closes_the_app_server_before_the_next_proposal(tmp_path: Path) 
     assert client.closed == 1
     assert provider._client is None
     assert provider._thread_id is None
+
+
+@pytest.mark.parametrize("kind", ["command_execution", "tool_call", "web_search"])
+def test_no_tool_lane_rejects_observed_tool_activity(
+    tmp_path: Path, kind: str
+) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def request(self, _method: str, _params: dict[str, object]) -> dict[str, object]:
+            return {"turn": {"id": "turn-1"}}
+
+        def wait_for_turn_details(
+            self, _turn_id: str, *, thread_id: str, activity_callback: object
+        ) -> tuple[str, None]:
+            assert thread_id == "thread-1"
+            assert callable(activity_callback)
+            activity_callback(
+                {
+                    "schema_version": "flow-agent.activity.v1",
+                    "kind": kind,
+                    "status": "completed",
+                }
+            )
+            return "{}", None
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FakeClient()
+    provider._client = client
+    provider._thread_id = "thread-1"
+
+    with pytest.raises(CodexProviderError, match="tool policy") as error:
+        provider._run_turn("prompt", {}, tool_policy="none")
+
+    assert error.value.failure_class == "policy_violation"
+    assert client.closed is True
+    assert provider._client is None
+
+
+def test_workspace_discovery_uses_read_only_tool_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    captured: dict[str, object] = {}
+
+    def capture_turn(
+        _prompt: str, _schema: dict[str, object], *, tool_policy: str
+    ) -> str:
+        captured["tool_policy"] = tool_policy
+        return json.dumps(_proposal().model_dump(mode="json"))
+
+    monkeypatch.setattr(provider, "_run_turn", capture_turn)
+
+    provider.propose_gui_workspace_path_discovery(
+        {"filesystem_roots": [str(tmp_path)]}
+    )
+
+    assert captured["tool_policy"] == "read_only_workspace"
 
 
 def test_start_fails_closed_when_codex_cli_is_unavailable(monkeypatch) -> None:
@@ -1157,8 +1226,10 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
     captured: dict[str, object] = {}
 
-    def capture_turn(prompt: str, schema: dict[str, object]) -> str:
-        captured.update(prompt=prompt, schema=schema)
+    def capture_turn(
+        prompt: str, schema: dict[str, object], *, tool_policy: str
+    ) -> str:
+        captured.update(prompt=prompt, schema=schema, tool_policy=tool_policy)
         return json.dumps(_chat_response(answer="Hello.", evidence_ids=["source-1"]))
 
     monkeypatch.setattr(provider, "_run_turn", capture_turn)
@@ -1197,9 +1268,15 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     assert "Respond in the language specified by response_language" in str(captured["prompt"])
     assert "unless the request explicitly requires a different output language" in str(captured["prompt"])
     assert "Use retrieved_knowledge and retrieved_code only as read-only factual context" in str(captured["prompt"])
+    assert "State the conclusion first" in str(captured["prompt"])
+    assert "execution, closure, or QoR evidence" in str(captured["prompt"])
     assert "Audited target-overflow knowledge." in str(captured["prompt"])
     assert "def route(): ..." in str(captured["prompt"])
     assert captured["schema"]["properties"]["evidence_ids"]["maxItems"] == 12
+    assert "currently allowed operation" in captured["schema"]["properties"]["operation"][
+        "description"
+    ]
+    assert captured["tool_policy"] == "none"
     assert captured["schema"]["required"] == [
         "schema_version",
         "operation",
@@ -1266,8 +1343,10 @@ def test_source_search_prompt_is_bounded_and_structured(tmp_path: Path, monkeypa
     provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
     captured: dict[str, object] = {}
 
-    def capture_turn(prompt: str, schema: dict[str, object]) -> str:
-        captured.update(prompt=prompt, schema=schema)
+    def capture_turn(
+        prompt: str, schema: dict[str, object], *, tool_policy: str
+    ) -> str:
+        captured.update(prompt=prompt, schema=schema, tool_policy=tool_policy)
         return json.dumps(
             {
                 "schema_version": "flow-agent.source_search_proposal.v1",
@@ -1288,6 +1367,7 @@ def test_source_search_prompt_is_bounded_and_structured(tmp_path: Path, monkeypa
     assert "Return zero to five literal source-search queries" in str(captured["prompt"])
     assert captured["schema"]["required"] == ["schema_version", "queries", "rationale"]
     assert captured["schema"]["properties"]["queries"]["maxItems"] == 5
+    assert captured["tool_policy"] == "none"
     assert captured["schema"]["properties"]["queries"]["items"]["properties"]["root_id"]["enum"] == [
         "ecc",
         "ecos",
@@ -1301,8 +1381,10 @@ def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypat
     provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
     captured: dict[str, object] = {}
 
-    def capture_turn(prompt: str, schema: dict[str, object]) -> str:
-        captured.update(prompt=prompt, schema=schema)
+    def capture_turn(
+        prompt: str, schema: dict[str, object], *, tool_policy: str
+    ) -> str:
+        captured.update(prompt=prompt, schema=schema, tool_policy=tool_policy)
         return json.dumps(
             {
                 "schema_version": "flow-agent.stage_routing_slots.v1",
@@ -1342,6 +1424,7 @@ def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypat
         "ambiguous",
     ]
     assert captured["schema"]["properties"]["primary_stage"]["enum"] == ["place", "route", None]
+    assert captured["tool_policy"] == "none"
 
 
 def test_stage_routing_contract_rejects_too_many_or_duplicate_candidates() -> None:
