@@ -20,6 +20,7 @@ export type {
   WorkspaceBaselineComparison,
   WorkspaceChecklistSummary,
   WorkspaceConfigurationSummary,
+  WorkspaceDashboardMetric,
   WorkspaceFlowSummary,
   WorkspaceOverviewCore,
   WorkspaceOverviewIdentity,

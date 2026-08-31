@@ -28,6 +28,19 @@ export interface WorkspaceConfigurationSummary {
   maxFanout: number | null
   clock: string
   frequencyMaxMhz: number | null
+  mpcDisplayName: string | null
+  mpcConstraints: {
+    minimumArea: number | null
+    maximumArea: number | null
+    maximumCellCount: number | null
+    ports: Array<{
+      name: string
+      direction: string
+      dataType: string
+      width: number | null
+      info: string
+    }>
+  } | null
 }
 
 export type FlowStepState =
@@ -91,6 +104,15 @@ export interface QorStepSummary {
   order: number
   name: string
   metrics: MetricValue[]
+  status: QorScore['gate']
+  summaryMetricCount: number
+}
+
+export interface WorkspaceDashboardMetric {
+  id: string
+  label: string
+  value: number | null
+  unit: string
 }
 
 export interface WorkspaceQorSummary {
@@ -126,6 +148,7 @@ export interface WorkspaceOverviewCore {
   flow: ReadSection<WorkspaceFlowSummary>
   checklist: ReadSection<WorkspaceChecklistSummary>
   qor: ReadSection<WorkspaceQorSummary>
+  keyMetrics: ReadSection<{ items: WorkspaceDashboardMetric[] }>
   baselineComparison: ReadSection<WorkspaceBaselineComparison>
 }
 

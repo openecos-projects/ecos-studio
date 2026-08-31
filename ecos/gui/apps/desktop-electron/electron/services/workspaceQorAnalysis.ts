@@ -14,6 +14,7 @@ import {
   buildProjectQorTrendSummary,
   buildProjectQorWorkspaceComparison,
   QOR_SCORE_THRESHOLD,
+  qorSummaryStatus,
   type ProjectQorMetricRecord,
   type ProjectQorWorkspaceInput,
 } from './qorAnalysis'
@@ -179,16 +180,22 @@ function metricValue(record: ProjectQorMetricRecord): MetricValue {
 
 function workspaceQor(
   record: ReturnType<typeof buildProjectQorTrendSummary>['workspaces'][number],
+  input: ProjectQorWorkspaceInput,
 ): WorkspaceQorSummary {
   const metrics = (record.comparisonRecords ?? record.records).map(metricValue)
   return {
     score: qorScore(record),
     metrics,
-    steps: FLOW_STEPS.flatMap((step, order) => {
+    steps: FLOW_STEPS.map((step, order) => {
       const stepMetrics = metrics.filter((metric) => metric.stepId === step)
-      return stepMetrics.length
-        ? [{ stepId: step, order, name: step, metrics: stepMetrics }]
-        : []
+      return {
+        stepId: step,
+        order,
+        name: step,
+        metrics: stepMetrics,
+        status: qorSummaryStatus(input.stepSummaryTexts?.[step]) ?? 'unavailable',
+        summaryMetricCount: stepMetrics.length,
+      }
     }),
   }
 }
@@ -252,7 +259,7 @@ export function analyzeWorkspaceQor(
     (workspace) => workspace.workspaceId === currentWorkspaceId,
   )
   const qor: ReadSection<WorkspaceQorSummary> = current
-    ? { status: 'ready', data: workspaceQor(current), issues: [] }
+    ? { status: 'ready', data: workspaceQor(current, currentInput), issues: [] }
     : {
         status: 'unavailable',
         issues: [{ code: 'WORKSPACE_QOR_UNAVAILABLE' }],

@@ -78,6 +78,7 @@ export function useBackendFlowStages() {
     ) {
       return steps
     }
+    if (steps.some((step) => step.state === 'running')) return steps
     const next = steps.map((step) => ({
       ...step,
       ...(request.resetAll ? { state: 'not-started' as const } : {}),

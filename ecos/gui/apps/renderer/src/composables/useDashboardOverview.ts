@@ -1,294 +1,49 @@
-import { computed, onScopeDispose, ref, watch } from 'vue'
-import {
-  joinLocalPath,
-  type WorkspaceResourceIndex,
-  type WorkspaceStepResource,
-} from '@ecos-studio/shared'
-import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
-import {
-  dashboardMetricSourceStepIndexes,
-  dashboardMetrics,
-  instanceMetricsFromDbFeature,
-  instanceMetricsFromStepFeature,
-  maxFanoutFromParameters,
-  metricsFromAnalysis,
-  mpcDisplayNameFromParameters,
-  mpcConstraintsFromParameters,
-  qorSummaryCounts,
-  qorStepsFromIndex,
-  qorSummaryStatus,
-  synthesisMetricsFromStat,
-  timingMetricsFromQorSummary,
-  type DashboardQorStep,
-} from '@/components/home/dashboardData'
-import { useWorkspace } from '@/composables/useWorkspace'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
-import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { registerRuntimeStepRenderTask } from '@/composables/runtimeStepRenderSync'
-
-function siblingSummaryPath(metricsPath: string): string | null {
-  return metricsPath.endsWith('/qor_metrics.json')
-    ? `${metricsPath.slice(0, -'qor_metrics.json'.length)}qor_summary.json`
-    : null
-}
-
-function metricsFromText(value: string | null): Map<string, number> {
-  if (!value) return new Map()
-  try {
-    return metricsFromAnalysis(JSON.parse(value))
-  } catch {
-    return new Map()
-  }
-}
-
-function mergeMetrics(
-  groups: readonly ReadonlyMap<string, number>[],
-): Map<string, number> {
-  const merged = new Map<string, number>()
-  for (const group of groups) {
-    for (const [metricId, value] of group) merged.set(metricId, value)
-  }
-  return merged
-}
-
-async function readAuthorizedProjectTextFile(path: string): Promise<string | null> {
-  const authorizedPath = await resolveProjectPathAccess(path)
-  return authorizedPath ? await readOptionalProjectTextFile(authorizedPath) : null
-}
-
-async function synthesisDashboardMetrics(
-  step: WorkspaceStepResource,
-): Promise<Map<string, number>> {
-  const statPath = step.resources.feature.stat
-  if (!statPath?.exists) return new Map()
-
-  const [statRaw, timingRaw] = await Promise.all([
-    readAuthorizedProjectTextFile(statPath.path),
-    readAuthorizedProjectTextFile(
-      joinLocalPath(step.directory, 'feature/post_synthesis/qor_summary.json'),
-    ),
-  ])
-  return mergeMetrics([
-    metricsFromTextWith(statRaw, synthesisMetricsFromStat),
-    metricsFromTextWith(timingRaw, timingMetricsFromQorSummary),
-  ])
-}
-
-async function dbFeatureDashboardMetrics(
-  step: WorkspaceStepResource,
-): Promise<Map<string, number>> {
-  const dbPath = step.resources.feature.db
-  if (!dbPath?.exists) return new Map()
-  return metricsFromTextWith(
-    await readAuthorizedProjectTextFile(dbPath.path),
-    instanceMetricsFromDbFeature,
-  )
-}
-
-function hasDbFeature(step: WorkspaceStepResource | undefined): boolean {
-  return Boolean(step?.resources.feature.db?.exists)
-}
-
-async function previousSuccessfulStepFeatureMetrics(
-  steps: readonly WorkspaceStepResource[],
-  currentIndex: number,
-): Promise<Map<string, number>> {
-  for (let index = currentIndex - 1; index >= 0; index -= 1) {
-    const step = steps[index]
-    if (!step || !isSuccessfulStep(step) || !step.resources.feature.step?.exists) continue
-    return metricsFromTextWith(
-      await readAuthorizedProjectTextFile(step.resources.feature.step.path),
-      instanceMetricsFromStepFeature,
-    )
-  }
-  return new Map()
-}
-
-function isSuccessfulStep(step: WorkspaceStepResource): boolean {
-  switch (step.state.trim().toLowerCase()) {
-    case 'success':
-    case 'succeeded':
-    case 'complete':
-    case 'completed':
-      return true
-    default:
-      return false
-  }
-}
-
-function metricsFromTextWith(
-  value: string | null,
-  parse: (value: unknown) => Map<string, number>,
-): Map<string, number> {
-  if (!value) return new Map()
-  try {
-    return parse(JSON.parse(value))
-  } catch {
-    return new Map()
-  }
-}
+import { computed } from 'vue'
+import type { DashboardMetric, DashboardQorStep } from '@/components/home/dashboardData'
+import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
 export function useDashboardOverview() {
-  const { currentProject, resourceVersions } = useWorkspace()
-  const index = ref<WorkspaceResourceIndex | null>(null)
-  const qorSteps = ref<DashboardQorStep[]>([])
-  const metricValues = ref(new Map<string, number>())
-  const loading = ref(false)
-  const error = ref<string | null>(null)
-  let loadToken = 0
-
-  const parameters = computed(() => index.value?.parameters ?? null)
-  const maxFanout = computed(() => maxFanoutFromParameters(parameters.value))
-  const mpcDisplayName = computed(() => mpcDisplayNameFromParameters(parameters.value))
-  const mpcConstraints = computed(() => mpcConstraintsFromParameters(parameters.value))
-  const keyMetrics = computed(() => dashboardMetrics(metricValues.value))
-
-  async function load(resourceIndex?: WorkspaceResourceIndex): Promise<void> {
-    const projectPath = currentProject.value?.path
-    const token = ++loadToken
-    if (!projectPath) {
-      index.value = null
-      qorSteps.value = []
-      metricValues.value = new Map()
-      error.value = null
-      loading.value = false
-      return
-    }
-
-    loading.value = true
-    error.value = null
-    try {
-      const nextIndex = resourceIndex ?? (await getWorkspaceResourceIndexApi())
-      if (token !== loadToken || currentProject.value?.path !== projectPath) return
-
-      const nextSteps = qorStepsFromIndex(nextIndex)
-      const sourceIndexes = dashboardMetricSourceStepIndexes(nextIndex.flow.steps)
-      const metricGroups = await Promise.all(
-        nextSteps.map(async (step, index) => {
-          const sourceStep = nextIndex.flow.steps[index]
-          const dbMetrics =
-            sourceIndexes.includes(index) && sourceStep
-              ? dbFeatureDashboardMetrics(sourceStep)
-              : Promise.resolve(new Map<string, number>())
-          if (!step.metricsPath) {
-            return { metrics: await dbMetrics, step }
-          }
-          const metricsPath = await resolveProjectPathAccess(step.metricsPath)
-          if (!metricsPath) {
-            return { metrics: await dbMetrics, step }
-          }
-
-          const [metricsRaw, summaryRaw, dbFeatureMetrics] = await Promise.all([
-            readOptionalProjectTextFile(metricsPath),
-            (() => {
-              const summaryPath = siblingSummaryPath(metricsPath)
-              return summaryPath
-                ? readOptionalProjectTextFile(summaryPath)
-                : Promise.resolve(null)
-            })(),
-            dbMetrics,
-          ])
-          const qorMetrics = metricsFromText(metricsRaw)
-          const metrics = mergeMetrics([qorMetrics, dbFeatureMetrics])
-          let status: DashboardQorStep['status'] = 'unavailable'
-          if (summaryRaw) {
-            try {
-              const summary = JSON.parse(summaryRaw)
-              status = qorSummaryStatus(summary)
-              return {
-                metrics,
-                step: { ...step, ...qorSummaryCounts(summary), status },
-              }
-            } catch {
-              status = 'incomplete'
-            }
-          }
-          return { metrics, step: { ...step, status } }
-        }),
-      )
-      if (token !== loadToken || currentProject.value?.path !== projectPath) return
-
-      const latestSourceStep =
-        sourceIndexes.length === 1 ? nextIndex.flow.steps[sourceIndexes[0]!] : null
-      const latestSourceGroup =
-        sourceIndexes.length === 1 ? metricGroups[sourceIndexes[0]!] : undefined
-      const nextMetricValues =
-        latestSourceStep?.name.trim().toLowerCase() === 'synthesis'
-          ? mergeMetrics([
-              await synthesisDashboardMetrics(latestSourceStep),
-              latestSourceGroup?.metrics ?? new Map<string, number>(),
-            ])
-          : mergeMetrics(
-              sourceIndexes.flatMap((index) => {
-                const group = metricGroups[index]
-                return group ? [group.metrics] : []
-              }),
-            )
-      const latestSourceIndex = sourceIndexes.length === 1 ? sourceIndexes[0] : undefined
-      const latestSource =
-        latestSourceIndex === undefined
-          ? undefined
-          : nextIndex.flow.steps[latestSourceIndex]
-      if (
-        latestSourceIndex !== undefined &&
-        latestSource &&
-        !hasDbFeature(latestSource)
-      ) {
-        const fallbackMetrics = await previousSuccessfulStepFeatureMetrics(
-          nextIndex.flow.steps,
-          latestSourceIndex,
-        )
-        if (token !== loadToken || currentProject.value?.path !== projectPath) return
-        const merged = mergeMetrics([fallbackMetrics, nextMetricValues])
-        index.value = nextIndex
-        qorSteps.value = metricGroups.map((group) => group.step)
-        metricValues.value = merged
-        return
-      }
-      if (token !== loadToken || currentProject.value?.path !== projectPath) return
-
-      index.value = nextIndex
-      qorSteps.value = metricGroups.map((group) => group.step)
-      metricValues.value = nextMetricValues
-    } catch (cause) {
-      if (token !== loadToken || currentProject.value?.path !== projectPath) return
-      error.value = cause instanceof Error ? cause.message : String(cause)
-      index.value = null
-      qorSteps.value = []
-      metricValues.value = new Map()
-    } finally {
-      if (token === loadToken) loading.value = false
-    }
-  }
-
-  const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
-    await load(await commit.resourceIndex())
+  const session = useBackendWorkspaceSession()
+  const overview = computed(() => session.projection.data)
+  const configuration = computed(() => {
+    const section = overview.value?.configuration
+    return section?.status === 'ready' || section?.status === 'partial'
+      ? section.data
+      : null
   })
-  onScopeDispose(unregisterStepRenderTask)
-
-  watch(
-    () => [
-      currentProject.value?.path,
-      resourceVersions.value.home,
-      resourceVersions.value.parameters,
-      resourceVersions.value.step,
-      resourceVersions.value.all,
-    ],
-    () => {
-      void load()
-    },
-    { immediate: true },
+  const qor = computed(() => {
+    const section = overview.value?.qor
+    return section?.status === 'ready' || section?.status === 'partial'
+      ? section.data
+      : null
+  })
+  const keyMetrics = computed<DashboardMetric[]>(() => {
+    const section = overview.value?.keyMetrics
+    return section?.status === 'ready' || section?.status === 'partial'
+      ? section.data.items
+      : []
+  })
+  const qorSteps = computed<DashboardQorStep[]>(() =>
+    (qor.value?.steps ?? []).map((step) => ({
+      blockedCount: step.status === 'blocked' ? 1 : 0,
+      id: step.stepId,
+      label: step.name,
+      metricsPath: null,
+      missing: step.summaryMetricCount > 0 ? [] : ['analysis/qor_metrics.json'],
+      passCount: step.status === 'pass' ? 1 : 0,
+      reportCount: 0,
+      runtime: '',
+      status: step.status,
+      summaryMetricCount: step.summaryMetricCount,
+      totalCount: step.status === 'unavailable' ? 0 : 1,
+    })),
   )
 
   return {
-    error,
-    index,
     keyMetrics,
-    loading,
-    maxFanout,
-    mpcDisplayName,
-    mpcConstraints,
+    maxFanout: computed(() => configuration.value?.maxFanout ?? null),
+    mpcConstraints: computed(() => configuration.value?.mpcConstraints ?? null),
+    mpcDisplayName: computed(() => configuration.value?.mpcDisplayName ?? null),
     qorSteps,
-    reload: load,
   }
 }

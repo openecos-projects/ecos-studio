@@ -159,6 +159,41 @@ describe('BackendWorkspaceService', () => {
     })
   })
 
+  it('keeps ECC Unstart steps queued instead of marking them invalid', async () => {
+    const index = resourceIndex()
+    index.flow.steps = [
+      {
+        directory: '/project/ws-a/Synthesis_yosys',
+        info: {},
+        name: 'Synthesis',
+        resources: {
+          analysis: {},
+          checklist: {},
+          config: {},
+          data: {},
+          feature: {},
+          log: {},
+          output: {},
+          report: {},
+          script: {},
+          subflow: {},
+        },
+        runtime: '',
+        state: 'Unstart',
+        tool: 'yosys',
+      },
+    ]
+    const service = new BackendWorkspaceService({
+      workspaceResourceService: { getIndex: vi.fn().mockResolvedValue(index) },
+    })
+
+    const result = await runWithWindowScope(42, () => service.getOverview())
+
+    expect(result.overview.flow).toMatchObject({
+      data: { steps: [{ stepId: 'Synthesis', state: 'not-started' }] },
+    })
+  })
+
   it('reports a damaged Flow section instead of a ready empty flow', async () => {
     const index = resourceIndex()
     index.flow.steps = []

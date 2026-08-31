@@ -37,6 +37,7 @@ export type BackendWorkspaceQorStatus =
   | 'loading'
   | 'available'
   | 'baseline'
+  | 'current-only'
   | 'no-project'
   | 'no-baseline'
   | 'unavailable'
@@ -87,12 +88,29 @@ export function useBackendWorkspaceQor() {
       } as const
     }
     if (baseline.status !== 'ready' && baseline.status !== 'partial') {
+      const comparison: BackendWorkspaceQorComparison = {
+        workspaceId: overview.identity.workspaceId ?? '',
+        workspaceName: overview.identity.workspaceName,
+        score: qor.data.score.value,
+        scoreGate: qor.data.score.gate,
+        scoreThreshold: qor.data.score.threshold,
+        baselineWorkspaceId: overview.identity.baselineWorkspaceId ?? null,
+        baselineWorkspaceName: null,
+        baselineScore: null,
+        baselineScoreGate: 'unavailable',
+        isBaselineWorkspace: false,
+        available: false,
+        metrics: [],
+        deltas: [],
+      }
       return {
-        status: overview.identity.baselineWorkspaceId ? 'unavailable' : 'no-baseline',
+        status: overview.identity.baselineWorkspaceId ? 'current-only' : 'no-baseline',
         projectName: overview.identity.projectName ?? null,
         baselineWorkspaceName: null,
-        baselineSource: null,
-        comparison: null,
+        baselineSource: overview.identity.baselineWorkspaceId
+          ? ('selected' as const)
+          : null,
+        comparison,
       } as const
     }
     const metrics = baseline.data.deltas.map(projectMetric)

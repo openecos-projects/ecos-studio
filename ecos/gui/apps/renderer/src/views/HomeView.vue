@@ -702,7 +702,8 @@ const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
 const qorStatusTone = computed<'pass' | 'warning' | 'blocked' | 'unavailable'>(() => {
   if (
     qorComparisonState.value.status !== 'available' &&
-    qorComparisonState.value.status !== 'baseline'
+    qorComparisonState.value.status !== 'baseline' &&
+    qorComparisonState.value.status !== 'current-only'
   ) {
     return 'unavailable'
   }
@@ -789,6 +790,9 @@ const qorSummaryLabel = computed(() => {
       state.comparison?.baselineScore,
     )} / 100`
   }
+  if (state.status === 'current-only') {
+    return 'Baseline artifacts are unavailable · current workspace QoR shown'
+  }
   if (state.status === 'no-baseline') return 'No baseline workspace is selected'
   if (state.status === 'no-project') return 'Project comparison is unavailable'
   return 'Baseline artifacts are not available for comparison'
@@ -798,10 +802,13 @@ const qorDashboardSteps = computed(() => {
     qorComparisonSummary.value.steps.map((step) => [step.step, step]),
   )
   const comparisonReady = qorComparisonState.value.status === 'available'
-  const showBaselineSummary = qorComparisonState.value.status === 'baseline'
+  const showCurrentSummary =
+    qorComparisonState.value.status === 'baseline' ||
+    qorComparisonState.value.status === 'current-only'
   const currentQorReady =
     qorComparisonState.value.status === 'available' ||
-    qorComparisonState.value.status === 'baseline'
+    qorComparisonState.value.status === 'baseline' ||
+    qorComparisonState.value.status === 'current-only'
   return qorSteps.value.map((step) => {
     const comparisonStep = homeQorFlowStepForLabel(step.label)
       ? comparisonByStep.get(homeQorFlowStepForLabel(step.label)!)
@@ -811,7 +818,7 @@ const qorDashboardSteps = computed(() => {
     const unchangedCount = comparisonReady ? (comparisonStep?.unchangedCount ?? 0) : 0
     const comparableCount = comparisonReady ? (comparisonStep?.comparableCount ?? 0) : 0
     const displayMode =
-      showBaselineSummary && step.status !== 'unavailable' ? 'summary' : 'comparison'
+      showCurrentSummary && step.status !== 'unavailable' ? 'summary' : 'comparison'
     return {
       ...step,
       displayCount: displayMode === 'summary' ? step.summaryMetricCount : comparableCount,
@@ -844,6 +851,9 @@ const qorDetailsEmptyLabel = computed(() => {
   }
   if (qorComparisonState.value.status === 'available') {
     return 'No QoR metrics can be paired with the baseline.'
+  }
+  if (qorComparisonState.value.status === 'current-only') {
+    return 'Current workspace QoR is available, but baseline artifacts are unavailable.'
   }
   return 'Project QoR comparison is not available.'
 })

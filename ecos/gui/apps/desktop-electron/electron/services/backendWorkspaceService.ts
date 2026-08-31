@@ -13,6 +13,7 @@ import {
   type ReadIssue,
   type ReadSection,
   type WorkspaceConfigurationSummary,
+  type WorkspaceDashboardMetric,
   type WorkspaceChecklistSummary,
   type WorkspaceFlowSummary,
   type WorkspaceOverviewCore,
@@ -24,6 +25,7 @@ import {
 import { requireWindowScopeId } from './windowScopeContext'
 import { analyzeWorkspaceQor, type WorkspaceAnalysisTexts } from './workspaceQorAnalysis'
 import { electronLogger } from './logger'
+import { workspaceDashboardMetrics } from './workspaceDashboardAnalysis'
 
 interface BackendWorkspaceServiceOptions {
   workspaceResourceService: {
@@ -58,7 +60,7 @@ export interface BackendWorkspaceInvalidation {
 }
 
 const NOT_MIGRATED_ISSUE: ReadIssue = { code: 'BACKEND_SECTION_NOT_MIGRATED' }
-const CHECKLIST_MAX_BYTES = 512 * 1024
+const WORKSPACE_TEXT_MAX_BYTES = 512 * 1024
 
 function unavailable<T>(): ReadSection<T> {
   return { status: 'unavailable', issues: [NOT_MIGRATED_ISSUE] }
@@ -84,10 +86,10 @@ async function readBoundedText(path: string): Promise<string | null> {
   let handle: Awaited<ReturnType<typeof open>> | null = null
   try {
     handle = await open(path, 'r')
-    const buffer = Buffer.alloc(CHECKLIST_MAX_BYTES + 1)
+    const buffer = Buffer.alloc(WORKSPACE_TEXT_MAX_BYTES + 1)
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-    if (bytesRead > CHECKLIST_MAX_BYTES) {
-      throw new Error(`Checklist exceeds ${CHECKLIST_MAX_BYTES} bytes`)
+    if (bytesRead > WORKSPACE_TEXT_MAX_BYTES) {
+      throw new Error(`Workspace file exceeds ${WORKSPACE_TEXT_MAX_BYTES} bytes`)
     }
     return buffer.subarray(0, bytesRead).toString('utf8')
   } catch (error) {
@@ -120,6 +122,25 @@ function configurationSection(
   }
 
   const die = recordValue(index.parameters.Die)
+  const mpc = recordValue(index.parameters.MPC)
+  const template = recordValue(mpc?.core_template)
+  const ports = Array.isArray(template?.ports)
+    ? template.ports.flatMap((value) => {
+        const port = recordValue(value)
+        const name = stringValue(port, 'name').trim()
+        return name
+          ? [
+              {
+                name,
+                direction: stringValue(port, 'direction').trim() || '--',
+                dataType: stringValue(port, 'data_type').trim() || '--',
+                width: finiteNumber(port?.width),
+                info: stringValue(port, 'info').trim(),
+              },
+            ]
+          : []
+      })
+    : []
   return {
     status: 'ready',
     data: {
@@ -130,6 +151,15 @@ function configurationSection(
       maxFanout: finiteNumber(index.parameters['Max fanout']),
       clock: stringValue(index.parameters, 'Clock'),
       frequencyMaxMhz: finiteNumber(index.parameters['Frequency max [MHz]']),
+      mpcDisplayName: stringValue(mpc, 'display_name').trim() || null,
+      mpcConstraints: template
+        ? {
+            minimumArea: finiteNumber(template.minimum_area),
+            maximumArea: finiteNumber(template.maximum_area),
+            maximumCellCount: finiteNumber(template.maximum_cell_num),
+            ports,
+          }
+        : null,
     },
     issues: [],
   }
@@ -153,6 +183,11 @@ function normalizeFlowState(value: string): FlowStepState {
     case 'error':
       return 'failed'
     case 'pending':
+    case 'unstart':
+    case 'unstarted':
+    case 'not_started':
+    case 'not-started':
+    case 'not started':
       return 'not-started'
     case 'skipped':
       return 'skipped'
@@ -370,6 +405,7 @@ export class BackendWorkspaceService {
       this.readChecklist(index),
     ])
     const qor = await this.readQor(index, manifest)
+    const keyMetrics = await this.readKeyMetrics(index, qor.qor)
     const readMs = performance.now() - readStartedAt
     const normalizeStartedAt = performance.now()
     const overview: WorkspaceOverviewCore = {
@@ -378,6 +414,7 @@ export class BackendWorkspaceService {
       flow: flowSection(index),
       checklist,
       qor: qor.qor,
+      keyMetrics,
       baselineComparison: qor.baselineComparison,
     }
     const result = {
@@ -545,6 +582,37 @@ export class BackendWorkspaceService {
       }
     }
     return result
+  }
+
+  private async readKeyMetrics(
+    index: WorkspaceResourceIndex,
+    qor: ReadSection<WorkspaceQorSummary>,
+  ): Promise<ReadSection<{ items: WorkspaceDashboardMetric[] }>> {
+    const metrics =
+      qor.status === 'ready' || qor.status === 'partial' ? qor.data.metrics : []
+    try {
+      return {
+        status: 'ready',
+        data: {
+          items: await workspaceDashboardMetrics(
+            index,
+            metrics,
+            this.options.readWorkspaceTextFile ?? readBoundedText,
+          ),
+        },
+        issues: [],
+      }
+    } catch (error) {
+      return {
+        status: 'error',
+        issues: [
+          {
+            code: 'WORKSPACE_KEY_METRICS_READ_FAILED',
+            detail: error instanceof Error ? error.message : String(error),
+          },
+        ],
+      }
+    }
   }
 }
 

@@ -25,6 +25,11 @@ function normalizeState(value: unknown, fallback: FlowStepState): FlowStepState 
     case 'error':
       return 'failed'
     case 'pending':
+    case 'unstart':
+    case 'unstarted':
+    case 'not_started':
+    case 'not-started':
+    case 'not started':
       return 'not-started'
     case 'skipped':
       return 'skipped'
