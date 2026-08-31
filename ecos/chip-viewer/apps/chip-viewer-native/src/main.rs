@@ -5,7 +5,7 @@ mod canvas_gpu3d;
 mod map_data;
 mod nav3d;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use app::ChipViewerApp;
@@ -47,37 +47,164 @@ struct Args {
     force_cpu: bool,
 }
 
+#[derive(Debug, Clone)]
+struct GraphicsEnvironment {
+    is_wsl: bool,
+    has_dxg: bool,
+    has_d3d12_mesa: bool,
+    has_dzn: bool,
+}
+
+impl GraphicsEnvironment {
+    fn detect() -> Self {
+        let is_wsl = cfg!(target_os = "linux")
+            && (std::env::var_os("WSL_DISTRO_NAME").is_some()
+                || std::env::var_os("WSL_INTEROP").is_some()
+                || Path::new("/dev/dxg").exists());
+        let has_dxg = Path::new("/dev/dxg").exists();
+        let has_d3d12_mesa = Path::new("/usr/lib/x86_64-linux-gnu/dri/d3d12_dri.so").exists()
+            || Path::new("/usr/lib/dri/d3d12_dri.so").exists();
+        let has_dzn = (Path::new("/usr/share/vulkan/icd.d/dzn_icd.json").exists()
+            || Path::new("/usr/share/vulkan/icd.d/dzn_icd.x86_64.json").exists())
+            && (Path::new("/usr/lib/x86_64-linux-gnu/libvulkan_dzn.so").exists()
+                || Path::new("/usr/lib/libvulkan_dzn.so").exists());
+
+        Self {
+            is_wsl,
+            has_dxg,
+            has_d3d12_mesa,
+            has_dzn,
+        }
+    }
+
+    fn configure_wsl_windowing(&self) {
+        if self.is_wsl && std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
+            std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+        }
+    }
+}
+
+fn is_software_adapter(info: &wgpu::AdapterInfo) -> bool {
+    matches!(info.device_type, wgpu::DeviceType::Cpu)
+        || info.name.to_ascii_lowercase().contains("llvmpipe")
+        || info.name.to_ascii_lowercase().contains("softpipe")
+        || info.driver.to_ascii_lowercase().contains("llvmpipe")
+        || info.driver.to_ascii_lowercase().contains("swrast")
+}
+
+fn is_hardware_adapter(info: &wgpu::AdapterInfo) -> bool {
+    !is_software_adapter(info)
+}
+
+fn probe_wgpu_adapter(backends: wgpu::Backends) -> Option<wgpu::AdapterInfo> {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends,
+        ..Default::default()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }))?;
+    Some(adapter.get_info())
+}
+
+fn print_startup_diagnostics(
+    env: &GraphicsEnvironment,
+    adapter_info: Option<&wgpu::AdapterInfo>,
+    has_hardware_gpu: bool,
+) {
+    let platform = if env.is_wsl {
+        "WSL2 / WSLg"
+    } else if cfg!(target_os = "linux") {
+        "Native Linux"
+    } else if cfg!(target_os = "windows") {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "macOS"
+    } else {
+        "Other"
+    };
+
+    let gpu_device_str = adapter_info
+        .map(|info| info.name.clone())
+        .unwrap_or_else(|| "None / Unprobed".to_string());
+
+    let backend_str = adapter_info
+        .map(|info| format!("{:?}", info.backend))
+        .unwrap_or_else(|| "None".to_string());
+
+    let driver_str = adapter_info
+        .map(|info| info.driver.clone())
+        .unwrap_or_else(|| "None".to_string());
+
+    let adapter_type_str = adapter_info
+        .map(|info| {
+            if is_software_adapter(info) {
+                "Software / CPU rasterizer"
+            } else {
+                "Hardware Accelerated GPU"
+            }
+        })
+        .unwrap_or("Unavailable");
+
+    let rendering_mode = if has_hardware_gpu {
+        "GPU Canvas (Hardware Accelerated)"
+    } else {
+        "CPU 2D (Software Fallback)"
+    };
+
+    let three_d_mode = if has_hardware_gpu {
+        "Available (GPU Instanced)"
+    } else {
+        "Unavailable (Requires Hardware GPU)"
+    };
+
+    eprintln!("============================================================");
+    eprintln!("ECOS Chip Viewer Graphics Diagnostic");
+    eprintln!("------------------------------------------------------------");
+    eprintln!("Platform:        {}", platform);
+    if env.is_wsl {
+        eprintln!(
+            "WSL /dev/dxg:    {}",
+            if env.has_dxg {
+                "Available"
+            } else {
+                "Not found"
+            }
+        );
+        eprintln!(
+            "Mesa D3D12:      {}",
+            if env.has_d3d12_mesa {
+                "Available"
+            } else {
+                "Not found"
+            }
+        );
+        eprintln!(
+            "Vulkan Dozen:    {}",
+            if env.has_dzn {
+                "Available"
+            } else {
+                "Not found"
+            }
+        );
+    }
+    eprintln!("Adapter Name:    {}", gpu_device_str);
+    eprintln!("Adapter Backend: {}", backend_str);
+    eprintln!("Adapter Driver:  {}", driver_str);
+    eprintln!("Adapter Type:    {}", adapter_type_str);
+    eprintln!("------------------------------------------------------------");
+    eprintln!("Rendering Mode:  {}", rendering_mode);
+    eprintln!("3D Canvas:       {}", three_d_mode);
+    eprintln!("============================================================");
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    if cfg!(target_os = "linux") {
-        let is_wsl = std::env::var_os("WSL_DISTRO_NAME").is_some()
-            || std::env::var_os("WSL_INTEROP").is_some()
-            || std::path::Path::new("/dev/dxg").exists();
-
-        if is_wsl {
-            if std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
-                std::env::set_var("WINIT_UNIX_BACKEND", "x11");
-            }
-            if std::env::var_os("VK_ICD_FILENAMES").is_none() {
-                let lvp64 = std::path::Path::new("/usr/share/vulkan/icd.d/lvp_icd.x86_64.json");
-                let lvp = std::path::Path::new("/usr/share/vulkan/icd.d/lvp_icd.json");
-                if lvp64.exists() {
-                    std::env::set_var(
-                        "VK_ICD_FILENAMES",
-                        "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
-                    );
-                    std::env::set_var(
-                        "VK_DRIVER_FILES",
-                        "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
-                    );
-                } else if lvp.exists() {
-                    std::env::set_var("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/lvp_icd.json");
-                    std::env::set_var("VK_DRIVER_FILES", "/usr/share/vulkan/icd.d/lvp_icd.json");
-                }
-            }
-        }
-    }
+    let env = GraphicsEnvironment::detect();
+    env.configure_wsl_windowing();
 
     let force_cpu_env = std::env::var("ECOS_FORCE_CPU")
         .ok()
@@ -85,6 +212,12 @@ fn main() -> Result<()> {
         .unwrap_or(false);
 
     let wgpu_backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
+    let probed_adapter = probe_wgpu_adapter(wgpu_backends);
+    let is_hardware_gpu = probed_adapter.as_ref().is_some_and(is_hardware_adapter)
+        && !args.force_cpu
+        && !force_cpu_env;
+
+    print_startup_diagnostics(&env, probed_adapter.as_ref(), is_hardware_gpu);
 
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -123,11 +256,11 @@ fn main() -> Result<()> {
         "Chip Viewer",
         native_options,
         Box::new(move |_cc| {
-            let has_wgpu = _cc
-                .wgpu_render_state
-                .as_ref()
-                .is_some_and(|rs| rs.device.limits().max_storage_buffers_per_shader_stage >= 1)
-                && !args.force_cpu
+            let has_wgpu = _cc.wgpu_render_state.as_ref().is_some_and(|rs| {
+                let limits = rs.device.limits();
+                let info = rs.adapter.get_info();
+                limits.max_storage_buffers_per_shader_stage >= 1 && is_hardware_adapter(&info)
+            }) && !args.force_cpu
                 && !force_cpu_env;
 
             Ok(Box::new(ChipViewerApp::open(
@@ -151,12 +284,7 @@ fn main() -> Result<()> {
     ) {
         Ok(()) => Ok(()),
         Err(err) => {
-            let msg = format!(
-                "Chip Viewer failed to start.\n\n\
-                 Error: {err}\n\n\
-                "
-            );
-            eprintln!("{msg}");
+            eprintln!("Chip Viewer encountered a windowing error: {err}");
             std::process::exit(1);
         }
     }

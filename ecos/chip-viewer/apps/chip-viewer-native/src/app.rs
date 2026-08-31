@@ -2667,7 +2667,7 @@ impl LoadedViewer {
                     if ui
                         .selectable_label(self.view_mode == mode, label)
                         .on_hover_text(if !enabled && mode == ViewMode::ThreeD {
-                            "3D view requires GPU acceleration (running in CPU fallback)"
+                            "3D view requires hardware acceleration (running in CPU fallback)"
                         } else if mode == ViewMode::ThreeD {
                             "Orbit the extruded metal stack"
                         } else {
@@ -4557,7 +4557,7 @@ impl LoadedViewer {
             painter.text(
                 canvas.center(),
                 egui::Align2::CENTER_CENTER,
-                "3D view requires GPU acceleration.\nRunning in CPU fallback mode — switch to 2D view.",
+                "3D acceleration unavailable in this environment.\n2D layout rendering remains available.",
                 egui::FontId::proportional(14.0),
                 ecos_text_secondary(),
             );
