@@ -32,6 +32,7 @@ const setupStages: BackendFlowStage[] = Object.values(STEP_METADATA)
 const optimisticRun = ref<{
   projectPath: string
   resetAll: boolean
+  runtimeEventCursor: unknown
   stepPath: string
 } | null>(null)
 
@@ -76,6 +77,10 @@ export function useBackendFlowStages() {
       !request ||
       request.projectPath !== normalizedPath(currentProject.value?.path ?? '')
     ) {
+      return steps
+    }
+    const latestRuntimeEvent = runtimeEvents.value[runtimeEvents.value.length - 1]
+    if (latestRuntimeEvent && latestRuntimeEvent !== request.runtimeEventCursor) {
       return steps
     }
     if (steps.some((step) => step.state === 'running')) return steps
@@ -129,6 +134,7 @@ export function useBackendFlowStages() {
     optimisticRun.value = {
       projectPath: normalizedPath(currentProject.value?.path ?? ''),
       resetAll: Boolean(options.resetAll),
+      runtimeEventCursor: runtimeEvents.value[runtimeEvents.value.length - 1] ?? null,
       stepPath: '',
     }
   }
@@ -137,6 +143,7 @@ export function useBackendFlowStages() {
     optimisticRun.value = {
       projectPath: normalizedPath(currentProject.value?.path ?? ''),
       resetAll: false,
+      runtimeEventCursor: runtimeEvents.value[runtimeEvents.value.length - 1] ?? null,
       stepPath,
     }
   }

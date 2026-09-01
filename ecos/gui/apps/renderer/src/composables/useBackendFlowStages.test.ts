@@ -81,4 +81,30 @@ describe('useBackendFlowStages runtime projection', () => {
       flow.dynamicFlowStages.value.filter((step) => step.state === 'Ongoing'),
     ).toEqual([expect.objectContaining({ label: 'Place' })])
   })
+
+  it('does not restore optimistic running state after the operation fails', () => {
+    const flow = useBackendFlowStages()
+    flow.setFirstRunStepOngoing()
+    state.runtimeEvents!.value.push(
+      {
+        data: {
+          runtimeProtocolType: 'step.started',
+          state: 'running',
+          step: 'Synthesis',
+        },
+      },
+      {
+        data: {
+          step: 'Synthesis',
+          type: 'error',
+        },
+      },
+    )
+
+    expect(flow.dynamicFlowStages.value[0]).toMatchObject({
+      label: 'Synthesis',
+      state: 'Incomplete',
+    })
+    expect(flow.hasOngoingRunStage.value).toBe(false)
+  })
 })
