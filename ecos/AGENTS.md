@@ -3,14 +3,6 @@
 These instructions apply to the application code under `ecos/` and supplement
 the repository-root `AGENTS.md`.
 
-## Application Layout
-
-- `gui/`: Electron desktop shell, Vue renderer, and shared TypeScript contracts.
-- `agent/`: Python Agent provider and its packaged plugin manifests.
-- `chip-viewer/`: Rust workspace for native layout inspection.
-- `scripts/`: runtime wrappers and integration smoke tests.
-- `docs/`: user-facing application documentation.
-
 ## Architecture
 
 - The Vue renderer presents workspaces and flows but delegates privileged work
@@ -26,11 +18,17 @@ the repository-root `AGENTS.md`.
 - Chip Viewer remains a native process so Rust rendering and large layout data
   stay outside the Electron renderer.
 
-## Component Instructions
+## Implementation Guidance
 
-- GUI work: read `gui/AGENTS.md`.
-- Agent work: read `agent/AGENTS.md`.
-- Chip Viewer work: read `chip-viewer/AGENTS.md`.
+- Add new behavior to focused modules instead of growing central orchestration
+  files.
+- Target new hand-written production files under 500 LoC.
+- When a file exceeds roughly 800 LoC, add new functionality in a separate
+  responsibility-focused module unless there is a strong reason to keep it
+  cohesive.
+- Do not reduce file size by removing validation, error handling, security, or
+  readability. Generated code, vendored code, fixtures, snapshots, lockfiles,
+  and declarative data are exempt.
 
 ## Cross-Component Changes
 

@@ -3,17 +3,6 @@
 These instructions apply to `ecos/agent/` and supplement the parent instruction
 files.
 
-## Package Layout
-
-- Python 3.11, Pydantic, uv, and pytest implement the in-tree Agent provider.
-- `src/ecos_agent/` contains provider state, typed contracts, Codex integration,
-  workspace setup and rerun logic, optimization, and knowledge retrieval.
-- `tests/` contains provider, protocol, workspace, optimization, and retrieval
-  tests.
-- `knowledge/` contains the production knowledge bundles loaded by the provider.
-- `agent-provider.json` launches the development provider through uv.
-- `agent-provider.packaged.json` launches the packaged `ecos-agent` executable.
-
 ## Execution Boundaries
 
 - Codex produces read-only, schema-constrained proposals; it does not execute
