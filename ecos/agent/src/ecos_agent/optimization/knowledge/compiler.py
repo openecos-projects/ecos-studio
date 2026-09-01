@@ -821,10 +821,7 @@ def _validate_parameter_card_bindings(binding: VersionBoundToolBinding) -> None:
             card = cards[knob]
         except (KeyError, ValueError) as exc:
             raise ValueError("binding parameter card is unavailable") from exc
-        expected_ref = (
-            "knowledge/optimization/parameter-effectiveness/cards/"
-            f"{action.knob_id}.json"
-        )
+        expected_ref = f"knowledge/optimization/{action.knob_id}.json"
         if (
             action.parameter_card_ref != expected_ref
             or action.parameter_card_sha256 != card_hash(card)

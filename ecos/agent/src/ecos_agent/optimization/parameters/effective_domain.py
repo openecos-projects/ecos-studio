@@ -263,10 +263,7 @@ def compile_effective_domain(
                         evidence_refs=(
                             {
                                 "kind": "parameter_card",
-                                "ref": (
-                                    "optimization/parameter-effectiveness/cards/"
-                                    f"{card.knob_id.value}.json"
-                                ),
+                                "ref": f"optimization/{card.knob_id.value}.json",
                                 "sha256": card_hash(card),
                             },
                             {

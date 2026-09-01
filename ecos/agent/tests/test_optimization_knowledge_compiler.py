@@ -372,10 +372,7 @@ def test_parameter_card_binding_rejects_tampered_hash() -> None:
     action = BoundKnowledgeAction(
         knob_id="place.target_density",
         direction="decrease",
-        parameter_card_ref=(
-            "knowledge/optimization/parameter-effectiveness/cards/"
-            "place.target_density.json"
-        ),
+        parameter_card_ref="knowledge/optimization/place.target_density.json",
         parameter_card_sha256=HASH,
         consumer_ids=("dreamplace.density_objective",),
         activation_predicate_ids=("dreamplace.density_objective",),

@@ -55,14 +55,14 @@ from ecos_agent.optimization.parameters.semantics import card_hash
 HASH = "sha256:" + "a" * 64
 CARD_PATH = (
     Path(__file__).parents[1]
-    / "knowledge/optimization/parameter-effectiveness/cards/place.target_density.json"
+    / "knowledge/optimization/place.target_density.json"
 )
 
 
 def _card_for(knob: OptimizationKnob) -> ParameterSemanticsCard:
     path = (
         Path(__file__).parents[1]
-        / f"knowledge/optimization/parameter-effectiveness/cards/{knob.value}.json"
+        / f"knowledge/optimization/{knob.value}.json"
     )
     return ParameterSemanticsCard.model_validate_json(path.read_bytes())
 

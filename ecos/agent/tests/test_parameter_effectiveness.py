@@ -39,6 +39,19 @@ from ecos_agent.optimization.parameters.semantics import (
 HASH = "sha256:" + "a" * 64
 
 
+def test_parameter_cards_are_flat_under_optimization() -> None:
+    manifest = json.loads((CARD_ROOT / "manifest.json").read_text(encoding="utf-8"))
+
+    assert CARD_ROOT.name == "optimization"
+    assert {item["path"] for item in manifest["cards"]} == {
+        f"{knob.value}.json" for knob in OptimizationKnob
+    }
+    assert {path.name for path in CARD_ROOT.iterdir()} == {
+        "manifest.json",
+        *(f"{knob.value}.json" for knob in OptimizationKnob),
+    }
+
+
 def test_parameter_receipt_schema_explains_evidence_boundaries() -> None:
     schema = ParameterApplicationReceipt.model_json_schema()
 
@@ -157,7 +170,7 @@ def test_non_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -
 def test_loader_rejects_dreamplace_card_without_native_consumer_span(tmp_path) -> None:
     root = tmp_path / "cards"
     shutil.copytree(CARD_ROOT, root)
-    card_path = root / "cards/place.target_density.json"
+    card_path = root / "place.target_density.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
     card["source_spans"] = [
         span
@@ -184,7 +197,7 @@ def test_loader_rejects_dreamplace_card_without_runtime_report_producer(
 ) -> None:
     root = tmp_path / "cards"
     shutil.copytree(CARD_ROOT, root)
-    card_path = root / "cards/place.target_density.json"
+    card_path = root / "place.target_density.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
     card["tool"].pop("source_sha256", None)
     card["source_spans"] = [
@@ -203,7 +216,7 @@ def test_loader_rejects_dreamplace_card_without_runtime_report_producer(
 def test_loader_rejects_source_span_hash_when_line_range_changes(tmp_path) -> None:
     root = tmp_path / "cards"
     shutil.copytree(CARD_ROOT, root)
-    card_path = root / "cards/place.target_density.json"
+    card_path = root / "place.target_density.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
     card["source_spans"][1]["start"] = 1
     card["source_spans"][1]["end"] = 1
@@ -230,7 +243,7 @@ def _refresh_card_manifest(root) -> None:
 def test_loader_rejects_changed_frozen_lattice(tmp_path) -> None:
     root = tmp_path / "cards"
     shutil.copytree(CARD_ROOT, root)
-    card_path = root / "cards/place.target_density.json"
+    card_path = root / "place.target_density.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
     card["requested_domain"]["values"][0] = 0.11
     card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
@@ -243,7 +256,7 @@ def test_loader_rejects_changed_frozen_lattice(tmp_path) -> None:
 def test_loader_rejects_unregistered_runtime_probe(tmp_path) -> None:
     root = tmp_path / "cards"
     shutil.copytree(CARD_ROOT, root)
-    card_path = root / "cards/place.target_density.json"
+    card_path = root / "place.target_density.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
     card["runtime_probe_ids"] = ["unknown.probe"]
     card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
@@ -257,7 +270,7 @@ def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
     wheel_dir = tmp_path / "wheel"
     subprocess.run(
         ["uv", "build", "--wheel", "--out-dir", str(wheel_dir)],
-        cwd=CARD_ROOT.parents[2],
+        cwd=CARD_ROOT.parents[1],
         check=True,
         capture_output=True,
         text=True,
@@ -394,10 +407,7 @@ def test_density_floor_excludes_only_values_supported_by_typed_rule() -> None:
     assert domain.thresholds[0].evidence_refs == (
         {
             "kind": "parameter_card",
-            "ref": (
-                "optimization/parameter-effectiveness/cards/"
-                "place.target_density.json"
-            ),
+            "ref": "optimization/place.target_density.json",
             "sha256": card_hash(card),
         },
         {

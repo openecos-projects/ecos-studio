@@ -228,9 +228,7 @@ def _binding_actions(
         if str(knob.get("step", "")).casefold() != card.stage.casefold():
             raise ValueError(f"binding stage does not match parameter card: {knob['knob_id']}")
         card_ref = str(
-            (CARD_ROOT / "cards" / f"{card.knob_id.value}.json").relative_to(
-                AGENT_ROOT
-            )
+            (CARD_ROOT / f"{card.knob_id.value}.json").relative_to(AGENT_ROOT)
         )
         actions.append(
             {

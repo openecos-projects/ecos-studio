@@ -15,13 +15,11 @@ _PACKAGE_CARD_ROOT = (
     Path(__file__).resolve().parents[2]
     / "knowledge"
     / "optimization"
-    / "parameter-effectiveness"
 )
 _SOURCE_CARD_ROOT = (
     Path(__file__).resolve().parents[4]
     / "knowledge"
     / "optimization"
-    / "parameter-effectiveness"
 )
 CARD_ROOT = (
     _PACKAGE_CARD_ROOT
