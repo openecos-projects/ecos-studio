@@ -198,19 +198,18 @@ equal-budget artifact 中的 `terminal_utility` 只是冻结 objective metric �
 在很多主机（含开启 AppArmor 限制的 Ubuntu）上无法生效；而 app-server 对**任何
 未知字段都静默接受**，因此无法从外部确认某个字段是否真的被采纳。
 
-## TODO
+## 当前实现与证据边界
 
-以下是规划中的能力，不代表当前版本已经提供。
-
-1. **设计状态诊断与受控流程建议**：从 workspace 流程记录、QoR、DRC、时序和
-   拥塞等证据中定位问题，给出带证据的参数调节或流程重访候选；每项建议仍须满足
-   参数白名单、合同校验和用户确认。
-2. **受控 PPA 优化闭环**：在隔离 workspace 中，以明确的基线、目标、资源预算和
-   通过门槛生成并执行候选实验，比较功耗、性能、面积及签核相关指标；保留配置、
-   随机种子、命令、产物和指标，以支持复现、回滚和结果审计。
-3. **Agent 能力自进化**：基于用户明确允许保存的执行轨迹、合同校验结果和实验
-   反馈，离线评估并版本化更新策略或知识；新版本须通过基准评测、审批与回滚机制，
-   不得绕过既有的权限边界和确定性执行链路。
+- **Parameter Engineering Implementation Complete**：8 个冻结的单参数 knob 已接入
+  effective-domain exact-value 提案；L0-L3 证据链包含原生参数回执、终态观测、ledger
+  和确定性回放。
+- **Knowledge Engineering Implementation Partial**：state-conditioned 双层知识、
+  post-match top-3 和 zero-shot knowledge treatment 门禁已接入；显式 objective/current-toolchain
+  compatibility、冻结 state-rule manifest、noise-aware trend 和真实 episode replay 验收仍待完成。
+- **Runtime Acceptance Pending**：尚无当前最终 revision 上覆盖全部目标参数和知识路径的
+  完整运行验收证据。
+- **Research Claim Not Assessed**：现有实现、单元测试、参数回执和知识支持关系均不能替代
+  equal-budget 终态实验，暂不声称优化收益、知识效用或因果改善。
 
 ## 常见问题
 
