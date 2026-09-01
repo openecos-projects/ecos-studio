@@ -73,14 +73,18 @@ export class WorkspaceRuntimeCommands {
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
     return this.context.enqueue('workspace.create', undefined, async () => {
       const client = await this.context.ensureStarted()
+      const payload = workspaceSpecCreatePayload(request) as {
+        workspaceBindings: Record<string, unknown>
+      }
       const response = await client.call<EccWorkspaceSessionResult>(
         'workspace.create',
-        workspaceSpecCreatePayload(request),
+        payload,
       )
       const session = this.context.sessions.activate(
         response.directory,
         response.workspaceId,
         response.workspaceRevision ?? 1,
+        payload.workspaceBindings,
       )
       return {
         directory: session.directory,
@@ -96,8 +100,20 @@ export class WorkspaceRuntimeCommands {
       await migrateWorkspaceConfigFilenames(request.directory)
       if (this.context.lazyWorkspaceOpen) {
         const existing = this.context.sessions.findByDirectory(request.directory)
-        const session =
-          existing ?? this.context.sessions.activate(request.directory, null)
+        if (existing && request.workspaceBindings) {
+          this.context.sessions.updateBindings(
+            existing.workspaceHandle,
+            request.workspaceBindings,
+          )
+        }
+        const session = existing
+          ? this.context.sessions.require(existing.workspaceHandle)
+          : this.context.sessions.activate(
+              request.directory,
+              null,
+              0,
+              request.workspaceBindings,
+            )
         return { directory: session.directory, workspaceHandle: session.workspaceHandle }
       }
       const client = await this.context.ensureStarted()
@@ -111,6 +127,7 @@ export class WorkspaceRuntimeCommands {
         response.directory,
         response.workspaceId,
         response.workspaceRevision ?? 1,
+        request.workspaceBindings,
       )
       return {
         directory: session.directory,
@@ -157,6 +174,10 @@ export class WorkspaceRuntimeCommands {
     this.context.sessions.updateRevision(
       request.workspaceHandle,
       result.workspaceRevision,
+    )
+    this.context.sessions.updateBindings(
+      request.workspaceHandle,
+      request.workspaceBindings,
     )
     return result
   }

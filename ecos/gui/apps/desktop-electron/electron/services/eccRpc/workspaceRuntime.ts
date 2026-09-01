@@ -649,6 +649,9 @@ export class EccWorkspaceRuntime {
     const client = this.client ?? (await this.ensureStarted())
     const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {
       directory: session.directory,
+      ...(session.workspaceBindings
+        ? { workspaceBindings: session.workspaceBindings }
+        : {}),
     })
     this.sessions.rebind(
       workspaceHandle,

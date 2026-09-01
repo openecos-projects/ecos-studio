@@ -1425,11 +1425,18 @@ describe('EccWorkspaceRuntime', () => {
 
   it('handshakes and reopens retained sessions when the sidecar returns a new client', async () => {
     const { client, service, sidecar } = createService()
+    const workspaceBindings = {
+      inputs: {},
+      pdk: { root: '/pdks/ics55', version: '1.10.102' },
+    }
     client.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
     )
-    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    const workspace = await service.openWorkspace({
+      directory: '/work/demo',
+      workspaceBindings,
+    })
     const replacementClient = new FakeRpcClient()
     replacementClient.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
@@ -1448,7 +1455,10 @@ describe('EccWorkspaceRuntime', () => {
 
     expect(replacementClient.calls).toEqual([
       { method: 'rpc.hello', params: { version: 1 } },
-      { method: 'workspace.open', params: { directory: '/work/demo' } },
+      {
+        method: 'workspace.open',
+        params: { directory: '/work/demo', workspaceBindings },
+      },
       {
         method: 'flow.run',
         options: { timeoutMs: 0 },

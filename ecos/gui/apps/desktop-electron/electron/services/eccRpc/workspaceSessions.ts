@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 export interface WorkspaceSessionRecord {
   directory: string
   eccWorkspaceId: string | null
+  workspaceBindings?: Record<string, unknown>
   workspaceHandle: string
   workspaceRevision: number
 }
@@ -43,10 +44,12 @@ export class WorkspaceSessionRegistry {
     directory: string,
     eccWorkspaceId: string | null,
     workspaceRevision = 0,
+    workspaceBindings?: Record<string, unknown>,
   ): WorkspaceSessionRecord {
     const session = {
       directory,
       eccWorkspaceId,
+      ...(workspaceBindings ? { workspaceBindings } : {}),
       workspaceHandle: this.idProvider(),
       workspaceRevision,
     }
@@ -90,6 +93,14 @@ export class WorkspaceSessionRegistry {
   updateRevision(workspaceHandle: string, workspaceRevision: number): void {
     const session = this.require(workspaceHandle)
     this.sessions.set(workspaceHandle, { ...session, workspaceRevision })
+  }
+
+  updateBindings(
+    workspaceHandle: string,
+    workspaceBindings: Record<string, unknown>,
+  ): void {
+    const session = this.require(workspaceHandle)
+    this.sessions.set(workspaceHandle, { ...session, workspaceBindings })
   }
 
   hasOtherEccWorkspaceReference(
