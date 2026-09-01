@@ -4,11 +4,16 @@ from dataclasses import replace
 
 import pytest
 
-from ecos_agent.optimization.experiments.equal_budget import CandidateTrace, EqualBudgetConfig
+from ecos_agent.optimization.experiments.equal_budget import (
+    CandidateTrace,
+    EqualBudgetConfig,
+)
 from ecos_agent.optimization.experiments.knowledge_treatments import (
     KNOWLEDGE_TREATMENTS,
+    ZERO_SHOT_GATE_TREATMENTS,
     KnowledgeTreatment,
     build_knowledge_treatment_report,
+    build_zero_shot_gate_report,
 )
 
 
@@ -41,20 +46,92 @@ def test_frozen_knowledge_treatments_map_to_bounded_runtime_modes() -> None:
     assert [item.treatment for item in KNOWLEDGE_TREATMENTS] == [
         KnowledgeTreatment.LLM_NO_KNOWLEDGE,
         KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG,
+        KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT,
         KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT,
     ]
     assert [item.agent_mode for item in KNOWLEDGE_TREATMENTS] == [
         "llm_no_knowledge",
         "raw_rag",
         "full_agent",
+        "full_agent",
     ]
-    assert [item.knowledge_case_shots for item in KNOWLEDGE_TREATMENTS] == [0, 0, 3]
+    assert [item.knowledge_case_shots for item in KNOWLEDGE_TREATMENTS] == [0, 0, 0, 3]
     assert all(item.receipt_aware_planning for item in KNOWLEDGE_TREATMENTS)
+
+
+def test_zero_shot_gate_requires_audited_positive_signal() -> None:
+    no_knowledge = KnowledgeTreatment.LLM_NO_KNOWLEDGE
+    raw_rag = KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG
+    zero_shot = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT
+    design_ids = tuple(f"d{index}" for index in range(10))
+    traces = {
+        treatment: tuple(
+            _trace(
+                treatment,
+                design_id,
+                11.0
+                if treatment == zero_shot
+                else 8.0
+                if treatment == no_knowledge
+                else 9.0,
+                effective=treatment == zero_shot,
+                candidate_index=candidate_index,
+            )
+            for design_id in design_ids
+            for candidate_index in range(2)
+        )
+        for treatment in (item.treatment for item in ZERO_SHOT_GATE_TREATMENTS)
+    }
+    complete = {treatment: True for treatment in traces}
+    zero_only_events = {
+        treatment: 20 if treatment == zero_shot else 0 for treatment in traces
+    }
+
+    report = build_zero_shot_gate_report(
+        traces,
+        planning_calls_by_treatment={treatment: 20 for treatment in traces},
+        config=EqualBudgetConfig(reference_runtime_seconds=2.0),
+        design_ids=design_ids,
+        rule_guided_utility_by_design={design_id: -1.0 for design_id in design_ids},
+        budget_complete_by_treatment=complete,
+        terminal_artifacts_complete_by_treatment=complete,
+        replay_chain_complete_by_treatment=complete,
+        selected_cases_by_treatment={treatment: 0 for treatment in traces},
+        case_selection_events_by_treatment=zero_only_events,
+        nonempty_case_selection_events_by_treatment={
+            treatment: 0 for treatment in traces
+        },
+    )
+
+    assert report["schema_version"] == "ecos.optimization_zero_shot_gate.v1"
+    assert report["decision"] == "pass"
+    assert report["few_shot_authorized"] is True
+    assert all(report["criteria"].values())
+
+    report = build_zero_shot_gate_report(
+        traces,
+        planning_calls_by_treatment={treatment: 20 for treatment in traces},
+        config=EqualBudgetConfig(reference_runtime_seconds=2.0),
+        design_ids=design_ids,
+        rule_guided_utility_by_design=None,
+        budget_complete_by_treatment=complete,
+        terminal_artifacts_complete_by_treatment=complete,
+        replay_chain_complete_by_treatment=complete,
+        selected_cases_by_treatment={treatment: 0 for treatment in traces},
+        case_selection_events_by_treatment=zero_only_events,
+        nonempty_case_selection_events_by_treatment={
+            treatment: 0 for treatment in traces
+        },
+    )
+
+    assert report["decision"] == "not_assessed"
+    assert report["few_shot_authorized"] is False
 
 
 def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
     no_knowledge = KnowledgeTreatment.LLM_NO_KNOWLEDGE
     raw_rag = KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG
+    zero_shot = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT
     full = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT
     design_ids = tuple(f"d{index}" for index in range(10))
     traces = {
@@ -75,6 +152,17 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
                 design_id,
                 9.0,
                 effective=design_id == "d0",
+                candidate_index=candidate_index,
+            )
+            for design_id in design_ids
+            for candidate_index in range(2)
+        ),
+        zero_shot: tuple(
+            _trace(
+                zero_shot,
+                design_id,
+                10.5,
+                effective=True,
                 candidate_index=candidate_index,
             )
             for design_id in design_ids
@@ -107,14 +195,15 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
             treatment: 20 if treatment == full else 0 for treatment in traces
         },
         case_selection_events_by_treatment={
-            treatment: 20 if treatment == full else 0 for treatment in traces
+            treatment: 20 if treatment in {zero_shot, full} else 0
+            for treatment in traces
         },
         nonempty_case_selection_events_by_treatment={
             treatment: 20 if treatment == full else 0 for treatment in traces
         },
     )
 
-    assert report["schema_version"] == "ecos.optimization_knowledge_treatment_report.v1"
+    assert report["schema_version"] == "ecos.optimization_knowledge_treatment_report.v2"
     assert report["evaluation_status"] == "completed"
     assert report["go_no_go"]["decision"] == "go"
     assert all(report["go_no_go"]["criteria"].values())
@@ -126,6 +215,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
         "tie": 0,
         "loss": 0,
     }
+    assert report["zero_shot_gate"]["decision"] == "pass"
     assert report["diagnostics"][full.value]["effective_intervention_rate"] == 1.0
     assert (
         report["diagnostics"][no_knowledge.value]["ineffective_candidate_rate"]
@@ -173,6 +263,7 @@ def test_treatment_report_does_not_assess_incomplete_evidence() -> None:
 def test_full_treatment_with_partial_case_coverage_remains_not_assessed() -> None:
     no_knowledge = KnowledgeTreatment.LLM_NO_KNOWLEDGE
     raw_rag = KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG
+    zero_shot = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT
     full = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT
     design_ids = tuple(f"d{index}" for index in range(10))
     traces = {
@@ -182,7 +273,18 @@ def test_full_treatment_with_partial_case_coverage_remains_not_assessed() -> Non
             for index in range(2)
         ),
         raw_rag: tuple(
-            _trace(raw_rag, design_id, 9.0, effective=design_id == "d0", candidate_index=index)
+            _trace(
+                raw_rag,
+                design_id,
+                9.0,
+                effective=design_id == "d0",
+                candidate_index=index,
+            )
+            for design_id in design_ids
+            for index in range(2)
+        ),
+        zero_shot: tuple(
+            _trace(zero_shot, design_id, 10.5, effective=True, candidate_index=index)
             for design_id in design_ids
             for index in range(2)
         ),
@@ -207,7 +309,8 @@ def test_full_treatment_with_partial_case_coverage_remains_not_assessed() -> Non
             treatment: 3 if treatment == full else 0 for treatment in traces
         },
         case_selection_events_by_treatment={
-            treatment: 20 if treatment == full else 0 for treatment in traces
+            treatment: 20 if treatment in {zero_shot, full} else 0
+            for treatment in traces
         },
         nonempty_case_selection_events_by_treatment={
             treatment: 1 if treatment == full else 0 for treatment in traces

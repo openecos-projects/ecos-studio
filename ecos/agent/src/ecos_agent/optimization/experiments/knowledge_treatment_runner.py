@@ -9,7 +9,7 @@ import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
@@ -24,9 +24,12 @@ from ecos_agent.optimization.experiments.equal_budget import (
     export_episode_traces,
 )
 from ecos_agent.optimization.experiments.knowledge_treatments import (
+    FEW_SHOT_TREATMENT,
     KNOWLEDGE_TREATMENTS,
+    ZERO_SHOT_GATE_TREATMENTS,
     KnowledgeTreatmentConfig,
     build_knowledge_treatment_report,
+    build_zero_shot_gate_report,
 )
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
@@ -77,7 +80,7 @@ def run_experiment(
             run_root / "knowledge-case-pool",
         )
 
-    def run_design(design: DesignSpec):
+    def prepare_design(design: DesignSpec):
         workspace = workspace_root / design.design_id
         canonical = _ensure_workspace(
             manifest, design, workspace, terminal_timeout_seconds
@@ -90,26 +93,165 @@ def run_experiment(
             run_root / design.design_id / "calibration",
             terminal_timeout_seconds,
         )
-        treatments = {
-            treatment.treatment.value: _run_treatment(
-                design,
-                workspace,
-                reference,
-                reference_runtime,
-                run_root / design.design_id / treatment.treatment.value,
-                run_id=run_id,
-                model=model,
-                seed=seed,
-                treatment=treatment,
-                provider_factory=provider_factory,
-                knowledge_case_pool_root=knowledge_case_pool_root,
-            )
-            for treatment in KNOWLEDGE_TREATMENTS
-        }
-        return design.design_id, reference_runtime, treatments
+        return design, workspace, reference, reference_runtime
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        results = tuple(executor.map(run_design, manifest.designs))
+        prepared = tuple(executor.map(prepare_design, manifest.designs))
+
+    def run_treatments(treatments: Sequence[KnowledgeTreatmentConfig]):
+        def run_design(item):
+            design, workspace, reference, reference_runtime = item
+            results = {
+                treatment.treatment.value: _run_treatment(
+                    design,
+                    workspace,
+                    reference,
+                    reference_runtime,
+                    run_root / design.design_id / treatment.treatment.value,
+                    run_id=run_id,
+                    model=model,
+                    seed=seed,
+                    treatment=treatment,
+                    provider_factory=provider_factory,
+                    knowledge_case_pool_root=knowledge_case_pool_root,
+                )
+                for treatment in treatments
+            }
+            return design.design_id, reference_runtime, results
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            return tuple(executor.map(run_design, prepared))
+
+    gate_results = run_treatments(ZERO_SHOT_GATE_TREATMENTS)
+    gate_evidence = _collect_treatment_evidence(
+        gate_results, ZERO_SHOT_GATE_TREATMENTS, manifest.designs
+    )
+    gate_trace_paths = _write_trace_inputs(run_root, gate_evidence["traces"])
+    gate_report = build_zero_shot_gate_report(
+        gate_evidence["traces"],
+        planning_calls_by_treatment=gate_evidence["planning_calls"],
+        config=EqualBudgetConfig(
+            reference_runtime_seconds=sum(gate_evidence["runtimes"].values())
+        ),
+        design_ids=tuple(design.design_id for design in manifest.designs),
+        rule_guided_utility_by_design=rule_guided_utility_by_design,
+        budget_complete_by_treatment=gate_evidence["budget_complete"],
+        terminal_artifacts_complete_by_treatment=gate_evidence["terminal_complete"],
+        replay_chain_complete_by_treatment=gate_evidence["replay_complete"],
+        selected_cases_by_treatment=gate_evidence["selected_cases"],
+        case_selection_events_by_treatment=gate_evidence["selection_events"],
+        nonempty_case_selection_events_by_treatment=gate_evidence[
+            "nonempty_selection_events"
+        ],
+    )
+    gate_report["run_metadata"] = {
+        "run_id": run_id,
+        "model": model,
+        "seed": seed,
+        "tool_revision": tool_revision,
+        "input_manifest_sha256": manifest.manifest_sha256,
+        "design_manifest_ref": str(Path(manifest_path)),
+        "design_manifest_file_sha256": file_sha256(Path(manifest_path)),
+        "reference_runtime_seconds_by_design": gate_evidence["runtimes"],
+        "rule_guided_utility_sha256": (
+            canonical_sha256(rule_guided_utility_by_design)
+            if rule_guided_utility_by_design is not None
+            else None
+        ),
+        "knowledge_case_pool": case_pool_metadata,
+        "episode_evidence": gate_evidence["episode_evidence"],
+        "trace_sha256": {
+            treatment.value: file_sha256(path)
+            for treatment, path in gate_trace_paths.items()
+        },
+    }
+    gate_path = run_root / "zero-shot-gate.v1.json"
+    _write_json(gate_path, gate_report)
+    gate_receipt = {
+        "artifact_ref": gate_path.name,
+        "artifact_sha256": file_sha256(gate_path),
+        "decision": gate_report["decision"],
+    }
+    if (
+        gate_report["decision"] != "pass"
+        or gate_report.get("few_shot_authorized") is not True
+    ):
+        _write_run_manifest(
+            run_root,
+            gate_report,
+            gate_receipt,
+            execution_status="few_shot_blocked",
+            planning_calls=gate_evidence["planning_calls"],
+            trace_paths=gate_trace_paths,
+        )
+        return gate_report
+    if (
+        knowledge_case_pool_root is None
+        or not case_pool_metadata
+        or not case_pool_metadata.get("case_count")
+    ):
+        _write_run_manifest(
+            run_root,
+            gate_report,
+            gate_receipt,
+            execution_status="few_shot_blocked_missing_case_pool",
+            planning_calls=gate_evidence["planning_calls"],
+            trace_paths=gate_trace_paths,
+        )
+        raise ValueError("three-shot treatment requires a nonempty frozen case pool")
+
+    few_shot_results = run_treatments((FEW_SHOT_TREATMENT,))
+    few_shot_by_design = {
+        design_id: treatments for design_id, _, treatments in few_shot_results
+    }
+    results = tuple(
+        (
+            design_id,
+            runtime,
+            {**treatments, **few_shot_by_design[design_id]},
+        )
+        for design_id, runtime, treatments in gate_results
+    )
+    evidence = _collect_treatment_evidence(
+        results, KNOWLEDGE_TREATMENTS, manifest.designs
+    )
+    trace_paths = _write_trace_inputs(run_root, evidence["traces"])
+    report = build_knowledge_treatment_report(
+        evidence["traces"],
+        planning_calls_by_treatment=evidence["planning_calls"],
+        config=EqualBudgetConfig(
+            reference_runtime_seconds=sum(evidence["runtimes"].values())
+        ),
+        design_ids=tuple(design.design_id for design in manifest.designs),
+        rule_guided_utility_by_design=rule_guided_utility_by_design,
+        budget_complete_by_treatment=evidence["budget_complete"],
+        terminal_artifacts_complete_by_treatment=evidence["terminal_complete"],
+        replay_chain_complete_by_treatment=evidence["replay_complete"],
+        selected_cases_by_treatment=evidence["selected_cases"],
+        case_selection_events_by_treatment=evidence["selection_events"],
+        nonempty_case_selection_events_by_treatment=evidence[
+            "nonempty_selection_events"
+        ],
+    )
+    report["protocol_gate_receipt"] = gate_receipt
+    report["run_metadata"] = {
+        **gate_report["run_metadata"],
+        "elapsed_wall_time_seconds_by_treatment": evidence["elapsed_wall_time"],
+        "episode_evidence": evidence["episode_evidence"],
+    }
+    _write_json(output / "knowledge-treatment-report.v2.json", report)
+    _write_run_manifest(
+        run_root,
+        report,
+        gate_receipt,
+        execution_status="completed",
+        planning_calls=evidence["planning_calls"],
+        trace_paths=trace_paths,
+    )
+    return report
+
+
+def _collect_treatment_evidence(results, treatments, designs) -> dict[str, object]:
     runtimes = {design_id: runtime for design_id, runtime, _ in results}
     traces = {
         treatment.treatment: tuple(
@@ -117,14 +259,14 @@ def run_experiment(
             for _, _, treatments in results
             for trace in treatments[treatment.treatment.value]["traces"]
         )
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
     planning_calls = {
         treatment.treatment: sum(
             treatments[treatment.treatment.value]["planning_calls"]
             for _, _, treatments in results
         )
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
     elapsed_wall_time = {
         treatment.treatment.value: {
@@ -133,16 +275,8 @@ def run_experiment(
             ]
             for design_id, _, treatments in results
         }
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
-    trace_paths = {}
-    for treatment, rows in traces.items():
-        path = run_root / f"{treatment.value}-input.jsonl"
-        path.write_text(
-            "".join(json.dumps(item.__dict__, sort_keys=True) + "\n" for item in rows),
-            encoding="utf-8",
-        )
-        trace_paths[treatment] = path
     budget_complete = {
         treatment.treatment: sum(item.started for item in traces[treatment.treatment])
         == EqualBudgetConfig().candidate_limit
@@ -152,10 +286,10 @@ def run_experiment(
                 for item in traces[treatment.treatment]
             )
             == _CANDIDATES_PER_DESIGN
-            for design in manifest.designs
+            for design in designs
         )
         and planning_calls[treatment.treatment]
-        <= _PLANNING_CALLS_PER_DESIGN * len(manifest.designs)
+        <= _PLANNING_CALLS_PER_DESIGN * len(designs)
         and all(
             treatments[treatment.treatment.value]["planning_calls"]
             <= _PLANNING_CALLS_PER_DESIGN
@@ -166,35 +300,35 @@ def run_experiment(
             <= 22.0 * runtimes[design_id]
             for design_id in runtimes
         )
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
     terminal_complete = {
         treatment.treatment: all(
             treatments[treatment.treatment.value]["terminal_artifacts_complete"]
             for _, _, treatments in results
         )
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
     replay_complete = {
         treatment.treatment: all(
             treatments[treatment.treatment.value]["replay_chain_complete"]
             for _, _, treatments in results
         )
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
     selected_cases = {
         treatment.treatment: sum(
             treatments[treatment.treatment.value]["selected_case_count"]
             for _, _, treatments in results
         )
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
     selection_events = {
         treatment.treatment: sum(
             treatments[treatment.treatment.value]["case_selection_event_count"]
             for _, _, treatments in results
         )
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
     nonempty_selection_events = {
         treatment.treatment: sum(
@@ -203,72 +337,72 @@ def run_experiment(
             ]
             for _, _, treatments in results
         )
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
     episode_evidence = {
         treatment.treatment.value: {
             design_id: treatments[treatment.treatment.value]["episode_evidence"]
             for design_id, _, treatments in results
         }
-        for treatment in KNOWLEDGE_TREATMENTS
+        for treatment in treatments
     }
-    report = build_knowledge_treatment_report(
-        traces,
-        planning_calls_by_treatment=planning_calls,
-        config=EqualBudgetConfig(
-            reference_runtime_seconds=sum(runtimes.values())
-        ),
-        design_ids=tuple(design.design_id for design in manifest.designs),
-        rule_guided_utility_by_design=rule_guided_utility_by_design,
-        budget_complete_by_treatment=budget_complete,
-        terminal_artifacts_complete_by_treatment=terminal_complete,
-        replay_chain_complete_by_treatment=replay_complete,
-        selected_cases_by_treatment=selected_cases,
-        case_selection_events_by_treatment=selection_events,
-        nonempty_case_selection_events_by_treatment=nonempty_selection_events,
-    )
-    report["run_metadata"] = {
-        "run_id": run_id,
-        "model": model,
-        "seed": seed,
-        "tool_revision": tool_revision,
-        "input_manifest_sha256": manifest.manifest_sha256,
-        "design_manifest_ref": str(Path(manifest_path)),
-        "design_manifest_file_sha256": file_sha256(Path(manifest_path)),
-        "reference_runtime_seconds_by_design": runtimes,
-        "elapsed_wall_time_seconds_by_treatment": elapsed_wall_time,
-        "knowledge_case_pool": case_pool_metadata,
+    return {
+        "runtimes": runtimes,
+        "traces": traces,
+        "planning_calls": planning_calls,
+        "elapsed_wall_time": elapsed_wall_time,
+        "budget_complete": budget_complete,
+        "terminal_complete": terminal_complete,
+        "replay_complete": replay_complete,
+        "selected_cases": selected_cases,
+        "selection_events": selection_events,
+        "nonempty_selection_events": nonempty_selection_events,
         "episode_evidence": episode_evidence,
     }
-    _write_json(output / "knowledge-treatment-report.v1.json", report)
+
+
+def _write_trace_inputs(run_root: Path, traces: Mapping) -> dict:
+    paths = {}
+    for treatment, rows in traces.items():
+        path = run_root / f"{treatment.value}-input.jsonl"
+        path.write_text(
+            "".join(json.dumps(item.__dict__, sort_keys=True) + "\n" for item in rows),
+            encoding="utf-8",
+        )
+        paths[treatment] = path
+    return paths
+
+
+def _write_run_manifest(
+    run_root: Path,
+    report: Mapping[str, object],
+    gate_receipt: Mapping[str, object],
+    *,
+    execution_status: str,
+    planning_calls: Mapping | None = None,
+    trace_paths: Mapping | None = None,
+) -> None:
+    metadata = report["run_metadata"]
+    assert isinstance(metadata, Mapping)
     _write_json(
-        run_root / "run-manifest.v1.json",
+        run_root / "run-manifest.v2.json",
         {
-            "schema_version": "ecos.phase8_execution_run.v1",
-            "run_id": run_id,
-            "model": model,
-            "seed": seed,
-            "tool_revision": tool_revision,
-            "input_manifest_sha256": manifest.manifest_sha256,
-            "design_manifest_ref": str(Path(manifest_path)),
-            "design_manifest_file_sha256": file_sha256(Path(manifest_path)),
-            "reference_runtime_seconds_by_design": runtimes,
+            "schema_version": "ecos.phase8_execution_run.v2",
+            **metadata,
+            "protocol_gate_receipt": gate_receipt,
+            "execution_status": execution_status,
             "planning_calls": {
                 treatment.value: count
-                for treatment, count in planning_calls.items()
+                for treatment, count in (planning_calls or {}).items()
             },
-            "elapsed_wall_time_seconds_by_treatment": elapsed_wall_time,
-            "knowledge_case_pool": case_pool_metadata,
-            "episode_evidence": episode_evidence,
             "trace_sha256": {
                 treatment.value: file_sha256(path)
-                for treatment, path in trace_paths.items()
+                for treatment, path in (trace_paths or {}).items()
             },
-            "evaluation_status": report["evaluation_status"],
-            "research_claim": report["research_claim"],
+            "evaluation_status": report.get("evaluation_status"),
+            "research_claim": report.get("research_claim", "not_assessed"),
         },
     )
-    return report
 
 
 def _run_treatment(

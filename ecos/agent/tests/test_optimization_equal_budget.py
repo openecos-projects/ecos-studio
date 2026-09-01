@@ -776,6 +776,103 @@ def test_phase8_rejects_reusing_a_run_id(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("decision", "runs_few_shot"),
+    [("pass", True), ("fail", False), ("not_assessed", False)],
+)
+def test_phase8_blocks_few_shot_until_zero_shot_gate_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    decision: str,
+    runs_few_shot: bool,
+) -> None:
+    module = _load_experiment_runner()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}\n", encoding="utf-8")
+    design = module.DesignSpec(
+        "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
+    )
+    manifest = SimpleNamespace(manifest_sha256=HASH, designs=(design,))
+    calls = []
+
+    monkeypatch.setattr(
+        module, "_ensure_workspace", lambda *_args: _terminal_observation()
+    )
+    monkeypatch.setattr(
+        module,
+        "_calibrate",
+        lambda *_args: (_terminal_observation(), 1.0),
+    )
+    monkeypatch.setattr(
+        module,
+        "_snapshot_case_pool",
+        lambda source, _destination: (source.resolve(), {"case_count": 1}),
+    )
+
+    def run_treatment(*_args, treatment, **_kwargs):
+        if treatment == module.FEW_SHOT_TREATMENT:
+            assert (tmp_path / "output/runs/run/zero-shot-gate.v1.json").is_file()
+        calls.append(treatment.treatment)
+        return {
+            "traces": (),
+            "planning_calls": 0,
+            "elapsed_wall_time_seconds": 0.0,
+            "terminal_artifacts_complete": True,
+            "replay_chain_complete": True,
+            "selected_case_count": 0,
+            "case_selection_event_count": 0,
+            "nonempty_case_selection_event_count": 0,
+            "episode_evidence": {},
+        }
+
+    monkeypatch.setattr(module, "_run_treatment", run_treatment)
+    monkeypatch.setattr(
+        module,
+        "build_zero_shot_gate_report",
+        lambda *_args, **_kwargs: {
+            "schema_version": "ecos.optimization_zero_shot_gate.v1",
+            "decision": decision,
+            "few_shot_authorized": decision == "pass",
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "build_knowledge_treatment_report",
+        lambda *_args, **_kwargs: {
+            "schema_version": "ecos.optimization_knowledge_treatment_report.v2",
+            "evaluation_status": "completed",
+            "research_claim": "supported",
+        },
+    )
+
+    result = module.run_experiment(
+        manifest,
+        manifest_path,
+        tmp_path / "output",
+        tmp_path / "workspaces",
+        run_id="run",
+        model="model",
+        seed=1,
+        tool_revision="tool",
+        max_workers=1,
+        terminal_timeout_seconds=1.0,
+        provider_factory=lambda **_kwargs: None,
+        knowledge_case_pool_root=tmp_path / "pool",
+    )
+
+    expected = [item.treatment for item in module.ZERO_SHOT_GATE_TREATMENTS]
+    if runs_few_shot:
+        expected.append(module.FEW_SHOT_TREATMENT.treatment)
+    assert calls == expected
+    assert (tmp_path / "output/runs/run/zero-shot-gate.v1.json").is_file()
+    if runs_few_shot:
+        assert result["schema_version"].endswith("treatment_report.v2")
+        assert (tmp_path / "output/knowledge-treatment-report.v2.json").is_file()
+    else:
+        assert result["decision"] == decision
+        assert not (tmp_path / "output/knowledge-treatment-report.v2.json").exists()
+
+
 def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:
     runner = _load_experiment_execution()
     workspace = tmp_path / "workspace"
