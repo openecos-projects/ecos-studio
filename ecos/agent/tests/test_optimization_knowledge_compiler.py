@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
@@ -108,6 +110,7 @@ def _catalog(*, binding_claim_sha256: str = HASH) -> KnowledgeSupportCatalog:
 
 
 def _compile(*features: StateEvidenceFeature, catalog=None):
+    catalog = catalog or _catalog()
     state = build_state_evidence_request(
         task_id="task-1",
         retrieval_request_sha256=HASH,
@@ -117,12 +120,58 @@ def _compile(*features: StateEvidenceFeature, catalog=None):
     )
     return compile_supported_action_view(
         state=state,
-        catalog=catalog or _catalog(),
-        retrieved_refs=(_catalog().claims[0].claim_ref,),
+        catalog=catalog,
+        candidate_refs=tuple(claim.claim_ref for claim in catalog.claims),
+        retrieval_ranked_refs=tuple(claim.claim_ref for claim in catalog.claims[:3]),
         legal_actions=(
             LegalAction(knob_id="place.target_density", direction="decrease"),
         ),
         effective_domains=(_domain(),),
+    )
+
+
+def _multi_claim_catalog(*, count: int, matched_from: int = 0) -> KnowledgeSupportCatalog:
+    base = _catalog()
+    claims = []
+    bindings = []
+    for index in range(count):
+        suffix = str(index + 1)
+        reference = KnowledgeReference(
+            entity_id=f"strategy.congestion.candidate_{suffix}.v1",
+            chunk_sha256=suffix * 64,
+        )
+        claim_hash = f"sha256:{suffix * 64}"
+        feature_id = (
+            "route_la_total_overflow" if index >= matched_from else f"missing_{suffix}"
+        )
+        claim = base.claims[0].model_copy(
+            update={
+                "claim_ref": reference,
+                "claim_sha256": claim_hash,
+                "state_predicates": (
+                    StatePredicate(
+                        feature_id=feature_id,
+                        op="positive",
+                        rule_ref="rules.numeric.positive.v1",
+                    ),
+                ),
+                "anti_predicates": (),
+            }
+        )
+        binding = base.bindings[0].model_copy(
+            update={
+                "binding_id": f"binding.candidate_{suffix}.v1",
+                "binding_sha256": claim_hash,
+                "claim_id": reference.entity_id,
+                "claim_sha256": claim_hash,
+            }
+        )
+        claims.append(claim)
+        bindings.append(binding)
+    return KnowledgeSupportCatalog(
+        catalog_sha256="sha256:" + "e" * 64,
+        claims=tuple(claims),
+        bindings=tuple(bindings),
     )
 
 
@@ -141,6 +190,7 @@ def test_compiler_matches_current_metric_and_spatial_evidence() -> None:
     )
 
     assert view.state.schema_version == "ecos.optimization_state_evidence_request.v1"
+    assert view.schema_version == "ecos.supported_action_view.v2"
     assert view.actions[0].applicability == KnowledgeApplicability.PASS
     assert view.actions[0].knob_id == "place.target_density"
     assert view.actions[0].direction == "decrease"
@@ -191,7 +241,8 @@ def test_compiler_rejects_stale_binding_and_unsupported_legal_action() -> None:
     unsupported = compile_supported_action_view(
         state=state,
         catalog=_catalog(),
-        retrieved_refs=(_catalog().claims[0].claim_ref,),
+        candidate_refs=(_catalog().claims[0].claim_ref,),
+        retrieval_ranked_refs=(_catalog().claims[0].claim_ref,),
         legal_actions=(
             LegalAction(knob_id="place.target_density", direction="increase"),
         ),
@@ -203,6 +254,70 @@ def test_compiler_rejects_stale_binding_and_unsupported_legal_action() -> None:
     assert "stale_binding" in stale.matches[0].reason_codes
     assert unsupported.actions == ()
     assert "unsupported_action" in unsupported.matches[0].reason_codes
+
+
+def test_compiler_state_matches_claim_beyond_raw_top_three() -> None:
+    catalog = _multi_claim_catalog(count=4, matched_from=3)
+    state = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={"place.target_density": 0.85},
+    )
+
+    view = compile_supported_action_view(
+        state=state,
+        catalog=catalog,
+        candidate_refs=tuple(claim.claim_ref for claim in catalog.claims),
+        retrieval_ranked_refs=tuple(claim.claim_ref for claim in catalog.claims[:3]),
+        legal_actions=(
+            LegalAction(knob_id="place.target_density", direction="decrease"),
+        ),
+        effective_domains=(_domain(),),
+    )
+
+    assert view.candidate_count == 4
+    assert len(view.matches) == 4
+    assert view.exposed_claim_refs == (catalog.claims[3].claim_ref,)
+    assert view.actions[0].claim_ref == catalog.claims[3].claim_ref
+    assert view.truncated_claim_refs == ()
+
+
+def test_compiler_exposes_only_three_state_matched_claims_with_audit() -> None:
+    catalog = _multi_claim_catalog(count=5)
+    ranked = tuple(claim.claim_ref for claim in reversed(catalog.claims[2:5]))
+    state = build_state_evidence_request(
+        task_id="task-1",
+        retrieval_request_sha256=HASH,
+        observation=_observation(),
+        current_values={"place.target_density": 0.85},
+    )
+
+    view = compile_supported_action_view(
+        state=state,
+        catalog=catalog,
+        candidate_refs=tuple(claim.claim_ref for claim in catalog.claims),
+        retrieval_ranked_refs=ranked,
+        legal_actions=(
+            LegalAction(knob_id="place.target_density", direction="decrease"),
+        ),
+        effective_domains=(_domain(),),
+    )
+
+    assert len(view.matches) == 5
+    assert view.exposed_claim_refs == ranked
+    assert len({action.claim_ref.entity_id for action in view.actions}) == 3
+    assert view.truncated_claim_refs == tuple(
+        claim.claim_ref for claim in catalog.claims[:2]
+    )
+    planner_payload = view.planner_payload()
+    planner_json = json.dumps(planner_payload, sort_keys=True)
+    assert all(ref.entity_id in planner_json for ref in view.exposed_claim_refs)
+    assert all(ref.entity_id not in planner_json for ref in view.truncated_claim_refs)
+    assert planner_payload["candidate_count"] == 5
+    assert planner_payload["audit_sha256"] == view.view_sha256
+    assert "candidate_refs" not in planner_payload
+    assert "truncated_claim_refs" not in planner_payload
 
 
 def test_state_evidence_derives_reference_delta_and_history_trend() -> None:

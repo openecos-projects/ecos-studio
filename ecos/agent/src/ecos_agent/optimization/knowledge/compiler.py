@@ -74,6 +74,7 @@ _APPLICABILITY_RANK = MappingProxyType(
         KnowledgeApplicability.PASS: 3,
     }
 )
+_PLANNER_CLAIM_LIMIT = 3
 
 
 class StatePredicate(_Model):
@@ -394,17 +395,77 @@ class SupportedKnowledgeAction(KnowledgeMatch):
 
 
 class SupportedActionView(_Model):
-    schema_version: Literal["ecos.supported_action_view.v1"] = (
-        "ecos.supported_action_view.v1"
+    schema_version: Literal["ecos.supported_action_view.v2"] = (
+        "ecos.supported_action_view.v2"
     )
     state: OptimizationStateEvidenceRequest
     catalog_sha256: str
+    candidate_count: int = Field(ge=0)
+    candidate_refs: tuple[KnowledgeReference, ...]
+    retrieval_ranked_refs: tuple[KnowledgeReference, ...]
+    exposed_claim_refs: tuple[KnowledgeReference, ...]
+    truncated_claim_refs: tuple[KnowledgeReference, ...]
+    selection_policy: Literal["applicability_bm25_entity.v1"] = (
+        "applicability_bm25_entity.v1"
+    )
     matches: tuple[KnowledgeMatch, ...]
     actions: tuple[SupportedKnowledgeAction, ...]
+
+    @model_validator(mode="after")
+    def validate_selection_audit(self) -> SupportedActionView:
+        candidates = _reference_keys(self.candidate_refs)
+        ranked = _reference_keys(self.retrieval_ranked_refs)
+        exposed = _reference_keys(self.exposed_claim_refs)
+        truncated = _reference_keys(self.truncated_claim_refs)
+        matched = _reference_keys(tuple(item.claim_ref for item in self.matches))
+        action_refs = _reference_keys(tuple(item.claim_ref for item in self.actions))
+        if self.candidate_count != len(self.candidate_refs) or len(candidates) != len(
+            self.candidate_refs
+        ):
+            raise ValueError("supported action candidate audit is invalid")
+        if (
+            len(self.matches) != self.candidate_count
+            or matched != candidates
+            or len(ranked) != len(self.retrieval_ranked_refs)
+            or not ranked <= candidates
+        ):
+            raise ValueError("supported action candidate matches are invalid")
+        if (
+            len(exposed) != len(self.exposed_claim_refs)
+            or len(exposed) > _PLANNER_CLAIM_LIMIT
+            or len(truncated) != len(self.truncated_claim_refs)
+        ):
+            raise ValueError("supported action exposure is invalid")
+        if not ((exposed | truncated) <= candidates) or exposed & truncated:
+            raise ValueError("supported action truncation audit is invalid")
+        if action_refs != exposed:
+            raise ValueError("supported actions include an unexposed claim")
+        return self
 
     @property
     def view_sha256(self) -> str:
         return canonical_sha256(self.model_dump(mode="json"))
+
+    def planner_payload(self) -> dict[str, object]:
+        exposed = _reference_keys(self.exposed_claim_refs)
+        return {
+            "schema_version": "ecos.supported_action_view.planner.v1",
+            "state": self.state.model_dump(mode="json"),
+            "catalog_sha256": self.catalog_sha256,
+            "candidate_count": self.candidate_count,
+            "exposed_count": len(self.exposed_claim_refs),
+            "exposed_claim_refs": [
+                item.model_dump(mode="json") for item in self.exposed_claim_refs
+            ],
+            "selection_policy": self.selection_policy,
+            "matches": [
+                item.model_dump(mode="json")
+                for item in self.matches
+                if _reference_key(item.claim_ref) in exposed
+            ],
+            "actions": [item.model_dump(mode="json") for item in self.actions],
+            "audit_sha256": self.view_sha256,
+        }
 
 
 BindingEvaluation = tuple[
@@ -498,11 +559,21 @@ def compile_supported_action_view(
     *,
     state: OptimizationStateEvidenceRequest,
     catalog: KnowledgeSupportCatalog,
-    retrieved_refs: tuple[KnowledgeReference, ...],
+    candidate_refs: tuple[KnowledgeReference, ...],
+    retrieval_ranked_refs: tuple[KnowledgeReference, ...],
     legal_actions: tuple[LegalAction, ...],
     effective_domains: tuple[EffectiveDomainSnapshot, ...],
 ) -> SupportedActionView:
-    retrieved = {(item.entity_id, item.chunk_sha256) for item in retrieved_refs}
+    candidate_keys = _reference_keys(candidate_refs)
+    ranked_keys = _reference_keys(retrieval_ranked_refs)
+    if len(candidate_keys) != len(candidate_refs) or not ranked_keys <= candidate_keys:
+        raise ValueError("knowledge candidate references are invalid")
+    claims = {
+        (claim.claim_ref.entity_id, claim.claim_ref.chunk_sha256): claim
+        for claim in catalog.claims
+    }
+    if not candidate_keys <= set(claims):
+        raise ValueError("knowledge candidate is absent from the support catalog")
     legal = {(item.knob_id.value, item.direction) for item in legal_actions}
     bindings: dict[str, list[VersionBoundToolBinding]] = {}
     for item in catalog.bindings:
@@ -510,10 +581,9 @@ def compile_supported_action_view(
     domains = {item.knob_id.value: item for item in effective_domains}
     features = {item.feature_id: item.value for item in state.features}
     matches: list[KnowledgeMatch] = []
-    actions: list[SupportedKnowledgeAction] = []
-    for claim in catalog.claims:
-        if (claim.claim_ref.entity_id, claim.claim_ref.chunk_sha256) not in retrieved:
-            continue
+    candidate_actions: list[SupportedKnowledgeAction] = []
+    for reference in candidate_refs:
+        claim = claims[(reference.entity_id, reference.chunk_sha256)]
         evaluated = _evaluate_bindings(
             claim, bindings.get(claim.claim_ref.entity_id, []), state, features, legal
         )
@@ -537,14 +607,71 @@ def compile_supported_action_view(
                 continue
             for action in binding.actions:
                 _append_supported_action(
-                    actions, action, binding, claim, applicability, reasons, legal, domains
+                    candidate_actions,
+                    action,
+                    binding,
+                    claim,
+                    applicability,
+                    reasons,
+                    legal,
+                    domains,
                 )
+    match_rank = {
+        (match.claim_ref.entity_id, match.claim_ref.chunk_sha256): _APPLICABILITY_RANK[
+            match.applicability
+        ]
+        for match in matches
+    }
+    retrieval_rank = {
+        (ref.entity_id, ref.chunk_sha256): index
+        for index, ref in enumerate(retrieval_ranked_refs)
+    }
+    actionable_refs = {
+        (action.claim_ref.entity_id, action.claim_ref.chunk_sha256): action.claim_ref
+        for action in candidate_actions
+    }
+    ordered_keys = sorted(
+        actionable_refs,
+        key=lambda key: (
+            -match_rank[key],
+            retrieval_rank.get(key, len(retrieval_rank)),
+            key,
+        ),
+    )
+    exposed_keys = ordered_keys[:_PLANNER_CLAIM_LIMIT]
+    exposed = set(exposed_keys)
+    actions = tuple(
+        sorted(
+            (action for action in candidate_actions if _reference_key(action.claim_ref) in exposed),
+            key=lambda action: (
+                exposed_keys.index(_reference_key(action.claim_ref)),
+                action.binding_id,
+                action.knob_id.value,
+                action.direction.value,
+            ),
+        )
+    )
     return SupportedActionView(
         state=state,
         catalog_sha256=catalog.catalog_sha256,
+        candidate_count=len(candidate_refs),
+        candidate_refs=candidate_refs,
+        retrieval_ranked_refs=retrieval_ranked_refs,
+        exposed_claim_refs=tuple(actionable_refs[key] for key in exposed_keys),
+        truncated_claim_refs=tuple(
+            actionable_refs[key] for key in ordered_keys[_PLANNER_CLAIM_LIMIT:]
+        ),
         matches=tuple(matches),
-        actions=tuple(actions),
+        actions=actions,
     )
+
+
+def _reference_key(reference: KnowledgeReference) -> tuple[str, str]:
+    return reference.entity_id, reference.chunk_sha256
+
+
+def _reference_keys(references: tuple[KnowledgeReference, ...]) -> set[tuple[str, str]]:
+    return {_reference_key(reference) for reference in references}
 
 
 def _evaluate_bindings(

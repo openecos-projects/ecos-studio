@@ -1021,24 +1021,28 @@ class OptimizationEpisodeController:
                     ),
                 ),
                 catalog=retrieval.support_catalog,
-                retrieved_refs=retrieval.knowledge_refs,
+                candidate_refs=retrieval.candidate_refs,
+                retrieval_ranked_refs=tuple(
+                    ref
+                    for channel in retrieval.channels
+                    if channel.channel == KnowledgeChannel.GENERAL
+                    for ref in channel.knowledge_refs
+                    if ref in retrieval.candidate_refs
+                ),
                 legal_actions=available_actions,
                 effective_domains=effective_domains,
             )
-            supported_claims = {
-                (item.claim_ref.entity_id, item.claim_ref.chunk_sha256)
-                for item in supported_action_view.actions
-            }
-            tool_refs = {
-                (item.entity_id, item.chunk_sha256)
+            tool_refs = tuple(
+                item
                 for channel in retrieval.channels
                 if channel.channel == KnowledgeChannel.TOOL
                 for item in channel.knowledge_refs
-            }
+            )
+            combined_refs = (*tool_refs, *supported_action_view.exposed_claim_refs)
             knowledge_refs = tuple(
-                item
-                for item in retrieval.knowledge_refs
-                if (item.entity_id, item.chunk_sha256) in supported_claims | tool_refs
+                {
+                    (ref.entity_id, ref.chunk_sha256): ref for ref in combined_refs
+                }.values()
             )
             knowledge_chunks = tuple(
                 channel.answer_text

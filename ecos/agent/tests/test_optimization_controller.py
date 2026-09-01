@@ -49,7 +49,10 @@ from ecos_agent.optimization.decision_audit import (
     OptimizationDecisionAudit,
     OptimizationDecisionAuditIntegrityError,
 )
-from ecos_agent.optimization.knowledge.compiler import BoundKnowledgeAction
+from ecos_agent.optimization.knowledge.compiler import (
+    BoundKnowledgeAction,
+    StatePredicate,
+)
 from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAuditStore,
     EmpiricalCaseDiagnostic,
@@ -553,6 +556,58 @@ def test_full_agent_accepts_only_current_context_and_retrieved_knowledge(
     )
 
 
+def test_full_agent_exposes_state_matched_claim_outside_raw_top_three(
+    tmp_path: Path,
+) -> None:
+    retrieval = _retrieval()
+    base = support_catalog(
+        retrieval.knowledge_refs[0], feature_id="missing_required_metric"
+    )
+    hidden_ref = KnowledgeReference(
+        entity_id="strategy.congestion.state_matched.v1",
+        chunk_sha256="f" * 64,
+    )
+    hidden_claim = base.claims[0].model_copy(
+        update={
+            "claim_ref": hidden_ref,
+            "claim_sha256": "sha256:" + "f" * 64,
+            "state_predicates": (
+                StatePredicate(
+                    feature_id="place_lutrudy_utilization_max",
+                    op="present",
+                    rule_ref="rules.evidence.present.v1",
+                ),
+            ),
+        }
+    )
+    hidden_binding = base.bindings[0].model_copy(
+        update={
+            "binding_id": "binding.state_matched.v1",
+            "binding_sha256": "sha256:" + "f" * 64,
+            "claim_id": hidden_ref.entity_id,
+            "claim_sha256": hidden_claim.claim_sha256,
+        }
+    )
+    catalog = base.model_copy(
+        update={
+            "claims": (*base.claims, hidden_claim),
+            "bindings": (*base.bindings, hidden_binding),
+        }
+    )
+    retrieval = replace(retrieval, support_catalog=catalog)
+    codex = _FakeCodex(_proposal)
+    controller = _controller(tmp_path, codex, _FakeEcc())
+
+    planned = controller.plan(_observation(), retrieval, CURRENT_VALUES)
+
+    assert planned.state == OptimizationEpisodeState.AWAITING_EXECUTION
+    assert codex.contexts[0].knowledge_refs == (hidden_ref,)
+    view = codex.contexts[0].supported_action_view
+    assert view is not None
+    assert len(view.matches) == 2
+    assert view.exposed_claim_refs == (hidden_ref,)
+
+
 def test_full_agent_rejects_retrieved_claim_that_does_not_support_action(
     tmp_path: Path,
 ) -> None:
@@ -719,6 +774,7 @@ def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
         domain.allowed_requested_values
     )
     payload = planning_context_payload(context)
+    assert payload["supported_action_view"] == context.supported_action_view.planner_payload()
     assert len(payload["effective_domains"]) == 8
     assert (
         payload["effective_domains"][0]["snapshot_sha256"]

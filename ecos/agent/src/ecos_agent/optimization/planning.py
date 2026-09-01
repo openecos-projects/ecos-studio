@@ -118,10 +118,7 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         ],
         "knowledge_chunks": list(context.knowledge_chunks),
         "supported_action_view": (
-            {
-                **context.supported_action_view.model_dump(mode="json"),
-                "view_sha256": context.supported_action_view.view_sha256,
-            }
+            context.supported_action_view.planner_payload()
             if context.supported_action_view is not None
             else None
         ),

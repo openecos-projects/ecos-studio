@@ -128,9 +128,28 @@ class OptimizationRetrievalResult:
         return self.request.request_sha256
 
     @property
+    def candidate_refs(self) -> tuple[KnowledgeReference, ...]:
+        if not any(
+            channel.channel == KnowledgeChannel.GENERAL and channel.enabled
+            for channel in self.channels
+        ):
+            return ()
+        stage = self.request.current_stage.value.casefold()
+        return tuple(
+            sorted(
+                (
+                    claim.claim_ref
+                    for claim in self.support_catalog.claims
+                    if stage in {item.casefold() for item in claim.stages}
+                ),
+                key=lambda ref: (ref.entity_id, ref.chunk_sha256),
+            )
+        )
+
+    @property
     def contract(self) -> dict[str, object]:
         return {
-            "schema_version": "ecos.optimization_knowledge_retrieval.v1",
+            "schema_version": "ecos.optimization_knowledge_retrieval.v2",
             "request_sha256": self.request_sha256,
             "request": self.request.model_dump(mode="json"),
             "channels": [
@@ -145,6 +164,9 @@ class OptimizationRetrievalResult:
                 for item in self.channels
             ],
             "knowledge_refs": [ref.model_dump() for ref in self.knowledge_refs],
+            "candidate_policy": "current_stage_compatible_support_catalog.v1",
+            "candidate_count": len(self.candidate_refs),
+            "candidate_refs": [ref.model_dump() for ref in self.candidate_refs],
             "support_catalog_sha256": self.support_catalog.catalog_sha256,
         }
 

@@ -152,8 +152,10 @@ Codex CLI 仅用于生成**只读、带类型约束的建议**，不会取得流
 继续作为 value-free、metric-ID-only baseline；目标路径另外生成
 `ecos.optimization_state_evidence_request.v1`，用 observation hash 绑定当前指标、相对
 reference/incumbent 的 delta、历史 trend、current values 和可用的 spatial evidence。
-确定性 compiler 将召回 claim、hash-locked tool binding 与当轮 legal actions 求交，
-只把 `ecos.supported_action_view.v1` 中 `pass` / `weak` 的 claim-action 关系交给 planner。
+确定性 compiler 扫描当前 stage 兼容的全部 structured claims，将其与 hash-locked tool
+binding 和当轮 legal actions 求交，再只把 `ecos.supported_action_view.v2` 中稳定排序后的
+最多 3 条 `pass` / `weak` claim-action 关系交给 planner。完整候选、匹配和截断结果留在内部
+审计 view；planner payload 只含 exposed claims 和完整审计 hash。
 缺观测、anti-condition、stale binding 或 unsupported action 均 fail closed。
 
 默认 `ecos.optimization_proposal.v2` 从 compiled view 支持的 knob/direction 及匹配的
@@ -177,7 +179,7 @@ Agent 不从配置文本或日志推断缺失事实。L3 terminal observation �
 并留下可验证的 signoff、manifest 和产物。前者回答参数实际发生了什么，后者回答完整候选最终得到
 什么；二者均不单独证明 QoR 改善。
 
-`ecos.supported_action_view.v1` 的 `pass/weak/blocked/unknown` 是机器可检查的动作支持关系：它只
+`ecos.supported_action_view.v2` 的 `pass/weak/blocked/unknown` 是机器可检查的动作支持关系：它只
 说明当前状态、工具版本、知识 binding 和有效参数域是否允许某个动作，不代表知识正确或有收益。
 equal-budget artifact 中的 `terminal_utility` 只是冻结 objective metric 的相反数（越大越好），不是
 综合 QoR；研究判断必须同时检查可行性、`success@k`、PPA/DRC/timing/congestion、runtime 和 memory。

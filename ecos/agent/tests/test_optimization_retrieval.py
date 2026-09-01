@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from optimization_test_support import support_catalog
+
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     EpisodeBudget,
+    KnowledgeReference,
     ObjectiveMetric,
     StageObservation,
 )
@@ -19,8 +22,8 @@ HASH = "sha256:" + "a" * 64
 
 
 class _FakeRetriever:
-    def __init__(self, entity_id: str, stages: tuple[str, ...]) -> None:
-        self.entity_id = entity_id
+    def __init__(self, entity_id: str | tuple[str, ...], stages: tuple[str, ...]) -> None:
+        self.entity_ids = (entity_id,) if isinstance(entity_id, str) else entity_id
         self.stages = stages
         self.queries: list[str] = []
 
@@ -28,10 +31,13 @@ class _FakeRetriever:
         assert stages == self.stages
         self.queries.append(query)
         return SimpleNamespace(
-            text=f"answer for {self.entity_id}",
+            text="\n\n".join(f"answer for {entity_id}" for entity_id in self.entity_ids),
             contract={
                 "retrieval": {"query_sha256": "b" * 64, "corpus_sha256": "c" * 64},
-                "matches": [{"entity_id": self.entity_id, "chunk_sha256": "d" * 64}],
+                "matches": [
+                    {"entity_id": entity_id, "chunk_sha256": str(index) * 64}
+                    for index, entity_id in enumerate(self.entity_ids, start=1)
+                ],
             },
         )
 
@@ -83,3 +89,69 @@ def test_fixed_objective_query_reaches_tool_and_general_channels() -> None:
         "tool.place.objective.v1",
         "general.objective.v1",
     ]
+
+
+def test_full_agent_candidates_scan_catalog_while_raw_retrieval_stays_top_three() -> None:
+    tool = _FakeRetriever(
+        tuple(f"tool.place.{index}.v1" for index in range(1, 5)),
+        ("floorplan", "fixfanout", "place"),
+    )
+    general = _FakeRetriever(
+        tuple(f"general.place.{index}.v1" for index in range(1, 5)),
+        ("floorplan", "place"),
+    )
+    base = support_catalog(
+        KnowledgeReference(entity_id="claim.place.v1", chunk_sha256="a" * 64)
+    )
+    floorplan_claim = base.claims[0].model_copy(
+        update={
+            "claim_ref": KnowledgeReference(
+                entity_id="claim.floorplan.v1", chunk_sha256="b" * 64
+            ),
+            "claim_sha256": "sha256:" + "b" * 64,
+            "stages": ("floorplan",),
+        }
+    )
+    catalog = base.model_copy(update={"claims": (*base.claims, floorplan_claim)})
+    retriever = OptimizationKnowledgeRetriever(
+        tool_retriever=tool,
+        general_retriever=general,
+        support_catalog=catalog,
+    )
+
+    result = retriever.retrieve(
+        build_optimization_retrieval_request(
+            task_id="task-1",
+            observation=_observation(),
+            previous_intervention_outcome=None,
+        )
+    )
+
+    assert [len(channel.knowledge_refs) for channel in result.channels] == [3, 3]
+    assert result.candidate_refs == (base.claims[0].claim_ref,)
+    assert result.contract["schema_version"] == "ecos.optimization_knowledge_retrieval.v2"
+    assert result.contract["candidate_count"] == 1
+
+
+def test_disabled_general_channel_has_no_structured_candidates() -> None:
+    retriever = OptimizationKnowledgeRetriever(
+        tool_retriever=_FakeRetriever(
+            "tool.place.v1", ("floorplan", "fixfanout", "place")
+        ),
+        general_retriever=_FakeRetriever("general.place.v1", ("floorplan", "place")),
+        support_catalog=support_catalog(
+            KnowledgeReference(entity_id="claim.place.v1", chunk_sha256="a" * 64)
+        ),
+    )
+
+    result = retriever.retrieve(
+        build_optimization_retrieval_request(
+            task_id="task-1",
+            observation=_observation(),
+            previous_intervention_outcome=None,
+        ),
+        enabled_channels=(KnowledgeChannel.TOOL,),
+    )
+
+    assert result.candidate_refs == ()
+    assert result.contract["candidate_count"] == 0
