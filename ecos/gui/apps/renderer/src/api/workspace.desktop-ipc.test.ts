@@ -37,10 +37,8 @@ describe('workspace desktop bridge', () => {
 
     setWindow({
       ecosDesktop: {
-        runtime: {
-          workspace: {
-            create,
-          },
+        productCommands: {
+          execute: create,
         },
       },
     })
@@ -86,7 +84,7 @@ describe('workspace desktop bridge', () => {
     })
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        designTool: 'backend',
+        command: 'workspace.create',
         payload: expect.objectContaining({
           parameters: expect.objectContaining({
             design: 'demo',

@@ -25,6 +25,23 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     app: {
       getVersions,
     },
+    productCommands: {
+      execute: async () => ({ accepted: false, operationId: '', state: '' }),
+    },
+    workspaceCreationModel: {
+      get: async () => ({
+        context: {},
+        controls: {
+          flowBoundaries: true,
+          manualPdkFiles: true,
+          mpc: true,
+          pdkVersion: true,
+        },
+        discovery: {},
+        parameters: [],
+        pdkInstallations: [],
+      }),
+    },
     window: {
       minimize: async () => undefined,
       toggleMaximize: async () => undefined,
@@ -184,22 +201,15 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       events: {
         onEvent: () => () => undefined,
       },
-      flow: {
-        run: async (request) => ({ rerun: Boolean(request.rerun) }),
-        runStep: async (request) => ({ state: 'Success', step: request.step }),
-      },
       rpc: {
         hello: async () => ({ capabilities: [], eccVersion: 'unknown', version: 1 }),
         ping: async () => ({ ok: true }),
         shutdown: async () => ({ ok: true }),
       },
       workspace: {
+        describeSpec: async () => ({}),
+        validateSpec: async () => ({ issues: [] }),
         close: async () => ({ ok: true }),
-        create: async (request) => ({
-          directory: request.directory,
-          workspaceHandle: 'workspace-handle-1',
-        }),
-        exportSignoff: async (request) => ({ outputPath: request.outputPath }),
         inspectSignoff: async () => ({ groups: [], risks: [], status: 'ready' as const }),
         home: async () => ({ path: '' }),
         info: async (request) => ({ id: request.id, info: {}, step: request.step }),
@@ -208,13 +218,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
           workspaceHandle: 'workspace-handle-1',
         }),
         refreshConfig: async () => ({ directory: '', refreshed: true }),
-        resetFlow: async () => ({ directory: '' }),
-        syncConfig: async (request) => ({
-          configPath: request.configPath,
-          directory: '',
-          parametersChanged: false,
-          refreshed: true,
-        }),
       },
     },
     shell: {

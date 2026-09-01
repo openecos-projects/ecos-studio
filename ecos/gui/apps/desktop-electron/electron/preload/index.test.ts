@@ -48,14 +48,10 @@ async function loadDesktopBridge() {
       events: {
         onEvent(listener: (event: unknown) => void): () => void
       }
-      flow: {
-        runStep(request: unknown): Promise<unknown>
-      }
       runtime: {
         waitForOperation(request: unknown): Promise<unknown>
       }
       workspace: {
-        exportSignoff(request: unknown): Promise<unknown>
         inspectSignoff(request: unknown): Promise<unknown>
       }
     }
@@ -113,9 +109,6 @@ describe('preload desktop bridge contract', () => {
         ecc: expect.objectContaining({
           events: expect.objectContaining({
             onEvent: expect.any(Function),
-          }),
-          flow: expect.objectContaining({
-            runStep: expect.any(Function),
           }),
         }),
         backendProjectComparison: expect.objectContaining({
@@ -243,28 +236,6 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       desktopApiEventChannels.backendWorkspaceInvalidated,
       eventListener,
-    )
-  })
-
-  it('routes ECC flow calls through the shared IPC channel constant', async () => {
-    const bridge = await loadDesktopBridge()
-    ipcRenderer.invoke.mockResolvedValueOnce({
-      state: 'Success',
-      step: 'place',
-    })
-    const request = {
-      rerun: false,
-      step: 'place',
-      workspaceHandle: 'workspace-handle-1',
-    }
-
-    await expect(bridge.ecc.flow.runStep(request)).resolves.toMatchObject({
-      state: 'Success',
-      step: 'place',
-    })
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.eccFlowRunStep,
-      request,
     )
   })
 
@@ -411,25 +382,6 @@ describe('preload desktop bridge contract', () => {
       phase: 'downloading',
       progress: 0.2,
     })
-  })
-
-  it('routes ECC signoff export through the shared IPC channel constant', async () => {
-    const bridge = await loadDesktopBridge()
-    const request = {
-      outputPath: '/exports/custom package.tar.gz',
-      workspaceHandle: 'workspace-handle-1',
-    }
-    ipcRenderer.invoke.mockResolvedValueOnce({
-      outputPath: request.outputPath,
-    })
-
-    await expect(bridge.ecc.workspace.exportSignoff(request)).resolves.toEqual({
-      outputPath: request.outputPath,
-    })
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.eccWorkspaceExportSignoff,
-      request,
-    )
   })
 
   it('routes ECC signoff inspection through the shared IPC channel constant', async () => {

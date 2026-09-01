@@ -1,7 +1,11 @@
 import { toDesktopBridgeData } from './desktopPayload'
 import { CMDEnum, ResponseEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
-import { projectIdFromName, type DesignTool } from '@ecos-studio/shared'
+import {
+  projectIdFromName,
+  type DesignTool,
+  type EccWorkspaceCreateRequest,
+} from '@ecos-studio/shared'
 
 // Types for API requests and responses
 export interface ProjectInfo {
@@ -18,6 +22,7 @@ export interface WorkspaceResponse {
     designTool?: DesignTool
     workspace_handle?: string
     workspaceHandle?: string
+    workspaceRevision?: number
   }
   message: string[]
 }
@@ -69,6 +74,7 @@ export function loadWorkspaceApi(directory: string, designTool: DesignTool = 'ba
         directory: result.directory,
         workspace_handle: result.workspaceHandle,
         workspaceHandle: result.workspaceHandle,
+        workspaceRevision: result.workspaceRevision,
       },
       message: [],
       response: ResponseEnum.success,
@@ -100,6 +106,7 @@ export function createWorkspaceApi(options: {
   pdk_installation_id?: string
   pdk_requirement?: import('@ecos-studio/shared').PdkRequirement
   filelist?: string
+  mpc?: Record<string, unknown> | null
   design_input_mode?: string
   sdc?: string
   flow_config?: Record<string, unknown>
@@ -213,6 +220,7 @@ export function createWorkspaceApi(options: {
     pdk_installation_id: options.pdk_installation_id || '',
     pdk_requirement: options.pdk_requirement,
     filelist: options.filelist || '',
+    mpc: options.mpc ?? null,
     design_input_mode: options.design_input_mode || '',
     sdc: options.sdc || '',
     flow_config: options.flow_config || {},
@@ -221,45 +229,92 @@ export function createWorkspaceApi(options: {
     pdk_json: options.pdk_json || '',
     project_context: options.project_context || {},
   })
+  const draft = backendWorkspaceDraft(data)
   return getDesktopApi()
-    .runtime.workspace.create({
-      designTool: 'backend',
-      payload: {
-        directory: String(data.directory ?? ''),
-        filelist: String(data.filelist ?? ''),
-        flowConfig: (data.flow_config as Record<string, unknown>) ?? {},
-        originDef: String(data.origin_def ?? ''),
-        originVerilog: String(data.origin_verilog ?? ''),
-        parameters: (data.parameters as Record<string, unknown>) ?? {},
-        pdk: String(data.pdk ?? ''),
-        pdkJson: data.pdk_json ?? null,
-        pdkRoot: String(data.pdk_root ?? ''),
-        pdkInstallationId: String(data.pdk_installation_id ?? ''),
-        pdkRequirement: data.pdk_requirement as
-          | import('@ecos-studio/shared').PdkRequirement
-          | undefined,
-        projectId: projectIdFromContext(
-          data.project_context as Record<string, unknown>,
-          String(data.directory ?? ''),
-        ),
-        projectRoot: projectRootFromContext(
-          data.project_context as Record<string, unknown>,
-          String(data.directory ?? ''),
-        ),
-        rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
-        sdc: String(data.sdc ?? ''),
-      },
+    .productCommands.execute({
+      command: 'workspace.create',
+      payload: { ...draft, commandId: crypto.randomUUID() },
     })
     .then((result) => ({
       cmd: CMDEnum.create_workspace,
       data: {
-        directory: result.directory,
-        workspace_handle: result.workspaceHandle,
-        workspaceHandle: result.workspaceHandle,
+        directory: 'directory' in result ? result.directory : '',
+        workspace_handle: 'workspaceHandle' in result ? result.workspaceHandle : '',
+        workspaceHandle: 'workspaceHandle' in result ? result.workspaceHandle : '',
+        workspaceRevision:
+          'workspaceRevision' in result ? result.workspaceRevision : undefined,
       },
       message: [],
       response: ResponseEnum.success,
     })) as Promise<WorkspaceResponse>
+}
+
+export function updateWorkspaceApi(
+  options: Parameters<typeof createWorkspaceApi>[0],
+  workspaceHandle: string,
+  expectedWorkspaceRevision: number,
+) {
+  const data = toDesktopBridgeData({
+    ...options,
+    flow_config: options.flow_config ?? {},
+    pdk_config: options.pdk_config ?? {},
+    project_context: options.project_context ?? {},
+  })
+  return getDesktopApi().productCommands.execute({
+    command: 'workspace.update',
+    payload: {
+      draft: backendWorkspaceDraft(data),
+      commandId: crypto.randomUUID(),
+      expectedWorkspaceRevision,
+      workspaceHandle,
+    },
+  })
+}
+
+function backendWorkspaceDraft(data: Record<string, unknown>): EccWorkspaceCreateRequest {
+  const directory = String(data.directory ?? '')
+  return {
+    ...(data.design_input_mode
+      ? {
+          designInputMode: String(data.design_input_mode) as 'rtl' | 'post_synthesis',
+        }
+      : {}),
+    directory,
+    filelist: String(data.filelist ?? ''),
+    mpc: (data.mpc as Record<string, unknown> | null) ?? null,
+    flowConfig: (data.flow_config as Record<string, unknown>) ?? {},
+    originDef: String(data.origin_def ?? ''),
+    originVerilog: String(data.origin_verilog ?? ''),
+    parameters: (data.parameters as Record<string, unknown>) ?? {},
+    pdk: String(data.pdk ?? ''),
+    pdkConfig:
+      (data.pdk_config as {
+        cell_lef?: string[]
+        liberty?: string[]
+        tech_lef?: string[]
+      }) ?? undefined,
+    ...(data.pdk_config_mode
+      ? {
+          pdkConfigMode: String(data.pdk_config_mode) as 'default' | 'manual',
+        }
+      : {}),
+    pdkJson: data.pdk_json ?? null,
+    pdkRoot: String(data.pdk_root ?? ''),
+    pdkInstallationId: String(data.pdk_installation_id ?? ''),
+    pdkRequirement: data.pdk_requirement as
+      | import('@ecos-studio/shared').PdkRequirement
+      | undefined,
+    projectId: projectIdFromContext(
+      data.project_context as Record<string, unknown>,
+      directory,
+    ),
+    projectRoot: projectRootFromContext(
+      data.project_context as Record<string, unknown>,
+      directory,
+    ),
+    rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
+    sdc: String(data.sdc ?? ''),
+  }
 }
 
 function projectRootFromContext(

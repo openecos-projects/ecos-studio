@@ -116,7 +116,11 @@ function createApi() {
     workspace: { writeProjectTextFile },
     workspaceResources: { readFlow, readParameters, readHome },
     dialog: { saveFile },
-    ecc: { workspace: { exportSignoff, inspectSignoff } },
+    ecc: { workspace: { inspectSignoff } },
+    productCommands: {
+      execute: (request: { payload: { outputPath: string } }) =>
+        exportSignoff(request.payload),
+    },
   } as unknown as DesktopApi
 
   return {

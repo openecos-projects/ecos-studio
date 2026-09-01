@@ -79,6 +79,14 @@ const desktopApi: DesktopApi = {
   app: {
     getVersions: () => invokeDesktop(desktopApiIpcChannels.appGetVersions),
   },
+  productCommands: {
+    execute: (request) =>
+      invokeDesktop(desktopApiIpcChannels.productCommandExecute, request),
+  },
+  workspaceCreationModel: {
+    get: (request) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceCreationModelGet, request),
+  },
   window: {
     minimize: () => invokeDesktop(desktopApiIpcChannels.windowMinimize),
     toggleMaximize: () => invokeDesktop(desktopApiIpcChannels.windowToggleMaximize),
@@ -437,26 +445,20 @@ const desktopApi: DesktopApi = {
           },
         ),
     },
-    flow: {
-      run: (request) => invokeDesktop(desktopApiIpcChannels.eccFlowRun, request),
-      runStep: (request) => invokeDesktop(desktopApiIpcChannels.eccFlowRunStep, request),
-    },
     rpc: {
       hello: () => invokeDesktop(desktopApiIpcChannels.eccRpcHello),
       ping: () => invokeDesktop(desktopApiIpcChannels.eccRpcPing),
       shutdown: () => invokeDesktop(desktopApiIpcChannels.eccRpcShutdown),
     },
     runtime: {
-      acknowledgeStepRendered: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered, request),
-      cancel: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationCancel, request),
+      engineeringSnapshot: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, request),
+      openArtifact: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOpenArtifact, request),
+      readArtifactChunk: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeReadArtifactChunk, request),
       snapshot: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
-      startFlow: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeStartFlow, request),
-      startStep: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeStartStep, request),
       status: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationStatus, request),
       waitForOperation: (request) =>
@@ -464,10 +466,7 @@ const desktopApi: DesktopApi = {
     },
     workspace: {
       close: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceClose, request),
-      create: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceCreate, request),
-      exportSignoff: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceExportSignoff, request),
+      describeSpec: () => invokeDesktop(desktopApiIpcChannels.eccWorkspaceDescribeSpec),
       inspectSignoff: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccWorkspaceInspectSignoff, request),
       home: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceHome, request),
@@ -475,10 +474,8 @@ const desktopApi: DesktopApi = {
       open: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceOpen, request),
       refreshConfig: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccWorkspaceRefreshConfig, request),
-      resetFlow: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceResetFlow, request),
-      syncConfig: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceSyncConfig, request),
+      validateSpec: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccWorkspaceValidateSpec, request),
     },
   },
   agent: {

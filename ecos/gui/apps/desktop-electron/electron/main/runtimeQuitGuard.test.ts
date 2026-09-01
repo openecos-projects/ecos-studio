@@ -56,7 +56,7 @@ async function flushPromises(): Promise<void> {
 }
 
 describe('installRuntimeQuitGuard', () => {
-  it('retries pending quit at a step ACK boundary but not for streaming logs', async () => {
+  it('retries pending quit at a committed boundary but not for streaming logs', async () => {
     const app = new FakeApp()
     const runtime = new FakeRuntime()
     runtime.shutdown.mockResolvedValueOnce({
@@ -82,10 +82,10 @@ describe('installRuntimeQuitGuard', () => {
         eventId: 'workspace-1:1',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { chunk: 'live output' },
+        payload: { chunk: 'live output', sourceType: 'step.log' },
         sequence: 1,
         timestamp: 1,
-        type: 'step.log',
+        type: 'execution.progress',
         workspaceId: 'workspace-1',
       },
       type: 'runtime.protocol',
@@ -98,10 +98,10 @@ describe('installRuntimeQuitGuard', () => {
         eventId: 'workspace-1:2',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { state: 'Success' },
+        payload: { sourceType: 'step.completed', state: 'Success' },
         sequence: 2,
         timestamp: 2,
-        type: 'step.completed',
+        type: 'workspace.committed',
         workspaceId: 'workspace-1',
       },
       type: 'runtime.protocol',

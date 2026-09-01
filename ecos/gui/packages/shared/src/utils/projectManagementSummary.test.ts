@@ -21,10 +21,13 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
     })
     expect(projectManagementWorkspaceSummaryPaths).toContain('home/flow.json')
     expect(projectManagementWorkspaceSummaryPaths).toContain(
+      'home/engineering-snapshot.json',
+    )
+    expect(projectManagementWorkspaceSummaryPaths).toContain(
       projectManagementStaTimingIssuesPath,
     )
     expect(projectManagementWorkspaceSummaryPaths).toHaveLength(
-      2 + projectManagementWorkspaceStepAnalysisSpecs.length * 3,
+      3 + projectManagementWorkspaceStepAnalysisSpecs.length * 3,
     )
     expect(new Set(projectManagementWorkspaceSummaryPaths).size).toBe(
       projectManagementWorkspaceSummaryPaths.length,

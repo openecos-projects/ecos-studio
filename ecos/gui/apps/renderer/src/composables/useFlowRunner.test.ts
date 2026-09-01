@@ -37,6 +37,7 @@ const {
     value: {
       sessionId: 'session-1',
       workspaceId: 'workspace-demo',
+      workspaceRevision: 1,
       state: undefined as string | undefined,
     },
   },
@@ -111,6 +112,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     workspaceSession.value = {
       sessionId: 'session-1',
       workspaceId: 'workspace-demo',
+      workspaceRevision: 1,
       state: undefined,
     }
     resourceVersions.value = {
@@ -161,11 +163,13 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     })
 
     expect(startFlowOperationApi).toHaveBeenCalledWith({
+      expectedWorkspaceRevision: 1,
       idempotencyKey: expect.any(String),
       rerun: true,
       workspaceHandle: 'workspace-demo',
     })
     expect(startStepOperationApi).toHaveBeenCalledWith({
+      expectedWorkspaceRevision: 1,
       idempotencyKey: expect.any(String),
       rerun: true,
       resetDependents: false,
@@ -242,6 +246,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     workspaceSession.value = {
       sessionId: 'session-1',
       workspaceId: '',
+      workspaceRevision: 1,
       state: 'loading',
     }
 

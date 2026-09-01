@@ -30,11 +30,13 @@ export interface WorkspaceSession {
   projectRoot: string
   state: WorkspaceSessionState
   resourceVersions: WorkspaceResourceVersions
+  workspaceRevision?: number
 }
 
 export interface WorkspaceSessionInput {
   workspaceId?: string
   projectRoot?: string
+  workspaceRevision?: number
 }
 
 export interface WorkspaceCleanupOptions {
@@ -95,6 +97,7 @@ function createSession(
     projectRoot: input.projectRoot ?? '',
     state,
     resourceVersions: resourceVersions.value,
+    workspaceRevision: input.workspaceRevision,
   }
 }
 
@@ -172,6 +175,7 @@ export function useWorkspaceLifecycle() {
     updateCurrentSession({
       workspaceId: input.workspaceId ?? session.value.workspaceId,
       projectRoot: input.projectRoot ?? session.value.projectRoot,
+      workspaceRevision: input.workspaceRevision ?? session.value.workspaceRevision,
       state: 'active',
     })
   }
@@ -192,6 +196,11 @@ export function useWorkspaceLifecycle() {
 
   function isCurrentSession(sessionId: string | undefined | null): boolean {
     return Boolean(sessionId) && session.value.sessionId === sessionId
+  }
+
+  function updateWorkspaceRevision(revision: number, sessionId?: string): void {
+    if (sessionId && !isCurrentSession(sessionId)) return
+    updateCurrentSession({ workspaceRevision: revision })
   }
 
   async function runForSession<T>(
@@ -258,6 +267,7 @@ export function useWorkspaceLifecycle() {
   return {
     session,
     currentSessionId,
+    updateWorkspaceRevision,
     resourceVersions,
     beginSession,
     setSessionLoading,

@@ -1,4 +1,7 @@
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -226,7 +229,10 @@ describe('EccRpcRuntimeService pool', () => {
   it('releases the one-shot workspace creation sidecar after the session is registered', async () => {
     const pool = createPool()
 
-    const workspace = await pool.service.createWorkspace({ directory: '/work/new' })
+    const workspace = await pool.service.createWorkspace({
+      commandId: 'workspace-create-new',
+      directory: '/work/new',
+    })
 
     expect(workspace.directory).toBe('/work/new')
     expect(pool.sidecarFor('/work/new').shutdownCount).toBe(1)
@@ -347,6 +353,84 @@ describe('EccRpcRuntimeService pool', () => {
     ).rejects.toThrow(WorkspaceSessionNotFoundError)
   })
 
+  it('resolves the Engineering Snapshot for an active Workspace directory', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.clientFor('/work/demo').responses.push({
+      artifacts: [],
+      checklist: {},
+      flow: { steps: [] },
+      metrics: [],
+      parameters: {},
+      qorAssessment: {},
+      signoffAssessment: { groups: [], risks: [], status: 'ready' },
+      workspaceId: 'id-/work/demo',
+      workspaceRevision: 1,
+    })
+
+    await expect(
+      pool.service.engineeringSnapshotForDirectory('/work/demo/'),
+    ).resolves.toMatchObject({
+      artifacts: [],
+      workspaceId: 'id-/work/demo',
+      workspaceRevision: 1,
+    })
+    expect(pool.clientFor('/work/demo').calls.at(-1)).toEqual({
+      method: 'workspace.engineering_snapshot',
+      params: { workspaceId: 'id-/work/demo' },
+    })
+    expect(workspace.workspaceHandle).toEqual(expect.any(String))
+  })
+
+  it('reads a bounded artifact chunk by opaque id without accepting a path', async () => {
+    const pool = createPool()
+    const workspaceDirectory = await mkdtemp(join(tmpdir(), 'ecos-artifact-runtime-'))
+    await writeFile(`${workspaceDirectory}/artifact.bin`, 'abcdef')
+    const workspace = await pool.service.openWorkspace({
+      directory: workspaceDirectory,
+    })
+    pool.clientFor(workspaceDirectory).responses.push({
+      artifacts: [
+        {
+          artifactId: 'artifact-1',
+          reference: 'artifact.bin',
+          sizeBytes: 6,
+        },
+      ],
+      workspaceId: `id-${workspaceDirectory}`,
+      workspaceRevision: 1,
+    })
+
+    const chunk = await pool.service.readArtifactChunk({
+      artifactId: 'artifact-1',
+      length: 3,
+      offset: 2,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    expect(new TextDecoder().decode(chunk.data)).toBe('cde')
+    expect(chunk).toMatchObject({ eof: false, nextOffset: 5, sizeBytes: 6 })
+    pool.clientFor(workspaceDirectory).responses.push({
+      artifacts: [
+        {
+          artifactId: 'artifact-1',
+          reference: 'artifact.bin',
+          sizeBytes: 6,
+        },
+      ],
+      workspaceId: `id-${workspaceDirectory}`,
+      workspaceRevision: 1,
+    })
+    await expect(
+      pool.service.readArtifactChunk({
+        artifactId: '../artifact.bin',
+        length: 3,
+        offset: 0,
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).rejects.toThrow('Artifact not found')
+  })
+
   it('shuts down and removes a runtime when its last handle closes', async () => {
     const pool = createPool()
     const first = await pool.service.openWorkspace({ directory: '/work/demo' })
@@ -422,14 +506,14 @@ describe('EccRpcRuntimeService pool', () => {
     expect(pool.sidecarFor(null).shutdownCount).toBe(1)
   })
 
-  it('requests ECC cancellation when GUI quit reaches a rendered-step safe boundary', async () => {
+  it('requests ECC cancellation when GUI quit reaches a committed safe boundary', async () => {
     const pool = createPool()
     await pool.service.openWorkspace({ directory: '/work/demo' })
     const sidecar = pool.sidecarFor('/work/demo')
     sidecar.shutdownError = new EccRpcShutdownDeferredError({
       operationId: 'operation-1',
       safeToStop: true,
-      state: 'waiting_for_gui_ack',
+      state: 'running',
       step: 'Synthesis',
       workspaceId: 'id-/work/demo',
     })
@@ -442,14 +526,35 @@ describe('EccRpcRuntimeService pool', () => {
       jsonrpc: '2.0',
       method: 'runtime.event',
       params: {
+        eventId: 'id-/work/demo:1',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { sourceType: 'operation.started', state: 'running' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
         eventId: 'id-/work/demo:2',
         kind: 'flow',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { state: 'Success', step: 'Synthesis', tool: 'yosys' },
+        payload: {
+          sourceType: 'step.completed',
+          state: 'Success',
+          step: 'Synthesis',
+          tool: 'yosys',
+          workspaceRevision: 2,
+        },
         sequence: 2,
         timestamp: 2,
-        type: 'step.completed',
+        type: 'workspace.committed',
         workspaceId: 'id-/work/demo',
       },
     })

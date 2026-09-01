@@ -22,8 +22,7 @@ const renderTasks = new Set<RuntimeStepRenderTask>()
 
 /**
  * Components that own step-derived data register their bounded refresh here.
- * The workspace event coordinator awaits these tasks before it releases the
- * ECC gate, so no next step races a slow NFS-backed view refresh.
+ * Runtime events trigger these tasks without delaying ECC execution.
  */
 export function registerRuntimeStepRenderTask(task: RuntimeStepRenderTask): () => void {
   renderTasks.add(task)

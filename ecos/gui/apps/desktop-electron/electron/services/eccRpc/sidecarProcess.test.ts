@@ -67,14 +67,10 @@ describe('EccRpcSidecarProcess', () => {
 
     await sidecar.start()
 
-    expect(spawn).toHaveBeenCalledWith(
-      'ecc',
-      ['rpc', 'serve', '--stdio', '--persistent-db'],
-      {
-        env: { PATH: '/bin' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
-    )
+    expect(spawn).toHaveBeenCalledWith('ecc', ['--stdio', '--persistent-db'], {
+      env: { PATH: '/bin' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
   })
 
   it('uses a runtime-specific launch resolver', async () => {
@@ -117,7 +113,7 @@ describe('EccRpcSidecarProcess', () => {
 
     expect(spawn).toHaveBeenCalledWith(
       '/tmp/packaged/binaries/ecc',
-      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      ['--stdio', '--persistent-db'],
       {
         env: { PATH: '/home/ecos/.local/bin:/bin' },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -168,14 +164,10 @@ describe('EccRpcSidecarProcess', () => {
 
     expect(secondClient).not.toBe(firstClient)
     expect(spawn).toHaveBeenCalledTimes(2)
-    expect(spawn).toHaveBeenLastCalledWith(
-      'ecc',
-      ['rpc', 'serve', '--stdio', '--persistent-db'],
-      {
-        env: { PATH: '/tools/v2/bin' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
-    )
+    expect(spawn).toHaveBeenLastCalledWith('ecc', ['--stdio', '--persistent-db'], {
+      env: { PATH: '/tools/v2/bin' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
   })
 
   it('reuses the last successful environment when the provider temporarily fails', async () => {

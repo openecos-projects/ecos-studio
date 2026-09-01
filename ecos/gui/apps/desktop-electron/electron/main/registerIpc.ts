@@ -30,18 +30,21 @@ import {
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
   type EccFlowRunStepRequest,
+  type EccArtifactOpenRequest,
+  type EccArtifactReadRequest,
   type EccRuntimeEvent,
   type EccRuntimeOperation,
   type EccRuntimeOperationRequest,
   type EccRuntimeStartFlowRequest,
   type EccRuntimeStartStepRequest,
-  type EccRuntimeStepRenderedAckRequest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceExportSignoffRequest,
   type EccWorkspaceHandleRequest,
   type EccWorkspaceInfoRequest,
   type EccWorkspaceOpenRequest,
   type EccWorkspaceSyncConfigRequest,
+  type EccWorkspaceSpecValidationRequest,
+  type EccWorkspaceUpdateRequest,
   type DesktopFileDialogOptions,
   type DesktopMenuEventId,
   type DesktopSaveFileDialogOptions,
@@ -49,6 +52,7 @@ import {
   type PickedRtlSources,
   type ProjectManifestMutationRequest,
   type ProjectManifestMutationResult,
+  type WorkspaceCreationModelRequest,
   type DesktopProjectTextFileChunk,
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
@@ -71,7 +75,6 @@ import {
   type PdkImportRequest,
   type PdkInstallationSnapshot,
   type PdkLocateRequest,
-  type PdkRequirement,
   type PdkResolveBindingRequest,
   type DesktopShellDataEvent,
   type DesktopShellExitEvent,
@@ -85,7 +88,6 @@ import {
   type WorkspaceResourceIndex,
   type WorkspaceStepInfoRequest,
   type WorkspaceStepInfoResult,
-  parseProjectManifest,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import {
@@ -108,6 +110,12 @@ import {
   executeWorkspaceRerun,
   prepareWorkspaceRerun,
 } from '../services/eccRpc/workspaceRerun'
+import { executeProductCommand } from '../services/productCommandService'
+import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
+import {
+  prepareWorkspaceCreateBinding,
+  prepareWorkspaceOpenBinding,
+} from '../services/workspacePdkBindings'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -350,18 +358,18 @@ export interface DesktopBridgeServices {
     workspaceInfo(workspaceHandle: string, step: string, id: string): Promise<unknown>
   }
   eccRuntimeService: {
-    acknowledgeDetachedStepRendered(
-      request: EccRuntimeStepRenderedAckRequest,
-    ): Promise<unknown>
-    acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<unknown>
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
     cancelOperationLegacy(
       operationId?: string,
     ): Promise<{ cancelled: boolean; operationId?: string }>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
+    describeWorkspaceSpec(): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
+    engineeringSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
     inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
+    openArtifact(request: EccArtifactOpenRequest): Promise<unknown>
+    readArtifactChunk(request: EccArtifactReadRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
     operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
@@ -378,6 +386,8 @@ export interface DesktopBridgeServices {
     startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
     startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
     syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
+    updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<unknown>
+    validateWorkspaceSpec(request: EccWorkspaceSpecValidationRequest): Promise<unknown>
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
     workspaceInfo(request: EccWorkspaceInfoRequest): Promise<unknown>
     workspaceSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -498,76 +508,6 @@ function readWorkspaceHandleFromEvent(event: EccRuntimeEvent): string | undefine
 function requireDesignTool(value: unknown): DesignTool {
   if (value === 'backend' || value === 'frontend') return value
   throw new Error(`Unsupported design runtime: ${String(value)}`)
-}
-
-async function resolveWorkspacePdkContext(
-  services: DesktopBridgeServices,
-  requestedProjectId: string,
-  projectRoot: string,
-  requested: PdkRequirement,
-): Promise<{ projectId: string; requirement: PdkRequirement }> {
-  if (!projectRoot || !services.projectManagementReadService) {
-    return { projectId: requestedProjectId, requirement: requested }
-  }
-  const manifestText =
-    await services.projectManagementReadService.readManifest(projectRoot)
-  if (!manifestText) return { projectId: requestedProjectId, requirement: requested }
-  const manifest = parseProjectManifest(manifestText)
-  return {
-    projectId: manifest.project_id,
-    requirement: manifest.base_design.pdk_requirement ?? requested,
-  }
-}
-
-async function prepareEccWorkspaceCreateRequest(
-  services: DesktopBridgeServices,
-  request: EccWorkspaceCreateRequest,
-): Promise<EccWorkspaceCreateRequest> {
-  if (!request.pdkRequirement) {
-    throw new Error('PDK Requirement is required for backend workspace creation')
-  }
-
-  const projectRoot = request.projectRoot ?? ''
-  const context = await resolveWorkspacePdkContext(
-    services,
-    request.projectId ?? '',
-    projectRoot,
-    request.pdkRequirement,
-  )
-  const { projectId, requirement } = context
-  const binding = await services.pdkInventoryService.resolveBinding({
-    projectId,
-    projectRoot,
-    requirement,
-  })
-  if (!binding) {
-    if (!request.pdkInstallationId) {
-      throw new Error('Project PDK Requirement is unbound')
-    }
-    await services.pdkInventoryService.bindInstallation({
-      installationId: request.pdkInstallationId,
-      requirement,
-      projectId,
-      projectRoot,
-    })
-  }
-  const installation = await services.pdkInventoryService.validateWorkspace({
-    projectId,
-    projectRoot,
-    requirement,
-  })
-  const {
-    pdkInstallationId: _pdkInstallationId,
-    pdkRequirement: _pdkRequirement,
-    projectId: _projectId,
-    projectRoot: _projectRoot,
-    ...runtimeRequest
-  } = request
-  return {
-    ...runtimeRequest,
-    pdk: requirement.familyId,
-    pdkRoot: installation.root,
-  }
 }
 
 function readWorkspaceDirectoryFromEvent(event: EccRuntimeEvent): string | undefined {
@@ -846,13 +786,16 @@ export function registerIpc(
       return true
     }
     if (payload.type !== 'runtime.protocol') return false
-    return [
-      'step.completed',
-      'operation.completed',
-      'operation.failed',
-      'operation.cancelled',
-      'operation.rerun_prepared',
-    ].includes(payload.event.type)
+    if (payload.event.type === 'workspace.committed') return true
+    if (payload.event.type === 'operation.changed') {
+      return ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+        String(payload.event.payload.state),
+      )
+    }
+    return (
+      payload.event.type === 'execution.progress' &&
+      payload.event.payload.sourceType === 'operation.rerun_prepared'
+    )
   }
 
   const agentSessionKey = (providerId: string, sessionId: string): string =>
@@ -945,31 +888,6 @@ export function registerIpc(
     return deliveredSenders.size
   }
 
-  const isSuccessfulDetachedStepCommit = (
-    payload: EccRuntimeEvent,
-  ): payload is Extract<EccRuntimeEvent, { type: 'runtime.protocol' }> => {
-    if (payload.type !== 'runtime.protocol') return false
-    if (payload.event.type !== 'step.completed') return false
-    return String(payload.event.payload.state).toLowerCase() === 'success'
-  }
-
-  const acknowledgeDetachedStepCommit = (payload: EccRuntimeEvent): void => {
-    if (!isSuccessfulDetachedStepCommit(payload) || !payload.workspaceHandle) return
-    const stepCommitId = payload.event.payload.stepCommitId
-    const workspaceRevision = payload.event.payload.workspaceRevision
-    void services.eccRuntimeService
-      .acknowledgeDetachedStepRendered({
-        eventId: payload.event.eventId,
-        operationId: payload.event.operationId,
-        workspaceHandle: payload.workspaceHandle,
-        ...(typeof stepCommitId === 'string' ? { stepCommitId } : {}),
-        ...(typeof workspaceRevision === 'number' ? { workspaceRevision } : {}),
-      })
-      .catch((error: unknown) => {
-        console.warn('Failed to persist a detached GUI step commit:', error)
-      })
-  }
-
   const deliverRuntimeEvent = (
     designTool: DesignTool,
     payload: EccRuntimeEvent,
@@ -995,18 +913,14 @@ export function registerIpc(
       // attached the GUI handle, or carry a stale handle after a workspace
       // reopen. The explicit directory is still scoped to the owning window,
       // so use it as a routing fallback instead of dropping the progress event.
-      const delivered = deliverDirectoryScopedEvent(designTool, payload)
-      if (delivered === 0 && designTool === 'backend') {
-        acknowledgeDetachedStepCommit(payload)
-      }
+      deliverDirectoryScopedEvent(designTool, payload)
       return
     }
     // Frontend legacy RPC progress events are directory-scoped even though
     // they do not carry the shared runtime protocol's workspaceHandle.
     if (!readWorkspaceDirectoryFromEvent(payload)) return
     const delivered = deliverDirectoryScopedEvent(designTool, payload)
-    if (delivered === 0 && designTool === 'backend')
-      acknowledgeDetachedStepCommit(payload)
+    void delivered
   }
 
   services.eccRuntimeService.onEvent((payload) => deliverRuntimeEvent('backend', payload))
@@ -1334,10 +1248,18 @@ export function registerIpc(
       workspaceHandle = openedHandle
     }
     pendingWorkspaceRerunExecutions.delete(token)
+    const runtimeSnapshot = await services.eccRuntimeService.workspaceSnapshot({
+      workspaceHandle,
+    })
+    const workspaceRevision =
+      isRecord(runtimeSnapshot) && typeof runtimeSnapshot.workspaceRevision === 'number'
+        ? runtimeSnapshot.workspaceRevision
+        : undefined
     await executeWorkspaceRerun(
       pending.contract,
       services.eccRuntimeService,
       workspaceHandle,
+      workspaceRevision,
     )
   })
 
@@ -2030,11 +1952,12 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.designRuntimeCancel, async (_event, request) => {
     const runtimeRequest = request as DesignRuntimeCancelRequest
-    return requireDesignTool(runtimeRequest.designTool) === 'frontend'
-      ? await services.frontendRpcRuntimeService.cancelOperationLegacy(
-          runtimeRequest.operationId,
-        )
-      : await services.eccRuntimeService.cancelOperationLegacy(runtimeRequest.operationId)
+    if (requireDesignTool(runtimeRequest.designTool) !== 'frontend') {
+      throw new Error('Backend operation cancellation requires a Product Command')
+    }
+    return await services.frontendRpcRuntimeService.cancelOperationLegacy(
+      runtimeRequest.operationId,
+    )
   })
 
   handle(desktopApiIpcChannels.designRuntimeRpcHello, async (_event, request) => {
@@ -2044,6 +1967,35 @@ export function registerIpc(
     return designTool === 'frontend'
       ? await services.frontendRpcRuntimeService.rpcHello()
       : await services.eccRuntimeService.rpcHello()
+  })
+
+  handle(desktopApiIpcChannels.workspaceCreationModelGet, async (_event, request) => {
+    const [discovery, pdkInstallations] = await Promise.all([
+      services.eccRuntimeService.describeWorkspaceSpec(),
+      services.pdkInventoryService.listInstallations(),
+    ])
+    return buildWorkspaceCreationModel(
+      discovery as Record<string, unknown>,
+      pdkInstallations,
+      (request as WorkspaceCreationModelRequest | undefined) ?? {},
+    )
+  })
+
+  handle(desktopApiIpcChannels.productCommandExecute, async (event, request) => {
+    return await executeProductCommand(request, {
+      ownsWorkspaceHandle: (workspaceHandle) =>
+        workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
+      prepareCreate: async (createRequest) =>
+        await prepareWorkspaceCreateBinding(services, createRequest),
+      runtime: services.eccRuntimeService,
+      trackCreateResult: (result) => {
+        const workspaceHandle = workspaceHandleFromResult(result)
+        const directory = workspaceDirectoryFromResult(result)
+        if (workspaceHandle && directory) {
+          trackWorkspaceHandle(event.sender, workspaceHandle, directory)
+        }
+      },
+    })
   })
 
   handle(desktopApiIpcChannels.designRuntimeRpcPing, async (_event, request) => {
@@ -2079,17 +2031,12 @@ export function registerIpc(
   handle(desktopApiIpcChannels.designRuntimeWorkspaceCreate, async (event, request) => {
     const runtimeRequest = request as DesignRuntimeWorkspaceCreateRequest
     const designTool = requireDesignTool(runtimeRequest.designTool)
-    const backendRequest =
-      designTool === 'backend'
-        ? (runtimeRequest.payload as unknown as EccWorkspaceCreateRequest)
-        : null
-    const eccBackendRequest = backendRequest
-      ? await prepareEccWorkspaceCreateRequest(services, backendRequest)
-      : null
-    const result =
-      designTool === 'frontend'
-        ? await services.frontendRpcRuntimeService.createWorkspace(runtimeRequest.payload)
-        : await services.eccRuntimeService.createWorkspace(eccBackendRequest!)
+    if (designTool !== 'frontend') {
+      throw new Error('Backend workspace creation requires a Product Command')
+    }
+    const result = await services.frontendRpcRuntimeService.createWorkspace(
+      runtimeRequest.payload,
+    )
     const workspaceHandle = workspaceHandleFromResult(result)
     if (workspaceHandle) {
       trackWorkspaceHandle(
@@ -2111,9 +2058,9 @@ export function registerIpc(
     const result =
       designTool === 'frontend'
         ? await services.frontendRpcRuntimeService.openWorkspace(runtimeRequest.directory)
-        : await services.eccRuntimeService.openWorkspace({
-            directory: runtimeRequest.directory,
-          })
+        : await services.eccRuntimeService.openWorkspace(
+            await prepareWorkspaceOpenBinding(services, runtimeRequest.directory),
+          )
     const workspaceHandle = workspaceHandleFromResult(result)
     if (workspaceHandle) {
       trackWorkspaceHandle(
@@ -2201,14 +2148,13 @@ export function registerIpc(
     desktopApiIpcChannels.designRuntimeWorkspaceSyncConfig,
     async (_event, request) => {
       const runtimeRequest = request as DesignRuntimeWorkspaceSyncConfigRequest
-      return requireDesignTool(runtimeRequest.designTool) === 'frontend'
-        ? await services.frontendRpcRuntimeService.syncConfig(
-            runtimeRequest.workspaceHandle,
-            runtimeRequest.configPath,
-          )
-        : await services.eccRuntimeService.syncConfig(
-            runtimeRequest as unknown as EccWorkspaceSyncConfigRequest,
-          )
+      if (requireDesignTool(runtimeRequest.designTool) !== 'frontend') {
+        throw new Error('Backend configuration sync requires a Product Command')
+      }
+      return await services.frontendRpcRuntimeService.syncConfig(
+        runtimeRequest.workspaceHandle,
+        runtimeRequest.configPath,
+      )
     },
   )
 
@@ -2216,37 +2162,39 @@ export function registerIpc(
     desktopApiIpcChannels.designRuntimeWorkspaceResetFlow,
     async (_event, request) => {
       const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
-      return requireDesignTool(runtimeRequest.designTool) === 'frontend'
-        ? await services.frontendRpcRuntimeService.resetFlow(
-            runtimeRequest.workspaceHandle,
-          )
-        : await services.eccRuntimeService.resetFlow(runtimeRequest)
+      if (requireDesignTool(runtimeRequest.designTool) !== 'frontend') {
+        throw new Error('Backend flow reset requires a Product Command')
+      }
+      return await services.frontendRpcRuntimeService.resetFlow(
+        runtimeRequest.workspaceHandle,
+      )
     },
   )
 
   handle(desktopApiIpcChannels.designRuntimeFlowRun, async (_event, request) => {
     const runtimeRequest = request as DesignRuntimeFlowRunRequest
-    return requireDesignTool(runtimeRequest.designTool) === 'frontend'
-      ? await services.frontendRpcRuntimeService.runFlow(
-          runtimeRequest.workspaceHandle,
-          Boolean(runtimeRequest.rerun),
-        )
-      : await services.eccRuntimeService.runFlow(
-          runtimeRequest as unknown as EccFlowRunRequest,
-        )
+    if (requireDesignTool(runtimeRequest.designTool) !== 'frontend') {
+      throw new Error('Backend flow execution requires a Product Command')
+    }
+    return await services.frontendRpcRuntimeService.runFlow(
+      runtimeRequest.workspaceHandle,
+      Boolean(runtimeRequest.rerun),
+    )
   })
 
   handle(desktopApiIpcChannels.designRuntimeFlowRunStep, async (_event, request) => {
     const runtimeRequest = request as DesignRuntimeFlowRunStepRequest
-    return requireDesignTool(runtimeRequest.designTool) === 'frontend'
-      ? await services.frontendRpcRuntimeService.runStep(runtimeRequest.workspaceHandle, {
-          ...runtimeRequest.options,
-          rerun: Boolean(runtimeRequest.rerun),
-          step: runtimeRequest.step,
-        })
-      : await services.eccRuntimeService.runStep(
-          runtimeRequest as unknown as EccFlowRunStepRequest,
-        )
+    if (requireDesignTool(runtimeRequest.designTool) !== 'frontend') {
+      throw new Error('Backend flow execution requires a Product Command')
+    }
+    return await services.frontendRpcRuntimeService.runStep(
+      runtimeRequest.workspaceHandle,
+      {
+        ...runtimeRequest.options,
+        rerun: Boolean(runtimeRequest.rerun),
+        step: runtimeRequest.step,
+      },
+    )
   })
 
   handle(desktopApiIpcChannels.eccRpcHello, async () => {
@@ -2261,29 +2209,13 @@ export function registerIpc(
     return await services.eccRuntimeService.rpcShutdown()
   })
 
-  handle(desktopApiIpcChannels.eccWorkspaceCreate, async (event, request) => {
-    const createRequest = request as EccWorkspaceCreateRequest
-    const validatedRequest = await prepareEccWorkspaceCreateRequest(
-      services,
-      createRequest,
-    )
-    const result = await services.eccRuntimeService.createWorkspace(validatedRequest)
-    const workspaceHandle = workspaceHandleFromResult(result)
-    const directory = workspaceDirectoryFromResult(result)
-    if (workspaceHandle) {
-      if (typeof createRequest.directory === 'string') {
-        trackWorkspaceHandle(event.sender, workspaceHandle, createRequest.directory)
-      }
-      if (directory) {
-        trackWorkspaceHandle(event.sender, workspaceHandle, directory)
-      }
-    }
-    return result
-  })
-
   handle(desktopApiIpcChannels.eccWorkspaceOpen, async (event, request) => {
     const openRequest = request as EccWorkspaceOpenRequest
-    const result = await services.eccRuntimeService.openWorkspace(openRequest)
+    const result = await services.eccRuntimeService.openWorkspace(
+      openRequest.workspaceBindings
+        ? openRequest
+        : await prepareWorkspaceOpenBinding(services, openRequest.directory),
+    )
     const workspaceHandle = workspaceHandleFromResult(result)
     const directory = workspaceDirectoryFromResult(result)
     if (workspaceHandle) {
@@ -2295,6 +2227,16 @@ export function registerIpc(
       }
     }
     return result
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceDescribeSpec, async () => {
+    return await services.eccRuntimeService.describeWorkspaceSpec()
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceValidateSpec, async (_event, request) => {
+    return await services.eccRuntimeService.validateWorkspaceSpec(
+      request as EccWorkspaceSpecValidationRequest,
+    )
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceClose, async (_event, request) => {
@@ -2320,47 +2262,9 @@ export function registerIpc(
     )
   })
 
-  handle(desktopApiIpcChannels.eccWorkspaceSyncConfig, async (_event, request) => {
-    return await services.eccRuntimeService.syncConfig(
-      request as EccWorkspaceSyncConfigRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceResetFlow, async (_event, request) => {
-    return await services.eccRuntimeService.resetFlow(
-      request as EccWorkspaceHandleRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceExportSignoff, async (_event, request) => {
-    return await services.eccRuntimeService.exportSignoff(
-      request as EccWorkspaceExportSignoffRequest,
-    )
-  })
-
   handle(desktopApiIpcChannels.eccWorkspaceInspectSignoff, async (_event, request) => {
     return await services.eccRuntimeService.inspectSignoff(
       request as EccWorkspaceHandleRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccFlowRun, async (_event, request) => {
-    return await services.eccRuntimeService.runFlow(request as EccFlowRunRequest)
-  })
-
-  handle(desktopApiIpcChannels.eccFlowRunStep, async (_event, request) => {
-    return await services.eccRuntimeService.runStep(request as EccFlowRunStepRequest)
-  })
-
-  handle(desktopApiIpcChannels.eccRuntimeStartFlow, async (_event, request) => {
-    return await services.eccRuntimeService.startFlowOperation(
-      request as EccRuntimeStartFlowRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccRuntimeStartStep, async (_event, request) => {
-    return await services.eccRuntimeService.startStepOperation(
-      request as EccRuntimeStartStepRequest,
     )
   })
 
@@ -2376,24 +2280,27 @@ export function registerIpc(
     )
   })
 
-  handle(desktopApiIpcChannels.eccRuntimeOperationCancel, async (_event, request) => {
-    return await services.eccRuntimeService.cancelOperation(
-      request as EccRuntimeOperationRequest,
-    )
-  })
-
-  handle(
-    desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered,
-    async (_event, request) => {
-      return await services.eccRuntimeService.acknowledgeStepRendered(
-        request as EccRuntimeStepRenderedAckRequest,
-      )
-    },
-  )
-
   handle(desktopApiIpcChannels.eccRuntimeSnapshot, async (_event, request) => {
     return await services.eccRuntimeService.workspaceSnapshot(
       request as EccWorkspaceHandleRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, async (_event, request) => {
+    return await services.eccRuntimeService.engineeringSnapshot(
+      request as EccWorkspaceHandleRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeReadArtifactChunk, async (_event, request) => {
+    return await services.eccRuntimeService.readArtifactChunk(
+      request as EccArtifactReadRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccRuntimeOpenArtifact, async (_event, request) => {
+    return await services.eccRuntimeService.openArtifact(
+      request as EccArtifactOpenRequest,
     )
   })
 

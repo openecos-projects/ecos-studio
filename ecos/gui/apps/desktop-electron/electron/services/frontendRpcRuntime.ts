@@ -128,6 +128,7 @@ export function normalizeFrontendRuntimeEvent(event: EccRuntimeEvent): EccRuntim
   const sequence = ++legacyFrontendProtocolSequence
   const payload: Record<string, unknown> = {
     ...data,
+    sourceType: protocolType,
     ...(step ? { step } : {}),
     ...(state ? { state } : {}),
     ...(subflowStep ? { subflowStep } : {}),
@@ -144,7 +145,8 @@ export function normalizeFrontendRuntimeEvent(event: EccRuntimeEvent): EccRuntim
       payload,
       sequence,
       timestamp: Date.now(),
-      type: protocolType,
+      type:
+        protocolType === 'step.completed' ? 'workspace.committed' : 'execution.progress',
       workspaceId: workspaceHandle,
     },
     type: 'runtime.protocol',

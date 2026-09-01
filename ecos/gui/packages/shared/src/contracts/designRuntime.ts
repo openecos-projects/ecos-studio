@@ -38,6 +38,7 @@ export interface DesignRuntimeWorkspaceOpenRequest extends DesignRuntimeTargetRe
 }
 
 export interface DesignRuntimeWorkspaceHandleRequest extends DesignRuntimeTargetRequest {
+  expectedWorkspaceRevision?: number
   workspaceHandle: string
 }
 

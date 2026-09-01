@@ -5,11 +5,7 @@ interface OperationWaiter {
   resolve(operation: EccRuntimeOperation): void
 }
 
-const terminalEventTypes = new Set([
-  'operation.completed',
-  'operation.failed',
-  'operation.cancelled',
-])
+const terminalStates = new Set(['succeeded', 'failed', 'cancelled', 'interrupted'])
 
 /**
  * Keeps the notification-derived operation state separate from RPC session
@@ -34,7 +30,9 @@ export class RuntimeOperationTracker {
   }
 
   track(protocolEvent: EccRuntimeProtocolPayload): boolean {
-    if (!terminalEventTypes.has(protocolEvent.type)) {
+    if (protocolEvent.type !== 'operation.changed') return false
+    const state = stringPayloadValue(protocolEvent.payload, 'state')
+    if (!terminalStates.has(state)) {
       if (this.terminalOperations.has(protocolEvent.operationId)) return false
       this.activeOperationIds.add(protocolEvent.operationId)
       return false
@@ -109,12 +107,11 @@ function terminalOperationFrom(
   const payload = protocolEvent.payload
   const error = isRuntimeErrorPayload(payload.error)
     ? payload.error
-    : protocolEvent.type === 'operation.cancelled'
+    : payload.state === 'cancelled'
       ? { code: 'cancelled', message: 'ECC operation cancelled.' }
       : null
   return {
-    awaitingEventId: null,
-    cancelRequested: protocolEvent.type === 'operation.cancelled',
+    cancelRequested: payload.state === 'cancelled' || Boolean(payload.cancelRequested),
     createdAt: protocolEvent.timestamp,
     currentStep: stringPayloadValue(payload, 'step'),
     currentTool: stringPayloadValue(payload, 'tool'),
@@ -124,12 +121,7 @@ function terminalOperationFrom(
     origin: protocolEvent.origin,
     rerun: Boolean(protocolEvent.rerun),
     result: recordPayloadValue(payload, 'result'),
-    state:
-      protocolEvent.type === 'operation.completed'
-        ? 'succeeded'
-        : protocolEvent.type === 'operation.cancelled'
-          ? 'cancelled'
-          : 'failed',
+    state: stringPayloadValue(payload, 'state') as EccRuntimeOperation['state'],
     step: stringPayloadValue(payload, 'step'),
     updatedAt: protocolEvent.timestamp,
     workspaceId: protocolEvent.workspaceId,

@@ -209,19 +209,21 @@ function registerHandlers(
     },
     createWindow: vi.fn(),
     eccRuntimeService: {
-      acknowledgeDetachedStepRendered: vi.fn(),
-      acknowledgeStepRendered: vi.fn(),
       cancelOperation: vi.fn(),
       cancelOperationLegacy: vi.fn(),
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
+      describeWorkspaceSpec: vi.fn(),
+      engineeringSnapshot: vi.fn(),
       exportSignoff: vi.fn(),
       inspectSignoff: vi.fn(),
+      openArtifact: vi.fn(),
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
       operationStatus: vi.fn(),
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
       refreshConfig: vi.fn(),
+      readArtifactChunk: vi.fn(),
       resetFlow: vi.fn(),
       rpcHello: vi.fn(),
       rpcPing: vi.fn(),
@@ -231,6 +233,8 @@ function registerHandlers(
       startFlowOperation: vi.fn(),
       startStepOperation: vi.fn(),
       syncConfig: vi.fn(),
+      updateWorkspace: vi.fn(),
+      validateWorkspaceSpec: vi.fn(),
       workspaceHome: vi.fn(),
       workspaceInfo: vi.fn(),
       workspaceSnapshot: vi.fn(),
@@ -654,6 +658,9 @@ describe('registerIpc', () => {
       directory: contract.target_workspace,
       workspaceHandle: 'target-gui-handle',
     })
+    services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
+      workspaceRevision: 1,
+    })
     await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
       { sender: owner },
       { directory: contract.target_workspace },
@@ -669,6 +676,7 @@ describe('registerIpc', () => {
       contract,
       services.eccRuntimeService,
       'target-gui-handle',
+      1,
     )
   })
 
@@ -736,6 +744,9 @@ describe('registerIpc', () => {
       directory: '/canonical/gcd_rerun_place',
       workspaceHandle: 'aliased-handle',
     })
+    services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
+      workspaceRevision: 1,
+    })
     await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
       { sender: owner },
       { directory: contract.target_workspace },
@@ -751,6 +762,7 @@ describe('registerIpc', () => {
       contract,
       services.eccRuntimeService,
       'aliased-handle',
+      1,
     )
   })
 
@@ -1003,9 +1015,10 @@ describe('registerIpc', () => {
     services.pdkInventoryService.validateWorkspace.mockRejectedValue(error)
 
     await expect(
-      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
-        designTool: 'backend',
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.create',
         payload: {
+          commandId: 'workspace-create-invalid-binding',
           directory: '/tmp/workspace',
           pdk: 'ics55',
           pdkInstallationId: 'pdk-installation:ics55',
@@ -1040,9 +1053,10 @@ describe('registerIpc', () => {
     const event = { sender: { id: 'web-contents' } }
 
     await expect(
-      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
-        designTool: 'backend',
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.create',
         payload: {
+          commandId: 'workspace-create-missing-requirement',
           directory: '/tmp/workspace',
           pdk: 'vendor-pdk',
           pdkRoot: '/tmp/vendor-pdk',
@@ -1065,6 +1079,7 @@ describe('registerIpc', () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     const payload = {
+      commandId: 'workspace-create-persisted-requirement',
       directory: '/tmp/workspace',
       pdk: 'ics55',
       pdkInstallationId: 'pdk-installation:ics55',
@@ -1120,8 +1135,8 @@ describe('registerIpc', () => {
     services.eccRuntimeService.createWorkspace.mockResolvedValue(result)
 
     await expect(
-      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
-        designTool: 'backend',
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.create',
         payload,
       }),
     ).resolves.toEqual(result)
@@ -1142,9 +1157,17 @@ describe('registerIpc', () => {
       requirement: persistedRequirement,
     })
     expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith({
+      commandId: payload.commandId,
       directory: payload.directory,
       pdk: payload.pdk,
+      pdkConfig: {
+        tech_lef: ['tech.lef'],
+        cell_lef: ['cells.lef'],
+        liberty: ['typ.lib'],
+      },
+      pdkConfigMode: 'manual',
       pdkRoot: '/canonical/pdk',
+      pdkVersion: null,
     })
   })
 
@@ -1997,27 +2020,6 @@ describe('registerIpc', () => {
     )
   })
 
-  it('runs ECC flow steps through the runtime service', async () => {
-    const { handlers, services } = registerHandlers()
-    const event = { sender: { id: 'web-contents' } }
-    const result = {
-      state: 'Success',
-      step: 'place',
-    }
-    const request = {
-      rerun: false,
-      step: 'place',
-      workspaceHandle: 'workspace-handle-1',
-    }
-    services.eccRuntimeService.runStep.mockResolvedValue(result)
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.eccFlowRunStep)?.(event, request),
-    ).resolves.toEqual(result)
-
-    expect(services.eccRuntimeService.runStep).toHaveBeenCalledWith(request)
-  })
-
   it('exports ECC signoff through the runtime service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
@@ -2026,13 +2028,56 @@ describe('registerIpc', () => {
       workspaceHandle: 'workspace-handle-1',
     }
     const result = { outputPath: request.outputPath }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: request.workspaceHandle,
+    })
     services.eccRuntimeService.exportSignoff.mockResolvedValue(result)
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+      directory: '/work/demo',
+    })
 
     await expect(
-      handlers.get(desktopApiIpcChannels.eccWorkspaceExportSignoff)?.(event, request),
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.exportSignoff',
+        payload: request,
+      }),
     ).resolves.toEqual(result)
 
     expect(services.eccRuntimeService.exportSignoff).toHaveBeenCalledWith(request)
+  })
+
+  it('rejects Product Commands from a Renderer that does not own the Workspace', async () => {
+    const { handlers, services } = registerHandlers()
+    const owner = { sender: { id: 'owner' } }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(owner, {
+      directory: '/work/demo',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(
+        { sender: { id: 'other' } },
+        {
+          command: 'workspace.run',
+          payload: {
+            expectedWorkspaceRevision: 1,
+            idempotencyKey: 'command-1',
+            workspaceHandle: 'workspace-handle-1',
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      error: {
+        message: 'Product Command does not own this Workspace handle',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.startFlowOperation).not.toHaveBeenCalled()
   })
 
   it('inspects ECC signoff through the runtime service', async () => {
@@ -2340,10 +2385,10 @@ describe('registerIpc', () => {
         eventId: 'workspace-1:3',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { state: 'Success' },
+        payload: { sourceType: 'step.completed', state: 'Success' },
         sequence: 3,
         timestamp: 1,
-        type: 'step.completed',
+        type: 'workspace.committed',
         workspaceId: 'workspace-1',
       },
       type: 'runtime.protocol',
@@ -2674,61 +2719,6 @@ describe('registerIpc', () => {
 
     expect(services.eccRuntimeService.closeWorkspace).not.toHaveBeenCalled()
     expect(sender.listenerCount('destroyed')).toBe(0)
-  })
-
-  it('acknowledges a committed GUI step from main after its renderer detaches', async () => {
-    const { handlers, services } = registerHandlers()
-    const sender = Object.assign(new EventEmitter(), {
-      isDestroyed: vi.fn(() => false),
-      send: vi.fn(),
-    })
-    const event = { sender }
-    services.eccRuntimeService.openWorkspace.mockResolvedValue({
-      directory: '/work/demo',
-      workspaceHandle: 'workspace-handle-1',
-    })
-    services.eccRuntimeService.acknowledgeDetachedStepRendered.mockResolvedValue({
-      accepted: true,
-    })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
-      directory: '/work/demo',
-    })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
-      workspaceHandle: 'workspace-handle-1',
-    })
-
-    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
-    listener?.({
-      type: 'runtime.protocol',
-      workspaceDirectory: '/work/demo',
-      workspaceHandle: 'workspace-handle-1',
-      event: {
-        eventId: 'workspace-1:3',
-        operationId: 'operation-1',
-        origin: 'gui',
-        payload: {
-          state: 'Success',
-          stepCommitId: 'operation-1:step:1',
-          workspaceRevision: 1,
-        },
-        sequence: 3,
-        timestamp: 1,
-        type: 'step.completed',
-        workspaceId: 'workspace-1',
-      },
-    })
-    await Promise.resolve()
-
-    expect(
-      services.eccRuntimeService.acknowledgeDetachedStepRendered,
-    ).toHaveBeenCalledWith({
-      eventId: 'workspace-1:3',
-      operationId: 'operation-1',
-      stepCommitId: 'operation-1:step:1',
-      workspaceHandle: 'workspace-handle-1',
-      workspaceRevision: 1,
-    })
-    expect(sender.send).not.toHaveBeenCalled()
   })
 
   it('tracks a workspace handle again after a successful explicit close', async () => {

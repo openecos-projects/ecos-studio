@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol, shell } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
@@ -86,6 +86,13 @@ function readHostInfo(path: string): string {
   }
 }
 
+function requireEccRuntimeAdapter(executable: string | null): string {
+  if (!executable) {
+    throw new Error('ECOS ECC Runtime Adapter is unavailable on this platform')
+  }
+  return executable
+}
+
 configureGpuMode({
   app,
   env: process.env,
@@ -137,12 +144,15 @@ function getDesktopServices() {
     userDataPath: app.getPath('userData'),
   }
   const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
-  const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
-  if (eccExecutable) {
-    electronLogger.info('[runtime] Using ECC executable %s', eccExecutable)
+  const eccRuntimeAdapterExecutable = resolveEccExecutable(eccRuntimeOptions)
+  if (eccRuntimeAdapterExecutable) {
+    electronLogger.info(
+      '[runtime] Using ECOS ECC Runtime Adapter %s',
+      eccRuntimeAdapterExecutable,
+    )
   } else {
     electronLogger.warn(
-      '[runtime] Packaged/dev ECC executable was not resolved; falling back to PATH lookup for ecc',
+      '[runtime] ECOS ECC Runtime Adapter is unavailable on this platform or installation',
     )
   }
   const appInfoService = new AppInfoService({
@@ -161,14 +171,15 @@ function getDesktopServices() {
   const eccRuntimeService = new EccRpcRuntimeService({
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
-        command: eccExecutable ?? 'ecc',
+        command: requireEccRuntimeAdapter(eccRuntimeAdapterExecutable),
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
         onEvent,
         onNotification,
       }),
-    lazyWorkspaceOpen: true,
+    lazyWorkspaceOpen: false,
+    openPath: (path) => shell.openPath(path),
     snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
   })
   installRuntimeQuitGuard({
@@ -221,6 +232,10 @@ function getDesktopServices() {
     projectManagementReadService,
   )
   const backendWorkspaceService = new BackendWorkspaceService({
+    engineeringSnapshotProvider: {
+      getByDirectory: (directory) =>
+        eccRuntimeService.engineeringSnapshotForDirectory(directory),
+    },
     projectManagementReadService,
     workspaceResourceService,
   })

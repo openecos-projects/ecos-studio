@@ -232,20 +232,30 @@ function responseFromProtocolEvent(
     typeof error.message === 'string'
       ? [error.message]
       : []
-  const typeByProtocol: Record<string, RuntimeNotifyType> = {
-    'operation.cancelled': 'cancelled',
-    'operation.completed': protocol.kind === 'flow' ? 'task_complete' : 'step_complete',
-    'operation.failed': 'error',
-    'operation.gui_sync_paused': 'message',
-    'operation.gui_sync_degraded': 'message',
+  const sourceType =
+    typeof payload.sourceType === 'string' ? payload.sourceType : protocol.type
+  const typeBySource: Record<string, RuntimeNotifyType> = {
     'operation.rerun_prepared': 'message',
-    'operation.started': 'message',
     'step.log': 'log',
     'step.completed': 'step_complete',
     'step.started': 'step_start',
     'subflow.stage': 'message',
   }
-  const notifyType = typeByProtocol[protocol.type]
+  const notifyType =
+    typeBySource[sourceType] ??
+    (protocol.type === 'workspace.committed'
+      ? 'step_complete'
+      : protocol.type === 'operation.changed'
+        ? state === 'failed' || state === 'interrupted'
+          ? 'error'
+          : state === 'cancelled'
+            ? 'cancelled'
+            : state === 'succeeded'
+              ? protocol.kind === 'flow'
+                ? 'task_complete'
+                : 'step_complete'
+              : 'message'
+        : undefined)
   if (!notifyType) return null
   return {
     cmd: 'notify',
@@ -261,7 +271,7 @@ function responseFromProtocolEvent(
       logCursor,
       affectedSteps: payload.affectedSteps,
       runtimeEventId: protocol.eventId,
-      runtimeProtocolType: protocol.type,
+      runtimeProtocolType: sourceType,
       rerun: protocol.rerun,
       runSessionId: protocol.runSessionId,
       runtimeInstanceId: protocol.runtimeInstanceId,
@@ -289,7 +299,12 @@ function responseFromProtocolEvent(
       workspaceId: event.workspaceHandle,
     },
     message,
-    response: notifyType === 'error' ? 'error' : 'success',
+    response:
+      notifyType === 'error'
+        ? 'error'
+        : notifyType === 'cancelled'
+          ? 'cancelled'
+          : 'success',
   }
 }
 

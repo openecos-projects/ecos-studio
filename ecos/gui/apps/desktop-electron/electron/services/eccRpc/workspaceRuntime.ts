@@ -20,7 +20,6 @@ import type {
   EccRuntimeOperationRequest,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
-  EccRuntimeStepRenderedAckRequest,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
@@ -38,6 +37,10 @@ import type {
   EccWorkspaceRuntimeSnapshot,
   EccWorkspaceSyncConfigRequest,
   EccWorkspaceSyncConfigResult,
+  EccWorkspaceSpecValidationRequest,
+  EccWorkspaceSpecValidationResult,
+  EccWorkspaceUpdateRequest,
+  EccWorkspaceUpdateResult,
 } from '@ecos-studio/shared'
 
 import { normalizeRuntimeError } from './errors'
@@ -227,8 +230,17 @@ export class EccWorkspaceRuntime {
         payload,
         { timeoutMs: 0 },
       )
-      const session = this.sessions.activate(response.directory, response.workspaceId)
-      return { directory: session.directory, workspaceHandle: session.workspaceHandle }
+      const session = this.sessions.activate(
+        response.directory,
+        response.workspaceId,
+        response.workspaceRevision ?? 1,
+      )
+      return {
+        directory: session.directory,
+        workspaceHandle: session.workspaceHandle,
+        workspaceId: session.eccWorkspaceId ?? undefined,
+        workspaceRevision: session.workspaceRevision,
+      }
     })
   }
 
@@ -294,6 +306,20 @@ export class EccWorkspaceRuntime {
 
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
     return this.commands.createWorkspace(request)
+  }
+
+  describeWorkspaceSpec(): Promise<Record<string, unknown>> {
+    return this.commands.describeWorkspaceSpec()
+  }
+
+  validateWorkspaceSpec(
+    request: EccWorkspaceSpecValidationRequest,
+  ): Promise<EccWorkspaceSpecValidationResult> {
+    return this.commands.validateWorkspaceSpec(request)
+  }
+
+  updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<EccWorkspaceUpdateResult> {
+    return this.commands.updateWorkspace(request)
   }
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
@@ -406,6 +432,7 @@ export class EccWorkspaceRuntime {
     }
     const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
     return await client.call<EccRuntimeOperation>('operation.start_flow', {
+      expectedWorkspaceRevision: request.expectedWorkspaceRevision,
       idempotencyKey: request.idempotencyKey,
       origin: 'gui',
       rerun: Boolean(request.rerun),
@@ -423,6 +450,7 @@ export class EccWorkspaceRuntime {
     }
     const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
     return await client.call<EccRuntimeOperation>('operation.start_step', {
+      expectedWorkspaceRevision: request.expectedWorkspaceRevision,
       idempotencyKey: request.idempotencyKey,
       origin: 'gui',
       rerun: Boolean(request.rerun),
@@ -452,46 +480,6 @@ export class EccWorkspaceRuntime {
     const client = await this.ensureStarted()
     await this.resolveEccWorkspaceId(request.workspaceHandle)
     return await client.call('operation.cancel', { operationId: request.operationId })
-  }
-
-  async acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
-    accepted: boolean
-    duplicate: boolean
-    eventId: string
-    operationId: string
-  }> {
-    const client = await this.ensureStarted()
-    await this.resolveEccWorkspaceId(request.workspaceHandle)
-    return await client.call('operation.ack_step_rendered', {
-      eventId: request.eventId,
-      operationId: request.operationId,
-      ...(request.stepCommitId ? { stepCommitId: request.stepCommitId } : {}),
-      ...(typeof request.workspaceRevision === 'number'
-        ? { workspaceRevision: request.workspaceRevision }
-        : {}),
-    })
-  }
-
-  /**
-   * A workspace page may detach while a GUI flow is stopped at a step boundary.
-   * Main first captures the authoritative in-memory snapshot, then sends the
-   * same idempotent ACK that a renderer would have sent after painting it.
-   */
-  async acknowledgeDetachedStepRendered(
-    request: EccRuntimeStepRenderedAckRequest,
-  ): Promise<{
-    accepted: boolean
-    duplicate: boolean
-    eventId: string
-    operationId: string
-  }> {
-    const client = await this.ensureStarted()
-    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-    const snapshot = await client.call<
-      Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
-    >('workspace.snapshot', { workspaceId })
-    this.snapshotCache.set(snapshot)
-    return await this.acknowledgeStepRendered(request)
   }
 
   async workspaceSnapshot(
@@ -527,6 +515,16 @@ export class EccWorkspaceRuntime {
     this.snapshotCache.set(snapshot)
     this.flushPendingRecoveryEvents()
     return { ...snapshot, workspaceHandle: request.workspaceHandle }
+  }
+
+  async engineeringSnapshot(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<Record<string, unknown>> {
+    const client = await this.ensureStarted()
+    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call<Record<string, unknown>>('workspace.engineering_snapshot', {
+      workspaceId,
+    })
   }
 
   async recoverInterrupted(
@@ -621,6 +619,19 @@ export class EccWorkspaceRuntime {
     this.helloResult = await client.call<EccRpcHelloResult>('rpc.hello', {
       version: 1,
     })
+    if (this.helloResult.adapterVersion !== undefined) {
+      const missing = [
+        'runtime.adapter.v1',
+        'workspace-spec.v1',
+        'engineering-snapshot.v1',
+      ].filter((capability) => !this.helloResult!.capabilities.includes(capability))
+      if (missing.length) {
+        this.helloResult = null
+        throw new Error(
+          `ECC Runtime Adapter is missing capabilities: ${missing.join(', ')}`,
+        )
+      }
+    }
     this.ready = true
     this.emit({
       type: 'runtime.ready',
@@ -639,7 +650,11 @@ export class EccWorkspaceRuntime {
     const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {
       directory: session.directory,
     })
-    this.sessions.rebind(workspaceHandle, response.workspaceId)
+    this.sessions.rebind(
+      workspaceHandle,
+      response.workspaceId,
+      response.workspaceRevision ?? 1,
+    )
     return response.workspaceId
   }
 
@@ -812,9 +827,15 @@ export class EccWorkspaceRuntime {
       protocolEvent.operationId,
     )
     const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
+    const committedRevision = protocolEvent.payload.workspaceRevision
+    if (session && typeof committedRevision === 'number') {
+      this.sessions.updateRevision(session.workspaceHandle, committedRevision)
+    }
     const isTerminal = this.operationTracker.track(protocolEvent)
+    const operationState = protocolEvent.payload.state
     if (
-      protocolEvent.type === 'operation.failed' &&
+      protocolEvent.type === 'operation.changed' &&
+      (operationState === 'failed' || operationState === 'interrupted') &&
       isTerminal &&
       !terminalAlreadyRecorded
     ) {
@@ -835,7 +856,8 @@ export class EccWorkspaceRuntime {
       }
     }
     if (
-      protocolEvent.type === 'operation.completed' &&
+      protocolEvent.type === 'operation.changed' &&
+      operationState === 'succeeded' &&
       isTerminal &&
       !terminalAlreadyRecorded
     ) {
@@ -847,8 +869,10 @@ export class EccWorkspaceRuntime {
     } else if (
       isTerminal &&
       !terminalAlreadyRecorded &&
-      (protocolEvent.type === 'operation.failed' ||
-        protocolEvent.type === 'operation.cancelled')
+      protocolEvent.type === 'operation.changed' &&
+      (operationState === 'failed' ||
+        operationState === 'cancelled' ||
+        operationState === 'interrupted')
     ) {
       this.sidecarLifecycle.retainFailedOperationForDiagnostics()
     }

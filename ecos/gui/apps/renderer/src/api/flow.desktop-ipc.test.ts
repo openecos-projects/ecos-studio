@@ -53,9 +53,18 @@ describe('flow API desktop bridge payloads', () => {
         refreshed: true,
       }
     })
+    const execute = vi.fn(async (request: { command: string }) => {
+      expect(() => structuredClone(request)).not.toThrow()
+      if (request.command === 'workspace.run') return { rerun: true }
+      if (request.command === 'workspace.runStep') {
+        return { state: 'Success', step: StepEnum.PLACEMENT }
+      }
+      return await syncConfig(request)
+    })
 
     setWindow({
       ecosDesktop: {
+        productCommands: { execute },
         runtime: {
           flow: {
             run,
@@ -81,6 +90,7 @@ describe('flow API desktop bridge payloads', () => {
           rerun: false,
           step: StepEnum.PLACEMENT,
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
         },
       }),
     )
@@ -91,6 +101,7 @@ describe('flow API desktop bridge payloads', () => {
           directory: '/work/demo',
           rerun: true,
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
         },
       }),
     )
@@ -120,21 +131,25 @@ describe('flow API desktop bridge payloads', () => {
           config_path: '/work/demo/config/route_ecc.json',
           directory: '/work/demo',
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
         },
       }),
     )
 
-    expect(runStep).toHaveBeenCalledWith({
-      designTool: 'backend',
-      options: {},
-      rerun: false,
-      step: StepEnum.PLACEMENT,
-      workspaceHandle: 'workspace-handle-1',
+    expect(execute).toHaveBeenCalledWith({
+      command: 'workspace.runStep',
+      payload: expect.objectContaining({
+        rerun: false,
+        step: StepEnum.PLACEMENT,
+        workspaceHandle: 'workspace-handle-1',
+      }),
     })
-    expect(run).toHaveBeenCalledWith({
-      designTool: 'backend',
-      rerun: true,
-      workspaceHandle: 'workspace-handle-1',
+    expect(execute).toHaveBeenCalledWith({
+      command: 'workspace.run',
+      payload: expect.objectContaining({
+        rerun: true,
+        workspaceHandle: 'workspace-handle-1',
+      }),
     })
     expect(info).toHaveBeenCalledWith({
       designTool: 'backend',
@@ -146,10 +161,13 @@ describe('flow API desktop bridge payloads', () => {
       designTool: 'backend',
       workspaceHandle: 'workspace-handle-1',
     })
-    expect(syncConfig).toHaveBeenCalledWith({
-      configPath: '/work/demo/config/route_ecc.json',
-      designTool: 'backend',
-      workspaceHandle: 'workspace-handle-1',
+    expect(execute).toHaveBeenCalledWith({
+      command: 'workspace.syncConfig',
+      payload: {
+        configPath: '/work/demo/config/route_ecc.json',
+        expectedWorkspaceRevision: 1,
+        workspaceHandle: 'workspace-handle-1',
+      },
     })
   })
 

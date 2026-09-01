@@ -89,6 +89,14 @@ export function useFlowRunner() {
   const error = ref<string | null>(null)
   const lastRunResult = ref<RunStepResponse | null>(null)
 
+  function currentWorkspaceRevision(): number {
+    const revision = workspaceSession.value.workspaceRevision
+    if (!Number.isInteger(revision)) {
+      throw new Error('The current Workspace revision is unavailable.')
+    }
+    return revision!
+  }
+
   /**
    * 获取当前步骤（从动态路由参数获取）
    */
@@ -256,6 +264,7 @@ export function useFlowRunner() {
       }
 
       const operation = await startStepOperationApi({
+        expectedWorkspaceRevision: currentWorkspaceRevision(),
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
         resetDependents: Boolean(options.resetDependents),
@@ -379,6 +388,7 @@ export function useFlowRunner() {
       }
 
       const operation = await startFlowOperationApi({
+        expectedWorkspaceRevision: currentWorkspaceRevision(),
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
         workspaceHandle: requestScope.workspaceHandle,

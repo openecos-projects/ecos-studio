@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import source from './NewProjectWizard.vue?raw'
+import catalogSource from './WorkspaceCatalogParameters.vue?raw'
+import creationModelSource from '../composables/useWorkspaceCreationModel.ts?raw'
 
 function expectSourceCall(name: string, firstArgument: string) {
   expect(source).toMatch(new RegExp(`${name}\\(\\s*${firstArgument}`))
 }
 
 describe('NewProjectWizard RTL browsing', () => {
+  it('renders parameters from the ECC Workspace Creation Model', () => {
+    expect(source).toContain('useWorkspaceCreationModel')
+    expect(source).toContain('extraCreationParameters')
+    expect(catalogSource).toContain("parameter.state === 'inapplicable'")
+    expect(creationModelSource).toContain('workspaceCreationModel.get')
+    expect(creationModelSource).toContain('explicitValues')
+  })
   it('keeps folder browsing available while the file action uses the RTL single-file picker', () => {
     expect(source).toContain('Select design folder...')
     expect(source).toContain('browseRtlFolder')

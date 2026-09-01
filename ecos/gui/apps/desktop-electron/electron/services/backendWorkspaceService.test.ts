@@ -1,4 +1,4 @@
-import type { WorkspaceResourceIndex } from '@ecos-studio/shared'
+import type { EccEngineeringSnapshot, WorkspaceResourceIndex } from '@ecos-studio/shared'
 import { describe, expect, it, vi } from 'vitest'
 import { BackendWorkspaceService } from './backendWorkspaceService'
 import { runWithWindowScope } from './windowScopeContext'
@@ -34,6 +34,35 @@ function resourceIndex(): WorkspaceResourceIndex {
     status: 'available',
     topModule: 'gcd_top',
   }
+}
+
+function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
+  return {
+    artifacts: [],
+    checklist: { checklist: [] },
+    flow: {
+      steps: index.flow.steps.map((step) => ({
+        info: step.info,
+        name: step.name,
+        'peak memory (mb)':
+          step.peakMemoryMb ?? Number(step.info['peak memory (mb)'] ?? 0),
+        runtime: step.runtime,
+        state: step.state,
+        tool: step.tool,
+      })),
+    },
+    metrics: [],
+    parameters: index.parameters ?? {},
+    qorAssessment: { score: { gate: 'pass', threshold: 60, value: 73.5 } },
+    schemaVersion: 1,
+    signoffAssessment: { groups: [], risks: [], status: 'ready' },
+    workspaceId: 'ecc-workspace-a',
+    workspaceRevision: 1,
+  }
+}
+
+function snapshotProvider(index = resourceIndex()) {
+  return { getByDirectory: vi.fn().mockResolvedValue(engineeringSnapshot(index)) }
 }
 
 describe('BackendWorkspaceService', () => {
@@ -81,6 +110,7 @@ describe('BackendWorkspaceService', () => {
       },
     }
     const service = new BackendWorkspaceService({
+      engineeringSnapshotProvider: snapshotProvider(),
       projectManagementReadService,
       workspaceResourceService: { getIndex },
     })
@@ -143,6 +173,7 @@ describe('BackendWorkspaceService', () => {
       },
     ]
     const service = new BackendWorkspaceService({
+      engineeringSnapshotProvider: snapshotProvider(index),
       workspaceResourceService: { getIndex: vi.fn().mockResolvedValue(index) },
     })
 
@@ -192,6 +223,7 @@ describe('BackendWorkspaceService', () => {
       },
     ]
     const service = new BackendWorkspaceService({
+      engineeringSnapshotProvider: snapshotProvider(index),
       workspaceResourceService: { getIndex: vi.fn().mockResolvedValue(index) },
     })
 
@@ -205,8 +237,12 @@ describe('BackendWorkspaceService', () => {
   it('reports a damaged Flow section instead of a ready empty flow', async () => {
     const index = resourceIndex()
     index.flow.steps = []
-    index.messages = [`Failed to parse workspace JSON: ${index.home.flowJson.path}`]
+    const snapshot = engineeringSnapshot(index)
+    snapshot.flow = {}
     const service = new BackendWorkspaceService({
+      engineeringSnapshotProvider: {
+        getByDirectory: vi.fn().mockResolvedValue(snapshot),
+      },
       workspaceResourceService: { getIndex: vi.fn().mockResolvedValue(index) },
     })
 
@@ -255,12 +291,14 @@ describe('BackendWorkspaceService', () => {
       summary: 'stale result',
       title: id,
     })
+    const snapshot = engineeringSnapshot(index)
+    snapshot.checklist = {
+      checklist: [finding('flow-ready', 'flow'), finding('layout', 'artifact')],
+    }
     const service = new BackendWorkspaceService({
-      readWorkspaceTextFile: vi.fn().mockResolvedValue(
-        JSON.stringify({
-          checklist: [finding('flow-ready', 'flow'), finding('layout', 'artifact')],
-        }),
-      ),
+      engineeringSnapshotProvider: {
+        getByDirectory: vi.fn().mockResolvedValue(snapshot),
+      },
       workspaceResourceService: { getIndex: vi.fn().mockResolvedValue(index) },
     })
 
@@ -301,6 +339,7 @@ describe('BackendWorkspaceService', () => {
       )
       .mockResolvedValue(resourceIndex())
     const service = new BackendWorkspaceService({
+      engineeringSnapshotProvider: snapshotProvider(),
       workspaceResourceService: { getIndex },
     })
 
@@ -321,6 +360,7 @@ describe('BackendWorkspaceService', () => {
 
   it('invalidates before notifying subscribers with the next generation', async () => {
     const service = new BackendWorkspaceService({
+      engineeringSnapshotProvider: snapshotProvider(),
       workspaceResourceService: {
         getIndex: vi.fn().mockResolvedValue(resourceIndex()),
       },

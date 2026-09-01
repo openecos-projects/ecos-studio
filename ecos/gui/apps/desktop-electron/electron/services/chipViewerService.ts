@@ -132,6 +132,7 @@ interface LayoutEditContext {
   revision: number
   step: string
   workspaceHandle: string
+  workspaceRevision: number
 }
 
 interface NativeGeometryEditCommand {
@@ -905,6 +906,9 @@ export class ChipViewerService {
     if (!editSession.geometryManifestPath) {
       throw new Error('ECC layout edit session did not return a geometry manifest')
     }
+    if (!Number.isInteger(workspace.workspaceRevision)) {
+      throw new Error('ECC layout edit session did not return a Workspace revision')
+    }
     return {
       bridgeId: `bridge-${this.nextEditBridgeId++}`,
       dirty: editSession.dirty,
@@ -913,6 +917,7 @@ export class ChipViewerService {
       revision: editSession.revision,
       step,
       workspaceHandle: workspace.workspaceHandle,
+      workspaceRevision: workspace.workspaceRevision!,
     }
   }
 
@@ -1107,6 +1112,7 @@ export class ChipViewerService {
           editSessionId: layoutEdit.editSessionId,
           expectedRevision: layoutEdit.revision,
           workspaceHandle: layoutEdit.workspaceHandle,
+          expectedWorkspaceRevision: layoutEdit.workspaceRevision,
         })
         if (!saved.saved || saved.dirty) {
           throw new Error('ECC did not confirm that dirty layout edits were published')
@@ -1118,6 +1124,9 @@ export class ChipViewerService {
         })
         await this.verifyPublishedLayoutArtifacts(saved)
         layoutEdit.revision = saved.revision
+        if (typeof saved.workspaceRevision === 'number') {
+          layoutEdit.workspaceRevision = saved.workspaceRevision
+        }
         geometryManifestPath = saved.artifacts.geometryManifestPath
         layoutEdit.geometryManifestPath = geometryManifestPath
         message = 'layout edit saved; verified DEF, IDB, GDS, and geometry manifest'

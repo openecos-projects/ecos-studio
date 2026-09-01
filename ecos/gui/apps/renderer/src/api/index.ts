@@ -8,6 +8,7 @@ export {
   closeWorkspaceApi,
   loadWorkspaceApi,
   createWorkspaceApi,
+  updateWorkspaceApi,
   type ProjectInfo,
   type WorkspaceResponse,
   type LoadWorkspaceRequest,

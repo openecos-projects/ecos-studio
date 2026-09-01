@@ -4,6 +4,7 @@ export interface WorkspaceSessionRecord {
   directory: string
   eccWorkspaceId: string | null
   workspaceHandle: string
+  workspaceRevision: number
 }
 
 export class WorkspaceSessionNotFoundError extends Error {
@@ -38,11 +39,16 @@ export class WorkspaceSessionRegistry {
     return this.sessions.size
   }
 
-  activate(directory: string, eccWorkspaceId: string | null): WorkspaceSessionRecord {
+  activate(
+    directory: string,
+    eccWorkspaceId: string | null,
+    workspaceRevision = 0,
+  ): WorkspaceSessionRecord {
     const session = {
       directory,
       eccWorkspaceId,
       workspaceHandle: this.idProvider(),
+      workspaceRevision,
     }
     this.sessions.set(session.workspaceHandle, session)
     this.activeHandle = session.workspaceHandle
@@ -54,6 +60,7 @@ export class WorkspaceSessionRegistry {
       this.sessions.set(workspaceHandle, {
         ...session,
         eccWorkspaceId: null,
+        workspaceRevision: 0,
       })
     }
   }
@@ -65,14 +72,24 @@ export class WorkspaceSessionRegistry {
     this.activeHandle = Array.from(this.sessions.keys()).at(-1) ?? null
   }
 
-  rebind(workspaceHandle: string, eccWorkspaceId: string): WorkspaceSessionRecord {
+  rebind(
+    workspaceHandle: string,
+    eccWorkspaceId: string,
+    workspaceRevision = 0,
+  ): WorkspaceSessionRecord {
     const session = this.require(workspaceHandle)
     const rebound = {
       ...session,
       eccWorkspaceId,
+      workspaceRevision,
     }
     this.sessions.set(workspaceHandle, rebound)
     return { ...rebound }
+  }
+
+  updateRevision(workspaceHandle: string, workspaceRevision: number): void {
+    const session = this.require(workspaceHandle)
+    this.sessions.set(workspaceHandle, { ...session, workspaceRevision })
   }
 
   hasOtherEccWorkspaceReference(

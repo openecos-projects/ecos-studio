@@ -1,6 +1,7 @@
 import type { ProjectManifest } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
-import { analyzeWorkspaceQor } from './workspaceQorAnalysis'
+import { buildProjectQorTrendSummary } from './qorAnalysis'
+import { analyzeWorkspaceQor, projectQorInputForWorkspace } from './workspaceQorAnalysis'
 
 function metricText(value: number): string {
   return JSON.stringify({
@@ -38,6 +39,13 @@ function metricText(value: number): string {
   })
 }
 
+const engineeringSnapshot = JSON.stringify({
+  qorAssessment: {
+    score: { gate: 'pass', threshold: 60, value: 73.5 },
+  },
+  signoffAssessment: { status: 'ready' },
+})
+
 describe('analyzeWorkspaceQor', () => {
   it('builds current QoR and the selected baseline comparison', () => {
     const workspace = (id: string, name: string) => ({
@@ -64,12 +72,21 @@ describe('analyzeWorkspaceQor', () => {
     } as ProjectManifest
 
     const result = analyzeWorkspaceQor(manifest, 'current', {
-      baseline: { 'route_ecc/analysis/qor_metrics.json': metricText(5200) },
-      current: { 'route_ecc/analysis/qor_metrics.json': metricText(5000) },
+      baseline: {
+        'home/engineering-snapshot.json': engineeringSnapshot,
+        'route_ecc/analysis/qor_metrics.json': metricText(5200),
+      },
+      current: {
+        'home/engineering-snapshot.json': engineeringSnapshot,
+        'route_ecc/analysis/qor_metrics.json': metricText(5000),
+      },
     })
 
     expect(result.qor).toMatchObject({
-      data: { metrics: [{ id: 'route_wirelength', value: 5000 }] },
+      data: {
+        metrics: [{ id: 'route_wirelength', value: 5000 }],
+        score: { value: 73.5 },
+      },
       status: 'ready',
     })
     expect(result.baselineComparison).toMatchObject({
@@ -87,5 +104,13 @@ describe('analyzeWorkspaceQor', () => {
       },
       status: 'ready',
     })
+
+    const projectInput = projectQorInputForWorkspace(manifest, 'current', {
+      'home/engineering-snapshot.json': engineeringSnapshot,
+      'route_ecc/analysis/qor_metrics.json': metricText(5000),
+    })
+    expect(buildProjectQorTrendSummary([projectInput!]).workspaces[0]?.overallScore).toBe(
+      result.qor.status === 'ready' ? result.qor.data.score.value : null,
+    )
   })
 })

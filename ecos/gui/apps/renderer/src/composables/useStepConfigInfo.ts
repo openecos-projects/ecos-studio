@@ -462,10 +462,18 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
                 : {}),
               directory: projectPath,
               workspaceHandle: workspaceLifecycle.session.value.workspaceId,
+              workspaceRevision: workspaceLifecycle.session.value.workspaceRevision,
             },
           }),
         )
         if (!canApply()) return false
+
+        if (typeof syncResult?.data?.workspaceRevision === 'number') {
+          workspaceLifecycle.updateWorkspaceRevision(
+            syncResult.data.workspaceRevision,
+            sessionId,
+          )
+        }
 
         workspaceLifecycle.invalidate('step-config', {
           reason: 'step-config-save',

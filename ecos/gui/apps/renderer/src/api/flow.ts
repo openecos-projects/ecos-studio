@@ -12,6 +12,7 @@ import type {
   EccRuntimeOperation,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
+  EccWorkspaceSyncConfigResult,
   DesignTool,
 } from '@ecos-studio/shared'
 
@@ -25,6 +26,14 @@ function workspaceHandleFromData(data: Record<string, unknown>): string {
 
 function designToolFromData(data: Record<string, unknown>): DesignTool {
   return data.designTool === 'frontend' ? 'frontend' : 'backend'
+}
+
+function workspaceRevisionFromData(data: Record<string, unknown>): number {
+  const revision = data.expectedWorkspaceRevision ?? data.workspaceRevision
+  if (!Number.isInteger(revision) || Number(revision) < 0) {
+    throw new Error('Workspace revision is required for runtime mutations.')
+  }
+  return Number(revision)
 }
 
 function success<T>(cmd: CMDEnum, data: T, message: string[] = []): ResponseData<T> {
@@ -71,6 +80,7 @@ export interface RTL2GDSRequest {
   rerun: boolean
   workspaceHandle?: string
   workspace_handle?: string
+  workspaceRevision?: number
 }
 
 export interface RTL2GDSResponse {
@@ -79,15 +89,27 @@ export interface RTL2GDSResponse {
 
 export function rtl2gdsApi(request: RequestData<RTL2GDSRequest>) {
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
-  return getDesktopApi()
-    .runtime.flow.run({
-      designTool: designToolFromData(data),
-      rerun: Boolean(data.rerun),
-      workspaceHandle: workspaceHandleFromData(data),
-    })
-    .then((result) => success(CMDEnum.rtl2gds, result as RTL2GDSResponse)) as Promise<
-    ResponseData<RTL2GDSResponse>
-  >
+  const runtimeRequest = {
+    rerun: Boolean(data.rerun),
+    workspaceHandle: workspaceHandleFromData(data),
+  }
+  const result =
+    designToolFromData(data) === 'backend'
+      ? getDesktopApi().productCommands.execute({
+          command: 'workspace.run',
+          payload: {
+            ...runtimeRequest,
+            expectedWorkspaceRevision: workspaceRevisionFromData(data),
+            idempotencyKey: crypto.randomUUID(),
+          },
+        })
+      : getDesktopApi().runtime.flow.run({
+          ...runtimeRequest,
+          designTool: 'frontend',
+        })
+  return result.then((result) =>
+    success(CMDEnum.rtl2gds, result as RTL2GDSResponse),
+  ) as Promise<ResponseData<RTL2GDSResponse>>
 }
 
 export interface RunStepRequest {
@@ -97,6 +119,7 @@ export interface RunStepRequest {
   rerun: boolean
   workspaceHandle?: string
   workspace_handle?: string
+  workspaceRevision?: number
   sim_test_suite?: string
   sim_cpu_test_mode?: 'all' | 'selected'
   sim_cpu_test_cases?: string[]
@@ -134,29 +157,43 @@ export function runStepApi(request: RequestData<RunStepRequest>) {
       .filter((key) => data[key] !== undefined)
       .map((key) => [key, data[key]]),
   )
-  return getDesktopApi()
-    .runtime.flow.runStep({
-      designTool: designToolFromData(data),
-      options,
-      rerun: Boolean(data.rerun),
-      step: String(data.step ?? ''),
-      workspaceHandle: workspaceHandleFromData(data),
-    })
-    .then((result) => success(CMDEnum.run_step, result as RunStepResponse)) as Promise<
-    ResponseData<RunStepResponse>
-  >
+  const runtimeRequest = {
+    rerun: Boolean(data.rerun),
+    step: String(data.step ?? ''),
+    workspaceHandle: workspaceHandleFromData(data),
+  }
+  const result =
+    designToolFromData(data) === 'backend'
+      ? getDesktopApi().productCommands.execute({
+          command: 'workspace.runStep',
+          payload: {
+            ...runtimeRequest,
+            expectedWorkspaceRevision: workspaceRevisionFromData(data),
+            idempotencyKey: crypto.randomUUID(),
+          },
+        })
+      : getDesktopApi().runtime.flow.runStep({
+          ...runtimeRequest,
+          designTool: 'frontend',
+          options,
+        })
+  return result.then((result) =>
+    success(CMDEnum.run_step, result as RunStepResponse),
+  ) as Promise<ResponseData<RunStepResponse>>
 }
 
 export function startFlowOperationApi(request: EccRuntimeStartFlowRequest) {
-  const runtime = getDesktopApi().ecc.runtime
-  if (!runtime) throw new Error('ECC runtime operation API is unavailable.')
-  return runtime.startFlow(request)
+  return getDesktopApi().productCommands.execute({
+    command: 'workspace.run',
+    payload: request,
+  }) as Promise<import('@ecos-studio/shared').EccRuntimeOperation>
 }
 
 export function startStepOperationApi(request: EccRuntimeStartStepRequest) {
-  const runtime = getDesktopApi().ecc.runtime
-  if (!runtime) throw new Error('ECC runtime operation API is unavailable.')
-  return runtime.startStep(request)
+  return getDesktopApi().productCommands.execute({
+    command: 'workspace.runStep',
+    payload: request,
+  }) as Promise<import('@ecos-studio/shared').EccRuntimeOperation>
 }
 
 export type { EccRuntimeOperation }
@@ -191,6 +228,7 @@ export interface SyncConfigRequest {
   config_path: string
   workspaceHandle?: string
   workspace_handle?: string
+  workspaceRevision?: number
 }
 
 export interface SyncConfigResponse {
@@ -198,25 +236,39 @@ export interface SyncConfigResponse {
   config_path: string
   parameters_changed: boolean
   refreshed: boolean
+  workspaceRevision: number
 }
 
 export function syncConfigApi(request: RequestData<SyncConfigRequest>) {
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
-  return getDesktopApi()
-    .runtime.workspace.syncConfig({
-      configPath: String(data.config_path ?? data.configPath ?? ''),
-      designTool: designToolFromData(data),
-      workspaceHandle: workspaceHandleFromData(data),
-    })
-    .then(
-      (result) =>
-        success(CMDEnum.sync_config, {
-          config_path: result.configPath,
-          directory: result.directory,
-          parameters_changed: result.parametersChanged,
-          refreshed: result.refreshed,
-        }) as ResponseData<SyncConfigResponse>,
-    )
+  const runtimeRequest = {
+    configPath: String(data.config_path ?? data.configPath ?? ''),
+    workspaceHandle: workspaceHandleFromData(data),
+  }
+  const result = (
+    designToolFromData(data) === 'backend'
+      ? getDesktopApi().productCommands.execute({
+          command: 'workspace.syncConfig',
+          payload: {
+            ...runtimeRequest,
+            expectedWorkspaceRevision: workspaceRevisionFromData(data),
+          },
+        })
+      : getDesktopApi().runtime.workspace.syncConfig({
+          ...runtimeRequest,
+          designTool: 'frontend',
+        })
+  ) as Promise<EccWorkspaceSyncConfigResult>
+  return result.then(
+    (result) =>
+      success(CMDEnum.sync_config, {
+        config_path: result.configPath,
+        directory: result.directory,
+        parameters_changed: result.parametersChanged,
+        refreshed: result.refreshed,
+        workspaceRevision: result.workspaceRevision,
+      }) as ResponseData<SyncConfigResponse>,
+  )
 }
 
 export interface ResetFlowRequest {
@@ -224,22 +276,33 @@ export interface ResetFlowRequest {
   directory: string
   workspaceHandle?: string
   workspace_handle?: string
+  workspaceRevision?: number
 }
 
 export interface ResetFlowResponse {
   directory: string
+  workspaceRevision?: number
 }
 
 export function resetFlowApi(request: RequestData<ResetFlowRequest>) {
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
-  return getDesktopApi()
-    .runtime.workspace.resetFlow({
-      designTool: designToolFromData(data),
-      workspaceHandle: workspaceHandleFromData(data),
-    })
-    .then((result) =>
-      success(CMDEnum.reset_flow, result as ResetFlowResponse),
-    ) as Promise<ResponseData<ResetFlowResponse>>
+  const runtimeRequest = { workspaceHandle: workspaceHandleFromData(data) }
+  const result =
+    designToolFromData(data) === 'backend'
+      ? getDesktopApi().productCommands.execute({
+          command: 'workspace.reset',
+          payload: {
+            ...runtimeRequest,
+            expectedWorkspaceRevision: workspaceRevisionFromData(data),
+          },
+        })
+      : getDesktopApi().runtime.workspace.resetFlow({
+          ...runtimeRequest,
+          designTool: 'frontend',
+        })
+  return result.then((result) =>
+    success(CMDEnum.reset_flow, result as ResetFlowResponse),
+  ) as Promise<ResponseData<ResetFlowResponse>>
 }
 
 // ============ Home Page API ============

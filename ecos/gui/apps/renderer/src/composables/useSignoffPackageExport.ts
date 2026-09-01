@@ -289,17 +289,20 @@ export function useSignoffPackageExport({
         }
       })
 
-      const result = await api.ecc.workspace.exportSignoff({
-        additionalFiles,
-        outputPath,
-        workspaceHandle: workspace.workspaceHandle,
+      const result = await api.productCommands.execute({
+        command: 'workspace.exportSignoff',
+        payload: {
+          additionalFiles,
+          outputPath,
+          workspaceHandle: workspace.workspaceHandle,
+        },
       })
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
 
       showToast({
         severity: 'success',
         summary: 'Signoff Package Exported',
-        detail: `Saved package and design summaries to ${result.outputPath}`,
+        detail: `Saved package and design summaries to ${'outputPath' in result ? result.outputPath : outputPath}`,
       })
     } catch (error) {
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return

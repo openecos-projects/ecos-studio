@@ -1,6 +1,7 @@
 import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
 
 export interface EccRpcHelloResult {
+  adapterVersion?: number
   capabilities: string[]
   eccVersion: string
   version: number
@@ -27,15 +28,25 @@ export interface EccRpcShutdownResult {
 import type { PdkRequirement } from './pdkInventory.ts'
 
 export interface EccWorkspaceCreateRequest {
+  commandId?: string
   directory: string
+  designInputMode?: 'rtl' | 'post_synthesis'
   filelist?: string
+  mpc?: Record<string, unknown> | null
   flowConfig?: Record<string, unknown>
   originDef?: string
   originVerilog?: string
   parameters?: Record<string, unknown>
   pdk?: string
+  pdkConfig?: {
+    cell_lef?: string[]
+    liberty?: string[]
+    tech_lef?: string[]
+  }
+  pdkConfigMode?: 'default' | 'manual'
   pdkJson?: unknown
   pdkRoot?: string
+  pdkVersion?: string | null
   pdkInstallationId?: string
   pdkRequirement?: PdkRequirement
   projectId?: string
@@ -46,10 +57,43 @@ export interface EccWorkspaceCreateRequest {
 
 export interface EccWorkspaceOpenRequest {
   directory: string
+  workspaceBindings?: Record<string, unknown>
+}
+
+export interface EccWorkspaceSpecValidationRequest {
+  workspaceSpec: Record<string, unknown>
+  workspaceBindings: Record<string, unknown>
+}
+
+export interface EccWorkspaceSpecValidationResult {
+  issues: Array<{
+    code: string
+    details: Record<string, unknown>
+    path: string
+    severity: 'error' | 'warning'
+  }>
+  resolvedWorkspaceSpec?: Record<string, unknown>
+}
+
+export interface EccWorkspaceUpdateRequest
+  extends EccWorkspaceMutationRequest, EccWorkspaceSpecValidationRequest {
+  commandId: string
+}
+
+export interface EccWorkspaceUpdateResult {
+  directory: string
+  executionReadiness?: { ready: boolean; code?: string }
+  workspaceId: string
+  workspaceRevision: number
 }
 
 export interface EccWorkspaceHandleRequest {
   workspaceHandle: string
+  expectedWorkspaceRevision?: number
+}
+
+export interface EccWorkspaceMutationRequest extends EccWorkspaceHandleRequest {
+  expectedWorkspaceRevision: number
 }
 
 export interface EccWorkspaceInfoRequest extends EccWorkspaceHandleRequest {
@@ -118,7 +162,9 @@ export interface EccSignoffReviewRisk {
 
 export interface EccWorkspaceOpenResult {
   directory: string
+  workspaceId?: string
   workspaceHandle: string
+  workspaceRevision?: number
 }
 
 export type EccWorkspaceCreateResult = EccWorkspaceOpenResult
@@ -147,10 +193,12 @@ export interface EccWorkspaceSyncConfigResult {
   directory: string
   parametersChanged: boolean
   refreshed: boolean
+  workspaceRevision?: number
 }
 
 export interface EccWorkspaceResetFlowResult {
   directory: string
+  workspaceRevision?: number
 }
 
 export interface EccWorkspaceExportSignoffResult {
@@ -193,7 +241,7 @@ export interface EccLayoutEditApplyResult {
   revision: number
 }
 
-export interface EccLayoutEditSaveRequest extends EccWorkspaceHandleRequest {
+export interface EccLayoutEditSaveRequest extends EccWorkspaceMutationRequest {
   editSessionId: string
   expectedRevision: number
 }
@@ -210,6 +258,7 @@ export interface EccLayoutEditSaveResult {
   geometryRevision: number
   revision: number
   saved: boolean
+  workspaceRevision?: number
 }
 
 export interface EccLayoutEditDiscardRequest extends EccWorkspaceHandleRequest {
@@ -243,17 +292,13 @@ export type EccRuntimeOperationKind = 'flow' | 'step'
 export type EccRuntimeOperationState =
   | 'queued'
   | 'running'
-  | 'waiting_for_gui_sync'
-  | 'paused_for_gui_recovery'
-  | 'gui_sync_degraded'
   | 'succeeded'
   | 'failed'
   | 'cancelled'
+  | 'interrupted'
 export type EccRuntimeInterruptibility = 'safe' | 'deferred' | 'forbidden'
 
 export interface EccRuntimeOperation {
-  awaitingEventId: string | null
-  awaitingStepCommitId?: string | null
   cancelRequested?: boolean
   createdAt: number
   currentStep: string
@@ -271,21 +316,13 @@ export interface EccRuntimeOperation {
   step: string
   safeToStop?: boolean
   workspaceRevision?: number
-  renderSyncState?:
-    | 'idle'
-    | 'waiting_for_gui_sync'
-    | 'paused_for_gui_recovery'
-    | 'gui_sync_degraded'
-    | 'timed_out'
-  renderRetryCount?: number
-  lastRenderAckAt?: number | null
   shutdownBarrier?: boolean
   updatedAt: number
   workspaceId: string
   deduplicated?: boolean
 }
 
-export interface EccRuntimeStartFlowRequest extends EccWorkspaceHandleRequest {
+export interface EccRuntimeStartFlowRequest extends EccWorkspaceMutationRequest {
   idempotencyKey: string
   rerun?: boolean
 }
@@ -298,12 +335,6 @@ export interface EccRuntimeStartStepRequest extends EccRuntimeStartFlowRequest {
 
 export interface EccRuntimeOperationRequest extends EccWorkspaceHandleRequest {
   operationId: string
-}
-
-export interface EccRuntimeStepRenderedAckRequest extends EccRuntimeOperationRequest {
-  eventId: string
-  stepCommitId?: string
-  workspaceRevision?: number
 }
 
 export interface EccRuntimeStepSnapshot {
@@ -324,6 +355,47 @@ export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
   runtimeInstanceId?: string
 }
 
+export interface EccArtifactRef {
+  artifactId: string
+  availability: 'available' | 'missing' | 'stale'
+  kind: string
+  name: string
+  sha256?: string
+  sizeBytes?: number
+  stepId?: string
+}
+
+export interface EccEngineeringSnapshot {
+  artifacts: EccArtifactRef[]
+  checklist: Record<string, unknown>
+  flow: Record<string, unknown>
+  metrics: unknown[]
+  parameters: Record<string, unknown>
+  qorAssessment: Record<string, unknown>
+  schemaVersion: 1
+  signoffAssessment: EccWorkspaceInspectSignoffResult
+  workspaceId: string
+  workspaceRevision: number
+}
+
+export interface EccArtifactReadRequest extends EccWorkspaceHandleRequest {
+  artifactId: string
+  length: number
+  offset: number
+}
+
+export interface EccArtifactChunk {
+  data: Uint8Array
+  eof: boolean
+  nextOffset: number
+  sizeBytes: number
+}
+
+export interface EccArtifactOpenRequest extends EccWorkspaceHandleRequest {
+  artifactId: string
+  viewer: 'system'
+}
+
 export interface EccRuntimeProtocolPayload {
   eventId: string
   kind?: EccRuntimeOperationKind
@@ -335,19 +407,11 @@ export interface EccRuntimeProtocolPayload {
   sequence: number
   timestamp: number
   type:
-    | 'operation.queued'
-    | 'operation.started'
-    | 'operation.completed'
-    | 'operation.failed'
-    | 'operation.cancelled'
-    | 'operation.cancel_requested'
-    | 'operation.gui_sync_paused'
-    | 'operation.gui_sync_degraded'
-    | 'operation.rerun_prepared'
-    | 'step.started'
-    | 'step.log'
-    | 'step.completed'
-    | 'subflow.stage'
+    | 'operation.changed'
+    | 'execution.progress'
+    | 'workspace.committed'
+    | 'artifact.changed'
+  workspaceRevision?: number
   workspaceId: string
   rerun?: boolean
 }
@@ -459,37 +523,24 @@ export interface EccRuntimeApi {
   events: {
     onEvent(listener: (event: EccRuntimeEvent) => void): DesktopEventUnsubscribe
   }
-  flow: {
-    run(request: EccFlowRunRequest): Promise<EccFlowRunResult>
-    runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult>
-  }
   rpc: {
     hello(): Promise<EccRpcHelloResult>
     ping(): Promise<EccRpcPingResult>
     shutdown(): Promise<EccRpcShutdownResult>
   }
   runtime?: {
-    acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
-      accepted: boolean
-      duplicate: boolean
-      eventId: string
-      operationId: string
-    }>
-    cancel(
-      request: EccRuntimeOperationRequest,
-    ): Promise<{ accepted: boolean; operationId: string; state: string }>
+    engineeringSnapshot(
+      request: EccWorkspaceHandleRequest,
+    ): Promise<EccEngineeringSnapshot>
+    openArtifact(request: EccArtifactOpenRequest): Promise<{ opened: boolean }>
+    readArtifactChunk(request: EccArtifactReadRequest): Promise<EccArtifactChunk>
     snapshot(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRuntimeSnapshot>
-    startFlow(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
-    startStep(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
     status(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
   }
   workspace: {
     close(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult>
-    create(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult>
-    exportSignoff(
-      request: EccWorkspaceExportSignoffRequest,
-    ): Promise<EccWorkspaceExportSignoffResult>
+    describeSpec(): Promise<Record<string, unknown>>
     inspectSignoff(
       request: EccWorkspaceHandleRequest,
     ): Promise<EccWorkspaceInspectSignoffResult>
@@ -499,9 +550,8 @@ export interface EccRuntimeApi {
     refreshConfig(
       request: EccWorkspaceHandleRequest,
     ): Promise<EccWorkspaceRefreshConfigResult>
-    resetFlow(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceResetFlowResult>
-    syncConfig(
-      request: EccWorkspaceSyncConfigRequest,
-    ): Promise<EccWorkspaceSyncConfigResult>
+    validateSpec(
+      request: EccWorkspaceSpecValidationRequest,
+    ): Promise<EccWorkspaceSpecValidationResult>
   }
 }

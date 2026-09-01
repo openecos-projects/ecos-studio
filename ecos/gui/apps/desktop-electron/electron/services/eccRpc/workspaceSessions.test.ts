@@ -17,6 +17,7 @@ describe('WorkspaceSessionRegistry', () => {
       directory: '/work/demo',
       eccWorkspaceId: 'workspace-1',
       workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 0,
     })
   })
 
@@ -45,6 +46,7 @@ describe('WorkspaceSessionRegistry', () => {
       directory: '/work/demo',
       eccWorkspaceId: 'workspace-2',
       workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 0,
     })
   })
 

@@ -49,6 +49,43 @@ type ProjectStepStatus = NonNullable<
   ProjectQorWorkspaceInput['stepStatuses'][ProjectManifestFlowStep]
 >
 
+function authoritativeAssessment(
+  text: string | null | undefined,
+): ProjectQorWorkspaceInput['authoritativeAssessment'] {
+  if (!text) return null
+  try {
+    const snapshot = JSON.parse(text) as Record<string, unknown>
+    const qor = snapshot.qorAssessment as Record<string, unknown> | undefined
+    const score = qor?.score as Record<string, unknown> | undefined
+    const signoff = snapshot.signoffAssessment as Record<string, unknown> | undefined
+    const gate = score?.gate
+    const value = score?.value
+    const threshold = score?.threshold
+    const signoffStatus = signoff?.status
+    if (
+      !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(gate)) ||
+      !(value === null || (typeof value === 'number' && Number.isFinite(value))) ||
+      typeof threshold !== 'number' ||
+      !Number.isFinite(threshold) ||
+      !['ready', 'attention', 'blocked'].includes(String(signoffStatus))
+    ) {
+      return null
+    }
+    return {
+      gateStatus: gate as NonNullable<
+        ProjectQorWorkspaceInput['authoritativeAssessment']
+      >['gateStatus'],
+      score: value as number | null,
+      scoreThreshold: threshold,
+      signoffStatus: signoffStatus as NonNullable<
+        ProjectQorWorkspaceInput['authoritativeAssessment']
+      >['signoffStatus'],
+    }
+  } catch {
+    return null
+  }
+}
+
 function flowStep(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
@@ -131,6 +168,9 @@ export function projectQorInputForWorkspace(
     createdAt: workspace.created_at,
     staTimingIssuesText: texts[projectManagementStaTimingIssuesPath] ?? null,
     status: workspaceStatus(workspace.status, statuses),
+    authoritativeAssessment: authoritativeAssessment(
+      texts['home/engineering-snapshot.json'],
+    ),
     stepHotspotTexts: Object.fromEntries(
       projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
         spec.step,
@@ -156,14 +196,17 @@ export function projectQorInputForWorkspace(
   }
 }
 
-function qorScore(record: {
-  overallScore: number | null
-  gateStatus: QorScore['gate']
-}): QorScore {
+function qorScore(
+  record: {
+    overallScore: number | null
+    gateStatus: QorScore['gate']
+  },
+  threshold = QOR_SCORE_THRESHOLD,
+): QorScore {
   return {
     value: record.overallScore,
     gate: record.gateStatus,
-    threshold: QOR_SCORE_THRESHOLD,
+    threshold,
   }
 }
 
@@ -184,7 +227,10 @@ function workspaceQor(
 ): WorkspaceQorSummary {
   const metrics = (record.comparisonRecords ?? record.records).map(metricValue)
   return {
-    score: qorScore(record),
+    score: qorScore(
+      record,
+      input.authoritativeAssessment?.scoreThreshold ?? QOR_SCORE_THRESHOLD,
+    ),
     metrics,
     steps: FLOW_STEPS.map((step, order) => {
       const stepMetrics = metrics.filter((metric) => metric.stepId === step)

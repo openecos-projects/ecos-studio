@@ -22,17 +22,23 @@ import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
   startFlowOperation(request: {
+    expectedWorkspaceRevision: number
     idempotencyKey: string
     rerun: boolean
     workspaceHandle: string
   }): Promise<{ operationId: string }>
   startStepOperation(request: {
+    expectedWorkspaceRevision: number
     idempotencyKey: string
     rerun: boolean
     step: string
     workspaceHandle: string
   }): Promise<{ operationId: string }>
-  syncConfig(request: { configPath: string; workspaceHandle: string }): Promise<unknown>
+  syncConfig(request: {
+    configPath: string
+    expectedWorkspaceRevision: number
+    workspaceHandle: string
+  }): Promise<unknown>
   waitForOperation(request: {
     operationId: string
     workspaceHandle: string
@@ -208,22 +214,37 @@ export async function executeWorkspaceRerun(
   contract: DesktopAgentWorkspaceRerunContract,
   runtime: WorkspaceRerunRuntime,
   workspaceHandle: string,
+  initialWorkspaceRevision: number | undefined,
 ): Promise<void> {
   const writes = contract.writes ?? []
   if (!hasValidParameterWrites(contract.parameter_patch, writes)) {
     throw new Error('Workspace rerun contract is invalid.')
   }
+  if (!Number.isInteger(initialWorkspaceRevision)) {
+    throw new Error('Workspace rerun revision is unavailable.')
+  }
+  let workspaceRevision = initialWorkspaceRevision!
   for (const file of new Set(
     writes.filter((write) => write.surface === 'step_config').map((write) => write.file),
   )) {
-    await runtime.syncConfig({
+    const synced = await runtime.syncConfig({
       configPath: join(contract.target_workspace, file),
+      expectedWorkspaceRevision: workspaceRevision,
       workspaceHandle,
     })
+    if (
+      typeof synced === 'object' &&
+      synced !== null &&
+      'workspaceRevision' in synced &&
+      typeof synced.workspaceRevision === 'number'
+    ) {
+      workspaceRevision = synced.workspaceRevision
+    }
   }
   if (writes.length > 0) await runtime.refreshConfig({ workspaceHandle })
   if (contract.execution_scope === 'full_flow') {
     const operation = await runtime.startFlowOperation({
+      expectedWorkspaceRevision: workspaceRevision,
       idempotencyKey: randomUUID(),
       rerun: false,
       workspaceHandle,
@@ -240,6 +261,7 @@ export async function executeWorkspaceRerun(
 
   const step = contract.target_step
   const operation = await runtime.startStepOperation({
+    expectedWorkspaceRevision: workspaceRevision,
     idempotencyKey: randomUUID(),
     rerun: false,
     step,

@@ -300,7 +300,7 @@ describe('prepareWorkspaceRerun', () => {
       waitForOperation: vi.fn().mockResolvedValue({ error: null, state: 'succeeded' }),
     }
 
-    await executeWorkspaceRerun(contract, runtime, 'target-gui-handle')
+    await executeWorkspaceRerun(contract, runtime, 'target-gui-handle', 1)
 
     expect(runtime.syncConfig).not.toHaveBeenCalled()
     expect(runtime.refreshConfig).toHaveBeenCalledWith({
@@ -367,14 +367,16 @@ describe('prepareWorkspaceRerun', () => {
       waitForOperation: vi.fn().mockResolvedValue({ error: null, state: 'succeeded' }),
     }
 
-    await executeWorkspaceRerun(contract, runtime, 'target-gui-handle')
+    await executeWorkspaceRerun(contract, runtime, 'target-gui-handle', 1)
 
     expect(runtime.syncConfig).toHaveBeenCalledWith({
       configPath: `${contract.target_workspace}/config/dreamplace_ecc.json`,
+      expectedWorkspaceRevision: 1,
       workspaceHandle: 'target-gui-handle',
     })
     expect(runtime.startStepOperation).not.toHaveBeenCalled()
     expect(runtime.startFlowOperation).toHaveBeenCalledWith({
+      expectedWorkspaceRevision: 1,
       idempotencyKey: expect.any(String),
       rerun: false,
       workspaceHandle: 'target-gui-handle',

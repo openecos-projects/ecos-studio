@@ -12,6 +12,7 @@ import {
   closeWorkspaceApi,
   loadWorkspaceApi,
   createWorkspaceApi,
+  updateWorkspaceApi,
   waitForRuntimeReady,
 } from '../api'
 import * as runtimeEventApi from '../api/runtimeEvents'
@@ -102,6 +103,75 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+function backendWorkspaceOptions(config: WorkspaceConfig, selectedPath: string) {
+  const frontendParams = config.parameters || {}
+  const pdkName = config.pdk || 'ics55'
+  const toNumber = (value: unknown, fallback: number) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : fallback
+  }
+  const dieAreaMode =
+    frontendParams.die_area_mode === 'width_height'
+      ? 'width_height'
+      : 'utilitization_margin'
+  const dieArea =
+    dieAreaMode === 'width_height'
+      ? {
+          mode: dieAreaMode,
+          width: toNumber(frontendParams.die_width, 100),
+          height: toNumber(frontendParams.die_height, 100),
+        }
+      : {
+          mode: dieAreaMode,
+          utilitization: toNumber(
+            frontendParams.utilitization ?? frontendParams.core_utilization,
+            0.6,
+          ),
+          margin: toNumber(frontendParams.margin, 0),
+        }
+  const parameters = {
+    ...Object.fromEntries(
+      Object.entries(frontendParams).filter(([key]) => key.includes('.')),
+    ),
+    Design: frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
+    'Top module': frontendParams.top_module || 'top',
+    Clock: frontendParams.clock || 'clk',
+    'Die Area': dieArea,
+    'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
+    'Max fanout': toNumber(frontendParams.max_fanout, 20),
+    'Target density': toNumber(frontendParams.target_density, 0.2),
+    'Target overflow': toNumber(frontendParams.target_overflow, 0.1),
+    PDK: pdkName,
+    Core: {
+      Utilitization:
+        dieAreaMode === 'utilitization_margin'
+          ? toNumber(frontendParams.utilitization ?? frontendParams.core_utilization, 0.6)
+          : toNumber(frontendParams.core_utilization, 0.5),
+    },
+  }
+  return {
+    directory: selectedPath,
+    designTool: 'backend' as const,
+    pdk: pdkName,
+    pdk_root: config.pdk_root || '',
+    pdk_installation_id: config.pdk_installation_id,
+    pdk_requirement: config.pdk_requirement,
+    parameters,
+    origin_def: config.origin_def,
+    origin_verilog: config.origin_verilog,
+    rtl_list: config.rtl_list || [],
+    filelist: config.filelist,
+    mpc: config.mpc as unknown as Record<string, unknown> | null,
+    design_input_mode: config.design_input_mode,
+    sdc: config.sdc,
+    flow_config: config.flow_config,
+    pdk_config_mode: config.pdk_config_mode,
+    pdk_config: config.pdk_config,
+    pdk_json: config.pdk_json,
+    project_context: config.project_context,
+  }
+}
+
 function workspaceHandleFromResponseData(
   data: { directory?: string; workspace_handle?: string; workspaceHandle?: string },
   fallback?: string,
@@ -117,7 +187,7 @@ function workspaceRuntimeIdFromResponseData(
   return workspaceHandleFromResponseData(data, fallback)
 }
 
-function scheduleStepRenderedAck(options: {
+function scheduleStepRefresh(options: {
   eventId: string
   operationId: string
   workspaceHandle: string
@@ -125,58 +195,15 @@ function scheduleStepRenderedAck(options: {
   stepCommitId?: string
   workspaceRevision?: number
 }): void {
-  const ackKey = `${options.workspaceHandle}\u001f${options.operationId}\u001f${options.stepCommitId ?? options.eventId}`
-  if (pendingStepRenderedAcks.has(ackKey)) return
-  const acknowledge = async () => {
-    await getOptionalDesktopApi()?.ecc.runtime?.acknowledgeStepRendered({
-      eventId: options.eventId,
-      operationId: options.operationId,
-      workspaceHandle: options.workspaceHandle,
-      ...(options.stepCommitId ? { stepCommitId: options.stepCommitId } : {}),
-      ...(typeof options.workspaceRevision === 'number'
-        ? { workspaceRevision: options.workspaceRevision }
-        : {}),
-    })
-  }
-  if (acknowledgedStepRenderedAcks.has(ackKey)) {
-    void acknowledge().catch((error) => {
-      console.warn('Failed to repeat an ECC step render acknowledgement:', error)
-    })
-    return
-  }
-  const nextFrame = () =>
-    new Promise<void>((resolve) => {
-      if (typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(() => resolve())
-        return
-      }
-      setTimeout(resolve, 0)
-    })
-
-  const acknowledgement = finishRuntimeStepRender({
+  void finishRuntimeStepRender({
     eventId: options.eventId,
     operationId: options.operationId,
     step: options.step,
     stepCommitId: options.stepCommitId ?? options.eventId,
     workspaceRevision: options.workspaceRevision,
+  }).catch((error) => {
+    console.warn('Failed to refresh data after an ECC step commit:', error)
   })
-    .then(nextFrame)
-    .then(async () => {
-      await acknowledge()
-      acknowledgedStepRenderedAcks.add(ackKey)
-      if (acknowledgedStepRenderedAcks.size > 512) {
-        acknowledgedStepRenderedAcks.delete(
-          acknowledgedStepRenderedAcks.values().next().value!,
-        )
-      }
-    })
-    .catch((error) => {
-      console.warn('Failed to acknowledge rendered ECC step:', error)
-    })
-    .finally(() => {
-      pendingStepRenderedAcks.delete(ackKey)
-    })
-  pendingStepRenderedAcks.set(ackKey, acknowledgement)
 }
 
 // Runtime event connection（workspace 级别，跟随 workspace 生命周期）
@@ -185,8 +212,6 @@ const runtimeEvents = ref<RuntimeEventResponse[]>([])
 const notificationStore = useNotificationStore()
 const handledRefreshRuntimeEvents = new Set<string>()
 const handledRuntimeProtocolEvents = new Set<string>()
-const pendingStepRenderedAcks = new Map<string, Promise<void>>()
-const acknowledgedStepRenderedAcks = new Set<string>()
 let unregisterRuntimeEventCleanup: (() => void) | null = null
 
 const workspaceLifecycle = useWorkspaceLifecycle()
@@ -625,6 +650,7 @@ export function useWorkspace() {
           workspaceLifecycle.activateSession(session.sessionId, {
             workspaceId,
             projectRoot: canonicalProjectRoot,
+            workspaceRevision: response.data.workspaceRevision,
           })
           connectRuntimeEvents(workspaceId, restoredDesignTool, session.sessionId)
         } else {
@@ -884,6 +910,7 @@ export function useWorkspace() {
         workspaceLifecycle.activateSession(activeSession.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
+          workspaceRevision: response.data.workspaceRevision,
         })
         candidateWorkspaceCommitted = true
         connectRuntimeEvents(workspaceId, requestedDesignTool, activeSession.sessionId)
@@ -897,13 +924,10 @@ export function useWorkspace() {
                 workspaceHandle: workspaceId,
               })
 
-              // 检查是否有活跃的operations（运行中、排队中或等待GUI同步）
+              // 检查是否有活跃的 operations。
               const hasActiveOperations = snapshot.operations?.some(
                 (op: import('@ecos-studio/shared').EccRuntimeOperation) =>
-                  op.state === 'running' ||
-                  op.state === 'queued' ||
-                  op.state === 'waiting_for_gui_sync' ||
-                  op.state === 'paused_for_gui_recovery',
+                  op.state === 'running' || op.state === 'queued',
               )
 
               if (hasActiveOperations) {
@@ -1045,6 +1069,49 @@ export function useWorkspace() {
       }
 
       selectedPath = normalizePath(selectedPath)
+      const updatesCurrentBackendWorkspace = Boolean(
+        config?.replaceExistingWorkspace &&
+        (config.designTool ?? 'backend') === 'backend' &&
+        currentProject.value &&
+        normalizePath(currentProject.value.path) === selectedPath &&
+        workspaceLifecycle.session.value.workspaceId,
+      )
+      if (updatesCurrentBackendWorkspace) {
+        existedBeforeCreate = true
+        if (!(await ensureApiReady({ keepLoading: true }))) {
+          lastWorkspaceCreationError.value =
+            'The desktop runtime is unavailable. Restart the application and try again.'
+          return false
+        }
+        runtimeBackendTitle.value = 'Updating your workspace'
+        runtimeBackendSubtitle.value = 'Committing the revised engineering specification'
+        runtimeBackendConnecting.value = true
+        const expectedWorkspaceRevision =
+          workspaceLifecycle.session.value.workspaceRevision
+        if (!Number.isInteger(expectedWorkspaceRevision)) {
+          throw new Error('The current Workspace revision is unavailable.')
+        }
+        const updated = await updateWorkspaceApi(
+          backendWorkspaceOptions(config!, selectedPath),
+          workspaceLifecycle.session.value.workspaceId,
+          expectedWorkspaceRevision!,
+        )
+        if (
+          'workspaceRevision' in updated &&
+          typeof updated.workspaceRevision === 'number'
+        ) {
+          workspaceLifecycle.updateWorkspaceRevision(updated.workspaceRevision)
+        }
+        workspaceLifecycle.invalidate('all', { reason: 'workspace-updated' })
+        runtimeBackendConnecting.value = false
+        showToast({
+          severity: 'success',
+          summary: 'Workspace Updated',
+          detail: 'The engineering specification was committed.',
+          life: 4000,
+        })
+        return true
+      }
       const createAffinity = await resolveWorkspaceWindowAffinity(selectedPath)
       if (createAffinity.action === 'focused') {
         lastWorkspaceCreationError.value =
@@ -1202,87 +1269,9 @@ export function useWorkspace() {
           ),
         })
       } else {
-        const pdkName = creationConfig?.pdk || 'ics55'
-        const toNumber = (value: unknown, fallback: number) => {
-          const parsed = Number(value)
-          return Number.isFinite(parsed) ? parsed : fallback
-        }
-        const dieAreaMode =
-          frontendParams.die_area_mode === 'width_height'
-            ? 'width_height'
-            : 'utilitization_margin'
-        const dieArea =
-          dieAreaMode === 'width_height'
-            ? {
-                mode: dieAreaMode,
-                width: toNumber(frontendParams.die_width, 100),
-                height: toNumber(frontendParams.die_height, 100),
-              }
-            : {
-                mode: dieAreaMode,
-                utilitization: toNumber(
-                  frontendParams.utilitization ?? frontendParams.core_utilization,
-                  0.6,
-                ),
-                margin: toNumber(frontendParams.margin, 0),
-              }
-        const backendParameters = {
-          Design:
-            frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
-          'Top module': frontendParams.top_module || 'top',
-          Clock: frontendParams.clock || 'clk',
-          'Die Area': dieArea,
-          'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
-          'Max fanout': toNumber(frontendParams.max_fanout, 20),
-          'Target density': toNumber(frontendParams.target_density, 0.2),
-          'Target overflow': toNumber(frontendParams.target_overflow, 0.1),
-          PDK: pdkName,
-          Core: {
-            Utilitization:
-              dieAreaMode === 'utilitization_margin'
-                ? toNumber(
-                    frontendParams.utilitization ?? frontendParams.core_utilization,
-                    0.6,
-                  )
-                : toNumber(frontendParams.core_utilization, 0.5),
-          },
-          ...(creationConfig?.mpc ? { MPC: creationConfig.mpc } : {}),
-        }
-
-        const resolvedPdkRoot = creationConfig?.pdk_root || ''
-        const manualPdkConfig = creationConfig?.pdk_config
-        const pdkJson =
-          creationConfig?.pdk_config_mode === 'manual' ||
-          manualPdkConfig?.mode === 'manual'
-            ? {
-                name: pdkName,
-                root: resolvedPdkRoot,
-                tech: manualPdkConfig?.tech_lef[0] ?? '',
-                lefs: manualPdkConfig?.cell_lef ?? [],
-                libs: manualPdkConfig?.liberty ?? [],
-              }
-            : creationConfig?.pdk_json
-
-        response = await createWorkspaceApi({
-          directory: selectedPath,
-          designTool: 'backend',
-          pdk: pdkName,
-          pdk_root: resolvedPdkRoot,
-          pdk_installation_id: creationConfig?.pdk_installation_id,
-          pdk_requirement: creationConfig?.pdk_requirement,
-          parameters: backendParameters,
-          origin_def: creationConfig?.origin_def,
-          origin_verilog: creationConfig?.origin_verilog,
-          rtl_list: creationConfig?.rtl_list || [],
-          filelist: creationConfig?.filelist,
-          design_input_mode: creationConfig?.design_input_mode,
-          sdc: creationConfig?.sdc,
-          flow_config: creationConfig?.flow_config,
-          pdk_config_mode: creationConfig?.pdk_config_mode,
-          pdk_config: creationConfig?.pdk_config,
-          pdk_json: pdkJson,
-          project_context: creationConfig?.project_context,
-        })
+        response = await createWorkspaceApi(
+          backendWorkspaceOptions(creationConfig!, selectedPath),
+        )
       }
       if (response.response === 'success') {
         candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
@@ -1357,6 +1346,7 @@ export function useWorkspace() {
         workspaceLifecycle.activateSession(session.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
+          workspaceRevision: response.data.workspaceRevision,
         })
         candidateWorkspaceCommitted = true
         workspaceLifecycle.invalidate(['home', 'flow', 'parameters'], {
@@ -1667,6 +1657,9 @@ export function useWorkspace() {
         const step = asString(response.data?.step) ?? ''
         const stepCommitId = asString(response.data?.stepCommitId)
         const workspaceRevision = asNumber(response.data?.workspaceRevision)
+        if (workspaceRevision !== undefined) {
+          workspaceLifecycle.updateWorkspaceRevision(workspaceRevision, sessionId)
+        }
         const runtimeEventKey = runtimeEventId
           ? [
               workspaceHandle ?? '',
@@ -1686,24 +1679,7 @@ export function useWorkspace() {
             )
           }
         }
-        if (duplicate) {
-          if (
-            eventType === 'step.completed' &&
-            runtimeEventId &&
-            operationId &&
-            workspaceHandle
-          ) {
-            scheduleStepRenderedAck({
-              eventId: runtimeEventId,
-              operationId,
-              step,
-              stepCommitId,
-              workspaceRevision,
-              workspaceHandle,
-            })
-          }
-          return
-        }
+        if (duplicate) return
         runtimeEvents.value.push(response)
         if (runtimeEvents.value.length > 200) {
           runtimeEvents.value.splice(0, runtimeEvents.value.length - 200)
@@ -1726,7 +1702,7 @@ export function useWorkspace() {
           operationId &&
           workspaceHandle
         ) {
-          scheduleStepRenderedAck({
+          scheduleStepRefresh({
             eventId: runtimeEventId,
             operationId,
             step,

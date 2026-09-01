@@ -5,6 +5,17 @@ export {
   type DesktopApiIpcChannel,
 } from './constants/ipcChannels.ts'
 export type {
+  ProductCommandApi,
+  ProductCommandRequest,
+  ProductCommandResult,
+} from './contracts/productCommands.ts'
+export type {
+  WorkspaceCreationModel,
+  WorkspaceCreationModelApi,
+  WorkspaceCreationModelRequest,
+  WorkspaceCreationParameter,
+} from './contracts/workspaceCreationModel.ts'
+export type {
   BackendWorkspaceApi,
   BackendWorkspaceInvalidatedEvent,
   BackendWorkspaceOverviewResult,
@@ -123,6 +134,11 @@ export type {
   EccLayoutEditDiscardResult,
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
+  EccArtifactChunk,
+  EccArtifactOpenRequest,
+  EccArtifactReadRequest,
+  EccArtifactRef,
+  EccEngineeringSnapshot,
   EccRpcHelloResult,
   EccRpcPingResult,
   EccRpcShutdownResult,
@@ -138,7 +154,6 @@ export type {
   EccRuntimeProtocolPayload,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
-  EccRuntimeStepRenderedAckRequest,
   EccRuntimeStepSnapshot,
   EccSignoffReviewDetail,
   EccSignoffReviewDetailKind,
@@ -162,6 +177,10 @@ export type {
   EccWorkspaceResetFlowResult,
   EccWorkspaceSyncConfigRequest,
   EccWorkspaceSyncConfigResult,
+  EccWorkspaceSpecValidationRequest,
+  EccWorkspaceSpecValidationResult,
+  EccWorkspaceUpdateRequest,
+  EccWorkspaceUpdateResult,
   EccWorkspaceRuntimeSnapshot,
 } from './contracts/eccRuntime.ts'
 export type {

@@ -19,7 +19,6 @@ import {
   type EccRpcRuntimeClient,
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
-import { EccJsonRpcError } from './jsonRpcClient'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 
 interface RpcCall {
@@ -318,16 +317,16 @@ describe('EccWorkspaceRuntime', () => {
         eventId: 'workspace-1:1',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { step: 'Synthesis', tool: 'yosys' },
+        payload: { sourceType: 'step.started', step: 'Synthesis', tool: 'yosys' },
         sequence: 1,
         timestamp: 1,
-        type: 'step.started',
+        type: 'execution.progress',
         workspaceId: 'workspace-1',
       },
     })
 
     expect(events).toContainEqual({
-      event: expect.objectContaining({ type: 'step.started' }),
+      event: expect.objectContaining({ type: 'execution.progress' }),
       type: 'runtime.protocol',
       workspaceDirectory: '/work/demo',
       workspaceHandle: workspace.workspaceHandle,
@@ -340,7 +339,6 @@ describe('EccWorkspaceRuntime', () => {
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
-        awaitingEventId: null,
         createdAt: 1,
         currentStep: '',
         currentTool: '',
@@ -360,6 +358,7 @@ describe('EccWorkspaceRuntime', () => {
 
     await expect(
       service.startFlowOperation({
+        expectedWorkspaceRevision: 1,
         idempotencyKey: 'request-1',
         workspaceHandle: workspace.workspaceHandle,
       }),
@@ -367,6 +366,7 @@ describe('EccWorkspaceRuntime', () => {
     expect(client.calls.at(-1)).toEqual({
       method: 'operation.start_flow',
       params: {
+        expectedWorkspaceRevision: 1,
         idempotencyKey: 'request-1',
         origin: 'gui',
         rerun: false,
@@ -499,7 +499,6 @@ describe('EccWorkspaceRuntime', () => {
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
-        awaitingEventId: null,
         createdAt: 1,
         currentStep: 'Floorplan',
         currentTool: '',
@@ -519,6 +518,7 @@ describe('EccWorkspaceRuntime', () => {
 
     await expect(
       service.startStepOperation({
+        expectedWorkspaceRevision: 1,
         idempotencyKey: 'request-2',
         rerun: true,
         resetDependents: true,
@@ -530,6 +530,7 @@ describe('EccWorkspaceRuntime', () => {
     expect(client.calls.at(-1)).toEqual({
       method: 'operation.start_step',
       params: {
+        expectedWorkspaceRevision: 1,
         idempotencyKey: 'request-2',
         origin: 'gui',
         rerun: true,
@@ -560,10 +561,16 @@ describe('EccWorkspaceRuntime', () => {
         kind: 'step',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { result: { state: 'Success' }, step: 'place', tool: 'dreamplace' },
+        payload: {
+          result: { state: 'Success' },
+          sourceType: 'operation.completed',
+          state: 'succeeded',
+          step: 'place',
+          tool: 'dreamplace',
+        },
         sequence: 2,
         timestamp: 2,
-        type: 'operation.completed',
+        type: 'operation.changed',
         workspaceId: 'workspace-1',
       },
     })
@@ -599,10 +606,14 @@ describe('EccWorkspaceRuntime', () => {
         kind: 'flow',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { result: { rerun: false } },
+        payload: {
+          result: { rerun: false },
+          sourceType: 'operation.completed',
+          state: 'succeeded',
+        },
         sequence: 2,
         timestamp: 2,
-        type: 'operation.completed',
+        type: 'operation.changed',
         workspaceId: 'workspace-1',
       },
     })
@@ -658,10 +669,10 @@ describe('EccWorkspaceRuntime', () => {
         kind: 'flow',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { step: 'Harden', tool: 'ecc' },
+        payload: { sourceType: 'step.started', step: 'Harden', tool: 'ecc' },
         sequence: 1,
         timestamp: 1,
-        type: 'step.started',
+        type: 'execution.progress',
         workspaceId: 'workspace-1',
       },
     })
@@ -677,10 +688,16 @@ describe('EccWorkspaceRuntime', () => {
         kind: 'flow',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { result: { state: 'Success' }, step: 'Harden', tool: 'ecc' },
+        payload: {
+          result: { state: 'Success' },
+          sourceType: 'operation.completed',
+          state: 'succeeded',
+          step: 'Harden',
+          tool: 'ecc',
+        },
         sequence: 2,
         timestamp: 2,
-        type: 'operation.completed',
+        type: 'operation.changed',
         workspaceId: 'workspace-1',
       },
     })
@@ -715,52 +732,6 @@ describe('EccWorkspaceRuntime', () => {
     ).toHaveLength(2)
   })
 
-  it('persists a detached step snapshot before releasing its GUI ACK gate', async () => {
-    const { client, service } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-      {
-        directory: '/work/demo',
-        flow: { steps: [] },
-        home: {},
-        lastEventId: 'workspace-1:3',
-        operations: [],
-        parameters: {},
-      },
-      {
-        accepted: true,
-        duplicate: false,
-        eventId: 'workspace-1:3',
-        operationId: 'operation-1',
-      },
-    )
-    const workspace = await service.openWorkspace({ directory: '/work/demo' })
-
-    await expect(
-      service.acknowledgeDetachedStepRendered({
-        eventId: 'workspace-1:3',
-        operationId: 'operation-1',
-        stepCommitId: 'operation-1:step:1',
-        workspaceHandle: workspace.workspaceHandle,
-        workspaceRevision: 1,
-      }),
-    ).resolves.toMatchObject({ accepted: true })
-
-    expect(client.calls.slice(-2)).toEqual([
-      { method: 'workspace.snapshot', params: { workspaceId: 'workspace-1' } },
-      {
-        method: 'operation.ack_step_rendered',
-        params: {
-          eventId: 'workspace-1:3',
-          operationId: 'operation-1',
-          stepCommitId: 'operation-1:step:1',
-          workspaceRevision: 1,
-        },
-      },
-    ])
-  })
-
   it('releases a failed operation sidecar after the diagnostic idle timeout', async () => {
     vi.useFakeTimers()
     try {
@@ -776,10 +747,14 @@ describe('EccWorkspaceRuntime', () => {
           kind: 'flow',
           operationId: 'operation-1',
           origin: 'gui',
-          payload: { error: { code: 'command_failed', message: 'failed' } },
+          payload: {
+            error: { code: 'command_failed', message: 'failed' },
+            sourceType: 'operation.failed',
+            state: 'failed',
+          },
           sequence: 2,
           timestamp: 2,
-          type: 'operation.failed',
+          type: 'operation.changed',
           workspaceId: 'workspace-1',
         },
       })
@@ -804,18 +779,24 @@ describe('EccWorkspaceRuntime', () => {
     }
 
     await service.createWorkspace({
+      commandId: 'workspace-create-flow-range',
       directory: '/work/demo',
       flowConfig,
-      pdkJson: '/pdks/ics55/pdk.json',
       sdc: '/constraints/top.sdc',
     })
 
     expect(client.calls.at(-1)).toEqual({
       method: 'workspace.create',
       params: expect.objectContaining({
-        flowConfig,
-        pdkJson: '/pdks/ics55/pdk.json',
-        sdc: '/constraints/top.sdc',
+        commandId: 'workspace-create-flow-range',
+        targetDirectory: '/work/demo',
+        workspaceSpec: expect.objectContaining({
+          flow: {
+            flowId: 'harden',
+            fromStepId: 'Synthesis',
+            throughStepId: 'Harden',
+          },
+        }),
       }),
     })
   })
@@ -828,138 +809,15 @@ describe('EccWorkspaceRuntime', () => {
     )
 
     await service.createWorkspace({
+      commandId: 'workspace-create-empty-flow',
       directory: '/work/demo',
       flowConfig: {},
-      pdkJson: '/pdks/ics55/pdk.json',
     })
 
     expect(client.calls.at(-1)).toEqual({
       method: 'workspace.create',
       params: expect.not.objectContaining({
         flowConfig: expect.anything(),
-      }),
-    })
-  })
-
-  it('retries workspace creation without sdc when an older runtime rejects the field', async () => {
-    const { client, service } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0a5', version: 1 },
-      new EccJsonRpcError(-32602, 'invalid_request', {
-        message: 'unknown field: sdc',
-      }),
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
-
-    await expect(
-      service.createWorkspace({
-        directory: '/work/demo',
-        pdkJson: '/pdks/ics55/pdk.json',
-        sdc: '/constraints/top.sdc',
-      }),
-    ).resolves.toEqual({
-      directory: '/work/demo',
-      workspaceHandle: expect.stringMatching(/^workspace-/),
-    })
-
-    expect(client.calls.at(-2)).toEqual({
-      method: 'workspace.create',
-      params: expect.objectContaining({
-        pdkJson: '/pdks/ics55/pdk.json',
-        sdc: '/constraints/top.sdc',
-      }),
-    })
-    expect(client.calls.at(-1)).toEqual({
-      method: 'workspace.create',
-      params: expect.not.objectContaining({
-        sdc: expect.anything(),
-      }),
-    })
-  })
-
-  it('retries workspace creation without flowConfig and sdc for older runtimes', async () => {
-    const { client, service } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0a4', version: 1 },
-      new EccJsonRpcError(-32602, 'invalid_request', {
-        message: 'unknown field: flowConfig',
-      }),
-      new EccJsonRpcError(-32602, 'invalid_request', {
-        message: 'unknown field: sdc',
-      }),
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
-    const flowConfig = {
-      start_step: 'Synthesis',
-      end_step: 'Harden',
-      steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
-    }
-
-    await expect(
-      service.createWorkspace({
-        directory: '/work/demo',
-        flowConfig,
-        pdkJson: '/pdks/ics55/pdk.json',
-        sdc: '/constraints/top.sdc',
-      }),
-    ).resolves.toEqual({
-      directory: '/work/demo',
-      workspaceHandle: expect.stringMatching(/^workspace-/),
-    })
-
-    expect(client.calls.at(-3)).toEqual({
-      method: 'workspace.create',
-      params: expect.objectContaining({
-        flowConfig,
-        sdc: '/constraints/top.sdc',
-      }),
-    })
-    expect(client.calls.at(-2)).toEqual({
-      method: 'workspace.create',
-      params: expect.not.objectContaining({
-        flowConfig: expect.anything(),
-      }),
-    })
-    expect(client.calls.at(-2)?.params).toEqual(
-      expect.objectContaining({
-        sdc: '/constraints/top.sdc',
-      }),
-    )
-    expect(client.calls.at(-1)).toEqual({
-      method: 'workspace.create',
-      params: expect.not.objectContaining({
-        flowConfig: expect.anything(),
-        sdc: expect.anything(),
-      }),
-    })
-  })
-
-  it('retries workspace creation without the default sdc field for older runtimes', async () => {
-    const { client, service } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0a5', version: 1 },
-      new EccJsonRpcError(-32602, 'invalid_request', {
-        message: 'unknown field: sdc',
-      }),
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
-
-    await service.createWorkspace({
-      directory: '/work/demo',
-      pdkJson: '/pdks/ics55/pdk.json',
-    })
-
-    expect(client.calls.at(-2)).toEqual({
-      method: 'workspace.create',
-      params: expect.objectContaining({
-        pdkJson: '/pdks/ics55/pdk.json',
-        sdc: '',
-      }),
-    })
-    expect(client.calls.at(-1)).toEqual({
-      method: 'workspace.create',
-      params: expect.not.objectContaining({
-        sdc: expect.anything(),
       }),
     })
   })
@@ -981,6 +839,8 @@ describe('EccWorkspaceRuntime', () => {
     expect(result).toEqual({
       directory: '/work/demo',
       workspaceHandle: expect.stringMatching(/^workspace-/),
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
     })
     expect(events).toContainEqual({
       type: 'runtime.ready',
@@ -999,6 +859,7 @@ describe('EccWorkspaceRuntime', () => {
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     await expect(
       service.runStep({
+        expectedWorkspaceRevision: 1,
         rerun: true,
         step: 'placement',
         workspaceHandle: workspace.workspaceHandle,
@@ -1010,6 +871,7 @@ describe('EccWorkspaceRuntime', () => {
       method: 'flow.run_step',
       options: { timeoutMs: 0 },
       params: {
+        expectedWorkspaceRevision: 1,
         rerun: true,
         step: 'placement',
         workspaceId: 'workspace-1',
@@ -1100,6 +962,7 @@ describe('EccWorkspaceRuntime', () => {
 
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     await service.runFlow({
+      expectedWorkspaceRevision: 1,
       rerun: true,
       workspaceHandle: workspace.workspaceHandle,
     })
@@ -1125,6 +988,7 @@ describe('EccWorkspaceRuntime', () => {
 
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     await service.runFlow({
+      expectedWorkspaceRevision: 1,
       rerun: true,
       workspaceHandle: workspace.workspaceHandle,
     })
@@ -1133,7 +997,11 @@ describe('EccWorkspaceRuntime', () => {
     expect(client.calls.at(-1)).toEqual({
       method: 'flow.run',
       options: { timeoutMs: 0 },
-      params: { rerun: true, workspaceId: 'workspace-1' },
+      params: {
+        expectedWorkspaceRevision: 1,
+        rerun: true,
+        workspaceId: 'workspace-1',
+      },
     })
   })
 
@@ -1153,6 +1021,7 @@ describe('EccWorkspaceRuntime', () => {
 
     await expect(
       service.runFlow({
+        expectedWorkspaceRevision: 1,
         rerun: false,
         workspaceHandle: workspace.workspaceHandle,
       }),
@@ -1277,6 +1146,7 @@ describe('EccWorkspaceRuntime', () => {
 
     await expect(
       service.runFlow({
+        expectedWorkspaceRevision: 1,
         rerun: false,
         workspaceHandle: workspace.workspaceHandle,
       }),
@@ -1291,6 +1161,7 @@ describe('EccWorkspaceRuntime', () => {
         method: 'flow.run',
         options: { timeoutMs: 0 },
         params: {
+          expectedWorkspaceRevision: 1,
           rerun: false,
           workspaceId: 'workspace-2',
         },
@@ -1401,6 +1272,7 @@ describe('EccWorkspaceRuntime', () => {
     )
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     await service.startStepOperation({
+      expectedWorkspaceRevision: 1,
       idempotencyKey: 'place-1',
       step: 'place',
       workspaceHandle: workspace.workspaceHandle,
@@ -1413,10 +1285,10 @@ describe('EccWorkspaceRuntime', () => {
         kind: 'step',
         operationId: 'operation-place',
         origin: 'gui',
-        payload: {},
+        payload: { sourceType: 'operation.started', state: 'running' },
         sequence: 1,
         timestamp: 1,
-        type: 'operation.started',
+        type: 'operation.changed',
         workspaceId: 'workspace-1',
       },
     })
@@ -1568,6 +1440,7 @@ describe('EccWorkspaceRuntime', () => {
 
     await expect(
       service.runFlow({
+        expectedWorkspaceRevision: 1,
         rerun: false,
         workspaceHandle: workspace.workspaceHandle,
       }),
@@ -1580,6 +1453,7 @@ describe('EccWorkspaceRuntime', () => {
         method: 'flow.run',
         options: { timeoutMs: 0 },
         params: {
+          expectedWorkspaceRevision: 1,
           rerun: false,
           workspaceId: 'workspace-2',
         },

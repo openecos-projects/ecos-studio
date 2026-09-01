@@ -26,23 +26,23 @@ exec "$BINARY" --no-sandbox "$@"
 }
 
 export async function validatePackagedEcc(appOutDir) {
-  const eccPath = join(appOutDir, 'resources', 'binaries', 'ecc')
+  const adapterPath = join(appOutDir, 'resources', 'binaries', 'ecos-ecc-runtime-adapter')
   try {
-    const ecc = await stat(eccPath)
-    if (!ecc.isFile() || (ecc.mode & 0o111) === 0) {
+    const adapter = await stat(adapterPath)
+    if (!adapter.isFile() || (adapter.mode & 0o111) === 0) {
       throw new Error('not an executable file')
     }
-    await execFileAsync(eccPath, ['rpc', 'serve', '--help'], { timeout: 10_000 })
-    const rpcRuntime = execFileAsync(
-      eccPath,
-      ['rpc', 'serve', '--stdio', '--persistent-db'],
-      { timeout: 10_000 },
-    )
+    await execFileAsync(adapterPath, ['--help'], { timeout: 10_000 })
+    const rpcRuntime = execFileAsync(adapterPath, ['--stdio', '--persistent-db'], {
+      timeout: 10_000,
+    })
     rpcRuntime.child.stdin?.end()
     await rpcRuntime
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`Packaged ECC RPC sidecar validation failed at ${eccPath}: ${reason}`)
+    throw new Error(
+      `Packaged ECC runtime adapter validation failed at ${adapterPath}: ${reason}`,
+    )
   }
 }
 

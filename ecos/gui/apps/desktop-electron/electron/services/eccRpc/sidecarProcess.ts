@@ -153,12 +153,7 @@ export class EccRpcSidecarProcess {
     const launch = this.options.resolveLaunch
       ? await this.options.resolveLaunch(baseEnv)
       : {
-          args: this.options.commandArgs ?? [
-            'rpc',
-            'serve',
-            '--stdio',
-            '--persistent-db',
-          ],
+          args: this.options.commandArgs ?? ['--stdio', '--persistent-db'],
           command: this.command,
         }
     const env = launch.env ?? baseEnv
@@ -181,9 +176,7 @@ export class EccRpcSidecarProcess {
     this.shuttingDown = false
     this.outputTail = ''
     this.launchError = null
-    this.appendLog(
-      `[sidecar] spawning ${this.command} rpc serve --stdio --persistent-db\n`,
-    )
+    this.appendLog(`[sidecar] spawning ${launch.command} ${launch.args.join(' ')}\n`)
 
     const child = this.spawnImpl(launch.command, launch.args, {
       env,

@@ -1,4 +1,6 @@
 import type { DesignRuntimeApi } from './designRuntime.ts'
+import type { ProductCommandApi } from './productCommands.ts'
+import type { WorkspaceCreationModelApi } from './workspaceCreationModel.ts'
 import type { BackendWorkspaceApi } from './backendWorkspace.ts'
 import type { BackendProjectComparisonApi } from './backendProjectComparison.ts'
 import type {
@@ -217,6 +219,8 @@ export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
   }
+  productCommands: ProductCommandApi
+  workspaceCreationModel: WorkspaceCreationModelApi
   window: {
     minimize(): Promise<void>
     toggleMaximize(): Promise<void>

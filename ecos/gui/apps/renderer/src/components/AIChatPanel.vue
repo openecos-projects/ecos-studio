@@ -1841,13 +1841,19 @@ async function syncWorkspaceParameterWrites(
     ),
   ]
   for (const configPath of stepConfigFiles) {
-    assertEccSuccess(
-      await syncConfigApi({
-        cmd: CMDEnum.sync_config,
-        data: { config_path: configPath, directory: workspaceRoot, workspaceHandle },
-      }),
-      `Failed to sync ${configPath}`,
-    )
+    const syncResult = await syncConfigApi({
+      cmd: CMDEnum.sync_config,
+      data: {
+        config_path: configPath,
+        directory: workspaceRoot,
+        workspaceHandle,
+        workspaceRevision: workspaceLifecycle.session.value.workspaceRevision,
+      },
+    })
+    assertEccSuccess(syncResult, `Failed to sync ${configPath}`)
+    if (typeof syncResult.data.workspaceRevision === 'number') {
+      workspaceLifecycle.updateWorkspaceRevision(syncResult.data.workspaceRevision)
+    }
   }
   assertEccSuccess(
     await refreshConfigApi({

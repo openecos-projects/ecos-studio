@@ -9,6 +9,7 @@ import {
   type BackendWorkspaceOverviewResult,
   type ChecklistFinding,
   type FlowStepState,
+  type EccEngineeringSnapshot,
   type ProjectManifest,
   type ReadIssue,
   type ReadSection,
@@ -28,6 +29,9 @@ import { electronLogger } from './logger'
 import { workspaceDashboardMetrics } from './workspaceDashboardAnalysis'
 
 interface BackendWorkspaceServiceOptions {
+  engineeringSnapshotProvider?: {
+    getByDirectory(directory: string): Promise<EccEngineeringSnapshot>
+  }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
   }
@@ -112,17 +116,18 @@ function pathsEqual(left: string, right: string): boolean {
 }
 
 function configurationSection(
-  index: WorkspaceResourceIndex,
+  snapshot: EccEngineeringSnapshot | null,
 ): ReadSection<WorkspaceConfigurationSummary> {
-  if (!index.parameters) {
+  if (!snapshot) {
     return {
       status: 'unavailable',
       issues: [{ code: 'WORKSPACE_CONFIGURATION_UNAVAILABLE' }],
     }
   }
 
-  const die = recordValue(index.parameters.Die)
-  const mpc = recordValue(index.parameters.MPC)
+  const parameters = snapshot.parameters
+  const die = recordValue(parameters.Die)
+  const mpc = recordValue(parameters.MPC)
   const template = recordValue(mpc?.core_template)
   const ports = Array.isArray(template?.ports)
     ? template.ports.flatMap((value) => {
@@ -144,13 +149,13 @@ function configurationSection(
   return {
     status: 'ready',
     data: {
-      pdk: stringValue(index.parameters, 'PDK'),
-      design: stringValue(index.parameters, 'Design'),
-      topModule: stringValue(index.parameters, 'Top module'),
+      pdk: stringValue(parameters, 'PDK'),
+      design: stringValue(parameters, 'Design'),
+      topModule: stringValue(parameters, 'Top module'),
       dieArea: finiteNumber(die?.Area),
-      maxFanout: finiteNumber(index.parameters['Max fanout']),
-      clock: stringValue(index.parameters, 'Clock'),
-      frequencyMaxMhz: finiteNumber(index.parameters['Frequency max [MHz]']),
+      maxFanout: finiteNumber(parameters['Max fanout']),
+      clock: stringValue(parameters, 'Clock'),
+      frequencyMaxMhz: finiteNumber(parameters['Frequency max [MHz]']),
       mpcDisplayName: stringValue(mpc, 'display_name').trim() || null,
       mpcConstraints: template
         ? {
@@ -199,39 +204,43 @@ function normalizeFlowState(value: string): FlowStepState {
   }
 }
 
-function flowSection(index: WorkspaceResourceIndex): ReadSection<WorkspaceFlowSummary> {
-  if (!index.home.flowJson.exists) {
+function flowSection(
+  snapshot: EccEngineeringSnapshot | null,
+): ReadSection<WorkspaceFlowSummary> {
+  if (!snapshot) {
     return {
       status: 'unavailable',
       issues: [{ code: 'WORKSPACE_FLOW_UNAVAILABLE' }],
     }
   }
-  const parseIssue = index.messages.find((message) =>
-    message.includes(index.home.flowJson.path),
-  )
-  if (parseIssue) {
+  const steps = recordValue(snapshot.flow)?.steps
+  if (!Array.isArray(steps)) {
     return {
       status: 'error',
-      issues: [{ code: 'WORKSPACE_FLOW_INVALID', detail: parseIssue }],
+      issues: [{ code: 'WORKSPACE_FLOW_INVALID' }],
     }
   }
   return {
     status: 'ready',
     data: {
-      steps: index.flow.steps.map((step, order) => {
-        const runtimeSeconds = parseRuntimeSeconds(step.runtime)
+      steps: steps.flatMap((value, order) => {
+        const step = recordValue(value)
+        if (!step || typeof step.name !== 'string') return []
+        const runtimeSeconds = parseRuntimeSeconds(String(step.runtime ?? ''))
         const peakMemoryMb = finiteNumber(
-          step.peakMemoryMb ?? step.info['peak memory (mb)'],
+          step['peak memory (mb)'] ?? recordValue(step.info)?.['peak memory (mb)'],
         )
-        return {
-          stepId: step.name,
-          order,
-          name: step.name,
-          state: normalizeFlowState(step.state),
-          ...(step.tool ? { toolId: step.tool } : {}),
-          ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
-          ...(peakMemoryMb === null ? {} : { peakMemoryMb }),
-        }
+        return [
+          {
+            stepId: step.name,
+            order,
+            name: step.name,
+            state: normalizeFlowState(String(step.state ?? '')),
+            ...(typeof step.tool === 'string' && step.tool ? { toolId: step.tool } : {}),
+            ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
+            ...(peakMemoryMb === null ? {} : { peakMemoryMb }),
+          },
+        ]
       }),
     },
     issues: [],
@@ -400,18 +409,20 @@ export class BackendWorkspaceService {
     const eventLoopDelay = eventLoopDelayMs()
     const readStartedAt = performance.now()
     const index = await this.options.workspaceResourceService.getIndex()
-    const [manifest, checklist] = await Promise.all([
+    const [manifest, snapshot] = await Promise.all([
       this.readManifest(index.root),
-      this.readChecklist(index),
+      this.readEngineeringSnapshot(index.root),
     ])
-    const qor = await this.readQor(index, manifest)
+    const flow = flowSection(snapshot)
+    const checklist = this.readChecklist(snapshot, flow)
+    const qor = await this.readQor(index, manifest, snapshot)
     const keyMetrics = await this.readKeyMetrics(index, qor.qor)
     const readMs = performance.now() - readStartedAt
     const normalizeStartedAt = performance.now()
     const overview: WorkspaceOverviewCore = {
       identity: identityFromManifest(index, manifest),
-      configuration: configurationSection(index),
-      flow: flowSection(index),
+      configuration: configurationSection(snapshot),
+      flow,
       checklist,
       qor: qor.qor,
       keyMetrics,
@@ -449,26 +460,31 @@ export class BackendWorkspaceService {
     }
   }
 
-  private async readChecklist(
-    index: WorkspaceResourceIndex,
-  ): Promise<ReadSection<WorkspaceChecklistSummary>> {
-    if (!index.home.checklistJson.exists) {
+  private async readEngineeringSnapshot(
+    workspaceRoot: string,
+  ): Promise<EccEngineeringSnapshot | null> {
+    try {
+      return (
+        (await this.options.engineeringSnapshotProvider?.getByDirectory(workspaceRoot)) ??
+        null
+      )
+    } catch {
+      return null
+    }
+  }
+
+  private readChecklist(
+    snapshot: EccEngineeringSnapshot | null,
+    flow: ReadSection<WorkspaceFlowSummary>,
+  ): ReadSection<WorkspaceChecklistSummary> {
+    if (!snapshot) {
       return {
         status: 'unavailable',
         issues: [{ code: 'WORKSPACE_CHECKLIST_UNAVAILABLE' }],
       }
     }
     try {
-      const content = await (this.options.readWorkspaceTextFile ?? readBoundedText)(
-        index.home.checklistJson.path,
-      )
-      if (!content) {
-        return {
-          status: 'unavailable',
-          issues: [{ code: 'WORKSPACE_CHECKLIST_UNAVAILABLE' }],
-        }
-      }
-      const root = recordValue(JSON.parse(content))
+      const root = recordValue(snapshot.checklist)
       if (!root || !Array.isArray(root.checklist)) {
         return {
           status: 'error',
@@ -478,9 +494,9 @@ export class BackendWorkspaceService {
       const findings = root.checklist.map(checklistFinding)
       const invalidCount = findings.filter((finding) => finding === null).length
       const successfulSteps = new Set(
-        index.flow.steps
+        (flow.status === 'ready' || flow.status === 'partial' ? flow.data.steps : [])
           .filter((step) => normalizeFlowState(step.state) === 'succeeded')
-          .flatMap((step) => [step.name.trim().toLowerCase()]),
+          .map((step) => step.name.trim().toLowerCase()),
       )
       const data = {
         findings: findings
@@ -515,6 +531,7 @@ export class BackendWorkspaceService {
   private async readQor(
     index: WorkspaceResourceIndex,
     manifest: ProjectManifest | null,
+    snapshot: EccEngineeringSnapshot | null,
   ): Promise<{
     qor: ReadSection<WorkspaceQorSummary>
     baselineComparison: ReadSection<WorkspaceBaselineComparison>
@@ -544,6 +561,12 @@ export class BackendWorkspaceService {
         )
         if (!workspace) {
           failedIds.add(workspaceId)
+          return
+        }
+        if (workspaceId === currentWorkspace.workspace_id && snapshot) {
+          textsByWorkspaceId[workspaceId] = {
+            'home/engineering-snapshot.json': JSON.stringify(snapshot),
+          }
           return
         }
         try {

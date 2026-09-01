@@ -56,7 +56,7 @@ describe('runtimeStepRenderSync', () => {
     unregisterSecond()
   })
 
-  it('keeps the ACK path available when one optional view refresh fails', async () => {
+  it('keeps event refresh available when one optional view refresh fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const unregister = registerRuntimeStepRenderTask(async () => {
       throw new Error('NFS preview unavailable')

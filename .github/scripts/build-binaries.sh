@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+export MAKEFLAGS="${MAKEFLAGS:--j2}"
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+export npm_config_jobs="${npm_config_jobs:-2}"
+
 SCRIPT_FILE="$(dirname "${BASH_SOURCE[0]}")"
 REPO_ROOT="$(cd "$SCRIPT_FILE/../.." && pwd)"
+export REPO_ROOT
 
 ensure_ecc_tools_python_extension() {
   local import_check='from ecc_tools_bin import ecc_py; print(ecc_py.__file__)'
@@ -61,6 +67,20 @@ build_ecc() {
   ensure_ecc_tools_python_extension
   ensure_ecc_dreamplace_native_extensions
   uv run pyinstaller ecc.spec --clean --noconfirm
+
+}
+
+build_runtime_adapter() {
+  cd "$REPO_ROOT/ecc"
+  if [ "${ECOS_USE_NIX:-}" = "1" ]; then
+    nix develop "$REPO_ROOT" --command bash -lc \
+      'ECOS_ECC_ENTRYPOINT="$REPO_ROOT/ecos/runtime-adapter/main.py" ECOS_ECC_BINARY_NAME="ecos-ecc-runtime-adapter" ECOS_PYINSTALLER_MODE="onefile" uv run pyinstaller ecc.spec --clean --noconfirm'
+    return
+  fi
+  ECOS_ECC_ENTRYPOINT="$REPO_ROOT/ecos/runtime-adapter/main.py" \
+    ECOS_ECC_BINARY_NAME="ecos-ecc-runtime-adapter" \
+    ECOS_PYINSTALLER_MODE="onefile" \
+    uv run pyinstaller ecc.spec --clean --noconfirm
 }
 
 build_chip_viewer() {
@@ -92,6 +112,7 @@ validate_packaged_binaries() {
 
   local required_files=(
     "$binary_dir/ecc"
+    "$binary_dir/ecos-ecc-runtime-adapter"
     "$binary_dir/chip-viewer-native"
   )
 
@@ -123,6 +144,7 @@ validate_packaged_binaries() {
 }
 
 build_ecc
+build_runtime_adapter
 build_chip_viewer
 build_agent_provider
 
@@ -130,6 +152,7 @@ cd "$REPO_ROOT"
 rm -rf ecos/gui/apps/desktop-electron/resources
 mkdir -p ecos/gui/apps/desktop-electron/resources/{agent,binaries}
 cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
+cp ecc/dist/ecos-ecc-runtime-adapter ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/agent/dist/ecos-agent ecos/gui/apps/desktop-electron/resources/agent
 cp ecos/agent/agent-provider.packaged.json ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json

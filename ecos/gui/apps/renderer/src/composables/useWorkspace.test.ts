@@ -6,6 +6,7 @@ const {
   createRuntimeEventClientMock,
   closeWorkspaceApiMock,
   createWorkspaceApiMock,
+  updateWorkspaceApiMock,
   loadWorkspaceApiMock,
   clearMessagesMock,
   readWorkspaceFlowResourceApiMock,
@@ -27,6 +28,7 @@ const {
   createRuntimeEventClientMock: vi.fn(),
   closeWorkspaceApiMock: vi.fn(),
   createWorkspaceApiMock: vi.fn(),
+  updateWorkspaceApiMock: vi.fn(),
   loadWorkspaceApiMock: vi.fn(),
   clearMessagesMock: vi.fn(),
   readWorkspaceFlowResourceApiMock: vi.fn(),
@@ -68,6 +70,7 @@ vi.mock('@/api', () => ({
   closeWorkspaceApi: closeWorkspaceApiMock,
   loadWorkspaceApi: loadWorkspaceApiMock,
   createWorkspaceApi: createWorkspaceApiMock,
+  updateWorkspaceApi: updateWorkspaceApiMock,
   waitForRuntimeReady: waitForRuntimeReadyMock,
 }))
 
@@ -232,6 +235,12 @@ describe('useWorkspace openProject', () => {
     closeWorkspaceApiMock.mockReset()
     closeWorkspaceApiMock.mockResolvedValue({ ok: true })
     createWorkspaceApiMock.mockReset()
+    updateWorkspaceApiMock.mockReset()
+    updateWorkspaceApiMock.mockResolvedValue({
+      directory: '/work/existing',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 2,
+    })
     loadWorkspaceApiMock.mockReset()
     clearMessagesMock.mockReset()
     readWorkspaceFlowResourceApiMock.mockReset()
@@ -2595,12 +2604,10 @@ describe('useWorkspace openProject', () => {
 
     expect(createWorkspaceApiMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        parameters: expect.objectContaining({
-          MPC: expect.objectContaining({
-            resource_id: 'mpc:mpc-frame',
-            design: { index: 0, design_name: 'frame' },
-            core_template: { minimum_area: 100, maximum_area: 500 },
-          }),
+        mpc: expect.objectContaining({
+          resource_id: 'mpc:mpc-frame',
+          design: { index: 0, design_name: 'frame' },
+          core_template: { minimum_area: 100, maximum_area: 500 },
         }),
       }),
     )
@@ -2768,7 +2775,7 @@ describe('useWorkspace openProject', () => {
     expect(setDesktopWindowTitleMock).toHaveBeenCalledWith('ws_0002')
   })
 
-  it('creates an external PDK JSON from manual PDK resources', async () => {
+  it('forwards manual PDK file bindings without a PDK override blob', async () => {
     const workspace = useWorkspace()
     createWorkspaceApiMock.mockResolvedValueOnce({
       response: 'success',
@@ -2804,15 +2811,54 @@ describe('useWorkspace openProject', () => {
 
     expect(createWorkspaceApiMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        pdk_json: {
-          name: 'local-pdk',
-          root: '/pdks/local-pdk',
-          tech: '/pdks/local-pdk/tech.lef',
-          lefs: ['/pdks/local-pdk/stdcells.lef'],
-          libs: ['/pdks/local-pdk/stdcells.lib'],
+        pdk_config_mode: 'manual',
+        pdk_config: {
+          mode: 'manual',
+          tech_lef: ['/pdks/local-pdk/tech.lef'],
+          cell_lef: ['/pdks/local-pdk/stdcells.lef'],
+          liberty: ['/pdks/local-pdk/stdcells.lib'],
         },
       }),
     )
+  })
+
+  it('updates the active backend workspace without replacing its directory', async () => {
+    const workspace = useWorkspace()
+    const lifecycle = useWorkspaceLifecycle()
+    workspace.currentProject.value = {
+      id: '/work/existing',
+      name: 'existing',
+      path: '/work/existing',
+      designTool: 'backend',
+      lastOpened: new Date(),
+    }
+    const session = lifecycle.beginSession({ projectRoot: '/work/existing' })
+    lifecycle.activateSession(session.sessionId, {
+      projectRoot: '/work/existing',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 1,
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/existing',
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        parameters: { design: 'gcd', top_module: 'gcd', clock: 'clk' },
+        origin_def: '',
+        origin_verilog: '/work/gcd.v',
+        rtl_list: ['/work/gcd.v'],
+        replaceExistingWorkspace: true,
+      }),
+    ).resolves.toBe(true)
+
+    expect(updateWorkspaceApiMock).toHaveBeenCalledWith(
+      expect.objectContaining({ directory: '/work/existing' }),
+      'workspace-handle-1',
+      1,
+    )
+    expect(createWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.prepareProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 
   it('closes a freshly created workspace handle when local activation fails', async () => {

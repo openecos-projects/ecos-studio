@@ -17,11 +17,11 @@ export interface RuntimeQuitGuardOptions {
   runtime: RuntimeQuitGuardRuntime
 }
 
-const safeBoundaryEventTypes = new Set([
-  'step.completed',
-  'operation.cancelled',
-  'operation.completed',
-  'operation.failed',
+const terminalOperationStates = new Set([
+  'succeeded',
+  'failed',
+  'cancelled',
+  'interrupted',
 ])
 
 /**
@@ -70,5 +70,10 @@ function shouldRetryShutdown(
 ): boolean {
   if (!runtime.hasPendingRuntimeWork()) return true
   if (event.type === 'runtime.idle' || event.type === 'runtime.exited') return true
-  return event.type === 'runtime.protocol' && safeBoundaryEventTypes.has(event.event.type)
+  return (
+    event.type === 'runtime.protocol' &&
+    (event.event.type === 'workspace.committed' ||
+      (event.event.type === 'operation.changed' &&
+        terminalOperationStates.has(String(event.event.payload.state))))
+  )
 }

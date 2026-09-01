@@ -1360,6 +1360,11 @@
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
                       />
                     </div>
+                    <WorkspaceCatalogParameters
+                      :parameters="extraCreationParameters"
+                      :values="catalogParameterValues"
+                      @update="setCatalogParameterValue"
+                    />
                   </div>
 
                   <div
@@ -1568,6 +1573,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Project, WorkspaceConfig } from '../types'
 import { usePdkManager } from '../composables/usePdkManager'
 import { useWorkspace } from '../composables/useWorkspace'
+import { useWorkspaceCreationModel } from '../composables/useWorkspaceCreationModel'
 import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
@@ -1586,6 +1592,7 @@ import {
 } from '@ecos-studio/shared'
 import DesignFileTransfer from './DesignFileTransfer.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
+import WorkspaceCatalogParameters from './WorkspaceCatalogParameters.vue'
 
 interface Emits {
   (e: 'close'): void
@@ -1664,6 +1671,7 @@ const standaloneWorkspace = computed(() =>
 
 onMounted(() => {
   document.addEventListener('keydown', handleWizardKeydown)
+  void refreshWorkspaceCreationModel()
   if (standaloneWorkspace.value) return
   void loadProjectHistoryEntries()
   void applyProjectDefaultsForProject(projectContext.value.project_root)
@@ -1676,6 +1684,32 @@ onBeforeUnmount(() => {
 const currentStep = ref(1)
 const highestStep = ref(1)
 const isCreating = ref(false)
+const {
+  explicitValues: explicitCatalogParameterValues,
+  parameters: extraCreationParameters,
+  refresh: refreshWorkspaceCreationModel,
+  setValue: setCatalogParameterValue,
+  values: catalogParameterValues,
+} = useWorkspaceCreationModel({
+  designTool: () => props.initialConfig?.designTool,
+  flowId: () =>
+    flowEndStep.value === 'Harden'
+      ? 'harden'
+      : flowEndStep.value === 'sta' || flowEndStep.value === 'RCX'
+        ? 'rcx'
+        : 'rtl2gds',
+  inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
+  mpc: () => projectMpc.value as Record<string, unknown> | null,
+  pdk: () =>
+    config.value.pdk
+      ? {
+          familyId: config.value.pdk,
+          mode: pdkConfigMode.value,
+          version: selectedPdk.value?.version ?? null,
+        }
+      : null,
+  projectPresetParameters: () => projectPresetParameters.value,
+})
 const isDraggingFiles = ref(false)
 const isScanningDirectory = ref(false)
 const directoryScanError = ref('')
@@ -1790,6 +1824,7 @@ const projectDesignName = ref(
   String(props.initialConfig?.parameters?.design ?? '').trim(),
 )
 const projectMpc = ref<ProjectManifestMpc | null>(null)
+const projectPresetParameters = ref<Record<string, unknown>>({})
 const projectManifestError = ref('')
 const isLoadingProjectManifest = ref(false)
 let projectManifestLoadGeneration = 0
@@ -2396,6 +2431,7 @@ watch([flowStartStep, flowEndStep], () => {
     }
   }
   syncWorkspaceConfig()
+  void refreshWorkspaceCreationModel()
 })
 
 watch(dieAreaMode, (mode) => {
@@ -2403,7 +2439,10 @@ watch(dieAreaMode, (mode) => {
   syncWorkspaceConfig()
 })
 
-watch(pdkConfigMode, syncWorkspaceConfig)
+watch(pdkConfigMode, () => {
+  syncWorkspaceConfig()
+  void refreshWorkspaceCreationModel()
+})
 watch(defaultConfigAvailable, (available) => {
   if (!available && pdkConfigMode.value === 'default') pdkConfigMode.value = 'manual'
 })
@@ -2483,6 +2522,7 @@ async function loadProjectHistoryEntries() {
 async function applyProjectDefaultsForProject(projectRoot: string) {
   const loadGeneration = ++projectManifestLoadGeneration
   projectMpc.value = null
+  projectPresetParameters.value = {}
   projectManifestError.value = ''
   isLoadingProjectManifest.value = true
 
@@ -2507,7 +2547,11 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
     applyProjectManifestDefaults(manifest)
   }
   projectMpc.value = manifest?.mpc ?? null
+  projectPresetParameters.value = isRecord(manifest?.base_design.parameters)
+    ? { ...manifest.base_design.parameters }
+    : {}
   isLoadingProjectManifest.value = false
+  void refreshWorkspaceCreationModel()
   syncWorkspaceConfig()
 }
 
@@ -2775,6 +2819,7 @@ function setProjectMode(mode: ProjectMode) {
   if (mode === 'create') {
     projectManifestLoadGeneration += 1
     projectMpc.value = null
+    projectPresetParameters.value = {}
     projectManifestError.value = ''
     isLoadingProjectManifest.value = false
     delete projectContext.value.project_id
@@ -2783,6 +2828,7 @@ function setProjectMode(mode: ProjectMode) {
       projectContext.value.project_name,
     )
     syncWorkspaceConfig()
+    void refreshWorkspaceCreationModel()
   }
   if (mode === 'select') {
     void applyProjectDefaultsForProject(projectContext.value.project_root)
@@ -3223,6 +3269,7 @@ function selectPdk(pdk: import('../types').ImportedPdk) {
     pdkConfigMode.value = 'manual'
   }
   syncWorkspaceConfig()
+  void refreshWorkspaceCreationModel()
 }
 
 async function handleValidatePdk(id: string): Promise<void> {
@@ -3340,6 +3387,7 @@ function syncWorkspaceConfig() {
   config.value.sdc = sdcPath.value
   config.value.pdk_config_mode = pdkConfigMode.value
   config.value.parameters.die_area_mode = dieAreaMode.value
+  Object.assign(config.value.parameters, explicitCatalogParameterValues())
   if (projectDesignName.value) {
     config.value.parameters.design = projectDesignName.value
   }

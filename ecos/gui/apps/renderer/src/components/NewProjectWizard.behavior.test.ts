@@ -15,6 +15,17 @@ const wizardMocks = vi.hoisted(() => ({
   readProjectManagementManifest: vi.fn(async () => null),
   resolveBinding: vi.fn(),
   scanPdkDirectory: vi.fn(),
+  getWorkspaceCreationModel: vi.fn(async () => ({
+    controls: {
+      flowBoundaries: true,
+      manualPdkFiles: true,
+      mpc: true,
+      pdkVersion: true,
+    },
+    discovery: {},
+    parameters: [],
+    pdkInstallations: [],
+  })),
 }))
 
 vi.mock('../composables/usePdkManager', () => ({
@@ -28,6 +39,7 @@ vi.mock('../composables/useWorkspace', () => ({
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
     pdkInventory: { resolveBinding: wizardMocks.resolveBinding },
+    workspaceCreationModel: { get: wizardMocks.getWorkspaceCreationModel },
     workspace: { scanPdkDirectory: wizardMocks.scanPdkDirectory },
   }),
 }))
@@ -41,6 +53,19 @@ vi.mock('@/utils/projectManagementRead', () => ({
 }))
 
 describe('NewProjectWizard behavior', () => {
+  it('loads the ECC-backed Workspace Creation Model', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wizardMocks.getWorkspaceCreationModel).toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it('reuses an imported PDK after resolving a configured symlink path', async () => {
     wizardMocks.importedPdks.value = [
       {

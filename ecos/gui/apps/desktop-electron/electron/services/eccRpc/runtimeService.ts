@@ -1,4 +1,9 @@
 import type {
+  EccArtifactChunk,
+  EccArtifactOpenRequest,
+  EccArtifactReadRequest,
+  EccArtifactRef,
+  EccEngineeringSnapshot,
   EccFlowRunRequest,
   EccFlowRunResult,
   EccFlowRunStepRequest,
@@ -19,7 +24,6 @@ import type {
   EccRuntimeOperationRequest,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
-  EccRuntimeStepRenderedAckRequest,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
@@ -37,9 +41,16 @@ import type {
   EccWorkspaceRuntimeSnapshot,
   EccWorkspaceSyncConfigRequest,
   EccWorkspaceSyncConfigResult,
+  EccWorkspaceSpecValidationRequest,
+  EccWorkspaceSpecValidationResult,
+  EccWorkspaceUpdateRequest,
+  EccWorkspaceUpdateResult,
 } from '@ecos-studio/shared'
+import { open, realpath } from 'node:fs/promises'
+import { resolve } from 'node:path'
 
 import { electronLogger } from '../logger'
+import { isPathWithinRoot } from '../pathScope'
 
 import { normalizeWorkspacePath } from '../workspacePath'
 import { WorkspaceSessionNotFoundError } from './workspaceSessions'
@@ -52,6 +63,26 @@ import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
+type RawSnapshot = Omit<EccEngineeringSnapshot, 'artifacts'> & {
+  artifacts: Array<EccArtifactRef & { reference: string; sizeBytes: number }>
+}
+
+function isRawSnapshot(value: unknown): value is RawSnapshot {
+  if (typeof value !== 'object' || value === null) return false
+  const artifacts = (value as { artifacts?: unknown }).artifacts
+  return (
+    Array.isArray(artifacts) &&
+    artifacts.every(
+      (artifact) =>
+        typeof artifact === 'object' &&
+        artifact !== null &&
+        typeof (artifact as { artifactId?: unknown }).artifactId === 'string' &&
+        typeof (artifact as { reference?: unknown }).reference === 'string' &&
+        Number.isSafeInteger((artifact as { sizeBytes?: unknown }).sizeBytes),
+    )
+  )
+}
+
 export interface EccRpcRuntimeServiceOptions {
   createSidecar(
     directory: string | null,
@@ -63,6 +94,7 @@ export interface EccRpcRuntimeServiceOptions {
   snapshotLoader?: (
     directory: string,
   ) => Promise<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>
+  openPath?: (path: string) => Promise<string>
 }
 
 /**
@@ -180,6 +212,20 @@ export class EccRpcRuntimeService {
       await runtime.releaseIdleSidecar()
       return result
     })
+  }
+
+  describeWorkspaceSpec(): Promise<Record<string, unknown>> {
+    return this.getOrCreateControlRuntime().describeWorkspaceSpec()
+  }
+
+  validateWorkspaceSpec(
+    request: EccWorkspaceSpecValidationRequest,
+  ): Promise<EccWorkspaceSpecValidationResult> {
+    return this.getOrCreateControlRuntime().validateWorkspaceSpec(request)
+  }
+
+  updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<EccWorkspaceUpdateResult> {
+    return this.runtimeForHandle(request.workspaceHandle).updateWorkspace(request)
   }
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
@@ -304,30 +350,97 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).cancelOperation(request)
   }
 
-  acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
-    accepted: boolean
-    duplicate: boolean
-    eventId: string
-    operationId: string
-  }> {
-    return this.runtimeForHandle(request.workspaceHandle).acknowledgeStepRendered(request)
-  }
-
-  acknowledgeDetachedStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
-    accepted: boolean
-    duplicate: boolean
-    eventId: string
-    operationId: string
-  }> {
-    return this.runtimeForHandle(request.workspaceHandle).acknowledgeDetachedStepRendered(
-      request,
-    )
-  }
-
   workspaceSnapshot(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRuntimeSnapshot> {
     return this.runtimeForHandle(request.workspaceHandle).workspaceSnapshot(request)
+  }
+
+  async engineeringSnapshot(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccEngineeringSnapshot> {
+    const snapshot = await this.rawEngineeringSnapshot(request.workspaceHandle)
+    return {
+      ...snapshot,
+      artifacts: snapshot.artifacts.map(
+        ({ reference: _reference, ...artifact }) => artifact,
+      ),
+    }
+  }
+
+  async engineeringSnapshotForDirectory(
+    directory: string,
+  ): Promise<EccEngineeringSnapshot> {
+    const key = normalizeWorkspacePath(directory)
+    const workspaceHandle = [...this.handleToDirectory].find(
+      ([, candidateDirectory]) => candidateDirectory === key,
+    )?.[0]
+    if (!workspaceHandle) throw new WorkspaceSessionNotFoundError(directory)
+    return await this.engineeringSnapshot({ workspaceHandle })
+  }
+
+  async readArtifactChunk(request: EccArtifactReadRequest): Promise<EccArtifactChunk> {
+    if (!Number.isInteger(request.offset) || request.offset < 0) {
+      throw new Error('Artifact offset must be a non-negative integer')
+    }
+    if (
+      !Number.isInteger(request.length) ||
+      request.length < 1 ||
+      request.length > 1024 * 1024
+    ) {
+      throw new Error('Artifact length must be between 1 and 1048576 bytes')
+    }
+    const { path, sizeBytes } = await this.resolveArtifact(request)
+    const artifact = await open(path, 'r')
+    try {
+      const buffer = Buffer.alloc(
+        Math.min(request.length, Math.max(0, sizeBytes - request.offset)),
+      )
+      const { bytesRead } = await artifact.read(buffer, 0, buffer.length, request.offset)
+      const nextOffset = request.offset + bytesRead
+      return {
+        data: new Uint8Array(buffer.subarray(0, bytesRead)),
+        eof: nextOffset >= sizeBytes,
+        nextOffset,
+        sizeBytes,
+      }
+    } finally {
+      await artifact.close()
+    }
+  }
+
+  async openArtifact(request: EccArtifactOpenRequest): Promise<{ opened: boolean }> {
+    if (request.viewer !== 'system' || !this.options.openPath) {
+      throw new Error(`Unsupported Artifact viewer: ${request.viewer}`)
+    }
+    const artifact = await this.resolveArtifact(request)
+    const error = await this.options.openPath(artifact.path)
+    if (error) throw new Error(error)
+    return { opened: true }
+  }
+
+  private async rawEngineeringSnapshot(workspaceHandle: string): Promise<RawSnapshot> {
+    const snapshot = await this.runtimeForHandle(workspaceHandle).engineeringSnapshot({
+      workspaceHandle,
+    })
+    if (!isRawSnapshot(snapshot))
+      throw new Error('ECC returned an invalid Engineering Snapshot')
+    return snapshot
+  }
+
+  private async resolveArtifact(
+    request: Pick<EccArtifactReadRequest, 'artifactId' | 'workspaceHandle'>,
+  ): Promise<{ path: string; sizeBytes: number }> {
+    const snapshot = await this.rawEngineeringSnapshot(request.workspaceHandle)
+    const artifact = snapshot.artifacts.find(
+      (candidate) => candidate.artifactId === request.artifactId,
+    )
+    if (!artifact) throw new Error(`Artifact not found: ${request.artifactId}`)
+    const root = await realpath(this.requireDirectory(request.workspaceHandle))
+    const path = await realpath(resolve(root, artifact.reference))
+    if (!isPathWithinRoot(path, root))
+      throw new Error('Artifact reference escapes Workspace')
+    return { path, sizeBytes: artifact.sizeBytes }
   }
 
   private getOrCreateRuntime(directory: string): EccWorkspaceRuntime {

@@ -43,6 +43,13 @@ export interface ProjectQorWorkspaceInput {
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   staTimingIssuesText?: string | null
   stepStatuses: Record<string, ProjectStepStatus>
+  /** Present on production inputs, including null when ECC has no valid Snapshot. */
+  authoritativeAssessment?: {
+    gateStatus: QorGateStatus
+    score: number | null
+    scoreThreshold: number
+    signoffStatus: 'ready' | 'attention' | 'blocked'
+  } | null
 }
 
 export interface QorStepMetricInput {
@@ -1712,13 +1719,20 @@ function buildWorkspaceSummary(
     workspace.stepSummaryTexts,
     blockingIssues,
   )
-  const signoffReadiness = resolveWorkspaceSignoffReadiness(workspace)
+  const snapshotAssessment = workspace.authoritativeAssessment
+  const hasSnapshotAssessment = 'authoritativeAssessment' in workspace
+  const signoffReadiness = hasSnapshotAssessment
+    ? snapshotSignoffReadiness(snapshotAssessment)
+    : resolveWorkspaceSignoffReadiness(workspace)
   const signoffComparison = resolveWorkspaceSignoffComparisonContext(workspace)
-  const effectiveGateStatus = combineGateStatus(gateStatus, signoffReadiness.status)
+  const effectiveGateStatus = hasSnapshotAssessment
+    ? (snapshotAssessment?.gateStatus ?? 'unavailable')
+    : combineGateStatus(gateStatus, signoffReadiness.status)
   const dimensionScores = buildDimensionScores(projectRecords, areaScoringStep)
   const weightedScore = weightedOverallScore(dimensionScores)
-  const overallScore =
-    signoffReadiness.scoreEligible && weightedScore !== null
+  const overallScore = hasSnapshotAssessment
+    ? (snapshotAssessment?.score ?? null)
+    : signoffReadiness.scoreEligible && weightedScore !== null
       ? roundScore(weightedScore)
       : null
 
@@ -1742,6 +1756,33 @@ function buildWorkspaceSummary(
     dataQuality,
     missingAnalysisSteps,
     missingMetrics,
+  }
+}
+
+function snapshotSignoffReadiness(
+  assessment: ProjectQorWorkspaceInput['authoritativeAssessment'],
+): ProjectQorSignoffReadiness {
+  if (!assessment) {
+    return {
+      status: 'unavailable',
+      scoreEligible: false,
+      reasonCodes: ['engineering_snapshot_unavailable'],
+      groups: [],
+    }
+  }
+  return {
+    status:
+      assessment.signoffStatus === 'ready'
+        ? 'pass'
+        : assessment.signoffStatus === 'blocked'
+          ? 'blocked'
+          : 'incomplete',
+    scoreEligible: assessment.score !== null,
+    reasonCodes:
+      assessment.signoffStatus === 'ready'
+        ? []
+        : [`signoff_assessment_${assessment.signoffStatus}`],
+    groups: [],
   }
 }
 
