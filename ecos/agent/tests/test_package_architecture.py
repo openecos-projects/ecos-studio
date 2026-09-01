@@ -105,3 +105,12 @@ def test_test_modules_stay_reviewable() -> None:
         if line_count > 800:
             violations.append(f"{path.relative_to(TEST_ROOT)}: {line_count} lines")
     assert not violations, "Oversized test modules:\n" + "\n".join(violations)
+
+
+def test_source_modules_stay_reviewable() -> None:
+    violations = []
+    for path in PACKAGE_ROOT.rglob("*.py"):
+        line_count = len(path.read_text(encoding="utf-8").splitlines())
+        if line_count > 800:
+            violations.append(f"{path.relative_to(PACKAGE_ROOT)}: {line_count} lines")
+    assert not violations, "Oversized source modules:\n" + "\n".join(violations)
