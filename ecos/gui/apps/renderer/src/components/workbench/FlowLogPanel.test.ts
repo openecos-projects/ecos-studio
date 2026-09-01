@@ -23,6 +23,7 @@ describe('FlowLogPanel embedded controls', () => {
   it('uses the selected flow node to switch logs and render its concise runtime title', () => {
     expect(source).toContain('selectedNode: FlowStatusNode | null')
     expect(source).toContain('selectSegmentForNode')
+    expect(source).toContain('sameFlowStepName(segment.stepName, node.label)')
     expect(source).toContain(
       'formatFlowLogTitle(selectedSegment.value, props.selectedNode)',
     )

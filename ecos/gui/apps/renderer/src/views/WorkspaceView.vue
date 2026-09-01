@@ -4,7 +4,7 @@ import StepDashboard from '@/components/StepDashboard.vue'
 import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
-import { getStepMetadata } from '@/api/type'
+import { getStepMetadata, sameFlowStepName } from '@/api/type'
 import { useHomeData } from '@/composables/useHomeData'
 import { useSubflow } from '@/composables/useSubflow'
 import { useRoute } from 'vue-router'
@@ -39,13 +39,12 @@ const currentStepLogNode = computed<FlowStatusNode | null>(() => {
   if (!stepKey) return null
 
   const metadata = getStepMetadata(stepKey)
-  const label = metadata?.label ?? stepKey
-  const segment = flowLogSegments.value.find(
-    (item) => item.stepName.trim().toLowerCase() === label.trim().toLowerCase(),
+  const segment = flowLogSegments.value.find((item) =>
+    sameFlowStepName(item.stepName, stepKey),
   )
   return {
     id: `workspace-log:${metadata?.path ?? stepKey}`,
-    label: segment?.stepName ?? label,
+    label: segment?.stepName ?? metadata?.path ?? stepKey,
     status: flowNodeStatus(segment?.state),
     runtime: '',
     peakMemoryMb: null,

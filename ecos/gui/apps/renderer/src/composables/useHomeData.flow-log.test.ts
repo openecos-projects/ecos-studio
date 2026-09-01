@@ -18,5 +18,7 @@ describe('useHomeData flow log loading strategy', () => {
   it('uses workspace resource metadata for step log paths instead of rebuilding them locally', () => {
     expect(useHomeDataSource).toContain('getWorkspaceResourceIndexApi')
     expect(useHomeDataSource).not.toContain('function stepLogAbsPath')
+    expect(useHomeDataSource).toContain("toolKey === 'sizer'")
+    expect(useHomeDataSource).toContain('${safeName}_sizer/log/${name}.log')
   })
 })
