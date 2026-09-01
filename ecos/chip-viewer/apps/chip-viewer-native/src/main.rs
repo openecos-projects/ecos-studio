@@ -189,7 +189,7 @@ fn print_startup_diagnostics(
     let rendering_mode = if preferred_gpu_available {
         "GPU Canvas (Hardware Accelerated)"
     } else {
-        "CPU 2D (Software Fallback)"
+        "CPU 2D (Software OpenGL)"
     };
 
     let three_d_mode = if preferred_gpu_available {
@@ -253,12 +253,19 @@ fn main() -> Result<()> {
     let (hardware_adapter, fallback_adapter) = probe_hardware_adapter(wgpu_backends);
     let preferred_gpu_available = hardware_adapter.is_some() && !args.force_cpu && !force_cpu_env;
 
+    let renderer = if preferred_gpu_available {
+        eframe::Renderer::Wgpu
+    } else {
+        eframe::Renderer::Glow
+    };
+
     print_startup_diagnostics(
         &env,
         hardware_adapter.as_ref(),
         fallback_adapter.as_ref(),
         preferred_gpu_available,
     );
+    eprintln!("ECOS eframe: selected renderer = {:?}", renderer);
 
     let force_cpu = args.force_cpu || force_cpu_env;
     let adapter_selector: egui_wgpu::NativeAdapterSelectorMethod = std::sync::Arc::new(
@@ -303,6 +310,7 @@ fn main() -> Result<()> {
     );
 
     let native_options = eframe::NativeOptions {
+        renderer,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 860.0])
             .with_min_inner_size([960.0, 640.0])

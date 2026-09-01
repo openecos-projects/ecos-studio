@@ -13,7 +13,7 @@ chip-view-db = { path = "../../crates/chip-view-db" }
 chipgeom-format = { path = "../../crates/chipgeom-format" }
 clap.workspace = true
 csv.workspace = true
-eframe = { workspace = true, features = ["wgpu"] }
+eframe = { workspace = true, features = ["wgpu", "glow"] }
 egui.workspace = true
 egui-wgpu.workspace = true
 image.workspace = true
