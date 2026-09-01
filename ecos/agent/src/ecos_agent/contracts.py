@@ -4,22 +4,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from ecos_agent.ecc_contracts import ECCStepName
 
-GUI_WORKSPACE_FLOW_STEPS = (
-    "Synthesis",
-    "Floorplan",
-    "fixFanout",
-    "place",
-    "CTS",
-    "legalization",
-    "route",
-    "drc",
-    "lvs",
-    "filler",
-    "RCX",
-    "sta",
-    "Harden",
-)
+
+GUI_WORKSPACE_FLOW_STEPS = tuple(step.value for step in ECCStepName)
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _MAX_STAGE_ROUTING_CANDIDATES = 3
 SOURCE_ROOT_IDS = ("ecc", "ecos", "pdk", "ip")

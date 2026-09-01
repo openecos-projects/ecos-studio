@@ -19,7 +19,10 @@ from ecos_agent.knob_registry import (
     resolve_write,
     validate_value,
 )
-from ecos_agent.parameter_authorization import assert_authorized_parameter_patch
+from ecos_agent.parameter_authorization import (
+    assert_authorized_parameter_patch,
+    authorized_knobs_for_step,
+)
 
 
 _STEP_NAMES = {step.value: step for step in ECCStepName}
@@ -184,7 +187,7 @@ class GuiWorkspaceRerunResolver:
         if execution_scope not in _RERUN_SCOPES:
             raise ValueError("rerun execution scope is invalid")
         target = self._next_rerun_target(source.workspace_path, target_step)
-        patch = self._validate_patch(target_step, parameter_patch)
+        patch = self.validate_patch(target_step, parameter_patch)
         return GuiWorkspaceRerunContract(
             source_workspace=str(source.workspace_path),
             target_workspace=str(target),
@@ -234,7 +237,7 @@ class GuiWorkspaceRerunResolver:
         if step is None:
             raise ValueError("rerun stage is invalid")
         values = []
-        for knob_id in _authorized_knobs_for_step(step):
+        for knob_id in sorted(authorized_knobs_for_step(step)):
             value = _current_parameter_value(workspace_path, knob_id)
             if value is not _MISSING:
                 values.append((knob_id, value))
@@ -301,7 +304,9 @@ class GuiWorkspaceRerunResolver:
         raise ValueError(f"completed stage {step} has no matching output artifact")
 
     @staticmethod
-    def _validate_patch(target_step: str, items: list[dict[str, object]]) -> ECCParameterPatch | None:
+    def validate_patch(
+        target_step: str, items: list[dict[str, object]]
+    ) -> ECCParameterPatch | None:
         if not items:
             return None
         step = _STEP_NAMES[target_step]
@@ -311,6 +316,8 @@ class GuiWorkspaceRerunResolver:
             _validate_value(item)
         return patch
 
+    _validate_patch = validate_patch
+
 
 def catalog_end_step() -> ECCStepName:
     """Standard ECC flow terminus used by full_flow reruns."""
@@ -318,12 +325,6 @@ def catalog_end_step() -> ECCStepName:
 
 
 _MISSING = object()
-
-
-def _authorized_knobs_for_step(step: ECCStepName) -> tuple[str, ...]:
-    from ecos_agent.parameter_authorization import _AUTHORIZED_KNOBS
-
-    return tuple(sorted(_AUTHORIZED_KNOBS.get(step, ())))
 
 
 def _current_parameter_value(workspace: Path, knob_id: str) -> object:
