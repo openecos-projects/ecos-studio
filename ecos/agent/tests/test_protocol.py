@@ -1,7 +1,17 @@
 import json
+import sys
 import threading
 
 from ecos_agent.gui.protocol import EcosAgentProtocolServer
+
+
+def test_gui_module_entrypoint_supports_version(monkeypatch, capsys) -> None:
+    from ecos_agent.gui import __main__ as gui_main
+
+    monkeypatch.setattr(sys, "argv", ["ecos-agent", "--version"])
+
+    assert gui_main.entrypoint() == 0
+    assert capsys.readouterr().out == "ecos-agent\n"
 
 
 class _BlockingProvider:

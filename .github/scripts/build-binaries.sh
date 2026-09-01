@@ -82,7 +82,7 @@ build_agent_provider() {
     --specpath build \
     --workpath build \
     --add-data "$PWD/knowledge:knowledge" \
-    packaging/run_ecos_agent.py
+    src/ecos_agent/gui/__main__.py
 }
 
 validate_packaged_binaries() {
