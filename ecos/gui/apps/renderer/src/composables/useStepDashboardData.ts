@@ -182,6 +182,7 @@ const floorplanStyleInsightSteps = new Set([
   'place',
   'cts',
   'legalization',
+  'timing optimization',
   'route',
   'filler',
 ])

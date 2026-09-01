@@ -304,6 +304,7 @@ describe('useStepDashboardData', () => {
     expect(source).toContain("'place'")
     expect(source).toContain("'cts'")
     expect(source).toContain("'legalization'")
+    expect(source).toContain("'timing optimization'")
     expect(source).toContain("'route'")
     expect(source).toContain("'filler'")
     expect(source).toContain(
