@@ -1117,7 +1117,9 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
     assert choice["title"] == "Get started"
     assert choice["kind"] == "choice"
     assert choice["options"][0]["id"]
-    assert "Quick Start" in choice["options"][0]["label"]
+    assert choice["options"][0]["label"] == (
+        "Start creating a Workspace and run a full RTL-to-GDS flow"
+    )
     assert "bounded optimization episode" in choice["options"][1]["label"]
     assert len(choice["options"]) == 3
     assert "Quick Start" in choice["options"][2]["label"]
@@ -2409,6 +2411,52 @@ def test_running_turn_can_be_interrupted_and_the_session_accepts_another_message
         event["type"] == "status" and event.get("status") == "running"
         for event in events
     ) == 2
+
+
+def test_same_session_reserves_a_turn_before_entering_the_handler() -> None:
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session({})["sessionId"]
+    session = provider.sessions[session_id]
+    session.pending_interaction = None
+    session.phase = "workspace_frequency"
+
+    original_run_turn = provider._run_turn
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def delayed_run_turn(*args, **kwargs):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+            call_number = calls
+        if call_number == 1:
+            first_entered.set()
+            assert release_first.wait(timeout=2)
+        return original_run_turn(*args, **kwargs)
+
+    provider._run_turn = delayed_run_turn
+    first_errors: list[Exception] = []
+
+    def send_first() -> None:
+        try:
+            provider.send_message({"sessionId": session_id, "message": "100"})
+        except Exception as exc:  # pragma: no cover - retained for thread diagnostics
+            first_errors.append(exc)
+
+    first = threading.Thread(target=send_first)
+    first.start()
+    assert first_entered.wait(timeout=2)
+
+    with pytest.raises(ValueError, match="already running"):
+        provider.send_message({"sessionId": session_id, "message": "100"})
+
+    release_first.set()
+    first.join(timeout=2)
+    assert not first.is_alive()
+    assert first_errors == []
+    assert calls == 1
 
 
 def test_start_session_binds_project_root_and_welcome_shows_both_contexts(

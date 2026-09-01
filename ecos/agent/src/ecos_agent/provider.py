@@ -445,6 +445,7 @@ class _Session:
     interaction_retry: dict[str, Any] | None = None
     interaction_history: dict[str, str] = field(default_factory=dict)
     interaction_undo: list[dict[str, Any]] = field(default_factory=list)
+    state_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
 
 class EcosAgentProvider:
@@ -537,20 +538,22 @@ class EcosAgentProvider:
 
     def send_message(self, request: Mapping[str, Any]) -> dict[str, str]:
         session = self._session(request)
-        if session.pending_interaction is not None:
-            raise ValueError("An interaction answer is required for this session.")
         message = _required_message(request.get("message"))
-        session.interaction_undo.clear()
-        if self._optimization_thread_active(session):
+        with session.state_lock:
+            if session.pending_interaction is not None:
+                raise ValueError("An interaction answer is required for this session.")
+            session.interaction_undo.clear()
+            optimization_active = self._optimization_thread_active(session)
+            if not optimization_active:
+                self._reserve_turn_locked(session)
+        if optimization_active:
             self._handle_optimization_control(session, message)
             return {
                 "messageId": uuid.uuid4().hex,
                 "sessionId": session.session_id,
                 "turnId": uuid.uuid4().hex,
             }
-        if session.running:
-            raise ValueError("An ECOS Agent turn is already running for this session.")
-        return self._run_turn(session, message)
+        return self._run_turn(session, message, turn_reserved=True)
 
     def get_model_settings(self, request: Mapping[str, Any]) -> dict[str, Any]:
         session = self._session(request)
@@ -558,8 +561,9 @@ class EcosAgentProvider:
 
     def set_model_settings(self, request: Mapping[str, Any]) -> dict[str, Any]:
         session = self._session(request)
-        if session.running:
-            raise ValueError("Model settings cannot change while the Agent is running.")
+        with session.state_lock:
+            if session.running:
+                raise ValueError("Model settings cannot change while the Agent is running.")
         model = _optional_text(request.get("model"))
         reasoning_effort = _optional_text(request.get("reasoningEffort"))
         if model is None and reasoning_effort is None:
@@ -568,12 +572,32 @@ class EcosAgentProvider:
             model=model, reasoning_effort=reasoning_effort
         )
 
+    @staticmethod
+    def _reserve_turn_locked(session: _Session) -> None:
+        if session.running:
+            raise ValueError("An ECOS Agent turn is already running for this session.")
+        session.running = True
+
+    @classmethod
+    def _reserve_turn(cls, session: _Session) -> None:
+        with session.state_lock:
+            cls._reserve_turn_locked(session)
+
+    @staticmethod
+    def _finish_turn(session: _Session) -> None:
+        with session.state_lock:
+            session.running = False
+
     def _run_turn(
         self,
         session: _Session,
         message: str,
         handler: Callable[[_Session, str], None] | None = None,
+        *,
+        turn_reserved: bool = False,
     ) -> dict[str, str]:
+        if not turn_reserved:
+            self._reserve_turn(session)
         if not session.language_locked:
             session.language = language_for_text(message)
             session.language_locked = True
@@ -583,7 +607,6 @@ class EcosAgentProvider:
         session.active_local_activities.clear()
         session.active_tool_message_id = f"{turn_id}-tool"
         session.interrupt_requested = False
-        session.running = True
         self._emit_status(session, "running")
         interrupted = False
         try:
@@ -609,7 +632,7 @@ class EcosAgentProvider:
             session.active_turn_id = None
             session.active_turn_started_at = None
             session.active_local_activities.clear()
-            session.running = False
+            self._finish_turn(session)
         if not interrupted:
             self._emit_status(session, self._resting_status(session))
         return {"messageId": turn_id, "sessionId": session.session_id, "turnId": turn_id}
@@ -630,9 +653,11 @@ class EcosAgentProvider:
                     or request.get("kind") != restored_request.get("kind")
                 ):
                     raise ValueError("No interaction selection is available to undo.")
-                if session.running:
-                    raise ValueError("An ECOS Agent turn is already running for this session.")
-                return self._undo_interaction(session, None)
+                self._reserve_turn(session)
+                try:
+                    return self._undo_interaction(session, None)
+                finally:
+                    self._finish_turn(session)
             request_id = _optional_text(request.get("requestId"))
             if request_id and session.interaction_history.get(request_id) == "superseded":
                 raise ValueError("Interaction request was superseded.")
@@ -652,10 +677,12 @@ class EcosAgentProvider:
             raise ValueError("Interaction request is expired or superseded.")
         if request.get("kind") != pending["request"]["kind"]:
             raise ValueError("Interaction kind does not match the pending request.")
-        if session.running:
-            raise ValueError("An ECOS Agent turn is already running for this session.")
         if request.get("undo") is True:
-            return self._undo_interaction(session, pending)
+            self._reserve_turn(session)
+            try:
+                return self._undo_interaction(session, pending)
+            finally:
+                self._finish_turn(session)
 
         reversible_selection = False
         if pending["request"]["kind"] == "form":
@@ -711,12 +738,6 @@ class EcosAgentProvider:
             else:
                 raise ValueError("Interaction option or text answer is required.")
 
-        undo_state = self._capture_interaction_state(session)
-        if reversible_selection:
-            session.interaction_undo.append(undo_state)
-            del session.interaction_undo[:-_INTERACTION_UNDO_LIMIT]
-        session.pending_interaction = None
-        session.interaction_retry = pending
         continuation = pending.get("continuation")
         if pending["request"]["purpose"] == "clarification":
             if not isinstance(continuation, str) or not continuation:
@@ -729,9 +750,23 @@ class EcosAgentProvider:
             )
         else:
             handler = None
+        self._reserve_turn(session)
+        try:
+            undo_state = self._capture_interaction_state(session)
+            if reversible_selection:
+                session.interaction_undo.append(undo_state)
+                del session.interaction_undo[:-_INTERACTION_UNDO_LIMIT]
+            session.pending_interaction = None
+            session.interaction_retry = pending
+        except Exception:
+            self._finish_turn(session)
+            raise
+
         def run_answer() -> None:
             try:
-                self._run_turn(session, str(message), handler)
+                self._run_turn(
+                    session, str(message), handler, turn_reserved=True
+                )
             except Exception:
                 if session.interaction_retry is pending:
                     self._restore_interaction_state(session, undo_state)
@@ -752,9 +787,12 @@ class EcosAgentProvider:
                 )
                 session.interaction_retry = None
         if defer:
-            session.running = True
             thread = threading.Thread(target=run_answer, daemon=True)
-            thread.start()
+            try:
+                thread.start()
+            except Exception:
+                self._finish_turn(session)
+                raise
         else:
             run_answer()
         result = {
@@ -820,13 +858,17 @@ class EcosAgentProvider:
             session.optimization_phase = "stopping"
             self._emit_status(session, "interrupted")
             return
-        if not session.running:
+        with session.state_lock:
+            running = session.running
+            if running:
+                session.interrupt_requested = True
+            active_interrupt = session.active_interrupt
+        if not running:
             self._emit_status(session, self._resting_status(session))
             return
-        session.interrupt_requested = True
         self._emit_status(session, "interrupted")
-        if session.active_interrupt is not None:
-            session.active_interrupt()
+        if active_interrupt is not None:
+            active_interrupt()
 
     def get_status(self, request: Mapping[str, Any] | None = None) -> dict[str, Any]:
         request = request or {}
